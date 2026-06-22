@@ -963,7 +963,7 @@ export function NoteEditor({
             component the Documents view uses (FIR-1647, request 5 + 6). */}
         <EditorActionsMenu
           triggerLabel="Note actions"
-          className="sm:ml-auto"
+          className="ml-auto"
           items={[
             // Share lives in the menu now (FIR-1873). Owner-only — only the
             // owner may change who can see the note; it opens the Share sheet.
