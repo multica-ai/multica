@@ -718,6 +718,7 @@ type MulticaWorkflowNode struct {
 	SortOrder    int32              `json:"sort_order"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	StageID      pgtype.UUID        `json:"stage_id"`
 }
 
 type MulticaWorkflowNodeRun struct {
@@ -757,6 +758,16 @@ type MulticaWorkflowRun struct {
 	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	RuntimeID       pgtype.UUID        `json:"runtime_id"`
+}
+
+type MulticaWorkflowStage struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkflowID  pgtype.UUID        `json:"workflow_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	SortOrder   int32              `json:"sort_order"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type MulticaWorkspace struct {

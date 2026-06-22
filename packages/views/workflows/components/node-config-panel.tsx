@@ -9,10 +9,10 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useDeleteNode } from "@multica/core/workflows/queries";
+import { useDeleteNode, useAssignNodeToStage } from "@multica/core/workflows/queries";
 import { useWorkflowEditorStore } from "@multica/core/workflows/store";
 import { AssigneePicker } from "../../issues/components/pickers/assignee-picker";
-import type { WorkflowNode, WorkerType, CriticType } from "@multica/core/types";
+import type { WorkflowNode, WorkflowStage, WorkerType, CriticType } from "@multica/core/types";
 import type { IssueAssigneeType } from "@multica/core/types/issue";
 
 function toAssigneeType(t: string): IssueAssigneeType | null {
@@ -64,14 +64,16 @@ interface NodeConfigPanelProps {
   node: WorkflowNode;
   workflowId: string;
   nodes?: WorkflowNode[];
+  stages?: WorkflowStage[];
   disabled?: boolean;
   onClose: () => void;
 }
 
-export function NodeConfigPanel({ node, workflowId, nodes = [], disabled = false, onClose }: NodeConfigPanelProps) {
+export function NodeConfigPanel({ node, workflowId, nodes = [], stages = [], disabled = false, onClose }: NodeConfigPanelProps) {
   const { t } = useT("workflows");
   const wsId = useWorkspaceId();
   const deleteMutation = useDeleteNode(wsId, workflowId);
+  const assignStageMutation = useAssignNodeToStage(wsId, workflowId);
   const nodeEdits = useWorkflowEditorStore((s) => s.nodeEdits);
   const cacheNodeEdits = useWorkflowEditorStore((s) => s.cacheNodeEdits);
 
@@ -97,6 +99,11 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], disabled = false
   const [criticType, setCriticType] = useState(saved?.critic_type ?? node.critic_type);
   const [criticId, setCriticId] = useState<string | null>(saved?.critic_id ?? node.critic_id ?? null);
   const [criticApiUrl, setCriticApiUrl] = useState(saved?.critic_api_url ?? node.critic_api_url ?? "");
+  const [stageId, setStageId] = useState<string | null>(node.stage_id ?? null);
+
+  useEffect(() => {
+    setStageId(node.stage_id ?? null);
+  }, [node.stage_id]);
 
   const bindableNodes = useMemo(
     () => nodes.filter((n) => {
@@ -174,6 +181,31 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], disabled = false
             rows={2}
           />
         </div>
+
+        {/* Stage assignment — immediate mutation, not batched with other edits */}
+        {stages.length > 0 && (
+        <div className="space-y-1.5">
+          <Label className="text-sm">{t(($) => $.node.stage_label)}</Label>
+          <select
+            disabled={disabled || assignStageMutation.isPending}
+            className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+            value={stageId ?? ""}
+            onChange={(e) => {
+              const newStageId = e.target.value || null;
+              setStageId(newStageId);
+              assignStageMutation.mutate(
+                { nodeId: node.id, stage_id: newStageId },
+                { onError: () => setStageId(node.stage_id ?? null) },
+              );
+            }}
+          >
+            <option value="">{t(($) => $.overview.stage_canvas.unassigned)}</option>
+            {stages.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+        )}
 
         {/* Format Schema */}
         <div className="space-y-1.5">

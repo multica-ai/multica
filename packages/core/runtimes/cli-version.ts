@@ -32,6 +32,10 @@ const SEMVER_RE = /v?(\d+)\.(\d+)\.(\d+)/;
 // the gate for staging or production users running stale stable releases.
 const DEV_DESCRIBE_RE = /^v?\d+\.\d+\.\d+-\d+-g[0-9a-fA-F]+/;
 
+/** Default version string for unbuilt source runs (go run / bare go build
+ *  without ldflags). Same constant as server/pkg/agent/version.go. */
+const DEV_BUILD_VERSION = "dev";
+
 function parseSemver(raw: string): [number, number, number] | null {
   const m = SEMVER_RE.exec(raw.trim());
   if (!m) return null;
@@ -54,6 +58,9 @@ function lessThan(a: [number, number, number], b: [number, number, number]) {
 export function checkQuickCreateCliVersion(detected: string | undefined | null): CliVersionCheck {
   const current = (detected ?? "").trim();
   if (DEV_DESCRIBE_RE.test(current)) {
+    return { state: "ok", current, min: MIN_QUICK_CREATE_CLI_VERSION };
+  }
+  if (current === DEV_BUILD_VERSION) {
     return { state: "ok", current, min: MIN_QUICK_CREATE_CLI_VERSION };
   }
   const parsed = current ? parseSemver(current) : null;

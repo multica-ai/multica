@@ -6,6 +6,10 @@ import type {
   CreateNodeRequest,
   UpdateNodeRequest,
   CreateEdgeRequest,
+  CreateStageRequest,
+  UpdateStageRequest,
+  ReorderStagesItem,
+  AssignNodeToStageRequest,
 } from "../types";
 
 export const workflowKeys = {
@@ -21,6 +25,7 @@ export const workflowKeys = {
   myTasks: (wsId: string) => [...workflowKeys.all(wsId), "my-tasks"] as const,
   templates: () => ["templates"] as const,
   admins: () => ["workflow-admins"] as const,
+  stages: (wsId: string, workflowId: string) => [...workflowKeys.detail(wsId, workflowId), "stages"] as const,
 };
 
 // ── Queries ──
@@ -99,6 +104,18 @@ export function myWorkflowTasksOptions(wsId: string) {
 }
 
 // ── Mutations ──
+
+// Intentionally aliased — overview fetches the same workflow detail data.
+// Kept as a separate name for semantic clarity at call sites; the query key
+// and API call are identical to workflowDetailOptions.
+export const workflowOverviewOptions = workflowDetailOptions;
+
+export function workflowStagesOptions(wsId: string, workflowId: string) {
+  return queryOptions({
+    queryKey: workflowKeys.stages(wsId, workflowId),
+    queryFn: () => api.listWorkflowStages(workflowId),
+  });
+}
 
 export function useCreateWorkflow(wsId: string) {
   const queryClient = useQueryClient();
@@ -285,6 +302,61 @@ export function useUpdateWorkflowAdmins() {
     mutationFn: (userIds: string[]) => api.updateWorkflowAdmins(userIds),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.admins() });
+    },
+  });
+}
+
+// ── Stage Mutations ──
+
+export function useCreateStage(wsId: string, workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CreateStageRequest) => api.createWorkflowStage(workflowId, req),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.detail(wsId, workflowId) });
+    },
+  });
+}
+
+export function useUpdateStage(wsId: string, workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ stageId, ...req }: UpdateStageRequest & { stageId: string }) =>
+      api.updateWorkflowStage(workflowId, stageId, req),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.detail(wsId, workflowId) });
+    },
+  });
+}
+
+export function useDeleteStage(wsId: string, workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (stageId: string) => api.deleteWorkflowStage(workflowId, stageId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.detail(wsId, workflowId) });
+    },
+  });
+}
+
+export function useReorderStages(wsId: string, workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (items: ReorderStagesItem[]) => api.reorderWorkflowStages(workflowId, items),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.detail(wsId, workflowId) });
+    },
+  });
+}
+
+export function useAssignNodeToStage(wsId: string, workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nodeId, ...req }: AssignNodeToStageRequest & { nodeId: string }) =>
+      api.assignNodeToStage(workflowId, nodeId, req),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.detail(wsId, workflowId) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.nodes(wsId, workflowId) });
     },
   });
 }

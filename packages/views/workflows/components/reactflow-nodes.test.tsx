@@ -10,8 +10,8 @@ vi.mock("@xyflow/react", () => ({
   ),
   NodeResizer: () => <div data-testid="node-resizer" />,
   Position: { Top: "top", Bottom: "bottom", Left: "left", Right: "right" },
-  BaseEdge: ({ id, path, className, strokeWidth, markerEnd }: {
-    id: string; path: string; className?: string; strokeWidth?: number; markerEnd?: unknown;
+  BaseEdge: ({ id, path, className, strokeWidth }: {
+    id: string; path: string; className?: string; strokeWidth?: number;
   }) => (
     <g data-testid="base-edge" data-id={id} data-path={path}
       data-classname={className} data-strokewidth={strokeWidth} />

@@ -16,6 +16,7 @@ import type {
   WorkflowEdge,
   WorkflowRun,
   WorkflowNodeRun,
+  WorkflowStage,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
@@ -678,6 +679,7 @@ const WorkflowNodeSchema = z.object({
   critic_id: z.string().nullable().default(null),
   critic_api_url: z.string().nullable().default(null),
   sort_order: z.number().default(0),
+  stage_id: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -699,16 +701,48 @@ export const WorkflowEdgeListSchema = z.array(WorkflowEdgeSchema);
 
 export const EMPTY_WORKFLOW_EDGE_LIST: WorkflowEdge[] = [];
 
+const WorkflowStageSchema = z.object({
+  id: z.string(),
+  workflow_id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  sort_order: z.number().default(0),
+  node_count: z.number().default(0),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const WorkflowStageListSchema = z.array(WorkflowStageSchema);
+
+export const EMPTY_WORKFLOW_STAGE: WorkflowStage = {
+  id: "",
+  workflow_id: "",
+  name: "",
+  description: "",
+  sort_order: 0,
+  node_count: 0,
+  created_at: "",
+  updated_at: "",
+};
+
+export const WorkflowStagesResponseSchema = z.object({
+  stages: z.array(WorkflowStageSchema).default([]),
+}).loose();
+
+export const EMPTY_WORKFLOW_STAGES_RESPONSE = { stages: [] };
+
 export const WorkflowDetailResponseSchema = z.object({
   workflow: z.lazy(() => WorkflowSchema).default(EMPTY_WORKFLOW as any),
   nodes: z.array(WorkflowNodeSchema).default([]),
   edges: z.array(WorkflowEdgeSchema).default([]),
+  stages: z.array(WorkflowStageSchema).default([]),
 }).loose();
 
 export const EMPTY_WORKFLOW_DETAIL_RESPONSE = {
   workflow: EMPTY_WORKFLOW,
   nodes: EMPTY_WORKFLOW_NODE_LIST,
   edges: EMPTY_WORKFLOW_EDGE_LIST,
+  stages: [],
 };
 
 export const WorkflowNodesResponseSchema = z.object({

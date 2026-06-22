@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -9,6 +10,7 @@ import {
   workflowDetailOptions,
   workflowNodesOptions,
   workflowEdgesOptions,
+  workflowStagesOptions,
   useCreateNode,
   useUpdateNode,
   useCreateEdge,
@@ -46,9 +48,10 @@ import type { WorkflowStatus } from "@multica/core/types";
 
 interface WorkflowDetailPageProps {
   workflowId: string;
+  viewToggle?: ReactNode;
 }
 
-export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) {
+export function WorkflowDetailPage({ workflowId: id, viewToggle }: WorkflowDetailPageProps) {
   const { t } = useT("workflows");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -106,6 +109,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
   const { data: workflow, isLoading } = useQuery(workflowDetailOptions(wsId, id!));
   const { data: nodes = [] } = useQuery(workflowNodesOptions(wsId, id!));
   const { data: edges = [] } = useQuery(workflowEdgesOptions(wsId, id!));
+  const { data: stages = [] } = useQuery(workflowStagesOptions(wsId, id!));
 
   const createNodeMutation = useCreateNode(wsId, id!);
   const updateNodeMutation = useUpdateNode(wsId, id!);
@@ -449,6 +453,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               </Button>
             </>
           )}
+          {viewToggle}
           <Button
             size="sm"
             variant={workflow?.status === "active" ? "secondary" : "default"}
@@ -516,6 +521,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               node={selectedNode}
               workflowId={id!}
               nodes={displayNodes}
+              stages={stages}
               disabled={mode !== "edit"}
               onClose={() => useWorkflowEditorStore.getState().selectNode(null)}
             />

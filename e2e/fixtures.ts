@@ -24,6 +24,8 @@ export class TestApiClient {
   private workspaceSlug: string | null = null;
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
+  private createdWorkflowIds: string[] = [];
+  private createdWorkflowStageIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -133,12 +135,103 @@ export class TestApiClient {
     return issue;
   }
 
+  async createWorkflow(title: string) {
+    const res = await this.authedFetch("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    });
+    const workflow = await res.json();
+    this.createdWorkflowIds.push(workflow.id);
+    return workflow;
+  }
+
+  async createWorkflowStage(workflowId: string, name: string, sortOrder: number) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/stages`, {
+      method: "POST",
+      body: JSON.stringify({ name, sort_order: sortOrder }),
+    });
+    const stage = await res.json();
+    this.createdWorkflowStageIds.push(stage.id);
+    return stage;
+  }
+
+  async createWorkflowNode(workflowId: string, data: {
+    title: string;
+    description?: string;
+    position_x?: number;
+    position_y?: number;
+    worker_type?: string;
+    critic_type?: string;
+    stage_id?: string | null;
+  }) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: data.title,
+        description: data.description ?? "",
+        position_x: data.position_x ?? 0,
+        position_y: data.position_y ?? 0,
+        worker_type: data.worker_type ?? "agent",
+        critic_type: data.critic_type ?? "human",
+      }),
+    });
+    const node = await res.json();
+
+    // If stage_id is provided, assign the node to the stage
+    if (data.stage_id !== undefined) {
+      await this.assignNodeToStage(workflowId, node.id, data.stage_id);
+    }
+
+    return node;
+  }
+
+  async createWorkflowEdge(
+    workflowId: string,
+    sourceNodeId: string,
+    targetNodeId: string
+  ) {
+    const res = await this.authedFetch(
+      `/api/workflows/${workflowId}/edges`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          source_node_id: sourceNodeId,
+          target_node_id: targetNodeId,
+        }),
+      }
+    );
+    return res.json();
+  }
+
+  async assignNodeToStage(workflowId: string, nodeId: string, stageId: string | null) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes/${nodeId}/stage`, {
+      method: "PUT",
+      body: JSON.stringify({ stage_id: stageId }),
+    });
+    return res.json();
+  }
+
   async deleteIssue(id: string) {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
-  /** Clean up all issues created during this test. */
+  async deleteWorkflow(id: string) {
+    await this.authedFetch(`/api/workflows/${id}`, { method: "DELETE" });
+  }
+
+  /** Clean up all issues, workflows created during this test.
+   *  Workflow cascade deletion handles associated stages and nodes. */
   async cleanup() {
+    for (const id of this.createdWorkflowIds) {
+      try {
+        await this.deleteWorkflow(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdWorkflowIds = [];
+    this.createdWorkflowStageIds = [];
+
     for (const id of this.createdIssueIds) {
       try {
         await this.deleteIssue(id);

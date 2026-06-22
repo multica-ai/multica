@@ -348,6 +348,10 @@
     "toast_saved": "Workflow admins saved",
     "toast_save_failed": "Failed to save workflow admins",
     "permission_denied": "You do not have permission to manage workflow admins.",
-    "empty_hint": "No members found. Please invite members to the workspace first."
+    "empty_hint": "No members found. Please invite members to the workspace first.",
+    "auto_reply_title": "Workflow Auto-Reply",
+    "auto_reply_description": "Automatically reply to agent questions using the recommended option",
+    "auto_reply_toast_saved": "Auto-reply setting saved",
+    "auto_reply_toast_failed": "Failed to save auto-reply setting"
   }
 }
