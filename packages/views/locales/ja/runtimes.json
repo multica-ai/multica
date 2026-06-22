@@ -93,6 +93,22 @@
     "serving_count_other": "エージェント {{count}} 個",
     "no_agents": "まだこのランタイムに紐づいたエージェントがありません。",
     "diagnostics_title": "診断",
+    "claim_window": {
+      "title": "タスク取得スケジュール",
+      "description": "ランタイムを接続したまま、毎日の時間枠内だけ新しいタスクを送信します。",
+      "enabled": "毎日の時間枠を使用",
+      "start": "開始時刻",
+      "timezone": "タイムゾーン",
+      "browser_suffix": "（ブラウザ）",
+      "preview": "毎日 {{start}}-{{end}}",
+      "always": "常時利用可能",
+      "open": "{{end}} まで受付中",
+      "closed": "予定済み - {{start}} に開始",
+      "save": "スケジュールを保存",
+      "saving": "保存中...",
+      "saved": "タスク取得スケジュールを更新しました",
+      "failed": "タスク取得スケジュールを更新できませんでした"
+    },
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "公開範囲",
     "visibility_label": {

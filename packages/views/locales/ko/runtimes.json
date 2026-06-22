@@ -98,6 +98,22 @@
     "serving_count_other": "에이전트 {{count}}개",
     "no_agents": "아직 이 런타임에 연결된 에이전트가 없습니다.",
     "diagnostics_title": "진단",
+    "claim_window": {
+      "title": "작업 수신 일정",
+      "description": "런타임 연결은 유지하되 매일 지정된 시간대에만 새 작업을 보냅니다.",
+      "enabled": "매일 시간대 사용",
+      "start": "시작 시간",
+      "timezone": "시간대",
+      "browser_suffix": " (브라우저)",
+      "preview": "매일 {{start}}-{{end}}",
+      "always": "항상 사용 가능",
+      "open": "{{end}}까지 열림",
+      "closed": "예약됨 - {{start}}에 열림",
+      "save": "일정 저장",
+      "saving": "저장 중...",
+      "saved": "작업 수신 일정이 업데이트되었습니다",
+      "failed": "작업 수신 일정을 업데이트하지 못했습니다"
+    },
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "공개 범위",
     "visibility_label": {

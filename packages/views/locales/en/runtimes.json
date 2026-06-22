@@ -98,6 +98,22 @@
     "serving_count_other": "{{count}} agents",
     "no_agents": "No agents are bound to this runtime yet.",
     "diagnostics_title": "Diagnostics",
+    "claim_window": {
+      "title": "Task claiming schedule",
+      "description": "Keep this runtime connected, but send new tasks only during this daily window.",
+      "enabled": "Use daily window",
+      "start": "Starts at",
+      "timezone": "Timezone",
+      "browser_suffix": " (browser)",
+      "preview": "{{start}}-{{end}} every day",
+      "always": "Always available",
+      "open": "Open until {{end}}",
+      "closed": "Scheduled - opens at {{start}}",
+      "save": "Save schedule",
+      "saving": "Saving...",
+      "saved": "Task claiming schedule updated",
+      "failed": "Failed to update task claiming schedule"
+    },
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibility",
     "visibility_label": {

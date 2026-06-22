@@ -37,6 +37,7 @@ import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
+import { RuntimeClaimWindowCard } from "./runtime-claim-window-card";
 import { useT } from "../../i18n";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
@@ -174,6 +175,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               presenceMap={presenceMap}
               agentHref={(id) => paths.agentDetail(id)}
             />
+            <RuntimeClaimWindowCard runtime={runtime} canEdit={!!canDelete} />
             <DiagnosticsCard
               runtime={runtime}
               cliVersion={cliVersion}

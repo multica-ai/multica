@@ -93,6 +93,22 @@
     "serving_count_other": "{{count}} 个智能体",
     "no_agents": "还没有智能体绑定到这个运行时。",
     "diagnostics_title": "诊断",
+    "claim_window": {
+      "title": "task 领取计划",
+      "description": "保持此运行时连接，但仅在每日时间窗口内发送新 task。",
+      "enabled": "使用每日时间窗口",
+      "start": "开始时间",
+      "timezone": "时区",
+      "browser_suffix": "（浏览器）",
+      "preview": "每天 {{start}}-{{end}}",
+      "always": "始终可用",
+      "open": "开放至 {{end}}",
+      "closed": "已计划 - {{start}} 开放",
+      "save": "保存计划",
+      "saving": "保存中...",
+      "saved": "task 领取计划已更新",
+      "failed": "更新 task 领取计划失败"
+    },
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "可见性",
     "visibility_label": {

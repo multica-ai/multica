@@ -59,6 +59,12 @@ vi.mock("@multica/core/auth", () => ({
 
 vi.mock("@multica/core/runtimes", () => ({
   deriveRuntimeHealth: () => "online",
+  RUNTIME_CLAIM_WINDOW_DURATION_MINUTES: 300,
+  addMinutesToHHMM: (value: string, minutes: number) => {
+    const [hours = "0", mins = "0"] = value.split(":");
+    const total = (Number(hours) * 60 + Number(mins) + minutes) % 1440;
+    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  },
 }));
 
 vi.mock("@multica/core/agents", () => ({
