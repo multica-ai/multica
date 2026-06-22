@@ -95,6 +95,24 @@ DO UPDATE SET
     updated_at = now()
 RETURNING *, (xmax = 0) AS inserted;
 
+-- name: UpdateAgentRuntimeEditable :one
+UPDATE agent_runtime
+SET visibility = CASE
+        WHEN sqlc.arg('set_visibility')::boolean THEN sqlc.arg('visibility')::text
+        ELSE visibility
+    END,
+    claim_window_start = CASE
+        WHEN sqlc.arg('set_claim_window')::boolean THEN sqlc.narg('claim_window_start')::time
+        ELSE claim_window_start
+    END,
+    claim_window_timezone = CASE
+        WHEN sqlc.arg('set_claim_window')::boolean THEN sqlc.narg('claim_window_timezone')::text
+        ELSE claim_window_timezone
+    END,
+    updated_at = now()
+WHERE id = sqlc.arg('id')
+RETURNING *;
+
 -- name: UpdateAgentRuntimeVisibility :one
 -- Toggles a runtime between 'private' (only owner can bind agents) and
 -- 'public' (any workspace member can). Default for new rows is 'private'

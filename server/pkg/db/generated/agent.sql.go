@@ -594,6 +594,80 @@ func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (Agen
 	return i, err
 }
 
+const claimAgentTaskForRuntime = `-- name: ClaimAgentTaskForRuntime :one
+UPDATE agent_task_queue
+SET status = 'dispatched', dispatched_at = now()
+WHERE id = (
+    SELECT atq.id FROM agent_task_queue atq
+    WHERE atq.agent_id = $1
+      AND atq.runtime_id = $2
+      AND atq.status = 'queued'
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_task_queue active
+          WHERE active.agent_id = atq.agent_id
+            AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+            AND (
+              (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
+              OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
+              OR (
+                atq.issue_id IS NULL
+                AND atq.chat_session_id IS NULL
+                AND atq.autopilot_run_id IS NULL
+                AND active.issue_id IS NULL
+                AND active.chat_session_id IS NULL
+                AND active.autopilot_run_id IS NULL
+              )
+            )
+      )
+    ORDER BY atq.priority DESC, atq.created_at ASC
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+`
+
+type ClaimAgentTaskForRuntimeParams struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+// Runtime-scoped variant used by daemon claims. Keeping runtime_id in the
+// predicate prevents a rebound agent from dispatching work queued elsewhere.
+func (q *Queries) ClaimAgentTaskForRuntime(ctx context.Context, arg ClaimAgentTaskForRuntimeParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, claimAgentTaskForRuntime, arg.AgentID, arg.RuntimeID)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+	)
+	return i, err
+}
+
 const clearAgentMcpConfig = `-- name: ClearAgentMcpConfig :one
 UPDATE agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1
@@ -1051,6 +1125,172 @@ type ExpireStaleQueuedTasksParams struct {
 // subsequent ticks.
 func (q *Queries) ExpireStaleQueuedTasks(ctx context.Context, arg ExpireStaleQueuedTasksParams) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, expireStaleQueuedTasks, arg.TtlSecs, arg.MaxPerTick)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const expireStaleQueuedTasksForScheduledRuntimes = `-- name: ExpireStaleQueuedTasksForScheduledRuntimes :many
+WITH eligible(runtime_id, window_start) AS (
+    SELECT runtimes.runtime_id, windows.window_start
+    FROM unnest($1::uuid[])
+        WITH ORDINALITY AS runtimes(runtime_id, position)
+    JOIN unnest($2::timestamptz[])
+        WITH ORDINALITY AS windows(window_start, position)
+        USING (position)
+), victims AS (
+    SELECT t.id
+    FROM agent_task_queue t
+    JOIN eligible e ON e.runtime_id = t.runtime_id
+    WHERE t.status = 'queued'
+      AND GREATEST(t.created_at, e.window_start)
+          < now() - make_interval(secs => $3::double precision)
+    ORDER BY t.created_at ASC
+    LIMIT $4::int
+    FOR UPDATE OF t SKIP LOCKED
+)
+UPDATE agent_task_queue t
+SET status = 'failed',
+    completed_at = now(),
+    error = 'task expired in queue',
+    failure_reason = 'queued_expired'
+FROM victims v
+WHERE t.id = v.id
+  AND t.status = 'queued'
+RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id
+`
+
+type ExpireStaleQueuedTasksForScheduledRuntimesParams struct {
+	RuntimeIds   []pgtype.UUID        `json:"runtime_ids"`
+	WindowStarts []pgtype.Timestamptz `json:"window_starts"`
+	TtlSecs      float64              `json:"ttl_secs"`
+	MaxPerTick   int32                `json:"max_per_tick"`
+}
+
+func (q *Queries) ExpireStaleQueuedTasksForScheduledRuntimes(ctx context.Context, arg ExpireStaleQueuedTasksForScheduledRuntimesParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, expireStaleQueuedTasksForScheduledRuntimes,
+		arg.RuntimeIds,
+		arg.WindowStarts,
+		arg.TtlSecs,
+		arg.MaxPerTick,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const expireStaleQueuedTasksUnscheduled = `-- name: ExpireStaleQueuedTasksUnscheduled :many
+WITH victims AS (
+    SELECT t.id
+    FROM agent_task_queue t
+    JOIN agent_runtime ar ON ar.id = t.runtime_id
+    WHERE t.status = 'queued'
+      AND ar.claim_window_start IS NULL
+      AND t.created_at < now() - make_interval(secs => $1::double precision)
+    ORDER BY t.created_at ASC
+    LIMIT $2::int
+    FOR UPDATE OF t SKIP LOCKED
+)
+UPDATE agent_task_queue t
+SET status = 'failed',
+    completed_at = now(),
+    error = 'task expired in queue',
+    failure_reason = 'queued_expired'
+FROM victims v
+WHERE t.id = v.id
+  AND t.status = 'queued'
+RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id
+`
+
+type ExpireStaleQueuedTasksUnscheduledParams struct {
+	TtlSecs    float64 `json:"ttl_secs"`
+	MaxPerTick int32   `json:"max_per_tick"`
+}
+
+func (q *Queries) ExpireStaleQueuedTasksUnscheduled(ctx context.Context, arg ExpireStaleQueuedTasksUnscheduledParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, expireStaleQueuedTasksUnscheduled, arg.TtlSecs, arg.MaxPerTick)
 	if err != nil {
 		return nil, err
 	}
@@ -2146,6 +2386,41 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtim
 			&i.WaitReason,
 			&i.InitiatorUserID,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listScheduledRuntimesWithStaleQueuedTasks = `-- name: ListScheduledRuntimesWithStaleQueuedTasks :many
+SELECT DISTINCT ar.id, ar.claim_window_start, ar.claim_window_timezone
+FROM agent_runtime ar
+JOIN agent_task_queue t ON t.runtime_id = ar.id
+WHERE ar.claim_window_start IS NOT NULL
+  AND t.status = 'queued'
+  AND t.created_at < now() - make_interval(secs => $1::double precision)
+`
+
+type ListScheduledRuntimesWithStaleQueuedTasksRow struct {
+	ID                  pgtype.UUID `json:"id"`
+	ClaimWindowStart    pgtype.Time `json:"claim_window_start"`
+	ClaimWindowTimezone pgtype.Text `json:"claim_window_timezone"`
+}
+
+func (q *Queries) ListScheduledRuntimesWithStaleQueuedTasks(ctx context.Context, ttlSecs float64) ([]ListScheduledRuntimesWithStaleQueuedTasksRow, error) {
+	rows, err := q.db.Query(ctx, listScheduledRuntimesWithStaleQueuedTasks, ttlSecs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListScheduledRuntimesWithStaleQueuedTasksRow{}
+	for rows.Next() {
+		var i ListScheduledRuntimesWithStaleQueuedTasksRow
+		if err := rows.Scan(&i.ID, &i.ClaimWindowStart, &i.ClaimWindowTimezone); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

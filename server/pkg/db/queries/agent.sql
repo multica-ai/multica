@@ -301,6 +301,39 @@ WHERE id = (
 )
 RETURNING *;
 
+-- name: ClaimAgentTaskForRuntime :one
+-- Runtime-scoped variant used by daemon claims. Keeping runtime_id in the
+-- predicate prevents a rebound agent from dispatching work queued elsewhere.
+UPDATE agent_task_queue
+SET status = 'dispatched', dispatched_at = now()
+WHERE id = (
+    SELECT atq.id FROM agent_task_queue atq
+    WHERE atq.agent_id = @agent_id
+      AND atq.runtime_id = @runtime_id
+      AND atq.status = 'queued'
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_task_queue active
+          WHERE active.agent_id = atq.agent_id
+            AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+            AND (
+              (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
+              OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
+              OR (
+                atq.issue_id IS NULL
+                AND atq.chat_session_id IS NULL
+                AND atq.autopilot_run_id IS NULL
+                AND active.issue_id IS NULL
+                AND active.chat_session_id IS NULL
+                AND active.autopilot_run_id IS NULL
+              )
+            )
+      )
+    ORDER BY atq.priority DESC, atq.created_at ASC
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
 -- name: ReclaimStaleDispatchedTaskForRuntime :one
 -- Re-delivers a task whose previous claim likely succeeded server-side but
 -- whose response never reached the daemon. The task is still in `dispatched`
@@ -515,6 +548,65 @@ FROM victims v
 WHERE t.id = v.id
   AND t.status = 'queued'
   AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
+RETURNING t.*;
+
+-- name: ExpireStaleQueuedTasksUnscheduled :many
+WITH victims AS (
+    SELECT t.id
+    FROM agent_task_queue t
+    JOIN agent_runtime ar ON ar.id = t.runtime_id
+    WHERE t.status = 'queued'
+      AND ar.claim_window_start IS NULL
+      AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
+    ORDER BY t.created_at ASC
+    LIMIT @max_per_tick::int
+    FOR UPDATE OF t SKIP LOCKED
+)
+UPDATE agent_task_queue t
+SET status = 'failed',
+    completed_at = now(),
+    error = 'task expired in queue',
+    failure_reason = 'queued_expired'
+FROM victims v
+WHERE t.id = v.id
+  AND t.status = 'queued'
+RETURNING t.*;
+
+-- name: ListScheduledRuntimesWithStaleQueuedTasks :many
+SELECT DISTINCT ar.id, ar.claim_window_start, ar.claim_window_timezone
+FROM agent_runtime ar
+JOIN agent_task_queue t ON t.runtime_id = ar.id
+WHERE ar.claim_window_start IS NOT NULL
+  AND t.status = 'queued'
+  AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision);
+
+-- name: ExpireStaleQueuedTasksForScheduledRuntimes :many
+WITH eligible(runtime_id, window_start) AS (
+    SELECT runtimes.runtime_id, windows.window_start
+    FROM unnest(sqlc.arg('runtime_ids')::uuid[])
+        WITH ORDINALITY AS runtimes(runtime_id, position)
+    JOIN unnest(sqlc.arg('window_starts')::timestamptz[])
+        WITH ORDINALITY AS windows(window_start, position)
+        USING (position)
+), victims AS (
+    SELECT t.id
+    FROM agent_task_queue t
+    JOIN eligible e ON e.runtime_id = t.runtime_id
+    WHERE t.status = 'queued'
+      AND GREATEST(t.created_at, e.window_start)
+          < now() - make_interval(secs => @ttl_secs::double precision)
+    ORDER BY t.created_at ASC
+    LIMIT @max_per_tick::int
+    FOR UPDATE OF t SKIP LOCKED
+)
+UPDATE agent_task_queue t
+SET status = 'failed',
+    completed_at = now(),
+    error = 'task expired in queue',
+    failure_reason = 'queued_expired'
+FROM victims v
+WHERE t.id = v.id
+  AND t.status = 'queued'
 RETURNING t.*;
 
 -- name: CancelAgentTask :one
