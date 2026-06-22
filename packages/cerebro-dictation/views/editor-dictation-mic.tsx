@@ -18,6 +18,13 @@ export interface EditorDictationMicProps {
    * the clip is in flight. Memoize the callback.
    */
   onStatusChange?: (status: DictationStatus) => void;
+  /**
+   * Forwarded to MicButton. "floating" renders the round grey record button for
+   * note / document overlays; "inline" (default) the composer-cluster mic.
+   */
+  appearance?: "inline" | "floating";
+  /** Forwarded to MicButton: green success-cue label ("Inserted" / "Added"). */
+  successLabel?: string;
 }
 
 /**
@@ -34,6 +41,8 @@ export function EditorDictationMic({
   disabled,
   className,
   onStatusChange,
+  appearance,
+  successLabel,
 }: EditorDictationMicProps) {
   const workspaceId = useWorkspaceId();
   const transcribe = useMemo(
@@ -63,6 +72,8 @@ export function EditorDictationMic({
         warmup={warmup}
         onTranscribed={onTranscribed}
         onStatusChange={onStatusChange}
+        appearance={appearance}
+        successLabel={successLabel}
       />
     </div>
   );

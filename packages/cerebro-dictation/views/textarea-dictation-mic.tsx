@@ -16,6 +16,13 @@ export interface TextareaDictationMicProps {
   disabled?: boolean;
   /** Positioning hook — defaults to a bottom-right corner overlay. */
   className?: string;
+  /**
+   * Visual treatment of the mic. Defaults to "floating" — the round grey record
+   * button that overlays the note / document / quick-note (FIR-1748, Jesper).
+   */
+  appearance?: "inline" | "floating";
+  /** Green success-cue label. Defaults to "Added" for note / document surfaces. */
+  successLabel?: string;
 }
 
 /**
@@ -33,6 +40,8 @@ export function TextareaDictationMic({
   textareaRef,
   disabled,
   className,
+  appearance = "floating",
+  successLabel = "Added",
 }: TextareaDictationMicProps) {
   // Forslag B (FIR-1637): while the clip transcribes (~2-4s) show grey skeleton
   // lines over the field so the user sees where the text will land. The mic
@@ -61,7 +70,9 @@ export function TextareaDictationMic({
         disabled={disabled}
         onTranscribed={onTranscribed}
         onStatusChange={onStatusChange}
-        className={className ?? "absolute bottom-1.5 right-1.5 z-10"}
+        appearance={appearance}
+        successLabel={successLabel}
+        className={className ?? "absolute bottom-2 right-2 z-10"}
       />
     </>
   );

@@ -84,6 +84,21 @@ export interface MicButtonProps {
    * dependency list.
    */
   onStatusChange?: (status: DictationStatus) => void;
+  /**
+   * Visual treatment. "inline" (default) is the ghost icon button mounted in a
+   * composer action cluster next to the attach button. "floating" is the round,
+   * filled grey record button (white icon) that overlays a note / document /
+   * quick-note editor (FIR-1748, Jesper) — a distinct round button on those
+   * surfaces so dictation reads as the primary action, not a corner affordance.
+   * Turns red while recording.
+   */
+  appearance?: "inline" | "floating";
+  /**
+   * Label for the brief green success cue shown next to the mic once a
+   * transcript lands. Defaults to "Inserted" for composer inputs; note /
+   * document surfaces pass "Added" (FIR-1748, Jesper).
+   */
+  successLabel?: string;
 }
 
 export function MicButton({
@@ -96,7 +111,10 @@ export function MicButton({
   onTranscribed,
   onError,
   onStatusChange,
+  appearance = "inline",
+  successLabel = "Inserted",
 }: MicButtonProps) {
+  const floating = appearance === "floating";
   // Dictation (speech → text) gates on its own flag only. The read-aloud flag
   // (cerebro_voice_output_enabled) is a separate, unrelated TTS feature — it
   // must not hide the mic.
@@ -256,7 +274,7 @@ export function MicButton({
           aria-live="polite"
         >
           <CircleCheck className="size-3.5" aria-hidden="true" />
-          Inserted
+          {successLabel}
         </span>
       )}
       <Tooltip>
@@ -264,9 +282,21 @@ export function MicButton({
           render={
             <Button
               type="button"
-              size="icon-sm"
-              variant={isRecording ? "secondary" : "ghost"}
-              className={cn(isRecording && "text-brand")}
+              size={floating ? "icon" : "icon-sm"}
+              variant={!floating && isRecording ? "secondary" : "ghost"}
+              className={cn(
+                floating
+                  ? cn(
+                      // sm:size-11 too — the Button preset's `sm:size-8` would
+                      // otherwise win over an unprefixed size on desktop and
+                      // shrink the round button back to 32px.
+                      "size-11 sm:size-11 rounded-full text-white shadow-md hover:text-white",
+                      isRecording
+                        ? "animate-pulse bg-red-500 hover:bg-red-600"
+                        : "bg-zinc-500 hover:bg-zinc-600",
+                    )
+                  : isRecording && "text-brand",
+              )}
               // While recording the button must stay clickable to stop, even
               // though `isDisabled` covers the busy/unsupported states.
               disabled={isDisabled && !isRecording}
@@ -275,11 +305,11 @@ export function MicButton({
               onClick={handleClick}
             >
               {isRecording ? (
-                <Square className="fill-current" />
+                <Square className={cn("fill-current", floating && "size-4")} />
               ) : isTranscribing ? (
-                <Loader2 className="animate-spin" />
+                <Loader2 className={cn("animate-spin", floating && "size-5")} />
               ) : (
-                <Mic />
+                <Mic className={cn(floating && "size-5")} />
               )}
             </Button>
           }

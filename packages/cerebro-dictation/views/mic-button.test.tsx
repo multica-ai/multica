@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MicButton } from "./mic-button";
 
@@ -311,5 +311,69 @@ describe("MicButton", () => {
     render(<MicButton onTranscribed={vi.fn()} />);
 
     expect(screen.getByRole("button")).toBeDisabled();
+  });
+
+  it("renders the round grey floating record button on note surfaces (FIR-1748, Jesper)", () => {
+    // On notes / documents / quick notes the mic is a distinct round, filled
+    // grey button overlaying the field — the primary action, not a ghost corner
+    // icon like the composer inputs use.
+    render(<MicButton onTranscribed={vi.fn()} appearance="floating" />);
+
+    const button = screen.getByRole("button", { name: "Start dictation" });
+    expect(button.className).toContain("rounded-full");
+    expect(button.className).toContain("bg-zinc-500");
+  });
+
+  it("turns the floating record button red while recording (FIR-1748)", () => {
+    mocks.useDictation.mockReturnValue({
+      status: "recording",
+      error: null,
+      isSupported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} appearance="floating" />);
+
+    const button = screen.getByRole("button", { name: "Stop dictation" });
+    expect(button.className).toContain("bg-red-500");
+  });
+
+  it("keeps the default inline mic a ghost icon, not a round button", () => {
+    render(<MicButton onTranscribed={vi.fn()} />);
+
+    const button = screen.getByRole("button", { name: "Start dictation" });
+    expect(button.className).not.toContain("rounded-full");
+  });
+
+  it("shows the custom success label once a transcript lands (Added on notes)", () => {
+    // The green cue text is configurable: composer inputs say "Inserted", note /
+    // document surfaces say "Added" (FIR-1748, Jesper).
+    let landed: ((text: string) => void) | undefined;
+    mocks.useDictation.mockImplementation(
+      (opts: { onTranscribed: (text: string) => void }) => {
+        landed = opts.onTranscribed;
+        return {
+          status: "idle",
+          error: null,
+          isSupported: true,
+          start: vi.fn(),
+          stop: vi.fn(),
+          cancel: vi.fn(),
+          lastTranscript: null,
+          mediaStream: null,
+        };
+      },
+    );
+
+    render(<MicButton onTranscribed={vi.fn()} successLabel="Added" />);
+    expect(screen.queryByText("Added")).toBeNull();
+
+    act(() => landed?.("hej med dig"));
+
+    expect(screen.getByText("Added")).toBeInTheDocument();
   });
 });
