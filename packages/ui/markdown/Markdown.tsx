@@ -16,8 +16,6 @@ import { CodeBlock, InlineCode } from './CodeBlock'
 import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
 import { preprocessMentionShortcodes } from './mentions'
-import { preprocessJsonLiterals } from './preprocess-json'
-import { highlightToHtml } from './highlight-markdown'
 import 'katex/dist/katex.min.css'
 import './markdown.css'
 
@@ -106,6 +104,17 @@ export interface MarkdownProps {
    * attach hover listeners for LinkHoverCard behavior.
    */
   onLinkHover?: (wrapperRef: React.RefObject<HTMLDivElement | null>) => void
+  /**
+   * Optional post-processing hook applied after the core preprocessing
+   * pipeline (mention shortcodes → linkify → file cards). The views-package
+   * wrapper uses this to inject editor-parity-specific transforms
+   * (preprocessJsonLiterals + highlightToHtml) without pulling those
+   * upstream-owned functions into `@multica/ui`.
+   *
+   * Runs in the same useMemo as the core pipeline, so the result is
+   * memoized together — no extra render pass.
+   */
+  postprocess?: (content: string) => string
 }
 
 // ---------------------------------------------------------------------------
@@ -734,6 +743,7 @@ export function Markdown({
   renderMermaid,
   renderHtmlBlock,
   onLinkHover,
+  postprocess,
 }: MarkdownProps): React.JSX.Element {
   // The `components` object is intentionally free of any lowlight dependency:
   // editor-parity code blocks subscribe to the lazy highlighter themselves
@@ -755,19 +765,20 @@ export function Markdown({
   }, [onLinkHover, mode])
 
   // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content.
-  // editor-parity mode additionally runs preprocessJsonLiterals + highlightToHtml.
+  // If a `postprocess` hook is provided (by the views wrapper for editor-parity
+  // mode), apply it last — after the core pipeline, so the ordering
+  // mention → link → filecard → postprocess(json + mark) is guaranteed.
   const processedContent = React.useMemo(
     () => {
       let result = preprocessMentionShortcodes(children)
       result = preprocessLinks(result)
       result = preprocessFileCards(result, cdnDomain ?? '')
-      if (mode === 'editor-parity') {
-        result = preprocessJsonLiterals(result)
-        result = highlightToHtml(result)
+      if (postprocess) {
+        result = postprocess(result)
       }
       return result
     },
-    [children, cdnDomain, mode]
+    [children, cdnDomain, postprocess]
   )
 
   // editor-parity uses .rich-text-editor.readonly CSS scope (matches Tiptap styles)

@@ -20,6 +20,8 @@ import { MermaidDiagram } from "../editor/mermaid-diagram";
 import { HtmlBlockPreview } from "../editor/html-block-preview";
 import { useLinkHover, LinkHoverCard } from "../editor/link-hover-card";
 import { openLink } from "../editor/utils/link-handler";
+import { preprocessJsonLiterals } from "../editor/utils/preprocess-json";
+import { highlightToHtml } from "../editor/utils/highlight-markdown";
 import "../editor/styles/index.css";
 
 export type { RenderMode };
@@ -170,6 +172,7 @@ export function Markdown(props: MarkdownProps): React.JSX.Element {
         renderHtmlBlock,
         onLinkHover: handleLinkHover,
         onUrlClick: handleUrlClick,
+        postprocess: (c: string) => highlightToHtml(preprocessJsonLiterals(c)),
       }
     : {};
 

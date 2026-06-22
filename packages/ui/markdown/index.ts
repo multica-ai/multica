@@ -10,6 +10,3 @@ export {
   isAllowedFileCardHref,
   FILE_CARD_URL_PATTERN,
 } from './file-cards'
-export { preprocessJsonLiterals } from './preprocess-json'
-export { highlightToHtml } from './highlight-markdown'
-export { matchHighlightAt, findLiteralRanges, type Range } from './highlight-match'
