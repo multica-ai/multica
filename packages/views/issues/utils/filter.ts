@@ -43,13 +43,17 @@ export interface IssueFilters {
 // reduce to a UTC-midnight calendar day before the range compare — no
 // time-of-day drift, and no field is silently excluded.
 function matchesDateFilter(issue: Issue, filter: IssueDateFilter): boolean {
-  if (filter.mode === "none") return !issue.due_date;
   const raw =
     filter.field === "due_date"
       ? issue.due_date
       : filter.field === "created_at"
         ? issue.created_at
         : issue.updated_at;
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — field-aware set-modes.
+  // "none" = Is not set (v1 only ever used field=due_date, so !raw === the old
+  // !issue.due_date); "set" = Is set / Any date.
+  if (filter.mode === "none") return !raw;
+  if (filter.mode === "set") return !!raw;
   if (!raw) return false;
   // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — re-derive the window now.
   const win = resolveDateWindow(filter);
@@ -57,7 +61,9 @@ function matchesDateFilter(issue: Issue, filter: IssueDateFilter): boolean {
   const from = dateOnlyToUTCDate(win.from);
   const to = dateOnlyToUTCDate(win.to);
   if (!day || !from || !to) return false;
-  return day.getTime() >= from.getTime() && day.getTime() <= to.getTime();
+  const inWindow = day.getTime() >= from.getTime() && day.getTime() <= to.getTime();
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — operator "Is not".
+  return filter.negate ? !inWindow : inWindow;
 }
 
 // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — every stacked condition

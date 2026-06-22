@@ -86,6 +86,22 @@ import { addDaysDateOnly, dateOnlyToLocalDate, formatDateOnly, toDateOnly, today
 import type { RelativeDateSpec, RelativeDateUnit, RelativeDateDirection } from "@multica/core/issues/date";
 // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — shared preset helpers + dynamic resolver.
 import { buildDatePreset, RELATIVE_PRESETS, DUE_PRESETS, DATE_PRESET_LABEL_KEY } from "../utils/cerebro-date-presets";
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — reference-aligned value vocabulary + builder.
+import {
+  DATE_VALUE_OPTIONS,
+  buildAbsoluteSingle,
+  valueOptionIdForFilter,
+  type DateValueOption,
+} from "../utils/cerebro-date-presets";
+import {
+  Command,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+} from "@multica/ui/components/ui/command";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { NativeSelect, NativeSelectOption } from "@multica/ui/components/ui/native-select";
 import { Input } from "@multica/ui/components/ui/input";
 import {
@@ -862,6 +878,298 @@ function DateBuilderSubContent({
   );
 }
 
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — reference-aligned builder.
+// Each condition is a Field / Operator / Value row, mirroring the reference
+// filter (Linear/ClickUp). Field + operator are NativeSelects (native, no
+// portal nesting → crash-safe inside the Date submenu); the value is a
+// searchable Popover+Command list; relative ranges add a number + unit; the
+// absolute kinds add a calendar popover. Gated on cerebro_date_filter_v2.
+type DateOp = "is" | "is_not" | "is_set" | "is_not_set";
+const DATE_OPS: { id: DateOp; labelKey: "date_op_is" | "date_op_is_not" | "date_op_is_set" | "date_op_is_not_set" }[] = [
+  { id: "is", labelKey: "date_op_is" },
+  { id: "is_not", labelKey: "date_op_is_not" },
+  { id: "is_set", labelKey: "date_op_is_set" },
+  { id: "is_not_set", labelKey: "date_op_is_not_set" },
+];
+
+function opOf(c: IssueDateFilter): DateOp {
+  if (c.mode === "set") return "is_set";
+  if (c.mode === "none") return "is_not_set";
+  return c.negate ? "is_not" : "is";
+}
+
+function applyValueOption(
+  field: IssueDateField,
+  negate: boolean,
+  option: DateValueOption,
+  prev: IssueDateFilter,
+): IssueDateFilter {
+  const neg = negate ? { negate: true } : {};
+  switch (option.kind) {
+    case "preset":
+      return { ...buildDatePreset(field, option.preset!), ...neg };
+    case "relative": {
+      const direction: RelativeDateDirection = option.id === "next_n" ? "next" : "past";
+      const spec: RelativeDateSpec =
+        prev.relative && prev.relative.direction === direction
+          ? prev.relative
+          : { direction, amount: 7, unit: "day" };
+      const win = relativeDateWindow(spec);
+      return { field, from: win.from, to: win.to, preset: "custom", relative: spec, ...neg };
+    }
+    case "on":
+    case "before":
+    case "after":
+      return { ...buildAbsoluteSingle(field, option.kind, todayDateOnly()), ...neg };
+    case "range":
+      return { field, from: todayDateOnly(), to: todayDateOnly(), preset: "custom", ...neg };
+  }
+}
+
+function DateConditionRowV2({
+  value: c,
+  isFirst,
+  onChange,
+  onRemove,
+}: {
+  value: IssueDateFilter;
+  isFirst: boolean;
+  onChange: (next: IssueDateFilter) => void;
+  onRemove: () => void;
+}) {
+  const { t } = useT("issues");
+  const [valueOpen, setValueOpen] = useState(false);
+  const [calOpen, setCalOpen] = useState(false);
+  const [stagedRange, setStagedRange] = useState<LocalDateRange | undefined>(undefined);
+
+  const op = opOf(c);
+  const negate = op === "is_not";
+  const needsValue = op === "is" || op === "is_not";
+  const selectedId = valueOptionIdForFilter(c);
+  const selectedOption = DATE_VALUE_OPTIONS.find((o) => o.id === selectedId);
+  const valueLabel = selectedOption ? t(($) => $.filters[selectedOption.labelKey]) : t(($) => $.filters.date_select_value);
+
+  const changeField = (field: IssueDateField) => {
+    if (c.mode === "set") onChange(buildDatePreset(field, "any"));
+    else if (c.mode === "none") onChange({ field, from: c.from, to: c.to, mode: "none", preset: "none" });
+    else if (c.preset && c.preset !== "custom") onChange({ ...buildDatePreset(field, c.preset), ...(negate ? { negate: true } : {}) });
+    else onChange({ ...c, field });
+  };
+
+  const changeOp = (next: DateOp) => {
+    if (next === "is_set") onChange(buildDatePreset(c.field, "any"));
+    else if (next === "is_not_set") onChange({ field: c.field, from: c.from, to: c.to, mode: "none", preset: "none" });
+    else {
+      const base = c.mode === "set" || c.mode === "none" ? buildDatePreset(c.field, "today") : c;
+      const { mode: _m, negate: _n, ...rest } = base;
+      onChange(next === "is_not" ? { ...rest, negate: true } : { ...rest });
+    }
+  };
+
+  const selectValue = (option: DateValueOption) => {
+    onChange(applyValueOption(c.field, negate, option, c));
+    setValueOpen(false);
+    if (option.kind === "range") {
+      setStagedRange(undefined);
+      setCalOpen(true);
+    } else if (option.kind === "on" || option.kind === "before" || option.kind === "after") {
+      setCalOpen(true);
+    }
+  };
+
+  // Relative number + unit (Last/Next N …).
+  const setRelative = (patch: Partial<RelativeDateSpec>) => {
+    const spec: RelativeDateSpec = {
+      direction: c.relative?.direction ?? "past",
+      amount: c.relative?.amount ?? 7,
+      unit: c.relative?.unit ?? "day",
+      ...patch,
+    };
+    spec.amount = Math.max(1, Math.floor(spec.amount || 1));
+    const win = relativeDateWindow(spec);
+    onChange({ field: c.field, from: win.from, to: win.to, preset: "custom", relative: spec, ...(negate ? { negate: true } : {}) });
+  };
+
+  // Absolute single-day pick (on/before/after).
+  const pickSingle = (date: Date | undefined) => {
+    if (!date) return;
+    if (selectedId === "on" || selectedId === "before" || selectedId === "after") {
+      onChange({ ...buildAbsoluteSingle(c.field, selectedId, toDateOnly(date)), ...(negate ? { negate: true } : {}) });
+    }
+    setCalOpen(false);
+  };
+  const applyRange = () => {
+    if (!stagedRange?.from) return;
+    const [from, to] = normalizeDateRange(stagedRange.from, stagedRange.to ?? stagedRange.from);
+    onChange({ field: c.field, from: toDateOnly(from), to: toDateOnly(to), preset: "custom", ...(negate ? { negate: true } : {}) });
+    setCalOpen(false);
+  };
+
+  const singleSelected = dateOnlyToLocalDate(selectedId === "before" ? c.to : c.from);
+  const rangeLabel = `${formatDateOnly(c.from)} – ${formatDateOnly(c.to)}`;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="w-12 shrink-0 text-xs text-muted-foreground">
+        {isFirst ? t(($) => $.filters.date_where) : t(($) => $.filters.date_and)}
+      </span>
+      <NativeSelect
+        className="h-8 w-32"
+        value={c.field}
+        onChange={(e) => changeField(e.target.value as IssueDateField)}
+      >
+        {(["created_at", "updated_at", "due_date"] as const).map((f) => (
+          <NativeSelectOption key={f} value={f}>
+            {t(($) => $.filters[DATE_FIELD_LABEL_KEY[f]])}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+      <NativeSelect
+        className="h-8 w-28"
+        value={op}
+        onChange={(e) => changeOp(e.target.value as DateOp)}
+      >
+        {DATE_OPS.map((o) => (
+          <NativeSelectOption key={o.id} value={o.id}>
+            {t(($) => $.filters[o.labelKey])}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+
+      {needsValue && (
+        <Popover open={valueOpen} onOpenChange={setValueOpen}>
+          <PopoverTrigger
+            render={
+              <Button variant="outline" size="sm" className="h-8 min-w-32 justify-between gap-1 font-normal">
+                <span className="truncate">{valueLabel}</span>
+                <ChevronDown className="size-3.5 opacity-60" />
+              </Button>
+            }
+          />
+          <PopoverContent align="start" className="w-56 p-0">
+            <Command>
+              <CommandInput placeholder={t(($) => $.filters.date_search)} />
+              <CommandList>
+                <CommandEmpty>{t(($) => $.filters.no_results)}</CommandEmpty>
+                <CommandGroup>
+                  {DATE_VALUE_OPTIONS.map((option) => {
+                    const label = t(($) => $.filters[option.labelKey]);
+                    return (
+                      <CommandItem key={option.id} value={label} onSelect={() => selectValue(option)}>
+                        {label}
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      )}
+
+      {/* Relative: number + unit */}
+      {needsValue && c.relative && (
+        <>
+          <Input
+            type="number"
+            min={1}
+            value={c.relative.amount}
+            onChange={(e) => setRelative({ amount: Number(e.target.value) })}
+            className="h-8 w-16"
+          />
+          <NativeSelect
+            className="h-8 w-24"
+            value={c.relative.unit}
+            onChange={(e) => setRelative({ unit: e.target.value as RelativeDateUnit })}
+          >
+            {RELATIVE_UNITS.map((u) => (
+              <NativeSelectOption key={u} value={u}>
+                {t(($) => $.filters[DATE_UNIT_LABEL_KEY[u]])}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </>
+      )}
+
+      {/* Absolute: calendar popover */}
+      {needsValue && (selectedId === "on" || selectedId === "before" || selectedId === "after" || selectedId === "range") && (
+        <Popover open={calOpen} onOpenChange={setCalOpen}>
+          <PopoverTrigger
+            render={
+              <Button variant="outline" size="sm" className="h-8 min-w-28 justify-start font-normal">
+                {selectedId === "range" ? rangeLabel : formatDateOnly(singleSelected ? toDateOnly(singleSelected) : todayDateOnly())}
+              </Button>
+            }
+          />
+          <PopoverContent align="start" className="w-auto gap-0 p-0">
+            {selectedId === "range" ? (
+              <>
+                <Calendar mode="range" numberOfMonths={2} selected={stagedRange} onSelect={(r) => setStagedRange(r)} captionLayout="dropdown" />
+                <div className="flex justify-end gap-2 border-t p-2">
+                  <Button variant="ghost" size="sm" onClick={() => setCalOpen(false)}>
+                    {t(($) => $.filters.date_cancel)}
+                  </Button>
+                  <Button size="sm" onClick={applyRange} disabled={!stagedRange?.from}>
+                    {t(($) => $.filters.date_apply)}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Calendar mode="single" numberOfMonths={1} selected={singleSelected} onSelect={pickSingle} captionLayout="dropdown" />
+            )}
+          </PopoverContent>
+        </Popover>
+      )}
+
+      <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground" onClick={onRemove}>
+        <X className="size-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+function DateBuilderV2SubContent({
+  value,
+  onChange,
+}: {
+  value: IssueDateFilter[];
+  onChange: (next: IssueDateFilter[]) => void;
+}) {
+  const { t } = useT("issues");
+  const updateAt = (i: number, next: IssueDateFilter) => onChange(value.map((c, idx) => (idx === i ? next : c)));
+  const removeAt = (i: number) => onChange(value.filter((_, idx) => idx !== i));
+  const add = () => onChange([...value, buildDatePreset("due_date", "this_week")]);
+
+  return (
+    <div className="flex w-[min(88vw,38rem)] flex-col gap-2 p-2">
+      {value.length === 0 ? (
+        <p className="px-1 py-2 text-sm text-muted-foreground">{t(($) => $.filters.date_empty)}</p>
+      ) : (
+        value.map((c, i) => (
+          <DateConditionRowV2
+            key={i}
+            value={c}
+            isFirst={i === 0}
+            onChange={(next) => updateAt(i, next)}
+            onRemove={() => removeAt(i)}
+          />
+        ))
+      )}
+      <div className="flex items-center justify-between pt-1">
+        <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={add}>
+          <Plus className="size-3.5" />
+          {t(($) => $.filters.date_add_filter)}
+        </Button>
+        {value.length > 0 && (
+          <Button variant="ghost" size="sm" className="h-8 text-destructive hover:text-destructive" onClick={() => onChange([])}>
+            {t(($) => $.filters.date_clear_all)}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DateSubContent({
   value,
   onChange,
@@ -1199,6 +1507,8 @@ export function IssueDisplayControls({
   // stacked builder handler; the global page passes the single-range handler.
   const showDateBuilder = !!onDateFiltersChange;
   const activeDateFilters = dateFilters ?? [];
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — reference-aligned builder.
+  const dateFilterV2 = useFeatureFlag("cerebro_date_filter_v2");
 
   const activeFilterCount = getActiveFilterCount({
     statusFilters,
@@ -1397,11 +1707,18 @@ export function IssueDisplayControls({
                     </span>
                   )}
                 </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="w-64">
-                  <DateBuilderSubContent
-                    value={activeDateFilters}
-                    onChange={onDateFiltersChange}
-                  />
+                <DropdownMenuSubContent className={dateFilterV2 ? "w-auto" : "w-64"}>
+                  {dateFilterV2 ? (
+                    <DateBuilderV2SubContent
+                      value={activeDateFilters}
+                      onChange={onDateFiltersChange}
+                    />
+                  ) : (
+                    <DateBuilderSubContent
+                      value={activeDateFilters}
+                      onChange={onDateFiltersChange}
+                    />
+                  )}
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
             ) : showDateFilter && onDateFilterChange ? (

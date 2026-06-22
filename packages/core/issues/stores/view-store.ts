@@ -32,7 +32,13 @@ export interface IssueDateFilter {
   // ignored). Undefined/"range" is the normal from..to range filter. Only the
   // client-side My Issues filter sets "none"; the server-backed /issues page
   // never produces it (its picker offers ranges only).
-  mode?: "range" | "none";
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — "set" matches issues that
+  // HAVE a value for the chosen field ("Any date" / operator "Is set"); "none"
+  // is "Is not set". from/to are ignored for both set-modes.
+  mode?: "range" | "none" | "set";
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — when true the window match
+  // is inverted (operator "Is not"). Ignored for the set-modes above.
+  negate?: boolean;
   // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — display hint for the My
   // Issues filter builder so a condition renders its preset name ("Last 7
   // days", "This week", …) without reverse-engineering the from/to range.
@@ -49,13 +55,32 @@ export interface IssueDateFilter {
 // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — preset identifiers for the
 // stacked date-condition builder. "custom" (or undefined) means an explicit
 // from..to range chosen from the calendar.
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — widened to the reference
+// filter vocabulary (calendar week/month/quarter/year, open-ended, set-modes).
+// Window math for each id lives in views/issues/utils/cerebro-date-presets.ts.
 export type IssueDatePreset =
   | "today"
+  | "yesterday"
+  | "tomorrow"
   | "last_3_days"
   | "last_7_days"
-  | "overdue"
   | "this_week"
+  | "last_week"
+  | "next_week"
+  | "this_month"
+  | "last_month"
+  | "next_month"
+  | "this_quarter"
+  | "last_quarter"
+  | "next_quarter"
+  | "this_year"
+  | "last_year"
+  | "next_year"
+  | "overdue"
+  | "today_and_earlier"
+  | "later_than_today"
   | "none"
+  | "any"
   | "custom";
 
 export const SWIMLANE_GROUPINGS: SwimlaneGrouping[] = ["parent", "project", "assignee"];

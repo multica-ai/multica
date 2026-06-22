@@ -155,6 +155,8 @@ export type CerebroFlagKey =
   | "cerebro_issue_date_times"
   // FIR-1659: personal saved filters — name a filter on the issue list and recall it with one click. Sharing + permissions land in later phases.
   | "cerebro_saved_filters"
+  // FIR-1812: reference-aligned My Issues date filter — Field/Operator/Value rows with the full searchable value list (calendar week/month/quarter/year, dynamic Last/Next N, on/before/after/range, Is set/Is not set).
+  | "cerebro_date_filter_v2"
   // TECH-3738 Bid C: capability drift watcher — periodically alert owners when an agent uses a tool its policy denies.
   | "cerebro_capability_drift_watcher"
   // TECH-3511: note types — reusable note templates with recurrence (business reviews).
@@ -452,6 +454,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-1659: OFF by default while the feature is built across phases. Hides the
   // "Saved filters" section + "Save current filter" action in the issue Filter menu.
   cerebro_saved_filters: false,
+  cerebro_date_filter_v2: false,
   // TECH-3738 Bid C: OFF by default. The capability drift watcher does nothing
   // until an admin turns it on; then it periodically alerts owners/admins when
   // an agent uses a tool its declared policy denies.
@@ -1218,6 +1221,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Let users save the current issue filter as a named, personal filter and recall it with one click from the Filter menu — across the Issues list, My Issues, project view and member/agent panels. Personal filters only for now; sharing with colleagues/groups/the whole team and the group permission for who may create shared filters land in later phases. Off hides the Saved filters section and the Save action. FIR-1659.",
+  },
+  {
+    key: "cerebro_date_filter_v2",
+    label: "Date filter v2 (reference-aligned)",
+    group: "workspace",
+    description:
+      "Replace the My Issues date filter with the reference-aligned builder: each condition is a Field / Operator / Value row with a searchable value list — Today/Yesterday/Tomorrow, calendar This/Last/Next week, month, quarter and year, Overdue, Today & earlier, Later than today, dynamic Last/Next N days/weeks/months/years, exact On / Before / After / Range, and Is set / Is not set. Off keeps the previous stacked date submenu. FIR-1812.",
   },
   {
     key: "cerebro_capability_drift_watcher",
