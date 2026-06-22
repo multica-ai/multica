@@ -4,7 +4,11 @@
     "breadcrumb_workspace_fallback": "ワークスペース",
     "empty_title": "まだイシューがありません",
     "empty_hint": "イシューを作成して始めましょう。",
-    "move_failed": "イシューを移動できませんでした"
+    "move_failed": "イシューを移動できませんでした",
+    "show_archived": "アーカイブを表示",
+    "hide_archived": "アーカイブを非表示",
+    "top_level_only": "トップレベルのみ",
+    "show_all_issues": "すべてのイシューを表示"
   },
   "status": {
     "backlog": "バックログ",

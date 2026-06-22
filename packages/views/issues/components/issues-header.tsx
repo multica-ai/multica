@@ -13,6 +13,7 @@ import {
   Filter,
   FolderKanban,
   FolderMinus,
+  Layers,
   List,
   SignalHigh,
   SlidersHorizontal,
@@ -777,6 +778,8 @@ export function IssueDisplayControls({
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const showArchived = useViewStore((s) => s.showArchived);
+  const topLevelOnly = useViewStore((s) => s.topLevelOnly);
+  const toggleTopLevelOnly = useViewStore((s) => s.toggleTopLevelOnly);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
@@ -1329,6 +1332,16 @@ export function IssueDisplayControls({
           title={showArchived ? t(($) => $.page.hide_archived) : t(($) => $.page.show_archived)}
         >
           <Archive className="size-3.5" />
+        </Button>
+        <Button
+          variant={topLevelOnly ? "default" : "outline"}
+          size="sm"
+          className={topLevelOnly ? "gap-1 bg-brand text-white hover:bg-brand/90" : "gap-1 text-muted-foreground"}
+          onClick={toggleTopLevelOnly}
+          title={topLevelOnly ? t(($) => $.page.show_all_issues) : t(($) => $.page.top_level_only)}
+          disabled={swimlaneGrouping === "parent"}
+        >
+          <Layers className="size-3.5" />
         </Button>
     </div>
   );

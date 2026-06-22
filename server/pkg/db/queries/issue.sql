@@ -49,6 +49,7 @@ WHERE i.workspace_id = $1
   )
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
+  AND (sqlc.narg('top_level_only')::bool IS NOT TRUE OR i.parent_issue_id IS NULL)
   AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
@@ -191,6 +192,7 @@ WHERE i.workspace_id = $1
   )
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
+  AND (sqlc.narg('top_level_only')::bool IS NOT TRUE OR i.parent_issue_id IS NULL)
   AND (
     (
       COALESCE(cardinality(sqlc.narg('project_ids')::uuid[]), 0) = 0
@@ -285,6 +287,7 @@ WHERE i.workspace_id = $1
   )
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
+  AND (sqlc.narg('top_level_only')::bool IS NOT TRUE OR i.parent_issue_id IS NULL)
   AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
