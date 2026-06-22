@@ -246,7 +246,12 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 		} else {
 			histHandoff = normalizeHandoff(histHandoff)
 		}
-		if _, err := createSession(r.Context(), tx, issue.ID, 1, "Session 1", "done", histHandoff, &issue.CreatedAt.Time); err != nil {
+		// FIR-1787 point 2: an agent-authored handoff names the chapter it closes.
+		session1Name := "Session 1"
+		if n := sessionNameFromHandoff(histHandoff, req.Handoff != nil); n != "" {
+			session1Name = n
+		}
+		if _, err := createSession(r.Context(), tx, issue.ID, 1, session1Name, "done", histHandoff, &issue.CreatedAt.Time); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create session 1")
 			return
 		}
@@ -302,7 +307,16 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to write handoff")
 			return
 		}
-		if _, err := tx.Exec(r.Context(), `UPDATE cerebro_session SET status = 'done', updated_at = now() WHERE id = $1 AND issue_id = $2`, openID, issue.ID); err != nil {
+		// FIR-1787 point 2: name the closing session from the agent's handoff, but
+		// only if it still carries the default "Session N" (never clobber a name a
+		// human or earlier agent already set).
+		closeName := sessionNameFromHandoff(handoff, req.Handoff != nil)
+		if _, err := tx.Exec(r.Context(), `
+			UPDATE cerebro_session
+			SET status = 'done',
+			    name = CASE WHEN $3::text <> '' AND name ~ '^Session [0-9]+$' THEN $3::text ELSE name END,
+			    updated_at = now()
+			WHERE id = $1 AND issue_id = $2`, openID, issue.ID, closeName); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to close session")
 			return
 		}
@@ -373,6 +387,27 @@ func (h *Handler) generateHandoff(ctx context.Context, tx pgx.Tx, issueID pgtype
 	}
 	brief.Summary = summary
 	return brief, nil
+}
+
+// sessionNameFromHandoff derives a short human display name for a session being
+// closed at handoff, from an AGENT-authored brief's summary. It returns "" for
+// server auto-generated briefs (so the default "Session N" stays) and for empty
+// summaries. This is the server half of FIR-1787 point 2 — "the agent also names
+// the session at handoff" — without a new API field: the agent already supplies
+// the brief, so its summary titles the chapter it just finished.
+func sessionNameFromHandoff(brief *handoffBrief, agentAuthored bool) string {
+	if !agentAuthored || brief == nil {
+		return ""
+	}
+	s := strings.TrimSpace(brief.Summary)
+	if s == "" {
+		return ""
+	}
+	// First line only, capped — a title, not the whole summary.
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	return snippet(s, 60)
 }
 
 func (h *Handler) loadIssue(w http.ResponseWriter, r *http.Request) (db.Issue, bool) {

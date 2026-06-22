@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineEntry } from "@multica/core/types";
-import { groupTimelineBySession } from "./grouping";
+import { groupTimelineBySession, sessionForTime } from "./grouping";
 import type { Session } from "./types";
 
 const entry = (id: string, created_at: string): TimelineEntry => ({
@@ -75,5 +75,38 @@ describe("groupTimelineBySession", () => {
     ]);
     expect(groups.map((g) => g.session.id)).toEqual(["s1", "s2"]);
     expect(groups[1]!.groups).toHaveLength(0);
+  });
+});
+
+describe("sessionForTime", () => {
+  it("returns null when there are no real sessions", () => {
+    expect(sessionForTime([], "2026-06-21T00:00:00Z")).toBeNull();
+    expect(sessionForTime(undefined, "2026-06-21T00:00:00Z")).toBeNull();
+  });
+
+  it("picks the latest session whose start is at or before the time", () => {
+    const sessions = [
+      session("s1", 1, "2026-06-21T00:00:00Z"),
+      session("s2", 2, "2026-06-21T02:00:00Z"),
+    ];
+    expect(sessionForTime(sessions, "2026-06-21T01:00:00Z")?.id).toBe("s1");
+    expect(sessionForTime(sessions, "2026-06-21T02:00:00Z")?.id).toBe("s2");
+    expect(sessionForTime(sessions, "2026-06-21T05:00:00Z")?.id).toBe("s2");
+  });
+
+  it("falls into the earliest session for times before the first marker", () => {
+    const sessions = [
+      session("s1", 1, "2026-06-21T01:00:00Z"),
+      session("s2", 2, "2026-06-21T03:00:00Z"),
+    ];
+    expect(sessionForTime(sessions, "2026-06-21T00:00:00Z")?.id).toBe("s1");
+  });
+
+  it("ignores input order — sorts by created_at then position", () => {
+    const sessions = [
+      session("s2", 2, "2026-06-21T02:00:00Z"),
+      session("s1", 1, "2026-06-21T00:00:00Z"),
+    ];
+    expect(sessionForTime(sessions, "2026-06-21T02:30:00Z")?.id).toBe("s2");
   });
 });

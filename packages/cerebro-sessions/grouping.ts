@@ -67,3 +67,30 @@ export function groupTimelineBySession(
   // session so its header (and handoff) still shows before the first comment.
   return list.map((session) => ({ session, groups: buckets.get(session.id) ?? [] }));
 }
+
+// Resolve which session owns a single point in time (e.g. an agent run's
+// created_at), using the same rule as groupTimelineBySession: the latest
+// session whose start is at or before the time; a time earlier than the first
+// marker falls into the earliest session. Returns null when there are no real
+// sessions yet (the implicit "Session 1" has no persisted name to show).
+export function sessionForTime(
+  sessions: Session[] | undefined,
+  isoTime: string,
+): Session | null {
+  const list = (sessions ?? []).slice().sort((a, b) => {
+    const ta = new Date(a.created_at).getTime();
+    const tb = new Date(b.created_at).getTime();
+    if (ta !== tb) return ta - tb;
+    return a.position - b.position;
+  });
+  if (list.length === 0) return null;
+
+  const t = new Date(isoTime).getTime();
+  const starts = list.map((s) => new Date(s.created_at).getTime());
+  let idx = 0;
+  for (let i = 0; i < starts.length; i++) {
+    if ((starts[i] ?? 0) <= t) idx = i;
+    else break;
+  }
+  return list[idx] ?? list[0] ?? null;
+}

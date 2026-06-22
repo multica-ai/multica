@@ -28,6 +28,8 @@ import { AgentTranscriptDialog } from "../../common/task-transcript/agent-transc
 import { redactSecrets } from "../../common/task-transcript/redact";
 // CEREBRO-PATCH(agent-live-card-cerebro): import getToolSummary from cerebro-chat after Phase 6 relocation
 import { getToolSummary } from "@multica/cerebro-chat/views";
+// CEREBRO-PATCH(run-log-prompt-session): FIR-1787 point 3 — run-log shows initial prompt + session name.
+import { RunLogPromptLine } from "@multica/cerebro-sessions";
 // CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717 — render the runtime-pause detail on queued banners.
 import {
   parseRuntimePauseWaitReason,
@@ -705,6 +707,8 @@ function TaskRunEntry({ task }: { task: AgentTask }) {
           <Maximize2 className="h-3 w-3" />
         </span>
       </CollapsibleTrigger>
+      {/* CEREBRO-PATCH(run-log-prompt-session): FIR-1787 point 3 — initial prompt + session name subtitle. */}
+      <RunLogPromptLine task={task} />
       <CollapsibleContent>
         <div className="ml-5 mt-1 max-h-64 overflow-y-auto rounded border bg-muted/30 px-3 py-2 space-y-0.5">
           {items === null ? (

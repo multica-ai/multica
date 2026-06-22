@@ -121,7 +121,8 @@ import { IssueTimePicker } from "@multica/cerebro-issue-datetime/views";
 import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
 // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 groups the comment timeline into sessions derived from start markers.
 // CEREBRO-PATCH(session-activity-context): FIR-1769 P2/P3 — per-session activity fold + context hairline.
-import { SessionHeader, SessionHandoff, StartFresh, SessionActivity, ActiveSessionContextHairline, groupTimelineBySession, partitionSessionGroups, countActivityEntries, useSessions } from "@multica/cerebro-sessions";
+// CEREBRO-PATCH(session-review-fir1787): context indicator moves above the composer (SessionContextBar) per FIR-1787 review.
+import { SessionHeader, SessionHandoff, StartFresh, SessionActivity, SessionContextBar, groupTimelineBySession, partitionSessionGroups, countActivityEntries, useSessions } from "@multica/cerebro-sessions";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -2623,24 +2624,22 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 // Sessions on: group the timeline by session start markers and
                 // render each session collapsed except the open one.
                 const sessionGroups = groupTimelineBySession(id, sessionsQuery.data, timelineView.groups);
-                // CEREBRO-PATCH(session-activity-context): FIR-1769 P3 — active = latest session.
-                const activeSessionId = sessionGroups[sessionGroups.length - 1]?.session.id;
                 return sessionGroups.map((sg) => {
                   const open = sg.session.id === openSessionId;
                   // CEREBRO-PATCH(session-activity-context): FIR-1769 P2 — split comments from activity.
                   const { commentGroups, activityGroups } = partitionSessionGroups(sg.groups);
+                  // CEREBRO-PATCH(session-review-fir1787): a session appears only once its first comment exists.
+                  if (commentGroups.length === 0) return null;
                   const bodyGroups = sessionActivityFoldEnabled ? commentGroups : sg.groups;
                   return (
                     <Fragment key={sg.session.id}>
+                      {/* CEREBRO-PATCH(session-review-fir1787): header is part of the thread (divider under) + inline rename. */}
                       <SessionHeader
+                        issueId={id}
                         session={sg.session}
                         open={open}
                         onToggle={() => setOpenSessionId(open ? "" : sg.session.id)}
                       />
-                      {/* CEREBRO-PATCH(session-context-usage): FIR-1709 P3 hairline fed by real cross-runtime/model context measurement. */}
-                      {sessionContextHairlineEnabled && sg.session.id === activeSessionId ? (
-                        <ActiveSessionContextHairline issueId={id} groups={sg.groups} />
-                      ) : null}
                       {open ? (
                         <SessionHandoff session={sg.session} />
                       ) : sg.session.handoff?.summary ? (
@@ -2663,6 +2662,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
+              {/* CEREBRO-PATCH(session-review-fir1787): FIR-1787 — context bar is the line above the input (colour + handoff). */}
+              {sessionsEnabled && sessionContextHairlineEnabled ? (
+                <SessionContextBar issueId={id} groups={timelineView.groups} />
+              ) : null}
               {/* CEREBRO-PATCH(issue-detail-pin-comment-input): JEH-1065 — opt
                   this input into the pin toggle. Channels/DMs (which also
                   mount CommentInput via channel-detail.tsx) leave pinnable

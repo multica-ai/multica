@@ -49,6 +49,29 @@ func TestNormalizeHandoff(t *testing.T) {
 	}
 }
 
+func TestSessionNameFromHandoff(t *testing.T) {
+	// Auto-generated briefs (agentAuthored=false) never rename — keep "Session N".
+	if got := sessionNameFromHandoff(&handoffBrief{Summary: "Auto-generated handoff: 3 comments."}, false); got != "" {
+		t.Errorf("auto-generated brief named the session: %q", got)
+	}
+	if got := sessionNameFromHandoff(nil, true); got != "" {
+		t.Errorf("nil brief = %q, want empty", got)
+	}
+	if got := sessionNameFromHandoff(&handoffBrief{Summary: "   "}, true); got != "" {
+		t.Errorf("blank summary = %q, want empty", got)
+	}
+	// Agent-authored: first line only, becomes the chapter title.
+	if got := sessionNameFromHandoff(&handoffBrief{Summary: "Shipped login redirect fix\nmore detail"}, true); got != "Shipped login redirect fix" {
+		t.Errorf("name = %q, want first line only", got)
+	}
+	// Long summaries are capped to a title length.
+	long := "This is a very long handoff summary that goes well beyond sixty characters and keeps going"
+	got := sessionNameFromHandoff(&handoffBrief{Summary: long}, true)
+	if len([]rune(got)) > 61 { // 60 runes + ellipsis
+		t.Errorf("name not capped: %q (%d runes)", got, len([]rune(got)))
+	}
+}
+
 func TestSnippet(t *testing.T) {
 	if got := snippet("line one\nline two", 100); got != "line one line two" {
 		t.Errorf("snippet collapse = %q", got)

@@ -1018,6 +1018,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
+	// CEREBRO-PATCH(new-thread-new-session): FIR-1787 point 5 — a new root comment opens its own session (fresh context).
+	h.openSessionForNewThreadOnComment(r.Context(), issue, !parentID.Valid, comment.CreatedAt.Time, authorType, authorID)
+
 	// CEREBRO-PATCH(task-delegation-context): comment/mention task starts must
 	// carry the original human principal. Member comments seed the chain;
 	// agent comments inherit it from X-Task-ID or default-deny the enqueue.
