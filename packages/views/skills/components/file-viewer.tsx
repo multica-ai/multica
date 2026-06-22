@@ -23,13 +23,11 @@ function isMarkdown(path: string) {
 function FrontmatterCard({ data }: { data: SkillFrontmatter }) {
   return (
     <div className="mb-4 rounded-lg border bg-muted/30 px-4 py-3">
-      <div className="grid gap-1.5">
+      {/* CEREBRO-PATCH(skills-mobile-detail-layout): two-column grid with a minmax(0,1fr) value column bounds the value to the viewport so break-words actually wraps long no-space JSON arrays. A single auto-sized grid column tracked the values' max-content, so break-words never engaged on mobile and the row ran off the phone screen. */}
+      <div className="grid grid-cols-[minmax(80px,auto)_minmax(0,1fr)] gap-x-2 gap-y-1.5 text-xs">
         {Object.entries(data).map(([key, value]) => (
-          <div key={key} className="flex gap-2 text-xs">
-            <span className="shrink-0 font-medium text-muted-foreground min-w-[80px]">
-              {key}
-            </span>
-            {/* CEREBRO-PATCH(skills-mobile-detail-layout): min-w-0 lets long no-space values (JSON arrays) wrap instead of forcing the row wider than the phone screen. */}
+          <div key={key} className="contents">
+            <span className="font-medium text-muted-foreground">{key}</span>
             <span className="min-w-0 text-foreground whitespace-pre-wrap break-words">
               {value.trimEnd()}
             </span>
