@@ -383,10 +383,27 @@ func (h *Handler) generateHandoff(ctx context.Context, tx pgx.Tx, issueID pgtype
 	}
 	summary := "Auto-generated handoff: " + strconv.Itoa(count) + " comment" + plural + " in the previous session."
 	if latest != nil {
-		summary += " Latest: " + snippet(*latest, 200)
+		// FIR-1839 B: include the FULL latest comment (newlines preserved), not a
+		// 200-char teaser — so opening the handoff shows the real content you can
+		// actually read and judge. Capped only to avoid pathological JSON bloat.
+		if body := handoffBody(*latest, 8000); body != "" {
+			summary += "\n\nLatest comment:\n" + body
+		}
 	}
 	brief.Summary = summary
 	return brief, nil
+}
+
+// handoffBody trims surrounding whitespace and caps very long content while
+// PRESERVING internal newlines (unlike snippet, which flattens them for a
+// single-line teaser). The handoff is meant to be opened and read in full, so
+// its formatting must survive.
+func handoffBody(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	return strings.TrimSpace(s[:max]) + "…"
 }
 
 // sessionNameFromHandoff derives a short human display name for a session being

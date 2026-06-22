@@ -80,3 +80,17 @@ func TestSnippet(t *testing.T) {
 		t.Errorf("snippet truncate = %q, want abcde…", got)
 	}
 }
+
+func TestHandoffBody_PreservesNewlinesAndCaps(t *testing.T) {
+	// FIR-1839 B: unlike snippet, the handoff body keeps internal newlines so the
+	// opened handoff is readable in full.
+	if got := handoffBody("line one\nline two", 100); got != "line one\nline two" {
+		t.Errorf("handoffBody newlines = %q, want preserved", got)
+	}
+	if got := handoffBody("  padded \n end  ", 100); got != "padded \n end" {
+		t.Errorf("handoffBody edge-trim = %q", got)
+	}
+	if got := handoffBody("abcdefghij", 5); got != "abcde…" {
+		t.Errorf("handoffBody cap = %q, want abcde…", got)
+	}
+}

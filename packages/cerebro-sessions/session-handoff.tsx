@@ -61,8 +61,17 @@ export function SessionHandoff({
         </button>
       )}
       {open && handoff && (
-        <div className={cn("space-y-3 px-4 text-sm", controlled ? "py-3" : "pb-4")}>
-          {handoff.summary && <p className="text-muted-foreground">{handoff.summary}</p>}
+        <div
+          className={cn(
+            // FIR-1839 B: the handoff is opened to be read in full, so keep its
+            // line breaks and let a long brief scroll instead of stretching the box.
+            "max-h-96 space-y-3 overflow-y-auto px-4 text-sm",
+            controlled ? "py-3" : "pb-4",
+          )}
+        >
+          {handoff.summary && (
+            <p className="whitespace-pre-wrap text-muted-foreground">{handoff.summary}</p>
+          )}
           {handoff.done.length > 0 && (
             <div>
               <div className="mb-1 text-xs font-medium text-muted-foreground">Done</div>
