@@ -350,6 +350,7 @@
     "transcript_tooltip": "View transcript",
     "show_transcript": "Show transcript",
     "hide_transcript": "Hide transcript",
+    "view_in_costrict": "View in CoStrict",
     "live_indicator": "Live",
     "no_events_yet": "No events yet.",
     "waiting_events": "Waiting for events...",

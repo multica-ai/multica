@@ -111,6 +111,12 @@ export interface AgentTask {
    * the daemon reports a work_dir (typically once execution starts).
    */
   work_dir?: string;
+  /**
+   * csc/Claude session id for this run. Empty until the daemon reports it.
+   * Combined with work_dir it deep-links into the CoStrict session viewer
+   * when multica runs embedded inside costrict-web.
+   */
+  session_id?: string;
 }
 
 export interface Agent {
