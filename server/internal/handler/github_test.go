@@ -2851,10 +2851,20 @@ func TestWebhook_RegistryDoesNotCaptureForeignAccount(t *testing.T) {
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 
+	// The installation maps to its OWN workspace (not the squatter), so when the
+	// gate refuses the registry it falls back here — a workspace with no
+	// matching issue — and the squatter genuinely gets zero links.
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "foreign-acct-install-ws")
+	wsA, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+		Name: "foreign-acct-install-ws", Slug: "foreign-acct-install-ws", IssuePrefix: "FAW",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
 	const installationID int64 = 778899002
 	// Installation account != repo owner — the gate must refuse the registry.
 	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-		WorkspaceID: parseUUID(testWorkspaceID), InstallationID: installationID,
+		WorkspaceID: wsA.ID, InstallationID: installationID,
 		AccountLogin: "some-other-account", AccountType: "User",
 	}); err != nil {
 		t.Fatalf("CreateGitHubInstallation: %v", err)
@@ -2865,6 +2875,7 @@ func TestWebhook_RegistryDoesNotCaptureForeignAccount(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
 		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
 		testPool.Exec(ctx, `UPDATE workspace SET repos = $1 WHERE id = $2`, prevRepos, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsA.ID)
 	})
 
 	body := map[string]any{
