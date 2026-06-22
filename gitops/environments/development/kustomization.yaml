@@ -37,7 +37,7 @@ patchesStrategicMerge:
 images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
     newName: ghcr.io/g2crowd/agentfarm-backend-dev
-    newTag: "02997ed8"
+    newTag: "aa4a07b4"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
     newTag: "02997ed8"
