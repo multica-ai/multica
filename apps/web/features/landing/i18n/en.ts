@@ -295,17 +295,25 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     entries: [
       {
         version: "0.3.27",
-        date: "2026-06-19",
-        title: "Smoother Desktop Sidebars and Cleaner Pins",
+        date: "2026-06-22",
+        title: "Threaded Lark Replies and Smoother Team Workflows",
         changes: [],
+        features: [
+          "Lark conversations now reply inside the original topic when a message starts from a topic, keeping team discussions easier to follow",
+          "Squad leaders can see member skills in the roster, making delegation more precise",
+          "Discord is now available from the website footer, help menu, README, and a dismissible in-app sidebar card",
+        ],
         improvements: [
-          "Desktop sidebars now open and close more smoothly while keeping navigation controls easy to reach",
-          "Pinned Issues in the sidebar are easier to scan because labels focus on the Issue title",
-          "Contributor guidance is shorter and clearer, making agent work easier to review before release",
+          "Agent activity in Issue headers opens on hover, so live work is easier to check at a glance",
+          "Desktop sidebars and pinned navigation feel smoother, clearer, and less noisy",
+          "Chat replies, assignment catch-up, and contributor guidance are tighter so agent work stays in the right place with less noise",
+          "Remote CLI setup and custom runtime deletion now give clearer guidance before users continue",
         ],
         fixes: [
-          "Pinned Issues and projects now show a single active highlight instead of lighting up their parent navigation item too",
-          "Issue and project detail sidebars no longer animate unexpectedly when entering a page or restoring a saved layout",
+          "Backlog parent Issues stay parked when child work finishes, avoiding unexpected follow-up automation",
+          "Project deletion now requires an owner or admin, and private GitHub skill imports work when a valid token is available",
+          "Login verification focuses the code field automatically, and detail sidebars no longer animate unexpectedly when pages open",
+          "Codex and daemon diagnostics are more reliable when permissions or slow task claims need investigation",
         ],
       },
       {
