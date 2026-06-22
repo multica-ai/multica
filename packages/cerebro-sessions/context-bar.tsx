@@ -86,7 +86,9 @@ export function SessionContextBar({
       : "text-muted-foreground";
 
   async function handoff() {
-    await startFresh.mutateAsync({ mode: "handoff" });
+    // FIR-1874: hand off THIS session = resolve its thread root and store a
+    // handoff. sessionId is the thread root_comment_id in the thread=session model.
+    if (sessionId) await startFresh.mutateAsync({ root_comment_id: sessionId });
   }
 
   return (

@@ -1,27 +1,25 @@
 package sessions
 
-// FIR-1741 Model B — context-window measurement (item 1 of the engine "motor").
+// FIR-1874 thread = session — context-window measurement (engine "motor").
 //
-// The surface tells you a session exists; the engine (issue_context_session_scope
-// in the handler package) makes a run in a new session receive only that
-// session's slice. This file answers the question the quiet indicator needs:
-// "how full is the active session's context window right now, and how much of it
-// was cache?" — from ground truth (task_usage), never a guess.
+// The surface tells you a session (= a thread) exists; the engine
+// (issue_context_session_scope in the handler package) makes a run in a thread
+// receive only that thread's slice. This file answers the question the quiet
+// indicator needs: "how full is this session's context window right now, and how
+// much of it was cache?" — from ground truth (task_usage), never a guess.
 //
 // Definition: the fullness of a session's context window is the WHOLE prompt
-// footprint of the most recent agent run that happened inside that session
-// (task.created_at within the session's [start,next) window). That is literally
-// how many tokens the model last had to read — and the prompt is
-// input + cache_read + cache_write (fresh + cache-hits + cache-creation), NOT
-// just the fresh `input_tokens`. With prompt caching warm, almost the entire
-// prompt is served from cache, so counting `input_tokens` alone reported ~0%
-// even when the window was ~40% full (FIR-1839 1D). cache_share = cache_read /
-// context — the proportion of that prompt that came from cache rather than fresh.
+// footprint of the most recent agent run TRIGGERED INSIDE that thread (its
+// trigger comment is the thread root or a reply to it). That is literally how
+// many tokens the model last had to read — and the prompt is input + cache_read
+// + cache_write (fresh + cache-hits + cache-creation), NOT just the fresh
+// `input_tokens`. With prompt caching warm, almost the entire prompt is served
+// from cache, so counting `input_tokens` alone reported ~0% even when the window
+// was ~40% full (FIR-1839 1D). cache_share = cache_read / context.
 
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -47,38 +45,33 @@ type contextUsageResponse struct {
 }
 
 // ContextUsage serves GET /api/cerebro/issues/{issueId}/sessions/context-usage.
-// It reports the context-window state of the issue's ACTIVE session (first
-// non-done, else the latest). has_data=false when no run with recorded usage
-// has happened in that window yet — the caller then renders nothing.
+// FIR-1874: a session is a thread, so the optional session_id query param is the
+// THREAD ROOT comment id. Empty resolves the ACTIVE session = the latest open
+// (unresolved) thread, else the latest thread. has_data=false when no run with
+// recorded usage has happened in that thread yet — the caller renders nothing.
 func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssue(w, r)
 	if !ok {
 		return
 	}
 
-	// FIR-1870: an optional session_id scopes the measurement to a specific
-	// session so the indicator can be shown per session; empty = active session.
-	requestedSession := r.URL.Query().Get("session_id")
-	sessionID, start, end, hasEnd, err := h.activeSessionWindow(r.Context(), issue.ID, requestedSession)
+	requested := r.URL.Query().Get("session_id")
+	rootID, sessionID, found, err := h.resolveThreadRoot(r.Context(), issue.ID, requested)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to resolve active session")
 		return
 	}
-
 	resp := contextUsageResponse{SessionID: sessionID}
+	if !found {
+		writeJSON(w, http.StatusOK, resp) // no thread yet — has_data stays false
+		return
+	}
 
-	// Latest run inside the window that has recorded token usage. Membership is
-	// by run start time relative to the session markers — the same Model B order
-	// the surface uses, so the indicator and the timeline agree.
-	// cf.* is the last-turn footprint: the size of the prompt the model last read,
-	// i.e. how full the window is. When present it is the authoritative numerator.
-	// FIR-1856 recorded it for Codex; FIR-1870 extended it to the other streaming
-	// runtimes (Claude, Cursor, Pi, OpenCode, OpenClaw, the local runtime) because
-	// the task_usage figure is the LIFETIME SUM for them too — with prompt caching
-	// warm each turn re-reads the cached prefix, so the summed cache_read is several
-	// times the window and pins the gauge at 100% (FIR-1870's 3350k/1000k). The
-	// task_usage SUMs below remain the fallback only for runtimes that report no
-	// footprint yet.
+	// Latest run TRIGGERED inside this thread (trigger comment is the root or a
+	// reply to it) that has recorded token usage. cf.* is the last-turn footprint
+	// (the size of the prompt the model last read); when present it is the
+	// authoritative numerator. The task_usage SUMs are the fallback for runtimes
+	// that report no footprint yet.
 	const q = `
 		SELECT COALESCE(SUM(tu.input_tokens), 0),
 		       COALESCE(SUM(tu.cache_read_tokens), 0),
@@ -91,20 +84,17 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 		JOIN task_usage tu ON tu.task_id = t.id
 		LEFT JOIN cerebro_task_context_footprint cf ON cf.task_id = t.id
 		WHERE t.issue_id = $1
-		  AND t.created_at >= $2
-		  AND ($3::timestamptz IS NULL OR t.created_at < $3)
+		  AND t.trigger_comment_id IS NOT NULL
+		  AND (t.trigger_comment_id = $2
+		       OR t.trigger_comment_id IN (SELECT id FROM comment WHERE parent_id = $2))
 		GROUP BY t.id, t.created_at
 		ORDER BY t.created_at DESC
 		LIMIT 1`
 
-	var endParam any
-	if hasEnd {
-		endParam = end
-	}
 	var input, cacheRead, cacheWrite, output int64
 	var footprintInput, footprintCacheRead int64
 	var model pgtype.Text
-	err = h.pool.QueryRow(r.Context(), q, issue.ID, start, endParam).Scan(&input, &cacheRead, &cacheWrite, &output, &model, &footprintInput, &footprintCacheRead)
+	err = h.pool.QueryRow(r.Context(), q, issue.ID, rootID).Scan(&input, &cacheRead, &cacheWrite, &output, &model, &footprintInput, &footprintCacheRead)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeJSON(w, http.StatusOK, resp) // no run with usage yet — has_data stays false
@@ -121,9 +111,6 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	resp.CacheWriteTokens = cacheWrite
 	resp.OutputTokens = output
 	if footprintInput > 0 {
-		// FIR-1856: Codex/gpt runtimes record the last turn's footprint. It is
-		// the prompt the model last read (input already includes cached for
-		// OpenAI), so it is the window occupancy directly — not a sum of turns.
 		resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent =
 			computeContextFootprint(footprintInput, footprintCacheRead, model.String)
 	} else {
@@ -137,8 +124,7 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 // last-turn footprint (Codex/gpt). `footprintInput` is the size of the prompt
 // the model last read — for OpenAI accounting it already includes the cached
 // tokens, so it IS the window occupancy and must not have cacheRead added on
-// top (that is the double-count that made Codex read 1955k/272k and pin at
-// 100%). `footprintCacheRead` is the cached subset, used only for the display.
+// top. `footprintCacheRead` is the cached subset, used only for the display.
 func computeContextFootprint(footprintInput, footprintCacheRead int64, model string) (contextTokens, maxContext int64, usedPercent, cacheSharePercent int) {
 	contextTokens = footprintInput
 	maxContext = contextWindowForModel(model)
@@ -154,10 +140,8 @@ func computeContextFootprint(footprintInput, footprintCacheRead int64, model str
 // computeContextUsage is the pure core of the measurement: from a run's raw
 // token components it derives the whole-prompt context size, the model window,
 // fullness percent and cache share. The prompt the model actually read is
-// input + cache_read + cache_write (fresh + cache hits + cache creation) — NOT
-// `input` alone, which is a tiny slice once prompt caching is warm. Counting
-// `input` only is what made the indicator read ~0% on a session that was
-// ~40% full (FIR-1839 1D).
+// input + cache_read + cache_write — NOT `input` alone, which is a tiny slice
+// once prompt caching is warm.
 func computeContextUsage(input, cacheRead, cacheWrite int64, model string) (contextTokens, maxContext int64, usedPercent, cacheSharePercent int) {
 	contextTokens = input + cacheRead + cacheWrite
 	maxContext = contextWindowForModel(model)
@@ -180,70 +164,37 @@ func clampPercent(p int) int {
 	return p
 }
 
-// activeSessionWindow returns a session's id and timeline window. When
-// requestedID is empty it resolves the ACTIVE session (first non-done marker,
-// else the latest); when requestedID names an existing marker it returns THAT
-// session's window, so the indicator can be shown per session (FIR-1870 — every
-// session has its own context window). When the issue has no session markers it
-// is the implicit single "Session 1" covering the whole timeline: id "default",
-// start = zero time, no end. An unknown requestedID falls back to the active
-// session.
-func (h *Handler) activeSessionWindow(ctx context.Context, issueID pgtype.UUID, requestedID string) (sessionID string, start time.Time, end time.Time, hasEnd bool, err error) {
-	rows, err := h.pool.Query(ctx, `
-		SELECT id, status, created_at
-		FROM cerebro_session
-		WHERE issue_id = $1
-		ORDER BY created_at ASC, position ASC, id ASC`, issueID)
-	if err != nil {
-		return "", time.Time{}, time.Time{}, false, err
-	}
-	defer rows.Close()
-
-	type marker struct {
-		id      string
-		status  string
-		created time.Time
-	}
-	var markers []marker
-	for rows.Next() {
-		var id pgtype.UUID
-		var status string
-		var created time.Time
-		if err := rows.Scan(&id, &status, &created); err != nil {
-			return "", time.Time{}, time.Time{}, false, err
-		}
-		markers = append(markers, marker{id: util.UUIDToString(id), status: status, created: created.UTC()})
-	}
-	if err := rows.Err(); err != nil {
-		return "", time.Time{}, time.Time{}, false, err
-	}
-
-	// No markers → implicit Session 1 = whole timeline.
-	if len(markers) == 0 {
-		return "default", time.Time{}, time.Time{}, false, nil
-	}
-
-	idx := len(markers) - 1 // default: latest
-	// A specific session was requested: return its window when it exists.
-	if requestedID != "" && requestedID != "default" {
-		for i, m := range markers {
-			if m.id == requestedID {
-				idx = i
-				goto chosen
+// resolveThreadRoot turns the optional session_id query value into a thread root
+// comment id. A valid UUID is taken as the requested thread root. Empty/"default"
+// resolves the ACTIVE session: the latest open (unresolved) thread root, else the
+// latest thread root. found=false when the issue has no comment threads yet.
+func (h *Handler) resolveThreadRoot(ctx context.Context, issueID pgtype.UUID, requested string) (rootID pgtype.UUID, sessionID string, found bool, err error) {
+	if requested != "" && requested != "default" {
+		if id, perr := util.ParseUUID(requested); perr == nil {
+			var exists bool
+			if err = h.pool.QueryRow(ctx,
+				`SELECT EXISTS(SELECT 1 FROM comment WHERE id = $1 AND issue_id = $2 AND parent_id IS NULL)`,
+				id, issueID).Scan(&exists); err != nil {
+				return pgtype.UUID{}, "", false, err
+			}
+			if exists {
+				return id, requested, true, nil
 			}
 		}
 	}
-	// Otherwise resolve the active session: first non-done marker, else latest.
-	for i, m := range markers {
-		if m.status != "done" {
-			idx = i
-			break
+
+	// Active session = latest open thread, else latest thread.
+	var id pgtype.UUID
+	err = h.pool.QueryRow(ctx, `
+		SELECT id FROM comment
+		WHERE issue_id = $1 AND parent_id IS NULL AND type = 'comment'
+		ORDER BY (resolved_at IS NULL) DESC, created_at DESC, id DESC
+		LIMIT 1`, issueID).Scan(&id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return pgtype.UUID{}, "", false, nil
 		}
+		return pgtype.UUID{}, "", false, err
 	}
-chosen:
-	chosenMarker := markers[idx]
-	if idx+1 < len(markers) {
-		return chosenMarker.id, chosenMarker.created, markers[idx+1].created, true, nil
-	}
-	return chosenMarker.id, chosenMarker.created, time.Time{}, false, nil
+	return id, util.UUIDToString(id), true, nil
 }

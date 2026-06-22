@@ -1,10 +1,8 @@
 package sessions
 
-// FIR-1741 (Codex review of PR #1657) regression tests: concurrent `Start fresh`
-// on one issue must never produce duplicate session positions or more than one
-// open session — the P1 failure class (empty/duplicate sessions) through a new
-// door. The advisory lock in StartFresh serializes the racing transactions and
-// the unique index on (issue_id, position) (migration 9098) is the DB backstop.
+// FIR-1874 (thread = session) DB tests: the Send-button Handoff action
+// (StartFresh) must resolve the chosen thread's root comment (closing the
+// session, B-100%) and store a handoff on that thread's session row.
 //
 // Tests skip cleanly when no test DB is reachable, same pattern as
 // wakeup/service_db_test.go and feature_flags/store_test.go.
@@ -16,7 +14,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -89,69 +86,52 @@ func callStartFresh(h *Handler, issueID, workspaceID, body string) *httptest.Res
 	return rec
 }
 
-// TestStartFreshUniquePositionBackstop proves the DB-level guarantee: two
-// sessions on the same issue can never share a position.
-func TestStartFreshUniquePositionBackstop(t *testing.T) {
-	issueID, _ := seedIssue(t)
-	ctx := context.Background()
-	if _, err := sessTestPool.Exec(ctx,
-		`INSERT INTO cerebro_session (issue_id, position, name, status) VALUES ($1::uuid, 1, 'Session 1', 'done')`, issueID); err != nil {
-		t.Fatalf("first insert: %v", err)
+// seedRootComment inserts a root comment (a thread) on the issue and returns its
+// id as a string.
+func seedRootComment(t *testing.T, issueID, workspaceID string) string {
+	t.Helper()
+	if sessTestPool == nil {
+		t.Skip("no test DB")
 	}
-	_, err := sessTestPool.Exec(ctx,
-		`INSERT INTO cerebro_session (issue_id, position, name, status) VALUES ($1::uuid, 1, 'Dup', 'in_progress')`, issueID)
-	if err == nil {
-		t.Fatal("expected unique-violation on duplicate (issue_id, position), got nil")
+	var id string
+	if err := sessTestPool.QueryRow(context.Background(),
+		`INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		 VALUES ($1::uuid, $2::uuid, 'member', gen_random_uuid(), 'work in this thread', 'comment')
+		 RETURNING id::text`, issueID, workspaceID).Scan(&id); err != nil {
+		t.Fatalf("create comment: %v", err)
 	}
-	if !strings.Contains(err.Error(), "duplicate key") && !strings.Contains(err.Error(), "unique") {
-		t.Fatalf("expected unique violation, got: %v", err)
-	}
+	return id
 }
 
-// TestStartFreshConcurrent fires many Start fresh calls at once and asserts no
-// duplicate positions and exactly one open session survive — the regression for
-// finding 1. Without the advisory lock + unique index this races into duplicate
-// "Session N" rows or multiple open sessions.
-func TestStartFreshConcurrent(t *testing.T) {
+// TestStartFreshHandoffResolvesThread proves the FIR-1874 behavior: handing off a
+// thread resolves its root comment (closing the session) and writes a handoff on
+// that thread's session row.
+func TestStartFreshHandoffResolvesThread(t *testing.T) {
 	issueID, workspaceID := seedIssue(t)
+	commentID := seedRootComment(t, issueID, workspaceID)
 	h := NewHandler(sessTestPool, db.New(sessTestPool))
 
-	const n = 8
-	var wg sync.WaitGroup
-	codes := make([]int, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			rec := callStartFresh(h, issueID, workspaceID, `{"mode":"blank"}`)
-			codes[idx] = rec.Code
-		}(i)
+	rec := callStartFresh(h, issueID, workspaceID, `{"root_comment_id":"`+commentID+`"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("StartFresh handoff: code=%d body=%s", rec.Code, strings.TrimSpace(rec.Body.String()))
 	}
-	wg.Wait()
 
 	ctx := context.Background()
-	var total, distinctPos, inProgress int
-	if err := sessTestPool.QueryRow(ctx, `
-		SELECT COUNT(*)::int,
-		       COUNT(DISTINCT position)::int,
-		       COUNT(*) FILTER (WHERE status <> 'done')::int
-		FROM cerebro_session WHERE issue_id = $1::uuid`, issueID).Scan(&total, &distinctPos, &inProgress); err != nil {
-		t.Fatalf("count sessions: %v", err)
+	var resolved bool
+	if err := sessTestPool.QueryRow(ctx,
+		`SELECT resolved_at IS NOT NULL FROM comment WHERE id = $1::uuid`, commentID).Scan(&resolved); err != nil {
+		t.Fatalf("read comment: %v", err)
+	}
+	if !resolved {
+		t.Error("expected the thread root to be resolved after handoff (session closed)")
 	}
 
-	if total != distinctPos {
-		t.Errorf("duplicate session positions: total=%d distinct=%d", total, distinctPos)
+	var hasHandoff bool
+	if err := sessTestPool.QueryRow(ctx,
+		`SELECT handoff IS NOT NULL FROM cerebro_session WHERE root_comment_id = $1::uuid`, commentID).Scan(&hasHandoff); err != nil {
+		t.Fatalf("read session row: %v", err)
 	}
-	if inProgress != 1 {
-		t.Errorf("expected exactly one open session, got %d", inProgress)
-	}
-	okCount := 0
-	for _, c := range codes {
-		if c == http.StatusCreated {
-			okCount++
-		}
-	}
-	if okCount == 0 {
-		t.Errorf("expected at least one StartFresh to succeed, codes=%v", codes)
+	if !hasHandoff {
+		t.Error("expected a session row with a handoff keyed to the thread root")
 	}
 }

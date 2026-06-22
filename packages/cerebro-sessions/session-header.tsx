@@ -7,12 +7,6 @@ import { cn } from "@multica/ui/lib/utils";
 import type { Session } from "./types";
 import { useUpdateSession } from "./use-sessions";
 
-const statusLabel = {
-  todo: "Todo",
-  in_progress: "In progress",
-  done: "Done",
-} as const;
-
 // FIR-1787 (review of FIR-1769) — the session headline is the top of the thread
 // box, not a separate floating card: a slim header row that sits at the top of
 // the session's box with a divider underneath, so a session reads exactly like
@@ -27,6 +21,7 @@ export function SessionHeader({
   session,
   open,
   active = false,
+  resolved = false,
   onToggle,
   hasHandoff = false,
   handoffOpen = false,
@@ -36,6 +31,9 @@ export function SessionHeader({
   session: Session;
   open: boolean;
   active?: boolean;
+  // FIR-1874: a session's state IS its thread root's resolved_at. Resolved =
+  // closed session; otherwise open.
+  resolved?: boolean;
   onToggle: () => void;
   // FIR-1839 point 7: when the session has a handoff brief, the header shows a
   // "Handoff" toggle so the brief reads as part of the headline and only opens
@@ -125,8 +123,13 @@ export function SessionHeader({
               <Pencil className="h-3.5 w-3.5" />
             </button>
           ) : null}
-          <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
-            {statusLabel[session.status]}
+          <span
+            className={cn(
+              "rounded-full border px-2 py-0.5 text-xs",
+              resolved ? "text-muted-foreground" : "border-primary/30 text-primary",
+            )}
+          >
+            {resolved ? "Resolved" : "Open"}
           </span>
         </div>
       )}

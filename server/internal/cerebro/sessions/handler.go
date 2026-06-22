@@ -1,8 +1,11 @@
-// Package sessions implements FIR-1741 Model B: a session is a contiguous
-// slice of an issue's comment timeline, opened by a session-start marker. There
-// is no per-comment membership column (the P1 design that never got set and
-// produced empty sessions). Membership is derived at read time from timeline
-// order, so a new comment always lands in the latest session by construction.
+// Package sessions implements FIR-1874: a session IS a comment thread. There is
+// no separate session entity timed independently of the timeline, and no
+// separate session status: a cerebro_session row is OPTIONAL metadata (a name
+// and/or a handoff) keyed to a thread root via root_comment_id, and a session's
+// open/closed state is the thread root's resolved_at. Membership is the thread
+// itself (root comment + its replies). This removes the two pieces of "double
+// logic" the time-window model carried — the status column and the marker-based
+// grouping — which is exactly the misalignment FIR-1874 set out to fix.
 package sessions
 
 import (
@@ -32,10 +35,8 @@ func NewHandler(pool *pgxpool.Pool, upstream *db.Queries) *Handler {
 	return &Handler{pool: pool, upstream: upstream}
 }
 
-// handoffBrief is the agent-generated carry-over between sessions. In Model B
-// it is a single nullable JSONB blob on the session row — there is no 4-field
-// human form. An agent may author a richer brief via the API; when none is
-// supplied the server auto-summarises the closing session.
+// handoffBrief is the agent-generated (or auto-summarised) carry-over a session
+// keeps when it is handed off. It is a single nullable JSONB blob on the row.
 type handoffBrief struct {
 	Summary   string   `json:"summary"`
 	Done      []string `json:"done"`
@@ -43,49 +44,33 @@ type handoffBrief struct {
 	PlanRef   *string  `json:"plan_ref,omitempty"`
 }
 
+// sessionResponse mirrors a cerebro_session row. root_comment_id ties it to the
+// thread it is the metadata for; the frontend matches it to the thread and reads
+// open/closed from that thread root's resolved_at (there is no status field).
 type sessionResponse struct {
-	ID        string        `json:"id"`
-	IssueID   string        `json:"issue_id"`
-	Position  int32         `json:"position"`
-	Name      string        `json:"name"`
-	Status    string        `json:"status"`
-	Handoff   *handoffBrief `json:"handoff"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
+	ID            string        `json:"id"`
+	IssueID       string        `json:"issue_id"`
+	RootCommentID *string       `json:"root_comment_id"`
+	Position      int32         `json:"position"`
+	Name          string        `json:"name"`
+	Handoff       *handoffBrief `json:"handoff"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
-// startFreshRequest opens a new session marker. Mode decides whether the new
-// session carries the previous session's handoff forward ("handoff", default)
-// or starts blank ("blank"). An optional agent-authored brief overrides the
-// server's auto-summary; the closing session always keeps a handoff either way.
-type startFreshRequest struct {
-	Mode    string        `json:"mode"`
-	Handoff *handoffBrief `json:"handoff"`
+// handoffRequest is the body of the Send-button "Start new session with Handoff"
+// action: it names the open thread being handed off (root_comment_id) and may
+// carry an agent-authored brief. The server resolves that thread (closing the
+// session) and stores the handoff on its row. The new session is the new thread
+// the composer posts separately.
+type handoffRequest struct {
+	RootCommentID string        `json:"root_comment_id"`
+	Handoff       *handoffBrief `json:"handoff"`
 }
 
 type updateRequest struct {
 	Name    *string       `json:"name"`
-	Status  *string       `json:"status"`
 	Handoff *handoffBrief `json:"handoff"`
-}
-
-const (
-	startModeHandoff = "handoff"
-	startModeBlank   = "blank"
-)
-
-// resolveStartMode normalizes the requested start mode. An empty mode defaults
-// to carrying the handoff forward. It returns ok=false for any unknown value so
-// the handler rejects it with a 400 instead of silently picking a behavior.
-func resolveStartMode(mode string) (string, bool) {
-	switch mode {
-	case "", startModeHandoff:
-		return startModeHandoff, true
-	case startModeBlank:
-		return startModeBlank, true
-	default:
-		return "", false
-	}
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -94,10 +79,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.pool.Query(r.Context(), `
-		SELECT id, issue_id, position, name, status, handoff, created_at, updated_at
+		SELECT id, issue_id, root_comment_id, position, name, handoff, created_at, updated_at
 		FROM cerebro_session
 		WHERE issue_id = $1
-		ORDER BY position ASC, created_at ASC, id ASC`, issue.ID)
+		ORDER BY created_at ASC, id ASC`, issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list sessions")
 		return
@@ -115,12 +100,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// Update renames a session or replaces its handoff. FIR-1874: a session is a
+// thread, so the {sessionId} path param is the THREAD ROOT comment id, and the
+// metadata row is upserted (created on first rename/handoff). State (open/closed)
+// is the thread root's resolved_at and is never set here.
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssue(w, r)
 	if !ok {
 		return
 	}
-	sessionID, ok := parseUUIDParam(w, r, "sessionId")
+	rootID, ok := parseUUIDParam(w, r, "sessionId")
 	if !ok {
 		return
 	}
@@ -136,36 +125,30 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
+	// The target must be a root comment (a thread) on this issue.
+	var isRoot bool
+	if err := tx.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM comment WHERE id = $1 AND issue_id = $2 AND parent_id IS NULL)`,
+		rootID, issue.ID).Scan(&isRoot); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load thread")
+		return
+	}
+	if !isRoot {
+		writeError(w, http.StatusNotFound, "thread not found")
+		return
+	}
+
+	name := ""
 	if req.Name != nil {
-		name := strings.TrimSpace(*req.Name)
+		name = strings.TrimSpace(*req.Name)
 		if name == "" {
 			writeError(w, http.StatusBadRequest, "name is required")
 			return
 		}
-		if _, err := tx.Exec(r.Context(), `UPDATE cerebro_session SET name = $1, updated_at = now() WHERE id = $2 AND issue_id = $3`, name, sessionID, issue.ID); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update session")
-			return
-		}
 	}
-	if req.Status != nil {
-		if !validStatus(*req.Status) {
-			writeError(w, http.StatusBadRequest, "invalid status")
-			return
-		}
-		if _, err := tx.Exec(r.Context(), `UPDATE cerebro_session SET status = $1, updated_at = now() WHERE id = $2 AND issue_id = $3`, *req.Status, sessionID, issue.ID); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update session")
-			return
-		}
-	}
-	if req.Handoff != nil {
-		if err := setHandoff(r.Context(), tx, issue.ID, sessionID, normalizeHandoff(req.Handoff)); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update handoff")
-			return
-		}
-	}
-	session, err := getSession(r.Context(), tx, issue.ID, sessionID)
+	session, err := upsertThreadSession(r.Context(), tx, issue.ID, rootID, name, normalizeHandoff(req.Handoff))
 	if err != nil {
-		writeError(w, http.StatusNotFound, "session not found")
+		writeError(w, http.StatusInternalServerError, "failed to update session")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
@@ -175,21 +158,27 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, session)
 }
 
+// StartFresh is the Send-button "Start new session with Handoff" action. In the
+// thread = session model it does NOT open a marker; it CLOSES the chosen open
+// thread by resolving its root comment and stores a handoff on that thread's
+// session row. The new session is simply the new thread the composer posts next.
+// (The route is still /start-fresh to avoid an upstream router edit.)
 func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssue(w, r)
 	if !ok {
 		return
 	}
-	var req startFreshRequest
+	var req handoffRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	mode, ok := resolveStartMode(req.Mode)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid mode")
+	rootID, err := util.ParseUUID(req.RootCommentID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid root_comment_id")
 		return
 	}
+
 	tx, err := h.pool.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start fresh")
@@ -197,167 +186,72 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
-	// FIR-1741 (Codex review): serialize concurrent Start fresh on the same
-	// issue. Without this, two racing calls can both read the same open session
-	// and the same MAX(position)+1 and create duplicate sessions / multiple open
-	// sessions — the P1 failure class (empty/duplicate sessions) through a new
-	// door. The lock is transaction-scoped and auto-releases on commit/rollback;
-	// the unique index on (issue_id, position) (migration 9098) is the DB-level
-	// backstop.
-	if _, err = tx.Exec(r.Context(),
-		`SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, issue.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to lock issue")
+	// The target must be a root comment (a thread) on this issue.
+	var isRoot bool
+	if err := tx.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM comment WHERE id = $1 AND issue_id = $2 AND parent_id IS NULL)`,
+		rootID, issue.ID).Scan(&isRoot); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load thread")
+		return
+	}
+	if !isRoot {
+		writeError(w, http.StatusNotFound, "thread not found")
 		return
 	}
 
-	// Find the currently open session (latest not-done), if any.
-	var openID pgtype.UUID
-	var openCreatedAt pgtype.Timestamptz
-	err = tx.QueryRow(r.Context(), `
-		SELECT id, created_at FROM cerebro_session
-		WHERE issue_id = $1 AND status <> 'done'
-		ORDER BY position DESC, created_at DESC, id DESC
-		LIMIT 1`, issue.ID).Scan(&openID, &openCreatedAt)
-	hasOpen := err == nil
-	if err != nil && err != pgx.ErrNoRows {
-		writeError(w, http.StatusInternalServerError, "failed to load open session")
-		return
-	}
-
-	var sessionCount int
-	if err := tx.QueryRow(r.Context(), `SELECT COUNT(*)::int FROM cerebro_session WHERE issue_id = $1`, issue.ID).Scan(&sessionCount); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to count sessions")
-		return
-	}
-
-	if sessionCount == 0 {
-		// First Start fresh on a legacy issue: materialize the implicit
-		// "Session 1" covering the whole existing timeline and close it with a
-		// handoff, then open the new active session. Session 1's created_at is
-		// the issue's creation time so every prior timeline entry windows into it.
-		histHandoff := req.Handoff
-		if histHandoff == nil {
-			// Session 1 covers the whole existing timeline; no upper bound.
-			histHandoff, err = h.generateHandoff(r.Context(), tx, issue.ID, issue.CreatedAt.Time, nil)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to summarise session")
-				return
-			}
-		} else {
-			histHandoff = normalizeHandoff(histHandoff)
-		}
-		// FIR-1787 point 2: an agent-authored handoff names the session it closes.
-		session1Name := "Session 1"
-		if n := sessionNameFromHandoff(histHandoff, req.Handoff != nil); n != "" {
-			session1Name = n
-		}
-		if _, err := createSession(r.Context(), tx, issue.ID, 1, session1Name, "done", histHandoff, &issue.CreatedAt.Time); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create session 1")
-			return
-		}
-		nextHandoff := histHandoff
-		if mode == startModeBlank {
-			nextHandoff = nil
-		}
-		next, err := createSession(r.Context(), tx, issue.ID, 2, "Session 2", "in_progress", nextHandoff, nil)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create next session")
-			return
-		}
-		if err := tx.Commit(r.Context()); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to start fresh")
-			return
-		}
-		writeJSON(w, http.StatusCreated, next)
-		return
-	}
-
-	// At least one session exists. Close the open one with a handoff (agent
-	// brief if supplied, else auto-summary of its window) and open the next.
+	// Handoff: agent brief if supplied, else an auto-summary of the thread.
 	handoff := req.Handoff
-	if hasOpen {
-		if handoff == nil {
-			// Bound the window above by the next session marker, if any, so the
-			// summary never counts comments that belong to a later session. With
-			// the advisory lock the open session is normally the newest (until is
-			// nil), but this keeps generateHandoff correct for any open session.
-			var until *time.Time
-			var nextStart pgtype.Timestamptz
-			nerr := tx.QueryRow(r.Context(), `
-				SELECT created_at FROM cerebro_session
-				WHERE issue_id = $1 AND created_at > $2
-				ORDER BY created_at ASC, position ASC, id ASC
-				LIMIT 1`, issue.ID, openCreatedAt.Time).Scan(&nextStart)
-			if nerr == nil {
-				t := nextStart.Time
-				until = &t
-			} else if nerr != pgx.ErrNoRows {
-				writeError(w, http.StatusInternalServerError, "failed to load next session")
-				return
-			}
-			handoff, err = h.generateHandoff(r.Context(), tx, issue.ID, openCreatedAt.Time, until)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to summarise session")
-				return
-			}
-		} else {
-			handoff = normalizeHandoff(handoff)
-		}
-		if err := setHandoff(r.Context(), tx, issue.ID, openID, handoff); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to write handoff")
+	agentAuthored := handoff != nil
+	if handoff == nil {
+		handoff, err = h.generateHandoff(r.Context(), tx, issue.ID, rootID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to summarise thread")
 			return
 		}
-		// FIR-1787 point 2: name the closing session from the agent's handoff, but
-		// only if it still carries the default "Session N" (never clobber a name a
-		// human or earlier agent already set).
-		closeName := sessionNameFromHandoff(handoff, req.Handoff != nil)
-		if _, err := tx.Exec(r.Context(), `
-			UPDATE cerebro_session
-			SET status = 'done',
-			    name = CASE WHEN $3::text <> '' AND name ~ '^Session [0-9]+$' THEN $3::text ELSE name END,
-			    updated_at = now()
-			WHERE id = $1 AND issue_id = $2`, openID, issue.ID, closeName); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to close session")
-			return
-		}
-	} else if handoff != nil {
+	} else {
 		handoff = normalizeHandoff(handoff)
 	}
 
-	var nextPos int32
-	if err := tx.QueryRow(r.Context(), `SELECT COALESCE(MAX(position), 0)::int + 1 FROM cerebro_session WHERE issue_id = $1`, issue.ID).Scan(&nextPos); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to compute position")
-		return
-	}
-	nextHandoff := handoff
-	if mode == startModeBlank {
-		nextHandoff = nil
-	}
-	next, err := createSession(r.Context(), tx, issue.ID, nextPos, "Session "+strconv.Itoa(int(nextPos)), "in_progress", nextHandoff, nil)
+	// Upsert the metadata row for this thread, preserving any name a human or an
+	// earlier agent set unless this brief carries a fresh one.
+	name := sessionNameFromHandoff(handoff, agentAuthored)
+	session, err := upsertThreadSession(r.Context(), tx, issue.ID, rootID, name, handoff)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create next session")
+		writeError(w, http.StatusInternalServerError, "failed to write handoff")
 		return
 	}
+
+	// Close the session = resolve its thread root (FIR-1874 point 3, B-100%).
+	// Idempotent: a re-handoff keeps the original resolver/time. Resolver
+	// preference: existing resolver > acting member > the thread author. The
+	// final fallback to author_type/author_id (both NOT NULL) is what keeps the
+	// resolve consistent with the comment_resolved_consistency CHECK when there
+	// is no member in context — e.g. an agent-triggered Handoff, where
+	// actorFromContext yields no member and $3/$4 are NULL.
+	actorType, actorID := actorFromContext(r.Context())
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE comment SET
+			resolved_at = COALESCE(resolved_at, now()),
+			resolved_by_type = COALESCE(resolved_by_type, $3, author_type),
+			resolved_by_id = COALESCE(resolved_by_id, $4, author_id),
+			updated_at = CASE WHEN resolved_at IS NULL THEN now() ELSE updated_at END
+		WHERE id = $1 AND issue_id = $2`,
+		rootID, issue.ID, nullText(actorType), actorID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve thread")
+		return
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start fresh")
 		return
 	}
-	writeJSON(w, http.StatusCreated, next)
+	writeJSON(w, http.StatusCreated, session)
 }
 
-// generateHandoff auto-summarises a session's window [since, until) from its
-// root comments. Deterministic, no LLM: it captures how many updates the session
-// held and a snippet of the most recent one, so a fresh runtime opening the next
-// session sees what came before even when no agent authored a brief.
-//
-// FIR-1741 (Codex review): the window is now half-open and bounded above by
-// `until` (the next session marker's created_at), matching the frontend's
-// grouping rule (`packages/cerebro-sessions/grouping.ts`: a comment belongs to
-// the marker that precedes it). A nil `until` means no upper bound — correct for
-// the newest session, whose window runs to "now". Without the upper bound, a
-// summary could count comments that belong to a later session if markers ever
-// land out of order.
-func (h *Handler) generateHandoff(ctx context.Context, tx pgx.Tx, issueID pgtype.UUID, since time.Time, until *time.Time) (*handoffBrief, error) {
+// generateHandoff auto-summarises a THREAD (its root comment + replies) when no
+// agent brief is supplied. Deterministic, no LLM: it captures how many comments
+// the thread held and the most recent one, so the handoff carries real context.
+func (h *Handler) generateHandoff(ctx context.Context, tx pgx.Tx, issueID, rootID pgtype.UUID) (*handoffBrief, error) {
 	var count int
 	var latest *string
 	err := tx.QueryRow(ctx, `
@@ -365,27 +259,22 @@ func (h *Handler) generateHandoff(ctx context.Context, tx pgx.Tx, issueID pgtype
 		       (array_agg(content ORDER BY created_at DESC) FILTER (WHERE content IS NOT NULL))[1]
 		FROM comment
 		WHERE issue_id = $1
-		  AND parent_id IS NULL
 		  AND type = 'comment'
-		  AND created_at >= $2
-		  AND ($3::timestamptz IS NULL OR created_at < $3)`, issueID, since, until).Scan(&count, &latest)
+		  AND (id = $2 OR parent_id = $2)`, issueID, rootID).Scan(&count, &latest)
 	if err != nil {
 		return nil, err
 	}
 	brief := &handoffBrief{Done: []string{}, Remaining: []string{}}
 	if count == 0 {
-		brief.Summary = "Auto-generated handoff: the previous session had no comments."
+		brief.Summary = "Auto-generated handoff: the closed session had no comments."
 		return brief, nil
 	}
 	plural := "s"
 	if count == 1 {
 		plural = ""
 	}
-	summary := "Auto-generated handoff: " + strconv.Itoa(count) + " comment" + plural + " in the previous session."
+	summary := "Auto-generated handoff: " + strconv.Itoa(count) + " comment" + plural + " in the closed session."
 	if latest != nil {
-		// FIR-1839 B: include the FULL latest comment (newlines preserved), not a
-		// 200-char teaser — so opening the handoff shows the real content you can
-		// actually read and judge. Capped only to avoid pathological JSON bloat.
 		if body := handoffBody(*latest, 8000); body != "" {
 			summary += "\n\nLatest comment:\n" + body
 		}
@@ -394,24 +283,47 @@ func (h *Handler) generateHandoff(ctx context.Context, tx pgx.Tx, issueID pgtype
 	return brief, nil
 }
 
-// handoffBody trims surrounding whitespace and caps very long content while
-// PRESERVING internal newlines (unlike snippet, which flattens them for a
-// single-line teaser). The handoff is meant to be opened and read in full, so
-// its formatting must survive.
-func handoffBody(s string, max int) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= max {
-		return s
+// upsertThreadSession writes (or updates) the metadata row for a thread root.
+// An empty name never clobbers an existing one; a non-empty name (from an agent
+// brief) wins. Handoff is always replaced with the supplied value.
+func upsertThreadSession(ctx context.Context, tx pgx.Tx, issueID, rootID pgtype.UUID, name string, handoff *handoffBrief) (sessionResponse, error) {
+	raw, err := marshalHandoff(handoff)
+	if err != nil {
+		return sessionResponse{}, err
 	}
-	return strings.TrimSpace(s[:max]) + "…"
+	var existingID pgtype.UUID
+	var existingName string
+	err = tx.QueryRow(ctx, `SELECT id, name FROM cerebro_session WHERE issue_id = $1 AND root_comment_id = $2`, issueID, rootID).Scan(&existingID, &existingName)
+	switch err {
+	case nil:
+		finalName := existingName
+		if name != "" {
+			finalName = name
+		}
+		// COALESCE so a rename (nil handoff) never wipes an existing handoff; a
+		// non-nil handoff replaces it.
+		row := tx.QueryRow(ctx, `
+			UPDATE cerebro_session
+			SET name = $1, handoff = COALESCE($2::jsonb, handoff), updated_at = now()
+			WHERE id = $3 AND issue_id = $4
+			RETURNING id, issue_id, root_comment_id, position, name, handoff, created_at, updated_at`,
+			finalName, raw, existingID, issueID)
+		return scanSession(row)
+	case pgx.ErrNoRows:
+		row := tx.QueryRow(ctx, `
+			INSERT INTO cerebro_session (issue_id, root_comment_id, position, name, handoff)
+			VALUES ($1, $2, 0, $3, $4::jsonb)
+			RETURNING id, issue_id, root_comment_id, position, name, handoff, created_at, updated_at`,
+			issueID, rootID, name, raw)
+		return scanSession(row)
+	default:
+		return sessionResponse{}, err
+	}
 }
 
-// sessionNameFromHandoff derives a short human display name for a session being
-// closed at handoff, from an AGENT-authored brief's summary. It returns "" for
-// server auto-generated briefs (so the default "Session N" stays) and for empty
-// summaries. This is the server half of FIR-1787 point 2 — "the agent also names
-// the session at handoff" — without a new API field: the agent already supplies
-// the brief, so its summary titles the session it just finished.
+// sessionNameFromHandoff derives a short display name from an AGENT-authored
+// brief's summary (first line, capped). Server auto-summaries return "" so the
+// frontend's default "Session N" stays.
 func sessionNameFromHandoff(brief *handoffBrief, agentAuthored bool) string {
 	if !agentAuthored || brief == nil {
 		return ""
@@ -420,11 +332,18 @@ func sessionNameFromHandoff(brief *handoffBrief, agentAuthored bool) string {
 	if s == "" {
 		return ""
 	}
-	// First line only, capped — a title, not the whole summary.
 	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
 		s = strings.TrimSpace(s[:i])
 	}
 	return snippet(s, 60)
+}
+
+func handoffBody(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	return strings.TrimSpace(s[:max]) + "…"
 }
 
 func (h *Handler) loadIssue(w http.ResponseWriter, r *http.Request) (db.Issue, bool) {
@@ -444,56 +363,23 @@ func (h *Handler) loadIssue(w http.ResponseWriter, r *http.Request) (db.Issue, b
 	return issue, true
 }
 
-func createSession(ctx context.Context, tx pgx.Tx, issueID pgtype.UUID, position int32, name string, status string, handoff *handoffBrief, createdAt *time.Time) (sessionResponse, error) {
-	raw, err := marshalHandoff(handoff)
-	if err != nil {
-		return sessionResponse{}, err
-	}
-	var createdParam any
-	if createdAt != nil {
-		createdParam = *createdAt
-	}
-	row := tx.QueryRow(ctx, `
-		INSERT INTO cerebro_session (issue_id, position, name, status, handoff, created_at)
-		VALUES ($1, $2, $3, $4, $5::jsonb, COALESCE($6::timestamptz, now()))
-		RETURNING id, issue_id, position, name, status, handoff, created_at, updated_at`,
-		issueID, position, name, status, raw, createdParam)
-	return scanSession(row)
-}
-
-func setHandoff(ctx context.Context, tx pgx.Tx, issueID pgtype.UUID, sessionID pgtype.UUID, handoff *handoffBrief) error {
-	raw, err := marshalHandoff(handoff)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, `
-		UPDATE cerebro_session
-		SET handoff = $1::jsonb, updated_at = now()
-		WHERE id = $2 AND issue_id = $3`, raw, sessionID, issueID)
-	return err
-}
-
-func getSession(ctx context.Context, tx pgx.Tx, issueID pgtype.UUID, sessionID pgtype.UUID) (sessionResponse, error) {
-	row := tx.QueryRow(ctx, `
-		SELECT id, issue_id, position, name, status, handoff, created_at, updated_at
-		FROM cerebro_session
-		WHERE id = $1 AND issue_id = $2`, sessionID, issueID)
-	return scanSession(row)
-}
-
 type scanner interface {
 	Scan(dest ...any) error
 }
 
 func scanSession(row scanner) (sessionResponse, error) {
-	var id, issueID pgtype.UUID
+	var id, issueID, rootID pgtype.UUID
 	var raw []byte
 	out := sessionResponse{}
-	if err := row.Scan(&id, &issueID, &out.Position, &out.Name, &out.Status, &raw, &out.CreatedAt, &out.UpdatedAt); err != nil {
+	if err := row.Scan(&id, &issueID, &rootID, &out.Position, &out.Name, &raw, &out.CreatedAt, &out.UpdatedAt); err != nil {
 		return sessionResponse{}, err
 	}
 	out.ID = util.UUIDToString(id)
 	out.IssueID = util.UUIDToString(issueID)
+	if rootID.Valid {
+		s := util.UUIDToString(rootID)
+		out.RootCommentID = &s
+	}
 	if len(raw) > 0 {
 		var brief handoffBrief
 		if err := json.Unmarshal(raw, &brief); err == nil {
@@ -509,7 +395,6 @@ func scanSession(row scanner) (sessionResponse, error) {
 	return out, nil
 }
 
-// marshalHandoff returns nil (SQL NULL) for a nil brief, or the JSON encoding.
 func marshalHandoff(handoff *handoffBrief) ([]byte, error) {
 	if handoff == nil {
 		return nil, nil
@@ -558,8 +443,21 @@ func trimPtr(in *string) *string {
 	return &s
 }
 
-func validStatus(status string) bool {
-	return status == "todo" || status == "in_progress" || status == "done"
+// actorFromContext returns the acting member as (type, userID) for resolved_by,
+// or ("", zero) for a non-member caller — the resolve then leaves resolved_by
+// NULL, which the COALESCE in the UPDATE handles.
+func actorFromContext(ctx context.Context) (string, pgtype.UUID) {
+	if member, ok := middleware.MemberFromContext(ctx); ok && member.UserID.Valid {
+		return "member", member.UserID
+	}
+	return "", pgtype.UUID{}
+}
+
+func nullText(s string) pgtype.Text {
+	if s == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: s, Valid: true}
 }
 
 func parseUUIDParam(w http.ResponseWriter, r *http.Request, name string) (pgtype.UUID, bool) {

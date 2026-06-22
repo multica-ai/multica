@@ -137,6 +137,10 @@ export interface BaseComposerProps {
   topSlot?: ReactNode;
   leftAdornment?: ReactNode;
   rightAdornment?: ReactNode;
+  /** Rendered immediately before the Submit button — used by issue comments to
+   *  fold the "Start new session with Handoff" action into the Send control
+   *  (FIR-1874). */
+  sendMenu?: ReactNode;
   isRunning?: boolean;
   onStop?: () => void;
 
@@ -193,6 +197,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
   topSlot,
   leftAdornment,
   rightAdornment,
+  sendMenu,
   isRunning = false,
   onStop,
   dictationRow,
@@ -424,6 +429,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
           <Square className="fill-current" />
         </Button>
       ) : null}
+      {sendMenu}
       <Button
         size="icon-sm"
         aria-label="Submit"

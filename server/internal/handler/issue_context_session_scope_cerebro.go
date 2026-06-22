@@ -1,30 +1,25 @@
 package handler
 
-// CEREBRO-PATCH(session-scoped-context): FIR-1741 Model B engine. This is the
-// "a new thread/session = a fresh context window" motor, not the surface.
+// CEREBRO-PATCH(session-scoped-context): FIR-1874 thread = session engine. This
+// is the "a thread = a fresh context window" motor, not the surface.
 //
-// The surface (PR #1657) made a session a contiguous slice of the comment
-// timeline, derived from session-start markers in cerebro_session — no
-// per-comment field (migration 9097). This file makes that slice *mean*
-// something to a running agent: when the cerebro_comment_chapters flag is ON and
-// the issue has session markers, the bundled `issue context` read an agent gets
-// at run-start is scoped to the session its triggering comment belongs to. The
-// agent sees only that session's slice of the timeline, never the whole issue
-// history — which is exactly what "fresh context per session" means. Because
-// membership is derived from timeline order (there is no field to set), a run in
-// a new session simply cannot inherit the previous session's context.
+// FIR-1874 makes a session BE a comment thread (root comment + replies), with
+// open/closed = the thread root's resolved_at — no time-window markers anymore.
+// This file makes that mean something to a running agent: when the
+// cerebro_comment_chapters flag is ON and a run was triggered by a comment, the
+// bundled `issue context` it gets at run-start is scoped to that comment's
+// THREAD. The agent sees only its own thread's slice, never the whole issue
+// history — which is exactly what "fresh context per session" means now that a
+// session is a thread.
 //
 // Ships dark: default OFF, scopes nothing for human callers (no task token) and
-// nothing for issues with no session markers (the implicit single "Session 1"
-// that is the whole timeline). All scoping is therefore additive and reversible
-// by the flag alone.
+// nothing for a run with no triggering comment (cold start = whole issue). All
+// scoping is additive and reversible by the flag alone.
 
 import (
 	"context"
 	"errors"
 	"log/slog"
-	"sort"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -39,9 +34,8 @@ const commentChaptersFlagKey = "cerebro_comment_chapters"
 
 // cerebroCommentChaptersEnabled resolves the workspace flag with the same
 // precedence as packages/cerebro-feature-flags/store.ts: locked workspace >
-// personal > unlocked workspace > default. Unlike the child-notify flags this
-// one defaults OFF: the engine ships dark and only scopes context where the flag
-// is explicitly turned on, so deploy changes nothing until a workspace opts in.
+// personal > unlocked workspace > default. It defaults OFF: the engine ships
+// dark and only scopes context where the flag is explicitly turned on.
 func (h *Handler) cerebroCommentChaptersEnabled(ctx context.Context, workspaceID pgtype.UUID, requesterUserID string) bool {
 	if h.CerebroQueries == nil || !workspaceID.Valid {
 		return false
@@ -86,124 +80,68 @@ func (h *Handler) cerebroCommentChaptersEnabled(ctx context.Context, workspaceID
 	return false
 }
 
-// sessionWindow is the [Start, End) time window of one Model B session. End is
-// only meaningful when HasEnd is true; the latest (open) session has no end and
-// runs "to now", so HasEnd is false for it.
-type sessionWindow struct {
-	Start  time.Time
-	End    time.Time
-	HasEnd bool
+// threadScope identifies the thread (session) a run is scoped to: the root
+// comment of the triggering comment's thread. A comment belongs to the thread
+// iff it IS the root or its parent IS the root (threads are two levels deep).
+type threadScope struct {
+	RootID pgtype.UUID
 }
 
-// contains reports whether a timeline entry created at t belongs to this window.
-// Lower bound inclusive, upper bound exclusive — the same half-open convention
-// the surface uses in grouping.ts so the engine and the UI agree on membership.
-func (w sessionWindow) contains(t time.Time) bool {
-	if t.Before(w.Start) {
-		return false
+// contains reports whether a comment belongs to this thread scope.
+func (s threadScope) contains(c db.Comment) bool {
+	if uuidEqual(c.ID, s.RootID) {
+		return true
 	}
-	if w.HasEnd && !t.Before(w.End) {
-		return false
-	}
-	return true
+	return c.ParentID.Valid && uuidEqual(c.ParentID, s.RootID)
 }
 
-// sessionWindowForComment returns the timeline window of the session that the
-// comment created at commentAt belongs to, given the issue's session-start
-// times in any order. Model B membership: a comment belongs to the latest
-// session whose start is at or before it; a comment earlier than the first
-// marker falls into the earliest session (nothing is ever orphaned). Returns
-// ok=false when there are no markers — that is the implicit single "Session 1"
-// covering the whole timeline, where no scoping should happen.
-func sessionWindowForComment(starts []time.Time, commentAt time.Time) (sessionWindow, bool) {
-	if len(starts) == 0 {
-		return sessionWindow{}, false
-	}
-	sorted := make([]time.Time, len(starts))
-	copy(sorted, starts)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Before(sorted[j]) })
-
-	idx := 0
-	for i, s := range sorted {
-		if !s.After(commentAt) { // s <= commentAt
-			idx = i
-		} else {
-			break
-		}
-	}
-
-	w := sessionWindow{Start: sorted[idx]}
-	if idx+1 < len(sorted) {
-		w.End = sorted[idx+1]
-		w.HasEnd = true
-	}
-	return w, true
+// uuidEqual compares two pgtype.UUIDs by value (both must be valid).
+func uuidEqual(a, b pgtype.UUID) bool {
+	return a.Valid && b.Valid && a.Bytes == b.Bytes
 }
 
-// sessionScopeForContext derives the session window for the current task-scoped
-// request, or ok=false when no scoping applies (human call, no trigger comment,
-// or an issue with no session markers). It is the bridge between the task that
-// triggered the run and the Model B slice that run should see.
-func (h *Handler) sessionScopeForContext(ctx context.Context, issue db.Issue) (sessionWindow, bool) {
+// sessionScopeForContext derives the thread (session) scope for the current
+// task-scoped request, or ok=false when no scoping applies (human call, or a run
+// with no triggering comment). It walks the trigger comment to its thread root.
+func (h *Handler) sessionScopeForContext(ctx context.Context, issue db.Issue) (threadScope, bool) {
+	_ = issue
 	ts := middleware.TaskScopeFromContext(ctx)
 	if ts.TaskID == "" {
-		return sessionWindow{}, false // human call — never scope
+		return threadScope{}, false // human call — never scope
 	}
 	taskUUID, err := util.ParseUUID(ts.TaskID)
 	if err != nil {
-		return sessionWindow{}, false
+		return threadScope{}, false
 	}
 	task, err := h.Queries.GetAgentTask(ctx, taskUUID)
 	if err != nil || !task.TriggerCommentID.Valid {
-		return sessionWindow{}, false // cold start / no triggering comment → whole issue
+		return threadScope{}, false // cold start / no triggering comment → whole issue
 	}
 	trigger, err := h.Queries.GetComment(ctx, task.TriggerCommentID)
-	if err != nil || !trigger.CreatedAt.Valid {
-		return sessionWindow{}, false
-	}
-
-	starts, err := h.sessionStartTimes(ctx, issue.ID)
 	if err != nil {
-		slog.Warn("session scope: start-times lookup failed", "issue_id", uuidToString(issue.ID), "error", err)
-		return sessionWindow{}, false
+		return threadScope{}, false
 	}
-	return sessionWindowForComment(starts, trigger.CreatedAt.Time)
+	// The thread root is the trigger's parent (if it is a reply) or itself.
+	root := trigger.ID
+	if trigger.ParentID.Valid {
+		root = trigger.ParentID
+	}
+	return threadScope{RootID: root}, true
 }
 
-// sessionStartTimes returns the created_at of every session marker on the issue.
-// Empty (no rows) means the implicit single Session 1 — the caller treats that
-// as "no scoping".
-func (h *Handler) sessionStartTimes(ctx context.Context, issueID pgtype.UUID) ([]time.Time, error) {
-	rows, err := h.DB.Query(ctx, `SELECT created_at FROM cerebro_session WHERE issue_id = $1`, issueID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []time.Time
-	for rows.Next() {
-		var t time.Time
-		if err := rows.Scan(&t); err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
-}
-
-// scopeContextComments filters a comment slice to the session window. Each
-// comment is judged by its own created_at, so a run only ever sees what was
-// written during its session — the literal definition of a fresh context
-// window. Returns the input unchanged when the slice is empty.
-func scopeContextComments(comments []db.Comment, w sessionWindow) []db.Comment {
+// scopeContextComments filters a comment slice to the triggering comment's
+// thread. A run only ever sees its own thread (root + replies) — the literal
+// definition of a fresh context window now that a session is a thread. Returns
+// the input unchanged when the slice is empty.
+func scopeContextComments(comments []db.Comment, scope threadScope) []db.Comment {
 	if len(comments) == 0 {
 		return comments
 	}
 	out := comments[:0]
 	for _, c := range comments {
-		if c.CreatedAt.Valid && !w.contains(c.CreatedAt.Time.UTC()) {
-			continue
+		if scope.contains(c) {
+			out = append(out, c)
 		}
-		out = append(out, c)
 	}
 	return out
 }

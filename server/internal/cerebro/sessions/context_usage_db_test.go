@@ -35,7 +35,9 @@ func callContextUsage(h *Handler, issueID, workspaceID string) *httptest.Respons
 
 // seedTaskWithUsage inserts a runtime + task + task_usage row for the issue and
 // returns the task id. The task_usage figures are the cumulative lifetime sum.
-func seedTaskWithUsage(t *testing.T, issueID, workspaceID, model string, cumInput, cumCacheRead int64) string {
+// FIR-1874 (thread = session): membership is now by trigger_comment_id, so the
+// task is anchored to triggerCommentID — the thread root the run fired inside.
+func seedTaskWithUsage(t *testing.T, issueID, workspaceID, triggerCommentID, model string, cumInput, cumCacheRead int64) string {
 	t.Helper()
 	ctx := context.Background()
 	var runtimeID string
@@ -54,9 +56,9 @@ func seedTaskWithUsage(t *testing.T, issueID, workspaceID, model string, cumInpu
 	}
 	var taskID string
 	if err := sessTestPool.QueryRow(ctx,
-		`INSERT INTO agent_task_queue (issue_id, agent_id, runtime_id)
-		 VALUES ($1::uuid, $2::uuid, $3::uuid) RETURNING id::text`,
-		issueID, agentID, runtimeID).Scan(&taskID); err != nil {
+		`INSERT INTO agent_task_queue (issue_id, agent_id, runtime_id, trigger_comment_id)
+		 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid) RETURNING id::text`,
+		issueID, agentID, runtimeID, triggerCommentID).Scan(&taskID); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
 	if _, err := sessTestPool.Exec(ctx,
@@ -75,8 +77,11 @@ func TestContextUsage_PrefersFootprintOverCumulative(t *testing.T) {
 	issueID, workspaceID := seedIssue(t)
 	h := NewHandler(sessTestPool, db.New(sessTestPool))
 
+	// FIR-1874: a session is a thread, so the run must be triggered inside one.
+	rootID := seedRootComment(t, issueID, workspaceID)
+
 	// The Codex bug shape: cumulative 1955k against the 272k gpt-5.5 window.
-	taskID := seedTaskWithUsage(t, issueID, workspaceID, "gpt-5.5", 1_955_000, 1_700_000)
+	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "gpt-5.5", 1_955_000, 1_700_000)
 
 	// Without a footprint, the gauge uses the cumulative and pins at 100%.
 	var before contextUsageResponse

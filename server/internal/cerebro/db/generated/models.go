@@ -979,14 +979,14 @@ type CerebroSearchEmbeddingQueue struct {
 }
 
 type CerebroSession struct {
-	ID        pgtype.UUID        `json:"id"`
-	IssueID   pgtype.UUID        `json:"issue_id"`
-	Position  int32              `json:"position"`
-	Name      string             `json:"name"`
-	Status    string             `json:"status"`
-	Handoff   []byte             `json:"handoff"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID            pgtype.UUID        `json:"id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	Position      int32              `json:"position"`
+	Name          string             `json:"name"`
+	Handoff       []byte             `json:"handoff"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	RootCommentID pgtype.UUID        `json:"root_comment_id"`
 }
 
 type CerebroShareToken struct {

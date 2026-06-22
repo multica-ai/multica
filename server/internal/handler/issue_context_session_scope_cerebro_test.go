@@ -2,146 +2,77 @@ package handler
 
 import (
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-func ts(s string) time.Time {
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		panic(err)
-	}
-	return t.UTC()
+// uid builds a deterministic, valid pgtype.UUID from a single byte so tests can
+// assert thread membership without real UUIDs.
+func uid(b byte) pgtype.UUID {
+	var u pgtype.UUID
+	u.Bytes[15] = b
+	u.Valid = true
+	return u
 }
 
-func TestSessionWindowForComment_NoMarkers_NoScope(t *testing.T) {
-	// No session markers = the implicit single "Session 1" covering the whole
-	// timeline. The engine must NOT scope: ok=false.
-	if _, ok := sessionWindowForComment(nil, ts("2026-06-21T12:00:00Z")); ok {
-		t.Fatalf("expected ok=false when there are no session markers")
+func TestUUIDEqual(t *testing.T) {
+	if !uuidEqual(uid(1), uid(1)) {
+		t.Fatal("same uuid should be equal")
 	}
-}
-
-func TestSessionWindowForComment_LatestSessionIsOpen(t *testing.T) {
-	starts := []time.Time{
-		ts("2026-06-21T10:00:00Z"), // Session 1
-		ts("2026-06-21T12:00:00Z"), // Session 2 (latest, open)
+	if uuidEqual(uid(1), uid(2)) {
+		t.Fatal("different uuids should not be equal")
 	}
-	// A comment after the second marker belongs to the open latest session: it
-	// has a start but no end (runs "to now").
-	w, ok := sessionWindowForComment(starts, ts("2026-06-21T13:30:00Z"))
-	if !ok {
-		t.Fatal("expected ok=true")
-	}
-	if !w.Start.Equal(ts("2026-06-21T12:00:00Z")) {
-		t.Fatalf("start = %v, want 12:00", w.Start)
-	}
-	if w.HasEnd {
-		t.Fatalf("latest session must have no end, got end=%v", w.End)
+	if uuidEqual(pgtype.UUID{}, pgtype.UUID{}) {
+		t.Fatal("invalid uuids should never be equal")
 	}
 }
 
-func TestSessionWindowForComment_MiddleSessionIsBounded(t *testing.T) {
-	starts := []time.Time{
-		ts("2026-06-21T10:00:00Z"),
-		ts("2026-06-21T12:00:00Z"),
-		ts("2026-06-21T14:00:00Z"),
+func TestThreadScope_ContainsRootAndReplies(t *testing.T) {
+	root := uid(1)
+	scope := threadScope{RootID: root}
+
+	// The root comment itself belongs to the thread.
+	if !scope.contains(db.Comment{ID: root}) {
+		t.Fatal("root must belong to its own thread")
 	}
-	w, ok := sessionWindowForComment(starts, ts("2026-06-21T13:00:00Z"))
-	if !ok {
-		t.Fatal("expected ok=true")
+	// A direct reply (parent_id = root) belongs to the thread.
+	if !scope.contains(db.Comment{ID: uid(2), ParentID: root}) {
+		t.Fatal("reply to root must belong to the thread")
 	}
-	if !w.Start.Equal(ts("2026-06-21T12:00:00Z")) || !w.End.Equal(ts("2026-06-21T14:00:00Z")) {
-		t.Fatalf("window = [%v,%v), want [12:00,14:00)", w.Start, w.End)
+	// An unrelated root comment does NOT belong.
+	if scope.contains(db.Comment{ID: uid(3)}) {
+		t.Fatal("a different thread root must not belong")
 	}
-	if !w.HasEnd {
-		t.Fatal("a non-latest session must be bounded")
+	// A reply to a different thread does NOT belong.
+	if scope.contains(db.Comment{ID: uid(4), ParentID: uid(3)}) {
+		t.Fatal("a reply in a different thread must not belong")
 	}
 }
 
-func TestSessionWindowForComment_BeforeFirstMarker_FallsIntoEarliest(t *testing.T) {
-	starts := []time.Time{
-		ts("2026-06-21T10:00:00Z"),
-		ts("2026-06-21T12:00:00Z"),
+func TestScopeContextComments_KeepsThread(t *testing.T) {
+	root := uid(1)
+	comments := []db.Comment{
+		{ID: root},                     // root — kept
+		{ID: uid(2), ParentID: root},   // reply in thread — kept
+		{ID: uid(3)},                   // other thread root — dropped
+		{ID: uid(4), ParentID: uid(3)}, // reply in other thread — dropped
+		{ID: uid(5), ParentID: root},   // reply in thread — kept
 	}
-	// A comment earlier than the first marker is never orphaned — it belongs to
-	// the earliest session.
-	w, ok := sessionWindowForComment(starts, ts("2026-06-21T09:00:00Z"))
-	if !ok {
-		t.Fatal("expected ok=true")
+	got := scopeContextComments(comments, threadScope{RootID: root})
+	if len(got) != 3 {
+		t.Fatalf("kept %d comments, want 3", len(got))
 	}
-	if !w.Start.Equal(ts("2026-06-21T10:00:00Z")) {
-		t.Fatalf("start = %v, want 10:00 (earliest)", w.Start)
-	}
-}
-
-func TestSessionWindowForComment_UnsortedInput(t *testing.T) {
-	starts := []time.Time{
-		ts("2026-06-21T14:00:00Z"),
-		ts("2026-06-21T10:00:00Z"),
-		ts("2026-06-21T12:00:00Z"),
-	}
-	w, ok := sessionWindowForComment(starts, ts("2026-06-21T13:00:00Z"))
-	if !ok || !w.Start.Equal(ts("2026-06-21T12:00:00Z")) || !w.End.Equal(ts("2026-06-21T14:00:00Z")) {
-		t.Fatalf("unsorted input not handled: got ok=%v window=[%v,%v)", ok, w.Start, w.End)
-	}
-}
-
-func TestSessionWindowContains_HalfOpen(t *testing.T) {
-	w := sessionWindow{Start: ts("2026-06-21T12:00:00Z"), End: ts("2026-06-21T14:00:00Z"), HasEnd: true}
-	cases := []struct {
-		at   string
-		want bool
-	}{
-		{"2026-06-21T11:59:59Z", false}, // before start
-		{"2026-06-21T12:00:00Z", true},  // start inclusive
-		{"2026-06-21T13:00:00Z", true},  // inside
-		{"2026-06-21T14:00:00Z", false}, // end exclusive
-		{"2026-06-21T15:00:00Z", false}, // after end
-	}
-	for _, c := range cases {
-		if got := w.contains(ts(c.at)); got != c.want {
-			t.Errorf("contains(%s) = %v, want %v", c.at, got, c.want)
+	for _, c := range got {
+		if !uuidEqual(c.ID, root) && !uuidEqual(c.ParentID, root) {
+			t.Fatalf("kept a comment outside the thread: %v", c.ID)
 		}
 	}
 }
 
-func TestSessionWindowContains_OpenSessionHasNoUpperBound(t *testing.T) {
-	w := sessionWindow{Start: ts("2026-06-21T12:00:00Z")}
-	if !w.contains(ts("2026-06-21T12:00:00Z")) || !w.contains(ts("2030-01-01T00:00:00Z")) {
-		t.Fatal("open session must include everything at or after its start")
-	}
-	if w.contains(ts("2026-06-21T11:00:00Z")) {
-		t.Fatal("open session must still exclude entries before its start")
-	}
-}
-
-func mkComment(at string) db.Comment {
-	return db.Comment{CreatedAt: pgtype.Timestamptz{Time: ts(at), Valid: true}}
-}
-
-func TestScopeContextComments_KeepsOnlyWindow(t *testing.T) {
-	comments := []db.Comment{
-		mkComment("2026-06-21T11:00:00Z"), // before window — dropped
-		mkComment("2026-06-21T12:30:00Z"), // inside — kept
-		mkComment("2026-06-21T13:30:00Z"), // inside — kept
-		mkComment("2026-06-21T14:00:00Z"), // at end (exclusive) — dropped
-	}
-	w := sessionWindow{Start: ts("2026-06-21T12:00:00Z"), End: ts("2026-06-21T14:00:00Z"), HasEnd: true}
-	got := scopeContextComments(comments, w)
-	if len(got) != 2 {
-		t.Fatalf("kept %d comments, want 2", len(got))
-	}
-	if !got[0].CreatedAt.Time.Equal(ts("2026-06-21T12:30:00Z")) || !got[1].CreatedAt.Time.Equal(ts("2026-06-21T13:30:00Z")) {
-		t.Fatalf("wrong comments kept: %v", got)
-	}
-}
-
 func TestScopeContextComments_EmptyInput(t *testing.T) {
-	if got := scopeContextComments(nil, sessionWindow{Start: ts("2026-06-21T12:00:00Z")}); len(got) != 0 {
+	if got := scopeContextComments(nil, threadScope{RootID: uid(1)}); len(got) != 0 {
 		t.Fatalf("expected empty result, got %d", len(got))
 	}
 }

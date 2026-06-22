@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getContextUsage, listSessions, startFresh, updateSession } from "./api";
-import type { SessionStartFreshInput } from "./types";
+import type { HandoffActionInput } from "./types";
 
 const key = (issueId: string) => ["cerebro-sessions", issueId] as const;
 
@@ -28,7 +28,7 @@ export function useContextUsage(issueId: string, sessionId?: string, enabled = t
 export function useStartFresh(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: SessionStartFreshInput) => startFresh(issueId, input),
+    mutationFn: (input: HandoffActionInput) => startFresh(issueId, input),
     onSuccess: () => qc.invalidateQueries({ queryKey: key(issueId) }),
   });
 }

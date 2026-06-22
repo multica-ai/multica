@@ -11,52 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const closeCerebroSession = `-- name: CloseCerebroSession :one
-UPDATE cerebro_session
-SET status = 'done', updated_at = now()
-WHERE id = $1 AND issue_id = $2
-RETURNING id, issue_id, position, name, status, handoff, created_at, updated_at
-`
-
-type CloseCerebroSessionParams struct {
-	ID      pgtype.UUID `json:"id"`
-	IssueID pgtype.UUID `json:"issue_id"`
-}
-
-func (q *Queries) CloseCerebroSession(ctx context.Context, arg CloseCerebroSessionParams) (CerebroSession, error) {
-	row := q.db.QueryRow(ctx, closeCerebroSession, arg.ID, arg.IssueID)
-	var i CerebroSession
-	err := row.Scan(
-		&i.ID,
-		&i.IssueID,
-		&i.Position,
-		&i.Name,
-		&i.Status,
-		&i.Handoff,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const countCerebroSessionsForIssue = `-- name: CountCerebroSessionsForIssue :one
-SELECT COUNT(*)::int FROM cerebro_session
-WHERE issue_id = $1
-`
-
-func (q *Queries) CountCerebroSessionsForIssue(ctx context.Context, issueID pgtype.UUID) (int32, error) {
-	row := q.db.QueryRow(ctx, countCerebroSessionsForIssue, issueID)
-	var column_1 int32
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const createCerebroSession = `-- name: CreateCerebroSession :one
 INSERT INTO cerebro_session (
     issue_id,
+    root_comment_id,
     position,
     name,
-    status,
     handoff,
     created_at
 ) VALUES (
@@ -67,24 +27,24 @@ INSERT INTO cerebro_session (
     $5,
     COALESCE($6, now())
 )
-RETURNING id, issue_id, position, name, status, handoff, created_at, updated_at
+RETURNING id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id
 `
 
 type CreateCerebroSessionParams struct {
-	IssueID   pgtype.UUID `json:"issue_id"`
-	Position  int32       `json:"position"`
-	Name      string      `json:"name"`
-	Status    string      `json:"status"`
-	Handoff   []byte      `json:"handoff"`
-	CreatedAt interface{} `json:"created_at"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	RootCommentID pgtype.UUID `json:"root_comment_id"`
+	Position      int32       `json:"position"`
+	Name          string      `json:"name"`
+	Handoff       []byte      `json:"handoff"`
+	CreatedAt     interface{} `json:"created_at"`
 }
 
 func (q *Queries) CreateCerebroSession(ctx context.Context, arg CreateCerebroSessionParams) (CerebroSession, error) {
 	row := q.db.QueryRow(ctx, createCerebroSession,
 		arg.IssueID,
+		arg.RootCommentID,
 		arg.Position,
 		arg.Name,
-		arg.Status,
 		arg.Handoff,
 		arg.CreatedAt,
 	)
@@ -94,16 +54,42 @@ func (q *Queries) CreateCerebroSession(ctx context.Context, arg CreateCerebroSes
 		&i.IssueID,
 		&i.Position,
 		&i.Name,
-		&i.Status,
 		&i.Handoff,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RootCommentID,
+	)
+	return i, err
+}
+
+const getCerebroSessionByRootComment = `-- name: GetCerebroSessionByRootComment :one
+SELECT id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id FROM cerebro_session
+WHERE issue_id = $1 AND root_comment_id = $2
+`
+
+type GetCerebroSessionByRootCommentParams struct {
+	IssueID       pgtype.UUID `json:"issue_id"`
+	RootCommentID pgtype.UUID `json:"root_comment_id"`
+}
+
+func (q *Queries) GetCerebroSessionByRootComment(ctx context.Context, arg GetCerebroSessionByRootCommentParams) (CerebroSession, error) {
+	row := q.db.QueryRow(ctx, getCerebroSessionByRootComment, arg.IssueID, arg.RootCommentID)
+	var i CerebroSession
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.Position,
+		&i.Name,
+		&i.Handoff,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RootCommentID,
 	)
 	return i, err
 }
 
 const getCerebroSessionForIssue = `-- name: GetCerebroSessionForIssue :one
-SELECT id, issue_id, position, name, status, handoff, created_at, updated_at FROM cerebro_session
+SELECT id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id FROM cerebro_session
 WHERE id = $1 AND issue_id = $2
 `
 
@@ -120,56 +106,25 @@ func (q *Queries) GetCerebroSessionForIssue(ctx context.Context, arg GetCerebroS
 		&i.IssueID,
 		&i.Position,
 		&i.Name,
-		&i.Status,
 		&i.Handoff,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getNextCerebroSessionPosition = `-- name: GetNextCerebroSessionPosition :one
-SELECT COALESCE(MAX(position), 0)::int + 1
-FROM cerebro_session
-WHERE issue_id = $1
-`
-
-func (q *Queries) GetNextCerebroSessionPosition(ctx context.Context, issueID pgtype.UUID) (int32, error) {
-	row := q.db.QueryRow(ctx, getNextCerebroSessionPosition, issueID)
-	var column_1 int32
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const getOpenCerebroSessionForIssue = `-- name: GetOpenCerebroSessionForIssue :one
-SELECT id, issue_id, position, name, status, handoff, created_at, updated_at FROM cerebro_session
-WHERE issue_id = $1 AND status <> 'done'
-ORDER BY position DESC, created_at DESC, id DESC
-LIMIT 1
-`
-
-func (q *Queries) GetOpenCerebroSessionForIssue(ctx context.Context, issueID pgtype.UUID) (CerebroSession, error) {
-	row := q.db.QueryRow(ctx, getOpenCerebroSessionForIssue, issueID)
-	var i CerebroSession
-	err := row.Scan(
-		&i.ID,
-		&i.IssueID,
-		&i.Position,
-		&i.Name,
-		&i.Status,
-		&i.Handoff,
-		&i.CreatedAt,
-		&i.UpdatedAt,
+		&i.RootCommentID,
 	)
 	return i, err
 }
 
 const listCerebroSessionsForIssue = `-- name: ListCerebroSessionsForIssue :many
-SELECT id, issue_id, position, name, status, handoff, created_at, updated_at FROM cerebro_session
+
+SELECT id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id FROM cerebro_session
 WHERE issue_id = $1
-ORDER BY position ASC, created_at ASC, id ASC
+ORDER BY created_at ASC, id ASC
 `
 
+// FIR-1874: a session is a thread. A cerebro_session row is optional metadata
+// (name/headline + handoff) keyed to the thread root via root_comment_id. State
+// (open/closed) is NOT stored here — it is the thread root's resolved_at. There
+// is no status column and no position-driven membership anymore.
 func (q *Queries) ListCerebroSessionsForIssue(ctx context.Context, issueID pgtype.UUID) ([]CerebroSession, error) {
 	rows, err := q.db.Query(ctx, listCerebroSessionsForIssue, issueID)
 	if err != nil {
@@ -184,10 +139,10 @@ func (q *Queries) ListCerebroSessionsForIssue(ctx context.Context, issueID pgtyp
 			&i.IssueID,
 			&i.Position,
 			&i.Name,
-			&i.Status,
 			&i.Handoff,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RootCommentID,
 		); err != nil {
 			return nil, err
 		}
@@ -203,7 +158,7 @@ const updateCerebroSessionHandoff = `-- name: UpdateCerebroSessionHandoff :one
 UPDATE cerebro_session
 SET handoff = $1, updated_at = now()
 WHERE id = $2 AND issue_id = $3
-RETURNING id, issue_id, position, name, status, handoff, created_at, updated_at
+RETURNING id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id
 `
 
 type UpdateCerebroSessionHandoffParams struct {
@@ -220,10 +175,10 @@ func (q *Queries) UpdateCerebroSessionHandoff(ctx context.Context, arg UpdateCer
 		&i.IssueID,
 		&i.Position,
 		&i.Name,
-		&i.Status,
 		&i.Handoff,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RootCommentID,
 	)
 	return i, err
 }
@@ -232,7 +187,7 @@ const updateCerebroSessionName = `-- name: UpdateCerebroSessionName :one
 UPDATE cerebro_session
 SET name = $1, updated_at = now()
 WHERE id = $2 AND issue_id = $3
-RETURNING id, issue_id, position, name, status, handoff, created_at, updated_at
+RETURNING id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id
 `
 
 type UpdateCerebroSessionNameParams struct {
@@ -249,39 +204,10 @@ func (q *Queries) UpdateCerebroSessionName(ctx context.Context, arg UpdateCerebr
 		&i.IssueID,
 		&i.Position,
 		&i.Name,
-		&i.Status,
 		&i.Handoff,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const updateCerebroSessionStatus = `-- name: UpdateCerebroSessionStatus :one
-UPDATE cerebro_session
-SET status = $1, updated_at = now()
-WHERE id = $2 AND issue_id = $3
-RETURNING id, issue_id, position, name, status, handoff, created_at, updated_at
-`
-
-type UpdateCerebroSessionStatusParams struct {
-	Status  string      `json:"status"`
-	ID      pgtype.UUID `json:"id"`
-	IssueID pgtype.UUID `json:"issue_id"`
-}
-
-func (q *Queries) UpdateCerebroSessionStatus(ctx context.Context, arg UpdateCerebroSessionStatusParams) (CerebroSession, error) {
-	row := q.db.QueryRow(ctx, updateCerebroSessionStatus, arg.Status, arg.ID, arg.IssueID)
-	var i CerebroSession
-	err := row.Scan(
-		&i.ID,
-		&i.IssueID,
-		&i.Position,
-		&i.Name,
-		&i.Status,
-		&i.Handoff,
-		&i.CreatedAt,
-		&i.UpdatedAt,
+		&i.RootCommentID,
 	)
 	return i, err
 }

@@ -4,6 +4,7 @@
 // chrome (pin, trigger-target bar, private-agent send confirm) lives here; the
 // shared editor/upload/draft/expand machinery is in BaseComposer.
 
+import type { ReactNode } from "react";
 import { useCommentDraft } from "@multica/cerebro-comment-drafts";
 import { usePrivateAgentSendConfirm } from "@multica/cerebro-access/views";
 import {
@@ -28,6 +29,9 @@ export interface CommentComposerProps {
   avatar?: { type: string; id: string } | null;
   size?: "sm" | "default";
   placeholder?: string;
+  /** New-comment only: a control folded in beside Send (FIR-1874 — "Start new
+   *  session with Handoff"). */
+  sendMenu?: ReactNode;
 }
 
 export function CommentComposer({
@@ -41,6 +45,7 @@ export function CommentComposer({
   avatar = null,
   size = "default",
   placeholder,
+  sendMenu,
 }: CommentComposerProps) {
   const isReply = variant === "reply";
   const draft = useCommentDraft(
@@ -65,6 +70,7 @@ export function CommentComposer({
       size={size}
       avatar={isReply ? avatar : null}
       pin={isReply ? "sticky-bottom" : pinnable ? "fixed" : "none"}
+      sendMenu={isReply ? undefined : sendMenu}
       suppressPlaceholder={!!triggerAgentId}
       hasTopOverlay={!!triggerAgentId}
       confirmBeforeSend={confirmBeforeSend}

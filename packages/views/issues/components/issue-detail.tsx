@@ -122,7 +122,8 @@ import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
 // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 groups the comment timeline into sessions derived from start markers.
 // CEREBRO-PATCH(session-activity-context): FIR-1769 P2/P3 — per-session activity fold + context hairline.
 // CEREBRO-PATCH(session-review-fir1787): context indicator moves above the composer (SessionContextBar) per FIR-1787 review.
-import { SessionHeader, SessionHandoff, StartFresh, SessionContextBar, groupTimelineBySession, partitionSessionGroups, hasHandoffBrief, useSessions, sessionIdForComment } from "@multica/cerebro-sessions";
+// CEREBRO-PATCH(thread-session-fir1874): thread = session — group by thread, state from resolved_at; handoff on Send.
+import { SessionHeader, SessionHandoff, SessionContextBar, SessionHandoffMenu, groupTimelineByThread, activeSessionId as computeActiveSessionId, partitionSessionGroups, hasHandoffBrief, useSessions, sessionIdForComment } from "@multica/cerebro-sessions";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -1080,17 +1081,22 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     return null;
   }, [timelineView.groups]);
 
-  // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 session membership is derived
-  // from timeline order against the session start markers — no per-comment field.
+  // CEREBRO-PATCH(thread-session-fir1874): a session IS a comment thread; group the
+  // timeline by thread, derive open/closed from the thread root's resolved_at.
   const sessionsQuery = useSessions(id);
-  const activeSessionId = useMemo(() => {
-    const sessions = sessionsQuery.data ?? [];
-    return (
-      sessions.find((session) => session.status !== "done")?.id ??
-      sessions[sessions.length - 1]?.id ??
-      "default"
-    );
-  }, [sessionsQuery.data]);
+  const sessionThreadGroups = useMemo(
+    () => groupTimelineByThread(id, sessionsQuery.data, timelineView.groups),
+    [id, sessionsQuery.data, timelineView.groups],
+  );
+  const activeSessionId = useMemo(() => computeActiveSessionId(sessionThreadGroups), [sessionThreadGroups]);
+  // CEREBRO-PATCH(thread-session-fir1874): open (unresolved) threads feed the Send-button Handoff menu.
+  const openThreads = useMemo(
+    () =>
+      sessionThreadGroups
+        .filter((sg) => !sg.resolved && sg.session.root_comment_id)
+        .map((sg) => ({ id: sg.session.id, name: sg.session.name })),
+    [sessionThreadGroups],
+  );
   const [openSessionId, setOpenSessionId] = useState<string>("default");
   useEffect(() => {
     setOpenSessionId(activeSessionId);
@@ -2558,12 +2564,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               <TimelineSkeleton />
             ) : (
             <>
-            {/* CEREBRO-PATCH(comment-sessions-flag): FIR-1741 hide Start fresh when sessions off. */}
-            {sessionsEnabled && (
-            <div className="mt-4 flex justify-end">
-              <StartFresh issueId={id} />
-            </div>
-            )}
+            {/* CEREBRO-PATCH(thread-session-fir1874): top StartFresh removed — handoff lives on the composer Send button now. */}
             <div className="mt-4 flex flex-col gap-3">
               {(() => {
                 // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 render one timeline
@@ -2652,12 +2653,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   return timelineView.groups.map((g) => renderGroup(g));
                 }
 
-                // Sessions on: group the timeline by session start markers. Each
-                // session renders as a single thread box — the session header
-                // (title + Handoff) sits at the top with a divider, the thread
-                // sits below it flush (FIR-1787 points 2 + 3).
-                const sessionGroups = groupTimelineBySession(id, sessionsQuery.data, timelineView.groups);
-                return sessionGroups.map((sg) => {
+                // CEREBRO-PATCH(thread-session-fir1874): sessions on → each comment
+                // thread renders as one session box; state comes from sg.resolved.
+                return sessionThreadGroups.map((sg) => {
                   // CEREBRO-PATCH(session-thread-box): FIR-1787 — the active session is
                   // always expanded and not collapsible; closed sessions fold to a collapsed box.
                   const isActive = sg.session.id === activeSessionId;
@@ -2683,6 +2681,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                           session={sg.session}
                           open={open}
                           active={isActive}
+                          resolved={sg.resolved}
                           onToggle={() => setOpenSessionId(open ? "" : sg.session.id)}
                           hasHandoff={showHandoff}
                           handoffOpen={handoffOpen}
@@ -2725,11 +2724,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   off so chat-style surfaces stay unchanged. */}
               {/* CEREBRO-PATCH(issue-composer-unify): FIR-1748 — shared CommentComposer (new-comment variant). */}
               {/* CEREBRO-PATCH(session-context-no-bottom-line): FIR-1870 — no context line under the bottom composer; each session carries its own line under its header (thread = session), so a page-bottom figure is meaningless. */}
+              {/* CEREBRO-PATCH(thread-session-fir1874): Handoff folds into the Send button. */}
               <CommentComposer
                 issueId={id}
                 onSubmit={submitComment}
                 pinnable
                 triggerAgentId={triggerAgentId}
+                sendMenu={sessionsEnabled ? <SessionHandoffMenu issueId={id} openThreads={openThreads} /> : undefined}
               />
             </div>
               </TabsContent>

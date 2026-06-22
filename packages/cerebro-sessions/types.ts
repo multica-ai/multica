@@ -1,8 +1,6 @@
-export type SessionStatus = "todo" | "in_progress" | "done";
-
-// The carry-over brief between sessions. In Model B it is a single nullable
-// object on the session row (no per-comment field, no 4-field human form). An
-// agent may author it via the API; otherwise the server auto-summarises.
+// The carry-over brief a session keeps when it is handed off. A single nullable
+// object on the session row. An agent may author it via the API; otherwise the
+// server auto-summarises the thread.
 export interface HandoffBrief {
   summary: string;
   done: string[];
@@ -10,26 +8,25 @@ export interface HandoffBrief {
   plan_ref?: string | null;
 }
 
+// FIR-1874: a Session row is OPTIONAL metadata (name/handoff) keyed to a thread
+// root via root_comment_id. A session's open/closed state is NOT stored here —
+// it is the thread root's resolved_at — so there is no status field.
 export interface Session {
   id: string;
   issue_id: string;
+  root_comment_id: string | null;
   position: number;
   name: string;
-  status: SessionStatus;
   handoff: HandoffBrief | null;
   created_at: string;
   updated_at: string;
 }
 
-// Starting a fresh session either carries the previous session's handoff
-// forward ("handoff") or opens empty ("blank"). The closing session always
-// keeps its handoff either way.
-export type SessionStartMode = "handoff" | "blank";
-
-export interface SessionStartFreshInput {
-  mode: SessionStartMode;
-  // Optional agent-authored brief; when omitted the server auto-summarises the
-  // closing session.
+// The Send-button "Start new session with Handoff" action: it closes the chosen
+// open thread (root_comment_id) by resolving its root and stores a handoff on
+// that thread's row. An optional agent-authored brief overrides the auto-summary.
+export interface HandoffActionInput {
+  root_comment_id: string;
   handoff?: HandoffBrief | null;
 }
 

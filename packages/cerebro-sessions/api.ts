@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { api, parseWithFallback } from "@multica/core/api";
-import type { ContextUsage, HandoffBrief, Session, SessionStartFreshInput, SessionStatus } from "./types";
+import type { ContextUsage, HandoffActionInput, HandoffBrief, Session } from "./types";
 
 const base = (issueId: string) => `/api/cerebro/issues/${issueId}/sessions`;
 
@@ -50,7 +50,10 @@ export function listSessions(issueId: string): Promise<Session[]> {
   return api.cerebroRequest<Session[]>(base(issueId));
 }
 
-export function startFresh(issueId: string, input: SessionStartFreshInput): Promise<Session> {
+// FIR-1874: the Send-button Handoff action. Closes (resolves) the chosen thread
+// and stores a handoff on its row. Endpoint kept as /start-fresh to avoid an
+// upstream router edit.
+export function startFresh(issueId: string, input: HandoffActionInput): Promise<Session> {
   return api.cerebroRequest<Session>(`${base(issueId)}/start-fresh`, {
     method: "POST",
     body: JSON.stringify(input),
@@ -59,7 +62,6 @@ export function startFresh(issueId: string, input: SessionStartFreshInput): Prom
 
 export function updateSession(issueId: string, sessionId: string, input: {
   name?: string;
-  status?: SessionStatus;
   handoff?: HandoffBrief;
 }): Promise<Session> {
   return api.cerebroRequest<Session>(`${base(issueId)}/${sessionId}`, {
