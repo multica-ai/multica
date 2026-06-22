@@ -22,6 +22,8 @@ declare global {
       pagination_previous: string;
       pagination_next: string;
       copy_code: string;
+      copied: string;
+      delete_block: string;
       plain_text: string;
     };
   }
