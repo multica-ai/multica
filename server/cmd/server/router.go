@@ -837,6 +837,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
+				r.Get("/", h.GetComment)
 				r.Put("/", h.UpdateComment)
 				r.Delete("/", h.DeleteComment)
 				r.Post("/resolve", h.ResolveComment)

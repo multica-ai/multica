@@ -1464,6 +1464,36 @@ func (h *Handler) computeMentionedAgentCommentTriggers(ctx context.Context, issu
 	return triggers
 }
 
+// GetComment returns a single comment by id, scoped to the current workspace.
+// It returns the full comment body without summary clipping — callers that want
+// truncated content should use ListComments with summary=true or ListTimeline
+// with summary=true instead.
+func (h *Handler) GetComment(w http.ResponseWriter, r *http.Request) {
+	commentId := chi.URLParam(r, "commentId")
+	commentUUID, ok := parseUUIDOrBadRequest(w, commentId, "comment id")
+	if !ok {
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+		ID:          commentUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
+	grouped := h.groupReactions(r, []pgtype.UUID{comment.ID})
+	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
+	cid := uuidToString(comment.ID)
+	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	commentId := chi.URLParam(r, "commentId")
 
