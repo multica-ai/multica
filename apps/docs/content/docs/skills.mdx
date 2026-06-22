@@ -16,6 +16,12 @@ Multica supports two skill sources:
 
 Most of the time you want **workspace skills**: import once, every teammate's agent can use it. Local skills are a fit when you want to test locally first, or when the content involves sensitive local material.
 
+## Repository-scoped skills
+
+Repo-scoped skills are expected behavior. Some AI coding tools discover **project-level skills committed inside a repository**, such as `.claude/skills/`, `.cursor/skills/`, `.opencode/skills/`, or `.agents/skills/`. When a Multica task checks out that repository, those files remain in the workdir and the underlying tool can load them through its native discovery rules. You do **not** need to import those repo skills into Multica just to use them in that repo; Multica does **not** import them into the workspace skill registry automatically.
+
+Workspace skills still sync into the same provider-native location for tools that support project-level discovery. If a workspace skill would collide with an existing repo skill directory, Multica writes the workspace copy to a sibling name such as `review-helper-multica` instead of overwriting the repo's files. The tool may then see both skills, with the workspace copy carrying the adjusted name.
+
 ## Importing a skill
 
 Workspace skills come from four sources:
