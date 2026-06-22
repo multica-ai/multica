@@ -3790,10 +3790,14 @@ func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
 	for _, want := range []string{
 		"Read the triggering conversation first",
 		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
+		"multica issue comment list " + issueID + " --recent 10 --output json",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("comment-triggered Workflow missing cold-start read %q\n---\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "--recent 20") {
+		t.Errorf("comment-triggered Workflow still uses recent 20\n---\n%s", s)
 	}
 	if strings.Contains(s, "new comment(s) since your last run") {
 		t.Errorf("cold-start workflow must not render the since-delta hint\n---\n%s", s)
@@ -3892,7 +3896,7 @@ func TestInjectRuntimeConfigAssignmentTriggerMentionsRecent(t *testing.T) {
 	// Mandatory comment catch-up must stay, but the required first read is
 	// bounded to recent active threads instead of the full flat timeline.
 	for _, want := range []string{
-		"multica issue comment list issue-1 --recent 20 --output json",
+		"multica issue comment list issue-1 --recent 10 --output json",
 		"this is mandatory, not optional",
 		"Skipping this step is the most common cause",
 	} {

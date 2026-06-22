@@ -382,7 +382,7 @@ func TestBuildChatPromptSlashSkills(t *testing.T) {
 func TestBuildPromptDefaultMentionsRecent(t *testing.T) {
 	out := BuildPrompt(Task{IssueID: "issue-default-1"}, "claude")
 	for _, s := range []string{
-		"multica issue comment list issue-default-1 --recent 20 --output json",
+		"multica issue comment list issue-default-1 --recent 10 --output json",
 		"Next thread cursor:",
 		"--since",
 	} {
@@ -492,6 +492,12 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	}
 	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --output json") {
 		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
+	}
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --recent 10 --output json") {
+		t.Errorf("cold start cross-thread fallback should use recent 10, got:\n%s", out)
+	}
+	if strings.Contains(out, "--recent 20") {
+		t.Errorf("cold start cross-thread fallback still uses recent 20, got:\n%s", out)
 	}
 }
 
