@@ -3,9 +3,13 @@
 import { useState } from "react";
 import { ChevronRight, ExternalLink } from "lucide-react";
 import { Card } from "@multica/ui/components/ui/card";
+import { cn } from "@multica/ui/lib/utils";
 import type { Session } from "./types";
 
-export function SessionHandoff({ session }: { session: Session }) {
+// FIR-1787: `bare` renders the handoff flush at the top of the session's thread
+// box (under the header divider) with no card chrome of its own, so the session
+// title + Handoff read as one box. Outside a box it keeps its dashed card.
+export function SessionHandoff({ session, bare = false }: { session: Session; bare?: boolean }) {
   const [open, setOpen] = useState(true);
   const handoff = session.handoff;
   const hasBrief =
@@ -17,7 +21,12 @@ export function SessionHandoff({ session }: { session: Session }) {
   if (!handoff || !hasBrief) return null;
 
   return (
-    <Card className="!py-0 !gap-0 overflow-hidden border-dashed">
+    <Card
+      className={cn(
+        "!py-0 !gap-0 overflow-hidden border-dashed",
+        bare && "rounded-none border-0 border-b border-dashed bg-transparent shadow-none",
+      )}
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

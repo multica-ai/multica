@@ -148,6 +148,12 @@ interface CommentCardProps {
    * indicator matches the trigger, not the replied-to comment author.
    */
   triggerAgentId?: string;
+  /**
+   * CEREBRO-PATCH(session-thread-box): FIR-1787 — when the card is rendered
+   * inside a session box (header + thread share one outline), drop this card's
+   * own border/rounding/shadow so the session reads as a single thread box.
+   */
+  bare?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -606,6 +612,7 @@ function CommentCardImpl({
   onCollapseResolved,
   highlightedCommentId,
   triggerAgentId,
+  bare = false,
 }: CommentCardProps) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
@@ -701,6 +708,8 @@ function CommentCardImpl({
     <Card
       className={cn(
         "!py-0 !gap-0 overflow-hidden transition-colors duration-700",
+        // CEREBRO-PATCH(session-thread-box): FIR-1787 — flush inside a session box.
+        bare && "rounded-none border-0 bg-transparent shadow-none",
         isQuestion && "border-primary/35 bg-primary/[0.03]",
         isTemp && "opacity-60",
         isHighlighted && "ring-2 ring-brand/50 bg-brand/5",

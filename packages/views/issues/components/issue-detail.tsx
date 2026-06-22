@@ -6,7 +6,7 @@
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(display-currency-issue-detail): FIR-40 cost in workspace currency.
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
-import { Fragment, useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -2544,7 +2544,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               {(() => {
                 // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 render one timeline
                 // group (a comment thread or a coalesced activity block).
-                const renderGroup = (group: typeof timelineView.groups[number]) => {
+                // CEREBRO-PATCH(session-thread-box): FIR-1787 — `bare` drops a
+                // comment card's own border so it sits flush inside a session box.
+                const renderGroup = (group: typeof timelineView.groups[number], bare = false) => {
                   if (group.type === "comment") {
                     const entry = group.entries[0]!;
                     // CEREBRO-PATCH(cerebro-wakeup-note): TECH-3298 — render an
@@ -2574,6 +2576,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                         <CommentCard
                           issueId={id}
                           entry={entry}
+                          bare={bare}
                           replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
                           currentUserId={user?.id}
                           canModerate={canModerateComments}
@@ -2618,41 +2621,53 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
 
                 // CEREBRO-PATCH(comment-sessions-flag): FIR-1741 flat render when sessions off.
                 if (!sessionsEnabled) {
-                  return timelineView.groups.map(renderGroup);
+                  return timelineView.groups.map((g) => renderGroup(g));
                 }
 
-                // Sessions on: group the timeline by session start markers and
-                // render each session collapsed except the open one.
+                // Sessions on: group the timeline by session start markers. Each
+                // session renders as a single thread box — the session header
+                // (title + Handoff) sits at the top with a divider, the thread
+                // sits below it flush (FIR-1787 points 2 + 3).
                 const sessionGroups = groupTimelineBySession(id, sessionsQuery.data, timelineView.groups);
                 return sessionGroups.map((sg) => {
-                  const open = sg.session.id === openSessionId;
+                  // CEREBRO-PATCH(session-thread-box): FIR-1787 — the active session is
+                  // always expanded and not collapsible; closed sessions fold to a chapter.
+                  const isActive = sg.session.id === activeSessionId;
+                  const open = isActive || sg.session.id === openSessionId;
                   // CEREBRO-PATCH(session-activity-context): FIR-1769 P2 — split comments from activity.
                   const { commentGroups, activityGroups } = partitionSessionGroups(sg.groups);
                   // CEREBRO-PATCH(session-review-fir1787): a session appears only once its first comment exists.
                   if (commentGroups.length === 0) return null;
                   const bodyGroups = sessionActivityFoldEnabled ? commentGroups : sg.groups;
                   return (
-                    <Fragment key={sg.session.id}>
-                      {/* CEREBRO-PATCH(session-review-fir1787): header is part of the thread (divider under) + inline rename. */}
+                    <div key={sg.session.id} className="overflow-hidden rounded-lg border bg-card">
+                      {/* CEREBRO-PATCH(session-thread-box): FIR-1787 — header is the top of the thread box. */}
                       <SessionHeader
                         issueId={id}
                         session={sg.session}
                         open={open}
+                        active={isActive}
                         onToggle={() => setOpenSessionId(open ? "" : sg.session.id)}
                       />
                       {open ? (
-                        <SessionHandoff session={sg.session} />
+                        <SessionHandoff session={sg.session} bare />
                       ) : sg.session.handoff?.summary ? (
-                        <div className="px-4 text-xs text-muted-foreground">{sg.session.handoff.summary}</div>
+                        <div className="px-4 py-2 text-xs text-muted-foreground">{sg.session.handoff.summary}</div>
                       ) : null}
-                      {open ? bodyGroups.map(renderGroup) : null}
+                      {open ? (
+                        <div className="flex flex-col divide-y">
+                          {bodyGroups.map((g) => renderGroup(g, true))}
+                        </div>
+                      ) : null}
                       {/* CEREBRO-PATCH(session-activity-context): FIR-1769 P2 — folded activity section. */}
                       {open && sessionActivityFoldEnabled ? (
-                        <SessionActivity count={countActivityEntries(activityGroups)}>
-                          {activityGroups.map(renderGroup)}
-                        </SessionActivity>
+                        <div className="border-t py-3">
+                          <SessionActivity count={countActivityEntries(activityGroups)}>
+                            {activityGroups.map((g) => renderGroup(g, true))}
+                          </SessionActivity>
+                        </div>
                       ) : null}
-                    </Fragment>
+                    </div>
                   );
                 });
               })()}

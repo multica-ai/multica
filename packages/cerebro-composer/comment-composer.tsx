@@ -57,9 +57,9 @@ export function CommentComposer({
       draft={draft}
       onSubmit={onSubmit}
       trackAttachmentIds
-      // FIR-1790: issue comment fields render without the boxed chrome.
-      // Channels/DMs/Chat keep the box (MessageComposer leaves frame=true).
-      frame={false}
+      // FIR-1787 review: Jesper reverted FIR-1790 — the issue comment box keeps
+      // its boxed card/border chrome (the bottom composer and replies are boxed,
+      // matching the original thread design). Default frame=true on BaseComposer.
       placeholder={placeholder}
       autoFocus={autoFocus}
       size={size}
