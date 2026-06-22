@@ -294,8 +294,8 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 		if err == nil {
 			t.Fatal("newAPIClient(): expected error without task token")
 		}
-		if !strings.Contains(err.Error(), "mat_ token") {
-			t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+		if !strings.Contains(err.Error(), "MULTICA_TOKEN is required in agent execution context") {
+			t.Fatalf("newAPIClient() error = %q, want missing-token guidance", err.Error())
 		}
 	})
 

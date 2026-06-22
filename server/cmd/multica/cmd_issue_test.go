@@ -354,6 +354,16 @@ func TestRunIssueCreateRequiresProjectWhenWorkspaceHasMultipleProjects(t *testin
 func TestRunIssueCreateSendsExistingAttachmentIDs(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/projects" {
+			json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{{
+					"id":     "11111111-1111-1111-1111-111111111111",
+					"title":  "Only Project",
+					"status": "in_progress",
+				}},
+			})
+			return
+		}
 		if r.URL.Path != "/api/issues" {
 			http.NotFound(w, r)
 			return
