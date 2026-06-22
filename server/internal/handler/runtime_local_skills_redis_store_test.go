@@ -11,11 +11,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// newRedisTestClient connects to the Redis instance indicated by REDIS_TEST_URL
-// and flushes it so each test starts from a clean slate. The helper skips the
+const redisTestDBHandler = 12
+
+// newRedisTestClient connects to a package-dedicated REDIS_TEST_URL DB and
+// flushes it so each test starts from a clean slate. The helper skips the
 // calling test if the env var is unset — matches the DATABASE_URL gating in
 // the rest of the suite so `go test ./...` still works on a stock laptop
-// without a running Redis.
+// without a running Redis. The DB split prevents package-parallel tests from
+// deleting each other's Redis keys via FlushDB.
 func newRedisTestClient(t *testing.T) *redis.Client {
 	t.Helper()
 	url := os.Getenv("REDIS_TEST_URL")
@@ -26,6 +29,7 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 	if err != nil {
 		t.Fatalf("parse REDIS_TEST_URL: %v", err)
 	}
+	opts.DB = redisTestDBHandler
 	rdb := redis.NewClient(opts)
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
