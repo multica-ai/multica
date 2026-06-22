@@ -77,18 +77,22 @@ func StrToText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
 }
 
+// TimestampToString renders an instant as RFC3339 normalized to UTC ("…Z").
+// Normalizing avoids emitting the connection/process-local offset that pgx
+// attaches when reading a timestamptz, so the API contract is deterministic
+// regardless of the server's timezone (prod runs UTC; dev/test may not).
 func TimestampToString(t pgtype.Timestamptz) string {
 	if !t.Valid {
 		return ""
 	}
-	return t.Time.Format(time.RFC3339)
+	return t.Time.UTC().Format(time.RFC3339)
 }
 
 func TimestampToPtr(t pgtype.Timestamptz) *string {
 	if !t.Valid {
 		return nil
 	}
-	s := t.Time.Format(time.RFC3339)
+	s := t.Time.UTC().Format(time.RFC3339)
 	return &s
 }
 
@@ -128,6 +132,56 @@ func ParseCalendarDate(s string) (pgtype.Date, error) {
 		return pgtype.Date{}, fmt.Errorf("invalid date %q: timestamps must be a UTC midnight boundary (e.g. 2026-03-01T00:00:00Z); use YYYY-MM-DD", s)
 	}
 	return pgtype.Date{}, fmt.Errorf("invalid date %q: expected YYYY-MM-DD", s)
+}
+
+// CalendarDateToTimestamptz parses a calendar day into a pgtype.Timestamptz
+// anchored at UTC midnight of that day. It mirrors ParseCalendarDate's policy
+// (accept "YYYY-MM-DD" and a UTC-midnight RFC3339, reject a non-midnight
+// instant whose calendar day is unrecoverable) but targets the timestamptz
+// columns the issue scheduling fields now use. Time-of-day support is layered
+// on top of this in a later change; this keeps date-only semantics intact.
+func CalendarDateToTimestamptz(s string) (pgtype.Timestamptz, error) {
+	d, err := ParseCalendarDate(s)
+	if err != nil {
+		return pgtype.Timestamptz{}, err
+	}
+	t := d.Time
+	return pgtype.Timestamptz{
+		Time:  time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC),
+		Valid: true,
+	}, nil
+}
+
+// ParseInstant parses a scheduling value that may carry a time-of-day into a
+// pgtype.Timestamptz, normalized to UTC. It accepts a full RFC3339 timestamp
+// (preserving the instant) and, for backward compatibility with date-only
+// clients, a bare "YYYY-MM-DD" which is interpreted as that day's UTC midnight.
+// Unlike CalendarDateToTimestamptz it does NOT reject a non-midnight instant —
+// a time-of-day is the whole point. Serialize the result with TimestampToPtr.
+func ParseInstant(s string) (pgtype.Timestamptz, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return pgtype.Timestamptz{Time: t.UTC(), Valid: true}, nil
+	}
+	if t, err := time.Parse(time.DateOnly, s); err == nil {
+		return pgtype.Timestamptz{
+			Time:  time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC),
+			Valid: true,
+		}, nil
+	}
+	return pgtype.Timestamptz{}, fmt.Errorf("invalid datetime %q: expected RFC3339 (e.g. 2026-02-01T14:30:00Z) or YYYY-MM-DD", s)
+}
+
+// FormatTimestamptzDateOnly renders a pgtype.Timestamptz as a date-only
+// "YYYY-MM-DD" string in UTC, or nil when unset. Used while the scheduling
+// columns are timestamptz but the API still exposes date-only values; the UTC
+// pin keeps the emitted day stable regardless of host timezone (the #3618
+// lesson).
+func FormatTimestamptzDateOnly(t pgtype.Timestamptz) *string {
+	if !t.Valid {
+		return nil
+	}
+	s := t.Time.UTC().Format(time.DateOnly)
+	return &s
 }
 
 func UUIDToPtr(u pgtype.UUID) *string {

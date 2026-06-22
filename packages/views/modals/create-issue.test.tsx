@@ -220,7 +220,15 @@ vi.mock("../issues/components", () => ({
       onClick={() => onOpenChange?.(false)}
     />
   ),
-  DueDatePicker: () => <div data-testid="due-date-picker" />,
+  // Emits an instant (with time-of-day) via onUpdate on click, mirroring the
+  // real picker, so a test can verify the modal forwards it into the payload.
+  DueDatePicker: ({ onUpdate }: { onUpdate?: (u: { due_date: string | null }) => void }) => (
+    <button
+      type="button"
+      data-testid="due-date-picker"
+      onClick={() => onUpdate?.({ due_date: "2026-02-01T14:30:00Z" })}
+    />
+  ),
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
@@ -432,6 +440,27 @@ describe("CreateIssueModal", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
+  });
+
+  it("forwards the picked due date-time into the create payload", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Timed deadline" },
+    });
+    // The Due date picker emits an instant (with time-of-day), like the real one.
+    fireEvent.click(screen.getByTestId("due-date-picker"));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Timed deadline",
+          due_date: "2026-02-01T14:30:00Z",
+        }),
+      );
+    });
   });
 
   it("keeps manual mode open and clears content when create another is enabled", async () => {

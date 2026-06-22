@@ -98,8 +98,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
-		StartDate:     dateToPtr(i.StartDate),
-		DueDate:       dateToPtr(i.DueDate),
+		StartDate:     timestampToPtr(i.StartDate),
+		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
@@ -125,8 +125,8 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
-		StartDate:     dateToPtr(i.StartDate),
-		DueDate:       dateToPtr(i.DueDate),
+		StartDate:     timestampToPtr(i.StartDate),
+		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
@@ -182,8 +182,8 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
-		StartDate:     dateToPtr(i.StartDate),
-		DueDate:       dateToPtr(i.DueDate),
+		StartDate:     timestampToPtr(i.StartDate),
+		DueDate:       timestampToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
@@ -2150,21 +2150,21 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var startDate pgtype.Date
+	var startDate pgtype.Timestamptz
 	if req.StartDate != nil && *req.StartDate != "" {
-		d, err := util.ParseCalendarDate(*req.StartDate)
+		d, err := util.ParseInstant(*req.StartDate)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid start_date format, expected YYYY-MM-DD")
+			writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339 (e.g. 2026-02-01T14:30:00Z) or YYYY-MM-DD")
 			return
 		}
 		startDate = d
 	}
 
-	var dueDate pgtype.Date
+	var dueDate pgtype.Timestamptz
 	if req.DueDate != nil && *req.DueDate != "" {
-		d, err := util.ParseCalendarDate(*req.DueDate)
+		d, err := util.ParseInstant(*req.DueDate)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid due_date format, expected YYYY-MM-DD")
+			writeError(w, http.StatusBadRequest, "invalid due_date format, expected RFC3339 (e.g. 2026-02-01T14:30:00Z) or YYYY-MM-DD")
 			return
 		}
 		dueDate = d
@@ -2385,26 +2385,26 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := rawFields["start_date"]; ok {
 		if req.StartDate != nil && *req.StartDate != "" {
-			d, err := util.ParseCalendarDate(*req.StartDate)
+			d, err := util.ParseInstant(*req.StartDate)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid start_date format, expected YYYY-MM-DD")
+				writeError(w, http.StatusBadRequest, "invalid start_date format, expected RFC3339 (e.g. 2026-02-01T14:30:00Z) or YYYY-MM-DD")
 				return
 			}
 			params.StartDate = d
 		} else {
-			params.StartDate = pgtype.Date{Valid: false} // explicit null = clear date
+			params.StartDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
 		}
 	}
 	if _, ok := rawFields["due_date"]; ok {
 		if req.DueDate != nil && *req.DueDate != "" {
-			d, err := util.ParseCalendarDate(*req.DueDate)
+			d, err := util.ParseInstant(*req.DueDate)
 			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid due_date format, expected YYYY-MM-DD")
+				writeError(w, http.StatusBadRequest, "invalid due_date format, expected RFC3339 (e.g. 2026-02-01T14:30:00Z) or YYYY-MM-DD")
 				return
 			}
 			params.DueDate = d
 		} else {
-			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
+			params.DueDate = pgtype.Timestamptz{Valid: false} // explicit null = clear date
 		}
 	}
 	if _, ok := rawFields["parent_issue_id"]; ok {
@@ -2496,10 +2496,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
 	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
-	prevStartDate := dateToPtr(prevIssue.StartDate)
+	prevStartDate := timestampToPtr(prevIssue.StartDate)
 	startDateChanged := prevStartDate != resp.StartDate && (prevStartDate == nil) != (resp.StartDate == nil) ||
 		(prevStartDate != nil && resp.StartDate != nil && *prevStartDate != *resp.StartDate)
-	prevDueDate := dateToPtr(prevIssue.DueDate)
+	prevDueDate := timestampToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
@@ -2925,24 +2925,24 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, ok := rawUpdates["start_date"]; ok {
 			if req.Updates.StartDate != nil && *req.Updates.StartDate != "" {
-				d, err := util.ParseCalendarDate(*req.Updates.StartDate)
+				d, err := util.ParseInstant(*req.Updates.StartDate)
 				if err != nil {
 					continue
 				}
 				params.StartDate = d
 			} else {
-				params.StartDate = pgtype.Date{Valid: false}
+				params.StartDate = pgtype.Timestamptz{Valid: false}
 			}
 		}
 		if _, ok := rawUpdates["due_date"]; ok {
 			if req.Updates.DueDate != nil && *req.Updates.DueDate != "" {
-				d, err := util.ParseCalendarDate(*req.Updates.DueDate)
+				d, err := util.ParseInstant(*req.Updates.DueDate)
 				if err != nil {
 					continue
 				}
 				params.DueDate = d
 			} else {
-				params.DueDate = pgtype.Date{Valid: false}
+				params.DueDate = pgtype.Timestamptz{Valid: false}
 			}
 		}
 

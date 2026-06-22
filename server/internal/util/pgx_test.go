@@ -114,3 +114,96 @@ func TestDateToPtr_StableAcrossTimezone(t *testing.T) {
 		t.Fatalf("got %v want 2026-03-01", got)
 	}
 }
+
+func TestCalendarDateToTimestamptz_DateOnly(t *testing.T) {
+	ts, err := CalendarDateToTimestamptz("2026-03-01")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if !ts.Valid {
+		t.Fatalf("expected ts.Valid = true")
+	}
+	want := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	if !ts.Time.UTC().Equal(want) {
+		t.Fatalf("got %v want %v", ts.Time.UTC(), want)
+	}
+}
+
+func TestCalendarDateToTimestamptz_AcceptsUTCMidnight(t *testing.T) {
+	ts, err := CalendarDateToTimestamptz("2026-03-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if got := FormatTimestamptzDateOnly(ts); got == nil || *got != "2026-03-01" {
+		t.Fatalf("got %v want 2026-03-01", got)
+	}
+}
+
+func TestCalendarDateToTimestamptz_RejectsNonMidnightAndGarbage(t *testing.T) {
+	// PR1 keeps date-only semantics, so it mirrors ParseCalendarDate's policy:
+	// a non-midnight instant has an unrecoverable calendar day and is rejected.
+	for _, s := range []string{"2026-02-28T16:00:00Z", "not-a-date", "", "03/01/2026"} {
+		t.Run(s, func(t *testing.T) {
+			if _, err := CalendarDateToTimestamptz(s); err == nil {
+				t.Fatalf("expected error for %q, got nil", s)
+			}
+		})
+	}
+}
+
+func TestFormatTimestamptzDateOnly_NullIsNil(t *testing.T) {
+	if got := FormatTimestamptzDateOnly(pgtype.Timestamptz{Valid: false}); got != nil {
+		t.Fatalf("expected nil for invalid timestamp, got %v", *got)
+	}
+}
+
+// Guard the timezone invariant: the date emitted is the stored UTC calendar day,
+// independent of the host process timezone (the #3618 lesson, now on timestamptz).
+func TestFormatTimestamptzDateOnly_StableAcrossTimezone(t *testing.T) {
+	ts := pgtype.Timestamptz{Time: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Valid: true}
+	if got := FormatTimestamptzDateOnly(ts); got == nil || *got != "2026-03-01" {
+		t.Fatalf("got %v want 2026-03-01", got)
+	}
+}
+
+func TestParseInstant_RFC3339(t *testing.T) {
+	ts, err := ParseInstant("2026-02-01T14:30:00Z")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	want := time.Date(2026, 2, 1, 14, 30, 0, 0, time.UTC)
+	if !ts.Time.Equal(want) {
+		t.Fatalf("got %v want %v", ts.Time, want)
+	}
+}
+
+func TestParseInstant_NormalizesOffsetToUTC(t *testing.T) {
+	// An offset instant is preserved as the same instant, stored in UTC.
+	ts, err := ParseInstant("2026-02-01T14:30:00+02:00")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if got := TimestampToString(ts); got != "2026-02-01T12:30:00Z" {
+		t.Fatalf("got %q want 2026-02-01T12:30:00Z", got)
+	}
+}
+
+func TestParseInstant_DateOnlyMeansUTCMidnight(t *testing.T) {
+	ts, err := ParseInstant("2026-02-01")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if got := TimestampToString(ts); got != "2026-02-01T00:00:00Z" {
+		t.Fatalf("got %q want 2026-02-01T00:00:00Z", got)
+	}
+}
+
+func TestParseInstant_RejectsGarbage(t *testing.T) {
+	for _, s := range []string{"", "not-a-date", "03/01/2026", "2026-13-40", "14:30"} {
+		t.Run(s, func(t *testing.T) {
+			if _, err := ParseInstant(s); err == nil {
+				t.Fatalf("expected error for %q, got nil", s)
+			}
+		})
+	}
+}
