@@ -24,6 +24,19 @@ type, ~line 822):
 | `notif` | `InboxItem` (`packages/core/types/inbox.ts`) | Everything about an **issue**: assignment, comments, mentions, reminders, agent activity, skill change requests, … | **Issues** (and Mentioned / Reminders sub-views) |
 | `channel` | `Channel` (`kind: "channel" \| "dm"`) | A **channel** (multi-party) or a **DM** (1:1 between people) | **Channels** and **DM** |
 | `chat` | `ChatSession` | A **1:1 agent chat** (a conversation with an AI agent) | **Chat** |
+| `thread` | `InboxItem` (the thread's newest unread reply) | A **channel/DM thread** that has unread replies — surfaced as its own row so a reply buried inside a thread is not missed (FIR-1854). **Dynamic inbox only.** | **Channels** / **DM** (same view as its channel) |
+
+> **`thread` is dynamic-inbox-only** (`packages/cerebro-inbox-dynamic`), gated by
+> `cerebro_inbox_thread_split` (inbox group, default on). It is built in
+> `useDynamicInboxData` by grouping channel/DM reply inbox items by
+> `details.thread_root_id` (set server-side — see the `inbox-thread-split` patch
+> in `docs/cerebro-patches.md`) and keeping only threads with an unread reply.
+> The row reuses the `notif` row chrome (`InboxListItem`) and every shared row
+> action, but opens its **channel** at the thread side-panel via the reply's
+> `details.comment_id`. It carries `channelId` / `channelKind` / `threadRootId`
+> so `matchesViewFilter` files it under Channels / DM (never Issues) and
+> favorites/classification treat it like its channel. The channel's top-level
+> messages still fold into the single `channel` row.
 
 So the "4 types" a user sees in the inbox view filter — **Issues, Channels, DM,
 Chat** — are really **3 row kinds**, where `channel` splits into Channels vs DM

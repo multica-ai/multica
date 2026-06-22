@@ -31,6 +31,50 @@ function taskStatusToRunState(status: string): "active" | "queued" {
   return status === "queued" ? "queued" : "active";
 }
 
+// FIR-1854 — build one inbox row per channel/DM thread that has unread replies.
+// A reply that lands inside a thread carries details.thread_root_id (set
+// server-side by cerebroChannelThreadDetails); grouping those replies by their
+// root surfaces the thread as its own row instead of burying it in the single
+// channel row. Only threads with an unread reply get a row, so the inbox stays
+// clean once the thread has been read. The most recent unread reply backs the
+// row (preview, sort time, deep-link target).
+function buildChannelThreadEntries(
+  rawItems: InboxItem[],
+  channelMap: Map<string, Channel>,
+): DynInboxEntry[] {
+  const byThread = new Map<string, InboxItem[]>();
+  for (const item of rawItems) {
+    if (item.archived) continue;
+    const channelId = item.issue_id;
+    if (!channelId || !channelMap.has(channelId)) continue;
+    const rootId = item.details?.thread_root_id;
+    if (!rootId) continue;
+    const group = byThread.get(rootId) ?? [];
+    group.push(item);
+    byThread.set(rootId, group);
+  }
+  const out: DynInboxEntry[] = [];
+  for (const [rootId, group] of byThread) {
+    const unread = group.filter((i) => !i.read);
+    if (unread.length === 0) continue;
+    unread.sort((a, b) => inboxItemSortTime(b) - inboxItemSortTime(a));
+    const representative = unread[0];
+    if (!representative?.issue_id) continue;
+    const channel = channelMap.get(representative.issue_id);
+    if (!channel) continue;
+    out.push({
+      kind: "thread",
+      id: `thread:${rootId}`,
+      time: inboxItemSortTime(representative),
+      item: representative,
+      channelId: representative.issue_id,
+      channelKind: channel.kind === "dm" ? "dm" : "channel",
+      threadRootId: rootId,
+    });
+  }
+  return out;
+}
+
 export interface DynamicInboxData {
   entries: DynInboxEntry[];
   /** TECH-3598 #3 — raw inbox items, needed to snapshot the unread comment_id
@@ -58,6 +102,11 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
     () => deduplicateInboxItems(inboxQuery.data ?? []),
     [inboxQuery.data],
   );
+  // FIR-1854 — raw (un-deduplicated) items, needed to split channel threads:
+  // deduplicateInboxItems collapses every comment of a channel into one row, so
+  // the per-thread rows must come from the raw feed.
+  const rawItems = useMemo(() => inboxQuery.data ?? [], [inboxQuery.data]);
+  const threadSplitEnabled = useFeatureFlag("cerebro_inbox_thread_split");
 
   const chatQuery = useQuery(chatSessionsOptions(wsId));
   const chatSessions = useMemo(
@@ -170,8 +219,14 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
       if (item.issue_id && (channelMap.has(item.issue_id) || knownChannelIds.has(item.issue_id))) continue;
       out.push({ kind: "notif", id: item.id, time: inboxItemSortTime(item), item });
     }
+    // FIR-1854 — split channel/DM threads with unread replies into their own
+    // rows so a reply buried in a thread is not missed. The channel's top-level
+    // messages still fold into the single channel row above.
+    if (threadSplitEnabled) {
+      for (const entry of buildChannelThreadEntries(rawItems, channelMap)) out.push(entry);
+    }
     return out;
-  }, [channels, chatSessions, items, channelMap, knownChannelIds]);
+  }, [channels, chatSessions, items, channelMap, knownChannelIds, threadSplitEnabled, rawItems]);
 
   const filterContext = useMemo<SectionFilterContext>(() => {
     const action: InboxActionContext = {

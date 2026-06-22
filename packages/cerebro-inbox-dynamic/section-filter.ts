@@ -17,7 +17,20 @@ import type {
 export type DynInboxEntry =
   | { kind: "notif"; id: string; time: number; item: InboxItem }
   | { kind: "chat"; id: string; time: number; session: ChatSession }
-  | { kind: "channel"; id: string; time: number; channel: Channel };
+  | { kind: "channel"; id: string; time: number; channel: Channel }
+  // FIR-1854 — a channel/DM thread with unread replies, surfaced as its own row
+  // so a reply buried inside a thread is not missed. Backed by the most recent
+  // unread reply's inbox item (so it reuses every notif affordance: unread, row
+  // actions, search), but it deep-links into the thread of its channel.
+  | {
+      kind: "thread";
+      id: string;
+      time: number;
+      item: InboxItem;
+      channelId: string;
+      channelKind: "channel" | "dm";
+      threadRootId: string;
+    };
 
 export interface SectionFilterContext {
   action: InboxActionContext;
@@ -46,6 +59,7 @@ const ACTION_KIND: Partial<Record<InboxSectionConfig["kind"], InboxActionCategor
 export function entryIsUnread(entry: DynInboxEntry): boolean {
   switch (entry.kind) {
     case "notif":
+    case "thread":
       return !entry.item.read;
     case "chat":
       return entry.session.has_unread === true;
@@ -83,6 +97,7 @@ export function entryIsRunning(entry: DynInboxEntry, ctx: SectionFilterContext):
 export function entryProjectId(entry: DynInboxEntry): string | null {
   switch (entry.kind) {
     case "notif":
+    case "thread":
       return entry.item.project_id ?? null;
     case "channel":
       return entry.channel.project_id ?? null;
@@ -187,7 +202,7 @@ function inboxSortSignals(
   userId: string,
 ): { lastMessage: number; lastFromMe: number; lastFromOther: number } {
   const lastMessage = entry.time;
-  if (entry.kind === "notif") {
+  if (entry.kind === "notif" || entry.kind === "thread") {
     const item = entry.item;
     const authoredByMe = item.actor_type === "member" && item.actor_id === userId;
     return {
@@ -247,7 +262,7 @@ export function sortEntries(
  *  and chat rows can all carry a muted_until (matches the classic inbox). */
 export function entryIsMuted(entry: DynInboxEntry): boolean {
   const until =
-    entry.kind === "notif"
+    entry.kind === "notif" || entry.kind === "thread"
       ? entry.item.muted_until
       : entry.kind === "channel"
         ? entry.channel.muted_until
@@ -276,13 +291,22 @@ export function matchesViewFilter(
     case "mentioned":
       return entry.kind === "notif" && entry.item.type === "mentioned";
     case "issues":
+      // FIR-1854 — a thread row is a channel/DM message, not an issue, so it
+      // stays out of the Issues view (it shows under Channels / DM instead).
       return entry.kind === "notif";
     case "channels":
-      return entry.kind === "channel" && entry.channel.kind === "channel";
+      return (
+        (entry.kind === "channel" && entry.channel.kind === "channel") ||
+        (entry.kind === "thread" && entry.channelKind === "channel")
+      );
     case "dms":
       // 1:1 agent chats group with DMs — the user's "DM" view is every 1:1
       // thread they have.
-      return entry.kind === "chat" || (entry.kind === "channel" && entry.channel.kind === "dm");
+      return (
+        entry.kind === "chat" ||
+        (entry.kind === "channel" && entry.channel.kind === "dm") ||
+        (entry.kind === "thread" && entry.channelKind === "dm")
+      );
     case "muted":
       return entryIsMuted(entry);
     case "pinned":
@@ -297,6 +321,8 @@ export function entryText(entry: DynInboxEntry): string {
   switch (entry.kind) {
     case "notif":
       return `${entry.item.title ?? ""} ${entry.item.body ?? ""}`;
+    case "thread":
+      return `${entry.item.title ?? ""} ${entry.item.body ?? ""} ${entry.item.details?.thread_root_preview ?? ""}`;
     case "chat":
       return entry.session.title ?? "";
     case "channel":
@@ -410,7 +436,7 @@ function bucketize(
       const id = entry.session.agent_id;
       return { key: id, label: gctx.agentMap?.get(id)?.name ?? "Unknown agent", isFallback: false };
     }
-    if (entry.kind === "notif") {
+    if (entry.kind === "notif" || entry.kind === "thread") {
       if (entry.item.actor_type === "agent" && entry.item.actor_id) {
         const id = entry.item.actor_id;
         return { key: id, label: gctx.agentMap?.get(id)?.name ?? "Unknown agent", isFallback: false };

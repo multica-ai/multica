@@ -29,6 +29,9 @@ export function messageKeyForEntry(entry: DynInboxEntry): string {
       return `channel:${entry.channel.id}`;
     case "chat":
       return `chat:${entry.session.id}`;
+    case "thread":
+      // FIR-1854 — a copyable link round-trips to the thread row.
+      return `thread:${entry.threadRootId}`;
   }
 }
 
@@ -52,6 +55,8 @@ export function findEntryByMessageKey(
     if (kind === "channel" && entry.kind === "channel" && entry.channel.id === id) return entry;
     if (kind === "channel" && entry.kind === "notif" && entry.item.issue_id === id) return entry;
     if (kind === "chat" && entry.kind === "chat" && entry.session.id === id) return entry;
+    // FIR-1854 — round-trip a thread link back to its thread row.
+    if (kind === "thread" && entry.kind === "thread" && entry.threadRootId === id) return entry;
   }
   return null;
 }

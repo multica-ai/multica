@@ -1060,6 +1060,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 			}
 		}
 
+		// CEREBRO-PATCH(inbox-thread-split): FIR-1854 — tag a channel/DM reply's inbox row with its thread root so the dynamic inbox can split the thread into its own row.
+		commentDetails = cerebroChannelThreadDetails(ctx, queries, issueKind, e.WorkspaceID, commentID, commentDetails)
+
 		// Notify @mentions in comment content. Suppress only the duplicate
 		// subscriber mobile push for mentioned recipients; their new_comment
 		// inbox/notification item is still created, and the mentioned push wins.

@@ -37,6 +37,9 @@ export type CerebroFlagKey =
   // instead of auto-advancing to the next message. Per-user preference.
   | "cerebro_inbox_archive_to_list"
   | "cerebro_inbox_dynamic"
+  // FIR-1854: split a channel/DM thread with unread replies into its own
+  // inbox row so replies buried in a thread are not missed.
+  | "cerebro_inbox_thread_split"
   | "cerebro_notes"
   // FIR-1590: per-folder access control — "Only you / Selected colleagues /
   // Whole team" on note + document folders. Gates the folder and its contents.
@@ -321,6 +324,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // OFF: preserve today's auto-advance-to-next behavior unless the user opts in.
   cerebro_inbox_archive_to_list: false,
   cerebro_inbox_dynamic: false,
+  // FIR-1854 (Jesper): ON — a thread reply that would otherwise hide inside
+  // the channel row gets its own inbox row so it is not missed.
+  cerebro_inbox_thread_split: true,
   // TECH-3421: OFF by default until the Notes UI ships + is QA'd on staging.
   // Gates the Notes feature (private-by-default notes built on artifacts):
   // the Notes nav entry, quick-capture, the notes list/editor surface, and the
@@ -1310,6 +1316,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Enable the per-runtime presentation_mode toggle and the in-app xterm.js terminal panel. Runtimes flipped to 'interactive' stream a live shell to the Multica UI so the user can watch and take over an agent session.",
+  },
+  {
+    key: "cerebro_inbox_thread_split",
+    label: "Split channel threads into their own inbox rows",
+    group: "inbox",
+    description:
+      "On a channel or DM, when someone replies inside a thread, surface that thread as its own inbox row (deep-linking into the thread) instead of folding the reply into the single channel row where it is easy to miss. Only threads with unread replies get a row. FIR-1854.",
   },
   {
     key: "cerebro_child_done_notify_parent",

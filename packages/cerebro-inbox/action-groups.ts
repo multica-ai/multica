@@ -80,6 +80,9 @@ export interface InboxActionContext {
 /** Structural subset of the inbox page's MergedEntry we classify against. */
 export type InboxActionEntry =
   | { kind: "notif"; item: InboxItem }
+  // FIR-1854 — a channel/DM thread row classifies exactly like the comment
+  // notification behind it (act_now when its newest reply is unread).
+  | { kind: "thread"; item: InboxItem }
   | { kind: "chat"; session: { id: string; has_unread?: boolean } }
   | {
       kind: "channel";
@@ -131,6 +134,7 @@ export function classifyInboxAction(
 ): InboxActionCategory {
   switch (entry.kind) {
     case "notif":
+    case "thread":
       return classifyNotif(entry.item, ctx);
     case "chat":
       // A 1:1 agent chat: unread is literal, then live run, then read/settled.

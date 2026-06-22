@@ -50,7 +50,24 @@ export function DynamicInboxRow({
   onUnarchive,
 }: DynamicInboxRowProps) {
   let row: React.ReactNode;
-  if (entry.kind === "notif") {
+  if (entry.kind === "thread") {
+    // FIR-1854 — a channel/DM thread row reuses the issue-notification row
+    // chrome (avatar, title, preview, unread stripe, 3-dot / swipe actions); it
+    // is backed by the thread's newest unread reply and opens the thread in the
+    // channel pane. Drop the unread weight the moment it is open, like notif.
+    const item =
+      isSelected && !entry.item.read ? { ...entry.item, read: true } : entry.item;
+    row = (
+      <InboxListItem
+        item={item}
+        isSelected={isSelected}
+        agentRunState={agentRunState}
+        onClick={() => onSelect(entry)}
+        onArchive={() => onArchive(entry)}
+        onUnarchive={isArchivedView && onUnarchive ? () => onUnarchive(entry) : undefined}
+      />
+    );
+  } else if (entry.kind === "notif") {
     // TECH-3709 — the open row reads as "read" the moment you're active on it:
     // the bold weight + brand-blue unread stripe drop on selection. We only
     // change what THIS row renders; placement still uses the frozen

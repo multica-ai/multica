@@ -19,7 +19,9 @@ import type { InboxItem, Channel } from "@multica/core/types";
 export type PinnableEntry =
   | { kind: "chat" }
   | { kind: "notif"; item: Pick<InboxItem, "issue_id" | "project_id"> }
-  | { kind: "channel"; channel: Pick<Channel, "id"> };
+  | { kind: "channel"; channel: Pick<Channel, "id"> }
+  // FIR-1854 — a channel/DM thread row pins with its channel.
+  | { kind: "thread"; channelId: string };
 
 /** The resolved pin context an entry is matched against. */
 export interface PinnedContext {
@@ -47,6 +49,7 @@ export function entryMatchesPins(entry: PinnableEntry, ctx: PinnedContext): bool
     return false;
   }
   if (entry.kind === "channel") return ctx.pinnedChannelIds.has(entry.channel.id);
+  if (entry.kind === "thread") return ctx.pinnedChannelIds.has(entry.channelId);
   return false; // agent chat sessions have no pin representation
 }
 

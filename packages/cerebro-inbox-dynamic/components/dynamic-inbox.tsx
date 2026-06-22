@@ -372,7 +372,8 @@ export function DynamicInbox() {
   // row passes it as `onCleared`).
   const onArchive = useCallback(
     (entry: DynInboxEntry) => {
-      if (entry.kind === "notif") archiveInbox.mutate(entry.item.id);
+      // FIR-1854 — a thread row archives its backing inbox item, like a notif.
+      if (entry.kind === "notif" || entry.kind === "thread") archiveInbox.mutate(entry.item.id);
       else if (entry.kind === "channel") archiveChannel.mutate(entry.channel.id);
       if (selected && selected.id === entry.id) clearSelection();
     },
@@ -719,6 +720,21 @@ export function DynamicInbox() {
             initialChannel={selected.channel}
             // TECH-3598 #3 — open at the unread thread, classic parity.
             initialCommentId={selectedChannelCommentId}
+            onArchive={clearSelection}
+          />
+        </ErrorBoundary>
+      );
+    }
+    // FIR-1854 — a thread row opens its channel in the same pane and deep-links
+    // straight into the thread via the reply's comment id (ChannelDetail opens
+    // the thread side-panel when the initial comment is itself a reply).
+    if (selected.kind === "thread") {
+      return (
+        <ErrorBoundary resetKeys={[selected.channelId, selected.threadRootId]}>
+          <ChannelDetail
+            key={selected.channelId}
+            channelId={selected.channelId}
+            initialCommentId={selected.item.details?.comment_id ?? undefined}
             onArchive={clearSelection}
           />
         </ErrorBoundary>

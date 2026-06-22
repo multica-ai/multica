@@ -475,3 +475,54 @@ describe("section-filter — classic parity (TECH-3541 #2)", () => {
     expect(groups[0]?.children).toHaveLength(2);
   });
 });
+
+// FIR-1854 — channel/DM thread rows reuse the notif-backed shape but file under
+// Channels / DM and classify like their backing comment notification.
+function threadEntry(
+  time: number,
+  channelKind: "channel" | "dm",
+  over: Partial<InboxItem> = {},
+): DynInboxEntry {
+  const item = notif({ type: channelKind === "dm" ? "dm_message" : "new_comment", ...over });
+  return {
+    kind: "thread",
+    id: `thread:${item.id}`,
+    time,
+    item,
+    channelId: item.issue_id ?? "iss1",
+    channelKind,
+    threadRootId: item.id,
+  };
+}
+
+describe("section-filter — FIR-1854 thread rows", () => {
+  it("reports unread/read from the backing reply item", () => {
+    expect(entryIsUnread(threadEntry(1, "channel", { read: false }))).toBe(true);
+    expect(entryIsUnread(threadEntry(1, "channel", { read: true }))).toBe(false);
+  });
+
+  it("reads project id and muted state from the backing item", () => {
+    expect(entryProjectId(threadEntry(1, "channel", { project_id: "p9" }))).toBe("p9");
+    const muted = threadEntry(1, "dm", { muted_until: "2999-01-01T00:00:00Z" });
+    expect(entryIsMuted(muted)).toBe(true);
+  });
+
+  it("files a channel thread under Channels and a DM thread under DM — never Issues", () => {
+    const chThread = threadEntry(1, "channel");
+    const dmThread = threadEntry(1, "dm");
+    expect(matchesViewFilter(chThread, "channels", ctx)).toBe(true);
+    expect(matchesViewFilter(chThread, "issues", ctx)).toBe(false);
+    expect(matchesViewFilter(dmThread, "dms", ctx)).toBe(true);
+    expect(matchesViewFilter(dmThread, "channels", ctx)).toBe(false);
+    expect(matchesViewFilter(dmThread, "issues", ctx)).toBe(false);
+  });
+
+  it("an unread thread classifies as act_now (same as its comment notification)", () => {
+    const out = selectSectionEntries(
+      [threadEntry(1, "channel", { read: false })],
+      { id: "s", kind: "act_now" },
+      ctx,
+    );
+    expect(out).toHaveLength(1);
+  });
+});

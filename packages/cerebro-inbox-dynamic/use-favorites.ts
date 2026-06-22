@@ -30,6 +30,9 @@ export function favoriteKeyForEntry(entry: DynInboxEntry): string {
       return `chat:${entry.session.id}`;
     case "channel":
       return `channel:${entry.channel.id}`;
+    case "thread":
+      // A thread shares its channel's favorite (FIR-1854).
+      return `channel:${entry.channelId}`;
     default:
       return "";
   }
