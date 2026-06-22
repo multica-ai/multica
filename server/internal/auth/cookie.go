@@ -88,6 +88,15 @@ func AuthTokenTTL() time.Duration {
 	return authTokenTTLCached
 }
 
+// ResetAuthTokenTTLCacheForTest forces the next AuthTokenTTL call to re-read
+// AUTH_TOKEN_TTL. AuthTokenTTL caches on first call via sync.Once, so a test
+// that sets AUTH_TOKEN_TTL via t.Setenv after another test already triggered
+// the cache would see the stale 30-day default. Only for use in tests.
+func ResetAuthTokenTTLCacheForTest() {
+	authTokenTTLOnce = sync.Once{}
+	authTokenTTLCached = 0
+}
+
 // cookieDomain returns the trimmed COOKIE_DOMAIN env value, or "" if it looks
 // like an IP address. RFC 6265 §4.1.2.3 forbids IP literals in the cookie
 // Domain attribute, so browsers silently drop Set-Cookie headers that carry

@@ -45,6 +45,9 @@ func TestRefreshCloudFrontCookies_UsesAuthTokenTTL(t *testing.T) {
 	// Set a short TTL (1 hour) so we can verify the middleware does NOT use
 	// the old hardcoded 30-day value.
 	t.Setenv("AUTH_TOKEN_TTL", "1h")
+	// AuthTokenTTL caches on first call via sync.Once; a prior test may have
+	// already cached the default. Force a re-read of the env var we just set.
+	auth.ResetAuthTokenTTLCacheForTest()
 
 	signer := testSigner(t)
 	handler := RefreshCloudFrontCookies(signer)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
