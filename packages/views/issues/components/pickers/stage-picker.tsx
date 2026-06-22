@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Hash } from "lucide-react";
+import { Milestone } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import { PropertyPicker, PickerItem } from "./property-picker";
 import { useT } from "../../../i18n";
@@ -65,7 +65,7 @@ export function StagePicker({
       trigger={
         customTrigger ?? (
           <>
-            <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <Milestone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate">
               {stage == null
                 ? t(($) => $.stage.none)
@@ -82,7 +82,7 @@ export function StagePicker({
           setOpen(false);
         }}
       >
-        <span className="truncate text-muted-foreground">{t(($) => $.stage.none)}</span>
+        <span className="truncate text-xs text-muted-foreground">{t(($) => $.stage.none)}</span>
       </PickerItem>
       {options.map((s) => (
         <PickerItem
@@ -93,8 +93,8 @@ export function StagePicker({
             setOpen(false);
           }}
         >
-          <span className="inline-flex items-center gap-1.5">
-            <Hash className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <span className="inline-flex items-center gap-1.5 text-xs">
+            <Milestone className="h-3 w-3 shrink-0 text-muted-foreground" />
             {t(($) => $.stage.value, { n: s })}
           </span>
         </PickerItem>

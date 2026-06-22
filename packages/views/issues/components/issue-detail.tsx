@@ -14,7 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
-  Hash,
+  Milestone,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -1531,7 +1531,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                         <PriorityIcon priority="medium" inheritColor className="text-muted-foreground" />
                       )}
                       {k === "stage" && (
-                        <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <Milestone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       )}
                       {k === "start_date" && (
                         <CalendarClock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
