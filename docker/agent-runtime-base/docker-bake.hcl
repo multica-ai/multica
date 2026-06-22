@@ -59,6 +59,11 @@ variable "GH_CLI_VERSION"      { default = "" }
 // at build time; pin (e.g. `1.3.18~stable`) for stricter reproducibility
 // once a known-good version is identified.
 variable "ACLI_VERSION"        { default = "" }
+// uv / uvx — copied from ghcr.io/astral-sh/uv:<UV_VERSION>. `latest`
+// takes whatever Astral ships at build time. Pin to a semver (e.g. `0.7.13`)
+// for prod bakes. Both /uv and /uvx are copied so `uv tool run` and the
+// `uvx` shorthand are both available in PATH.
+variable "UV_VERSION"          { default = "latest" }
 variable "UID"                 { default = "1000" }
 variable "GID"                 { default = "1000" }
 
@@ -94,12 +99,13 @@ target "default" {
     HERMES_COMMIT       = "${HERMES_COMMIT}"
     GH_CLI_VERSION      = "${GH_CLI_VERSION}"
     ACLI_VERSION        = "${ACLI_VERSION}"
+    UV_VERSION          = "${UV_VERSION}"
     UID                 = "${UID}"
     GID                 = "${GID}"
   }
   labels = {
     "org.opencontainers.image.source"      = "https://github.com/g2crowd/agentfarm"
-    "org.opencontainers.image.description" = "Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes + acli)"
+    "org.opencontainers.image.description" = "Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes + acli + uv/uvx + npx)"
     "org.opencontainers.image.licenses"    = "UNLICENSED"
   }
   cache-from = ["type=gha,scope=agent-runtime-base"]

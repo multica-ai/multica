@@ -30,6 +30,8 @@ Image: `ghcr.io/g2crowd/agent-runtime-base:<tag>` — multi-arch
 | `hermes`  | [`NousResearch/hermes-agent`][hermes] installer | `HERMES_REF` (upstream release tag) + `HERMES_COMMIT` (verified SHA) |
 | `gh`      | apt from `cli.github.com/packages`              | `GH_CLI_VERSION` (apt)   |
 | `acli`    | apt from `acli.atlassian.com/linux/deb`         | `ACLI_VERSION` (apt)     |
+| `uv` / `uvx` | [`ghcr.io/astral-sh/uv`][uv] (binary copy)  | `UV_VERSION`             |
+| `npx`     | Ships with npm (Node.js LTS install)            | `NODE_VERSION`           |
 
 Common substrate: Debian `bookworm-slim`, Node `22` LTS, Go `1.26.1` (build
 stage only), `git`, `bash`, `curl`, `jq`, `rsync`, `ripgrep`, `tini`,
@@ -41,6 +43,7 @@ build Python wheels from source on aarch64 if no manylinux wheel exists) and
 purged before the layer commits — it does not ship in the final image.
 
 [hermes]:  https://github.com/NousResearch/hermes-agent
+[uv]:      https://github.com/astral-sh/uv
 
 ## Build args
 
@@ -61,6 +64,7 @@ All version-pinned via build args. Defaults match the Dockerfile so a bare
 | `HERMES_COMMIT`        | `498bfc7bc12a937621b4215312049b1000726df3` | The commit SHA that `HERMES_REF` resolves to (peeled — what `git rev-parse HEAD` returns after `git clone --branch <tag>`, not the tag-object SHA). The Dockerfile verifies the installed HEAD matches; the build fails loudly if the tag has been force-moved. Resolve via `git ls-remote --tags https://github.com/NousResearch/hermes-agent <tag>^{}` (the `^{}` form gives you the peeled commit). |
 | `GH_CLI_VERSION`       | (empty)                                  | apt version pin for `gh` (e.g. `2.63.0`). Empty = whatever cli.github.com ships at build time. |
 | `ACLI_VERSION`         | `1.3.18~stable`                          | apt version pin for `acli`. Required (no empty default) — agents drive JIRA via this and an upstream regression silently downgrading capability would be hard to spot. Format matches the package version advertised at `acli.atlassian.com/linux/deb` (semver with a `~stable` suffix). |
+| `UV_VERSION`           | `latest`                                 | Tag for `ghcr.io/astral-sh/uv`. `latest` = current Astral release at build time. Pin to a semver (e.g. `0.7.13`) for prod bakes. Both `/uv` and `/uvx` are copied from this image so both commands are available. |
 | `UID`                  | `1000`                                   | Runtime user uid.                                                   |
 | `GID`                  | `1000`                                   | Runtime user gid.                                                   |
 
@@ -70,14 +74,16 @@ The Dockerfile runs the smoke test at build time and fails the build if any
 tool refuses to start:
 
 ```bash
-claude  --version
-codex   --version
+claude   --version
+codex    --version
 opencode --version
-pi      --version
-multica --version
-gh      --version
-acli    --version
-hermes  --help     # hermes uses python-fire; --version is not surfaced
+pi       --version
+multica  --version
+gh       --version
+acli     --version
+hermes   --help     # hermes uses python-fire; --version is not surfaced
+uvx      --version
+npx      --version
 ```
 
 `hermes --version` is **not** in the smoke set on purpose — the project
@@ -92,7 +98,8 @@ To run the smoke test manually against a built image:
 docker run --rm ghcr.io/g2crowd/agent-runtime-base:<tag> \
   sh -c "claude --version && codex --version && opencode --version \
       && pi --version && multica --version && gh --version \
-      && acli --version && hermes --help >/dev/null"
+      && acli --version && hermes --help >/dev/null \
+      && uvx --version && npx --version"
 ```
 
 ## Building locally
@@ -178,11 +185,24 @@ one of the baked tools:
    The Dockerfile pins `acli=${ACLI_VERSION}` against apt — a stale or
    removed version fails the build with `E: Version '<X>' for 'acli' was not
    found`, so wedging an unsupported pin into prod is mechanically impossible.
-7. **Open the PR.** CI bakes the new image on merge (see `publish.yml`'s
+7. **For `uv` / `uvx`:** bump `UV_VERSION` in `docker-bake.hcl` to the desired
+   semver tag (e.g. `0.7.13` — find releases at
+   [`astral-sh/uv/releases`](https://github.com/astral-sh/uv/releases)). The
+   Dockerfile copies both `/uv` and `/uvx` from `ghcr.io/astral-sh/uv:<tag>`,
+   which is a multi-arch image maintained by Astral. No SHA verification is
+   needed beyond the image tag — Docker's content-addressable registry ensures
+   the tag you pull is exactly the image Astral published. Smoke-test locally:
+   ```bash
+   docker buildx bake -f docker/agent-runtime-base/docker-bake.hcl \
+     --set default.platform=linux/arm64 \
+     --set default.output=type=docker \
+     --set default.tags=test-uv-pin:local default
+   ```
+8. **Open the PR.** CI bakes the new image on merge (see `publish.yml`'s
    `bake-build-agent-runtime-base` job) and publishes both
    `ghcr.io/g2crowd/agent-runtime-base:<sha>` and
    `ghcr.io/g2crowd/agent-runtime-base:latest`.
-8. **Bump consumers** in a separate PR. Each downstream image FROMs
+9. **Bump consumers** in a separate PR. Each downstream image FROMs
    `agent-runtime-base:<tag>` — bump `BASE_TAG` in their bake file
    (`docker/devenv-runtime/docker-bake.hcl`)
    to the new `<sha>`, or leave it at `latest` to ride the floating tag.

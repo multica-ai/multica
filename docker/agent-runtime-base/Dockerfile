@@ -15,6 +15,8 @@
 #   * hermes     — NousResearch/hermes-agent (installer)   @ HERMES_REF (+ HERMES_COMMIT verify)
 #   * gh         — GitHub CLI (apt; cli.github.com repo)   @ GH_CLI_VERSION
 #   * acli       — Atlassian CLI (apt; acli.atlassian.com) @ ACLI_VERSION
+#   * uv / uvx   — astral-sh/uv (multi-arch image copy)   @ UV_VERSION
+#   * npx        — ships with npm (Node.js LTS install above)
 #
 # Substrate: debian bookworm-slim, node LTS, git, bash, curl, jq, rsync,
 # ripgrep, ca-certificates, tini. Non-root user `agent` at UID:GID 1000:1000.
@@ -25,6 +27,7 @@
 
 ARG NODE_VERSION=22
 ARG GO_VERSION=1.26.1
+ARG UV_VERSION=latest
 
 # ----------------------------------------------------------------------------
 # Stage 1 — build the multica CLI from this repo's server/cmd/multica.
@@ -59,7 +62,18 @@ RUN cd server \
       -o /out/multica ./cmd/multica
 
 # ----------------------------------------------------------------------------
-# Stage 2 — runtime substrate + npm-installable agent CLIs.
+# Stage 2 — uv / uvx binaries (multi-arch official image).
+#
+# ghcr.io/astral-sh/uv publishes a minimal multi-arch image whose only
+# content is the two static binaries /uv and /uvx. We COPY them into the
+# runtime stage rather than running the curl installer, which keeps the
+# install hermetic, avoids a curl→sh pipeline, and works identically on
+# amd64 and arm64 without any platform-conditional logic.
+# ----------------------------------------------------------------------------
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv-dist
+
+# ----------------------------------------------------------------------------
+# Stage 3 — runtime substrate + npm-installable agent CLIs.
 #
 # We install hermes here too (root + Linux path of the installer drops the
 # binary at /usr/local/bin/hermes — same FHS layout as claude-code / codex).
@@ -172,6 +186,11 @@ RUN apt-get update \
  && apt-get purge -y --auto-remove build-essential \
  && rm -rf /var/lib/apt/lists/*
 
+# uv / uvx are static binaries with no self-update path baked in here, so
+# they live in the shared root-owned toolchain dir (unlike multica, which
+# self-updates and gets its own agent-owned /opt/multica/bin below).
+COPY --from=uv-dist /uv /uvx /usr/local/bin/
+
 # Non-root runtime user. Matches the description's UID=1000 default; pass
 # UID/GID build args to align with hosts that need a different mapping
 # (devenv overlays uid=1000 onto the EFS PVC owner).
@@ -229,7 +248,9 @@ RUN claude --version \
  && multica --version \
  && gh --version \
  && acli --version \
- && hermes --help >/dev/null
+ && hermes --help >/dev/null \
+ && uvx --version \
+ && npx --version
 
 USER agent
 WORKDIR /home/agent
@@ -238,5 +259,5 @@ ENV HOME=/home/agent \
     MULTICA_WORKSPACES_ROOT=/home/agent/multica_workspaces
 
 LABEL org.opencontainers.image.source="https://github.com/g2crowd/agentfarm" \
-      org.opencontainers.image.description="Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes + acli)" \
+      org.opencontainers.image.description="Shared agent-runtime base (multica + claude + codex + opencode + pi + hermes + acli + uv/uvx + npx)" \
       org.opencontainers.image.licenses="UNLICENSED"
