@@ -248,13 +248,8 @@
     text-autospace: ideograph-alpha ideograph-numeric;
   }
 
-  @media (max-width: 767px), (pointer: coarse) {
-    input:not([type="button"]):not([type="checkbox"]):not([type="color"]):not([type="file"]):not([type="hidden"]):not([type="image"]):not([type="radio"]):not([type="range"]):not([type="reset"]):not([type="submit"]),
-    textarea,
-    select,
-    [contenteditable]:not([contenteditable="false"]) {
-      /* iOS Safari zooms the page when focused editable text is below 16px. */
-      font-size: 16px !important;
-    }
-  }
+  /* CEREBRO-PATCH(no-mobile-form-font-bump): FIR-1812 — removed the global mobile
+     16px form-font rule (old iOS-Safari zoom-on-focus workaround). Firtal serves
+     touch users via the native mobile app; on web it made controls read oversized
+     and out of step with the app's standard text sizes. Do not re-add on sync. */
 }

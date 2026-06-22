@@ -1017,10 +1017,7 @@ function DateConditionRowV2({
     // with standard h-8 controls (matching NativeSelect/Input/Button defaults) so mobile
     // element sizing aligns with the rest of Multica and with the desktop inline single-row
     // layout. The `md:contents` wrappers group controls on mobile yet dissolve on desktop
-    // so the parent flex row is byte-identical to the original. The native <select> boxes
-    // carry `text-sm!` to opt out of the global mobile 16px form-font rule (base.css) — that
-    // rule only exists to stop iOS zooming text inputs on focus; a <select> opens a picker
-    // and never zooms, so 16px just made these boxes read oversized vs the value button.
+    // so the parent flex row is byte-identical to the original.
     <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-muted/30 p-2.5 md:flex-row md:flex-wrap md:items-center md:gap-1.5 md:rounded-none md:border-0 md:bg-transparent md:p-0">
       {/* Conjunction tag + remove sit on one header line on mobile; on desktop the
           label flows inline and the remove icon moves to the end of the row. */}
@@ -1042,7 +1039,7 @@ function DateConditionRowV2({
       {/* Field + operator share a row on mobile, become separate inline cells on desktop. */}
       <div className="flex gap-2 md:contents">
         <NativeSelect
-          className="h-8 flex-1 text-sm! md:w-32 md:flex-none"
+          className="h-8 flex-1 md:w-32 md:flex-none"
           value={c.field}
           onChange={(e) => changeField(e.target.value as IssueDateField)}
         >
@@ -1053,7 +1050,7 @@ function DateConditionRowV2({
           ))}
         </NativeSelect>
         <NativeSelect
-          className="h-8 flex-1 text-sm! md:w-28 md:flex-none"
+          className="h-8 flex-1 md:w-28 md:flex-none"
           value={op}
           onChange={(e) => changeOp(e.target.value as DateOp)}
         >
@@ -1107,7 +1104,7 @@ function DateConditionRowV2({
             className="h-8 w-20 md:w-16"
           />
           <NativeSelect
-            className="h-8 flex-1 text-sm! md:w-24 md:flex-none"
+            className="h-8 flex-1 md:w-24 md:flex-none"
             value={c.relative.unit}
             onChange={(e) => setRelative({ unit: e.target.value as RelativeDateUnit })}
           >
