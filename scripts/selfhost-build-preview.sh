@@ -68,23 +68,15 @@ fi
 
 project_name="${COMPOSE_PROJECT_NAME:-multica_preview_${profile}}"
 
-# Guard: skip rebuild if this profile already has running services
+# Detect existing services for this profile and rebuild them automatically,
+# instead of silently starting a second copy on shifted ports.
 echo "==> Checking if preview '${profile}' is already running..."
 if docker ps --filter "label=com.docker.compose.project=${project_name}" -q 2>/dev/null | grep -q .; then
-  echo ""
-  echo "⚠️  Preview '${profile}' already has running services."
-  echo "  To rebuild, stop it first:"
-  if [ -n "$issue" ]; then
-    echo "    make selfhost-preview-clean ISSUE=${issue}"
-  elif [ -n "${PROFILE:-}" ]; then
-    echo "    make selfhost-preview-clean PROFILE=${PROFILE}"
-  else
-    echo "    make selfhost-preview-clean"
-  fi
-  exit 0
+  echo "  Preview '${profile}' is already running — stopping it to rebuild."
 fi
 
-# Clean up any leftover containers (stopped/exited) before allocating ports
+# Stop any previous containers for this profile (running or stopped) before
+# allocating ports, so the rebuild reuses the same ports instead of drifting.
 echo "==> Stopping any previous preview containers for '${profile}'..."
 if ! COMPOSE_PROJECT_NAME="$project_name" \
   docker compose \
