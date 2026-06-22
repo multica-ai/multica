@@ -71,6 +71,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const storeProperties = useViewStore((s) => s.cardProperties);
+  const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),
@@ -194,8 +195,11 @@ export const BoardCardContent = memo(function BoardCardContent({
 
       {/* Row 2: Title */}
       <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">
-        {issue.parent_issue_id && (
-          <CornerDownRight className="inline-block size-3.5 text-muted-foreground/70 shrink-0 mr-1.5 align-text-bottom" />
+        {issue.parent_issue_id && swimlaneGrouping !== "parent" && (
+          <CornerDownRight
+            className="inline-block size-3.5 text-muted-foreground/70 mr-1.5 align-[-0.125em]"
+            aria-hidden="true"
+          />
         )}
         {issue.title}
       </p>
