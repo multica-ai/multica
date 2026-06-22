@@ -232,6 +232,7 @@
     "update_failed": "Failed to update issue",
     "link_copied": "Link copied",
     "link_copy_failed": "Failed to copy link",
+    "export_failed": "Failed to export issue",
     "workdir_path_copied": "Workdir path copied",
     "workdir_path_copy_failed": "Failed to copy workdir path",
     "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
@@ -428,6 +429,7 @@
     "unpin_from_sidebar": "Unpin from sidebar",
     "copy_link": "Copy link",
     "copy_workdir_path": "Copy local workdir path",
+    "export": "Export",
     "more": "More",
     "create_sub_issue": "Create sub-issue",
     "set_parent_issue": "Set parent issue...",

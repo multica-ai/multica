@@ -229,6 +229,7 @@
     "update_failed": "イシューを更新できませんでした",
     "link_copied": "リンクをコピーしました",
     "link_copy_failed": "リンクをコピーできませんでした",
+    "export_failed": "イシューをエクスポートできませんでした",
     "workdir_path_copied": "作業ディレクトリのパスをコピーしました",
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
     "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのイシューを実行していません"
@@ -409,6 +410,7 @@
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
     "copy_link": "リンクをコピー",
     "copy_workdir_path": "ローカルの作業ディレクトリのパスをコピー",
+    "export": "エクスポート",
     "more": "その他",
     "create_sub_issue": "サブイシューを作成",
     "set_parent_issue": "親イシューを設定...",

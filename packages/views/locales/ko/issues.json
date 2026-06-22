@@ -232,6 +232,7 @@
     "update_failed": "이슈를 업데이트하지 못했습니다",
     "link_copied": "링크를 복사했습니다",
     "link_copy_failed": "링크를 복사하지 못했습니다",
+    "export_failed": "이슈를 내보내지 못했습니다",
     "workdir_path_copied": "작업 디렉터리 경로를 복사했습니다",
     "workdir_path_copy_failed": "작업 디렉터리 경로를 복사하지 못했습니다",
     "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 이슈를 실행하지 않았습니다"
@@ -427,6 +428,7 @@
     "unpin_from_sidebar": "사이드바 고정 해제",
     "copy_link": "링크 복사",
     "copy_workdir_path": "로컬 작업 디렉터리 경로 복사",
+    "export": "내보내기",
     "more": "더 보기",
     "create_sub_issue": "하위 이슈 만들기",
     "set_parent_issue": "상위 이슈 설정...",

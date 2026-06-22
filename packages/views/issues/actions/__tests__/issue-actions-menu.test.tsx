@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue } from "@multica/core/types";
@@ -82,6 +82,7 @@ vi.mock("@multica/core/paths", async () => {
   return {
     ...actual,
     useCurrentWorkspace: () => ({ id: "ws-1", name: "Test", slug: "test" }),
+    useWorkspaceSlug: () => "test",
     useWorkspacePaths: () => actual.paths.workspace("test"),
   };
 });
@@ -98,6 +99,10 @@ vi.mock("../../../navigation", () => ({
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock("@multica/core/workspace/avatar-url", () => ({
+  resolvePublicFileUrl: (path: string) => `https://api.example.test${path}`,
 }));
 
 vi.mock("../../../common/actor-avatar", () => ({
@@ -144,6 +149,10 @@ beforeEach(() => {
   mockOpenModal.mockReset();
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("IssueActionsDropdown", () => {
   it("renders the top-level items when the trigger is clicked", async () => {
     render(
@@ -163,6 +172,7 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Assignee")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
+    expect(screen.getByText("Export")).toBeInTheDocument();
     expect(screen.getByText("More")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
     // Relationship actions are hidden inside the "More" submenu by default.
@@ -192,6 +202,42 @@ describe("IssueActionsDropdown", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("Members")).toBeInTheDocument();
     expect(await screen.findByText("Test User")).toBeInTheDocument();
+  });
+
+  it("clicking Export starts a native issue export download", async () => {
+    const originalCreateElement = document.createElement.bind(document);
+    const click = vi.fn();
+    const remove = vi.fn();
+    const appendChild = vi.spyOn(document.body, "appendChild");
+    vi.spyOn(document, "createElement").mockImplementation(((tagName: string) => {
+      const el = originalCreateElement(tagName);
+      if (tagName.toLowerCase() === "a") {
+        Object.defineProperty(el, "click", { value: click });
+        Object.defineProperty(el, "remove", { value: remove });
+      }
+      return el;
+    }) as typeof document.createElement);
+
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Export"));
+
+    expect(appendChild).toHaveBeenCalledWith(
+      expect.objectContaining({
+        href: "https://api.example.test/api/issues/issue-1/export?workspace_slug=test",
+        download: "",
+      }),
+    );
+    expect(click).toHaveBeenCalled();
+    expect(remove).toHaveBeenCalled();
   });
 
   it("clicking Delete issue opens the delete-confirm modal", async () => {
