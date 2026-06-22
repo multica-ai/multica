@@ -16,6 +16,7 @@
     "trigger": "帮助",
     "docs": "文档",
     "changelog": "更新日志",
+    "discord": "Discord",
     "feedback": "反馈"
   },
   "workspace_loader": {

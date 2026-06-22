@@ -1,4 +1,4 @@
-import { githubUrl } from "../components/shared";
+import { githubUrl, discordUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
 export function createEnDict(allowSignup: boolean): LandingDict {
@@ -244,6 +244,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           { label: "Documentation", href: "/docs" },
           { label: "API", href: githubUrl },
           { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
+          { label: "Discord", href: discordUrl },
         ],
       },
       company: {

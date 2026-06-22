@@ -16,6 +16,7 @@
     "trigger": "Help",
     "docs": "Docs",
     "changelog": "Change log",
+    "discord": "Discord",
     "feedback": "Feedback"
   },
   "workspace_loader": {

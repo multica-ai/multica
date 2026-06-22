@@ -16,6 +16,7 @@
     "trigger": "도움말",
     "docs": "문서",
     "changelog": "변경 로그",
+    "discord": "Discord",
     "feedback": "피드백"
   },
   "workspace_loader": {
