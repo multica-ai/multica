@@ -768,6 +768,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             onUpdate={(md) => handleUpdateField({ description: md || null })}
             debounceMs={1500}
           />
+          <p className="mt-1 px-2 text-xs text-muted-foreground">
+            {t(($) => $.detail.description_hint)}
+          </p>
         </div>}
       </div>
 

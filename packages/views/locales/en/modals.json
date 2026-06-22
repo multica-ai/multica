@@ -90,6 +90,7 @@
     "icon_tooltip": "Choose icon",
     "title_placeholder": "Project title",
     "description_placeholder": "Add description...",
+    "description_hint": "Shared with agents as context for every task in this project.",
     "lead": "Lead",
     "no_lead": "No lead",
     "lead_placeholder": "Assign lead...",

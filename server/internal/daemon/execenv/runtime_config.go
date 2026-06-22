@@ -564,6 +564,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		if ctx.ProjectTitle != "" {
 			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
 		}
+		if desc := strings.TrimSpace(ctx.ProjectDescription); desc != "" {
+			b.WriteString("Project description — durable context the project owner set for every task in this project:\n\n")
+			b.WriteString(desc)
+			b.WriteString("\n\n")
+		}
 		if len(ctx.ProjectResources) > 0 {
 			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
 			for _, r := range ctx.ProjectResources {
