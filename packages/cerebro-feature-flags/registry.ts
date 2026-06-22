@@ -66,6 +66,10 @@ export type CerebroFlagKey =
   // (no auto-fire on @-mention). Gates the coupling UI, the "unsent comments"
   // notice, and the send controls. Default off until QA'd on staging.
   | "cerebro_note_agent_collab"
+  // FIR-1800: reference an artifact (document/note) inside a comment / chat /
+  // DM / channel body via a `mention://artifact/<id>` token, rendered as a
+  // compact white card that opens the full-page note editor.
+  | "cerebro_artifact_references"
   // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
@@ -336,6 +340,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_note_inbox_pane: true,
   // FIR-1621: ON (FIR-1647) — coupling + send-to-agent flow shipped.
   cerebro_note_agent_collab: true,
+  // FIR-1800: ON — render artifact references in comments/chat/DM/channels.
+  cerebro_artifact_references: true,
   cerebro_inbox_slack_block: false,
   cerebro_inbox_secretary: false,
   cerebro_inbox_favorites: true,
@@ -731,6 +737,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Show the spend ($) of each agent comment on issues and channels, with a token/model breakdown on hover. A run that posts progress + a result places the badge on the run's last comment, so per-comment numbers sum to the issue total already shown in the sidebar (JEH-736) without double-counting. Off hides the per-comment badge.",
+  },
+  {
+    key: "cerebro_artifact_references",
+    label: "Artifact references in comments",
+    group: "issues",
+    description:
+      "Let a comment, chat message, DM, or channel message reference an artifact (document/note) via a `mention://artifact/<id>` token, rendered as a compact white card (white = real document; grey = uploaded file). Clicking the card opens the full-page note editor (same rule as document cards, FIR-1782). Posted from the CLI with `multica issue comment add --artifact <id>`. Off renders the reference as plain link text.",
   },
   {
     key: "cerebro_web_push",

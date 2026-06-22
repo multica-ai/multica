@@ -184,7 +184,8 @@ function createComponents(
       // Mention links: mention://member/id, mention://agent/id, mention://issue/id, mention://project/id, mention://all/all
       if (href?.startsWith('mention://')) {
         // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 add `comment` mention type for in-issue thread jumps.
-        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|project|all|comment)\/(.+)$/)
+        // CEREBRO-PATCH(artifact-mention-markdown): FIR-1800 add `artifact` mention type for artifact reference cards.
+        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|project|all|comment|artifact)\/(.+)$/)
         if (mentionMatch?.[1] && mentionMatch[2]) {
           const type = mentionMatch[1]
           const id = mentionMatch[2]

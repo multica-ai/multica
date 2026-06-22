@@ -41,6 +41,8 @@ import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable
 import { useIssueLinkOpenMode } from "@multica/cerebro-preferences/views";
 // CEREBRO-PATCH(skill-mention-readonly): render `mention://skill/<id>` links as SkillMentionChip.
 import { SkillMentionChip } from "@multica/cerebro-skill-mention";
+// CEREBRO-PATCH(artifact-mention-readonly): FIR-1800 render `mention://artifact/<id>` as a white card.
+import { ArtifactMentionChip } from "@multica/cerebro-artifact-mention";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
@@ -224,7 +226,8 @@ function ReadonlyLink({
   if (isMentionHref(href)) {
     // CEREBRO-PATCH(skill-mention-readonly-route): `skill` joins the mention regex
     // and routes to SkillMentionChip; member/agent/all keep their plain @-text render.
-    const match = href.match(/^mention:\/\/(member|agent|issue|project|all|skill)\/(.+)$/);
+    // CEREBRO-PATCH(artifact-mention-readonly-route): `artifact` joins the regex and routes to ArtifactMentionChip (FIR-1800).
+    const match = href.match(/^mention:\/\/(member|agent|issue|project|all|skill|artifact)\/(.+)$/);
     if (match?.[1] === "skill" && match[2]) {
       const label =
         typeof children === "string"
@@ -233,6 +236,15 @@ function ReadonlyLink({
             ? children.join("")
             : undefined;
       return <SkillMentionChip skillId={match[2]} fallbackLabel={label} />;
+    }
+    if (match?.[1] === "artifact" && match[2]) {
+      const label =
+        typeof children === "string"
+          ? children
+          : Array.isArray(children)
+            ? children.join("")
+            : undefined;
+      return <ArtifactMentionChip artifactId={match[2]} fallbackLabel={label} />;
     }
     if (match?.[1] === "issue" && match[2]) {
       const label =

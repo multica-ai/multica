@@ -391,6 +391,8 @@ func init() {
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	// CEREBRO-PATCH(artifact-references-cli): FIR-1800 reference an artifact (document/note) as a white card.
+	issueCommentAddCmd.Flags().StringSlice("artifact", nil, "Artifact (document/note) ID(s) to reference as a card (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue search
@@ -1292,6 +1294,11 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", filePath)
 	}
 
+	// CEREBRO-PATCH(artifact-references-cli): FIR-1800 append artifact reference tokens (white card) to the body.
+	artifactRefs, _ := cmd.Flags().GetStringSlice("artifact")
+	for _, a := range artifactRefs {
+		content += "\n\n[document](mention://artifact/" + a + ")"
+	}
 	body := map[string]any{"content": content}
 	if parentID, _ := cmd.Flags().GetString("parent"); parentID != "" {
 		body["parent_id"] = parentID

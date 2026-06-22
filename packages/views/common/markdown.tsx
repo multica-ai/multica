@@ -12,6 +12,8 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 in-issue jump link for moved-comment breadcrumbs.
 import { CommentMentionLink } from "../issues/components/cerebro-comment-mention-link";
+// CEREBRO-PATCH(artifact-mention-markdown): FIR-1800 render `mention://artifact/<id>` as a white card.
+import { ArtifactMentionChip } from "@multica/cerebro-artifact-mention";
 import { ProjectChip } from "../projects/components/project-chip";
 import { AppLink } from "../navigation";
 import {
@@ -61,6 +63,10 @@ function defaultRenderMention({
   // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 moved-comment breadcrumb → in-issue jump link.
   if (type === "comment") {
     return <CommentMentionLink commentId={id} />;
+  }
+  // CEREBRO-PATCH(artifact-mention-markdown): FIR-1800 artifact reference → compact white card.
+  if (type === "artifact") {
+    return <ArtifactMentionChip artifactId={id} />;
   }
   if (type === "project") {
     return <ProjectMentionCard projectId={id} />;
