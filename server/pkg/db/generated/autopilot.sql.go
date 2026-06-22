@@ -48,16 +48,31 @@ func (q *Queries) AdvanceTriggerNextRun(ctx context.Context, arg AdvanceTriggerN
 
 const claimDueScheduleTriggers = `-- name: ClaimDueScheduleTriggers :many
 
-UPDATE autopilot_trigger t
-SET next_run_at = NULL
-FROM autopilot a
-WHERE t.autopilot_id = a.id
-  AND t.kind = 'schedule'
-  AND t.enabled = true
-  AND t.next_run_at IS NOT NULL
-  AND t.next_run_at <= now()
-  AND a.status = 'active'
-RETURNING t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, a.workspace_id AS autopilot_workspace_id
+WITH due AS (
+  SELECT
+    t.id,
+    t.next_run_at AS planned_at
+  FROM autopilot_trigger t
+  JOIN autopilot a ON a.id = t.autopilot_id
+  WHERE t.kind = 'schedule'
+    AND t.enabled = true
+    AND t.next_run_at IS NOT NULL
+    AND t.next_run_at <= now()
+    AND a.status = 'active'
+  FOR UPDATE SKIP LOCKED
+),
+claimed AS (
+  UPDATE autopilot_trigger t
+  SET next_run_at = NULL
+  FROM due
+  WHERE t.id = due.id
+  RETURNING t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, due.planned_at
+)
+SELECT
+  claimed.id, claimed.autopilot_id, claimed.kind, claimed.enabled, claimed.cron_expression, claimed.timezone, claimed.next_run_at, claimed.webhook_token, claimed.label, claimed.last_fired_at, claimed.created_at, claimed.updated_at, claimed.provider, claimed.signing_secret, claimed.event_filters, claimed.planned_at,
+  a.workspace_id AS autopilot_workspace_id
+FROM claimed
+JOIN autopilot a ON a.id = claimed.autopilot_id
 `
 
 type ClaimDueScheduleTriggersRow struct {
@@ -76,6 +91,7 @@ type ClaimDueScheduleTriggersRow struct {
 	Provider             string             `json:"provider"`
 	SigningSecret        pgtype.Text        `json:"signing_secret"`
 	EventFilters         []byte             `json:"event_filters"`
+	PlannedAt            pgtype.Timestamptz `json:"planned_at"`
 	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
 }
 
@@ -83,7 +99,7 @@ type ClaimDueScheduleTriggersRow struct {
 // Scheduler Queries
 // =====================
 // Atomically claim all due schedule triggers to prevent concurrent execution.
-// Joins the autopilot table to ensure only active autopilots are fired.
+// Returns planned_at (the original next_run_at) so scheduler can advance from DB-based claimed time.
 func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueScheduleTriggersRow, error) {
 	rows, err := q.db.Query(ctx, claimDueScheduleTriggers)
 	if err != nil {
@@ -109,6 +125,7 @@ func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueSched
 			&i.Provider,
 			&i.SigningSecret,
 			&i.EventFilters,
+			&i.PlannedAt,
 			&i.AutopilotWorkspaceID,
 		); err != nil {
 			return nil, err

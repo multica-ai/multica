@@ -117,12 +117,29 @@ func advanceNextRun(ctx context.Context, queries *db.Queries, t db.ClaimDueSched
 		tz = t.Timezone.String
 	}
 
-	next, err := service.ComputeNextRun(t.CronExpression.String, tz)
+	if !t.PlannedAt.Valid {
+		slog.Warn("autopilot scheduler: planned_at is NULL, cannot compute next run",
+			"trigger_id", util.UUIDToString(t.ID),
+		)
+		return
+	}
+
+	next, err := service.ComputeNextRunFrom(t.CronExpression.String, tz, t.PlannedAt.Time)
 	if err != nil {
 		slog.Warn("autopilot scheduler: failed to compute next run",
 			"trigger_id", util.UUIDToString(t.ID),
 			"cron", t.CronExpression.String,
+			"planned_at", t.PlannedAt.Time,
 			"error", err,
+		)
+		return
+	}
+
+	if !next.After(t.PlannedAt.Time) {
+		slog.Warn("autopilot scheduler: computed next_run_at is not after planned_at",
+			"trigger_id", util.UUIDToString(t.ID),
+			"planned_at", t.PlannedAt.Time,
+			"next_run_at", next,
 		)
 		return
 	}
