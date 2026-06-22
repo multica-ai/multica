@@ -33,7 +33,10 @@ var chatSessionSendCmd = &cobra.Command{
   $ multica chat session send 13dec5c7-... --content "Here is my report."
 
   # Send a message with a file attachment
-  $ multica chat session send 13dec5c7-... --content "Here is the file." --attachment report.md`,
+  $ multica chat session send 13dec5c7-... --content "Here is the file." --attachment report.md
+
+  # Reference an artifact (document/note) as a compact white card
+  $ multica chat session send 13dec5c7-... --content "See the report." --artifact 019eeb5d-...`,
 	Args: exactArgs(1),
 	RunE: runChatSessionSend,
 }
@@ -60,6 +63,8 @@ func init() {
 
 	chatSessionSendCmd.Flags().String("content", "", "Message text to send (required)")
 	chatSessionSendCmd.Flags().StringArray("attachment", nil, "Local file to attach (may be repeated)")
+	// CEREBRO-PATCH(artifact-references-cli): FIR-1904 reference an artifact (document/note) as a white card, mirroring `issue comment add --artifact` (FIR-1800).
+	chatSessionSendCmd.Flags().StringSlice("artifact", nil, "Artifact (document/note) ID(s) to reference as a card (can be specified multiple times)")
 	_ = chatSessionSendCmd.MarkFlagRequired("content")
 
 	chatSessionListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -81,6 +86,12 @@ func runChatSessionSend(cmd *cobra.Command, args []string) error {
 
 	content, _ := cmd.Flags().GetString("content")
 	attachments, _ := cmd.Flags().GetStringArray("attachment")
+
+	// CEREBRO-PATCH(artifact-references-cli): FIR-1904 append artifact reference tokens (white card) to the body.
+	artifactRefs, _ := cmd.Flags().GetStringSlice("artifact")
+	for _, a := range artifactRefs {
+		content += "\n\n[document](mention://artifact/" + a + ")"
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
