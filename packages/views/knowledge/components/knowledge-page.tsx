@@ -315,7 +315,7 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
   const hasGovernanceFinding = !!(item.review_needed_at || item.review_reason || item.update_suggestion || item.conflict_group);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -1340,7 +1340,7 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
           </div>
           </aside>
         )}
-        <main className="min-w-0 flex-1">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {workspaceView === "review" ? (
             governanceFindingsQuery.isLoading ? (
               <div className="space-y-4 p-6">
@@ -1371,7 +1371,7 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
               <AnalyticsPanel rows={analyticsQuery.data?.items ?? []} />
             )
           ) : detailQuery.isLoading ? (
-            <div className="space-y-4 p-6">
+            <div className="min-h-0 space-y-4 overflow-y-auto p-6">
               <Skeleton className="h-8 w-2/3" />
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-24 w-full" />
