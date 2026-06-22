@@ -1947,6 +1947,115 @@ func TestRunIssueCommentAddAgentContextMemberTokenDoesNotCallAPI(t *testing.T) {
 	}
 }
 
+func TestRunIssueCommentAddAgentWorkdirMarkerMissingTokenDoesNotCallAPI(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	workDir := t.TempDir()
+	writeAgentTaskMarkerForTest(t, workDir)
+	chdirForTest(t, workDir)
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_TOKEN", "")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "done")
+	err := runIssueCommentAdd(cmd, []string{"OPE-1"})
+	if err == nil {
+		t.Fatal("runIssueCommentAdd: expected missing token error")
+	}
+	if !strings.Contains(err.Error(), "MULTICA_TOKEN is required in agent execution context") {
+		t.Fatalf("error = %q", err.Error())
+	}
+	if called {
+		t.Fatal("runIssueCommentAdd called API despite missing token in agent workdir marker context")
+	}
+}
+
+func TestRunIssueCommentAddAgentWorkdirMarkerMemberTokenDoesNotCallAPI(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	workDir := t.TempDir()
+	writeAgentTaskMarkerForTest(t, workDir)
+	chdirForTest(t, workDir)
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_TOKEN", "mul_member_token")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "done")
+	err := runIssueCommentAdd(cmd, []string{"OPE-1"})
+	if err == nil {
+		t.Fatal("runIssueCommentAdd: expected task-token error")
+	}
+	if !strings.Contains(err.Error(), "task token (mat_)") {
+		t.Fatalf("error = %q", err.Error())
+	}
+	if called {
+		t.Fatal("runIssueCommentAdd called API despite member token in agent workdir marker context")
+	}
+}
+
+func TestRunIssueCommentAddMemberContextUnaffected(t *testing.T) {
+	var sawComment bool
+	var commentAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/OPE-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "OPE-1",
+			})
+		case "/api/issues/issue-1/comments":
+			sawComment = true
+			commentAuth = r.Header.Get("Authorization")
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":      "comment-1",
+				"content": "done",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	workDir := t.TempDir()
+	chdirForTest(t, workDir)
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_TOKEN", "mul_member_token")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "done")
+	if err := runIssueCommentAdd(cmd, []string{"OPE-1"}); err != nil {
+		t.Fatalf("runIssueCommentAdd member context: %v", err)
+	}
+	if !sawComment {
+		t.Fatal("member comment add did not call comment API")
+	}
+	if commentAuth != "Bearer mul_member_token" {
+		t.Fatalf("Authorization = %q, want member token", commentAuth)
+	}
+}
+
 func TestRunIssueAttachmentRemoveAgentContextMemberTokenDoesNotCallAPI(t *testing.T) {
 	called := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1970,6 +2079,36 @@ func TestRunIssueAttachmentRemoveAgentContextMemberTokenDoesNotCallAPI(t *testin
 	}
 	if called {
 		t.Fatal("runIssueAttachmentRemove called API despite non-task token in agent context")
+	}
+}
+
+func TestRunIssueAttachmentRemoveAgentWorkdirMarkerMemberTokenDoesNotCallAPI(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	workDir := t.TempDir()
+	writeAgentTaskMarkerForTest(t, workDir)
+	chdirForTest(t, workDir)
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_TOKEN", "mul_member_token")
+
+	err := runIssueAttachmentRemove(testCmd(), []string{"OPE-1", "attachment-1"})
+	if err == nil {
+		t.Fatal("runIssueAttachmentRemove: expected task-token error")
+	}
+	if !strings.Contains(err.Error(), "task token (mat_)") {
+		t.Fatalf("error = %q", err.Error())
+	}
+	if called {
+		t.Fatal("runIssueAttachmentRemove called API despite member token in agent workdir marker context")
 	}
 }
 

@@ -3312,6 +3312,138 @@ func agentTaskCredential(task Task) (string, error) {
 	return token, nil
 }
 
+func taskAuthTokenType(task Task) string {
+	token := strings.TrimSpace(task.AuthToken)
+	switch {
+	case token == "":
+		return "missing"
+	case strings.HasPrefix(token, "mat_"):
+		return "mat"
+	default:
+		return "non_mat"
+	}
+}
+
+func customEnvKeys(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func buildAgentEnv(task Task, provider string, cfg Config, agentName, traceRunID string, slot int, env *execenv.Environment, logger *slog.Logger) map[string]string {
+	agentEnv := map[string]string{
+		"MULTICA_TOKEN":        strings.TrimSpace(task.AuthToken),
+		"MULTICA_SERVER_URL":   cfg.ServerBaseURL,
+		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", cfg.HealthPort),
+		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
+		"MULTICA_AGENT_NAME":   agentName,
+		"MULTICA_AGENT_ID":     task.AgentID,
+		"MULTICA_TASK_ID":      task.ID,
+		"MULTICA_TASK_RUN_ID":  traceRunID,
+		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+	}
+	if task.AutopilotRunID != "" {
+		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
+	}
+	if task.AutopilotID != "" {
+		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
+	}
+	// Quick-create marker — when set, the multica CLI's `issue create`
+	// command stamps the new issue with origin_type=quick_create +
+	// origin_id=<task_id> so the completion handler can find it
+	// deterministically (see GetIssueByOrigin).
+	if task.QuickCreatePrompt != "" {
+		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
+		if len(task.QuickCreateAttachmentIDs) > 0 {
+			if raw, err := json.Marshal(task.QuickCreateAttachmentIDs); err == nil {
+				agentEnv["MULTICA_QUICK_CREATE_ATTACHMENT_IDS"] = string(raw)
+			} else if logger != nil {
+				logger.Warn("quick-create attachment ids: marshal failed; skipping env injection", "error", err)
+			}
+		}
+	}
+	// Ensure the multica CLI is on PATH inside the agent's environment.
+	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
+	// inherit the daemon's PATH. Prepend the directory of the running
+	// multica binary so that `multica` commands in the agent always resolve.
+	if selfBin, err := os.Executable(); err == nil {
+		binDir := filepath.Dir(selfBin)
+		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+	}
+	if env != nil {
+		// Point Codex to the per-task CODEX_HOME so it discovers skills natively
+		// without polluting the system ~/.codex/skills/.
+		if env.CodexHome != "" {
+			agentEnv["CODEX_HOME"] = env.CodexHome
+		}
+		// Point Cursor at per-task project state when managed MCP is present.
+		// The workdir .cursor/mcp.json carries the managed server list, while
+		// CURSOR_DATA_DIR isolates the matching project approvals from the user's
+		// persistent ~/.cursor/projects state.
+		if env.CursorDataDir != "" {
+			agentEnv["CURSOR_DATA_DIR"] = env.CursorDataDir
+		}
+		// Point OpenClaw at the per-task synthesized config. The config pins
+		// agents.defaults.workspace (and any agents.list[].workspace) to the
+		// task workdir, so the CLI's native skill scanner picks up the per-task
+		// skills written under {workDir}/skills/. Falls back silently when the
+		// preparer didn't run (non-openclaw provider, or write failure).
+		if env.OpenclawConfigPath != "" {
+			agentEnv["OPENCLAW_CONFIG_PATH"] = env.OpenclawConfigPath
+		}
+	}
+	// WujieClaw isolation: point at ~/.wujieai so it never reads/writes
+	// the global OpenClaw directories (~/.openclaw). Only injected when
+	// the user hasn't already set them (the blocklist prevents custom_env
+	// from overriding these, so this is the authoritative source).
+	if provider == "wujieclaw" {
+		if home, err := os.UserHomeDir(); err == nil {
+			wujieaiHome := filepath.Join(home, ".wujieai")
+			if _, set := agentEnv["OPENCLAW_HOME"]; !set {
+				agentEnv["OPENCLAW_HOME"] = wujieaiHome
+			}
+			if _, set := agentEnv["OPENCLAW_STATE_DIR"]; !set {
+				agentEnv["OPENCLAW_STATE_DIR"] = wujieaiHome
+			}
+		}
+	}
+	// Grant the wrapper config permission to $include the user's active
+	// config across directories. OpenClaw's $include defaults to confining
+	// resolution to the wrapper's own directory; without this, the
+	// wrapper-out-of-envRoot $include into ~/.openclaw/openclaw.json is
+	// rejected and the run boots with no user-registered agents.
+	openclawIncludeRoot := ""
+	if env != nil {
+		openclawIncludeRoot = env.OpenclawIncludeRoot
+	}
+	if rootsValue, ok := composeOpenclawIncludeRoots(openclawIncludeRoot, os.Getenv("OPENCLAW_INCLUDE_ROOTS")); ok {
+		agentEnv["OPENCLAW_INCLUDE_ROOTS"] = rootsValue
+	}
+	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
+	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
+	// Bedrock). These are set per-agent via the agent settings UI.
+	// Critical internal variables are blocklisted to prevent accidental or
+	// malicious override of daemon-set values.
+	if task.Agent != nil {
+		for k, v := range task.Agent.CustomEnv {
+			if isBlockedEnvKey(k) {
+				if logger != nil {
+					logger.Warn("custom_env: blocked key skipped", "key", k)
+				}
+				continue
+			}
+			agentEnv[k] = v
+		}
+	}
+	return agentEnv
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	d.taskProviders.Store(task.ID, provider)
 	defer d.taskProviders.Delete(task.ID)
@@ -3369,6 +3501,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
+		WorkspaceID:                      task.WorkspaceID,
+		TaskID:                           task.ID,
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
 		TriggerThreadID:                  task.TriggerThreadID,
@@ -3575,45 +3709,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
 		return TaskResult{}, err
 	}
-	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        agentToken,
-		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
-		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
-		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
-		"MULTICA_AGENT_NAME":   agentName,
-		"MULTICA_AGENT_ID":     task.AgentID,
-		"MULTICA_TASK_ID":      task.ID,
-		"MULTICA_TASK_RUN_ID":  traceRunID,
-		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
-	}
-	if task.AutopilotRunID != "" {
-		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
-	}
-	if task.AutopilotID != "" {
-		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
-	}
-	// Quick-create marker — when set, the multica CLI's `issue create`
-	// command stamps the new issue with origin_type=quick_create +
-	// origin_id=<task_id> so the completion handler can find it
-	// deterministically (see GetIssueByOrigin).
-	if task.QuickCreatePrompt != "" {
-		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
-		if len(task.QuickCreateAttachmentIDs) > 0 {
-			if raw, err := json.Marshal(task.QuickCreateAttachmentIDs); err == nil {
-				agentEnv["MULTICA_QUICK_CREATE_ATTACHMENT_IDS"] = string(raw)
-			} else {
-				taskLog.Warn("quick-create attachment ids: marshal failed; skipping env injection", "error", err)
-			}
-		}
-	}
-	// Ensure the multica CLI is on PATH inside the agent's environment.
-	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
-	// inherit the daemon's PATH. Prepend the directory of the running
-	// multica binary so that `multica` commands in the agent always resolve.
-	if selfBin, err := os.Executable(); err == nil {
-		binDir := filepath.Dir(selfBin)
-		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
-	}
+	agentEnv := buildAgentEnv(task, provider, d.cfg, agentName, traceRunID, slot, env, d.logger)
+	agentEnv["MULTICA_TOKEN"] = agentToken
 	// PATH ordering in the inherited env is not enough: coding agents run their
 	// shell tool-calls through a login zsh, which re-sources the user's
 	// ~/.zprofile and re-prepends Homebrew's bin (shadowing our binDir with a
@@ -3623,63 +3720,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if zdotdir := d.managedZdotdir(); zdotdir != "" {
 		agentEnv["ZDOTDIR"] = zdotdir
 	}
-	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
-	// without polluting the system ~/.codex/skills/.
-	if env.CodexHome != "" {
-		agentEnv["CODEX_HOME"] = env.CodexHome
-	}
-	// Point Cursor at per-task project state when managed MCP is present.
-	// The workdir .cursor/mcp.json carries the managed server list, while
-	// CURSOR_DATA_DIR isolates the matching project approvals from the user's
-	// persistent ~/.cursor/projects state.
-	if env.CursorDataDir != "" {
-		agentEnv["CURSOR_DATA_DIR"] = env.CursorDataDir
-	}
-	// Point OpenClaw at the per-task synthesized config. The config pins
-	// agents.defaults.workspace (and any agents.list[].workspace) to the
-	// task workdir, so the CLI's native skill scanner picks up the per-task
-	// skills written under {workDir}/skills/. Falls back silently when the
-	// preparer didn't run (non-openclaw provider, or write failure).
-	if env.OpenclawConfigPath != "" {
-		agentEnv["OPENCLAW_CONFIG_PATH"] = env.OpenclawConfigPath
-	}
-	// WujieClaw isolation: point at ~/.wujieai so it never reads/writes
-	// the global OpenClaw directories (~/.openclaw). Only injected when
-	// the user hasn't already set them (the blocklist prevents custom_env
-	// from overriding these, so this is the authoritative source).
-	if provider == "wujieclaw" {
-		if home, err := os.UserHomeDir(); err == nil {
-			wujieaiHome := filepath.Join(home, ".wujieai")
-			if _, set := agentEnv["OPENCLAW_HOME"]; !set {
-				agentEnv["OPENCLAW_HOME"] = wujieaiHome
-			}
-			if _, set := agentEnv["OPENCLAW_STATE_DIR"]; !set {
-				agentEnv["OPENCLAW_STATE_DIR"] = wujieaiHome
-			}
-		}
-	}
-	// Grant the wrapper config permission to $include the user's active
-	// config across directories. OpenClaw's $include defaults to confining
-	// resolution to the wrapper's own directory; without this, the
-	// wrapper-out-of-envRoot $include into ~/.openclaw/openclaw.json is
-	// rejected and the run boots with no user-registered agents.
-	if rootsValue, ok := composeOpenclawIncludeRoots(env.OpenclawIncludeRoot, os.Getenv("OPENCLAW_INCLUDE_ROOTS")); ok {
-		agentEnv["OPENCLAW_INCLUDE_ROOTS"] = rootsValue
-	}
-	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
-	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
-	// Bedrock). These are set per-agent via the agent settings UI.
-	// Critical internal variables are blocklisted to prevent accidental or
-	// malicious override of daemon-set values.
+	customKeys := []string(nil)
 	if task.Agent != nil {
-		for k, v := range task.Agent.CustomEnv {
-			if isBlockedEnvKey(k) {
-				d.logger.Warn("custom_env: blocked key skipped", "key", k)
-				continue
-			}
-			agentEnv[k] = v
-		}
+		customKeys = customEnvKeys(task.Agent.CustomEnv)
 	}
+	taskLog.Info("agent spawn env prepared",
+		"task_auth_token_type", taskAuthTokenType(task),
+		"custom_env_key_count", len(customKeys),
+		"custom_env_keys", customKeys,
+	)
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,

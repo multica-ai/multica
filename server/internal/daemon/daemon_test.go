@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	daemonnotifier "github.com/multica-ai/multica/server/internal/daemon/notifier"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	daemonnotifier "github.com/multica-ai/multica/server/internal/daemon/notifier"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -90,6 +90,69 @@ func TestAgentTaskCredentialRequiresTaskToken(t *testing.T) {
 			t.Fatalf("error = %q", err.Error())
 		}
 	})
+}
+
+func TestTaskAuthTokenType(t *testing.T) {
+	tests := []struct {
+		name string
+		task Task
+		want string
+	}{
+		{name: "task token", task: Task{AuthToken: "mat_task_token"}, want: "mat"},
+		{name: "missing", task: Task{}, want: "missing"},
+		{name: "member token", task: Task{AuthToken: "mul_member_token"}, want: "non_mat"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := taskAuthTokenType(tc.task); got != tc.want {
+				t.Fatalf("taskAuthTokenType() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildAgentEnvInjectsCustomEnvWithoutOverridingInternalKeys(t *testing.T) {
+	task := Task{
+		ID:          "task-1",
+		AgentID:     "agent-1",
+		WorkspaceID: "workspace-1",
+		AuthToken:   "mat_task_token",
+		Agent: &AgentData{
+			CustomEnv: map[string]string{
+				"AIPC_AUTH_MOBILE":   "test-mobile",
+				"AIPC_AUTH_PASSWORD": "test-password",
+				"MULTICA_TOKEN":      "mul_member_token",
+				"MULTICA_TASK_ID":    "evil-task",
+				"CODEX_HOME":         "/tmp/evil-codex-home",
+			},
+		},
+	}
+	env := &execenv.Environment{
+		CodexHome: "/tmp/codex-home",
+	}
+
+	got := buildAgentEnv(task, "codex", Config{
+		ServerBaseURL: "https://server.example.test",
+		HealthPort:    18765,
+	}, "agent-name", "run-1", 3, env, slog.Default())
+
+	for key, want := range map[string]string{
+		"AIPC_AUTH_MOBILE":   "test-mobile",
+		"AIPC_AUTH_PASSWORD": "test-password",
+	} {
+		if got[key] != want {
+			t.Fatalf("%s = %q, want %q", key, got[key], want)
+		}
+	}
+	for key, want := range map[string]string{
+		"MULTICA_TOKEN":   "mat_task_token",
+		"MULTICA_TASK_ID": "task-1",
+		"CODEX_HOME":      "/tmp/codex-home",
+	} {
+		if got[key] != want {
+			t.Fatalf("%s = %q, want %q", key, got[key], want)
+		}
+	}
 }
 
 func TestNormalizeServerBaseURL(t *testing.T) {

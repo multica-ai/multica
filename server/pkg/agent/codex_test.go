@@ -1675,6 +1675,64 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	}
 }
 
+func TestCodexExecutePassesConfigEnvToAppServerProcess(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	probeFile := filepath.Join(t.TempDir(), "codex-env-probe.txt")
+	fakePath := filepath.Join(t.TempDir(), "codex")
+	script := "#!/bin/sh\n" +
+		`printf 'AIPC_AUTH_MOBILE=%s\n' "${AIPC_AUTH_MOBILE:+present}" > "$CODEX_ENV_PROBE_FILE"` + "\n" +
+		`printf 'AIPC_AUTH_PASSWORD=%s\n' "${AIPC_AUTH_PASSWORD:+present}" >> "$CODEX_ENV_PROBE_FILE"` + "\n" +
+		"exit 2\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"AIPC_AUTH_MOBILE":     "test-mobile",
+			"AIPC_AUTH_PASSWORD":   "test-password",
+			"CODEX_ENV_PROBE_FILE": probeFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	data, err := os.ReadFile(probeFile)
+	if err != nil {
+		t.Fatalf("read env probe: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"AIPC_AUTH_MOBILE=present",
+		"AIPC_AUTH_PASSWORD=present",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("env probe missing %q, got:\n%s", want, got)
+		}
+	}
+}
+
 func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {

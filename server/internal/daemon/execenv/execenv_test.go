@@ -144,6 +144,48 @@ func TestPrepareDirectoryMode(t *testing.T) {
 	}
 }
 
+func TestPrepareWritesAgentTaskMarker(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-marker",
+		TaskID:         "task-marker",
+		AgentName:      "Test Agent",
+		Task: TaskContextForEnv{
+			WorkspaceID: "ws-marker",
+			TaskID:      "task-marker",
+			AgentID:     "agent-marker",
+			IssueID:     "issue-marker",
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	raw, err := os.ReadFile(filepath.Join(env.WorkDir, ".multica", "agent-task.json"))
+	if err != nil {
+		t.Fatalf("read agent task marker: %v", err)
+	}
+	var marker map[string]string
+	if err := json.Unmarshal(raw, &marker); err != nil {
+		t.Fatalf("decode marker: %v", err)
+	}
+	for key, want := range map[string]string{
+		"managed_by":   "multica-daemon",
+		"workspace_id": "ws-marker",
+		"task_id":      "task-marker",
+		"agent_id":     "agent-marker",
+		"issue_id":     "issue-marker",
+	} {
+		if got := marker[key]; got != want {
+			t.Fatalf("marker[%s] = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestPrepareWithProjectResources(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()
@@ -313,7 +355,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name != ".agent_context" && name != "CLAUDE.md" && name != ".claude" {
+		if name != ".agent_context" && name != ".multica" && name != "CLAUDE.md" && name != ".claude" {
 			t.Errorf("unexpected entry in workdir: %s", name)
 		}
 	}
@@ -725,6 +767,62 @@ func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
 				t.Errorf("SKILL.md should carry refreshed content v2; got:\n%s", body)
 			}
 		})
+	}
+}
+
+func TestReuseRefreshesAgentTaskMarker(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-reuse",
+		TaskID:         "task-old",
+		AgentName:      "Test Agent",
+		Provider:       "claude",
+		Task: TaskContextForEnv{
+			WorkspaceID: "ws-reuse",
+			TaskID:      "task-old",
+			AgentID:     "agent-old",
+			IssueID:     "issue-old",
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "claude",
+		Task: TaskContextForEnv{
+			WorkspaceID: "ws-reuse",
+			TaskID:      "task-new",
+			AgentID:     "agent-new",
+			IssueID:     "issue-new",
+		},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	raw, err := os.ReadFile(filepath.Join(env.WorkDir, ".multica", "agent-task.json"))
+	if err != nil {
+		t.Fatalf("read refreshed marker: %v", err)
+	}
+	var marker map[string]string
+	if err := json.Unmarshal(raw, &marker); err != nil {
+		t.Fatalf("decode marker: %v", err)
+	}
+	for key, want := range map[string]string{
+		"workspace_id": "ws-reuse",
+		"task_id":      "task-new",
+		"agent_id":     "agent-new",
+		"issue_id":     "issue-new",
+	} {
+		if got := marker[key]; got != want {
+			t.Fatalf("marker[%s] = %q, want %q", key, got, want)
+		}
 	}
 }
 
@@ -1481,7 +1579,7 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name != ".agent_context" && name != "AGENTS.md" {
+		if name != ".agent_context" && name != ".multica" && name != "AGENTS.md" {
 			t.Errorf("unexpected entry in workdir: %s", name)
 		}
 	}

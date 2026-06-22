@@ -127,7 +127,19 @@ export function WikiPage({ pageId }: WikiPageProps) {
   });
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
-  const canEdit = currentMember?.role === "owner" || currentMember?.role === "admin";
+  const canEdit =
+    currentMember?.role === "owner" ||
+    currentMember?.role === "admin" ||
+    currentMember?.role === "member";
+  // Deletion is ownership-gated for members: they may only delete pages they
+  // created, while owners/admins may delete any page.
+  const canDeletePage = useCallback(
+    (page: { created_by: string | null }) =>
+      currentMember?.role === "owner" ||
+      currentMember?.role === "admin" ||
+      (currentMember?.role === "member" && page.created_by === user?.id),
+    [currentMember?.role, user?.id],
+  );
   const tree = useMemo(() => buildWikiTree(pages), [pages]);
   const flatPages = useMemo(() => flattenWikiTree(tree), [tree]);
   const pageMap = useMemo(() => {
@@ -232,7 +244,7 @@ export function WikiPage({ pageId }: WikiPageProps) {
   }, [canEdit, queryClient, wsId]);
 
   const deletePage = useCallback(async () => {
-    if (!deleteTarget || !canEdit) return;
+    if (!deleteTarget || !canDeletePage(deleteTarget)) return;
     try {
       await api.deleteWikiPage(deleteTarget.id);
       const deletedIds = new Set<string>();
@@ -256,7 +268,7 @@ export function WikiPage({ pageId }: WikiPageProps) {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete wiki page");
     }
-  }, [canEdit, deleteTarget, flatPages, nav, paths, queryClient, wsId]);
+  }, [canDeletePage, deleteTarget, flatPages, nav, paths, queryClient, wsId]);
 
   const handleUpdate = useCallback(async (content: string) => {
     if (!selectedPageId || !canEdit) return;
@@ -475,7 +487,7 @@ export function WikiPage({ pageId }: WikiPageProps) {
           <h1 className="text-sm font-medium">Wiki</h1>
         </div>
         <span className="ml-auto text-xs text-muted-foreground">
-          {canEdit ? "Owner/Admin can edit" : "Read-only"}
+          {canEdit ? "All members can edit" : "Read-only"}
         </span>
       </PageHeader>
 
@@ -536,6 +548,7 @@ export function WikiPage({ pageId }: WikiPageProps) {
                     onSelect={(id) => void selectPage(id)}
                     onCreateChild={(id) => void createPage(id)}
                     onDelete={setDeleteTarget}
+                    canDeletePage={canDeletePage}
                     members={members}
                     overFolderId={overFolderId}
                   />
@@ -691,6 +704,7 @@ function SortableWikiItem({
   onSelect,
   onCreateChild,
   onDelete,
+  canDeletePage,
   members,
   overFolderId,
   depth = 0,
@@ -706,6 +720,7 @@ function SortableWikiItem({
   onSelect: (id: string) => void;
   onCreateChild: (id: string) => void;
   onDelete: (page: WikiPageTreeNode) => void;
+  canDeletePage: (page: { created_by: string | null }) => boolean;
   members: Array<{ user_id: string; name: string; avatar_url: string | null }>;
   overFolderId: string | null;
   depth?: number;
@@ -836,11 +851,15 @@ function SortableWikiItem({
               <DropdownMenuItem onClick={() => onStartRename(node)}>
                 Rename
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={() => onDelete(node)}>
-                <Trash2 className="size-3.5" />
-                Delete
-              </DropdownMenuItem>
+              {canDeletePage(node) && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={() => onDelete(node)}>
+                    <Trash2 className="size-3.5" />
+                    Delete
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}
@@ -862,6 +881,7 @@ function SortableWikiItem({
             onSelect={onSelect}
             onCreateChild={onCreateChild}
             onDelete={onDelete}
+            canDeletePage={canDeletePage}
             members={members}
             overFolderId={overFolderId}
             depth={depth + 1}
@@ -881,6 +901,7 @@ function SortableWikiItem({
           onSelect={onSelect}
           onCreateChild={onCreateChild}
           onDelete={onDelete}
+          canDeletePage={canDeletePage}
           members={members}
           overFolderId={overFolderId}
           depth={depth + 1}
@@ -905,6 +926,7 @@ function WikiTree({
   onSelect,
   onCreateChild,
   onDelete,
+  canDeletePage,
   members,
   overFolderId,
   depth = 0,
@@ -920,6 +942,7 @@ function WikiTree({
   onSelect: (id: string) => void;
   onCreateChild: (id: string) => void;
   onDelete: (page: WikiPageTreeNode) => void;
+  canDeletePage: (page: { created_by: string | null }) => boolean;
   members: Array<{ user_id: string; name: string; avatar_url: string | null }>;
   overFolderId: string | null;
   depth?: number;
@@ -940,6 +963,7 @@ function WikiTree({
           onSelect={onSelect}
           onCreateChild={onCreateChild}
           onDelete={onDelete}
+          canDeletePage={canDeletePage}
           members={members}
           overFolderId={overFolderId}
           depth={depth}

@@ -17,6 +17,32 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
+func chdirForTest(t *testing.T, dir string) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(old)
+	})
+}
+
+func writeAgentTaskMarkerForTest(t *testing.T, dir string) {
+	t.Helper()
+	path := filepath.Join(dir, ".multica")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir marker dir: %v", err)
+	}
+	body := `{"managed_by":"multica-daemon","workspace_id":"ws-1","task_id":"task-1","agent_id":"agent-1"}`
+	if err := os.WriteFile(filepath.Join(path, "agent-task.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+}
+
 // freshAgentEnvSetCmd returns a standalone cobra.Command with the three
 // --custom-env* flags registered identically to agentEnvSetCmd, so
 // resolveCustomEnv-shaped tests can mutate flag state without leaking
@@ -193,6 +219,32 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 			t.Fatalf("resolveToken() = %q, want MULTICA_TOKEN", got)
 		}
 	})
+}
+
+func TestResolveTokenStrictAgentWorkdirMarkerSkipsConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_config_member_token"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_TOKEN", "")
+
+	workDir := t.TempDir()
+	nested := filepath.Join(workDir, "repo", "subdir")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir nested workdir: %v", err)
+	}
+	writeAgentTaskMarkerForTest(t, workDir)
+	chdirForTest(t, nested)
+
+	got, err := resolveTokenStrict(testCmd())
+	if err == nil {
+		t.Fatalf("resolveTokenStrict() = %q, want marker-context error", got)
+	}
+	if !strings.Contains(err.Error(), "MULTICA_TOKEN is required in agent execution context") {
+		t.Fatalf("resolveTokenStrict() error = %q", err.Error())
+	}
 }
 
 func TestRequireAgentTaskTokenForAuditWrite(t *testing.T) {
