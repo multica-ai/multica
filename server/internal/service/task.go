@@ -1160,7 +1160,7 @@ func (s *TaskService) ExpireStaleQueuedTasks(
 
 	runtimes, err := s.Queries.ListScheduledRuntimesWithStaleQueuedTasks(ctx, ttl.Seconds())
 	if err != nil {
-		return nil, fmt.Errorf("list scheduled runtimes with stale queued tasks: %w", err)
+		return failed, fmt.Errorf("list scheduled runtimes with stale queued tasks: %w", err)
 	}
 	now := time.Now()
 	runtimeIDs := make([]pgtype.UUID, 0, len(runtimes))
@@ -1210,7 +1210,7 @@ func (s *TaskService) ExpireStaleQueuedTasks(
 		},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("expire stale scheduled queued tasks: %w", err)
+		return failed, fmt.Errorf("expire stale scheduled queued tasks: %w", err)
 	}
 	return append(failed, scheduledFailed...), nil
 }

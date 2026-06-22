@@ -616,6 +616,91 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	}
 }
 
+func TestExpireStaleQueuedTasksReturnsPartialSuccessOnLaterQueryError(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback(ctx) })
+
+	var agentID, runtimeID string
+	if err := tx.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a
+		JOIN member m ON m.workspace_id = a.workspace_id
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("find test agent: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE agent_runtime
+		SET claim_window_start = NULL, claim_window_timezone = NULL
+		WHERE id = $1
+	`, runtimeID); err != nil {
+		t.Fatalf("clear runtime schedule: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET created_at = now()
+		WHERE runtime_id = $1 AND status = 'queued'
+	`, runtimeID); err != nil {
+		t.Fatalf("freshen existing queued tasks: %v", err)
+	}
+
+	var issueID, taskID string
+	if err := tx.QueryRow(ctx, `
+		WITH bumped AS (
+			UPDATE workspace SET issue_counter = issue_counter + 1
+			WHERE id = $1 RETURNING issue_counter
+		)
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			assignee_type, assignee_id, number
+		)
+		SELECT $1, 'Queued TTL partial success', 'todo', 'none', 'member',
+			m.user_id, 'agent', $2, (SELECT issue_counter FROM bumped)
+		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		RETURNING id
+	`, testWorkspaceID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, created_at
+		)
+		VALUES ($1, $2, $3, 'queued', 0, '2000-01-01T00:00:00Z')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// The first expiry statement does not need this column, while scheduled
+	// runtime discovery does. Dropping it inside the rollback-only transaction
+	// deterministically exercises a later failure after the first update succeeds.
+	if _, err := tx.Exec(ctx, `
+		ALTER TABLE agent_runtime
+			DROP CONSTRAINT agent_runtime_claim_window_pair,
+			DROP COLUMN claim_window_timezone
+	`); err != nil {
+		t.Fatalf("break scheduled runtime discovery: %v", err)
+	}
+
+	taskSvc := service.NewTaskService(db.New(tx), nil, nil, events.New())
+	failed, err := taskSvc.ExpireStaleQueuedTasks(ctx, time.Hour, 2)
+	if err == nil {
+		t.Fatal("expected scheduled runtime discovery error")
+	}
+	if len(failed) != 1 || failed[0].ID.Bytes != parseUUIDBytes(taskID) {
+		t.Fatalf("partial result = %+v; want expired task %s", failed, taskID)
+	}
+}
+
 // TestExpireStaleQueuedTasksRespectsBatchLimit verifies the per-tick cap so
 // that a large historical backlog cannot monopolise a single sweep.
 func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {

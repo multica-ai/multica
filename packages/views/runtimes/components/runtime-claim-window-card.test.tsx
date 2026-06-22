@@ -229,4 +229,32 @@ describe("RuntimeClaimWindowCard", () => {
     }), false);
     expect(screen.getByText("Open until 07:00")).toBeInTheDocument();
   });
+
+  it("keeps status server-authoritative while editing a draft", () => {
+    renderCard(makeRuntime({
+      claim_window_start: "02:00",
+      claim_window_timezone: "Europe/Warsaw",
+      claim_window_open: true,
+    }));
+
+    fireEvent.change(screen.getByLabelText("Starts at"), {
+      target: { value: "23:00" },
+    });
+
+    expect(screen.getByText("Open until 07:00")).toBeInTheDocument();
+    expect(screen.getByText("23:00-04:00 every day")).toBeInTheDocument();
+  });
+
+  it("does not report always available before a disable draft is saved", () => {
+    renderCard(makeRuntime({
+      claim_window_start: "02:00",
+      claim_window_timezone: "Europe/Warsaw",
+      claim_window_open: false,
+    }));
+
+    fireEvent.click(screen.getByRole("switch", { name: "Use daily window" }));
+
+    expect(screen.getByText("Scheduled - opens at 02:00")).toBeInTheDocument();
+    expect(screen.queryByText("Always available")).not.toBeInTheDocument();
+  });
 });

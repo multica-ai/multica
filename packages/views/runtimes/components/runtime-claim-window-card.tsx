@@ -46,18 +46,19 @@ export function RuntimeClaimWindowCard({
     startTime,
     RUNTIME_CLAIM_WINDOW_DURATION_MINUTES,
   );
+  const savedEndTime = addMinutesToHHMM(
+    savedStart,
+    RUNTIME_CLAIM_WINDOW_DURATION_MINUTES,
+  );
   const dirty = enabled !== savedEnabled || (
     enabled && (startTime !== savedStart || timezone !== savedTimezone)
   );
-  const persistedDraft = savedEnabled &&
-    startTime === savedStart &&
-    timezone === savedTimezone;
 
-  const status = !enabled
+  const status = !savedEnabled
     ? t(($) => $.detail.claim_window.always)
-    : persistedDraft && runtime.claim_window_open === true
-      ? t(($) => $.detail.claim_window.open, { end: endTime })
-      : t(($) => $.detail.claim_window.closed, { start: startTime });
+    : runtime.claim_window_open === true
+      ? t(($) => $.detail.claim_window.open, { end: savedEndTime })
+      : t(($) => $.detail.claim_window.closed, { start: savedStart });
 
   const save = () => {
     updateRuntime.mutate(

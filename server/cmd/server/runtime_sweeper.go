@@ -269,17 +269,15 @@ func sweepExpiredQueuedTasks(ctx context.Context, taskSvc *service.TaskService) 
 		time.Duration(queuedTTLSeconds)*time.Second,
 		queuedExpireBatchSize,
 	)
+	if len(failedTasks) > 0 {
+		slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
+		taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
+		taskSvc.HandleFailedTasks(ctx, failedTasks)
+	}
 	if err != nil {
 		slog.Warn("task sweeper: failed to expire stale queued tasks", "error", err)
 		return
 	}
-	if len(failedTasks) == 0 {
-		return
-	}
-
-	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
-	taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
-	taskSvc.HandleFailedTasks(ctx, failedTasks)
 }
 
 // broadcastFailedTasks is preserved as a thin shim for the integration tests
