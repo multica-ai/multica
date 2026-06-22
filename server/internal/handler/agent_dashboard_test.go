@@ -82,6 +82,20 @@ func TestAgentRunDashboardOwnerFilter(t *testing.T) {
 	createRun(otherAgentID)
 	createRun(myAgentID)
 
+	// The owner-scoped agents list intentionally returns every agent owned by
+	// the current user, including ones with zero runs in the window (the shared
+	// "Handler Test Agent" fixture is one of them). Assert owner scoping by
+	// membership — current user's agent present, other owner's agent absent —
+	// rather than an exact list length, which the zero-run siblings break.
+	findAgent := func(agents []AgentRunDashboardAgentResponse, id string) *AgentRunDashboardAgentResponse {
+		for i := range agents {
+			if agents[i].AgentID == id {
+				return &agents[i]
+			}
+		}
+		return nil
+	}
+
 	t.Run("defaults to the current owner when no owner filter is provided", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		testHandler.GetAgentRunDashboard(w, newRequest("GET", "/api/dashboard/agent-runs?days=1", nil))
@@ -95,8 +109,11 @@ func TestAgentRunDashboardOwnerFilter(t *testing.T) {
 		if resp.Summary.TotalRuns != 1 {
 			t.Fatalf("expected only the current user's run by default, got %d", resp.Summary.TotalRuns)
 		}
-		if len(resp.Agents) != 1 || resp.Agents[0].AgentID != myAgentID {
-			t.Fatalf("expected only current user's agent %s, got %#v", myAgentID, resp.Agents)
+		if mine := findAgent(resp.Agents, myAgentID); mine == nil || mine.TotalRuns != 1 {
+			t.Fatalf("expected current user's agent %s with 1 run, got %#v", myAgentID, resp.Agents)
+		}
+		if other := findAgent(resp.Agents, otherAgentID); other != nil {
+			t.Fatalf("expected other owner's agent %s to be excluded, got %#v", otherAgentID, other)
 		}
 	})
 
@@ -113,8 +130,11 @@ func TestAgentRunDashboardOwnerFilter(t *testing.T) {
 		if resp.Summary.TotalRuns != 1 {
 			t.Fatalf("expected only the current owner's run, got %d", resp.Summary.TotalRuns)
 		}
-		if len(resp.Agents) != 1 || resp.Agents[0].AgentID != myAgentID {
-			t.Fatalf("expected only current user's agent %s, got %#v", myAgentID, resp.Agents)
+		if mine := findAgent(resp.Agents, myAgentID); mine == nil || mine.TotalRuns != 1 {
+			t.Fatalf("expected current user's agent %s with 1 run, got %#v", myAgentID, resp.Agents)
+		}
+		if other := findAgent(resp.Agents, otherAgentID); other != nil {
+			t.Fatalf("expected other owner's agent %s to be excluded, got %#v", otherAgentID, other)
 		}
 	})
 
@@ -154,8 +174,11 @@ func TestAgentRunDashboardOwnerFilter(t *testing.T) {
 		if resp.Summary.TotalRuns != 1 {
 			t.Fatalf("expected owner=all to stay scoped to the current user, got %d", resp.Summary.TotalRuns)
 		}
-		if len(resp.Agents) != 1 || resp.Agents[0].AgentID != myAgentID {
-			t.Fatalf("expected only current user's agent %s, got %#v", myAgentID, resp.Agents)
+		if mine := findAgent(resp.Agents, myAgentID); mine == nil || mine.TotalRuns != 1 {
+			t.Fatalf("expected current user's agent %s with 1 run, got %#v", myAgentID, resp.Agents)
+		}
+		if other := findAgent(resp.Agents, otherAgentID); other != nil {
+			t.Fatalf("expected other owner's agent %s to be excluded, got %#v", otherAgentID, other)
 		}
 	})
 
