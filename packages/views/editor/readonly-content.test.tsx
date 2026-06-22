@@ -14,6 +14,24 @@ vi.mock("@multica/core/api", () => ({
   PreviewUnsupportedError: class extends Error {},
 }));
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (sel: (s: Record<string, string>) => string) => {
+      const keys: Record<string, string> = {
+        copy_code: "Copy code",
+        copied: "Copied",
+        delete_block: "Delete",
+        plain_text: "Plain text",
+      };
+      try {
+        return sel(keys);
+      } catch {
+        return "";
+      }
+    },
+  }),
+}));
+
 const pushSpy = vi.fn();
 const openInNewTabSpy = vi.fn();
 const originalCreateObjectURL = URL.createObjectURL;

@@ -4,7 +4,19 @@ import { Markdown } from "./Markdown";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: () => "Plain text",
+    t: (sel: (s: Record<string, string>) => string) => {
+      const keys: Record<string, string> = {
+        plain_text: "Plain text",
+        copy_code: "Copy code",
+        copied: "Copied",
+        delete_block: "Delete block",
+      };
+      try {
+        return sel(keys);
+      } catch {
+        return "Plain text";
+      }
+    },
   }),
 }));
 

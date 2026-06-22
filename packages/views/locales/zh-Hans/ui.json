@@ -4,5 +4,7 @@
   "pagination_previous": "上一页",
   "pagination_next": "下一页",
   "copy_code": "复制代码",
+  "copied": "已复制",
+  "delete_block": "删除代码块",
   "plain_text": "纯文本"
 }

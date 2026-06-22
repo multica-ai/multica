@@ -3,6 +3,7 @@ import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markd
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import { useTranslation } from 'react-i18next'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -225,7 +226,12 @@ function urlTransform(url: string): string {
 }
 
 
-// File path detection regex - matches paths starting with /, ~/, or ./
+// File path detection regex — matches local paths starting with /, ~/, or ./
+// followed by a known source-file extension. Used in the shared link click
+// handler (baseComponents `a` renderer) to distinguish file paths from URLs.
+// In editor-parity mode, the views wrapper injects `onUrlClick` (openLink)
+// which handles internal workspace navigation; this regex only fires for
+// paths that `onUrlClick` does NOT intercept (i.e. non-workspace file paths).
 const FILE_PATH_REGEX =
   /^(?:\/|~\/|\.\/)[\w\-./@]+\.(?:ts|tsx|js|jsx|mjs|cjs|md|json|yaml|yml|py|go|rs|css|scss|less|html|htm|txt|log|sh|bash|zsh|swift|kt|java|c|cpp|h|hpp|rb|php|xml|toml|ini|cfg|conf|env|sql|graphql|vue|svelte|astro|prisma)$/i
 
@@ -236,6 +242,7 @@ const FILE_PATH_REGEX =
 
 function CodeBlockHeader({ language, code }: { language?: string; code: string }) {
   const [copied, setCopied] = useState(false)
+  const { t } = useTranslation('ui')
 
   const handleCopy = async () => {
     if (!code) return
@@ -257,19 +264,19 @@ function CodeBlockHeader({ language, code }: { language?: string; code: string }
           onMouseDown={(e) => e.preventDefault()}
           onClick={handleCopy}
           className="pointer-events-auto flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
-          title="Copy code"
-          aria-label="Copy code"
+          title={t(($) => $.copy_code)}
+          aria-label={t(($) => $.copy_code)}
         >
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          <span>{copied ? 'Copied' : 'Copy'}</span>
+          <span>{copied ? t(($) => $.copied) : t(($) => $.copy_code)}</span>
         </button>
         <button
           type="button"
           disabled
           aria-disabled="true"
           className="flex h-6 w-6 cursor-default items-center justify-center rounded text-muted-foreground opacity-60"
-          title="Delete"
-          aria-label="Delete"
+          title={t(($) => $.delete_block)}
+          aria-label={t(($) => $.delete_block)}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
