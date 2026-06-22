@@ -219,6 +219,7 @@
     "pin_tooltip": "サイドバーにピン留め",
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "sidebar_tooltip": "サイドバーの開閉",
+    "open_full_page_tooltip": "フルページで開く",
     "cmdf_toast_title": "ページ内検索は表示中の内容のみが対象です",
     "cmdf_toast_description": "タイムラインは仮想化されているため、画面外のコメントは ⌘F で見つかりません。アプリ全体の検索は近日提供予定です。",
     "update_failed": "イシューを更新できませんでした",
