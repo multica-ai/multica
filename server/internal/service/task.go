@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"sync"
@@ -1449,13 +1450,13 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
 	// runtime_recovery). The helper itself enforces attempt < max_attempts
 	// and only triggers for issue/chat tasks.
-	retried, _ := s.MaybeRetryFailedTask(ctx, task)
+	retried, retryScheduled, _ := s.MaybeRetryFailedTask(ctx, task)
 
-	// Skip the per-failure system comment when we'll immediately retry —
-	// the new task will surface its own status to the user, and we don't
-	// want to spam the issue with "task timed out" messages on every
-	// daemon hiccup.
-	if errMsg != "" && task.IssueID.Valid && retried == nil {
+	// Skip the per-failure system comment when a retry was scheduled
+	// (synchronously or deferred) — the new task will surface its own
+	// status to the user, and we don't want to spam the issue with
+	// "task timed out" messages on every daemon hiccup.
+	if errMsg != "" && task.IssueID.Valid && retried == nil && !retryScheduled {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
 	}
 
@@ -1464,7 +1465,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// conversation history shows what happened. Skip when auto-retry is
 	// pending (the new attempt will write its own outcome) — same guard as
 	// the issue path above.
-	if task.ChatSessionID.Valid && retried == nil {
+	if task.ChatSessionID.Valid && retried == nil && !retryScheduled {
 		if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
 			ChatSessionID: task.ChatSessionID,
 			Role:          "assistant",
@@ -1488,7 +1489,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// requester so they can either retry or fall back to the advanced form
 	// without losing their original prompt. Skipped when an auto-retry is
 	// pending — the new attempt will write its own outcome.
-	if retried == nil {
+	if retried == nil && !retryScheduled {
 		if qc, ok := s.parseQuickCreateContext(task); ok {
 			s.notifyQuickCreateFailed(ctx, task, qc, errMsg)
 		}
@@ -1507,11 +1508,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 var retryableReasons = map[string]bool{
-	"runtime_offline":                            true,
-	"runtime_recovery":                           true,
-	"timeout":                                    true,
-	"codex_semantic_inactivity":                  true,
 	"agent_error.provider_capacity_or_rate_limit": true,
+	"codex_semantic_inactivity":                   true,
+	"runtime_offline":                             true,
+	"runtime_recovery":                            true,
+	"timeout":                                     true,
 }
 
 func resumeUnsafeFailureReason(reason string) bool {
@@ -1531,20 +1532,22 @@ func resumeUnsafeFailureReason(reason string) bool {
 // max_attempts budget. The child task inherits agent/runtime/issue/chat
 // links and, for resume-safe failures, the parent's session_id/work_dir so
 // the agent can resume the conversation when the backend supports it. Returns
-// the new task, or nil when no retry was created.
+// the new task (nil when no retry was created), whether a retry was scheduled
+// (true for both synchronous and deferred/goroutine-based retries), and an
+// error.
 //
 // Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
 // its own re-run cadence and we don't want to double-fire it.
-func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
+func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, bool, error) {
 	if parent.Status != "failed" {
-		return nil, nil
+		return nil, false, nil
 	}
 	reason := ""
 	if parent.FailureReason.Valid {
 		reason = parent.FailureReason.String
 	}
 	if !retryableReasons[reason] {
-		return nil, nil
+		return nil, false, nil
 	}
 	if parent.Attempt >= parent.MaxAttempts {
 		slog.Info("task auto-retry skipped: budget exhausted",
@@ -1552,14 +1555,14 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 			"attempt", parent.Attempt,
 			"max_attempts", parent.MaxAttempts,
 		)
-		return nil, nil
+		return nil, false, nil
 	}
 	if parent.AutopilotRunID.Valid {
 		// Autopilot has its own retry semantics; do not double-trigger.
-		return nil, nil
+		return nil, false, nil
 	}
 	if !parent.IssueID.Valid && !parent.ChatSessionID.Valid {
-		return nil, nil
+		return nil, false, nil
 	}
 
 	// Rate-limit failures get exponential backoff before the retry is
@@ -1598,7 +1601,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 			broadcast(bgCtx, protocol.EventTaskQueued, child)
 			notify(bgCtx, child)
 		}()
-		return nil, nil
+		return nil, true, nil
 	}
 
 	child, err := s.Queries.CreateRetryTask(ctx, parent.ID)
@@ -1608,7 +1611,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 			"reason", reason,
 			"error", err,
 		)
-		return nil, err
+		return nil, false, err
 	}
 	slog.Info("task auto-retry enqueued",
 		"parent_task_id", util.UUIDToString(parent.ID),
@@ -1622,20 +1625,24 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// see EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
 	s.NotifyTaskEnqueued(ctx, child)
-	return &child, nil
+	return &child, true, nil
 }
 
 // rateLimitBackoff returns the delay before a rate-limited retry can be
-// enqueued. Exponential: 60s → 180s → 540s → capped at 30 min.
+// enqueued. Exponential with ±20% jitter: 60s → 180s → 540s → 1620s →
+// capped at 30 min (1800s). Jitter spreads out retries so tasks that
+// shared the same attempt count don't all re-collide with the throttle.
 func rateLimitBackoff(attempt int32) time.Duration {
 	const (
 		base    = 60
-		capSecs = 1800
+		capSecs = 1800.0
 	)
-	secs := base
+	secs := float64(base)
 	for i := int32(1); i < attempt && secs < capSecs; i++ {
 		secs *= 3
 	}
+	// ±20% jitter so simultaneous rate-limited tasks spread out, then cap.
+	secs *= 0.8 + rand.Float64()*0.4
 	if secs > capSecs {
 		secs = capSecs
 	}
@@ -1786,7 +1793,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, t := range tasks {
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
-		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+		if child, retryScheduled, _ := s.MaybeRetryFailedTask(ctx, t); child != nil || retryScheduled {
 			retried++
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true
