@@ -467,7 +467,11 @@ export function SwimLaneView({
   activeFilters?: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
   visibleStatuses?: IssueStatus[];
   hiddenStatuses?: IssueStatus[];
-  onMoveIssue: (issueId: string, updates: SwimLaneMoveUpdates) => void;
+  onMoveIssue: (
+    issueId: string,
+    updates: SwimLaneMoveUpdates,
+    onSettled?: () => void,
+  ) => void;
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
@@ -782,6 +786,12 @@ export function SwimLaneView({
 
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const isDraggingRef = useRef(false);
+  // Settle lock: held from drop until the move mutation settles, so a cache
+  // change that lands mid-flight (e.g. a membership refetch) does not rebuild
+  // localCells out from under the optimistic move. Mirrors board-view /
+  // list-view. settleVersion forces the resync once the lock releases.
+  const isSettlingRef = useRef(false);
+  const [settleVersion, setSettleVersion] = useState(0);
 
   const issueMap = useMemo(() => {
     const map = new Map<string, Issue>();
@@ -790,7 +800,7 @@ export function SwimLaneView({
   }, [mergedIssues]);
 
   const issueMapRef = useRef(issueMap);
-  if (!isDraggingRef.current) {
+  if (!isDraggingRef.current && !isSettlingRef.current) {
     issueMapRef.current = issueMap;
   }
 
@@ -799,10 +809,10 @@ export function SwimLaneView({
   localCellsRef.current = localCells;
 
   useEffect(() => {
-    if (!isDraggingRef.current) {
+    if (!isDraggingRef.current && !isSettlingRef.current) {
       setLocalCells(cells);
     }
-  }, [cells]);
+  }, [cells, settleVersion]);
 
   const recentlyMovedRef = useRef(false);
   useEffect(() => {
@@ -1062,11 +1072,19 @@ export function SwimLaneView({
         return;
       }
 
-      onMoveIssue(activeId, {
-        ...targetLane.moveUpdates,
-        status: finalOverCell.status as IssueStatus,
-        position: newPosition,
-      });
+      isSettlingRef.current = true;
+      onMoveIssue(
+        activeId,
+        {
+          ...targetLane.moveUpdates,
+          status: finalOverCell.status as IssueStatus,
+          position: newPosition,
+        },
+        () => {
+          isSettlingRef.current = false;
+          setSettleVersion((v) => v + 1);
+        },
+      );
     },
     [cells, cellSet, laneByKey, laneGroups, onMoveIssue, swimlaneGrouping, viewStoreApi],
   );
