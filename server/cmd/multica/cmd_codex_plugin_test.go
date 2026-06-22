@@ -247,7 +247,7 @@ func TestRunCodexPluginMCPServerCallsSessionBind(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	input := bytes.NewBufferString(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"session_bind","arguments":{"issue_id":"OPE-1493","codex_thread_id":"thread-1","project_folder":"/tmp/project","branch":"feat/OPE-1493-codex-plugin","source_key":"thread-1:bind"}}}` + "\n")
+	input := bytes.NewBufferString(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"session_bind","arguments":{"issue_id":"OPE-1493","codex_thread_id":"thread-1","codex_session_id":"session-1","project_folder":"/tmp/project","branch":"feat/OPE-1493-codex-plugin","source_key":"thread-1:bind"}}}` + "\n")
 	var output bytes.Buffer
 	cmd := testCodexPluginMCPCommand(srv.URL)
 	if err := runCodexPluginMCPServer(cmd, input, &output); err != nil {
@@ -289,6 +289,41 @@ func TestRunCodexPluginMCPServerCallsSessionBind(t *testing.T) {
 	}
 }
 
+func TestRunCodexPluginMCPServerCallsSessionBindWithoutSessionKeepsThreadSourceKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	var posted map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/OPE-1493":
+			json.NewEncoder(w).Encode(map[string]any{"id": "11111111-1111-4111-8111-111111111111", "identifier": "OPE-1493"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/11111111-1111-4111-8111-111111111111/local-runs":
+			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+				t.Fatalf("decode posted body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "binding-1", "issue_id": "11111111-1111-4111-8111-111111111111", "status": "running", "top_comment_id": "comment-1"})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	input := bytes.NewBufferString(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"session_bind","arguments":{"issue_id":"OPE-1493","codex_thread_id":"thread-1","project_folder":"/tmp/project","branch":"feat/OPE-1493-codex-plugin","source_key":"thread-1:bind"}}}` + "\n")
+	var output bytes.Buffer
+	cmd := testCodexPluginMCPCommand(srv.URL)
+	if err := runCodexPluginMCPServer(cmd, input, &output); err != nil {
+		t.Fatalf("runCodexPluginMCPServer() error = %v", err)
+	}
+
+	if posted["source_key"] != "thread-1:bind" || posted["cli_name"] != "codex_app" || posted["comments_mode"] != "thread" {
+		t.Fatalf("posted body = %+v", posted)
+	}
+	if contextDir, _ := posted["context_dir"].(string); strings.Contains(contextDir, "codex_session_id=") {
+		t.Fatalf("context_dir = %q, want no codex_session_id", contextDir)
+	}
+}
+
 func TestRunCodexPluginMCPServerEndToEndSyncDedupe(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "")
@@ -319,9 +354,10 @@ func TestRunCodexPluginMCPServerEndToEndSyncDedupe(t *testing.T) {
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/"+issueID+"/local-runs":
 			json.NewEncoder(w).Encode(map[string]any{
-				"id":       "binding-1",
-				"issue_id": issueID,
-				"status":   "running",
+				"id":             "binding-1",
+				"issue_id":       issueID,
+				"status":         "running",
+				"top_comment_id": "comment-root",
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/local-runs/binding-1/messages":
 			var posted map[string]any
