@@ -166,6 +166,20 @@ var issueCommentDeleteCmd = &cobra.Command{
 	RunE:  runIssueCommentDelete,
 }
 
+var issueCommentResolveCmd = &cobra.Command{
+	Use:   "resolve <comment-id>",
+	Short: "Resolve a comment thread",
+	Args:  exactArgs(1),
+	RunE:  runIssueCommentResolve,
+}
+
+var issueCommentUnresolveCmd = &cobra.Command{
+	Use:   "unresolve <comment-id>",
+	Short: "Unresolve a comment thread",
+	Args:  exactArgs(1),
+	RunE:  runIssueCommentUnresolve,
+}
+
 // Subscriber subcommands.
 
 var issueSubscriberCmd = &cobra.Command{
@@ -278,6 +292,8 @@ func init() {
 	issueCommentCmd.AddCommand(issueCommentListCmd)
 	issueCommentCmd.AddCommand(issueCommentAddCmd)
 	issueCommentCmd.AddCommand(issueCommentDeleteCmd)
+	issueCommentCmd.AddCommand(issueCommentResolveCmd)
+	issueCommentCmd.AddCommand(issueCommentUnresolveCmd)
 
 	issueSubscriberCmd.AddCommand(issueSubscriberListCmd)
 	issueSubscriberCmd.AddCommand(issueSubscriberAddCmd)
@@ -375,6 +391,10 @@ func init() {
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue comment resolve/unresolve
+	issueCommentResolveCmd.Flags().String("output", "json", "Output format: table or json")
+	issueCommentUnresolveCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue search
 	issueSearchCmd.Flags().Int("limit", 20, "Maximum number of results to return")
@@ -1316,6 +1336,44 @@ func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Comment %s deleted.\n", args[0])
 	return nil
+}
+
+func runIssueCommentResolve(cmd *cobra.Command, args []string) error {
+	return runIssueCommentResolution(cmd, args[0], true)
+}
+
+func runIssueCommentUnresolve(cmd *cobra.Command, args []string) error {
+	return runIssueCommentResolution(cmd, args[0], false)
+}
+
+func runIssueCommentResolution(cmd *cobra.Command, commentID string, resolve bool) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	path := "/api/comments/" + url.PathEscape(commentID) + "/resolve"
+	var result map[string]any
+	if resolve {
+		if err := client.PostJSON(ctx, path, nil, &result); err != nil {
+			return fmt.Errorf("resolve comment: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Comment %s resolved.\n", commentID)
+	} else {
+		if err := client.DeleteJSONResponse(ctx, path, &result); err != nil {
+			return fmt.Errorf("unresolve comment: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Comment %s unresolved.\n", commentID)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }
 
 // ---------------------------------------------------------------------------
