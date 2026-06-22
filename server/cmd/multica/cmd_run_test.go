@@ -600,7 +600,6 @@ func TestAgyTranscriptTrackerToolOutputChainNotFinal(t *testing.T) {
 // flushing any pending final from the old session.
 func TestAgyTranscriptTrackerRediscovery(t *testing.T) {
 	// Create a fake HOME with two brain sessions.
-	origHome := os.Getenv("HOME")
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
@@ -667,8 +666,6 @@ func TestAgyTranscriptTrackerRediscovery(t *testing.T) {
 	if tracker.pendingFinal.Content != "hi there" {
 		t.Fatalf("pendingFinal.Content = %q, want %q", tracker.pendingFinal.Content, "hi there")
 	}
-
-	_ = origHome
 }
 
 func TestInferCLIName(t *testing.T) {
