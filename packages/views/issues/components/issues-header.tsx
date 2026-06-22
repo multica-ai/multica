@@ -2,7 +2,7 @@
 
 // CEREBRO-PATCH(issues-header-cerebro): cerebro modification of upstream file
 
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -583,6 +583,50 @@ const DATE_UNIT_LABEL_KEY: Record<
   year: "date_unit_year",
 };
 
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1871 — relative "Last/Next N" amount.
+// The field accepts free typing (no live digit-stripping). Invalid input (empty,
+// non-numeric, < 1) turns the field red via aria-invalid and is simply NOT
+// committed; a valid positive integer commits to the filter. inputMode="numeric"
+// keeps the numeric keypad on mobile without hard-blocking input.
+function RelativeAmountInput({
+  amount,
+  onCommit,
+  className,
+}: {
+  amount: number;
+  onCommit: (next: number) => void;
+  className?: string;
+}) {
+  const [text, setText] = useState(String(amount));
+  const committed = useRef(amount);
+  // Re-sync the field when the amount changes from outside (e.g. switching
+  // direction or re-selecting the relative value), but not from our own commit.
+  useEffect(() => {
+    if (amount !== committed.current) {
+      committed.current = amount;
+      setText(String(amount));
+    }
+  }, [amount]);
+  const isValid = /^[1-9]\d*$/.test(text);
+  return (
+    <Input
+      type="text"
+      inputMode="numeric"
+      value={text}
+      aria-invalid={!isValid}
+      onChange={(e) => {
+        const next = e.target.value;
+        setText(next);
+        if (/^[1-9]\d*$/.test(next)) {
+          committed.current = Number(next);
+          onCommit(Number(next));
+        }
+      }}
+      className={className}
+    />
+  );
+}
+
 // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — editor for ONE stacked date
 // condition (field + value). onChange replaces the condition; onRemove drops it.
 function DateConditionEditor({
@@ -742,12 +786,9 @@ function DateConditionEditor({
                   </Button>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={amount}
-                    onChange={(e) => setAmount(Number(e.target.value.replace(/[^0-9]/g, "")))}
+                  <RelativeAmountInput
+                    amount={amount}
+                    onCommit={setAmount}
                     className="h-8 w-16"
                   />
                   <NativeSelect
@@ -1097,12 +1138,9 @@ function DateConditionRowV2({
       {/* Relative: number + unit */}
       {needsValue && c.relative && (
         <div className="flex gap-2 md:contents">
-          <Input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={c.relative.amount}
-            onChange={(e) => setRelative({ amount: Number(e.target.value.replace(/[^0-9]/g, "")) })}
+          <RelativeAmountInput
+            amount={c.relative.amount}
+            onCommit={(next) => setRelative({ amount: next })}
             className="h-8 w-20 md:w-16"
           />
           <NativeSelect

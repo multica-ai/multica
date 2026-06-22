@@ -1,11 +1,13 @@
 // CEREBRO-PATCH(my-issues-date-builder): regression test for FIR-1871.
 // The relative "Next/Last N <unit>" amount used a native <input type="number">,
-// which on iOS Safari (inside the filter popover) surfaced the alphabetic
-// keyboard and refused numeric entry. The fix switches it to a text input with
-// inputMode="numeric" + pattern="[0-9]*" (numeric keypad) and strips non-digits
-// in onChange. This test renders the V2 builder with a relative condition and
-// asserts (1) the amount input requests the numeric keypad and (2) typing a
-// mixed string commits a digits-only amount.
+// which on iOS Safari surfaced the alphabetic keyboard. The field is now a text
+// input with inputMode="numeric" (numeric keypad on mobile) and SOFT validation:
+// it accepts free typing without stripping characters, marks itself red via
+// aria-invalid when the value is not a positive integer, and only commits a
+// valid amount to the filter. This test renders the V2 builder with a relative
+// condition and asserts (1) the amount input requests the numeric keypad,
+// (2) invalid input turns the field red and is not committed, and (3) a valid
+// integer commits.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -81,10 +83,9 @@ describe("date builder relative amount input (FIR-1871)", () => {
     const input = (await screen.findByDisplayValue("1")) as HTMLInputElement;
     expect(input.getAttribute("type")).toBe("text");
     expect(input.getAttribute("inputmode")).toBe("numeric");
-    expect(input.getAttribute("pattern")).toBe("[0-9]*");
   });
 
-  it("strips non-digits and commits a numeric amount", async () => {
+  it("does not hard-strip: invalid input stays in the field, turns it red, and is not committed", async () => {
     const onChange = vi.fn();
     const { container } = renderBuilderControls([relativeCondition], onChange);
 
@@ -95,6 +96,25 @@ describe("date builder relative amount input (FIR-1871)", () => {
     const input = (await screen.findByDisplayValue("1")) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "1a4" } });
 
+    // The raw text is preserved (no live stripping), the field is marked red,
+    // and nothing is committed because the value is not a valid positive integer.
+    expect(input.value).toBe("1a4");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("commits a valid positive integer and clears the red state", async () => {
+    const onChange = vi.fn();
+    const { container } = renderBuilderControls([relativeCondition], onChange);
+
+    const trigger = container.querySelector('[data-slot="dropdown-menu-trigger"]');
+    fireEvent.click(trigger as Element);
+    fireEvent.click(await screen.findByText("Date"));
+
+    const input = (await screen.findByDisplayValue("1")) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "14" } });
+
+    expect(input.getAttribute("aria-invalid")).toBe("false");
     expect(onChange).toHaveBeenCalled();
     const committed = onChange.mock.calls.at(-1)![0] as IssueDateFilter[];
     expect(committed[0]?.relative?.amount).toBe(14);
