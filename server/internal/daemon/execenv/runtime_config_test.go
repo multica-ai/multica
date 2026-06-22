@@ -50,6 +50,12 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				"`multica issue status <child-id> todo`",
 				"all `--status todo`",
 				"`--status backlog` from the start",
+				// Stage guidance must reach the always-on brief so agents
+				// reach for stages instead of only the manual backlog chain
+				// (MUL-3508 follow-up).
+				"**Ordering with stages.**",
+				"`--stage <N>`",
+				"`multica issue children <id>`",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
