@@ -3790,10 +3790,14 @@ func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
 	for _, want := range []string{
 		"Read the triggering conversation first",
 		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
+		"multica issue comment list " + issueID + " --recent 10 --output json",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("comment-triggered Workflow missing cold-start read %q\n---\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "--recent 20") {
+		t.Errorf("comment-triggered Workflow still uses recent 20\n---\n%s", s)
 	}
 	if strings.Contains(s, "new comment(s) since your last run") {
 		t.Errorf("cold-start workflow must not render the since-delta hint\n---\n%s", s)
@@ -3873,11 +3877,9 @@ func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
 }
 
 // TestInjectRuntimeConfigAssignmentTriggerMentionsRecent pins that the
-// assignment-triggered Workflow keeps full-history reading as the mandatory
-// default (the agent must still ingest earlier comments — that rule was
-// added in MUL-1124) but ALSO points at `--recent N` as the long-issue
-// alternative. Without this, the prompt would still be the only place
-// telling the agent about --recent on busy issues.
+// assignment-triggered Workflow keeps comment catch-up mandatory while bounding
+// the mandatory first read to the recent active-thread window. Older context
+// stays reachable through explicit pagination.
 func TestInjectRuntimeConfigAssignmentTriggerMentionsRecent(t *testing.T) {
 	t.Parallel()
 
@@ -3891,29 +3893,37 @@ func TestInjectRuntimeConfigAssignmentTriggerMentionsRecent(t *testing.T) {
 	}
 	s := string(data)
 
-	// Mandatory full-history rule (MUL-1124) must stay.
+	// Mandatory comment catch-up must stay, but the required first read is
+	// bounded to recent active threads instead of the full flat timeline.
 	for _, want := range []string{
-		"multica issue comment list issue-1 --output json",
+		"multica issue comment list issue-1 --recent 10 --output json",
 		"this is mandatory, not optional",
 		"Skipping this step is the most common cause",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("assignment Workflow regressed mandatory-history rule, missing %q\n---\n%s", want, s)
+			t.Errorf("assignment Workflow regressed mandatory recent-first catch-up, missing %q\n---\n%s", want, s)
 		}
 	}
-	// AND --recent must be offered as the long-issue alternative.
+	// Older context must remain reachable through pagination.
 	for _, want := range []string{
-		"--recent 20 --output json",
 		"Next thread cursor:",
+		"--before",
+		"--before-id",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("assignment Workflow missing --recent guidance %q\n---\n%s", want, s)
+			t.Errorf("assignment Workflow missing older-history pagination guidance %q\n---\n%s", want, s)
 		}
 	}
-	// The previous wording framed `--recent` as a replacement ("you may
-	// switch to ..."), which conflicts with the mandatory full-history
-	// rule. Pin that the replacement semantics never reappears — `--recent`
-	// is a paging strategy, not a shortcut.
+	for _, banned := range []string{
+		"multica issue comment list issue-1 --output json",
+		"read the full comment history",
+		"read the full history page-by-page",
+		"`--recent` is a way to read the full history",
+	} {
+		if strings.Contains(s, banned) {
+			t.Errorf("assignment Workflow still carries full-flat mandatory phrasing %q\n---\n%s", banned, s)
+		}
+	}
 	for _, banned := range []string{
 		"you may switch to",
 		"switch to `--recent",
