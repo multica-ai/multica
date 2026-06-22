@@ -148,6 +148,7 @@ const TimelineEntrySchema = z.object({
   attachments: z.array(AttachmentSchema).optional(),
   source_task_id: z.string().nullable().optional(),
   coalesced_count: z.number().optional(),
+  content_truncated: z.boolean().optional(),
 }).loose();
 
 // /timeline returns a flat array of TimelineEntry, oldest first. The

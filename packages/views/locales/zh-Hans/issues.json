@@ -312,7 +312,9 @@
       "bar_authors_more_other": "{{names}} 等 {{count}} 人",
       "resolve_failed": "标记已解决失败",
       "unresolve_failed": "重新打开失败"
-    }
+    },
+    "expand_full_text": "展开全文",
+    "loading_full_text": "加载中..."
   },
   "reply": {
     "placeholder": "回复..."

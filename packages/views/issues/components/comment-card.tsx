@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -40,6 +41,7 @@ import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { commentDetailOptions } from "@multica/core/issues/queries";
 import { useT } from "../../i18n";
 import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
@@ -498,6 +500,18 @@ function CommentRow({
   const canDeleteEntry = isOwn || canModerate;
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // "展开全文" — when the timeline endpoint clips comment bodies under
+  // summary=true, show a button to fetch the full (unsummarized) body.
+  const isTruncated = entry.content_truncated === true;
+  const [shouldFetchFull, setShouldFetchFull] = useState(false);
+  const { data: fullComment, isFetching: loadingFullContent } = useQuery({
+    ...commentDetailOptions(entry.id),
+    enabled: shouldFetchFull,
+  });
+  const expandedContent = fullComment?.content;
+  const effectiveContent = expandedContent ?? entry.content ?? "";
+  const isExpanded = !!expandedContent;
+
   const reactions = entry.reactions ?? [];
 
   return (
@@ -654,8 +668,24 @@ function CommentRow({
       ) : (
         <>
           <div className="pl-12 pr-4 pt-1 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+            <ReadonlyContent content={effectiveContent} attachments={entry.attachments} />
           </div>
+          {isTruncated && !isExpanded && (
+            <button
+              type="button"
+              className="pl-12 pr-4 pt-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => setShouldFetchFull(true)}
+            >
+              {loadingFullContent ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  {t(($) => $.comment.loading_full_text)}
+                </span>
+              ) : (
+                t(($) => $.comment.expand_full_text)
+              )}
+            </button>
+          )}
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
           {retryableAgentFailureComment(entry) && (
             <TaskCommentRetryButton
@@ -711,6 +741,17 @@ function CommentCardImpl({
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // "展开全文" for the root comment body (replies use CommentRow, which has its own).
+  const isTruncated = entry.content_truncated === true;
+  const [shouldFetchFull, setShouldFetchFull] = useState(false);
+  const { data: fullComment, isFetching: loadingFullContent } = useQuery({
+    ...commentDetailOptions(entry.id),
+    enabled: shouldFetchFull,
+  });
+  const expandedContent = fullComment?.content;
+  const effectiveContent = expandedContent ?? entry.content ?? "";
+  const isExpanded = !!expandedContent;
 
   const allNestedReplies = replies;
 
@@ -941,8 +982,24 @@ function CommentCardImpl({
             ) : (
               <>
                 <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  <ReadonlyContent content={effectiveContent} attachments={entry.attachments} />
                 </div>
+                {isTruncated && !isExpanded && (
+                  <button
+                    type="button"
+                    className="pl-10 pt-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => setShouldFetchFull(true)}
+                  >
+                    {loadingFullContent ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        {t(($) => $.comment.loading_full_text)}
+                      </span>
+                    ) : (
+                      t(($) => $.comment.expand_full_text)
+                    )}
+                  </button>
+                )}
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {retryableAgentFailureComment(entry) && (
                   <TaskCommentRetryButton

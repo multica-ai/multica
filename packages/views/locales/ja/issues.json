@@ -307,7 +307,9 @@
       "bar_authors_more_other": "{{names}} 他 {{count}} 名",
       "resolve_failed": "スレッドを解決できませんでした",
       "unresolve_failed": "スレッドの解決を取り消せませんでした"
-    }
+    },
+    "expand_full_text": "全文を表示",
+    "loading_full_text": "読み込み中..."
   },
   "reply": {
     "placeholder": "返信を残す..."

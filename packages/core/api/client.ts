@@ -686,13 +686,17 @@ export class ApiClient {
     });
   }
 
-  async listTimeline(issueId: string): Promise<TimelineEntry[]> {
-    const raw = await this.fetch<unknown>(
-      `/api/issues/${issueId}/timeline`,
-    );
+  async listTimeline(issueId: string, params?: { summary?: boolean }): Promise<TimelineEntry[]> {
+    let path = `/api/issues/${issueId}/timeline`;
+    if (params?.summary) path += `?summary=true`;
+    const raw = await this.fetch<unknown>(path);
     return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
       endpoint: "GET /api/issues/:id/timeline",
     });
+  }
+
+  async getComment(commentId: string): Promise<Comment> {
+    return this.fetch(`/api/comments/${commentId}`);
   }
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
