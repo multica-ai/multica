@@ -54,7 +54,7 @@ export function ArtifactMentionChip({
   const enabled = useFeatureFlag("cerebro_artifact_references");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
-  const { push, openInNewTab } = useNavigation();
+  const { openInNewTab } = useNavigation();
 
   const { data: artifact } = useQuery(
     artifactDetailOptions(wsId, artifactId, enabled),
@@ -87,21 +87,22 @@ export function ArtifactMentionChip({
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.metaKey || e.ctrlKey || e.shiftKey) {
-      if (openInNewTab) {
-        openInNewTab(docPath, label);
-      } else {
-        window.open(docPath, "_blank", "noopener,noreferrer");
-      }
-      return;
+    // FIR-1782: a document/note card always opens in a NEW tab/window so the
+    // user keeps their current context (the issue or comment they clicked from)
+    // instead of navigating away from it.
+    if (openInNewTab) {
+      openInNewTab(docPath, label);
+    } else {
+      window.open(docPath, "_blank", "noopener,noreferrer");
     }
-    push(docPath);
   };
 
   return (
     <a
       href={docPath}
       onClick={handleClick}
+      target="_blank"
+      rel="noopener noreferrer"
       title={label}
       className={`${cls} cursor-pointer transition-colors hover:bg-accent`}
     >

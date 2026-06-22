@@ -56,6 +56,17 @@ export function ArtifactList(props: ArtifactListProps) {
   const router = useNavigation();
   const wsPaths = useWorkspacePaths();
 
+  // FIR-1782: open a document/note card in a NEW tab/window so the user keeps
+  // their current context (the issue) instead of navigating away from it.
+  const openDoc = (id: string, label?: string) => {
+    const path = wsPaths.documentDetail(id);
+    if (router.openInNewTab) {
+      router.openInNewTab(path, label ?? "document");
+    } else {
+      window.open(path, "_blank", "noopener,noreferrer");
+    }
+  };
+
   const artifacts = data ?? [];
   const hasArtifacts = artifacts.length > 0;
   const hasCoupled = coupledNotes.length > 0;
@@ -79,7 +90,7 @@ export function ArtifactList(props: ArtifactListProps) {
             <ArtifactCard
               key={a.id}
               artifact={a}
-              onClick={() => router.push(wsPaths.documentDetail(a.id))}
+              onClick={() => openDoc(a.id, a.title)}
             />
           ))}
         </div>
@@ -94,7 +105,7 @@ export function ArtifactList(props: ArtifactListProps) {
             <CoupledNoteCard
               key={n.id}
               note={n}
-              onClick={() => router.push(wsPaths.documentDetail(n.id))}
+              onClick={() => openDoc(n.id, n.title)}
             />
           ))}
         </div>
