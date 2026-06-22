@@ -156,6 +156,67 @@ func TestGetDashboardModelRunTime(t *testing.T) {
 			t.Errorf("expected 400 for malformed uuid, got %d", w.Code)
 		}
 	})
+
+	// multi-provider rows for the same (task_id, model) must be collapsed by the
+	// DISTINCT subquery so total_seconds equals the task's actual duration, not 2×.
+	t.Run("multi-provider rows for same model deduplicated to task duration", func(t *testing.T) {
+		const dedupModel = "dedup-test-model"
+		const durationSeconds = 180
+
+		var dedupIssueID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+			VALUES (
+				$1, 'dedup-test issue', $2, 'member',
+				(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
+			)
+			RETURNING id
+		`, testWorkspaceID, testUserID).Scan(&dedupIssueID); err != nil {
+			t.Fatalf("insert dedup issue: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, dedupIssueID) })
+
+		started := now.Add(-10 * time.Minute)
+		completed := started.Add(time.Duration(durationSeconds) * time.Second)
+		var dedupTaskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, created_at)
+			VALUES ($1, $2, $3, 'completed', $4, $5, now())
+			RETURNING id
+		`, agentID, dedupIssueID, runtimeID, started, completed).Scan(&dedupTaskID); err != nil {
+			t.Fatalf("insert dedup task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, dedupTaskID) })
+
+		// Two usage rows: same task + model, different providers (allowed by UNIQUE (task_id, provider, model)).
+		for _, provider := range []string{"anthropic", "bedrock"} {
+			if _, err := testPool.Exec(ctx, `
+				INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, created_at)
+				VALUES ($1, $2, $3, 100, 50, now())
+			`, dedupTaskID, provider, dedupModel); err != nil {
+				t.Fatalf("insert task_usage (%s): %v", provider, err)
+			}
+		}
+
+		w := httptest.NewRecorder()
+		testHandler.GetDashboardModelRunTime(w, newRequest("GET", "/api/dashboard/model-runtime?days=1", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var rows []modelRTRow
+		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		var total int64
+		for _, r := range rows {
+			if r.Model == dedupModel {
+				total += r.TotalSeconds
+			}
+		}
+		if total != durationSeconds {
+			t.Errorf("dedup: expected total_seconds=%d for %q, got %d (multi-provider rows not deduplicated)", durationSeconds, dedupModel, total)
+		}
+	})
 }
 
 // TestGetDashboardRuntimeUsage covers the per-(runtime_id, model) token
