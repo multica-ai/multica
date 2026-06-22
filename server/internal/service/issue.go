@@ -471,3 +471,220 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 			"error", err)
 	}
 }
+
+// ErrSelfParent signals that an update tried to set an issue as its own
+// parent. Callers translate to HTTP 400 "an issue cannot be its own
+// parent".
+var ErrSelfParent = errors.New("an issue cannot be its own parent")
+
+// ErrCircularParent signals that the new parent would create a cycle in
+// the parent-issue graph (detected by walking ancestors up to 10 levels).
+// Callers translate to HTTP 400 "circular parent relationship detected".
+var ErrCircularParent = errors.New("circular parent relationship detected")
+
+// IssueUpdateOpts carries caller-resolved context that the service cannot
+// derive on its own because it deliberately avoids *http.Request.
+type IssueUpdateOpts struct {
+	// ActorType / ActorID are the resolved identity of the caller ("agent"
+	// or "member" + UUID). Used for squad-leader dispatch.
+	ActorType string
+	ActorID   string
+
+	// TaskID is the agent's current task UUID (from X-Task-ID header),
+	// resolved by the handler. Zero/invalid when the caller is not an
+	// agent. Used by the backlog-promotion self-loop guard.
+	TaskID pgtype.UUID
+}
+
+// IssueChangeSummary records which top-level fields changed between the
+// previous and updated issue rows. Computed from prev-vs-new value
+// comparison (not JSON-field-presence) so the service is transport-
+// agnostic. Callers use these flags for WS payloads and reconciliation
+// branching.
+type IssueChangeSummary struct {
+	AssigneeChanged    bool
+	StatusChanged      bool
+	PriorityChanged    bool
+	TitleChanged       bool
+	DescriptionChanged bool
+	StartDateChanged   bool
+	DueDateChanged     bool
+}
+
+// IssueUpdateResult is the typed return from IssueService.Update.
+type IssueUpdateResult struct {
+	Issue     db.Issue
+	PrevIssue db.Issue
+	Changes   IssueChangeSummary
+}
+
+// Update performs the DB write for an issue update: cycle detection (when
+// the parent changes), the UPDATE query, and attachment linking. It
+// returns the new row, the previous row, and a computed change summary.
+//
+// It deliberately does NOT publish events or reconcile task queues — the
+// handler owns publish (preserving single-vs-batch payload divergence),
+// and ReconcileAfterUpdate owns the cancel/enqueue/promote side effects.
+// This split preserves the exact ordering of the pre-refactor handler:
+// DB write → attachment link → publish → reconcile → notify.
+func (s *IssueService) Update(ctx context.Context, prev db.Issue, params db.UpdateIssueParams, attachmentIDs []pgtype.UUID, opts IssueUpdateOpts) (IssueUpdateResult, error) {
+	if params.ParentIssueID.Valid && params.ParentIssueID != prev.ParentIssueID {
+		if err := s.detectParentCycle(ctx, prev.ID, params.ParentIssueID, prev.WorkspaceID); err != nil {
+			return IssueUpdateResult{}, err
+		}
+	}
+
+	issue, err := s.Queries.UpdateIssue(ctx, params)
+	if err != nil {
+		return IssueUpdateResult{}, fmt.Errorf("update issue: %w", err)
+	}
+
+	s.linkAttachments(ctx, issue, attachmentIDs)
+
+	return IssueUpdateResult{
+		Issue:     issue,
+		PrevIssue: prev,
+		Changes:   computeIssueChanges(prev, issue),
+	}, nil
+}
+
+// ReconcileAfterUpdate runs the post-publish side effects: task-queue
+// cancel/enqueue on assignee change, backlog→active promotion, and
+// cancel-on-cancelled. The handler MUST publish EventIssueUpdated before
+// calling this so the broadcast reaches subscribers before any task
+// dispatches fire.
+//
+// notifyParentOfChildDone stays handler-side (it publishes events and
+// uses handler-layer types) and is called by the handler after this
+// method returns.
+func (s *IssueService) ReconcileAfterUpdate(ctx context.Context, result IssueUpdateResult, opts IssueUpdateOpts) {
+	issue := result.Issue
+	prev := result.PrevIssue
+	ch := result.Changes
+
+	// Assignee-change reconciliation: cancel outstanding tasks for the
+	// old assignee, then enqueue for the new one.
+	if ch.AssigneeChanged {
+		s.TaskService.CancelTasksForIssue(ctx, issue.ID)
+		if s.shouldEnqueueAgentTask(ctx, issue) {
+			if _, err := s.TaskService.EnqueueTaskForIssue(ctx, issue); err != nil {
+				slog.Warn("enqueue agent task on update failed",
+					"issue_id", util.UUIDToString(issue.ID),
+					"error", err)
+			}
+		}
+		if s.shouldEnqueueSquadLeaderOnAssign(ctx, issue) {
+			s.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, opts.ActorType, opts.ActorID)
+		}
+	}
+
+	// Backlog→active promotion: trigger the assigned agent/squad when an
+	// issue moves out of backlog (but not when the assignee also changed
+	// — that case is handled above). Agent actors are allowed so the
+	// documented serial sub-task chain works; the self-loop guard
+	// (isAgentRunningOnIssue) prevents an agent from re-triggering the
+	// same issue its current task is executing for.
+	if ch.StatusChanged && !ch.AssigneeChanged &&
+		prev.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" &&
+		!s.isAgentRunningOnIssue(ctx, opts.ActorType, opts.TaskID, issue) {
+		if s.isAgentAssigneeReady(ctx, issue) {
+			if _, err := s.TaskService.EnqueueTaskForIssue(ctx, issue); err != nil {
+				slog.Warn("enqueue agent task on backlog promotion failed",
+					"issue_id", util.UUIDToString(issue.ID),
+					"error", err)
+			}
+		}
+		if s.isSquadLeaderReady(ctx, issue) {
+			s.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, opts.ActorType, opts.ActorID)
+		}
+	}
+
+	// Cancel active tasks when the issue is cancelled by a user.
+	if ch.StatusChanged && issue.Status == "cancelled" {
+		s.TaskService.CancelTasksForIssue(ctx, issue.ID)
+	}
+}
+
+// detectParentCycle validates that setting newParentID as the parent of
+// issueID does not create a cycle. It checks self-parenting, cross-
+// workspace existence, and walks up to 10 ancestors.
+func (s *IssueService) detectParentCycle(ctx context.Context, issueID, newParentID, workspaceID pgtype.UUID) error {
+	if newParentID == issueID {
+		return ErrSelfParent
+	}
+	// Parent must exist in the same workspace.
+	if _, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID:          newParentID,
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		return ErrParentIssueNotFound
+	}
+	// Walk ancestors — cap at 10 to bound the query cost.
+	cursor := newParentID
+	for depth := 0; depth < 10; depth++ {
+		ancestor, err := s.Queries.GetIssue(ctx, cursor)
+		if err != nil || !ancestor.ParentIssueID.Valid {
+			break
+		}
+		if ancestor.ParentIssueID == issueID {
+			return ErrCircularParent
+		}
+		cursor = ancestor.ParentIssueID
+	}
+	return nil
+}
+
+// isAgentRunningOnIssue reports whether the calling agent's current task
+// (identified by opts.TaskID, resolved from X-Task-ID by the handler) is
+// running for the exact issue being promoted. Mirrors the handler-side
+// guard; kept here so ReconcileAfterUpdate is self-contained.
+func (s *IssueService) isAgentRunningOnIssue(ctx context.Context, actorType string, taskID pgtype.UUID, issue db.Issue) bool {
+	if actorType != "agent" || !taskID.Valid {
+		return false
+	}
+	task, err := s.Queries.GetAgentTask(ctx, taskID)
+	if err != nil {
+		return false
+	}
+	if !task.IssueID.Valid {
+		return false
+	}
+	return util.UUIDToString(task.IssueID) == util.UUIDToString(issue.ID)
+}
+
+// computeIssueChanges diffs two issue rows and returns which top-level
+// fields changed. Uses value comparison (not pointer comparison) so the
+// result is accurate even when a field was "touched" in the request but
+// the value stayed the same.
+func computeIssueChanges(prev, issue db.Issue) IssueChangeSummary {
+	return IssueChangeSummary{
+		AssigneeChanged: prev.AssigneeType.String != issue.AssigneeType.String ||
+			util.UUIDToString(prev.AssigneeID) != util.UUIDToString(issue.AssigneeID),
+		StatusChanged:      prev.Status != issue.Status,
+		PriorityChanged:    prev.Priority != issue.Priority,
+		TitleChanged:       prev.Title != issue.Title,
+		DescriptionChanged: !pgTextEqual(prev.Description, issue.Description),
+		StartDateChanged:   !pgDateEqual(prev.StartDate, issue.StartDate),
+		DueDateChanged:     !pgDateEqual(prev.DueDate, issue.DueDate),
+	}
+}
+
+func pgTextEqual(a, b pgtype.Text) bool {
+	if a.Valid != b.Valid {
+		return false
+	}
+	if !a.Valid {
+		return true
+	}
+	return a.String == b.String
+}
+
+func pgDateEqual(a, b pgtype.Date) bool {
+	if a.Valid != b.Valid {
+		return false
+	}
+	if !a.Valid {
+		return true
+	}
+	return a.Time.Equal(b.Time)
+}
