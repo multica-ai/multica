@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -246,6 +247,55 @@ func TestCodexHandleServerRequestPermissionsApproval(t *testing.T) {
 	}
 	if got := fileSystem["read"].([]any)[0]; got != "/tmp/repo" {
 		t.Fatalf("expected fileSystem.read to round-trip, got %v", got)
+	}
+}
+
+func TestCodexPermissionsApprovalResponseDropsUnknownKeysAndLogs(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	resp := codexPermissionsApprovalResponse(
+		json.RawMessage(`{"permissions":{"network":{"enabled":true},"gpu":{"enabled":true}}}`),
+		logger,
+	)
+
+	if resp["scope"] != "turn" {
+		t.Fatalf("expected scope=turn, got %v", resp["scope"])
+	}
+	perms, ok := resp["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected permissions object, got %v", resp["permissions"])
+	}
+	if _, ok := perms["network"]; !ok {
+		t.Fatalf("expected network permission to be granted, got %v", perms)
+	}
+	if _, ok := perms["gpu"]; ok {
+		t.Fatalf("expected unrecognized key gpu to be dropped, got %v", perms)
+	}
+	if !strings.Contains(buf.String(), "gpu") {
+		t.Fatalf("expected dropped key to be logged, got %q", buf.String())
+	}
+}
+
+func TestCodexPermissionsApprovalResponseMalformedParamsLogs(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	resp := codexPermissionsApprovalResponse(json.RawMessage(`{"permissions":"not-an-object"}`), logger)
+
+	if resp["scope"] != "turn" {
+		t.Fatalf("expected scope=turn, got %v", resp["scope"])
+	}
+	perms, ok := resp["permissions"].(map[string]any)
+	if !ok || len(perms) != 0 {
+		t.Fatalf("expected empty permissions on malformed params, got %v", resp["permissions"])
+	}
+	if !strings.Contains(buf.String(), "failed to parse") {
+		t.Fatalf("expected parse failure to be logged, got %q", buf.String())
 	}
 }
 
