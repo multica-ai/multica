@@ -199,7 +199,7 @@ func (h *Handler) SendComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body := buildBundle(artifact.Title, toSend)
+	body := buildBundle(noteDisplayTitle(artifact.Title, artifact.Body), h.noteLink(r.Context(), wsUUID, noteID), toSend)
 
 	var agentsTriggered int
 	switch object {
@@ -368,15 +368,58 @@ func hasAgentMention(body string) bool {
 	return false
 }
 
+// noteDisplayTitle is the human name for the note in the dispatched bundle. A
+// note's artifact.Title is often empty (the first body line doubles as the
+// title in the Notes UI), which used to render "From note “”" on the issue
+// comment (FIR-1873). Fall back to the first non-empty body line, stripped of
+// leading markdown, capped; finally to "Untitled note" so the name is never
+// blank.
+func noteDisplayTitle(title, body string) string {
+	if t := strings.TrimSpace(title); t != "" {
+		return t
+	}
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		line = strings.TrimLeft(line, "#> ")
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if len(line) > 80 {
+			line = strings.TrimSpace(line[:80]) + "…"
+		}
+		return line
+	}
+	return "Untitled note"
+}
+
+// noteLink builds the in-app path to the note (e.g. "/acme/notes?note=<id>") so
+// the dispatched issue comment can deep-link back to its source note (FIR-1873).
+// Best-effort: an unresolvable workspace yields an empty string and the bundle
+// falls back to a plain (unlinked) note name.
+func (h *Handler) noteLink(ctx context.Context, wsUUID, noteID pgtype.UUID) string {
+	ws, err := h.Upstream.GetWorkspace(ctx, wsUUID)
+	if err != nil || strings.TrimSpace(ws.Slug) == "" {
+		return ""
+	}
+	return fmt.Sprintf("/%s/notes?note=%s", ws.Slug, uuidStr(noteID))
+}
+
 // buildBundle renders the note title + the comment bodies into one message body.
 // Comment bodies are kept verbatim so any @-mention links inside them survive
 // into the dispatched issue comment / chat message and drive the agent trigger.
+//
+// The note name links back to the source note (noteLink) when available so the
+// reader can open it; otherwise it renders as plain quoted text (FIR-1873).
 //
 // When a comment is anchored to a span of the note/document (a "markering" — the
 // author selected text and commented on it), the quoted span is the context the
 // agent needs to act on the comment. We render it as a blockquote above the
 // comment so the agent sees WHICH text the remark is about, not just the remark.
-func buildBundle(title string, comments []cerebrodb.CerebroNoteComment) string {
+func buildBundle(title, link string, comments []cerebrodb.CerebroNoteComment) string {
 	type entry struct{ quote, body string }
 	entries := make([]entry, 0, len(comments))
 	for _, c := range comments {
@@ -391,7 +434,11 @@ func buildBundle(title string, comments []cerebrodb.CerebroNoteComment) string {
 		entries = append(entries, entry{quote: quote, body: body})
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "From note “%s” (%d comment", title, len(entries))
+	if link != "" {
+		fmt.Fprintf(&b, "From note [%s](%s) (%d comment", title, link, len(entries))
+	} else {
+		fmt.Fprintf(&b, "From note “%s” (%d comment", title, len(entries))
+	}
 	if len(entries) != 1 {
 		b.WriteString("s")
 	}

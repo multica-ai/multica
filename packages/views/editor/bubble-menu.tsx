@@ -63,6 +63,7 @@ import {
   ListTodo, // CEREBRO-PATCH(todo-list-editor): expose task-list formatting in the bubble menu.
   Quote,
   ChevronDown,
+  MoreHorizontal, // CEREBRO-PATCH(bubble-menu-collapse): overflow trigger for secondary formatting.
   Check,
   X,
   Unlink,
@@ -296,89 +297,92 @@ function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor
 }
 
 // ---------------------------------------------------------------------------
-// List Dropdown
+// More-formatting overflow (CEREBRO-PATCH)
 // ---------------------------------------------------------------------------
 
-function ListDropdown({
+// CEREBRO-PATCH(bubble-menu-collapse): FIR-1873 — keep the floating toolbar
+// small everywhere. Primary actions (bold, link, heading, highlight, task,
+// comment) stay inline; the secondary marks/blocks (italic, strikethrough,
+// lists, quote, code) collapse behind this "⋯" button, which opens a menu
+// downward toward the text. Mirrors the ListDropdown row styling so the popover
+// matches the heading/list menus.
+function MoreFormatPopover({
   editor,
   onOpenChange,
-  isBullet,
-  isOrdered,
-  isTask,
+  fmt,
 }: {
   editor: Editor;
   onOpenChange: (open: boolean) => void;
-  isBullet: boolean;
-  isOrdered: boolean;
-  isTask: boolean;
+  fmt: {
+    italic: boolean;
+    strike: boolean;
+    bulletList: boolean;
+    orderedList: boolean;
+    blockquote: boolean;
+    code: boolean;
+  };
 }) {
   const { t } = useT("editor");
   const [open, setOpen] = useState(false);
 
-  const handleOpenChange = useCallback((next: boolean) => {
-    setOpen(next);
-    onOpenChange(next);
-  }, [onOpenChange]);
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      setOpen(next);
+      onOpenChange(next);
+    },
+    [onOpenChange],
+  );
+
+  const rows: {
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    active: boolean;
+    action: () => void;
+  }[] = [
+    { label: t(($) => $.bubble_menu.italic), icon: Italic, active: fmt.italic, action: () => editor.chain().focus().toggleItalic().run() },
+    { label: t(($) => $.bubble_menu.strikethrough), icon: Strikethrough, active: fmt.strike, action: () => editor.chain().focus().toggleStrike().run() },
+    { label: t(($) => $.bubble_menu.list_dropdown.bullet_list), icon: List, active: fmt.bulletList, action: () => editor.chain().focus().toggleBulletList().run() },
+    { label: t(($) => $.bubble_menu.list_dropdown.ordered_list), icon: ListOrdered, active: fmt.orderedList, action: () => editor.chain().focus().toggleOrderedList().run() },
+    { label: t(($) => $.bubble_menu.quote), icon: Quote, active: fmt.blockquote, action: () => editor.chain().focus().toggleBlockquote().run() },
+    { label: t(($) => $.bubble_menu.code), icon: Code, active: fmt.code, action: () => editor.chain().focus().toggleCode().run() },
+  ];
 
   return (
     <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger render={
           <PopoverTrigger
-            className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs font-medium hover:bg-muted aria-pressed:bg-muted"
-            aria-pressed={isBullet || isOrdered || isTask}
+            className="inline-flex h-7 items-center justify-center rounded-md px-1.5 hover:bg-muted aria-pressed:bg-muted"
             onMouseDown={(e) => e.preventDefault()}
           />
         }>
-          <List className="size-3.5" />
-          <ChevronDown className="size-3" />
+          <MoreHorizontal className="size-3.5" />
         </TooltipTrigger>
-        <TooltipContent side="top" sideOffset={8}>{t(($) => $.bubble_menu.list)}</TooltipContent>
+        <TooltipContent side="top" sideOffset={8}>More</TooltipContent>
       </Tooltip>
       <PopoverContent
         side="bottom"
         sideOffset={8}
-        align="start"
-        className="w-auto min-w-32 p-1"
+        align="end"
+        className="w-auto min-w-36 p-1"
         initialFocus={false}
         finalFocus={false}
       >
-        <button
-          type="button"
-          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            editor.chain().focus().toggleBulletList().run();
-            handleOpenChange(false);
-          }}
-        >
-          <List className="size-3.5" /> {t(($) => $.bubble_menu.list_dropdown.bullet_list)}
-          {isBullet && <Check className="ml-auto size-3.5" />}
-        </button>
-        <button
-          type="button"
-          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            editor.chain().focus().toggleOrderedList().run();
-            handleOpenChange(false);
-          }}
-        >
-          <ListOrdered className="size-3.5" /> {t(($) => $.bubble_menu.list_dropdown.ordered_list)}
-          {isOrdered && <Check className="ml-auto size-3.5" />}
-        </button>
-        <button
-          type="button"
-          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            editor.chain().focus().toggleTaskList().run();
-            handleOpenChange(false);
-          }}
-        >
-          <ListTodo className="size-3.5" /> {t(($) => $.bubble_menu.list_dropdown.task_list)}
-          {isTask && <Check className="ml-auto size-3.5" />}
-        </button>
+        {rows.map((row) => (
+          <button
+            type="button"
+            key={row.label}
+            className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              row.action();
+              handleOpenChange(false);
+            }}
+          >
+            <row.icon className="size-3.5" /> {row.label}
+            {row.active && <Check className="ml-auto size-3.5" />}
+          </button>
+        ))}
       </PopoverContent>
     </Popover>
   );
@@ -625,13 +629,13 @@ function EditorBubbleMenu({
         <LinkEditBar editor={editor} onClose={() => { setMode("toolbar"); editor.commands.focus(); }} />
       ) : (
         <TooltipProvider delay={300}>
-          <div className="bubble-menu max-w-full overflow-x-auto">{/* CEREBRO-PATCH(bubble-menu-mobile-scroll): FIR-1676 — scroll the pill horizontally when its tools exceed the viewport width. */}
+          {/* CEREBRO-PATCH(bubble-menu-collapse): FIR-1873 — primary actions
+              inline (bold, link, heading "Text", highlight "marker", task,
+              comment); secondary marks/blocks (italic, strike, lists, quote,
+              code) live behind the "⋯" overflow. overflow-x-auto + the maxWidth
+              cap on the wrapper stay as a last-resort guard on tiny screens. */}
+          <div className="bubble-menu max-w-full overflow-x-auto">
             <MarkButton editor={editor} mark="bold" icon={Bold} label={t(($) => $.bubble_menu.bold)} shortcut={`${modKey}+B`} isActive={fmt.bold} />
-            <MarkButton editor={editor} mark="italic" icon={Italic} label={t(($) => $.bubble_menu.italic)} shortcut={`${modKey}+I`} isActive={fmt.italic} />
-            <MarkButton editor={editor} mark="strike" icon={Strikethrough} label={t(($) => $.bubble_menu.strikethrough)} shortcut={`${modKey}+Shift+S`} isActive={fmt.strike} />
-            <MarkButton editor={editor} mark="code" icon={Code} label={t(($) => $.bubble_menu.code)} shortcut={`${modKey}+E`} isActive={fmt.code} />
-            <MarkButton editor={editor} mark="highlight" icon={Highlighter} label={t(($) => $.bubble_menu.highlight)} shortcut={`${modKey}+Shift+H`} isActive={fmt.highlight} />
-            <Separator orientation="vertical" className="mx-0.5 h-5" />
             <Tooltip>
               <TooltipTrigger render={
                 <Toggle size="sm" pressed={fmt.link} onPressedChange={() => setMode("link-edit")} onMouseDown={(e) => e.preventDefault()} />
@@ -642,51 +646,55 @@ function EditorBubbleMenu({
             </Tooltip>
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <HeadingDropdown editor={editor} onOpenChange={handleMenuOpenChange} activeLevel={fmt.heading1 ? 1 : fmt.heading2 ? 2 : fmt.heading3 ? 3 : undefined} />
-            <ListDropdown
-              editor={editor}
-              onOpenChange={handleMenuOpenChange}
-              isBullet={fmt.bulletList}
-              isOrdered={fmt.orderedList}
-              isTask={fmt.taskList}
-            />
+            <MarkButton editor={editor} mark="highlight" icon={Highlighter} label={t(($) => $.bubble_menu.highlight)} shortcut={`${modKey}+Shift+H`} isActive={fmt.highlight} />
             <Tooltip>
               <TooltipTrigger render={
-                <Toggle size="sm" pressed={fmt.blockquote} onPressedChange={() => editor.chain().focus().toggleBlockquote().run()} onMouseDown={(e) => e.preventDefault()} />
+                <Toggle size="sm" pressed={fmt.taskList} onPressedChange={() => editor.chain().focus().toggleTaskList().run()} onMouseDown={(e) => e.preventDefault()} />
               }>
-                <Quote className="size-3.5" />
+                <ListTodo className="size-3.5" />
               </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={8}>{t(($) => $.bubble_menu.quote)}</TooltipContent>
+              <TooltipContent side="top" sideOffset={8}>{t(($) => $.bubble_menu.list_dropdown.task_list)}</TooltipContent>
             </Tooltip>
+            {/* CEREBRO-PATCH(bubble-menu-comment-on-selection): TECH-3637 — note
+                comment affordance, an icon button matching the others. */}
+            {onCommentOnSelection && (
+              <Tooltip>
+                <TooltipTrigger render={
+                  <Toggle
+                    size="sm"
+                    pressed={false}
+                    onPressedChange={() => {
+                      const { from, to } = editor.state.selection;
+                      const text = editor.state.doc.textBetween(from, to, " ", " ").trim();
+                      if (text) onCommentOnSelection(text);
+                    }}
+                    onMouseDown={(e) => e.preventDefault()}
+                  />
+                }>
+                  <MessageSquarePlus className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>Comment</TooltipContent>
+              </Tooltip>
+            )}
             {currentIssueId && (
               <>
                 <Separator orientation="vertical" className="mx-0.5 h-5" />
                 <CreateSubIssueButton editor={editor} parentIssueId={currentIssueId} />
               </>
             )}
-            {/* CEREBRO-PATCH(bubble-menu-comment-on-selection): TECH-3637 — note
-                comment affordance, an icon button matching the others. */}
-            {onCommentOnSelection && (
-              <>
-                <Separator orientation="vertical" className="mx-0.5 h-5" />
-                <Tooltip>
-                  <TooltipTrigger render={
-                    <Toggle
-                      size="sm"
-                      pressed={false}
-                      onPressedChange={() => {
-                        const { from, to } = editor.state.selection;
-                        const text = editor.state.doc.textBetween(from, to, " ", " ").trim();
-                        if (text) onCommentOnSelection(text);
-                      }}
-                      onMouseDown={(e) => e.preventDefault()}
-                    />
-                  }>
-                    <MessageSquarePlus className="size-3.5" />
-                  </TooltipTrigger>
-                  <TooltipContent side="top" sideOffset={8}>Comment</TooltipContent>
-                </Tooltip>
-              </>
-            )}
+            <Separator orientation="vertical" className="mx-0.5 h-5" />
+            <MoreFormatPopover
+              editor={editor}
+              onOpenChange={handleMenuOpenChange}
+              fmt={{
+                italic: fmt.italic,
+                strike: fmt.strike,
+                bulletList: fmt.bulletList,
+                orderedList: fmt.orderedList,
+                blockquote: fmt.blockquote,
+                code: fmt.code,
+              }}
+            />
           </div>
         </TooltipProvider>
       )}

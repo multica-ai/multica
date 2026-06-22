@@ -73,9 +73,12 @@ export function NoteVersionsDialog({
           </SheetDescription>
         </SheetHeader>
 
-        <div className="flex min-h-0 flex-1">
+        {/* FIR-1873: stack on mobile (timeline on top, preview below) so the
+            preview + "Restore this version" button are reachable; side-by-side
+            from sm up where there is room. */}
+        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
           {/* Timeline */}
-          <div className="flex w-64 shrink-0 flex-col border-r">
+          <div className="flex max-h-44 w-full shrink-0 flex-col border-b sm:max-h-none sm:w-64 sm:border-b-0 sm:border-r">
             <div className="flex items-center justify-between px-3 py-2">
               <span className="text-xs text-muted-foreground">
                 {versions.length} version{versions.length === 1 ? "" : "s"}
@@ -127,7 +130,7 @@ export function NoteVersionsDialog({
           <div className="flex min-w-0 flex-1 flex-col">
             {selected ? (
               <>
-                <div className="flex items-center gap-2 border-b px-4 py-2">
+                <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
                   <span className="text-sm font-medium">
                     {selected.title || "Untitled"}
                   </span>

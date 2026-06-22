@@ -23,6 +23,8 @@ import {
   User,
   Pencil,
   Replace,
+  Share2,
+  Check,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -51,7 +53,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuCheckboxItem,
   DropdownMenuGroup,
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
@@ -754,6 +755,9 @@ export function NoteEditor({
   const [sharedIds, setSharedIds] = React.useState<string[]>([]);
   const [showComments, setShowComments] = React.useState(false);
   const [showHistory, setShowHistory] = React.useState(false);
+  // FIR-1873: sharing is managed from the "⋯" menu via this sheet, not a
+  // top-bar button (Jesper: "begge dele ind i 3 priks menuen").
+  const [showShare, setShowShare] = React.useState(false);
   // Add-reference + create-issue are launched from the "⋯" menu (TECH-3690).
   const [addRefOpen, setAddRefOpen] = React.useState(false);
   const [creatingIssue, setCreatingIssue] = React.useState(false);
@@ -943,62 +947,12 @@ export function NoteEditor({
           </Badge>
         )}
 
-        {/* Owner (FIR-1460, request 1): a note always shows who owns it. */}
-        <Badge variant="secondary" className="gap-1.5">
-          <User className="size-3" />
-          {ownerName(note.owner_id, myId, members)}
-        </Badge>
-
-        {/* Visibility is a single "Share" button (request 4) — the icon still
-            reflects who can see it; the menu sets it. Only the owner may change
-            sharing; others see a read-only visibility badge (request 2). */}
-        {isOwner ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              nativeButton={false}
-              render={
-                <Button size="sm" variant="outline" className="gap-1.5">
-                  {VIS_ICON[note.visibility]}
-                  <span>Share</span>
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="start" className="w-60">
-              <DropdownMenuRadioGroup
-                value={note.visibility}
-                onValueChange={(v) => applyVisibility(v as NoteVisibility)}
-              >
-                <DropdownMenuLabel>Who can see it</DropdownMenuLabel>
-                <DropdownMenuRadioItem value="private">
-                  Only you
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="shared">
-                  Selected colleagues
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="workspace">
-                  Whole team
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-              {note.visibility === "shared" && members.length > 0 && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>Share with</DropdownMenuLabel>
-                    {members.map((m) => (
-                      <DropdownMenuCheckboxItem
-                        key={m.user_id}
-                        checked={sharedIds.includes(m.user_id)}
-                        onCheckedChange={() => toggleShare(m.user_id)}
-                      >
-                        {m.name}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                  </DropdownMenuGroup>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : (
+        {/* FIR-1873: the owner now manages sharing from the "⋯" menu (it opens
+            the Share sheet), and the owner badge is gone from this bar — the
+            owner is already shown under the title (EntityMetaHeader). A
+            non-owner can't change sharing, so they keep a read-only badge here
+            showing who can currently see the note. */}
+        {!isOwner && (
           <Badge variant="outline" className="gap-1.5">
             {VIS_ICON[note.visibility]}
             <span>{VISIBILITY_LABELS[note.visibility]}</span>
@@ -1011,6 +965,14 @@ export function NoteEditor({
           triggerLabel="Note actions"
           className="sm:ml-auto"
           items={[
+            // Share lives in the menu now (FIR-1873). Owner-only — only the
+            // owner may change who can see the note; it opens the Share sheet.
+            isOwner && {
+              key: "share",
+              label: "Share",
+              icon: Share2,
+              onSelect: () => setShowShare(true),
+            },
             // Pin is an owner-only action on the backend (FIR-1460, request 2).
             isOwner && {
               key: "pin",
@@ -1189,6 +1151,68 @@ export function NoteEditor({
               }}
               onClose={closeComments}
             />
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {/* FIR-1873: Share moved out of the top bar into this sheet, opened from
+          the "⋯" menu. Same controls as before — visibility + share-with — so
+          behavior is unchanged, only the entry point moved. Owner-only. */}
+      {isOwner && (
+        <Sheet open={showShare} onOpenChange={setShowShare}>
+          <SheetContent
+            side="right"
+            className="flex flex-col gap-0 p-0 data-[side=right]:w-[94vw] data-[side=right]:sm:max-w-md"
+          >
+            <SheetHeader className="border-b px-5 py-3">
+              <SheetTitle className="flex items-center gap-2 text-base">
+                <Share2 className="size-4" /> Share
+              </SheetTitle>
+              <SheetDescription className="sr-only">
+                Choose who can see this note.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="flex flex-col gap-1 overflow-y-auto p-3">
+              <div className="px-1 pb-1 text-xs font-medium text-muted-foreground">
+                Who can see it
+              </div>
+              {(
+                [
+                  ["private", "Only you"],
+                  ["shared", "Selected colleagues"],
+                  ["workspace", "Whole team"],
+                ] as [NoteVisibility, string][]
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  onClick={() => applyVisibility(v)}
+                  className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted/50"
+                >
+                  {VIS_ICON[v]}
+                  <span className="flex-1">{label}</span>
+                  {note.visibility === v && <Check className="size-4" />}
+                </button>
+              ))}
+              {note.visibility === "shared" && members.length > 0 && (
+                <>
+                  <div className="mt-2 px-1 pb-1 text-xs font-medium text-muted-foreground">
+                    Share with
+                  </div>
+                  {members.map((m) => (
+                    <button
+                      key={m.user_id}
+                      onClick={() => toggleShare(m.user_id)}
+                      className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted/50"
+                    >
+                      <span className="flex-1 truncate">{m.name}</span>
+                      {sharedIds.includes(m.user_id) && (
+                        <Check className="size-4" />
+                      )}
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
           </SheetContent>
         </Sheet>
       )}

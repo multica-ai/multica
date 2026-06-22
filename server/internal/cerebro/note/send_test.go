@@ -23,7 +23,7 @@ func anchoredComment(quote, body string) cerebrodb.CerebroNoteComment {
 }
 
 func TestBuildBundle(t *testing.T) {
-	got := buildBundle("My note", []cerebrodb.CerebroNoteComment{
+	got := buildBundle("My note", "", []cerebrodb.CerebroNoteComment{
 		comment("first point"),
 		comment("  "), // blank — skipped
 		comment("second point"),
@@ -41,16 +41,44 @@ func TestBuildBundle(t *testing.T) {
 		t.Errorf("blank comment should be skipped: %q", got)
 	}
 
-	single := buildBundle("X", []cerebrodb.CerebroNoteComment{comment("only")})
+	single := buildBundle("X", "", []cerebrodb.CerebroNoteComment{comment("only")})
 	if !strings.Contains(single, "1 comment)") {
 		t.Errorf("singular count wrong: %q", single)
+	}
+}
+
+// FIR-1873 — when a note has a link, the bundle deep-links the note name back to
+// the source note instead of rendering a bare quoted title.
+func TestBuildBundleLinksNote(t *testing.T) {
+	got := buildBundle("My note", "/acme/notes?note=abc", []cerebrodb.CerebroNoteComment{comment("hi")})
+	if !strings.Contains(got, "From note [My note](/acme/notes?note=abc)") {
+		t.Errorf("bundle should link the note name: %q", got)
+	}
+}
+
+// FIR-1873 — the dispatched comment used to read "From note “”" when the note
+// had no explicit title. noteDisplayTitle falls back to the first body line.
+func TestNoteDisplayTitle(t *testing.T) {
+	cases := []struct {
+		title, body, want string
+	}{
+		{"My note", "ignored body", "My note"},
+		{"  ", "# First heading\nrest", "First heading"},
+		{"", "> quoted first line\nmore", "quoted first line"},
+		{"", "", "Untitled note"},
+		{"", "   \n  \n", "Untitled note"},
+	}
+	for _, c := range cases {
+		if got := noteDisplayTitle(c.title, c.body); got != c.want {
+			t.Errorf("noteDisplayTitle(%q, %q) = %q, want %q", c.title, c.body, got, c.want)
+		}
 	}
 }
 
 // A comment anchored to a text selection must carry its quoted span into the
 // bundle, so the agent sees which part of the note/document the remark is about.
 func TestBuildBundleIncludesAnchorQuote(t *testing.T) {
-	got := buildBundle("Doc", []cerebrodb.CerebroNoteComment{
+	got := buildBundle("Doc", "", []cerebrodb.CerebroNoteComment{
 		anchoredComment("the\n  third  paragraph", "please rewrite this"),
 		comment("a general note"),
 	})
