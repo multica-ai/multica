@@ -40,4 +40,4 @@ images:
     newTag: "97eefe9f"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "269bd7ba"
+    newTag: "97eefe9f"
