@@ -566,7 +566,9 @@ SELECT
     )::bigint AS total_seconds,
     COUNT(DISTINCT atq.id)::int AS task_count,
     COUNT(DISTINCT atq.id) FILTER (WHERE atq.status = 'failed')::int AS failed_count
-FROM task_usage tu
+FROM (
+    SELECT DISTINCT task_id, model FROM task_usage
+) tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
@@ -595,7 +597,10 @@ type ListDashboardModelRunTimeRow struct {
 
 // Per-model task run time and task count. Joins task_usage with
 // agent_task_queue on task_id. A task that uses multiple models
-// contributes its full duration to each model.
+// contributes its full duration to each model. A task that runs the
+// same model via multiple providers has its task_usage rows collapsed
+// to one (task_id, model) pair before joining, so its duration is
+// counted once per model — not duplicated per provider.
 func (q *Queries) ListDashboardModelRunTime(ctx context.Context, arg ListDashboardModelRunTimeParams) ([]ListDashboardModelRunTimeRow, error) {
 	rows, err := q.db.Query(ctx, listDashboardModelRunTime, arg.WorkspaceID, arg.Since, arg.ProjectID)
 	if err != nil {
@@ -660,6 +665,12 @@ type ListDashboardRuntimeUsageRow struct {
 
 // Per-(runtime_id, model) token aggregates. Joins agent_task_queue with
 // task_usage on task_id. Model dimension preserved for client-side cost math.
+//
+// Token basis differs from the hourly-rollup scopes: this query reads the
+// live `task_usage` table joined to terminal agent tasks only, while
+// Agent/Model scopes roll up `task_usage_hourly` (no terminal filter,
+// bucket-windowed). Cross-scope totals will not reconcile; accepted
+// because `task_usage_hourly` has no `runtime_id` key.
 func (q *Queries) ListDashboardRuntimeUsage(ctx context.Context, arg ListDashboardRuntimeUsageParams) ([]ListDashboardRuntimeUsageRow, error) {
 	rows, err := q.db.Query(ctx, listDashboardRuntimeUsage, arg.WorkspaceID, arg.Since, arg.ProjectID)
 	if err != nil {

@@ -96,6 +96,7 @@ function Segmented<T extends string | number>({
         <button
           key={String(o.value)}
           type="button"
+          aria-pressed={o.value === value}
           disabled={disabled}
           onClick={() => onChange(o.value)}
           className={`rounded-sm px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed ${

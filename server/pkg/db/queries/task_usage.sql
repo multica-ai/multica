@@ -210,7 +210,12 @@ ORDER BY total_seconds DESC;
 -- with agent_task_queue on task_id. A task that uses multiple models
 -- contributes its full duration to each model — total_seconds may exceed
 -- the workspace total for workspaces where tasks call multiple models.
--- COUNT(DISTINCT) avoids inflating the task count for multi-model tasks.
+-- Likewise, a task that runs the same model via multiple providers
+-- produces multiple `task_usage` rows (UNIQUE (task_id, provider, model));
+-- we collapse to one row per (task_id, model) before joining so a
+-- multi-provider task's duration is attributed once per model, not
+-- duplicated per provider. COUNT(DISTINCT) avoids inflating the task
+-- count for multi-model tasks.
 --
 -- @since is the viewer's local start-of-day-(N), consistent with the
 -- companion ListDashboardUsageByModel query.
@@ -222,7 +227,9 @@ SELECT
     )::bigint AS total_seconds,
     COUNT(DISTINCT atq.id)::int AS task_count,
     COUNT(DISTINCT atq.id) FILTER (WHERE atq.status = 'failed')::int AS failed_count
-FROM task_usage tu
+FROM (
+    SELECT DISTINCT task_id, model FROM task_usage
+) tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
@@ -244,6 +251,12 @@ ORDER BY total_seconds DESC;
 -- Only terminal tasks with both timestamps contribute (consistent with
 -- ListDashboardRuntimeRunTime so the time and token data cover the same
 -- set of tasks).
+--
+-- NOTE: token basis differs from the hourly-rollup scopes. This query reads
+-- the live `task_usage` table joined to terminal agent tasks only, while
+-- the Agent/Model scopes roll up `task_usage_hourly` (no terminal filter,
+-- bucket-windowed). Cross-scope totals will not reconcile; this is an
+-- accepted consequence of `task_usage_hourly` lacking a `runtime_id` key.
 SELECT
     atq.runtime_id,
     tu.model,
