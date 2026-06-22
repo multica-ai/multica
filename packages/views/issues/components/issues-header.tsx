@@ -104,6 +104,8 @@ import {
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { NativeSelect, NativeSelectOption } from "@multica/ui/components/ui/native-select";
 import { Input } from "@multica/ui/components/ui/input";
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — responsive date builder needs viewport size.
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import {
   useIssuesScopeStore,
   type IssuesScope,
@@ -941,6 +943,8 @@ function DateConditionRowV2({
   const [valueOpen, setValueOpen] = useState(false);
   const [calOpen, setCalOpen] = useState(false);
   const [stagedRange, setStagedRange] = useState<LocalDateRange | undefined>(undefined);
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — stack the row on phones, one calendar month.
+  const isMobile = useIsMobile();
 
   const op = opOf(c);
   const negate = op === "is_not";
@@ -1009,38 +1013,59 @@ function DateConditionRowV2({
   const rangeLabel = `${formatDateOnly(c.from)} – ${formatDateOnly(c.to)}`;
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="w-12 shrink-0 text-xs text-muted-foreground">
-        {isFirst ? t(($) => $.filters.date_where) : t(($) => $.filters.date_and)}
-      </span>
-      <NativeSelect
-        className="h-8 w-32"
-        value={c.field}
-        onChange={(e) => changeField(e.target.value as IssueDateField)}
-      >
-        {(["created_at", "updated_at", "due_date"] as const).map((f) => (
-          <NativeSelectOption key={f} value={f}>
-            {t(($) => $.filters[DATE_FIELD_LABEL_KEY[f]])}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
-      <NativeSelect
-        className="h-8 w-28"
-        value={op}
-        onChange={(e) => changeOp(e.target.value as DateOp)}
-      >
-        {DATE_OPS.map((o) => (
-          <NativeSelectOption key={o.id} value={o.id}>
-            {t(($) => $.filters[o.labelKey])}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
+    // CEREBRO-PATCH(my-issues-date-builder): FIR-1812 — stacked card on phones (<md),
+    // restores the inline single-row layout at md+ via `md:` resets. The `md:contents`
+    // wrappers group controls on mobile yet dissolve on desktop so the parent flex row
+    // is byte-identical to the original.
+    <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-muted/30 p-2.5 md:flex-row md:flex-wrap md:items-center md:gap-1.5 md:rounded-none md:border-0 md:bg-transparent md:p-0">
+      {/* Conjunction tag + remove sit on one header line on mobile; on desktop the
+          label flows inline and the remove icon moves to the end of the row. */}
+      <div className="flex items-center justify-between md:contents">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground md:w-12 md:shrink-0 md:text-xs md:font-normal md:normal-case md:tracking-normal">
+          {isFirst ? t(($) => $.filters.date_where) : t(($) => $.filters.date_and)}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={t(($) => $.filters.date_remove)}
+          className="size-7 shrink-0 text-muted-foreground md:hidden"
+          onClick={onRemove}
+        >
+          <X className="size-4" />
+        </Button>
+      </div>
+
+      {/* Field + operator share a row on mobile, become separate inline cells on desktop. */}
+      <div className="flex gap-2 md:contents">
+        <NativeSelect
+          className="h-9 flex-1 md:h-8 md:w-32 md:flex-none"
+          value={c.field}
+          onChange={(e) => changeField(e.target.value as IssueDateField)}
+        >
+          {(["created_at", "updated_at", "due_date"] as const).map((f) => (
+            <NativeSelectOption key={f} value={f}>
+              {t(($) => $.filters[DATE_FIELD_LABEL_KEY[f]])}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <NativeSelect
+          className="h-9 flex-1 md:h-8 md:w-28 md:flex-none"
+          value={op}
+          onChange={(e) => changeOp(e.target.value as DateOp)}
+        >
+          {DATE_OPS.map((o) => (
+            <NativeSelectOption key={o.id} value={o.id}>
+              {t(($) => $.filters[o.labelKey])}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </div>
 
       {needsValue && (
         <Popover open={valueOpen} onOpenChange={setValueOpen}>
           <PopoverTrigger
             render={
-              <Button variant="outline" size="sm" className="h-8 min-w-32 justify-between gap-1 font-normal">
+              <Button variant="outline" size="sm" className="h-9 w-full justify-between gap-1 font-normal md:h-8 md:w-auto md:min-w-32">
                 <span className="truncate">{valueLabel}</span>
                 <ChevronDown className="size-3.5 opacity-60" />
               </Button>
@@ -1069,16 +1094,16 @@ function DateConditionRowV2({
 
       {/* Relative: number + unit */}
       {needsValue && c.relative && (
-        <>
+        <div className="flex gap-2 md:contents">
           <Input
             type="number"
             min={1}
             value={c.relative.amount}
             onChange={(e) => setRelative({ amount: Number(e.target.value) })}
-            className="h-8 w-16"
+            className="h-9 w-20 md:h-8 md:w-16"
           />
           <NativeSelect
-            className="h-8 w-24"
+            className="h-9 flex-1 md:h-8 md:w-24 md:flex-none"
             value={c.relative.unit}
             onChange={(e) => setRelative({ unit: e.target.value as RelativeDateUnit })}
           >
@@ -1088,7 +1113,7 @@ function DateConditionRowV2({
               </NativeSelectOption>
             ))}
           </NativeSelect>
-        </>
+        </div>
       )}
 
       {/* Absolute: calendar popover */}
@@ -1096,15 +1121,15 @@ function DateConditionRowV2({
         <Popover open={calOpen} onOpenChange={setCalOpen}>
           <PopoverTrigger
             render={
-              <Button variant="outline" size="sm" className="h-8 min-w-28 justify-start font-normal">
+              <Button variant="outline" size="sm" className="h-9 w-full justify-start font-normal md:h-8 md:w-auto md:min-w-28">
                 {selectedId === "range" ? rangeLabel : formatDateOnly(singleSelected ? toDateOnly(singleSelected) : todayDateOnly())}
               </Button>
             }
           />
-          <PopoverContent align="start" className="w-auto gap-0 p-0">
+          <PopoverContent align="start" className="w-auto max-w-[92vw] gap-0 overflow-x-auto p-0">
             {selectedId === "range" ? (
               <>
-                <Calendar mode="range" numberOfMonths={2} selected={stagedRange} onSelect={(r) => setStagedRange(r)} captionLayout="dropdown" />
+                <Calendar mode="range" numberOfMonths={isMobile ? 1 : 2} selected={stagedRange} onSelect={(r) => setStagedRange(r)} captionLayout="dropdown" />
                 <div className="flex justify-end gap-2 border-t p-2">
                   <Button variant="ghost" size="sm" onClick={() => setCalOpen(false)}>
                     {t(($) => $.filters.date_cancel)}
@@ -1121,7 +1146,13 @@ function DateConditionRowV2({
         </Popover>
       )}
 
-      <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground" onClick={onRemove}>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={t(($) => $.filters.date_remove)}
+        className="hidden size-8 shrink-0 text-muted-foreground md:inline-flex"
+        onClick={onRemove}
+      >
         <X className="size-3.5" />
       </Button>
     </div>

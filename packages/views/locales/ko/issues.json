@@ -54,6 +54,7 @@
     "date_custom_range": "사용자 지정 날짜 또는 범위",
     "date_apply": "적용",
     "date_cancel": "Cancel",
+    "date_remove": "Remove",
     "date_mode_relative": "Relative",
     "date_mode_absolute": "Absolute",
     "date_dir_past": "In the last",

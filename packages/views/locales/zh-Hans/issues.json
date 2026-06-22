@@ -54,6 +54,7 @@
     "date_custom_range": "自定义日期或范围",
     "date_apply": "应用",
     "date_cancel": "Cancel",
+    "date_remove": "Remove",
     "date_mode_relative": "Relative",
     "date_mode_absolute": "Absolute",
     "date_dir_past": "In the last",

@@ -54,6 +54,7 @@
     "date_custom_range": "Custom date or range",
     "date_apply": "Apply",
     "date_cancel": "Cancel",
+    "date_remove": "Remove",
     "date_mode_relative": "Relative",
     "date_mode_absolute": "Absolute",
     "date_dir_past": "In the last",

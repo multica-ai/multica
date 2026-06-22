@@ -54,6 +54,7 @@
     "date_custom_range": "日付または範囲を指定",
     "date_apply": "適用",
     "date_cancel": "Cancel",
+    "date_remove": "Remove",
     "date_mode_relative": "Relative",
     "date_mode_absolute": "Absolute",
     "date_dir_past": "In the last",
