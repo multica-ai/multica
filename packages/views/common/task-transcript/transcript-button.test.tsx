@@ -20,6 +20,16 @@ vi.mock("../actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));
 
+// CEREBRO-PATCH(transcript-dialog-runprompt-stub): the dialog hard-imports the
+// cerebro RunPromptDisclosure (@multica/cerebro-sessions), which pulls in the
+// feature-flag + workspace data layer (TanStack Query + workspace route). This
+// upstream test only exercises the dialog's message/error flow, so it stubs the
+// cerebro child the same way it stubs ActorAvatar — keeping the test isolated
+// from cerebro's workspace-scoped runtime. See docs/cerebro-patches.md.
+vi.mock("@multica/cerebro-sessions", () => ({
+  RunPromptDisclosure: () => null,
+}));
+
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
     id: "task-1",
