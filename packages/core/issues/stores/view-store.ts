@@ -77,6 +77,8 @@ export interface IssueViewState {
   // users return to an empty list with no obvious cause.
   agentRunningFilter: boolean;
   showArchived: boolean;
+  /** When true, only show top-level (parent) issues, hiding sub-issues. */
+  topLevelOnly: boolean;
   sortBy: SortField;
   sortDirection: SortDirection;
   cardProperties: CardProperties;
@@ -106,6 +108,7 @@ export interface IssueViewState {
   toggleLabelFilter: (labelId: string) => void;
   toggleAgentRunningFilter: () => void;
   toggleShowArchived: () => void;
+  toggleTopLevelOnly: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
@@ -133,6 +136,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   labelFilters: [],
   agentRunningFilter: false,
   showArchived: false,
+  topLevelOnly: false,
   sortBy: "position",
   sortDirection: "asc",
   cardProperties: {
@@ -215,6 +219,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
   toggleShowArchived: () =>
     set((state) => ({ showArchived: !state.showArchived })),
+  toggleTopLevelOnly: () =>
+    set((state) => ({ topLevelOnly: !state.topLevelOnly })),
   hideStatus: (status) =>
     set((state) => {
       // If no filter active, activate filter with all EXCEPT this one
@@ -243,6 +249,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       labelFilters: [],
       agentRunningFilter: false,
       showArchived: false,
+      topLevelOnly: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
   setSortDirection: (dir) => set({ sortDirection: dir }),
@@ -296,6 +303,7 @@ export const viewStorePersistOptions = (name: string) => ({
     includeNoProject: state.includeNoProject,
     labelFilters: state.labelFilters,
     showArchived: state.showArchived,
+    topLevelOnly: state.topLevelOnly,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,

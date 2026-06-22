@@ -4,7 +4,11 @@
     "breadcrumb_workspace_fallback": "워크스페이스",
     "empty_title": "아직 이슈가 없습니다",
     "empty_hint": "이슈를 만들어 시작하세요.",
-    "move_failed": "이슈를 이동하지 못했습니다"
+    "move_failed": "이슈를 이동하지 못했습니다",
+    "show_archived": "아카이브 표시",
+    "hide_archived": "아카이브 숨기기",
+    "top_level_only": "최상위만",
+    "show_all_issues": "모든 이슈 표시"
   },
   "status": {
     "backlog": "백로그",

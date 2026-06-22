@@ -6,7 +6,9 @@
     "empty_hint": "创建一个 issue 开始使用。",
     "move_failed": "移动 issue 失败",
     "show_archived": "显示已归档",
-    "hide_archived": "隐藏已归档"
+    "hide_archived": "隐藏已归档",
+    "top_level_only": "仅一级 Issue",
+    "show_all_issues": "显示全部 Issue"
   },
   "status": {
     "backlog": "待规划",

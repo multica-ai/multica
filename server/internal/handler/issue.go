@@ -879,6 +879,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// top_level_only=true restricts the result to issues that have no parent
+	// (parent_issue_id IS NULL). Used by the Project panel to show only
+	// top-level issues, hiding sub-issues.
+	var topLevelOnlyFilter pgtype.Bool
+	if r.URL.Query().Get("top_level_only") == "true" {
+		topLevelOnlyFilter = pgtype.Bool{Bool: true, Valid: true}
+	}
+
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
@@ -898,6 +906,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			LabelIds:          labelIdsFilter,
 			MetadataFilter:    metadataFilter,
 			InvolvesUserID:    involvesUserFilter,
+			TopLevelOnly:      topLevelOnlyFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1047,6 +1056,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
+	}
+	if topLevelOnlyFilter.Valid {
+		where = append(where, "i.parent_issue_id IS NULL")
 	}
 	if metadataFilter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
@@ -1366,6 +1378,9 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if filter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(filter))))
+	}
+	if r.URL.Query().Get("top_level_only") == "true" {
+		where = append(where, "i.parent_issue_id IS NULL")
 	}
 	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
 	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic

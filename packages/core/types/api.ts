@@ -92,6 +92,8 @@ export interface ListIssuesParams {
   archived?: boolean;
   /** When true, include archived issues alongside non-archived ones (no archived_at filter). */
   include_archived?: boolean;
+  /** When true, only return top-level issues (parent_issue_id IS NULL). */
+  top_level_only?: boolean;
 }
 
 export interface IssueActorRef {
@@ -127,6 +129,8 @@ export interface ListGroupedIssuesParams {
   sort_direction?: "asc" | "desc";
   archived?: boolean;
   include_archived?: boolean;
+  /** When true, only return top-level issues (parent_issue_id IS NULL). */
+  top_level_only?: boolean;
 }
 
 /** Raw backend response shape for `GET /api/issues`. */

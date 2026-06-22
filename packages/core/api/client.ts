@@ -809,6 +809,7 @@ export class ApiClient {
     if (params?.sort_direction) search.set("direction", params.sort_direction);
     if (params?.archived) search.set("archived", "true");
     if (params?.include_archived) search.set("include_archived", "true");
+    if (params?.top_level_only) search.set("top_level_only", "true");
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
@@ -848,6 +849,7 @@ export class ApiClient {
     if (params.sort_direction) search.set("direction", params.sort_direction);
     if (params.archived) search.set("archived", "true");
     if (params.include_archived) search.set("include_archived", "true");
+    if (params.top_level_only) search.set("top_level_only", "true");
     const raw = await this.fetch<unknown>(`/api/issues/grouped?${search}`);
     return parseWithFallback(raw, GroupedIssuesResponseSchema, EMPTY_GROUPED_ISSUES_RESPONSE, {
       endpoint: "GET /api/issues/grouped",
