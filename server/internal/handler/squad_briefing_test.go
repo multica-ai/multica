@@ -150,8 +150,7 @@ func TestBuildSquadLeaderBriefing_FullSquad(t *testing.T) {
 	}
 }
 
-// assignSkillToAgent creates a workspace skill and attaches it to the agent,
-// registering cleanup for the skill row (agent_skill cascades on skill delete).
+// assignSkillToAgent creates a workspace skill and attaches it to the agent.
 func assignSkillToAgent(t *testing.T, agentID, skillName string) {
 	t.Helper()
 	ctx := context.Background()
@@ -163,7 +162,14 @@ func assignSkillToAgent(t *testing.T, agentID, skillName string) {
 	`, testWorkspaceID, skillName, testUserID).Scan(&skillID); err != nil {
 		t.Fatalf("create skill %s: %v", skillName, err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM skill WHERE id = $1`, skillID) })
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(ctx, `DELETE FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`, agentID, skillID); err != nil {
+			t.Errorf("cleanup agent skill %s/%s: %v", agentID, skillName, err)
+		}
+		if _, err := testPool.Exec(ctx, `DELETE FROM skill WHERE id = $1`, skillID); err != nil {
+			t.Errorf("cleanup skill %s: %v", skillName, err)
+		}
+	})
 	if _, err := testPool.Exec(ctx,
 		`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
 		agentID, skillID,
@@ -183,7 +189,7 @@ func TestBuildSquadLeaderBriefing_MemberSkillsInRoster(t *testing.T) {
 
 	skilled := createHandlerTestAgent(t, "Skilled Bot", []byte("[]"))
 	addAgentMember(t, squad.ID, skilled, "backend")
-	// ListAgentSkillSummaries orders by name ASC → "polars" before "stat…".
+	// ListAgentSkillNamesByAgentIDs orders by name ASC → "polars" before "stat…".
 	assignSkillToAgent(t, skilled, "polars")
 	assignSkillToAgent(t, skilled, "statistical-analysis")
 
