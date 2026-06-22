@@ -46,17 +46,20 @@ func (h *Handler) TestAsUserAccess(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	eff, err := h.Store.Resolve(r.Context(), Query{
+	// Opt-in gate: OFF for everyone until an admin grants an explicit Allow at the
+	// user or group layer. This is NOT Resolve(Base: Deny) — the tighten-only
+	// chain can never loosen a Deny base back to Allow, so that always returns
+	// Deny and hides the entry for everyone, grant or no grant (FIR-1771).
+	allowed, err := h.Store.ResolveOptIn(r.Context(), Query{
 		WorkspaceID: workspaceID,
 		ToolKey:     TestAsUserToolKey,
 		UserID:      member.UserID,
-		Base:        SettingDeny,
 	})
 	if err != nil {
 		h.serverError(w, r, "resolve test-as-user access", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, testAsUserAccessResponse{Allowed: eff.Setting == SettingAllow})
+	writeJSON(w, http.StatusOK, testAsUserAccessResponse{Allowed: allowed})
 }
 
 // testAsUserRequest is the POST body: which (user, agent, runtime) combination
@@ -72,7 +75,8 @@ type testAsUserRequest struct {
 
 // TestAsUser — POST /api/workspaces/{id}/cerebro/test-as-user.
 //
-// Gated by the tools:test-as-user capability (Base = Deny, no admin bypass).
+// Gated by the tools:test-as-user capability (opt-in: OFF until an explicit
+// user/group Allow grant, no admin bypass).
 // Resolves every tool for the target (user, agent, runtime) context — the
 // target user's real groups are auto-resolved by Store.Table — and returns the
 // rows (verdict, deciding/capping layer, capped group(s), reason), identical in
@@ -84,19 +88,19 @@ func (h *Handler) TestAsUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Gate the caller: only an explicit Allow on tools:test-as-user lets anyone
-	// look up another user's permissions. Base = Deny, no admin shortcut.
-	access, err := h.Store.Resolve(r.Context(), Query{
+	// Gate the caller: only an explicit Allow grant on tools:test-as-user (user or
+	// group layer) lets anyone look up another user's permissions. Opt-in, no
+	// admin shortcut — see ResolveOptIn for why this is not Resolve(Base: Deny).
+	allowed, err := h.Store.ResolveOptIn(r.Context(), Query{
 		WorkspaceID: workspaceID,
 		ToolKey:     TestAsUserToolKey,
 		UserID:      member.UserID,
-		Base:        SettingDeny,
 	})
 	if err != nil {
 		h.serverError(w, r, "resolve test-as-user access", err)
 		return
 	}
-	if access.Setting != SettingAllow {
+	if !allowed {
 		writeError(w, http.StatusForbidden, "the Test as user feature is not enabled for you — ask a workspace admin")
 		return
 	}

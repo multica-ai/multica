@@ -291,3 +291,33 @@ func TestResolve_SystemLayerCaps(t *testing.T) {
 		t.Fatalf("expected CappedBy=system, got %q", e.CappedBy)
 	}
 }
+
+// TestResolveOptIn covers the OFF-by-default capability gate (FIR-1771). The key
+// regression it locks: an explicit user/group Allow grants access — the bug was
+// that the gate used Resolve(Base: Deny), which the tighten-only chain can never
+// lift back to Allow, so it returned false for everyone regardless of grant.
+func TestResolveOptIn(t *testing.T) {
+	cases := []struct {
+		name     string
+		settings map[Layer]Setting
+		want     bool
+	}{
+		{"no rows → off", set(), false},
+		{"user allow → on", set(LayerUser, SettingAllow), true},
+		{"group allow, user absent → on", set(LayerGroup, SettingAllow), true},
+		{"user deny revokes group allow", set(LayerUser, SettingDeny, LayerGroup, SettingAllow), false},
+		{"user ask → off", set(LayerUser, SettingAsk), false},
+		{"user inherit → off", set(LayerUser, SettingInherit), false},
+		// A non-user/group layer never grants this gate on its own.
+		{"workspace allow alone → off", set(LayerWorkspace, SettingAllow), false},
+		{"agent allow alone → off", set(LayerAgent, SettingAllow), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ResolveOptIn(Input{Settings: tc.settings})
+			if got != tc.want {
+				t.Fatalf("ResolveOptIn(%v) = %v, want %v", tc.settings, got, tc.want)
+			}
+		})
+	}
+}

@@ -129,6 +129,20 @@ func (s *Store) Resolve(ctx context.Context, in Query) (Effective, error) {
 	return Resolve(input), nil
 }
 
+// ResolveOptIn loads the explicit settings for the query's (workspace, user,
+// groups, tool) context and decides an OFF-by-default capability gate: false
+// unless an explicit Allow has been granted at the user or group layer. Unlike
+// Resolve (tighten-only, default Allow), this cannot be expressed by the chain
+// — see ResolveOptIn for why a Deny base can never be lifted by a grant. in.Base
+// is ignored; the gate is opt-in by definition.
+func (s *Store) ResolveOptIn(ctx context.Context, in Query) (bool, error) {
+	input, err := s.loadInput(ctx, in)
+	if err != nil {
+		return false, err
+	}
+	return ResolveOptIn(input), nil
+}
+
 // loadInput fetches the rows for the query and assembles a chain Input. Several
 // group rows are collapsed with CombineGroups (most permissive group wins)
 // before entering the chain at LayerGroup.

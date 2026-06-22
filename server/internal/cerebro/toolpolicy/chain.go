@@ -222,6 +222,28 @@ func Resolve(in Input) Effective {
 	}
 }
 
+// ResolveOptIn decides an OFF-by-default capability gate from the explicit
+// per-layer settings. It exists because Resolve (the tighten-only chain) cannot
+// express opt-in: Resolve only ever TIGHTENS below its Base and refuses to
+// loosen ("Loosening is not permitted; the running value stands"), so a Deny
+// Base can never be lifted by a grant — Resolve(Base: Deny) is ALWAYS Deny no
+// matter what Allow rows exist below it. An opt-in capability is the opposite
+// shape: nobody holds it until an admin grants it. Semantics here:
+//
+//   - granted by an explicit Allow at the User OR Group layer;
+//   - an explicit User Deny revokes it even when a group grants it;
+//   - everything else (no rows, Ask, Inherit) stays OFF.
+//
+// LayerGroup has already been collapsed to its single most-permissive value by
+// CombineGroups before it reaches here, so a User with no row inherits any
+// group grant. Used by capability gates such as tools:test-as-user (FIR-1771).
+func ResolveOptIn(in Input) bool {
+	if in.Settings[LayerUser] == SettingDeny {
+		return false
+	}
+	return in.Settings[LayerUser] == SettingAllow || in.Settings[LayerGroup] == SettingAllow
+}
+
 // CombineGroups collapses the settings from every group a user belongs to into
 // the single value that enters Resolve at LayerGroup.
 //
