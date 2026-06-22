@@ -165,4 +165,35 @@ describe("RuntimeDetail visibility section", () => {
     // The editor's "Private" choice button must not render in read-only mode.
     expect(screen.queryByText("Private")).not.toBeInTheDocument();
   });
+
+  // MUL-3352: an owner viewing an online local (self-healing) runtime
+  // used to see a disabled Delete button with only a hover tooltip
+  // explaining why. The new contract: the button is always clickable
+  // for owner/admin; the dialog now carries the self-heal warning.
+  it("renders an enabled Delete runtime button for an owner on a self-healing local runtime", () => {
+    renderDetail(
+      makeRuntime({
+        owner_id: "user-me",
+        runtime_mode: "local",
+        status: "online",
+      }),
+    );
+    const btn = screen.getByRole("button", {
+      name: /Delete runtime/i,
+    }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+  });
+
+  it("hides the Delete runtime button entirely for callers who cannot edit", () => {
+    renderDetail(
+      makeRuntime({
+        owner_id: "someone-else",
+        runtime_mode: "local",
+        status: "online",
+      }),
+    );
+    expect(
+      screen.queryByRole("button", { name: /Delete runtime/i }),
+    ).not.toBeInTheDocument();
+  });
 });

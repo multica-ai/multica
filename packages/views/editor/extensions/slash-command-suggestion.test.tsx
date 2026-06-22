@@ -42,6 +42,8 @@ import {
   type SlashCommandListRef,
   createSlashCommandSuggestion,
   type SlashCommandItem,
+  buildBuiltinCommandItems,
+  BUILTIN_COMMANDS,
 } from "./slash-command-suggestion";
 
 function agent(overrides: Partial<Agent>): Agent {
@@ -325,5 +327,58 @@ describe("SlashCommandList empty states", () => {
     );
 
     expect(getByText("No matching skills")).toBeInTheDocument();
+  });
+
+  it("renders nothing on empty items when hideOnEmpty is set (command menu)", () => {
+    const { container } = render(
+      <I18nWrapper>
+        <SlashCommandList items={[]} query="6" command={vi.fn()} hideOnEmpty />
+      </I18nWrapper>,
+    );
+
+    // No popup box on a non-matching `/` (e.g. typing a date like 6/8).
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("buildBuiltinCommandItems", () => {
+  it("returns the full built-in command set for an empty query", () => {
+    expect(buildBuiltinCommandItems("")).toEqual(BUILTIN_COMMANDS);
+  });
+
+  it("includes /note while the query is a prefix of the label", () => {
+    expect(buildBuiltinCommandItems("no").map((c) => c.id)).toEqual(["note"]);
+    expect(buildBuiltinCommandItems("NOTE").map((c) => c.id)).toEqual(["note"]);
+  });
+
+  it("matches the label as a prefix only — not the description", () => {
+    // "agent" appears in the description but is not a label prefix.
+    expect(buildBuiltinCommandItems("agent")).toEqual([]);
+    // A non-prefix substring of the label does not match either.
+    expect(buildBuiltinCommandItems("ote")).toEqual([]);
+  });
+
+  it("returns nothing for a query that matches no command", () => {
+    expect(buildBuiltinCommandItems("deploy")).toEqual([]);
+  });
+});
+
+describe("SlashCommandList built-in command rendering", () => {
+  it("renders the localized description for a built-in command", () => {
+    const { getByText } = render(
+      <I18nWrapper>
+        <SlashCommandList
+          items={buildBuiltinCommandItems("")}
+          query=""
+          command={vi.fn()}
+          hideOnEmpty
+        />
+      </I18nWrapper>,
+    );
+
+    expect(getByText("/note")).toBeInTheDocument();
+    expect(
+      getByText("Add a note — won't trigger any agents"),
+    ).toBeInTheDocument();
   });
 });

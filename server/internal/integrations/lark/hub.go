@@ -203,11 +203,12 @@ func (c HubConfig) withDefaults() HubConfig {
 //	... ctx cancellation triggers ...
 //	hub.Wait()                  // joins on every per-installation goroutine
 type Hub struct {
-	queries    HubQueries
-	factory    ConnectorFactory
-	dispatcher *Dispatcher
-	replier    OutcomeReplier
-	cfg        HubConfig
+	queries         HubQueries
+	factory         ConnectorFactory
+	dispatcher      *Dispatcher
+	replier         OutcomeReplier
+	typingIndicator *TypingIndicatorManager
+	cfg             HubConfig
 
 	// nodeID is the per-process lease ownership token. The CAS
 	// predicate on AcquireLarkWSLease treats matching tokens as
@@ -291,6 +292,13 @@ func (h *Hub) SetOutcomeReplier(r OutcomeReplier) {
 		r = NewNoopOutcomeReplier(h.cfg.Logger)
 	}
 	h.replier = r
+}
+
+// SetTypingIndicatorManager installs the typing-indicator manager on
+// the Hub. Must be called BEFORE Run. Nil is safe and disables the
+// typing reaction lifecycle.
+func (h *Hub) SetTypingIndicatorManager(m *TypingIndicatorManager) {
+	h.typingIndicator = m
 }
 
 // NodeID exposes the per-process lease token. Useful for tests and
@@ -773,6 +781,16 @@ func (h *Hub) handleEvent(ctx context.Context, inst db.LarkInstallation, log *sl
 		"outcome", string(res.Outcome),
 		"drop_reason", string(res.DropReason),
 	)
+	if res.Outcome == OutcomeIngested && h.typingIndicator != nil {
+		// Detached: the typing reaction HTTP call must not block the
+		// connector's ACK path. A short timeout keeps the goroutine
+		// from hanging if Lark is slow.
+		go func() {
+			addCtx, cancel := context.WithTimeout(context.Background(), h.cfg.ReplyTimeout)
+			defer cancel()
+			h.typingIndicator.Add(addCtx, inst, res.ChatSessionID, msg.MessageID, msg.CreateTime)
+		}()
+	}
 	h.scheduleReply(inst, msg, res, log)
 	return res, nil
 }

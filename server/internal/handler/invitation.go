@@ -464,7 +464,7 @@ func (h *Handler) CreateInviteLink(w http.ResponseWriter, r *http.Request) {
 
 	resp := inviteLinkToResponse(inv, token)
 	resp.InviteURL = "/invite/" + token
-	h.Analytics.Capture(analytics.TeamInviteSent(uuidToString(requester.UserID), workspaceID, "", "link"))
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.TeamInviteSent(uuidToString(requester.UserID), workspaceID, "", "link"))
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -673,7 +673,7 @@ func (h *Handler) AcceptInviteLink(w http.ResponseWriter, r *http.Request) {
 	if consumed.CreatedAt.Valid {
 		daysSinceInvite = int64(time.Since(consumed.CreatedAt.Time).Hours() / 24)
 	}
-	h.Analytics.Capture(analytics.TeamInviteAccepted(userID, wsID, daysSinceInvite))
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.TeamInviteAccepted(userID, wsID, daysSinceInvite))
 
 	writeJSON(w, http.StatusOK, memberResp)
 }

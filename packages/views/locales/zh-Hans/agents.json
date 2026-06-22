@@ -14,7 +14,8 @@
   "scope": {
     "mine": "我的",
     "all": "全部",
-    "default": "默认"
+    "default": "默认",
+    "archived": "已归档"
   },
   "sort": {
     "label_recent": "最近活跃",
@@ -67,7 +68,11 @@
     "workload": "工作负载",
     "runtime": "运行时",
     "activity_7d": "活动（7 天）",
-    "runs": "运行次数"
+    "runs": "运行次数",
+    "last_active": "最近活跃",
+    "model": "模型",
+    "created": "创建时间",
+    "owner": "Owner"
   },
   "row": {
     "you": "你",
@@ -75,7 +80,9 @@
     "no_description": "暂无描述",
     "fallback_runtime_cloud": "云端",
     "fallback_runtime_local": "本地",
-    "actions_aria": "行操作"
+    "actions_aria": "行操作",
+    "task_count_one": "{{count}} 个任务",
+    "task_count_other": "{{count}} 个任务"
   },
   "activity_tooltip": {
     "created_today": "今天创建",
@@ -250,6 +257,7 @@
     "custom_args": "自定义参数",
     "mcp_config": "MCP",
     "integrations": "集成",
+    "runtime_config": "路由",
     "discard_dialog_title": "放弃未保存的修改？",
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",
@@ -361,6 +369,26 @@
       "redacted_title": "已配置 —— 当前账号无权查看",
       "redacted_hint": "只有智能体所有者或工作区管理员可以读取该配置。"
     },
+    "runtime_config": {
+      "intro": "选择 OpenClaw 运行时执行该智能体每一回合的方式。Local 模式让智能体直接在 daemon 进程内运行；Gateway 模式则把每一回合转发到一个 OpenClaw Gateway —— 适合 daemon 宿主只是轻量协调机、希望真正算力落在更强的远端机器上的场景。",
+      "mode_label": "路由模式",
+      "mode_local": "Local",
+      "mode_gateway": "Gateway",
+      "mode_local_hint": "默认。daemon 调用 `openclaw agent --local …`，智能体循环跑在本机。",
+      "mode_gateway_hint": "daemon 连接 OpenClaw Gateway。端点字段留空则继承 daemon 宿主 `~/.openclaw/openclaw.json` 里的配置。",
+      "gateway_legend": "Gateway 端点",
+      "host_label": "Host",
+      "host_placeholder": "gw.internal",
+      "port_label": "端口",
+      "port_invalid": "端口必须是正整数。",
+      "token_label": "鉴权 Token",
+      "token_placeholder": "Gateway 颁发的 bearer token",
+      "token_masked_placeholder": "已保存 —— 输入新值可轮换，留空则保留原 token",
+      "tls_label": "启用 TLS",
+      "tls_hint": "用 https:// 代替 http:// 连接",
+      "saved_toast": "路由配置已保存",
+      "save_failed_toast": "保存路由配置失败"
+    },
     "skills": {
       "intro": "分配给该智能体的工作区 skill。本地运行时 skill 会自动可用。",
       "add_action": "添加 skill",
@@ -406,10 +434,12 @@
       "source_issue": "Issue",
       "source_chat": "聊天",
       "source_autopilot": "自动化",
+      "source_channel": "频道",
       "source_untracked": "未追踪",
       "source_quick_create": "快速创建",
       "source_creating_issue": "正在创建 issue",
       "source_chat_session": "聊天会话",
+      "source_channel_message": "频道消息",
       "source_autopilot_run": "自动化运行",
       "issue_short_fallback": "Issue {{prefix}}...",
       "triggered_by": "触发来源",
@@ -526,5 +556,32 @@
     "relative_minutes": "{{count}} 分钟前",
     "relative_hours": "{{count}} 小时前",
     "relative_days": "{{count}} 天前"
+  },
+  "last_active": {
+    "today": "今天",
+    "days_ago_one": "{{count}} 天前",
+    "days_ago_other": "{{count}} 天前",
+    "none": "30 天内无活动"
+  },
+  "toolbar": {
+    "result_count_title": "当前结果 / 范围内全部",
+    "filter_label": "筛选",
+    "filter_active_count_one": "{{count}} 项筛选",
+    "filter_active_count_other": "{{count}} 项筛选",
+    "clear_filters": "清除筛选",
+    "section_availability": "可用性",
+    "section_runtime": "运行时",
+    "display": "显示",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "列",
+    "section_owner": "Owner",
+    "section_model": "模型"
+  },
+  "actions": {
+    "selected_one": "已选 {{count}} 项",
+    "selected_other": "已选 {{count}} 项",
+    "clear_selection": "清除选择"
   }
 }

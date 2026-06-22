@@ -885,15 +885,21 @@ func TestNotification_StartDateChanged(t *testing.T) {
 	}
 }
 
-// TestNotification_ParentBubble_StatusChanged verifies that a status_changed
-// event on a sub-issue bubbles to subscribers of the parent issue.
-func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
+// TestNotification_ParentBubble_StatusChangedSuppressed verifies that a
+// status_changed event on a sub-issue only notifies the sub-issue subscriber
+// list. Parent subscribers must be inherited at child creation time instead
+// of being queried as a second notification source.
+func TestNotification_ParentBubble_StatusChangedSuppressed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
 	parentSubEmail := "notif-parent-sub-status@multica.ai"
 	parentSubID := createTestUser(t, parentSubEmail)
 	t.Cleanup(func() { cleanupTestUser(t, parentSubEmail) })
+
+	childSubEmail := "notif-child-sub-status@multica.ai"
+	childSubID := createTestUser(t, childSubEmail)
+	t.Cleanup(func() { cleanupTestUser(t, childSubEmail) })
 
 	parentID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() {
@@ -906,9 +912,10 @@ func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
 		cleanupTestIssue(t, subID)
 	})
 
-	// Subscribe a watcher to the parent only — they should hear about
-	// status changes on the sub-issue.
+	// Parent-only subscribers are not a notification source after child
+	// creation. The child subscriber should receive the update.
 	addTestSubscriber(t, parentID, "member", parentSubID, "manual")
+	addTestSubscriber(t, subID, "member", childSubID, "manual")
 
 	bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
@@ -931,17 +938,78 @@ func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
 		},
 	})
 
+	parentItems := inboxItemsForRecipient(t, queries, parentSubID)
+	if len(parentItems) != 0 {
+		t.Fatalf("expected 0 inbox items for parent-only subscriber, got %d", len(parentItems))
+	}
+
+	childItems := inboxItemsForRecipient(t, queries, childSubID)
+	if len(childItems) != 1 {
+		t.Fatalf("expected 1 inbox item for child subscriber, got %d", len(childItems))
+	}
+	if childItems[0].Type != "status_changed" {
+		t.Fatalf("expected type 'status_changed', got %q", childItems[0].Type)
+	}
+	if util.UUIDToString(childItems[0].IssueID) != subID {
+		t.Fatalf("expected inbox item issue_id=%s, got %s",
+			subID, util.UUIDToString(childItems[0].IssueID))
+	}
+}
+
+func TestNotification_ParentSubscriberUnsubscribedFromChildDoesNotReceiveUpdate(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	parentSubEmail := "notif-parent-sub-unsub-child@multica.ai"
+	parentSubID := createTestUser(t, parentSubEmail)
+	t.Cleanup(func() { cleanupTestUser(t, parentSubEmail) })
+
+	parentID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, parentID)
+		cleanupTestIssue(t, parentID)
+	})
+	subID := createTestSubIssue(t, testWorkspaceID, testUserID, parentID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, subID)
+		cleanupTestIssue(t, subID)
+	})
+
+	addTestSubscriber(t, parentID, "member", parentSubID, "manual")
+	addTestSubscriber(t, subID, "member", parentSubID, "parent")
+	err := queries.RemoveIssueSubscriber(context.Background(), db.RemoveIssueSubscriberParams{
+		IssueID:  util.MustParseUUID(subID),
+		UserType: "member",
+		UserID:   util.MustParseUUID(parentSubID),
+	})
+	if err != nil {
+		t.Fatalf("RemoveIssueSubscriber: %v", err)
+	}
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:          subID,
+				WorkspaceID: testWorkspaceID,
+				Title:       "sub-issue status after child unsubscribe",
+				Status:      "done",
+				Priority:    "medium",
+				CreatorType: "member",
+				CreatorID:   testUserID,
+			},
+			"assignee_changed": false,
+			"status_changed":   true,
+			"prev_status":      "in_progress",
+		},
+	})
+
 	items := inboxItemsForRecipient(t, queries, parentSubID)
-	if len(items) != 1 {
-		t.Fatalf("expected 1 inbox item bubbled to parent subscriber, got %d", len(items))
-	}
-	if items[0].Type != "status_changed" {
-		t.Fatalf("expected type 'status_changed', got %q", items[0].Type)
-	}
-	// The inbox item should point to the sub-issue, not the parent.
-	if util.UUIDToString(items[0].IssueID) != subID {
-		t.Fatalf("expected inbox item issue_id=%s (sub-issue), got %s",
-			subID, util.UUIDToString(items[0].IssueID))
+	if len(items) != 0 {
+		t.Fatalf("expected 0 inbox items after child unsubscribe, got %d", len(items))
 	}
 }
 

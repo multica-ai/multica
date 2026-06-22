@@ -46,8 +46,8 @@ func createWebhookTestAutopilot(t *testing.T, agentID, status, mode string) stri
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO autopilot (
 			workspace_id, title, assignee_id, status, execution_mode,
-			created_by_type, created_by_id
-		) VALUES ($1, $2, $3, $4, $5, 'member', $6)
+			created_by_type, created_by_id, manual_options
+		) VALUES ($1, $2, $3, $4, $5, 'member', $6, '{}')
 		RETURNING id
 	`, testWorkspaceID, "Webhook test "+status, agentID, status, mode, testUserID).Scan(&apID); err != nil {
 		t.Fatalf("create autopilot: %v", err)

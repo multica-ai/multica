@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask } from "@multica/core/types/agent";
@@ -16,11 +18,23 @@ vi.mock("@multica/core/api", () => ({
 }));
 
 vi.mock("./agent-transcript-dialog", () => ({
-  AgentTranscriptDialog: ({ items }: { items: TimelineItem[] }) => (
-    <div data-testid="transcript-dialog">
-      {items.length}:{items.map((item) => item.content ?? item.output ?? "").join("|")}
-    </div>
-  ),
+  AgentTranscriptDialog: ({
+    open = true,
+    onOpenChange,
+    items,
+  }: {
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
+    items: TimelineItem[];
+  }) =>
+    open ? (
+      <div role="dialog" data-testid="transcript-dialog">
+        {items.length}:{items.map((item) => item.content ?? item.output ?? "").join("|")}
+        <button type="button" onClick={() => onOpenChange?.(false)}>
+          Close
+        </button>
+      </div>
+    ) : null,
 }));
 
 function makeQueryClient() {
@@ -107,5 +121,28 @@ describe("TranscriptButton", () => {
 
     expect(screen.getByTestId("transcript-dialog")).toHaveTextContent("1:provided");
     expect(mockApi.listTaskMessages).not.toHaveBeenCalled();
+  });
+
+  it("closes the transcript dialog when desktop navigation starts", async () => {
+    const queryClient = makeQueryClient();
+
+    renderButton(queryClient, {
+      items: [{ seq: 1, type: "text", content: "hello world" }],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "View transcript" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("multica:navigate", {
+          detail: { path: "/acme/inbox?issue=MUL-123" },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
   });
 });

@@ -18,7 +18,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/autosubscribe"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/mention"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -57,6 +56,43 @@ type TaskContext struct {
 }
 
 const LeaderTaskSourceSquadMention = "squad_mention"
+
+const ChannelMentionContextType = "channel_mention"
+
+type ChannelMentionContext struct {
+	Type                   string `json:"type"`
+	WorkspaceID            string `json:"workspace_id"`
+	ChannelID              string `json:"channel_id"`
+	ChannelName            string `json:"channel_name"`
+	TriggerMessageID       string `json:"trigger_message_id"`
+	TriggerContent         string `json:"trigger_content"`
+	RequesterID            string `json:"requester_id,omitempty"`
+	MentionType            string `json:"mention_type"`
+	MentionedID            string `json:"mentioned_id"`
+	ResolvedAgentID        string `json:"resolved_agent_id"`
+	SquadID                string `json:"squad_id,omitempty"`
+	SquadName              string `json:"squad_name,omitempty"`
+	RecentLimit            int    `json:"recent_limit"`
+	ThreadRootMessageID    string `json:"thread_root_message_id,omitempty"`
+}
+
+type EnqueueChannelMentionTaskInput struct {
+	WorkspaceID              pgtype.UUID
+	ChannelID                pgtype.UUID
+	ChannelName              string
+	ChannelMessageID         pgtype.UUID
+	ChannelThreadID          pgtype.UUID
+	ChannelReplyToID         pgtype.UUID
+	ChannelThreadRootMsgID   pgtype.UUID
+	TriggerContent           string
+	RequesterID              pgtype.UUID
+	MentionType              string
+	MentionedID              pgtype.UUID
+	ResolvedAgentID          pgtype.UUID
+	SquadID                  pgtype.UUID
+	SquadName                string
+	IsLeaderTask             bool
+}
 
 type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
@@ -347,6 +383,7 @@ func taskAnalyticsContextKey(task db.AgentTaskQueue) string {
 		util.UUIDToString(task.IssueID),
 		util.UUIDToString(task.ChatSessionID),
 		util.UUIDToString(task.AutopilotRunID),
+		util.UUIDToString(task.ChannelID),
 	}, "|")
 }
 
@@ -393,6 +430,9 @@ func (s *TaskService) taskAnalyticsContext(ctx context.Context, task db.AgentTas
 	if task.AutopilotRunID.Valid {
 		tc.AutopilotRunID = util.UUIDToString(task.AutopilotRunID)
 		tc.Source = analytics.SourceAutopilot
+	}
+	if task.ChannelID.Valid {
+		tc.Source = analytics.SourceManual
 	}
 
 	if task.RuntimeID.Valid {
@@ -453,6 +493,11 @@ func (s *TaskService) taskAnalyticsContext(ctx context.Context, task db.AgentTas
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		tc.WorkspaceID = qc.WorkspaceID
 		tc.UserID = qc.RequesterID
+		tc.Source = analytics.SourceManual
+	}
+	if ch, ok := s.parseChannelMentionContext(task); ok {
+		tc.WorkspaceID = ch.WorkspaceID
+		tc.UserID = ch.RequesterID
 		tc.Source = analytics.SourceManual
 	}
 	s.storeTaskAnalyticsContext(task, tc)
@@ -645,6 +690,95 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 	return task, nil
 }
 
+func (s *TaskService) EnqueueChannelMentionTask(ctx context.Context, input EnqueueChannelMentionTaskInput) (db.AgentTaskQueue, error) {
+	if !input.WorkspaceID.Valid || !input.ChannelID.Valid || !input.ChannelMessageID.Valid || !input.ResolvedAgentID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("channel mention task requires workspace, channel, message, and agent")
+	}
+	agent, err := s.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          input.ResolvedAgentID,
+		WorkspaceID: input.WorkspaceID,
+	})
+	if err != nil {
+		slog.Error("channel mention task enqueue failed: agent not found",
+			"channel_id", util.UUIDToString(input.ChannelID),
+			"message_id", util.UUIDToString(input.ChannelMessageID),
+			"agent_id", util.UUIDToString(input.ResolvedAgentID),
+			"error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+	hasExisting, err := s.Queries.HasChannelMentionTaskForMessageAndAgent(ctx, db.HasChannelMentionTaskForMessageAndAgentParams{
+		ChannelMessageID: input.ChannelMessageID,
+		AgentID:          input.ResolvedAgentID,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("check channel mention task dedupe: %w", err)
+	}
+	if hasExisting {
+		return db.AgentTaskQueue{}, fmt.Errorf("channel mention task already exists")
+	}
+
+	recentLimit := 20
+	payload := ChannelMentionContext{
+		Type:                ChannelMentionContextType,
+		WorkspaceID:         util.UUIDToString(input.WorkspaceID),
+		ChannelID:           util.UUIDToString(input.ChannelID),
+		ChannelName:         input.ChannelName,
+		TriggerMessageID:    util.UUIDToString(input.ChannelMessageID),
+		TriggerContent:      input.TriggerContent,
+		RequesterID:         util.UUIDToString(input.RequesterID),
+		MentionType:         input.MentionType,
+		MentionedID:         util.UUIDToString(input.MentionedID),
+		ResolvedAgentID:     util.UUIDToString(input.ResolvedAgentID),
+		RecentLimit:         recentLimit,
+		ThreadRootMessageID: util.UUIDToString(input.ChannelThreadRootMsgID),
+	}
+	if input.SquadID.Valid {
+		payload.SquadID = util.UUIDToString(input.SquadID)
+		payload.SquadName = input.SquadName
+	}
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal channel mention context: %w", err)
+	}
+
+	task, err := s.Queries.CreateChannelMentionTask(ctx, db.CreateChannelMentionTaskParams{
+		AgentID:          input.ResolvedAgentID,
+		RuntimeID:        agent.RuntimeID,
+		Priority:         priorityToInt("medium"),
+		Context:          contextJSON,
+		ChannelID:        input.ChannelID,
+		ChannelMessageID: input.ChannelMessageID,
+		TriggerSummary:   pgtype.Text{String: truncateForSummary(input.TriggerContent, triggerSummaryMaxLen), Valid: strings.TrimSpace(input.TriggerContent) != ""},
+		IsLeaderTask:     pgtype.Bool{Bool: input.IsLeaderTask, Valid: input.IsLeaderTask},
+		ChannelThreadID:  input.ChannelThreadID,
+		ChannelReplyToID: input.ChannelReplyToID,
+	})
+	if err != nil {
+		slog.Error("channel mention task enqueue failed",
+			"channel_id", util.UUIDToString(input.ChannelID),
+			"message_id", util.UUIDToString(input.ChannelMessageID),
+			"agent_id", util.UUIDToString(input.ResolvedAgentID),
+			"error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("create channel mention task: %w", err)
+	}
+
+	slog.Info("channel mention task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"channel_id", util.UUIDToString(input.ChannelID),
+		"message_id", util.UUIDToString(input.ChannelMessageID),
+		"agent_id", util.UUIDToString(input.ResolvedAgentID),
+		"is_leader_task", input.IsLeaderTask)
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
 // QuickCreateContext is the JSON payload stored on a quick-create task's
 // context column. The daemon detects this variant via Type == "quick_create"
 // and switches to the quick-create prompt template; the completion path
@@ -662,12 +796,13 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 // onto the agent's Instructions, matching the behavior of issue-bound
 // tasks assigned to the squad.
 type QuickCreateContext struct {
-	Type        string `json:"type"`
-	Prompt      string `json:"prompt"`
-	RequesterID string `json:"requester_id"`
-	WorkspaceID string `json:"workspace_id"`
-	ProjectID   string `json:"project_id,omitempty"`
-	SquadID     string `json:"squad_id,omitempty"`
+	Type          string   `json:"type"`
+	Prompt        string   `json:"prompt"`
+	RequesterID   string   `json:"requester_id"`
+	WorkspaceID   string   `json:"workspace_id"`
+	ProjectID     string   `json:"project_id,omitempty"`
+	SquadID       string   `json:"squad_id,omitempty"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// ParentIssueID is the optional UUID of the parent issue the new issue
 	// should be filed under. Set when the user opens the modal from "Add
 	// sub issue" on an existing issue; the daemon claim handler resolves the
@@ -699,7 +834,7 @@ const QuickCreateContextType = "quick_create"
 // parentIssueID is optional (zero-valued pgtype.UUID when the user didn't
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -725,6 +860,14 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 	if parentIssueID.Valid {
 		payload.ParentIssueID = util.UUIDToString(parentIssueID)
+	}
+	if len(attachmentIDs) > 0 {
+		payload.AttachmentIDs = make([]string, 0, len(attachmentIDs))
+		for _, id := range attachmentIDs {
+			if id.Valid {
+				payload.AttachmentIDs = append(payload.AttachmentIDs, util.UUIDToString(id))
+			}
+		}
 	}
 	contextJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -788,7 +931,15 @@ var ErrChatTaskAgentNoRuntime = errors.New("chat task: agent has no runtime")
 //   - Infrastructure failures (DB load / insert errors) are wrapped
 //     as ordinary errors. The caller should treat them as retryable
 //     or page-worthy, NOT as user-facing state.
-func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession) (db.AgentTaskQueue, error) {
+//
+// initiatorUserID is the user who actually sent the triggering message — the
+// real requester behind this run. Callers pass it explicitly because
+// chat_session.creator_id is not a reliable source: Lark group sessions set the
+// creator to the installer, not the sender (see the lark dispatcher). Web chat
+// passes the request user; the lark dispatcher passes the inbound sender of the
+// latest message in the silence window. Stored on the task so the daemon brief
+// can attribute the run to the right person. See MUL-2645.
+func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -802,10 +953,11 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	}
 
 	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
-		AgentID:       chatSession.AgentID,
-		RuntimeID:     agent.RuntimeID,
-		Priority:      2, // medium priority for chat
-		ChatSessionID: chatSession.ID,
+		AgentID:         chatSession.AgentID,
+		RuntimeID:       agent.RuntimeID,
+		Priority:        2, // medium priority for chat
+		ChatSessionID:   chatSession.ID,
+		InitiatorUserID: initiatorUserID,
 	})
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -900,16 +1052,38 @@ func (s *TaskService) CaptureCancelledTasks(ctx context.Context, cancelled []db.
 	}
 }
 
+type CancelledChatMessageResult struct {
+	ChatSessionID  string
+	MessageID      string
+	Content        string
+	RestoreToInput bool
+}
+
+type CancelTaskResult struct {
+	Task                 db.AgentTaskQueue
+	CancelledChatMessage *CancelledChatMessageResult
+}
+
 // CancelTask cancels a single task by ID. It broadcasts a task:cancelled event
 // so frontends can update immediately.
 func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	result, err := s.CancelTaskWithResult(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return &result.Task, nil
+}
+
+// CancelTaskWithResult cancels a single task and returns any chat-specific
+// cleanup result needed by user-facing callers.
+func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UUID) (*CancelTaskResult, error) {
 	task, err := s.Queries.CancelAgentTask(ctx, taskID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, err := s.Queries.GetAgentTask(ctx, taskID)
 		if err != nil {
 			return nil, fmt.Errorf("cancel task: %w", err)
 		}
-		return &existing, nil
+		return &CancelTaskResult{Task: existing}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("cancel task: %w", err)
@@ -917,6 +1091,7 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 
 	slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCancelled(ctx, task)
+	cancelledChatMessage := s.finalizeCancelledChatMessage(ctx, task)
 
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
@@ -924,7 +1099,57 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 	// Broadcast cancellation as a task:failed event so frontends clear the live card
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
 
-	return &task, nil
+	return &CancelTaskResult{
+		Task:                 task,
+		CancelledChatMessage: cancelledChatMessage,
+	}, nil
+}
+
+func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.AgentTaskQueue) *CancelledChatMessageResult {
+	if !task.ChatSessionID.Valid {
+		return nil
+	}
+	var cancelled *CancelledChatMessageResult
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		messages, err := qtx.ListTaskMessages(ctx, task.ID)
+		if err != nil {
+			return fmt.Errorf("list cancelled chat task messages: %w", err)
+		}
+		if len(messages) == 0 {
+			deleted, err := qtx.DeleteUserChatMessageByTask(ctx, task.ID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("delete empty cancelled chat user message: %w", err)
+			}
+			cancelled = &CancelledChatMessageResult{
+				ChatSessionID:  util.UUIDToString(deleted.ChatSessionID),
+				MessageID:      util.UUIDToString(deleted.ID),
+				Content:        deleted.Content,
+				RestoreToInput: true,
+			}
+			return nil
+		}
+		if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ChatSessionID: task.ChatSessionID,
+			Role:          "assistant",
+			Content:       "Stopped.",
+			TaskID:        task.ID,
+			ElapsedMs:     computeChatElapsedMs(task),
+		}); err != nil {
+			return fmt.Errorf("create cancelled chat message: %w", err)
+		}
+		return nil
+	}); err != nil {
+		slog.Error("failed to finalize cancelled chat message",
+			"task_id", util.UUIDToString(task.ID),
+			"chat_session_id", util.UUIDToString(task.ChatSessionID),
+			"error", err,
+		)
+		return nil
+	}
+	return cancelled
 }
 
 // ClaimTask atomically claims the next queued task for an agent,
@@ -1350,6 +1575,10 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		s.broadcastChatDone(ctx, task, assistantMsg)
 	}
 
+	if task.ChannelID.Valid && task.ChannelMessageID.Valid {
+		s.maybePostChannelTaskOutput(ctx, task, result)
+	}
+
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
@@ -1544,6 +1773,97 @@ func resumeUnsafeFailureReason(reason string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func (s *TaskService) maybePostChannelTaskOutput(ctx context.Context, task db.AgentTaskQueue, result []byte) {
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err != nil || payload.Output == "" {
+		return
+	}
+	body := strings.TrimSpace(util.UnescapeBackslashEscapes(payload.Output))
+	if body == "" || isTrivialDoneOutput(body) || isNoActionReasoning(body) {
+		return
+	}
+	if task.StartedAt.Valid {
+		agentMessaged, err := s.Queries.HasAgentChannelMessageSince(ctx, db.HasAgentChannelMessageSinceParams{
+			ChannelID: task.ChannelID,
+			AuthorID:  task.AgentID,
+			CreatedAt: task.StartedAt,
+		})
+		if err != nil {
+			slog.Warn("channel task fallback: failed to check existing agent messages",
+				"task_id", util.UUIDToString(task.ID),
+				"channel_id", util.UUIDToString(task.ChannelID),
+				"agent_id", util.UUIDToString(task.AgentID),
+				"error", err)
+			return
+		}
+		if agentMessaged {
+			return
+		}
+	}
+	var workspaceID pgtype.UUID
+	if triggerMsg, err := s.Queries.GetChannelMessage(ctx, task.ChannelMessageID); err == nil {
+		workspaceID = triggerMsg.WorkspaceID
+	} else if ch, ok := s.parseChannelMentionContext(task); ok {
+		if parsed, err := util.ParseUUID(ch.WorkspaceID); err == nil {
+			workspaceID = parsed
+		}
+	}
+	if !workspaceID.Valid {
+		slog.Warn("channel task fallback: missing workspace id",
+			"task_id", util.UUIDToString(task.ID),
+			"channel_id", util.UUIDToString(task.ChannelID),
+			"agent_id", util.UUIDToString(task.AgentID))
+		return
+	}
+	msg, err := s.Queries.CreateChannelMessageTopLevel(ctx, db.CreateChannelMessageTopLevelParams{
+		ChannelID:   task.ChannelID,
+		WorkspaceID: workspaceID,
+		AuthorType:  "agent",
+		AuthorID:    task.AgentID,
+		Content:     redact.Text(body),
+	})
+	if err != nil {
+		slog.Warn("channel task fallback: failed to create channel message",
+			"task_id", util.UUIDToString(task.ID),
+			"channel_id", util.UUIDToString(task.ChannelID),
+			"agent_id", util.UUIDToString(task.AgentID),
+			"error", err)
+		return
+	}
+	if err := s.Queries.TouchChannel(ctx, task.ChannelID); err != nil {
+		slog.Warn("channel task fallback: failed to touch channel",
+			"task_id", util.UUIDToString(task.ID),
+			"channel_id", util.UUIDToString(task.ChannelID),
+			"error", err)
+	}
+	workspaceIDString := util.UUIDToString(msg.WorkspaceID)
+	if workspaceIDString == "" {
+		workspaceIDString = s.ResolveTaskWorkspaceID(ctx, task)
+	}
+	if s.Bus != nil && workspaceIDString != "" {
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventChannelMessageCreated,
+			WorkspaceID: workspaceIDString,
+			ActorType:   "agent",
+			ActorID:     util.UUIDToString(task.AgentID),
+			Payload: map[string]any{
+				"channel_id": util.UUIDToString(task.ChannelID),
+				"message": map[string]any{
+					"id":           util.UUIDToString(msg.ID),
+					"channel_id":   util.UUIDToString(msg.ChannelID),
+					"workspace_id": util.UUIDToString(msg.WorkspaceID),
+					"author_type":  msg.AuthorType,
+					"author_id":    util.UUIDToString(msg.AuthorID),
+					"content":      msg.Content,
+					"reply_count":  0,
+					"created_at":   util.TimestampToString(msg.CreatedAt),
+					"updated_at":   util.TimestampToString(msg.UpdatedAt),
+				},
+			},
+		})
 	}
 }
 
@@ -2056,6 +2376,12 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 	if task.ChatSessionID.Valid {
 		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
 	}
+	if task.ChannelID.Valid {
+		payload["channel_id"] = util.UUIDToString(task.ChannelID)
+	}
+	if task.ChannelMessageID.Valid {
+		payload["channel_message_id"] = util.UUIDToString(task.ChannelMessageID)
+	}
 
 	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
@@ -2084,6 +2410,12 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 	if task.ChatSessionID.Valid {
 		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
 	}
+	if task.ChannelID.Valid {
+		payload["channel_id"] = util.UUIDToString(task.ChannelID)
+	}
+	if task.ChannelMessageID.Valid {
+		payload["channel_message_id"] = util.UUIDToString(task.ChannelMessageID)
+	}
 	// Include notification_summary from task result for completed/failed events.
 	if (eventType == protocol.EventTaskCompleted || eventType == protocol.EventTaskFailed) && len(task.Result) > 0 {
 		var taskResult map[string]any
@@ -2104,7 +2436,8 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 
 // ResolveTaskWorkspaceID determines the workspace ID for a task.
 // For issue tasks, it comes from the issue. For chat tasks, from the chat session.
-// For autopilot tasks, from the autopilot via its run.
+// For autopilot tasks, from the autopilot via its run. For channel tasks, from
+// the channel row, with context JSON as a fallback for historical rows.
 // Returns "" when none of the links resolve — callers treat that as "not found".
 func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentTaskQueue) string {
 	if task.IssueID.Valid {
@@ -2122,6 +2455,16 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 			if ap, err := s.Queries.GetAutopilot(ctx, run.AutopilotID); err == nil {
 				return util.UUIDToString(ap.WorkspaceID)
 			}
+		}
+	}
+	if task.ChannelID.Valid {
+		if task.ChannelMessageID.Valid {
+			if msg, err := s.Queries.GetChannelMessage(ctx, task.ChannelMessageID); err == nil {
+				return util.UUIDToString(msg.WorkspaceID)
+			}
+		}
+		if ch, ok := s.parseChannelMentionContext(task); ok {
+			return ch.WorkspaceID
 		}
 	}
 	// Quick-create tasks have no issue / chat / autopilot link — workspace
@@ -2221,8 +2564,6 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			rootComment = &root
 		}
 	}
-	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
-	content = mention.ExpandIssueIdentifiers(ctx, s.Queries, issue.WorkspaceID, content)
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issueID,
 		WorkspaceID: issue.WorkspaceID,
@@ -2334,7 +2675,7 @@ func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
 // autopilot are never quick-create even if they happen to carry a
 // context blob, so those are filtered up front.
 func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCreateContext, bool) {
-	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid || task.ChannelID.Valid {
 		return QuickCreateContext{}, false
 	}
 	if len(task.Context) == 0 {
@@ -2348,6 +2689,20 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 		return QuickCreateContext{}, false
 	}
 	return qc, true
+}
+
+func (s *TaskService) parseChannelMentionContext(task db.AgentTaskQueue) (ChannelMentionContext, bool) {
+	if !task.ChannelID.Valid || len(task.Context) == 0 {
+		return ChannelMentionContext{}, false
+	}
+	var ch ChannelMentionContext
+	if err := json.Unmarshal(task.Context, &ch); err != nil {
+		return ChannelMentionContext{}, false
+	}
+	if ch.Type != ChannelMentionContextType {
+		return ChannelMentionContext{}, false
+	}
+	return ch, true
 }
 
 // notifyQuickCreateCompleted writes a success inbox notification to the

@@ -14,10 +14,20 @@ import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import {
+  RENDERER_ROUTE_CONTEXT_CHANNEL,
+  sanitizeRendererRouteContext,
+  type RendererRouteContext,
+} from "../shared/renderer-route-context";
+import {
   createElectronReloadPrompt,
   installRendererRecoveryHandlers,
   type RendererRecoveryWindow,
 } from "./renderer-recovery";
+import {
+  writeFreezeBreadcrumb,
+  readAndClearFreezeBreadcrumb,
+  clearFreezeBreadcrumb,
+} from "./freeze-breadcrumb";
 
 // Bundled icon used for dock/taskbar branding. macOS/Windows production
 // builds let the OS pick up the icon from the .app bundle / .exe resources,
@@ -61,7 +71,15 @@ if (process.platform !== "win32") {
 
 const PROTOCOL = "multica";
 
+// Where the main process parks a freeze/crash breadcrumb until the next
+// renderer boot flushes it to telemetry. Lives in userData so it survives a
+// force-quit. Resolved lazily — app.getPath is only valid after `ready`.
+function freezeBreadcrumbPath(): string {
+  return join(app.getPath("userData"), "last-client-failure.json");
+}
+
 let mainWindow: BrowserWindow | null = null;
+let latestRendererRouteContext: RendererRouteContext | null = null;
 let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
@@ -165,10 +183,19 @@ function createWindow(): void {
       additionalArguments: [`--multica-locale=${systemLocale}`],
     },
   });
+  const window = mainWindow;
+  latestRendererRouteContext = null;
+
+  window.on("closed", () => {
+    if (mainWindow === window) {
+      mainWindow = null;
+      latestRendererRouteContext = null;
+    }
+  });
 
   // Strip Origin header from WebSocket upgrade requests so the server's
   // origin whitelist doesn't reject connections from localhost dev origins.
-  mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+  window.webContents.session.webRequest.onBeforeSendHeaders(
     { urls: ["wss://*/*", "ws://*/*"] },
     (details, callback) => {
       delete details.requestHeaders["Origin"];
@@ -176,8 +203,8 @@ function createWindow(): void {
     },
   );
 
-  mainWindow.on("ready-to-show", () => {
-    mainWindow?.show();
+  window.on("ready-to-show", () => {
+    window.show();
   });
 
   // Detect OS language changes while the app is running. Electron has no
@@ -185,24 +212,28 @@ function createWindow(): void {
   // catches the common case where users switch System Settings → Language
   // and bring the app back. The renderer decides whether to act (it ignores
   // the signal when the user has an explicit Settings choice).
-  mainWindow.on("focus", () => {
+  window.on("focus", () => {
     const current = getSystemLocale();
     if (current === lastKnownSystemLocale) return;
     lastKnownSystemLocale = current;
-    mainWindow?.webContents.send("locale:system-changed", current);
+    window.webContents.send("locale:system-changed", current);
   });
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  window.webContents.setWindowOpenHandler((details) => {
     openExternalSafely(details.url);
     return { action: "deny" };
   });
 
   // Window-level keyboard shortcuts. Calling preventDefault here prevents
   // both the renderer keydown AND the application menu accelerator, so
-  // anything we own here (reload-block, zoom) is the sole handler for
-  // that combination — no double-fire with the macOS default View menu.
-  mainWindow.webContents.on("before-input-event", (event, input) => {
-    if (handleAppShortcut(input, mainWindow!.webContents)) {
+  // anything we own here (reload-block, zoom, tab-close) is the sole handler
+  // for that combination — no double-fire with the macOS default View menu.
+  window.webContents.on("before-input-event", (event, input) => {
+    const result = handleAppShortcut(input, window.webContents);
+    if (result === "close-tab") {
+      event.preventDefault();
+      window.webContents.send("tab:close-active");
+    } else if (result) {
       event.preventDefault();
     }
   });
@@ -224,7 +255,7 @@ function createWindow(): void {
     // Forward every renderer-side console.* call. The detail object also
     // carries source URL + line — included so a thrown stack trace from
     // window.onerror is traceable back to a file.
-    mainWindow.webContents.on("console-message", (details) => {
+    window.webContents.on("console-message", (details) => {
       const { level, message, sourceId, lineNumber } = details;
       log(level, `${message} (${sourceId}:${lineNumber})`);
     });
@@ -232,7 +263,7 @@ function createWindow(): void {
     // Fires when loadURL / loadFile can't reach its target (dev server
     // not up yet, network blip, file missing). errorCode is a Chromium
     // net error number; -3 = ABORTED is normal during HMR and skipped.
-    mainWindow.webContents.on(
+    window.webContents.on(
       "did-fail-load",
       (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
         if (errorCode === -3) return;
@@ -245,20 +276,41 @@ function createWindow(): void {
 
   }
 
-  installRendererRecoveryHandlers(mainWindow as unknown as RendererRecoveryWindow, {
+  installRendererRecoveryHandlers(window as unknown as RendererRecoveryWindow, {
     isDev: is.dev,
     showReloadPrompt: createElectronReloadPrompt((options) =>
-      dialog.showMessageBox(mainWindow!, options),
+      dialog.showMessageBox(window, options),
     ),
+    getDiagnosticContext: () => ({
+      windowUrl: window.webContents.getURL(),
+      ...(latestRendererRouteContext
+        ? { desktopRoute: latestRendererRouteContext }
+        : {}),
+    }),
+    // Only persist in production: a true hang/crash can't report itself, so we
+    // write a breadcrumb and the next renderer boot flushes it to PostHog. Dev
+    // is excluded to keep field telemetry clean.
+    persistBreadcrumb: is.dev
+      ? undefined
+      : (payload) =>
+          writeFreezeBreadcrumb(freezeBreadcrumbPath(), {
+            kind: payload.kind,
+            context: payload.context,
+            ts: Date.now(),
+            version: getAppVersion(),
+          }),
+    clearBreadcrumb: is.dev
+      ? undefined
+      : () => clearFreezeBreadcrumb(freezeBreadcrumbPath()),
   });
 
-  installContextMenu(mainWindow.webContents);
-  installNavigationGestures(mainWindow);
+  installContextMenu(window.webContents);
+  installNavigationGestures(window);
 
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
-    mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
+    window.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
-    mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    window.loadFile(join(__dirname, "../renderer/index.html"));
   }
 }
 
@@ -365,6 +417,11 @@ if (!gotTheLock) {
       return openExternalSafely(url);
     });
 
+    // Renderer requests window close (e.g. Cmd+W on last tab).
+    ipcMain.on("window:close", () => {
+      mainWindow?.close();
+    });
+
     ipcMain.handle("file:download-url", (_event, url: string) => {
       if (!mainWindow) {
         console.warn("[download] ignored file:download-url — mainWindow torn down");
@@ -383,11 +440,26 @@ if (!gotTheLock) {
       event.returnValue = { version: getAppVersion(), os };
     });
 
+    // Sync IPC: read + clear any freeze/crash breadcrumb left by a previous
+    // session. The renderer flushes it to telemetry on boot (it couldn't be
+    // reported when it happened — the renderer was hung or gone). Read-and-
+    // clear so a failure reports exactly once.
+    ipcMain.on("freeze:get-last", (event) => {
+      event.returnValue = readAndClearFreezeBreadcrumb(freezeBreadcrumbPath());
+    });
+
     // Sync IPC: preload exposes the validated runtime config before renderer
     // boot. If desktop.json exists but is invalid, renderer receives the
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
+    });
+
+    ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) return;
+      const sanitized = sanitizeRendererRouteContext(context);
+      if (!sanitized) return;
+      latestRendererRouteContext = sanitized;
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen
@@ -411,12 +483,14 @@ if (!gotTheLock) {
           slug,
           itemId,
           issueKey,
+          targetPath,
           title,
           body,
         }: {
           slug: string;
           itemId: string;
           issueKey: string;
+          targetPath?: string;
           title: string;
           body: string;
         },
@@ -435,6 +509,7 @@ if (!gotTheLock) {
             slug,
             itemId,
             issueKey,
+            targetPath,
           });
         });
         notification.show();

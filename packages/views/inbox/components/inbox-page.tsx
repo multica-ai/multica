@@ -13,6 +13,10 @@ import {
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import {
+  buildChannelInboxPath,
+  getInboxItemSelectionKey,
+} from "@multica/core/inbox/channel";
+import {
   useMarkInboxRead,
   useArchiveInbox,
   useMarkAllInboxRead,
@@ -73,7 +77,7 @@ export function InboxPage() {
   const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
 
-  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+  const selected = items.find((i) => getInboxItemSelectionKey(i) === selectedKey) ?? null;
 
   // Track the last key we actually resolved against the inbox list. Lets the
   // fallback effect distinguish "shared-link to a notification not in our
@@ -91,6 +95,14 @@ export function InboxPage() {
     replace(url);
   }, [replace, wsPaths]);
 
+  const openChannelInboxItem = useCallback((item: InboxItem): boolean => {
+    const channelPath = buildChannelInboxPath(item, wsPaths);
+    if (!channelPath) return false;
+    setSelectedKeyState(getInboxItemSelectionKey(item));
+    replace(channelPath);
+    return true;
+  }, [replace, wsPaths]);
+
   // Shared inbox links (?issue=<id>) may point to notifications not in this
   // user's inbox (archived, or never received). Fall back to the issue page
   // so the URL still resolves to something meaningful. But if the key was
@@ -102,6 +114,10 @@ export function InboxPage() {
     if (!selectedKey) return;
     if (selected) return;
     if (lastResolvedKeyRef.current === selectedKey) {
+      setSelectedKey("");
+      return;
+    }
+    if (selectedKey.startsWith("channel:")) {
       setSelectedKey("");
       return;
     }
@@ -146,20 +162,21 @@ export function InboxPage() {
   }, [selectedId, selectedRead, markReadMutate, t]);
 
   const handleSelect = (item: InboxItem) => {
-    setSelectedKey(item.issue_id ?? item.id);
+    if (openChannelInboxItem(item)) return;
+    setSelectedKey(getInboxItemSelectionKey(item));
   };
 
   const handleArchive = (id: string) => {
     const idx = items.findIndex((i) => i.id === id);
     const archived = idx >= 0 ? items[idx] : null;
     const wasSelected =
-      !!archived && (archived.issue_id ?? archived.id) === selectedKey;
+      !!archived && getInboxItemSelectionKey(archived) === selectedKey;
     if (wasSelected) {
       // List is sorted newest-first; prefer the next (older) item, fall back
       // to the previous (newer) one when archiving at the bottom, and only
       // clear the selection when nothing else is left.
       const next = items[idx + 1] ?? items[idx - 1] ?? null;
-      setSelectedKey(next ? (next.issue_id ?? next.id) : "");
+      setSelectedKey(next ? getInboxItemSelectionKey(next) : "");
     }
     archiveMutation.mutate(id, {
       onError: (err) =>
@@ -196,7 +213,7 @@ export function InboxPage() {
   };
 
   const handleArchiveAllRead = () => {
-    const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
+    const readKeys = items.filter((i) => i.read).map((i) => getInboxItemSelectionKey(i));
     if (readKeys.includes(selectedKey)) setSelectedKey("");
     archiveAllReadMutation.mutate(undefined, {
       onError: (err) =>
@@ -278,7 +295,7 @@ export function InboxPage() {
         <InboxListItem
           key={item.id}
           item={item}
-          isSelected={(item.issue_id ?? item.id) === selectedKey}
+          isSelected={getInboxItemSelectionKey(item) === selectedKey}
           onClick={() => handleSelect(item)}
           onArchive={() => handleArchive(item.id)}
         />
@@ -298,7 +315,7 @@ export function InboxPage() {
         defaultSidebarOpen={false}
         layoutId="multica_inbox_issue_detail_layout"
         sidebarMaxSize={420}
-        highlightCommentId={selected.details?.comment_id ?? undefined}
+        highlightCommentId={selected.details?.comment_id}
         onDelete={() => {
           // Issue deletion CASCADE-deletes the inbox item server-side, and the
           // issue:deleted WS event prunes it from the inbox cache. Just clear

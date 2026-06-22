@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { IssueAssigneeType, IssueStatus, IssuePriority } from "../../types";
+import type { IssueStatus, IssuePriority, IssueAssigneeType, Attachment } from "../../types";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
@@ -13,6 +13,7 @@ interface IssueDraft {
   assigneeId?: string;
   startDate: string | null;
   dueDate: string | null;
+  attachments: Attachment[];
 }
 
 const EMPTY_DRAFT: IssueDraft = {
@@ -24,12 +25,19 @@ const EMPTY_DRAFT: IssueDraft = {
   assigneeId: undefined,
   startDate: null,
   dueDate: null,
+  attachments: [],
 };
 
 interface IssueDraftStore {
   draft: IssueDraft;
+  // Last assignee picked at submit time. Persisted across drafts so the
+  // create-issue modal can prefill the picker with the user's most recent
+  // choice instead of always opening with no assignee.
+  lastAssigneeType?: IssueAssigneeType;
+  lastAssigneeId?: string;
   setDraft: (patch: Partial<IssueDraft>) => void;
   clearDraft: () => void;
+  setLastAssignee: (type?: IssueAssigneeType, id?: string) => void;
   hasDraft: () => boolean;
 }
 
@@ -37,9 +45,20 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
   persist(
     (set, get) => ({
       draft: { ...EMPTY_DRAFT },
+      lastAssigneeType: undefined,
+      lastAssigneeId: undefined,
       setDraft: (patch) =>
         set((s) => ({ draft: { ...s.draft, ...patch } })),
-      clearDraft: () => set({ draft: { ...EMPTY_DRAFT } }),
+      clearDraft: () =>
+        set((s) => ({
+          draft: {
+            ...EMPTY_DRAFT,
+            assigneeType: s.lastAssigneeType,
+            assigneeId: s.lastAssigneeId,
+          },
+        })),
+      setLastAssignee: (type, id) =>
+        set({ lastAssigneeType: type, lastAssigneeId: id }),
       hasDraft: () => {
         const { draft } = get();
         return !!(draft.title || draft.description);
@@ -49,15 +68,32 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
       name: "multica_issue_draft",
       version: 2,
       migrate: (persistedState) => {
-        const state = (persistedState as { draft?: Partial<IssueDraft> } | undefined) ?? {};
+        const state =
+          (persistedState as Partial<IssueDraftStore> | undefined) ?? {};
         const draft = { ...EMPTY_DRAFT, ...(state.draft ?? {}) };
         if (!draft.title && !draft.description) {
           draft.assigneeType = undefined;
           draft.assigneeId = undefined;
         }
-        return { draft };
+        return {
+          draft,
+          lastAssigneeType: state.lastAssigneeType,
+          lastAssigneeId: state.lastAssigneeId,
+        };
       },
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+      // Drafts persisted by older builds predate fields added later (e.g.
+      // `attachments`). Backfill EMPTY_DRAFT defaults on rehydrate so every
+      // read site can rely on the declared IssueDraft shape instead of
+      // re-defending with `?? fallback`.
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState ?? {}) as Partial<IssueDraftStore>;
+        return {
+          ...currentState,
+          ...persisted,
+          draft: { ...EMPTY_DRAFT, ...persisted.draft },
+        };
+      },
     },
   ),
 );

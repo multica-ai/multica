@@ -44,9 +44,17 @@ func TestCommentMentionsAnyone(t *testing.T) {
 	}
 }
 
+// shouldEnqueueSquadLeaderOnCommentForTest reports whether the shared comment
+// trigger computation would wake the issue's assigned squad leader — the
+// boolean view these integration tests assert on.
+func shouldEnqueueSquadLeaderOnCommentForTest(ctx context.Context, issue db.Issue, content, authorType, authorID string) bool {
+	_, ok := testHandler.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, authorType, authorID, commentTriggerComputeOptions{})
+	return ok
+}
+
 // squadCommentTriggerFixture wires a squad assigned to a fresh issue and
 // returns the loaded db.Issue plus the leader agent UUID for use in
-// shouldEnqueueSquadLeaderOnComment integration tests.
+// computeAssignedSquadLeaderCommentTrigger integration tests.
 type squadCommentTriggerFixture struct {
 	Issue    db.Issue
 	SquadID  string
@@ -195,7 +203,7 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := testHandler.shouldEnqueueSquadLeaderOnComment(ctx, fx.Issue, tc.content, tc.authorType, tc.authorID)
+			got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, tc.content, tc.authorType, tc.authorID)
 			if got != tc.want {
 				t.Fatalf("%s\n  content=%q author=%s/%s\n  got=%v want=%v",
 					tc.description, tc.content, tc.authorType, tc.authorID, got, tc.want)
@@ -243,7 +251,7 @@ func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T)
 
 	t.Run("no prior task wakes leader (fresh external trigger)", func(t *testing.T) {
 		clearTasks()
-		if got := testHandler.shouldEnqueueSquadLeaderOnComment(ctx, fx.Issue, "noted", "agent", fx.LeaderID); !got {
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "noted", "agent", fx.LeaderID); !got {
 			t.Fatalf("no prior task: expected leader to be enqueued, got skip")
 		}
 	})
@@ -251,7 +259,7 @@ func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T)
 	t.Run("prior leader task suppresses self-trigger", func(t *testing.T) {
 		clearTasks()
 		insertTask(true, "completed")
-		if got := testHandler.shouldEnqueueSquadLeaderOnComment(ctx, fx.Issue, "noted", "agent", fx.LeaderID); got {
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "noted", "agent", fx.LeaderID); got {
 			t.Fatalf("after leader task: expected skip (anti-loop), got enqueue")
 		}
 	})
@@ -259,7 +267,7 @@ func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T)
 	t.Run("prior worker task still wakes leader (dual-role agent)", func(t *testing.T) {
 		clearTasks()
 		insertTask(false, "completed")
-		if got := testHandler.shouldEnqueueSquadLeaderOnComment(ctx, fx.Issue, "result", "agent", fx.LeaderID); !got {
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "result", "agent", fx.LeaderID); !got {
 			t.Fatalf("after worker task: expected leader to be enqueued (MUL-2218), got skip")
 		}
 	})
@@ -268,7 +276,7 @@ func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T)
 		clearTasks()
 		insertTask(true, "completed")  // older leader task
 		insertTask(false, "completed") // newer worker task
-		if got := testHandler.shouldEnqueueSquadLeaderOnComment(ctx, fx.Issue, "result", "agent", fx.LeaderID); !got {
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "result", "agent", fx.LeaderID); !got {
 			t.Fatalf("latest task is worker: expected leader to be enqueued, got skip")
 		}
 	})
@@ -425,7 +433,7 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 // MUL-2218: auto-retry of a leader-role task must produce a child task that is
 // also is_leader_task=true. Without this, MaybeRetryFailedTask silently
 // demotes a retried leader task to a worker task, and the self-trigger guard
-// in shouldEnqueueSquadLeaderOnComment / comment.go stops recognising the
+// in computeAssignedSquadLeaderCommentTrigger / comment.go stops recognising the
 // retried leader's own comments — re-opening the bug this issue fixes.
 func TestCreateRetryTask_InheritsIsLeaderTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
@@ -677,6 +685,19 @@ func TestCreateComment_SquadMentionLeaderClaimGetsBriefing(t *testing.T) {
 	}
 	if taskContext.LeaderTaskSource != service.LeaderTaskSourceSquadMention {
 		t.Fatalf("queued leader task source = %q, want %q", taskContext.LeaderTaskSource, service.LeaderTaskSourceSquadMention)
+	}
+
+	// The handler-test runtime is shared suite-wide and ClaimTaskForRuntime
+	// returns the oldest claimable task for the runtime. Park any other
+	// in-flight queued/dispatched tasks (left by sibling tests that create
+	// agent-assigned issues on this runtime) so the leader claims our briefing
+	// task rather than an unrelated one.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status = 'completed', completed_at = now()
+		 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched') AND issue_id <> $2`,
+		runtimeID, issueID,
+	); err != nil {
+		t.Fatalf("park stray runtime tasks: %v", err)
 	}
 
 	agent := claimAndDecodeAgent(t, runtimeID)

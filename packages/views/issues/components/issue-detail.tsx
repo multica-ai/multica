@@ -27,11 +27,14 @@ import {
   Plus,
   MessageSquare,
   MessageSquareReply,
+  MessagesSquare,
   Square,
   Terminal,
   Tag,
   Trash2,
   Users,
+  FoldVertical,
+  UnfoldVertical,
 } from "lucide-react";
 import { MarkdownPreviewDrawer } from "./markdown-preview-drawer";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
@@ -73,6 +76,7 @@ import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar"
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import type { Attachment, Issue, IssueStatus, IssuePriority, LocalPreview, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -86,8 +90,8 @@ import { CommentInput, type CommentInputRef } from "./comment-input";
 import type { ReplyInputRef } from "./reply-input";
 import { AgentStreamSidebar } from "./agent-stream-sidebar";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
-import { collectThreadReplies } from "./thread-utils";
-import { AgentLiveCard } from "./agent-live-card";
+import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
+import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
@@ -97,13 +101,13 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useRecentIssuesStore, useIssueDetailCollapseStore } from "@multica/core/issues/stores";
 import { useActiveIssueContextStore } from "@multica/core/issues/stores/active-issue-context-store";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -120,6 +124,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 
 type PreviewWithPort = LocalPreview & { healthPort: number };
 
@@ -766,16 +771,25 @@ function ActivityBlock({
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
               {isReferencedBy ? (
-                <span className="truncate">
-                  {"referenced by "}
-                  <AppLink
-                    href={paths.issueDetail(details.source_issue_id ?? "")}
-                    className="font-medium text-foreground hover:underline"
-                  >
-                    {details.source_issue_identifier ?? details.source_issue_id ?? "?"}
-                  </AppLink>
-                  {details.source_issue_title ? `: ${details.source_issue_title}` : ""}
-                </span>
+                details.source_type === "channel_message" ? (
+                  <span className="truncate">
+                    {"mentioned in channel "}
+                    <span className="font-medium text-foreground">
+                      {details.source_channel_name || "channel"}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="truncate">
+                    {"referenced by "}
+                    <AppLink
+                      href={paths.issueDetail(details.source_issue_id ?? "")}
+                      className="font-medium text-foreground hover:underline"
+                    >
+                      {details.source_issue_identifier ?? details.source_issue_id ?? "?"}
+                    </AppLink>
+                    {details.source_issue_title ? `: ${details.source_issue_title}` : ""}
+                  </span>
+                )
               ) : (
                 <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
               )}
@@ -980,7 +994,6 @@ export function IssueDetail({
     members.find((m) => m.user_id === user?.id)?.role ?? null;
   const canModerateComments =
     currentUserRole === "owner" || currentUserRole === "admin";
-  const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -1074,6 +1087,14 @@ export function IssueDetail({
       else next.delete(commentId);
       return next;
     });
+    // On collapse the thread shrinks and the viewport would jump to whatever was
+    // below; pull the just-folded thread back into view with the smallest
+    // movement. rAF waits for the collapse to land before measuring.
+    if (!expand) {
+      requestAnimationFrame(() =>
+        document.getElementById(`comment-${commentId}`)?.scrollIntoView({ block: "nearest" }),
+      );
+    }
   }, []);
   const clearResolvedExpand = useCallback((commentId: string) => {
     setExpandedResolved((prev) => {
@@ -1153,16 +1174,8 @@ export function IssueDetail({
   const [markdownPreviewOpen, setMarkdownPreviewOpen] = useState(false);
   const clearHistoryMutation = useClearIssueHistory();
 
-  // Issue data from TQ — uses detail query, seeded from list cache if available.
-  // Only seed when description is present; list API omits it, and ContentEditor
-  // reads defaultValue on mount only — seeding null description shows an empty editor.
-  const { data: issue = null, isLoading: issueLoading } = useQuery({
-    ...issueDetailOptions(wsId, id),
-    initialData: () => {
-      const cached = allIssues.find((i) => i.id === id || i.identifier === id);
-      return cached?.description != null ? cached : undefined;
-    },
-  });
+  // Issue data from TQ — single detail fetch (no full-list pull).
+  const { data: issue = null, isLoading: issueLoading } = useQuery(issueDetailOptions(wsId, id));
   const setActiveIssueContext = useActiveIssueContextStore((s) => s.setCurrent);
   const clearActiveIssueContext = useActiveIssueContextStore((s) => s.clearCurrent);
   useEffect(() => {
@@ -1367,10 +1380,16 @@ export function IssueDetail({
   // visually expanded after the second resolve.
   const handleResolveToggle = useCallback(
     (commentId: string, resolved: boolean) => {
-      clearResolvedExpand(commentId);
+      // Fold the thread back on any resolve change: clear the thread ROOT's
+      // expand entry (expand state is keyed on root id, but a resolve target
+      // can be a reply). Walk parent_id up to the root.
+      const byId = new Map(timeline.map((e) => [e.id, e]));
+      let cur = byId.get(commentId);
+      while (cur?.parent_id && byId.get(cur.parent_id)) cur = byId.get(cur.parent_id)!;
+      clearResolvedExpand(cur?.id ?? commentId);
       toggleResolveComment(commentId, resolved);
     },
-    [clearResolvedExpand, toggleResolveComment],
+    [timeline, clearResolvedExpand, toggleResolveComment],
   );
 
   // Memoized timeline grouping. Each render rebuilds the per-parent map from
@@ -1541,7 +1560,6 @@ export function IssueDetail({
   const { data: parentIssue = null } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
-    initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
 
   // Project segment in the breadcrumb. The issue's project_id is the source of
@@ -1561,7 +1579,55 @@ export function IssueDetail({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
-  const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const isDescriptionCollapsedState = useIssueDetailCollapseStore((s) =>
+    s.isDescriptionCollapsed(resolvedId, true)
+  );
+  const setDescriptionCollapsed = useIssueDetailCollapseStore((s) => s.setDescriptionCollapsed);
+  const isDescriptionCollapsed = !isEditingDescription && isDescriptionCollapsedState;
+
+  const descriptionContainerRef = useRef<HTMLDivElement>(null);
+  const [descriptionHeight, setDescriptionHeight] = useState(0);
+
+  useEffect(() => {
+    const element = descriptionContainerRef.current;
+    if (!element) return;
+
+    const observer = new ResizeObserver(() => {
+      setDescriptionHeight(element.scrollHeight);
+    });
+
+    observer.observe(element);
+    setDescriptionHeight(element.scrollHeight);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [id, issue?.description]);
+
+  const showCollapseToggle = descriptionHeight > 400 && !isEditingDescription;
+
+  const defaultSubIssuesCollapsed = useMemo(() => {
+    if (childIssues.length === 0) return false;
+    return childIssues.every((c) => c.status === "done" || c.status === "cancelled");
+  }, [childIssues]);
+
+  const subIssuesCollapsed = useIssueDetailCollapseStore((s) =>
+    s.isSubIssuesCollapsed(resolvedId, defaultSubIssuesCollapsed)
+  );
+  const setSubIssuesCollapsed = useCallback((collapsed: boolean | ((prev: boolean) => boolean)) => {
+    const store = useIssueDetailCollapseStore.getState();
+    const current = store.isSubIssuesCollapsed(resolvedId, defaultSubIssuesCollapsed);
+    const next = typeof collapsed === "function" ? collapsed(current) : collapsed;
+    store.setSubIssuesCollapsed(resolvedId, next);
+  }, [resolvedId, defaultSubIssuesCollapsed]);
+
+  const isIssueCollapsed = isDescriptionCollapsedState && subIssuesCollapsed;
+
+  const handleToggleAllSections = useCallback(() => {
+    const nextCollapsed = !isIssueCollapsed;
+    useIssueDetailCollapseStore.getState().toggleAllSections(resolvedId, nextCollapsed);
+  }, [isIssueCollapsed, resolvedId]);
 
   // Selection store is global (workspace-scoped); clear it whenever this
   // issue detail is mounted or switched.
@@ -1607,25 +1673,71 @@ export function IssueDetail({
     if (didHighlightRef.current === requestedCommentId) return;
 
     const rootId = replyToRoot.get(requestedCommentId);
-    if (
-      rootId &&
-      rootId !== requestedCommentId &&
-      items[targetIdx]?.kind === "resolved-bar"
-    ) {
-      toggleResolvedExpand(rootId, true);
-      return;
+    if (rootId && rootId !== requestedCommentId) {
+      // Root resolved → the whole thread is a folded bar.
+      if (items[targetIdx]?.kind === "resolved-bar") {
+        toggleResolvedExpand(rootId, true);
+        return;
+      }
+      // A reply is the resolution → the other replies fold behind the
+      // "N comments" bar; expand if the target is one of those folded replies.
+      const rootItem = items[targetIdx];
+      if (rootItem?.kind === "comment" && !expandedResolved.has(rootId)) {
+        const resolution = deriveThreadResolution(
+          rootItem.entry,
+          timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES,
+        );
+        if (resolution.kind === "reply" && resolution.resolutionId !== requestedCommentId) {
+          toggleResolvedExpand(rootId, true);
+          return;
+        }
+      }
     }
 
     const el = document.getElementById(`comment-${requestedCommentId}`);
-    if (!el) return;
+    const container = scrollContainerRef.current;
+    if (!el || !container) return;
 
     didHighlightRef.current = requestedCommentId;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    // Center the target comment WITHIN its own scroll container by driving the
+    // container's scrollTop directly — never native scrollIntoView. Native
+    // scrollIntoView is spec'd to scroll EVERY scrollable ancestor: on a cold
+    // mount where the timeline is still growing (streaming agent), the inner
+    // scroller can't satisfy centering on its own, so the scroll propagates up
+    // and moves the desktop shell's `overflow:hidden` wrapper — shoving the
+    // whole page, header included, off the top with no scrollbar to recover,
+    // until a resize reflows it (#3929). Scoping the scroll to `container`
+    // keeps it contained; re-centering across frames lands the comment
+    // precisely once async heights (markdown, code highlight, streamed replies)
+    // settle, instead of leaning on the ancestor scroll the way native did.
+    let rafId = 0;
+    let frames = 0;
+    let last = -1;
+    const center = () => {
+      const c = container.getBoundingClientRect();
+      const e = el.getBoundingClientRect();
+      const target = Math.max(
+        0,
+        container.scrollTop + (e.top - c.top) - (container.clientHeight - e.height) / 2,
+      );
+      container.scrollTop = target;
+      // Content is still laying out → the centered offset keeps shifting; keep
+      // re-centering until it stabilizes (within 1px) or we hit ~0.5s of frames.
+      if (Math.abs(target - last) > 1 && ++frames < 30) {
+        last = target;
+        rafId = requestAnimationFrame(center);
+      }
+    };
+    rafId = requestAnimationFrame(center);
 
     setHighlightedId(requestedCommentId);
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
-    return () => clearTimeout(fade);
-  }, [requestedCommentId, items, targetIdx, virtuosoReady, replyToRoot, toggleResolvedExpand]);
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(fade);
+    };
+  }, [requestedCommentId, items, targetIdx, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
   // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
   // the viewport — off-screen comments are invisible to browser find-in-page.
@@ -1666,7 +1778,9 @@ export function IssueDetail({
   // the description keeps rendering attachments inline at their markdown
   // positions.
   const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
+  const descPendingAttachmentsRef = useRef<Attachment[]>([]);
   useEffect(() => {
+    descPendingAttachmentsRef.current = [];
     setDescPendingAttachments([]);
   }, [resolvedId]);
   const descEditorAttachments = descPendingAttachments.length > 0
@@ -1680,7 +1794,11 @@ export function IssueDetail({
       // the node from the body before the debounced save fires.
       const result = await uploadWithToast(file, { issueId: resolvedId });
       if (result) {
-        setDescPendingAttachments((prev) => [...prev, result]);
+        descPendingAttachmentsRef.current = [
+          ...descPendingAttachmentsRef.current,
+          result,
+        ];
+        setDescPendingAttachments(descPendingAttachmentsRef.current);
       }
       return result;
     },
@@ -1910,6 +2028,13 @@ export function IssueDetail({
       toast.error(err instanceof Error ? err.message : t(($) => $.detail.clear_history_failed));
     }
   };
+
+  useIssueDetailScrollRestore({
+    restoreKey: `${wsId}:${id}`,
+    scrollContainerEl: scrollContainerRef.current,
+    ready: !!issue && !loading && !timelineLoading,
+    disabled: !!highlightCommentId,
+  });
 
   if (loading) {
     return (
@@ -2352,6 +2477,8 @@ export function IssueDetail({
             onToggleReaction={handleToggleReaction}
             onResolveToggle={handleResolveToggle}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
+            expandedResolvedIds={expandedResolved}
+            onResolvedExpandChange={toggleResolvedExpand}
             highlightedCommentId={highlightedId}
             onRegisterReplyController={registerReplyController}
             selectionQuoteActions={{
@@ -2445,6 +2572,10 @@ export function IssueDetail({
           }
           actions={
             <>
+            {/* Live "agent is working" chip, leftmost in the right cluster so
+                it never overlaps the title (which truncates to make room).
+                It self-hides when no agent is active. */}
+            <IssueAgentHeaderChip issueId={id} />
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger
@@ -2514,6 +2645,29 @@ export function IssueDetail({
                 {t(($) => $.detail.clear_history)}
               </DropdownMenuItem>
             </IssueActionsDropdown>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={handleToggleAllSections}
+                  >
+                    {isIssueCollapsed ? (
+                      <UnfoldVertical className="h-4 w-4" />
+                    ) : (
+                      <FoldVertical className="h-4 w-4" />
+                    )}
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">
+                {isIssueCollapsed
+                  ? t(($) => $.detail.expand_issue)
+                  : t(($) => $.detail.collapse_issue)}
+              </TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -2592,34 +2746,99 @@ export function IssueDetail({
             </AppLink>
           )}
 
+          {issue.source_channel_id && (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
+              <MessagesSquare className="h-3.5 w-3.5" />
+              <span>来自频道讨论</span>
+            </div>
+          )}
+
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
-            <ContentEditor
-              ref={descEditorRef}
-              key={id}
-              defaultValue={issue.description || ""}
-              placeholder={t(($) => $.detail.desc_placeholder)}
-              onUpdate={(md) => {
-                // Attachments are linked to the issue at upload time (via
-                // issueId context), so we only save the description text here.
-                // Removing an attachment node from the body does NOT unlink or
-                // delete the attachment — only the attachment area delete does.
-                handleUpdateField({
-                  description: md,
-                  description_base_updated_at: descBaseUpdatedAtRef.current || undefined,
-                  description_base_value: descBaseValueRef.current ?? undefined,
-                });
-              }}
-              onExternalSyncAccepted={handleDescriptionExternalSyncAccepted}
-              onUploadFile={handleDescriptionUpload}
-              debounceMs={1500}
-              currentIssueId={resolvedId}
-              attachments={descEditorAttachments}
-              selectionQuoteActions={{
-                onQuoteToNewComment: handleEditorQuoteToNewComment,
-                onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
-                replyTargets: selectionQuoteReplyTargets,
-              }}
-            />
+            <div
+              ref={descriptionContainerRef}
+              className={cn(
+                "transition-all duration-300 relative",
+                isDescriptionCollapsed && "max-h-[400px] overflow-hidden"
+              )}
+            >
+              <ContentEditor
+                ref={descEditorRef}
+                key={id}
+                defaultValue={issue.description || ""}
+                placeholder={t(($) => $.detail.desc_placeholder)}
+                onUpdate={(md) => {
+                  // Bind any pending uploads still referenced in the markdown
+                  // so they appear in `issueAttachments` after refresh and the
+                  // editor's text/code preview keeps working past reload.
+                  //
+                  // Match with `contentReferencesAttachment`, NOT `md.includes(a.url)`:
+                  // the editor persists the durable `markdownLink`
+                  // (`/api/attachments/<id>/download` / `markdown_url`) into the
+                  // body, never the raw storage `a.url`. A bare `md.includes(a.url)`
+                  // therefore never matches, so the upload is never linked via
+                  // `attachment_ids`. After reload it's absent from
+                  // `issueAttachments`, the renderer can't resolve it to a
+                  // freshly-signed `download_url`, and the persisted auth-gated
+                  // download endpoint fails to load as a native <img> on clients
+                  // whose origin isn't the API host (Desktop/Electron, mobile
+                  // webview) — while still working on web via the cookie/proxy.
+                  // This mirrors the comment/reply/chat composers, which already
+                  // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
+                  const ids = descPendingAttachmentsRef.current
+                    .filter((a) => contentReferencesAttachment(md, a))
+                    .map((a) => a.id);
+                  handleUpdateField({
+                    description: md,
+                    attachment_ids: ids.length > 0 ? ids : undefined,
+                    description_base_updated_at: descBaseUpdatedAtRef.current || undefined,
+                    description_base_value: descBaseValueRef.current ?? undefined,
+                  });
+                }}
+                onExternalSyncAccepted={handleDescriptionExternalSyncAccepted}
+                onUploadFile={handleDescriptionUpload}
+                onFocus={() => setIsEditingDescription(true)}
+                onBlur={() => setIsEditingDescription(false)}
+                debounceMs={1500}
+                // Closing the issue modal must save what the user last saw —
+                // without the flush, a paste followed by a quick close loses
+                // the image markdown and its attachment_ids bind (MUL-3254).
+                flushPendingOnUnmount
+                currentIssueId={resolvedId}
+                attachments={descEditorAttachments}
+                selectionQuoteActions={{
+                  onQuoteToNewComment: handleEditorQuoteToNewComment,
+                  onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
+                  replyTargets: selectionQuoteReplyTargets,
+                }}
+              />
+              {isDescriptionCollapsed && showCollapseToggle && (
+                <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-background via-background/80 to-transparent pointer-events-none flex items-end justify-center pb-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="pointer-events-auto shadow-sm border"
+                    onClick={() => setDescriptionCollapsed(resolvedId, false)}
+                  >
+                    {t(($) => $.detail.expand_description)}
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {!isDescriptionCollapsed && showCollapseToggle && (
+              <div className="flex justify-center mt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => setDescriptionCollapsed(resolvedId, true)}
+                >
+                  {t(($) => $.detail.collapse_description)}
+                </Button>
+              </div>
+            )}
 
             <div className="flex items-center gap-1 mt-3">
               <ReactionBar
@@ -2792,13 +3011,11 @@ export function IssueDetail({
 
             <LocalDirectoryHint projectId={issue?.project_id} />
 
-            {/* Agent live output — sticky banner in the activity section,
-                keyed by issue id so switching issues remounts the card and
-                clears any in-flight task state from the previous issue.
-                The execution log itself (per-task timeline + past runs)
-                lives in the right panel via ExecutionLogSection — this
-                card is just a header-style "agent is working" anchor. */}
-            <AgentLiveCard key={resolvedId} issueId={resolvedId} />
+            {/* The "agent is working" live signal now lives in the header
+                (IssueAgentHeaderChip) so it stays in one fixed place and
+                doesn't compete with sticky banners in this content column.
+                The per-task timeline + past runs live in the right panel
+                via ExecutionLogSection. */}
 
             {/* Timeline entries */}
             {timelineLoading && timelineView.groups.length === 0 ? (

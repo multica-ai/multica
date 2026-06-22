@@ -67,8 +67,11 @@ func syncRunFromTaskEvent(ctx context.Context, svc *service.AutopilotService, e 
 	if err != nil {
 		return
 	}
-	if !task.AutopilotRunID.Valid {
+	if task.AutopilotRunID.Valid {
+		svc.SyncRunFromTask(ctx, task)
 		return
 	}
-	svc.SyncRunFromTask(ctx, task)
+	if e.Type == protocol.EventTaskFailed {
+		svc.SyncRunFromLinkedIssueTask(ctx, task)
+	}
 }

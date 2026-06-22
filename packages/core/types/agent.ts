@@ -29,12 +29,96 @@ export interface RuntimeDevice {
   /** Defaults to "private" when the backend predates the visibility flag. */
   visibility: RuntimeVisibility;
   timezone?: string | null;
+  /**
+   * The custom runtime profile this registered runtime was launched from,
+   * or `null` for a built-in protocol family. The UI uses this to stamp a
+   * "Built-in" vs "Custom" badge on the runtime row. Older backends that
+   * predate the custom-runtime feature omit the field; consumers must treat
+   * a missing value as `null` (built-in).
+   */
+  profile_id?: string | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export type AgentRuntime = RuntimeDevice;
+
+// ---------------------------------------------------------------------------
+// Custom runtime profiles (MUL-3284)
+//
+// A RuntimeProfile is a workspace-level *definition* of a custom runtime
+// backend — distinct from a RuntimeDevice, which is a daemon-registered
+// *instance*. An admin authors a profile (display name + base protocol
+// family + the CLI command to launch), and daemons can then register
+// runtimes against it; those instances carry `profile_id` pointing back here.
+// ---------------------------------------------------------------------------
+
+// The fixed allow-list of base protocol families a custom runtime can wrap.
+// These are the only backends the create flow may select; the server rejects
+// anything else with 400. Kept as a const tuple so the union type is derived
+// from the single source of truth.
+export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
+  "claude",
+  "codebuddy",
+  "codex",
+  "copilot",
+  "opencode",
+  "openclaw",
+  "hermes",
+  "gemini",
+  "pi",
+  "cursor",
+  "kimi",
+  "kiro",
+  "antigravity",
+] as const;
+
+export type RuntimeProtocolFamily =
+  (typeof RUNTIME_PROFILE_PROTOCOL_FAMILIES)[number];
+
+// Profile visibility mirrors RuntimeVisibility's vocabulary but uses the
+// workspace/private axis the server documents for profiles.
+export type RuntimeProfileVisibility = "workspace" | "private";
+
+export interface RuntimeProfile {
+  id: string;
+  workspace_id: string;
+  display_name: string;
+  protocol_family: RuntimeProtocolFamily;
+  command_name: string;
+  description: string | null;
+  fixed_args: string[];
+  visibility: RuntimeProfileVisibility;
+  created_by: string | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// POST body. `protocol_family` is required and immutable after creation.
+// Optional fields are omitted entirely when unset (never sent as null/empty)
+// so the server applies its own defaults.
+export interface CreateRuntimeProfileRequest {
+  display_name: string;
+  protocol_family: RuntimeProtocolFamily;
+  command_name: string;
+  description?: string;
+  fixed_args?: string[];
+  visibility?: RuntimeProfileVisibility;
+  enabled?: boolean;
+}
+
+// PATCH body — every field optional; `protocol_family` is intentionally
+// absent because it is immutable.
+export interface UpdateRuntimeProfileRequest {
+  display_name?: string;
+  command_name?: string;
+  description?: string | null;
+  fixed_args?: string[];
+  visibility?: RuntimeProfileVisibility;
+  enabled?: boolean;
+}
 
 // Coarse classifier set by the backend when a task transitions to "failed".
 // Mirrors the unified failure taxonomy defined in daemon/failure_taxonomy.go.
@@ -107,6 +191,14 @@ export interface AgentTask {
   created_at: string;
   /** Non-empty when the task was spawned from a chat session. */
   chat_session_id?: string;
+  /** Non-empty when the task was spawned from a channel mention. */
+  channel_id?: string;
+  /** Triggering channel message for channel-origin tasks. */
+  channel_message_id?: string;
+  /** Optional channel thread associated with the trigger message. */
+  channel_thread_id?: string;
+  /** Optional parent message for reply-triggered channel tasks. */
+  channel_reply_to_id?: string;
   /** Non-empty when the task was spawned by an autopilot run. */
   autopilot_run_id?: string;
   /** Set when this task was created as an auto-retry of a parent task. */
@@ -129,7 +221,7 @@ export interface AgentTask {
    * tasks that have no linked issue (so e.g. quick-create tasks render
    * with a meaningful title instead of falling through to "Untracked").
    */
-  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct" | "local_cli";
+  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct" | "channel_mention" | "local_cli";
   owner_id?: string;
   cli_name?: string;
   exit_code?: number;
@@ -921,8 +1013,17 @@ export type RuntimeLocalSkillStatus =
   | "pending"
   | "running"
   | "completed"
+  | "conflict"
   | "failed"
   | "timeout";
+
+export type RuntimeLocalSkillImportAction = "overwrite";
+
+export interface RuntimeLocalSkillImportConflict {
+  existing_skill_id: string;
+  existing_created_by?: string;
+  can_overwrite: boolean;
+}
 
 export interface RuntimeLocalSkillSummary {
   key: string;
@@ -949,6 +1050,9 @@ export interface CreateRuntimeLocalSkillImportRequest {
   name?: string;
   description?: string;
   overwrite?: boolean;
+  action?: RuntimeLocalSkillImportAction;
+  target_skill_id?: string;
+  supports_conflict?: boolean;
 }
 
 export interface RuntimeLocalSkillImportRequest {
@@ -957,8 +1061,12 @@ export interface RuntimeLocalSkillImportRequest {
   skill_key: string;
   name?: string;
   description?: string;
+  action?: RuntimeLocalSkillImportAction;
+  target_skill_id?: string;
+  supports_conflict?: boolean;
   status: RuntimeLocalSkillStatus;
   skill?: Skill;
+  conflict?: RuntimeLocalSkillImportConflict;
   error?: string;
   created_at: string;
   updated_at: string;
@@ -970,5 +1078,7 @@ export interface RuntimeLocalSkillsResult {
 }
 
 export interface RuntimeLocalSkillImportResult {
-  skill: Skill;
+  status: "created" | "updated" | "conflict";
+  skill?: Skill;
+  conflict?: RuntimeLocalSkillImportConflict;
 }

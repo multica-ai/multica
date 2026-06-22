@@ -83,6 +83,21 @@ func subscriberCount(t *testing.T, queries *db.Queries, issueID string) int {
 	return len(subs)
 }
 
+func subscriberReason(t *testing.T, queries *db.Queries, issueID, userType, userID string) string {
+	t.Helper()
+	subs, err := queries.ListIssueSubscribers(context.Background(), util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("ListIssueSubscribers: %v", err)
+	}
+	for _, sub := range subs {
+		if sub.UserType == userType && util.UUIDToString(sub.UserID) == userID {
+			return sub.Reason
+		}
+	}
+	t.Fatalf("subscriber %s:%s not found on issue %s", userType, userID, issueID)
+	return ""
+}
+
 func setAutoSubscribePreference(t *testing.T, queries *db.Queries, userID string, prefs autosubscribe.Preferences) {
 	t.Helper()
 	_, err := queries.UpsertAutoSubscribePreference(context.Background(), db.UpsertAutoSubscribePreferenceParams{
@@ -103,6 +118,57 @@ func setAutoSubscribePreference(t *testing.T, queries *db.Queries, userID string
 			DELETE FROM auto_subscribe_preference WHERE workspace_id = $1 AND user_id = $2
 		`, testWorkspaceID, userID)
 	})
+}
+
+func TestSubscriberIssueCreated_InheritsParentSubscribers(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	parentSubEmail := "subscriber-parent-inherit@multica.ai"
+	parentSubID := createTestUser(t, parentSubEmail)
+	t.Cleanup(func() { cleanupTestUser(t, parentSubEmail) })
+
+	parentID := createTestIssue(t, testWorkspaceID, testUserID)
+	childID := createTestSubIssue(t, testWorkspaceID, testUserID, parentID)
+	t.Cleanup(func() {
+		cleanupTestIssue(t, childID)
+		cleanupTestIssue(t, parentID)
+	})
+
+	addTestSubscriber(t, parentID, "member", parentSubID, "manual")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:            childID,
+				WorkspaceID:   testWorkspaceID,
+				Title:         "child issue",
+				Status:        "todo",
+				Priority:      "medium",
+				CreatorType:   "member",
+				CreatorID:     testUserID,
+				ParentIssueID: &parentID,
+			},
+		},
+	})
+
+	if !isSubscribed(t, queries, childID, "member", parentSubID) {
+		t.Fatal("expected parent issue subscriber to be inherited by child issue")
+	}
+	if reason := subscriberReason(t, queries, childID, "member", parentSubID); reason != "parent" {
+		t.Fatalf("expected inherited subscriber reason parent, got %q", reason)
+	}
+	if !isSubscribed(t, queries, childID, "member", testUserID) {
+		t.Fatal("expected child issue creator to remain subscribed")
+	}
+	if count := subscriberCount(t, queries, childID); count != 2 {
+		t.Fatalf("expected creator plus inherited parent subscriber, got %d subscribers", count)
+	}
 }
 
 func TestSubscriberIssueCreated_CreatorSubscribed(t *testing.T) {
@@ -653,6 +719,48 @@ func TestSubscriberIssueCreated_AutopilotMapPayload(t *testing.T) {
 
 	if !isSubscribed(t, queries, issueID, "member", testUserID) {
 		t.Fatal("expected creator to be subscribed when autopilot publishes map payload")
+	}
+}
+
+func TestSubscriberIssueCreated_MapPayloadInheritsParentSubscribers(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	parentSubEmail := "subscriber-map-parent-inherit@multica.ai"
+	parentSubID := createTestUser(t, parentSubEmail)
+	t.Cleanup(func() { cleanupTestUser(t, parentSubEmail) })
+
+	parentID := createTestIssue(t, testWorkspaceID, testUserID)
+	childID := createTestSubIssue(t, testWorkspaceID, testUserID, parentID)
+	t.Cleanup(func() {
+		cleanupTestIssue(t, childID)
+		cleanupTestIssue(t, parentID)
+	})
+
+	addTestSubscriber(t, parentID, "member", parentSubID, "manual")
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": map[string]any{
+				"id":              childID,
+				"workspace_id":    testWorkspaceID,
+				"title":           "autopilot child issue",
+				"status":          "todo",
+				"priority":        "medium",
+				"creator_type":    "member",
+				"creator_id":      testUserID,
+				"parent_issue_id": parentID,
+			},
+		},
+	})
+
+	if !isSubscribed(t, queries, childID, "member", parentSubID) {
+		t.Fatal("expected map payload parent subscriber to be inherited by child issue")
 	}
 }
 

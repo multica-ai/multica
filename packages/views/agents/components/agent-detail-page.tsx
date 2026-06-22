@@ -499,7 +499,7 @@ function DetailHeader({
               </DropdownMenuItem>
               {canArchive && (
               <DropdownMenuItem
-                className="text-destructive"
+                variant="destructive"
                 onClick={onArchive}
               >
                 <Trash2 className="h-3.5 w-3.5" />

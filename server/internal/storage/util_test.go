@@ -25,7 +25,7 @@ func TestContentDisposition(t *testing.T) {
 			name:        "non ascii filename gets ascii fallback and utf8 filename star",
 			disposition: "inline",
 			filename:    "脉率.pdf",
-			want:        `inline; filename="__.pdf"; filename*=UTF-8''%E8%84%89%E7%8E%87%E7%8E%87.pdf`,
+			want:        `inline; filename="__.pdf"; filename*=UTF-8''%E8%84%89%E7%8E%87.pdf`,
 		},
 	}
 

@@ -34,6 +34,7 @@ import {
   X,
   Zap,
   Users,
+  MessagesSquare,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -74,6 +75,7 @@ import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
+import { deriveChannelsSettings } from "@multica/core/channels";
 import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
@@ -112,6 +114,7 @@ type NavKey =
   | "autopilots"
   | "agents"
   | "wiki"
+  | "channels"
   | "squads"
   | "usage"
   | "agentDashboard"
@@ -127,6 +130,7 @@ type NavLabelKey =
   | "autopilots"
   | "agents"
   | "wiki"
+  | "channels"
   | "squads"
   | "usage"
   | "agent_dashboard"
@@ -144,6 +148,7 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "wiki", labelKey: "wiki", icon: BookOpenText },
+  { key: "channels", labelKey: "channels", icon: MessagesSquare },
   { key: "squads", labelKey: "squads", icon: Users },
   { key: "usage", labelKey: "usage", icon: BarChart3 },
   { key: "agentDashboard", labelKey: "agent_dashboard", icon: Activity },
@@ -722,7 +727,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {workspaceNav.map((item) => {
+                {workspaceNav
+                  .filter((item) => item.key !== "channels" || deriveChannelsSettings(workspace).enabled)
+                  .map((item) => {
                   const href = p[item.key]();
                   const isActive = isNavActive(pathname, href);
                   return (

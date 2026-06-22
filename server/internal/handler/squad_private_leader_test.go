@@ -118,6 +118,7 @@ func TestCreateIssue_SquadPrivateLeader_OwnerAllowed(t *testing.T) {
 		"title":         "Owner assigns private-leader squad",
 		"assignee_type": "squad",
 		"assignee_id":   squadID,
+		"project_id":    testProjectID,
 	})
 	testHandler.CreateIssue(w, r)
 	if w.Code != http.StatusCreated {
@@ -225,6 +226,7 @@ func TestChildDone_SquadPrivateLeader_PlainMemberNoEnqueue(t *testing.T) {
 		"title":         "parent with private-leader squad",
 		"assignee_type": "squad",
 		"assignee_id":   squadID,
+		"project_id":    testProjectID,
 	})
 	testHandler.CreateIssue(w, r)
 	if w.Code != http.StatusCreated {
@@ -252,6 +254,7 @@ func TestChildDone_SquadPrivateLeader_PlainMemberNoEnqueue(t *testing.T) {
 		"assignee_type":   "member",
 		"assignee_id":     memberID,
 		"status":          "in_progress",
+		"project_id":      testProjectID,
 	})
 	testHandler.CreateIssue(w, r)
 	if w.Code != http.StatusCreated {

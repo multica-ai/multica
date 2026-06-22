@@ -38,6 +38,39 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 	}
 }
 
+func TestBuildAntigravityArgsModel(t *testing.T) {
+	t.Parallel()
+
+	// agy 1.0.6's --model takes the exact human display string (spaces +
+	// parens), not a slug. It must ride as a single argv element so no shell
+	// quoting is required, and it must sit before the user's custom args.
+	args := buildAntigravityArgs(
+		"hello",
+		"/tmp/agy.log",
+		20*time.Minute,
+		ExecOptions{Cwd: "/work", Model: "Claude Opus 4.6 (Thinking)"},
+		quietAntigravityLogger(),
+	)
+
+	want := []string{
+		"-p", "hello",
+		"--dangerously-skip-permissions",
+		"--model", "Claude Opus 4.6 (Thinking)",
+		"--print-timeout", "20m0s",
+		"--log-file", "/tmp/agy.log",
+		"--add-dir", "/work",
+	}
+	if !slices.Equal(args, want) {
+		t.Fatalf("buildAntigravityArgs with model mismatch\n got: %v\nwant: %v", args, want)
+	}
+
+	// Empty model must omit the flag entirely so agy resolves its own default.
+	bare := buildAntigravityArgs("hi", "/tmp/agy.log", 0, ExecOptions{}, quietAntigravityLogger())
+	if slices.Contains(bare, "--model") {
+		t.Fatalf("--model must be omitted when opts.Model is empty; got %v", bare)
+	}
+}
+
 func TestBuildAntigravityArgsNoTimeoutOmitsPrintTimeout(t *testing.T) {
 	t.Parallel()
 
@@ -99,6 +132,7 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 				"--continue",
 				"-c",
 				"--conversation", "bad-id",
+				"--model", "sneaky-model", // managed via ExecOptions.Model
 				"--dangerously-skip-permissions",
 				"--print-timeout", "1h",
 				"--log-file", "/elsewhere.log",
@@ -125,6 +159,9 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 	if strings.Contains(joined, "bad-id") {
 		t.Errorf("custom --conversation value leaked through filter: %v", args)
+	}
+	if strings.Contains(joined, "sneaky-model") {
+		t.Errorf("custom --model value leaked through filter: %v", args)
 	}
 	if strings.Contains(joined, "/elsewhere.log") {
 		t.Errorf("custom --log-file value leaked through filter: %v", args)
@@ -175,5 +212,60 @@ func TestReadAntigravityConversationIDMissingFile(t *testing.T) {
 	}
 	if got := readAntigravityConversationID(""); got != "" {
 		t.Errorf("expected empty string for empty path, got %q", got)
+	}
+}
+
+// TestAntigravityModelError is the regression guard for the silent-no-op fix:
+// agy exits 0 with empty output on an unrecognised --model, so Execute must
+// reject a non-empty model that isn't in the `agy models` catalog instead of
+// letting it run to a fake "completed + empty" success. This covers the same
+// validation regardless of whether opts.Model originated from agent.model, a
+// persisted/API value, or the daemon-wide MULTICA_ANTIGRAVITY_MODEL default —
+// they all collapse to opts.Model before Execute runs this check.
+func TestAntigravityModelError(t *testing.T) {
+	t.Parallel()
+
+	catalog := []Model{
+		{ID: "Gemini 3.5 Flash (Medium)", Label: "Gemini 3.5 Flash (Medium)", Provider: "antigravity"},
+		{ID: "Claude Opus 4.6 (Thinking)", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
+	}
+
+	// Exact catalog hit → accepted.
+	if err := antigravityModelError("Claude Opus 4.6 (Thinking)", catalog); err != nil {
+		t.Errorf("valid model rejected: %v", err)
+	}
+
+	// Empty model → accepted (flag omitted, agy resolves its own default).
+	if err := antigravityModelError("", catalog); err != nil {
+		t.Errorf("empty model should not error: %v", err)
+	}
+
+	// Empty / nil catalog → fail open (discovery couldn't produce a list, so we
+	// can't prove the value is bad — let agy decide rather than block the run).
+	if err := antigravityModelError("anything at all", nil); err != nil {
+		t.Errorf("empty catalog should fail open, got: %v", err)
+	}
+
+	// Unknown model with a known catalog → actionable error that names the
+	// rejected value and points at `agy models`. THIS is the case that stops
+	// the silent empty-success.
+	err := antigravityModelError("Totally Made Up Model", catalog)
+	if err == nil {
+		t.Fatal("unknown model should be rejected, not silently accepted")
+	}
+	if !strings.Contains(err.Error(), "Totally Made Up Model") {
+		t.Errorf("error should name the rejected model: %v", err)
+	}
+	if !strings.Contains(err.Error(), "agy models") {
+		t.Errorf("error should point the user at `agy models`: %v", err)
+	}
+
+	// Near-miss (trailing space / dropped suffix) → still rejected, because agy
+	// needs the exact display string and would no-op on anything else.
+	if err := antigravityModelError("Claude Opus 4.6 (Thinking) ", catalog); err == nil {
+		t.Error("near-miss model (trailing space) should be rejected")
+	}
+	if err := antigravityModelError("Claude Opus 4.6", catalog); err == nil {
+		t.Error("near-miss model (dropped suffix) should be rejected")
 	}
 }

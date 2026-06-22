@@ -203,7 +203,7 @@ vi.mock("@multica/ui/components/ui/collapsible", () => ({
   CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-import { CommentCard } from "./comment-card";
+import { AttachmentList, CommentCard } from "./comment-card";
 
 const entry: TimelineEntry = {
   type: "comment",
@@ -216,6 +216,15 @@ const entry: TimelineEntry = {
   updated_at: "2026-01-16T00:00:00Z",
   comment_type: "comment",
 };
+
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+}
 
 function renderCommentCard({
   cardEntry = entry,
@@ -234,12 +243,7 @@ function renderCommentCard({
   currentUserId?: string;
   onEdit?: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
 } = {}) {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
+  const queryClient = createTestQueryClient();
 
   return render(
     <QueryClientProvider client={queryClient}>
@@ -257,6 +261,16 @@ function renderCommentCard({
           onDelete={() => {}}
           onToggleReaction={() => {}}
         />
+      </I18nProvider>
+    </QueryClientProvider>,
+  );
+}
+
+function renderWithQuery(ui: React.ReactElement) {
+  return render(
+    <QueryClientProvider client={createTestQueryClient()}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        {ui}
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -425,5 +439,29 @@ describe("CommentCard", () => {
 
     expect(screen.queryByText("Show more")).toBeNull();
     expect(screen.queryByText("Show less")).toBeNull();
+  });
+});
+
+describe("AttachmentList — inline attachment filtering", () => {
+  it("does not render a bottom attachment row when the body already has the stable file-card URL", () => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const href = `/api/attachments/${id}/download`;
+    const attachment = {
+      id,
+      url: "/uploads/report.pdf",
+      filename: "report.pdf",
+      content_type: "application/pdf",
+      size_bytes: 1024,
+    } as any;
+
+    const { container } = renderWithQuery(
+      <AttachmentList
+        attachments={[attachment]}
+        content={`!file[report.pdf](${href})`}
+      />,
+    );
+
+    expect(screen.queryByText("report.pdf")).toBeNull();
+    expect(container.firstChild).toBeNull();
   });
 });

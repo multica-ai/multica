@@ -122,11 +122,25 @@ const (
 	EventSquadUpdated = "squad:updated"
 	EventSquadDeleted = "squad:deleted"
 
+	// Channel events (lightweight human+agent collaboration)
+	EventChannelCreated     = "channel:created"
+	EventChannelUpdated     = "channel:updated"
+	EventChannelDeleted     = "channel:deleted"
+	EventChannelMemberAdded = "channel:member_added"
+	EventChannelMemberLeft  = "channel:member_left"
+	EventChannelThreadCreated = "channel_thread:created"
+	EventChannelThreadUpdated = "channel_thread:updated"
+	EventChannelThreadDeleted  = "channel_thread:deleted"
+	EventChannelMessageCreated = "channel_message:created"
+	EventChannelMessageUpdated = "channel_message:updated"
+	EventChannelMessageDeleted = "channel_message:deleted"
+
 	// Daemon events
-	EventDaemonHeartbeat     = "daemon:heartbeat"
-	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
-	EventDaemonRegister      = "daemon:register"
-	EventDaemonTaskAvailable = "daemon:task_available"
+	EventDaemonHeartbeat              = "daemon:heartbeat"
+	EventDaemonHeartbeatAck           = "daemon:heartbeat_ack"
+	EventDaemonRegister               = "daemon:register"
+	EventDaemonTaskAvailable          = "daemon:task_available"
+	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
 
 	// Notification delivery events (server <-> daemon)
 	EventNotificationDeliver        = "notification:deliver"

@@ -16,6 +16,10 @@ export interface CreateIssueRequest {
   due_date?: string;
   attachment_ids?: string[];
   label_ids?: string[];
+  /** When set, links the new issue back to the channel thread it was
+   *  created from (OPE-1943). The backend records source_channel_id from
+   *  the thread and reflows issue status changes back to the thread. */
+  source_thread_id?: string;
 }
 
 export interface UpdateIssueRequest {
@@ -82,6 +86,9 @@ export interface ListIssuesParams {
    * majority on the client.
    */
   scheduled?: boolean;
+  date_field?: "created_at" | "updated_at";
+  date_start?: string;
+  date_end?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
   /** When true, only return archived issues. Default: false (excludes archived). */
@@ -119,8 +126,13 @@ export interface ListGroupedIssuesParams {
   label_ids?: string[];
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
+  date_field?: "created_at" | "updated_at";
+  date_start?: string;
+  date_end?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
+  archived?: boolean;
+  include_archived?: boolean;
 }
 
 /** Raw backend response shape for `GET /api/issues`. */

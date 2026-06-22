@@ -30,9 +30,13 @@ import type {
   AgentActivityBucket,
   AgentRunCount,
   AgentRuntime,
+  RuntimeProfile,
+  CreateRuntimeProfileRequest,
+  UpdateRuntimeProfileRequest,
   InboxItem,
   IssueSubscriber,
   Comment,
+  CommentTriggerPreview,
   Reaction,
   IssueReaction,
   Workspace,
@@ -80,6 +84,7 @@ import type {
   ChatPendingTask,
   PendingChatTasksResponse,
   SendChatMessageResponse,
+  CancelTaskResponse,
   Project,
   CreateProjectRequest,
   UpdateProjectRequest,
@@ -149,6 +154,23 @@ import type {
   CreateWikiPageRequest,
   UpdateWikiPageRequest,
   ReorderWikiPagesRequest,
+  ListChannelsResponse,
+  ChannelSummary,
+  ListChannelMembersResponse,
+  ListChannelThreadsResponse,
+  ChannelThreadSummary,
+  ListThreadMessagesResponse,
+  ListChannelMessagesResponse,
+  MessageThreadResponse,
+  ChannelContextResponse,
+  ConvertMessageToIssueRequest,
+  ConvertMessageToIssueResponse,
+  ChannelMessage,
+  ChannelGroup,
+  CreateChannelRequest,
+  UpdateChannelRequest,
+  CreateChannelThreadRequest,
+  CreateChannelMessageRequest,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
@@ -188,8 +210,10 @@ import {
   AutopilotResponseSchema,
   AutopilotRunResponseSchema,
   AttachmentResponseSchema,
+  CancelTaskResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
+  CommentTriggerPreviewSchema,
   CloudRuntimeNodeListSchema,
   CloudRuntimeNodeSchema,
   CreateAgentFromTemplateResponseSchema,
@@ -270,6 +294,7 @@ import {
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
   EMPTY_MOBILE_PUSH_REGISTRATION_RESPONSE,
   MobilePushRegistrationResponseSchema,
+  EMPTY_CANCEL_TASK_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -788,6 +813,9 @@ export class ApiClient {
     }
     if (params?.open_only) search.set("open_only", "true");
     if (params?.scheduled) search.set("scheduled", "true");
+    if (params?.date_field) search.set("date_field", params.date_field);
+    if (params?.date_start) search.set("date_start", params.date_start);
+    if (params?.date_end) search.set("date_end", params.date_end);
     if (params?.sort_by) search.set("sort", params.sort_by);
     if (params?.sort_direction) search.set("direction", params.sort_direction);
     if (params?.archived) search.set("archived", "true");
@@ -827,8 +855,13 @@ export class ApiClient {
     if (params.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
     if (params.group_assignee_type) search.set("group_assignee_type", params.group_assignee_type);
     if (params.group_assignee_id) search.set("group_assignee_id", params.group_assignee_id);
+    if (params.date_field) search.set("date_field", params.date_field);
+    if (params.date_start) search.set("date_start", params.date_start);
+    if (params.date_end) search.set("date_end", params.date_end);
     if (params.sort_by) search.set("sort", params.sort_by);
     if (params.sort_direction) search.set("direction", params.sort_direction);
+    if (params.archived) search.set("archived", "true");
+    if (params.include_archived) search.set("include_archived", "true");
     const raw = await this.fetch<unknown>(`/api/issues/grouped?${search}`);
     return parseWithFallback(raw, GroupedIssuesResponseSchema, EMPTY_GROUPED_ISSUES_RESPONSE, {
       endpoint: "GET /api/issues/grouped",
@@ -871,23 +904,6 @@ export class ApiClient {
     return res.blob();
   }
 
-  /**
-   * Export an issue to PDF by sending the rendered HTML from the frontend preview.
-   * This produces a PDF that closely matches the browser preview quality.
-   */
-  async exportIssueHTML(
-    id: string,
-    htmlContent: string,
-  ): Promise<Blob> {
-    const res = await this.fetchRaw(`/api/issues/${id}/export-html`, {
-      method: "POST",
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-      body: htmlContent,
-    });
-    return res.blob();
-  }
-
-
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     return this.fetch("/api/issues", {
       method: "POST",
@@ -901,6 +917,7 @@ export class ApiClient {
     prompt: string;
     project_id?: string | null;
     parent_issue_id?: string | null;
+    attachment_ids?: string[];
   }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",
@@ -994,7 +1011,14 @@ export class ApiClient {
     });
   }
 
-  async createComment(issueId: string, content: string, type?: string, parentId?: string, attachmentIds?: string[]): Promise<Comment> {
+  async createComment(
+    issueId: string,
+    content: string,
+    type?: string,
+    parentId?: string,
+    attachmentIds?: string[],
+    suppressAgentIds?: string[],
+  ): Promise<Comment> {
     return this.fetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
       body: JSON.stringify({
@@ -1002,7 +1026,22 @@ export class ApiClient {
         type: type ?? "comment",
         ...(parentId ? { parent_id: parentId } : {}),
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
+        ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
       }),
+    });
+  }
+
+  async previewCommentTriggers(issueId: string, content: string, parentId?: string, editingCommentId?: string): Promise<CommentTriggerPreview> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments/trigger-preview`, {
+      method: "POST",
+      body: JSON.stringify({
+        content,
+        ...(parentId ? { parent_id: parentId } : {}),
+        ...(editingCommentId ? { editing_comment_id: editingCommentId } : {}),
+      }),
+    });
+    return parseWithFallback(raw, CommentTriggerPreviewSchema, { agents: [] }, {
+      endpoint: "POST /api/issues/:id/comments/trigger-preview",
     });
   }
 
@@ -1047,10 +1086,14 @@ export class ApiClient {
     return this.fetch("/api/mention-frequency");
   }
 
-  async updateComment(commentId: string, content: string, attachmentIds?: string[]): Promise<Comment> {
+  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}`, {
       method: "PUT",
-      body: JSON.stringify({ content, attachment_ids: attachmentIds }),
+      body: JSON.stringify({
+        content,
+        attachment_ids: attachmentIds,
+        ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
+      }),
     });
   }
 
@@ -1480,6 +1523,61 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(patch),
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // Custom runtime profiles (MUL-3284). All workspace-scoped: the caller
+  // passes the workspace id the same way the runtimes list resolves it.
+  // ---------------------------------------------------------------------
+
+  async listRuntimeProfiles(workspaceId: string): Promise<RuntimeProfile[]> {
+    const res = await this.fetch<{ runtime_profiles?: RuntimeProfile[] }>(
+      `/api/workspaces/${workspaceId}/runtime-profiles`,
+    );
+    return res.runtime_profiles ?? [];
+  }
+
+  async getRuntimeProfile(
+    workspaceId: string,
+    profileId: string,
+  ): Promise<RuntimeProfile> {
+    return this.fetch(
+      `/api/workspaces/${workspaceId}/runtime-profiles/${profileId}`,
+    );
+  }
+
+  async createRuntimeProfile(
+    workspaceId: string,
+    body: CreateRuntimeProfileRequest,
+  ): Promise<RuntimeProfile> {
+    return this.fetch(`/api/workspaces/${workspaceId}/runtime-profiles`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async updateRuntimeProfile(
+    workspaceId: string,
+    profileId: string,
+    patch: UpdateRuntimeProfileRequest,
+  ): Promise<RuntimeProfile> {
+    return this.fetch(
+      `/api/workspaces/${workspaceId}/runtime-profiles/${profileId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      },
+    );
+  }
+
+  async deleteRuntimeProfile(
+    workspaceId: string,
+    profileId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/workspaces/${workspaceId}/runtime-profiles/${profileId}`,
+      { method: "DELETE" },
+    );
   }
 
   async getRuntimeUsage(
@@ -1918,6 +2016,10 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/task-runs`);
   }
 
+  async listMyTasksByIssue(issueId: string): Promise<AgentTask[]> {
+    return this.fetch(`/api/issues/${issueId}/my-task-runs`);
+  }
+
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
     return this.fetch(`/api/issues/${issueId}/usage`);
   }
@@ -2099,6 +2201,182 @@ export class ApiClient {
     return this.fetch(`/api/wiki-pages/${pageId}/activity?limit=${limit}`);
   }
 
+  // Channels (OPE-1943)
+  async listChannels(): Promise<ListChannelsResponse> {
+    return this.fetch("/api/channels");
+  }
+
+  async getChannel(id: string): Promise<ChannelSummary> {
+    return this.fetch(`/api/channels/${id}`);
+  }
+
+  async createChannel(data: CreateChannelRequest): Promise<ChannelSummary> {
+    return this.fetch("/api/channels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateChannel(id: string, data: UpdateChannelRequest): Promise<ChannelSummary> {
+    return this.fetch(`/api/channels/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteChannel(id: string): Promise<{ deleted: boolean; channel_id: string }> {
+    return this.fetch(`/api/channels/${id}`, { method: "DELETE" });
+  }
+
+  async joinChannel(id: string): Promise<{ joined: boolean }> {
+    return this.fetch(`/api/channels/${id}/join`, { method: "POST" });
+  }
+
+  async leaveChannel(id: string): Promise<{ left: boolean }> {
+    return this.fetch(`/api/channels/${id}/leave`, { method: "POST" });
+  }
+
+  async markChannelRead(id: string): Promise<{ marked: boolean }> {
+    return this.fetch(`/api/channels/${id}/read`, { method: "POST" });
+  }
+
+  async listChannelMembers(id: string): Promise<ListChannelMembersResponse> {
+    return this.fetch(`/api/channels/${id}/members`);
+  }
+
+  async addChannelMember(channelId: string, data: { user_id: string; role?: string }): Promise<{ channel_id: string; user_id: string; role: string }> {
+    return this.fetch(`/api/channels/${channelId}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listChannelThreads(channelId: string): Promise<ListChannelThreadsResponse> {
+    return this.fetch(`/api/channels/${channelId}/threads`);
+  }
+
+  async createChannelThread(
+    channelId: string,
+    data: CreateChannelThreadRequest,
+  ): Promise<ChannelThreadSummary> {
+    return this.fetch(`/api/channels/${channelId}/threads`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteChannelThread(
+    channelId: string,
+    threadId: string,
+  ): Promise<{ deleted: boolean; thread_id: string }> {
+    return this.fetch(`/api/channels/${channelId}/threads/${threadId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listThreadMessages(
+    channelId: string,
+    threadId: string,
+  ): Promise<ListThreadMessagesResponse> {
+    return this.fetch(`/api/channels/${channelId}/threads/${threadId}/messages`);
+  }
+
+  async createChannelMessage(
+    channelId: string,
+    threadId: string,
+    data: CreateChannelMessageRequest,
+  ): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/threads/${threadId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Channel V2 — flat messages
+  async listChannelMessages(
+    channelId: string,
+    params: { limit?: number; before?: string; around?: string } = {},
+  ): Promise<ListChannelMessagesResponse> {
+    const query = new URLSearchParams();
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.before) query.set("before", params.before);
+    if (params.around) query.set("around", params.around);
+    const qs = query.toString();
+    return this.fetch(`/api/channels/${channelId}/messages${qs ? `?${qs}` : ""}`);
+  }
+
+  async sendChannelMessage(channelId: string, data: CreateChannelMessageRequest): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async replyToMessage(channelId: string, messageId: string, data: CreateChannelMessageRequest): Promise<{ message: ChannelMessage; thread: ChannelThreadSummary }> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/reply`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getMessageThread(channelId: string, messageId: string): Promise<MessageThreadResponse> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/thread`);
+  }
+
+  async convertMessageToIssue(channelId: string, messageId: string, data?: ConvertMessageToIssueRequest): Promise<ConvertMessageToIssueResponse> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/convert-issue`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    });
+  }
+
+  async removeChannelMember(channelId: string, userId: string): Promise<{ removed: boolean }> {
+    return this.fetch(`/api/channels/${channelId}/members/${userId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getChannelContext(channelId: string, recent = 20): Promise<ChannelContextResponse> {
+    return this.fetch(`/api/channels/${channelId}/context?recent=${recent}`);
+  }
+
+  // Channel Groups
+  async listChannelGroups(): Promise<ChannelGroup[]> {
+    return this.fetch("/api/channels/groups");
+  }
+
+  async createChannelGroup(name: string): Promise<ChannelGroup> {
+    return this.fetch("/api/channels/groups", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async updateChannelGroup(groupId: string, name: string): Promise<ChannelGroup> {
+    return this.fetch(`/api/channels/groups/${groupId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async deleteChannelGroup(groupId: string): Promise<void> {
+    return this.fetch(`/api/channels/groups/${groupId}`, { method: "DELETE" });
+  }
+
+  async updateChannelGroupPosition(groupId: string, position: number): Promise<void> {
+    return this.fetch(`/api/channels/groups/${groupId}/position`, {
+      method: "PATCH",
+      body: JSON.stringify({ position }),
+    });
+  }
+
+  async moveChannelToGroup(channelId: string, groupId: string | null, position: number): Promise<void> {
+    return this.fetch("/api/channels/move", {
+      method: "PATCH",
+      body: JSON.stringify({ channel_id: channelId, group_id: groupId, position }),
+    });
+  }
+
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
     return this.fetch(`/api/workspaces/${workspaceId}/members`);
@@ -2252,6 +2530,16 @@ export class ApiClient {
   async setAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
     await this.fetch(`/api/agents/${agentId}/skills`, {
       method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Incremental attach: POST /skills/add only inserts the given ids (the
+  // server upserts with ON CONFLICT DO NOTHING), so callers don't need to
+  // read the agent's current skill set first.
+  async addAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/skills/add`, {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -2519,8 +2807,11 @@ export class ApiClient {
     await this.fetch(`/api/chat/sessions/${sessionId}/read`, { method: "POST" });
   }
 
-  async cancelTaskById(taskId: string): Promise<void> {
-    await this.fetch(`/api/tasks/${taskId}/cancel`, { method: "POST" });
+  async cancelTaskById(taskId: string): Promise<CancelTaskResponse> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/cancel`, { method: "POST" });
+    return parseWithFallback(raw, CancelTaskResponseSchema, EMPTY_CANCEL_TASK_RESPONSE, {
+      endpoint: "POST /api/tasks/{taskId}/cancel",
+    });
   }
 
   async listAttachments(issueId: string): Promise<Attachment[]> {

@@ -38,6 +38,7 @@ func seedAutopilot(t *testing.T, queries *db.Queries, title, creatorType string,
 		AssigneeID:    agentID,
 		Status:        "active",
 		ExecutionMode: "run_only",
+		ManualOptions: []string{},
 		CreatedByType: creatorType,
 		CreatedByID:   creatorID,
 	})

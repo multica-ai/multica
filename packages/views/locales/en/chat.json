@@ -11,7 +11,8 @@
     "placeholder_named": "Message {{name}}…",
     "placeholder_default": "Start a message…",
     "send_tooltip": "Send",
-    "stop_tooltip": "Stop"
+    "stop_tooltip": "Stop",
+    "send_failed_toast": "Failed to send message"
   },
   "message_list": {
     "show_details": "Show details",

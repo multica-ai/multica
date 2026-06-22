@@ -168,6 +168,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	if opts.DaemonWakeup != nil {
 		h.TaskService.Wakeup = opts.DaemonWakeup
+		if notifier, ok := opts.DaemonWakeup.(handler.RuntimeProfileRefreshNotifier); ok {
+			h.DaemonProfileRefresh = notifier
+		}
 	}
 	if rdb != nil {
 		h.UpdateStore = handler.NewRedisUpdateStore(rdb)
@@ -224,6 +227,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				patcher := lark.NewPatcher(queries, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
 
+				// Typing indicator: shows a "processing" reaction on the user's
+				// message while the agent is working, then removes it before the
+				// reply is sent. Best-effort; failures are logged only.
+				typingIndicator := lark.NewTypingIndicatorManager(larkClient, installSvc, queries, slog.Default())
+				patcher.SetTypingIndicatorManager(typingIndicator)
+
 				// Inbound pipeline: lark_inbound_audit logger,
 				// channel-aware ChatSessionService, and the
 				// Dispatcher that orders identity / dedup / append /
@@ -263,6 +272,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// "noop" so operators can spot it.
 				connectorFactory, connectorLabel := buildLarkConnectorFactory(installSvc, larkClient)
 				h.LarkHub = lark.NewHub(queries, connectorFactory, dispatcher, lark.HubConfig{})
+				h.LarkHub.SetTypingIndicatorManager(typingIndicator)
 
 				// OutcomeReplier wires the outbound side of the
 				// EventEmitter contract: NeedsBinding / AgentOffline /
@@ -400,6 +410,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Share allowed origins with WebSocket origin checker.
 	realtime.SetAllowedOrigins(origins)
 
+	// Share the same trusted-proxy CIDRs (MULTICA_TRUSTED_PROXIES) so the
+	// WebSocket origin check honors X-Forwarded-Host only from trusted proxies,
+	// using one config source instead of a parallel one.
+	realtime.SetTrustedProxies(signupConfig.TrustedProxies)
+
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -506,6 +521,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/heartbeat", h.DaemonHeartbeat)
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
+		r.Get("/workspaces/{workspaceId}/runtime-profiles", h.DaemonListRuntimeProfiles)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
@@ -588,6 +604,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/attachments/upload/multipart/abort", h.AbortMultipartAttachmentUpload)
 		r.Post("/api/feedback", h.CreateFeedback)
 
+		// Attachment download — user-scoped (auth-only), NOT
+		// workspace-scoped. The handler self-resolves the workspace
+		// from the attachment row and enforces membership inside, so
+		// this route is callable as a native browser <img>/<video>
+		// src that cannot attach X-Workspace-Slug / X-Workspace-ID
+		// headers. Persisting `/api/attachments/<id>/download` into
+		// comment markdown depends on this — see MUL-3130. The
+		// metadata / delete endpoints below stay workspace-scoped
+		// because they are JSON-API consumers that always have
+		// workspace context.
+		r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
+
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
@@ -607,6 +635,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/instructions-history", h.ListInstructionsHistory)
 					r.Get("/instructions-history/{versionId}", h.GetInstructionsHistory)
 					r.Get("/github/installations", h.ListGitHubInstallations)
+					// Custom runtime profiles — listing/reading is member-visible
+					// (the Runtime page renders for everyone; create/edit/delete
+					// are admin-gated below).
+					r.Get("/runtime-profiles", h.ListRuntimeProfiles)
+					r.Get("/runtime-profiles/{profileId}", h.GetRuntimeProfile)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -620,6 +653,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					// Custom runtime profile mutations (admin-only).
+					r.Post("/runtime-profiles", h.CreateRuntimeProfile)
+					r.Patch("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
+					r.Put("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
+					r.Delete("/runtime-profiles/{profileId}", h.DeleteRuntimeProfile)
 				})
 				// Owner-only access
 				r.Group(func(r chi.Router) {
@@ -747,6 +785,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
 					r.Delete("/", h.DeleteIssue)
+					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
@@ -757,15 +796,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/rerun", h.RerunIssue)
 					r.Get("/task-runs", h.ListTasksByIssue)
+					r.Get("/my-task-runs", h.ListMyTasksByIssue)
 					r.Post("/local-runs", h.CreateLocalCLIRun)
 					r.Get("/usage", h.GetIssueUsage)
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
-								r.Patch("/archive", h.ArchiveIssue)
-								r.Patch("/unarchive", h.UnarchiveIssue)
+					r.Patch("/archive", h.ArchiveIssue)
+					r.Patch("/unarchive", h.UnarchiveIssue)
 					r.Post("/export", h.ExportIssue)
-				r.Post("/export-html", h.ExportIssueHTML)
 					r.Get("/children", h.ListChildIssues)
 					r.Post("/clear-history", h.ClearIssueHistory)
 					r.Get("/labels", h.ListLabelsForIssue)
@@ -831,6 +870,54 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Channels (lightweight human+agent collaboration — OPE-1943)
+			r.Route("/api/channels", func(r chi.Router) {
+				r.Get("/", h.ListChannels)
+				r.Post("/", h.CreateChannel)
+				r.Route("/groups", func(r chi.Router) {
+					r.Get("/", h.ListChannelGroups)
+					r.Post("/", h.CreateChannelGroup)
+					r.Route("/{groupId}", func(r chi.Router) {
+						r.Patch("/", h.UpdateChannelGroup)
+						r.Delete("/", h.DeleteChannelGroup)
+						r.Patch("/position", h.UpdateChannelGroupPosition)
+					})
+				})
+				r.Patch("/move", h.MoveChannelToGroup)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetChannel)
+					r.Patch("/", h.UpdateChannel)
+					r.Delete("/", h.DeleteChannel)
+					r.Post("/read", h.MarkChannelRead)
+					r.Get("/members", h.ListChannelMembers)
+					r.Post("/members", h.AddChannelMember)
+					r.Delete("/members/{userId}", h.RemoveChannelMember)
+					r.Post("/join", h.JoinChannel)
+					r.Post("/leave", h.LeaveChannel)
+					r.Get("/context", h.GetChannelContext)
+					// V2 flat messages
+					r.Get("/messages", h.ListChannelMessages)
+					r.Post("/messages", h.SendChannelMessage)
+					r.Route("/messages/{msgId}", func(r chi.Router) {
+						r.Patch("/", h.UpdateChannelMessage)
+						r.Delete("/", h.DeleteChannelMessage)
+						r.Post("/reply", h.ReplyToMessage)
+						r.Get("/thread", h.GetMessageThread)
+						r.Post("/convert-issue", h.ConvertMessageToIssue)
+					})
+					// V1 threads (backward compat)
+					r.Get("/threads", h.ListChannelThreads)
+					r.Post("/threads", h.CreateChannelThread)
+					r.Route("/threads/{threadId}", func(r chi.Router) {
+						r.Get("/", h.GetChannelThreadByID)
+						r.Patch("/", h.UpdateChannelThread)
+						r.Get("/messages", h.ListThreadMessages)
+						r.Post("/messages", h.CreateChannelMessage)
+						r.Delete("/", h.DeleteChannelThread)
+					})
+				})
+			})
+
 			// Squads
 			r.Route("/api/squads", func(r chi.Router) {
 				r.Get("/", h.ListSquads)
@@ -886,7 +973,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Attachments
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
 			r.Get("/api/attachments/{id}/preview-url", h.GetAttachmentPreviewURL)
-			r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
+			// /api/attachments/{id}/download is registered in the
+			// outer Auth-only group above so it can be loaded as a
+			// native <img>/<video> src without workspace headers
+			// (MUL-3130). The handler self-resolves the workspace
+			// from the attachment row.
 			r.Get("/api/attachments/{id}/content", h.GetAttachmentContent)
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 

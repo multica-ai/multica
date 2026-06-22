@@ -24,6 +24,7 @@ const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockUpdateIssue = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
+const mockSetLastAssignee = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockCreateLabel = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
@@ -45,9 +46,29 @@ const mockDraftStore = {
     assigneeId: undefined as string | undefined,
     startDate: null,
     dueDate: null,
+    attachments: [] as Array<{
+      id: string;
+      workspace_id: string;
+      issue_id: string | null;
+      comment_id: string | null;
+      chat_session_id: string | null;
+      chat_message_id: string | null;
+      uploader_type: string;
+      uploader_id: string;
+      filename: string;
+      url: string;
+      download_url: string;
+      markdown_url: string;
+      content_type: string;
+      size_bytes: number;
+      created_at: string;
+    }>,
   },
+  lastAssigneeType: undefined as "agent" | "squad" | "member" | undefined,
+  lastAssigneeId: undefined as string | undefined,
   setDraft: mockSetDraft,
   clearDraft: mockClearDraft,
+  setLastAssignee: mockSetLastAssignee,
 };
 
 const mockQuickCreateStore = {
@@ -175,7 +196,7 @@ vi.mock("@multica/core/api", async () => {
 });
 
 vi.mock("../editor", () => {
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onUploadFile, placeholder }: any, ref: any) => {
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onUploadFile, placeholder, attachments }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
@@ -193,6 +214,7 @@ vi.mock("../editor", () => {
         <textarea
           value={value}
           placeholder={placeholder}
+          data-attachments-count={attachments?.length ?? 0}
           onChange={(e) => {
             valueRef.current = e.target.value;
             setValue(e.target.value);
@@ -407,6 +429,7 @@ describe("CreateIssueModal", () => {
       assigneeId: undefined,
       startDate: null,
       dueDate: null,
+      attachments: [],
     };
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
@@ -429,6 +452,29 @@ describe("CreateIssueModal", () => {
     // doesn't leak into the next test in the suite.
     mockDraftStore.draft.assigneeType = undefined;
     mockDraftStore.draft.assigneeId = undefined;
+    mockDraftStore.draft.attachments = [];
+    mockDraftStore.lastAssigneeType = undefined;
+    mockDraftStore.lastAssigneeId = undefined;
+    mockSetDraft.mockImplementation((patch: Partial<typeof mockDraftStore.draft>) => {
+      mockDraftStore.draft = { ...mockDraftStore.draft, ...patch };
+    });
+    mockSetLastAssignee.mockImplementation((type, id) => {
+      mockDraftStore.lastAssigneeType = type;
+      mockDraftStore.lastAssigneeId = id;
+    });
+    mockClearDraft.mockImplementation(() => {
+      mockDraftStore.draft = {
+        title: "",
+        description: "",
+        status: "todo",
+        priority: "none",
+        assigneeType: mockDraftStore.lastAssigneeType,
+        assigneeId: mockDraftStore.lastAssigneeId,
+        startDate: null,
+        dueDate: null,
+        attachments: [],
+      };
+    });
     mockCreateIssue.mockResolvedValue({
       id: "issue-123",
       identifier: "TES-123",

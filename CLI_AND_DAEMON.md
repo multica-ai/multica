@@ -699,3 +699,79 @@ Most commands support `--output` with two formats:
 multica issue list --output json
 multica daemon status --output json
 ```
+
+## Error Messages
+
+The CLI funnels command errors returned to the top-level handler through a
+single user-facing translation layer (`server/internal/cli/errors.go`) so that
+what you see on the terminal is a short, actionable sentence rather than a raw
+Go error, an HTTP status line, or an internal `resolve issue: ...` chain. (A
+few commands print their own output or run deliberate fast probes — for example
+`setup`'s short `/health` reachability check — and don't go through this
+layer.) The underlying detail is still available on demand (see `--debug`).
+
+### What you see
+
+- **Friendly, single-line message.** Transport failures (timeout, DNS,
+  connection refused, TLS) and HTTP status failures (401/403/404/409/400·422/
+  429/5xx) are each rendered as one clear sentence with a next step — for
+  example a timeout suggests checking the network or raising
+  `MULTICA_HTTP_TIMEOUT`, and a 401 tells you to run `multica login`.
+- **Server-provided validation messages are preserved.** For a 400/422 that
+  carries a message from the server, that message is shown verbatim
+  (`Invalid request: <server message>`); only when there is none do you get the
+  generic "check your values / run with --help" hint.
+- **No leaked internals by default.** Raw URLs, status lines, JSON bodies, and
+  the internal verb chain are hidden unless you ask for them.
+
+### Language
+
+Messages default to **English**, matching the rest of the CLI's help output.
+If a Chinese locale is detected in `LC_ALL`, `LC_MESSAGES`, or `LANG` (in that
+precedence order), messages switch to **Chinese**. No flag is needed; set the
+locale as usual:
+
+```bash
+LANG=zh_CN.UTF-8 multica issue get MUL-9999   # 错误信息显示为中文
+```
+
+### Exit codes
+
+The process exit code is tiered so scripts can branch on the failure class:
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | success |
+| `1` | generic / unclassified error |
+| `2` | network error (timeout, DNS, connection refused, TLS, offline) |
+| `3` | authentication / authorization (HTTP 401, 403) |
+| `4` | not found (HTTP 404) |
+| `5` | validation (HTTP 400, 422) |
+
+```bash
+multica issue get MUL-9999
+if [ $? -eq 4 ]; then echo "no such issue"; fi
+```
+
+### Seeing the full detail (`--debug`)
+
+Pass the global `--debug` flag (or set `MULTICA_DEBUG=1`) to print the complete
+original error chain — the internal verb chain, the request method/path/status,
+and the raw server body — underneath the friendly message. Use it when you need
+to file a bug or understand exactly what the server returned:
+
+```bash
+multica issue list --debug
+MULTICA_DEBUG=1 multica issue update MUL-1234 --title "x"
+```
+
+### Request timeout
+
+API requests use a default timeout of 30 seconds. Override it with
+`MULTICA_HTTP_TIMEOUT` when you are on a slow network; it accepts a Go duration
+(`45s`, `2m`) or a plain number of seconds (`45`). Command-level deadlines are
+always at least this value, so raising it takes effect across all commands.
+
+```bash
+MULTICA_HTTP_TIMEOUT=60s multica issue list
+```

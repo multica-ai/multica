@@ -38,9 +38,9 @@ import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import { BaseMentionExtension } from "./mention-extension";
-import { createMentionSuggestion, type MentionItem } from "./mention-suggestion";
+import { createMentionSuggestion, type MentionItem, type MentionSuggestionScope } from "./mention-suggestion";
 import { SlashCommandExtension } from "./slash-command-extension";
-import { createSlashCommandSuggestion } from "./slash-command-suggestion";
+import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
 import { CodeBlockView } from "./code-block-view";
 import { PatchedListItem, PatchedTaskItem } from "./list-item";
 import { createMarkdownPasteExtension } from "./markdown-paste";
@@ -52,6 +52,7 @@ import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
 import { HighlightExtension } from "./highlight";
+import { AutolinkEmailRepairExtension } from "./autolink-email-repair";
 
 const lowlight = createLowlight(common);
 
@@ -133,11 +134,18 @@ export interface EditorExtensionsOptions {
    * system prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  mentionScope?: MentionSuggestionScope;
   /** Override @ behavior for chat context suggestions. */
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
-  /** When true, attach the `/` skill picker. Default false. */
+  /** When true, attach the `/` picker. Default false. */
   enableSlashCommands?: boolean;
+  /**
+   * Which `/` menu to attach when enableSlashCommands is true:
+   * - "skill" (default) — the chat picker listing the active agent's skills.
+   * - "command" — the fixed built-in command menu (issue comments), e.g. /note.
+   */
+  slashCommandMode?: "skill" | "command";
 }
 
 export function createEditorExtensions(
@@ -173,8 +181,14 @@ export function createEditorExtensions(
     // linkOnPaste relies on Link's handlePaste plugin firing first;
     // markdownPaste's handlePaste is a catch-all that returns true.
     LinkExtension,
+    AutolinkEmailRepairExtension,
     ImageExtension,
-    Table.configure({ resizable: false }),
+    // renderWrapper wraps the table in `<div class="tableWrapper">` (the same
+    // wrapper the resizable NodeView emits), which prose.css styles with
+    // `overflow-x: auto`. Without it a wide table is a bare <table> that can't
+    // shrink below min-content, so the horizontal scrollbar lands on the
+    // page-level scroll container instead of the table itself.
+    Table.configure({ resizable: false, renderWrapper: true }),
     TableRow,
     TableHeader,
     TableCell,
@@ -192,15 +206,24 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems }) }
+          ? {
+              suggestion: createMentionSuggestion(options.queryClient, {
+                mode: options.mentionMode,
+                getContextItems: options.getMentionContextItems,
+                scope: options.mentionScope,
+              }),
+            }
           : {}),
     }),
     SlashCommandExtension.configure({
       HTMLAttributes: { class: "slash-command" },
-      suggestion:
-        options.enableSlashCommands && options.queryClient
-          ? createSlashCommandSuggestion(options.queryClient)
-          : { char: "/", allow: () => false },
+      suggestion: !options.enableSlashCommands
+        ? { char: "/", allow: () => false }
+        : options.slashCommandMode === "command"
+          ? createBuiltinCommandSuggestion()
+          : options.queryClient
+            ? createSlashCommandSuggestion(options.queryClient)
+            : { char: "/", allow: () => false },
     }),
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),

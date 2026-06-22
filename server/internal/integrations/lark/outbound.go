@@ -205,10 +205,11 @@ func (c PatcherConfig) withDefaults() PatcherConfig {
 //     most one replica holds the installation lease at a time, the
 //     event bus is per-process, so exactly one Patcher reacts per run.
 type Patcher struct {
-	queries     PatcherQueries
-	credentials CredentialsResolver
-	client      APIClient
-	cfg         PatcherConfig
+	queries         PatcherQueries
+	credentials     CredentialsResolver
+	client          APIClient
+	typingIndicator *TypingIndicatorManager
+	cfg             PatcherConfig
 }
 
 // NewPatcher constructs a Patcher bound to its dependencies. The
@@ -221,6 +222,14 @@ func NewPatcher(queries PatcherQueries, credentials CredentialsResolver, client 
 		client:      client,
 		cfg:         cfg,
 	}
+}
+
+// SetTypingIndicatorManager wires the typing-indicator manager into the
+// patcher so that replies clear the "processing" reaction before they
+// are sent. Call once at boot after both the patcher and manager are
+// constructed. Nil disables the clear step.
+func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
+	p.typingIndicator = m
 }
 
 // Register subscribes the patcher to the task-lifecycle events it
@@ -305,6 +314,13 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 	agentName := ""
 	if agentErr == nil {
 		agentName = agent.Name
+	}
+
+	// Clear the "processing" reaction before the reply is visible so the
+	// user sees a clean transition. Best-effort: a failure here is logged
+	// but does not block the actual reply.
+	if p.typingIndicator != nil {
+		p.typingIndicator.Clear(ctx, chatSessionID)
 	}
 
 	switch e.Type {

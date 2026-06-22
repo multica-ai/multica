@@ -66,10 +66,39 @@ if [ -z "$profile" ]; then
   profile="multica"
 fi
 
+project_name="${COMPOSE_PROJECT_NAME:-multica_preview_${profile}}"
+
+# Guard: skip rebuild if this profile already has running services
+echo "==> Checking if preview '${profile}' is already running..."
+if docker ps --filter "label=com.docker.compose.project=${project_name}" -q 2>/dev/null | grep -q .; then
+  echo ""
+  echo "⚠️  Preview '${profile}' already has running services."
+  echo "  To rebuild, stop it first:"
+  if [ -n "$issue" ]; then
+    echo "    make selfhost-preview-clean ISSUE=${issue}"
+  elif [ -n "${PROFILE:-}" ]; then
+    echo "    make selfhost-preview-clean PROFILE=${PROFILE}"
+  else
+    echo "    make selfhost-preview-clean"
+  fi
+  exit 0
+fi
+
+# Clean up any leftover containers (stopped/exited) before allocating ports
+echo "==> Stopping any previous preview containers for '${profile}'..."
+if ! COMPOSE_PROJECT_NAME="$project_name" \
+  docker compose \
+    -p "$project_name" \
+    -f docker-compose.selfhost.yml \
+    -f docker-compose.selfhost.build.yml \
+    down; then
+  echo "❌ Failed to stop previous preview containers. Check docker status and retry." >&2
+  exit 1
+fi
+
 frontend_port="$(next_free_port "$base_frontend_port")"
 backend_port="$(next_free_port "$base_backend_port")"
 
-project_name="${COMPOSE_PROJECT_NAME:-multica_preview_${profile}}"
 if [ "${ISOLATED_DB:-0}" = "1" ]; then
   db_name="${POSTGRES_DB:-multica_preview_${profile}}"
 else
@@ -126,14 +155,6 @@ if [ "$db_exists" != "1" ]; then
     > /dev/null
 fi
 
-echo "==> Stopping any previous preview with the same project name (idempotent rebuild)..."
-COMPOSE_PROJECT_NAME="$project_name" \
-docker compose \
-  -p "$project_name" \
-  -f docker-compose.selfhost.yml \
-  -f docker-compose.selfhost.build.yml \
-  down 2>/dev/null || true
-
 echo "==> Building Multica preview from the current checkout..."
 COMPOSE_PROJECT_NAME="$project_name" \
 POSTGRES_DB="$db_name" \
@@ -185,6 +206,34 @@ if curl -sf "${backend_origin}/health" > /dev/null 2>&1; then
   fi
   echo "  Frontend:        ${frontend_origin}"
   echo "  Backend:         ${backend_origin}"
+
+  # Keep the local agent daemon and its CLI on the SAME code as this preview.
+  # The daemon is a host process (not in compose); it injects MULTICA_SERVER_URL
+  # = its own ServerBaseURL into every agent, so @Agent's `multica channel ...`
+  # calls hit whichever backend the daemon points at. Build a fixed-path binary
+  # (go run's temp binary gets deleted, breaking the PATH it injects into agents)
+  # and restart the --profile local daemon against this preview's backend.
+  # Set PREVIEW_SKIP_DAEMON=1 to skip (e.g. when running parallel previews, since
+  # a single --profile local daemon can only point at one backend at a time).
+  if [ "${PREVIEW_SKIP_DAEMON:-0}" != "1" ]; then
+    echo ""
+    echo "==> Building fixed-path CLI binary (server/bin/multica)..."
+    if (cd server && go build -o bin/multica ./cmd/multica); then
+      echo "==> Restarting --profile local daemon against ${backend_origin}..."
+      if ./server/bin/multica daemon restart --profile local --server-url "${backend_origin}"; then
+        echo "  ✓ Daemon now runs server/bin/multica and points at this preview."
+        echo "    @Agent in this preview will use the same CLI code you just built."
+      else
+        echo "  ⚠️  Daemon restart failed — check 'multica daemon logs --profile local'."
+      fi
+    else
+      echo "  ⚠️  CLI build failed — daemon left untouched. Preview backend is still up."
+    fi
+  else
+    echo ""
+    echo "  (PREVIEW_SKIP_DAEMON=1 — daemon not touched; @Agent may run stale CLI / wrong backend.)"
+  fi
+
   echo ""
   echo "Stop this preview:"
   if [ -n "$issue" ]; then

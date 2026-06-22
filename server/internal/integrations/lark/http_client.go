@@ -654,6 +654,73 @@ func (c *httpAPIClient) ListChatMessages(ctx context.Context, creds Installation
 // a caller asking for more still gets the first 50 resolved.
 const larkBatchGetUsersMaxIDs = 50
 
+// AddMessageReaction adds an emoji reaction to a message via
+// POST /open-apis/im/v1/messages/{message_id}/reactions.
+// Returns the reaction_id so it can be deleted later.
+func (c *httpAPIClient) AddMessageReaction(ctx context.Context, p AddReactionParams) (string, error) {
+	if p.MessageID == "" {
+		return "", errors.New("lark http client: missing message_id")
+	}
+	if p.EmojiType == "" {
+		return "", errors.New("lark http client: missing emoji_type")
+	}
+	token, err := c.tenantAccessToken(ctx, p.InstallationID)
+	if err != nil {
+		return "", err
+	}
+	body := map[string]any{
+		"reaction_type": map[string]string{"emoji_type": p.EmojiType},
+	}
+	path := "/open-apis/im/v1/messages/" + url.PathEscape(p.MessageID) + "/reactions"
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			ReactionID string `json:"reaction_id"`
+		} `json:"data"`
+	}
+	if err := c.doJSON(ctx, c.resolveBaseURL(p.InstallationID), http.MethodPost, path, token, body, &resp); err != nil {
+		return "", fmt.Errorf("lark http client: add message reaction: %w", err)
+	}
+	if resp.Code != 0 || resp.Data.ReactionID == "" {
+		if isTokenError(resp.Code) {
+			c.invalidateToken(p.InstallationID.AppID)
+		}
+		return "", fmt.Errorf("lark http client: add message reaction: code=%d msg=%q", resp.Code, resp.Msg)
+	}
+	return resp.Data.ReactionID, nil
+}
+
+// DeleteMessageReaction removes a reaction from a message via
+// DELETE /open-apis/im/v1/messages/{message_id}/reactions/{reaction_id}.
+func (c *httpAPIClient) DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error {
+	if p.MessageID == "" {
+		return errors.New("lark http client: missing message_id")
+	}
+	if p.ReactionID == "" {
+		return errors.New("lark http client: missing reaction_id")
+	}
+	token, err := c.tenantAccessToken(ctx, p.InstallationID)
+	if err != nil {
+		return err
+	}
+	path := "/open-apis/im/v1/messages/" + url.PathEscape(p.MessageID) + "/reactions/" + url.PathEscape(p.ReactionID)
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := c.doJSON(ctx, c.resolveBaseURL(p.InstallationID), http.MethodDelete, path, token, nil, &resp); err != nil {
+		return fmt.Errorf("lark http client: delete message reaction: %w", err)
+	}
+	if resp.Code != 0 {
+		if isTokenError(resp.Code) {
+			c.invalidateToken(p.InstallationID.AppID)
+		}
+		return fmt.Errorf("lark http client: delete message reaction: code=%d msg=%q", resp.Code, resp.Msg)
+	}
+	return nil
+}
+
 // BatchGetUsers resolves user open_ids to display names via
 // GET /open-apis/contact/v3/users/batch?user_ids=…&user_id_type=open_id.
 // It mirrors fetchBotUnionID's single-user contact lookup, batched. Only

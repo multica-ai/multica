@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	daemonnotifier "github.com/multica-ai/multica/server/internal/daemon/notifier"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -59,6 +60,101 @@ func createDaemonTestRepo(t *testing.T) string {
 	return dir
 }
 
+func TestAgentTaskCredentialRequiresTaskToken(t *testing.T) {
+	t.Run("task token passes", func(t *testing.T) {
+		got, err := agentTaskCredential(Task{ID: "task-1", AuthToken: "mat_task_token"})
+		if err != nil {
+			t.Fatalf("agentTaskCredential(): %v", err)
+		}
+		if got != "mat_task_token" {
+			t.Fatalf("agentTaskCredential() = %q, want task token", got)
+		}
+	})
+
+	t.Run("missing token fails closed", func(t *testing.T) {
+		_, err := agentTaskCredential(Task{ID: "task-1"})
+		if err == nil {
+			t.Fatal("agentTaskCredential(): expected error")
+		}
+		if !strings.Contains(err.Error(), "no task-scoped auth_token") {
+			t.Fatalf("error = %q", err.Error())
+		}
+	})
+
+	t.Run("member token fails closed", func(t *testing.T) {
+		_, err := agentTaskCredential(Task{ID: "task-1", AuthToken: "mul_member_token"})
+		if err == nil {
+			t.Fatal("agentTaskCredential(): expected error")
+		}
+		if !strings.Contains(err.Error(), "not a task token") {
+			t.Fatalf("error = %q", err.Error())
+		}
+	})
+}
+
+func TestTaskAuthTokenType(t *testing.T) {
+	tests := []struct {
+		name string
+		task Task
+		want string
+	}{
+		{name: "task token", task: Task{AuthToken: "mat_task_token"}, want: "mat"},
+		{name: "missing", task: Task{}, want: "missing"},
+		{name: "member token", task: Task{AuthToken: "mul_member_token"}, want: "non_mat"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := taskAuthTokenType(tc.task); got != tc.want {
+				t.Fatalf("taskAuthTokenType() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildAgentEnvInjectsCustomEnvWithoutOverridingInternalKeys(t *testing.T) {
+	task := Task{
+		ID:          "task-1",
+		AgentID:     "agent-1",
+		WorkspaceID: "workspace-1",
+		AuthToken:   "mat_task_token",
+		Agent: &AgentData{
+			CustomEnv: map[string]string{
+				"AIPC_AUTH_MOBILE":   "test-mobile",
+				"AIPC_AUTH_PASSWORD": "test-password",
+				"MULTICA_TOKEN":      "mul_member_token",
+				"MULTICA_TASK_ID":    "evil-task",
+				"CODEX_HOME":         "/tmp/evil-codex-home",
+			},
+		},
+	}
+	env := &execenv.Environment{
+		CodexHome: "/tmp/codex-home",
+	}
+
+	got := buildAgentEnv(task, "codex", Config{
+		ServerBaseURL: "https://server.example.test",
+		HealthPort:    18765,
+	}, "agent-name", "run-1", 3, env, slog.Default())
+
+	for key, want := range map[string]string{
+		"AIPC_AUTH_MOBILE":   "test-mobile",
+		"AIPC_AUTH_PASSWORD": "test-password",
+	} {
+		if got[key] != want {
+			t.Fatalf("%s = %q, want %q", key, got[key], want)
+		}
+	}
+	for key, want := range map[string]string{
+		"MULTICA_TOKEN":   "mat_task_token",
+		"MULTICA_TASK_ID": "task-1",
+		"CODEX_HOME":      "/tmp/codex-home",
+	} {
+		if got[key] != want {
+			t.Fatalf("%s = %q, want %q", key, got[key], want)
+		}
+	}
+}
+
 func TestNormalizeServerBaseURL(t *testing.T) {
 	t.Parallel()
 
@@ -95,6 +191,85 @@ func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	}
 	if got := d.RestartBinary(); got == deletedCellarPath {
 		t.Fatalf("restart binary used deleted Cellar path %q", got)
+	}
+}
+
+func TestIsBlockedEnvKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{key: "MULTICA_TOKEN", want: true},
+		{key: "multica_runtime_id", want: true},
+		{key: "HOME", want: true},
+		{key: "PATH", want: true},
+		{key: "CODEX_HOME", want: true},
+		{key: "CURSOR_DATA_DIR", want: true},
+		{key: "cursor_data_dir", want: true},
+		{key: "OPENCLAW_CONFIG_PATH", want: true},
+		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
+		{key: "ANTHROPIC_API_KEY", want: false},
+		{key: "CURSOR_AGENT", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			t.Parallel()
+			if got := isBlockedEnvKey(tt.key); got != tt.want {
+				t.Fatalf("isBlockedEnvKey(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskScopedAuthToken(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		token   string
+		want    string
+		wantErr string
+	}{
+		{
+			name:    "missing token fails closed",
+			wantErr: "server did not provide task-scoped auth token",
+		},
+		{
+			name:    "member token fails closed",
+			token:   "mul_member_token",
+			wantErr: "server provided non-task-scoped auth token",
+		},
+		{
+			name:  "task token accepted",
+			token: " mat_task_token ",
+			want:  "mat_task_token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := taskScopedAuthToken(Task{AuthToken: tt.token})
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("taskScopedAuthToken() error = nil, want %q", tt.wantErr)
+				}
+				if err.Error() != tt.wantErr {
+					t.Fatalf("taskScopedAuthToken() error = %q, want %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("taskScopedAuthToken(): %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("taskScopedAuthToken() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1002,8 +1177,12 @@ func TestShouldInterruptAgent(t *testing.T) {
 		want   bool
 	}{
 		{name: "status cancelled", status: "cancelled", err: nil, want: true},
+		{name: "status failed (offline sweeper)", status: "failed", err: nil, want: true},
+		{name: "status completed (finished elsewhere)", status: "completed", err: nil, want: true},
 		{name: "task deleted (404)", status: "", err: notFound, want: true},
 		{name: "running normally", status: "running", err: nil, want: false},
+		{name: "waiting_local_directory keeps running", status: "waiting_local_directory", err: nil, want: false},
+		{name: "dispatched keeps running", status: "dispatched", err: nil, want: false},
 		{name: "transient 5xx is not a cancel signal", status: "", err: transient, want: false},
 		{name: "no information yet", status: "", err: nil, want: false},
 	}
@@ -1189,6 +1368,71 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	// "directory not empty" cleanup error.
 	t.Cleanup(d.waitBackgroundSyncs)
 	return d
+}
+
+func TestGateResumeToReusedWorkdir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		sessionID   string
+		priorDir    string
+		envDir      string
+		wantSession string
+		wantReused  bool
+	}{
+		{
+			name:        "same workdir keeps session",
+			sessionID:   "sess-1",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-a/workdir",
+			wantSession: "sess-1",
+			wantReused:  true,
+		},
+		{
+			name:        "fresh workdir drops session",
+			sessionID:   "sess-1",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+		{
+			name:        "session without recorded workdir drops session",
+			sessionID:   "sess-1",
+			priorDir:    "",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+		{
+			name:        "no prior session is a no-op",
+			sessionID:   "",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: tt.priorDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
+
+			reused := gateResumeToReusedWorkdir(&task, &taskCtx, tt.envDir, slog.Default())
+
+			if reused != tt.wantReused {
+				t.Fatalf("reused = %v, want %v", reused, tt.wantReused)
+			}
+			if task.PriorSessionID != tt.wantSession {
+				t.Fatalf("PriorSessionID = %q, want %q", task.PriorSessionID, tt.wantSession)
+			}
+			if taskCtx.PriorSessionResumed != (tt.wantSession != "") {
+				t.Fatalf("PriorSessionResumed = %v, want %v", taskCtx.PriorSessionResumed, tt.wantSession != "")
+			}
+		})
+	}
 }
 
 func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {

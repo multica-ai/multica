@@ -166,7 +166,7 @@ export function StatusIcon({
   className = "h-4 w-4",
   inheritColor = false,
 }: {
-  status: string;
+  status: IssueStatus | string;
   className?: string;
   inheritColor?: boolean;
 }) {
@@ -177,7 +177,7 @@ export function StatusIcon({
     <svg
       viewBox="0 0 14 14"
       fill="none"
-      className={`${className} ${inheritColor ? "" : cfg.iconColor} shrink-0`}
+      className={`${className} ${inheritColor ? "" : cfg?.iconColor ?? "text-muted-foreground"} shrink-0`}
     >
       <Renderer />
     </svg>

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Issue } from "@multica/core/types";
+import type { AgentTask, Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
@@ -59,7 +59,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
-  useActorName: () => ({ getActorName: (_t: string, _id: string) => "" }),
+  useActorName: () => ({
+    getActorName: (_t: string, _id: string) => "",
+    getAgentName: (id: string) => `agent-${id}`,
+  }),
 }));
 
 vi.mock("@multica/core/pins", () => ({
@@ -98,6 +101,22 @@ vi.mock("../../../navigation", () => ({
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+const mockListTasksByIssue = vi.fn<(...args: unknown[]) => Promise<AgentTask[]>>(
+  () => Promise.resolve([]),
+);
+vi.mock("@multica/core/api", () => ({
+  api: {
+    listTasksByIssue: (...args: unknown[]) => mockListTasksByIssue(...args),
+  },
+}));
+
+const mockCopyText = vi.fn<(text: string) => Promise<boolean>>(
+  () => Promise.resolve(true),
+);
+vi.mock("@multica/ui/lib/clipboard", () => ({
+  copyText: (text: string) => mockCopyText(text),
 }));
 
 vi.mock("../../../common/actor-avatar", () => ({
@@ -143,6 +162,10 @@ function wrap(ui: React.ReactNode) {
 
 beforeEach(() => {
   mockOpenModal.mockReset();
+  mockListTasksByIssue.mockReset();
+  mockListTasksByIssue.mockResolvedValue([]);
+  mockCopyText.mockReset();
+  mockCopyText.mockResolvedValue(true);
 });
 
 describe("IssueActionsDropdown", () => {
@@ -262,6 +285,140 @@ describe("IssueActionsMenuItems", () => {
     fireEvent.click(screen.getByText("New issue from this"));
 
     expect(openCreateIssueFromCurrent).toHaveBeenCalledTimes(1);
+  });
+
+  const workdirActions = {
+    isPinned: false,
+    canDelete: true,
+    updateField: vi.fn(),
+    togglePin: vi.fn(),
+    copyLink: vi.fn(),
+    openCreateIssueFromCurrent: vi.fn(),
+    openCreateSubIssue: vi.fn(),
+    openSetParent: vi.fn(),
+    openAddChild: vi.fn(),
+    openDeleteConfirm: vi.fn(),
+    openArchiveConfirm: vi.fn(),
+    openUnarchiveConfirm: vi.fn(),
+  };
+
+  function renderMenu() {
+    return render(
+      wrap(
+        <IssueActionsMenuItems
+          issue={mockIssue}
+          primitives={primitives as any}
+          onOpenAssignee={vi.fn()}
+          actions={workdirActions}
+        />,
+      ),
+    );
+  }
+
+  it("lists one workdir sub-item per task, newest first, and copies the raw work_dir on click", async () => {
+    mockListTasksByIssue.mockResolvedValue([
+      {
+        id: "task-old",
+        agent_id: "arch",
+        created_at: "2026-01-01T00:00:00Z",
+        work_dir: "/abs/arch-wd",
+        relative_work_dir: "arch/workdir",
+      },
+      {
+        id: "task-new",
+        agent_id: "dev",
+        created_at: "2026-01-02T00:00:00Z",
+        work_dir: "/abs/dev-wd",
+        relative_work_dir: "dev/workdir",
+      },
+    ] as AgentTask[]);
+
+    renderMenu();
+
+    // Both agent names render (resolved via getAgentName, since AgentTask has
+    // no agent_name field), newest first.
+    const dev = await screen.findByText("agent-dev");
+    const arch = screen.getByText("agent-arch");
+    expect(dev.compareDocumentPosition(arch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // Privacy-safe relative path is shown; the raw absolute path is never rendered.
+    expect(screen.getByText("dev/workdir")).toBeInTheDocument();
+    expect(screen.queryByText("/abs/dev-wd")).not.toBeInTheDocument();
+
+    // Clicking copies the raw absolute work_dir, not the relative display form.
+    fireEvent.click(dev);
+    expect(mockCopyText).toHaveBeenCalledWith("/abs/dev-wd");
+  });
+
+  it("collapses repeated runs of the same agent+workdir into one row", async () => {
+    // Same agent reuses one working copy across runs on an issue, so its
+    // tasks all report an identical work_dir. We want one row, not three.
+    mockListTasksByIssue.mockResolvedValue([
+      {
+        id: "run-1",
+        agent_id: "dev",
+        created_at: "2026-01-01T00:00:00Z",
+        work_dir: "/abs/dev-wd",
+        relative_work_dir: "dev/workdir",
+      },
+      {
+        id: "run-2",
+        agent_id: "dev",
+        created_at: "2026-01-02T00:00:00Z",
+        work_dir: "/abs/dev-wd",
+        relative_work_dir: "dev/workdir",
+      },
+      {
+        id: "run-3",
+        agent_id: "dev",
+        created_at: "2026-01-03T00:00:00Z",
+        work_dir: "/abs/dev-wd",
+        relative_work_dir: "dev/workdir",
+      },
+    ] as AgentTask[]);
+
+    renderMenu();
+
+    await screen.findByText("agent-dev");
+    expect(screen.getAllByText("agent-dev")).toHaveLength(1);
+  });
+
+  it("keeps separate rows when the same agent has distinct workdirs", async () => {
+    mockListTasksByIssue.mockResolvedValue([
+      {
+        id: "t1",
+        agent_id: "dev",
+        created_at: "2026-01-01T00:00:00Z",
+        work_dir: "/abs/wd-a",
+        relative_work_dir: "wd-a",
+      },
+      {
+        id: "t2",
+        agent_id: "dev",
+        created_at: "2026-01-02T00:00:00Z",
+        work_dir: "/abs/wd-b",
+        relative_work_dir: "wd-b",
+      },
+    ] as AgentTask[]);
+
+    renderMenu();
+
+    const rows = await screen.findAllByText("agent-dev");
+    expect(rows).toHaveLength(2);
+  });
+
+  it("drops tasks without a workdir and shows the unavailable label when none remain", async () => {
+    mockListTasksByIssue.mockResolvedValue([
+      { id: "t1", agent_id: "a", created_at: "2026-01-01T00:00:00Z" },
+    ] as AgentTask[]);
+
+    renderMenu();
+
+    expect(
+      await screen.findByText(
+        "No local workdir yet — issue has not been run by a local agent",
+      ),
+    ).toBeInTheDocument();
   });
 });
 

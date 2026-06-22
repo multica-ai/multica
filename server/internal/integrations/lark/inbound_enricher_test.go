@@ -87,6 +87,12 @@ func (f *enricherFakeClient) SendBindingPromptCard(context.Context, BindingPromp
 func (f *enricherFakeClient) GetBotInfo(context.Context, InstallationCredentials) (BotInfo, error) {
 	return BotInfo{}, nil
 }
+func (f *enricherFakeClient) AddMessageReaction(context.Context, AddReactionParams) (string, error) {
+	return "", nil
+}
+func (f *enricherFakeClient) DeleteMessageReaction(context.Context, DeleteReactionParams) error {
+	return nil
+}
 
 func textMsg(id, sender, text, createTime string) LarkMessage {
 	return LarkMessage{

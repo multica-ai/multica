@@ -13,6 +13,7 @@ import type {
   BillingPriceTier,
   BillingTopupsPage,
   BillingTransactionsPage,
+  CancelTaskResponse,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
@@ -35,6 +36,11 @@ import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
 export interface AppConfigResponse {
   cdn_domain: string;
+  // True when the CDN domain serves private content via time-bounded signed
+  // URLs (CloudFront signing) — raw storage URLs on that domain are NOT
+  // publicly fetchable and must not be used as native media sources
+  // (MUL-3254). Older servers omit the field; treat that as false.
+  cdn_signed?: boolean;
   allow_signup: boolean;
   google_client_id?: string;
   dingtalk_client_id?: string;
@@ -97,10 +103,18 @@ const AttachmentSchema = z.object({
 // in a new tab — `download_url` and `url` — must be strings, otherwise we'd
 // happily `window.open(undefined)`. `filename` gates the toast/title and is
 // also enforced so a missing value falls back to the empty record below.
+//
+// `markdown_url` is parsed lenient: a server old enough to predate
+// MUL-3192 omits the field, in which case the schema defaults it to "".
+// Callers that need to persist a URL into markdown should go through the
+// `useFileUpload` helper (which falls back to the legacy
+// `attachmentDownloadPath` shape when `markdown_url` is empty), so the
+// empty-string default does not silently break any persistence path.
 export const AttachmentResponseSchema = z.object({
   id: z.string(),
   url: z.string(),
   download_url: z.string(),
+  markdown_url: z.string().optional().default(""),
   filename: z.string(),
   chat_session_id: z.string().nullable().optional(),
   chat_message_id: z.string().nullable().optional(),
@@ -118,6 +132,7 @@ export const EMPTY_ATTACHMENT: Attachment = {
   filename: "",
   url: "",
   download_url: "",
+  markdown_url: "",
   content_type: "",
   size_bytes: 0,
   created_at: "",
@@ -168,6 +183,7 @@ const BooleanWithDefaultSchema = (fallback: boolean) =>
 
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
+  cdn_signed: BooleanWithDefaultSchema(false),
   allow_signup: BooleanWithDefaultSchema(true),
   google_client_id: OptionalStringSchema,
   dingtalk_client_id: OptionalStringSchema,
@@ -183,6 +199,7 @@ export const AppConfigSchema = z.object({
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
   cdn_domain: "",
+  cdn_signed: false,
   allow_signup: true,
   google_client_id: "",
   dingtalk_client_id: "",
@@ -209,6 +226,18 @@ export const CommentSchema = z.object({
 }).passthrough();
 
 export const CommentsListSchema = z.array(CommentSchema);
+
+const CommentTriggerPreviewAgentSchema = z.object({
+  id: z.string(),
+  name: z.string().default(""),
+  avatar_url: z.string().optional(),
+  source: z.string().default(""),
+  reason: z.string().default(""),
+}).loose();
+
+export const CommentTriggerPreviewSchema = z.object({
+  agents: z.array(CommentTriggerPreviewAgentSchema).default([]),
+}).loose();
 
 // Metadata is primitive-only by API/DB contract. Stay lenient on shape:
 // unknown keys land as `unknown` to a caller, but the field itself defaults
@@ -698,6 +727,67 @@ export const EMPTY_DISCOVER_IMPORT_SKILLS_RESPONSE: DiscoverImportSkillsResponse
 };
 
 // ---------------------------------------------------------------------------
+// Task cancellation (`POST /api/tasks/:id/cancel`)
+//
+// This response is consumed directly by chat recovery. The embedded task
+// object stays loose so daemon/runtime fields can drift, but the optional
+// `cancelled_chat_message` payload must be well-formed before the UI deletes
+// a message from cache or restores text into the input.
+// ---------------------------------------------------------------------------
+
+const AgentTaskResponseSchema = z.object({
+  id: z.string(),
+  agent_id: z.string().default(""),
+  runtime_id: z.string().default(""),
+  issue_id: z.string().default(""),
+  status: z.string().default("cancelled"),
+  priority: z.number().default(0),
+  dispatched_at: z.string().nullable().default(null),
+  started_at: z.string().nullable().default(null),
+  completed_at: z.string().nullable().default(null),
+  result: z.unknown().default(null),
+  error: z.string().nullable().default(null),
+  failure_reason: z.string().optional(),
+  created_at: z.string().default(""),
+  chat_session_id: z.string().optional(),
+  autopilot_run_id: z.string().optional(),
+  parent_task_id: z.string().optional(),
+  attempt: z.number().optional(),
+  trigger_comment_id: z.string().optional(),
+  trigger_summary: z.string().optional(),
+  kind: z.string().optional(),
+  work_dir: z.string().optional(),
+  relative_work_dir: z.string().optional(),
+}).loose();
+
+const CancelledChatMessageSchema = z.object({
+  chat_session_id: z.string(),
+  message_id: z.string(),
+  content: z.string(),
+  restore_to_input: z.boolean().default(false),
+}).loose();
+
+export const CancelTaskResponseSchema = AgentTaskResponseSchema.extend({
+  cancelled_chat_message: CancelledChatMessageSchema.nullish()
+    .transform((value) => value ?? undefined),
+}).loose();
+
+export const EMPTY_CANCEL_TASK_RESPONSE: CancelTaskResponse = {
+  id: "",
+  agent_id: "",
+  runtime_id: "",
+  issue_id: "",
+  status: "cancelled",
+  priority: 0,
+  dispatched_at: null,
+  started_at: null,
+  completed_at: null,
+  result: null,
+  error: null,
+  created_at: "",
+};
+
+// ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the
 // create-from-template response. The desktop app's create-agent picker
 // reaches these endpoints, and a future server change to the template shape
@@ -917,7 +1007,11 @@ const AutopilotRunSchema = z.object({
 }).loose();
 
 export const ListAutopilotsResponseSchema = z.object({
-  autopilots: z.array(AutopilotSchema).default([]),
+  autopilots: z.array(AutopilotSchema.extend({
+    trigger_kinds: z.array(z.string()).optional(),
+    next_run_at: z.string().nullable().optional(),
+    last_run_status: z.string().nullable().optional(),
+  }).loose()).default([]),
   total: z.number().default(0),
 }).loose();
 

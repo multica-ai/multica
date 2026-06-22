@@ -22,9 +22,9 @@ func BuildPromptWithRunMode(task Task, runMode string) string {
 
 // injected by execenv.InjectRuntimeConfig. The provider string is threaded
 // through to comment-triggered tasks' per-turn reply template; that template
-// is provider-agnostic now (Linux/macOS → quoted-HEREDOC stdin, Windows →
-// file) because the shell-layer corruption it guards against is not specific
-// to any one provider (MUL-2904).
+// is provider-agnostic AND host-agnostic now (every OS → write a UTF-8 file,
+// post with `--content-file`) because the shell-layer corruption it guards
+// against is not specific to any one provider or host (MUL-2904, #4182).
 func BuildPromptWithProvider(task Task, provider string) string {
 	return BuildPromptWithRunModeAndProvider(task, protocol.ResolveTaskRunMode(task.Context), provider)
 }
@@ -32,6 +32,9 @@ func BuildPromptWithProvider(task Task, provider string) string {
 func BuildPromptWithRunModeAndProvider(task Task, runMode, provider string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
+	}
+	if task.ChannelID != "" {
+		return buildChannelMentionPrompt(task)
 	}
 	if task.TriggerCommentID != "" {
 		return buildCommentPrompt(task, runMode, provider)
@@ -50,6 +53,60 @@ func BuildPromptWithRunModeAndProvider(task Task, runMode, provider string) stri
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	return b.String()
+}
+
+func buildChannelMentionPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	writeLanguageInstruction(&b)
+	writeRetryInstruction(&b, task)
+	b.WriteString("This task was triggered by a Channel message mention, not by an Issue. Do not treat this as an assigned issue unless the channel conversation explicitly asks you to create or update one.\n\n")
+	fmt.Fprintf(&b, "Workspace ID: %s\n", task.WorkspaceID)
+	fmt.Fprintf(&b, "Channel ID: %s\n", task.ChannelID)
+	if task.ChannelName != "" {
+		fmt.Fprintf(&b, "Channel name: %s\n", task.ChannelName)
+	}
+	fmt.Fprintf(&b, "Triggering message ID: %s\n", task.ChannelMessageID)
+	if task.ChannelThreadID != "" {
+		fmt.Fprintf(&b, "Thread ID: %s\n", task.ChannelThreadID)
+	}
+	if task.ChannelThreadRootMsgID != "" {
+		fmt.Fprintf(&b, "Thread root message ID: %s\n", task.ChannelThreadRootMsgID)
+	}
+	if task.ChannelReplyToID != "" {
+		fmt.Fprintf(&b, "Reply-to message ID: %s\n", task.ChannelReplyToID)
+	}
+	if task.ChannelMentionType != "" {
+		fmt.Fprintf(&b, "Mention type: %s\n", task.ChannelMentionType)
+	}
+	if task.RequestingUserName != "" {
+		fmt.Fprintf(&b, "Requesting user: %s\n", task.RequestingUserName)
+	}
+	if strings.TrimSpace(task.RequestingUserProfileDescription) != "" {
+		b.WriteString("Requesting user profile:\n")
+		for _, line := range strings.Split(task.RequestingUserProfileDescription, "\n") {
+			fmt.Fprintf(&b, "> %s\n", line)
+		}
+	}
+	if task.PriorSessionID != "" {
+		b.WriteString("Prior session available: the runtime may resume your previous conversation for this agent in this channel.\n")
+		if task.PriorWorkDir != "" {
+			fmt.Fprintf(&b, "Prior work dir: %s\n", task.PriorWorkDir)
+		}
+	}
+	b.WriteString("\n## Triggering Message (this IS the user's request — act on it directly)\n\n")
+	for _, line := range strings.Split(task.ChannelTriggerContent, "\n") {
+		fmt.Fprintf(&b, "> %s\n", line)
+	}
+	b.WriteString("\nThe triggering message above is your primary input — respond to it directly. Only run `multica channel context` if you genuinely need surrounding conversation history to understand what the user is asking:\n\n")
+	fmt.Fprintf(&b, "`multica channel context %s --message %s --include-replies --recent 20 --output json`\n\n", task.ChannelID, task.ChannelMessageID)
+	b.WriteString("You may also use workspace/member/agent/repo CLI commands as needed. Avoid Issue-oriented commands unless you explicitly create or choose a real issue during this task.\n\n")
+	if task.ChannelThreadRootMsgID != "" {
+		fmt.Fprintf(&b, "When you need to share a final result, reply in the same thread: `multica channel message reply %s %s --content \"...\"`. Do NOT reply to the triggering message directly (that would create a nested thread). Use `multica channel message send %s --content \"...\"` only when the result should be a top-level message outside the thread. If no visible reply is warranted, finish silently after doing the required work.\n", task.ChannelID, task.ChannelThreadRootMsgID, task.ChannelID)
+	} else {
+		fmt.Fprintf(&b, "When you share a final result, reply to the triggering message so it stays in that message's thread (the reply auto-creates a thread): `multica channel message reply %s %s --content \"...\"`. Do NOT post a top-level `multica channel message send` for a result that is a reply — that clutters the channel timeline. Use `multica channel message send %s --content \"...\"` only for a standalone broadcast that is not a reply to anything. If no visible reply is warranted, finish silently after doing the required work.\n", task.ChannelID, task.ChannelMessageID, task.ChannelID)
+	}
 	return b.String()
 }
 
@@ -254,6 +311,7 @@ func buildChatPrompt(task Task) string {
 			}
 		}
 		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
+		b.WriteString("When creating an issue that should preserve one of these attachments, pass `--attachment-id <id>` to `multica issue create` in addition to keeping the attachment markdown inline.\n")
 	}
 	return b.String()
 }

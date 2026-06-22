@@ -16,6 +16,11 @@ export interface IssueFilters {
   // free of any data-fetching dependency.
   agentRunningFilter?: boolean;
   runningIssueIds?: ReadonlySet<string>;
+  // When false (default), archived issues are excluded even if they appear
+  // in the cached dataset (e.g. during keepPreviousData placeholder render).
+  // When true, only archived issues are shown — matches the server-side
+  // `archived=true` query param that is sent when the toggle is on.
+  showArchived?: boolean;
 }
 
 /**
@@ -28,7 +33,7 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showArchived } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
@@ -37,6 +42,15 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
   const applyAgentRunning = agentRunningFilter === true;
 
   return issues.filter((issue) => {
+    // Archived gate: when showArchived is on, show ONLY archived issues.
+    // When off (default), exclude any archived issue that snuck in via
+    // keepPreviousData or a stale cache entry.
+    if (showArchived) {
+      if (!issue.archived_at) return false;
+    } else {
+      if (issue.archived_at) return false;
+    }
+
     if (applyAgentRunning && !(runningIssueIds?.has(issue.id) ?? false))
       return false;
 

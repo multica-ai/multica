@@ -170,7 +170,7 @@ func TestRegisterRuntimesForWorkspaceUsesWujieClawBrandName(t *testing.T) {
 	}
 	t.Cleanup(stubAgentVersion(t))
 
-	if _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+	if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 	if gotName != "WujieClaw (qa-host)" {

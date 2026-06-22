@@ -12,6 +12,7 @@ import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
 import { wikiKeys } from "../wiki/queries";
+import { channelKeys } from "../channels/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
@@ -39,10 +40,15 @@ import {
   notificationPreferenceKeys,
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import {
+  showWebNotification,
+  type SystemNotificationPayload,
+} from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
+import { buildChannelInboxPathForSlug } from "../inbox/channel";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
@@ -88,6 +94,14 @@ const chatWsLogger = createLogger("chat.ws");
 const logger = createLogger("realtime-sync");
 const TASK_LIFECYCLE_INVALIDATE_DELAY_MS = 2500;
 
+export function invalidateChatMessageQueries(
+  qc: QueryClient,
+  sessionId: string,
+) {
+  qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+  qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+}
+
 export function applyChatDoneToCache(
   qc: QueryClient,
   payload: ChatDonePayload,
@@ -124,8 +138,7 @@ export function applyChatDoneToCache(
   qc.setQueryData(chatKeys.pendingTask(sessionId), {});
   // Authoritative refetch reconciles redaction / migrations / clients
   // that took the fallback branch above.
-  qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-  qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+  invalidateChatMessageQueries(qc, sessionId);
   qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
 }
 
@@ -194,7 +207,9 @@ export function invalidateWorkspaceTaskQueries(
   invalidateActiveQueries(qc, agentRunCountsKeys.last30d(wsId));
   invalidateActiveQueries(qc, agentTasksKeys.all(wsId));
   invalidateActiveQueries(qc, issueKeys.tasksAll());
+  invalidateActiveQueries(qc, issueKeys.myTaskRunsAll());
   invalidateActiveQueries(qc, issueKeys.usageAll());
+  invalidateActiveQueries(qc, issueKeys.commentTriggerPreviewAll());
   invalidateActiveQueries(qc, workspaceKeys.squads(wsId));
 }
 
@@ -302,33 +317,43 @@ export async function handleInboxNew(
       // Fall through with default behavior.
     }
   }
-  const desktopAPI = (
-    globalThis as unknown as {
-      desktopAPI?: {
-        showNotification?: (payload: {
-          slug: string;
-          itemId: string;
-          issueKey: string;
-          title: string;
-          body: string;
-        }) => void;
-      };
-    }
-  ).desktopAPI;
+  // Channel-origin items carry `targetPath` so the desktop bridge can navigate
+  // directly to the channel message instead of treating it as an issue. Needs
+  // a resolved slug; without one we omit it and the click falls back to a
+  // no-op (empty slug) like issue items.
+  const targetPath = slug
+    ? (buildChannelInboxPathForSlug(item, slug) ?? undefined)
+    : undefined;
   // `issueKey` matches the inbox page's URL selector (issue id when the
   // item is attached to an issue, otherwise the inbox item id). `itemId`
   // is the inbox row's own id, needed to fire markInboxRead on click.
   // A null slug (workspace list unavailable / item from a workspace this
   // client can't see) still shows the banner — the user should learn about
   // the inbox item — but with an empty slug so the click is a no-op
-  // (DesktopInboxBridge ignores empty slugs) instead of routing wrong.
-  desktopAPI?.showNotification?.({
+  // (the inbox bridge ignores empty slugs) instead of routing wrong.
+  const payload: SystemNotificationPayload = {
     slug: slug ?? "",
     itemId: item.id,
     issueKey: item.issue_id ?? item.id,
+    targetPath,
     title: item.title,
     body: item.body ?? "",
-  });
+  };
+  const desktopAPI = (
+    globalThis as unknown as {
+      desktopAPI?: {
+        showNotification?: (payload: SystemNotificationPayload) => void;
+      };
+    }
+  ).desktopAPI;
+  if (desktopAPI?.showNotification) {
+    // Desktop: native OS banner rendered by the Electron main process.
+    desktopAPI.showNotification(payload);
+    return;
+  }
+  // Web: the browser Notification API. No-op without granted permission or on
+  // SSR — the in-app inbox + unread badge still reflect the new item.
+  showWebNotification(payload);
 }
 
 /**
@@ -356,6 +381,19 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
   }
+  // Per-issue caches are keyed without wsId, so the issueKeys.all(wsId)
+  // prefix above does not reach them. They rely entirely on WS events for
+  // freshness (staleTime: Infinity), so events missed while disconnected
+  // left them stale until a full reload — the inbox showed an agent's new
+  // comment while the issue timeline didn't (#3953). Inactive caches only
+  // get marked stale here and refetch on next mount; the one mounted issue
+  // refetches immediately, same as its own useWSReconnect already does.
+  qc.invalidateQueries({ queryKey: issueKeys.timelineAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.reactionsAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
@@ -417,6 +455,22 @@ export function useRealtimeSync(
     const scheduleTaskRefresh = (wsId: string) => {
       taskInvalidator.schedule(wsId);
     };
+    const invalidateChannelTaskSource = (payload: { channel_id?: string; channel_message_id?: string }) => {
+      const wsId = getCurrentWsId();
+      if (!wsId || !payload.channel_id) return;
+      qc.invalidateQueries({
+        queryKey: channelKeys.channelMessages(wsId, payload.channel_id),
+      });
+      if (payload.channel_message_id) {
+        qc.invalidateQueries({
+          queryKey: channelKeys.messageThread(
+            wsId,
+            payload.channel_id,
+            payload.channel_message_id,
+          ),
+        });
+      }
+    };
 
     const refreshMap: Record<string, () => void> = {
       inbox: () => {
@@ -458,6 +512,18 @@ export function useRealtimeSync(
       wiki_page: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: wikiKeys.all(wsId) });
+      },
+      channel: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
+      },
+      channel_thread: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
+      },
+      channel_message: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
       },
       squad: () => {
         const wsId = getCurrentWsId();
@@ -871,7 +937,7 @@ export function useRealtimeSync(
     const unsubChatMessage = ws.on("chat:message", (p) => {
       const payload = p as { chat_session_id: string };
       chatWsLogger.info("chat:message (global)", { chat_session_id: payload.chat_session_id });
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
@@ -930,6 +996,9 @@ export function useRealtimeSync(
     // when reconnect replays the event for an already-running task).
     const unsubTaskQueued = ws.on("task:queued", (p) => {
       const payload = p as TaskQueuedPayload;
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
@@ -950,6 +1019,9 @@ export function useRealtimeSync(
     // taskMessages → "Thinking · Ns".
     const unsubTaskDispatch = ws.on("task:dispatch", (p) => {
       const payload = p as TaskDispatchPayload;
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
@@ -967,6 +1039,9 @@ export function useRealtimeSync(
     // would stay parked even after the daemon resumed work.
     const unsubTaskRunning = ws.on("task:running", (p) => {
       const payload = p as TaskRunningPayload;
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
@@ -986,6 +1061,9 @@ export function useRealtimeSync(
       "task:waiting_local_directory",
       (p) => {
         const payload = p as TaskWaitingLocalDirectoryPayload;
+        if (payload.channel_id) {
+          invalidateChannelTaskSource(payload);
+        }
         if (!payload.chat_session_id) return;
         qc.setQueryData<ChatPendingTask>(
           chatKeys.pendingTask(payload.chat_session_id),
@@ -1002,9 +1080,15 @@ export function useRealtimeSync(
     //   2. another tab / admin / system cancels — this is the only path that
     //      drops the pending pill in those cases. Without it the pill spins
     //      forever in the second-tab scenario.
+    // CancelTask also persists a best-effort assistant snapshot when the
+    // stopped chat task had already streamed transcript rows, so refresh the
+    // message page along with clearing pending.
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
       const payload = p as TaskCancelledPayload;
       const wsId = getCurrentWsId();
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) {
         // Issue task: invalidate agent presence and task caches
         if (wsId) {
@@ -1017,12 +1101,16 @@ export function useRealtimeSync(
         chat_session_id: payload.chat_session_id,
       });
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       invalidatePendingAggregate();
     });
 
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
       const wsId = getCurrentWsId();
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) {
         // Issue task: invalidate agent presence, task lists, and activity caches
         // so the execution log, agent cards, and activity charts refresh.
@@ -1047,6 +1135,9 @@ export function useRealtimeSync(
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
       const wsId = getCurrentWsId();
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) {
         // Issue task: same invalidation as task:completed
         if (wsId) {
@@ -1065,7 +1156,7 @@ export function useRealtimeSync(
       // this branch only flipped pending — the comment "No new message"
       // was true then, but FailTask now persists a row.
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });

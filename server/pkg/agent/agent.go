@@ -85,6 +85,7 @@ type ExecOptions struct {
 	// relies on cwd-scoped context files such as AGENTS.md instead.
 	SystemPrompt              string
 	VisibleLanguage           string
+	ThreadName                string
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
@@ -112,6 +113,17 @@ type ExecOptions struct {
 	// passes non-empty values through to app-server as serviceTier; other
 	// backends intentionally ignore it.
 	ServiceTier string
+	// OpenclawMode chooses between local (embedded) and gateway routing for
+	// the openclaw backend. "" or "local" keeps the historical behaviour —
+	// the daemon spawns `openclaw agent --local …` and the agent loop runs
+	// in-process on the daemon host. "gateway" instructs the daemon to drop
+	// the --local flag and let openclaw route the turn through a Gateway (the
+	// user's globally-configured one, or an endpoint pinned in the per-task
+	// config wrapper that the daemon writes from execenv.OpenclawGatewayPin —
+	// see server/internal/daemon/execenv/openclaw_config.go). Other backends
+	// ignore this field, mirroring ThinkingLevel's renderer-side fall-through
+	// pattern. See issue #3260.
+	OpenclawMode string
 }
 
 // runContext derives the execution context for an agent subprocess from the
@@ -187,8 +199,43 @@ type Config struct {
 	Logger         *slog.Logger
 }
 
+// SupportedTypes is the canonical whitelist of agent types New can construct.
+// It MUST stay in lockstep with the switch in New below and the
+// runtime_profile.protocol_family CHECK constraint (migration 120): a custom
+// runtime profile may only be based on a backend Multica officially supports.
+var SupportedTypes = []string{
+	"claude",
+	"codebuddy",
+	"codex",
+	"copilot",
+	"opencode",
+	"openclaw",
+	"wujieclaw",
+	"hermes",
+	"gemini",
+	"pi",
+	"cursor",
+	"kimi",
+	"kiro",
+	"DeepSeek-TUI",
+	"antigravity",
+	"qoderclicn",
+	"mmx",
+}
+
+// IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
+// Used to validate a custom runtime profile's protocol_family before it is
+// persisted or registered.
+func IsSupportedType(agentType string) bool {
+	for _, t := range SupportedTypes {
+		if t == agentType {
+			return true
+		}
+	}
+	return false
+}
+
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "wujieclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity", "qoderclicn", "mmx".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -198,7 +245,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "claude":
 		return &claudeBackend{cfg: cfg}, nil
 	case "codebuddy":
-		return newCodebuddyBackend(cfg), nil
+		return &codebuddyBackend{cfg: cfg}, nil
 	case "codex":
 		return &codexBackend{cfg: cfg}, nil
 	case "copilot":
@@ -233,16 +280,13 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "mmx":
 		return &mmxBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, wujieclaw, hermes, gemini, pi, cursor, kimi, kiro, DeepSeek-TUI, antigravity, qoderclicn, mmx)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
 }
 
 // SupportedBackends returns the set of agent types accepted by New.
 func SupportedBackends() []string {
-	return []string{
-		"claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "wujieclaw",
-		"hermes", "gemini", "pi", "cursor", "kimi", "kiro", "DeepSeek-TUI", "antigravity", "qoderclicn", "mmx",
-	}
+	return append([]string(nil), SupportedTypes...)
 }
 
 // RegisteredProviders returns the set of provider names with capability entries.
