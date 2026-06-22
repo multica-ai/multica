@@ -68,6 +68,8 @@ func TestClassifyRules(t *testing.T) {
 		{"balance is too low", "balance is too low to make this request", ReasonAgentProviderQuotaLimit},
 		{"monthly usage limit", "You've hit your org's monthly usage limit", ReasonAgentProviderQuotaLimit},
 		{"usage limit", "Account exceeded the daily usage limit", ReasonAgentProviderQuotaLimit},
+		// CEREBRO-PATCH(taskfailure-spend-limit): FIR-1889 — Claude monthly spend cap wording
+		{"monthly spend limit", "You've hit your monthly spend limit · raise it at claude.ai/settings/usage", ReasonAgentProviderQuotaLimit},
 		{"hit your limit ascii", "you've hit your limit; upgrade to continue", ReasonAgentProviderQuotaLimit},
 		{"hit your limit curly", "you\u2019ve hit your limit", ReasonAgentProviderQuotaLimit},
 		{"credits", "Your account has 0 credits remaining", ReasonAgentProviderQuotaLimit},

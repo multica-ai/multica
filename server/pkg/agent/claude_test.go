@@ -195,6 +195,13 @@ func TestClaudeProviderLimitOutput(t *testing.T) {
 			want: true,
 		},
 		{
+			// CEREBRO-PATCH(agent-claude-provider-limit-output): FIR-1889 — Claude
+			// emits the monthly SPEND cap with the word "spend", not "usage".
+			name: "anthropic monthly spend limit",
+			in:   "You've hit your monthly spend limit · raise it at claude.ai/settings/usage",
+			want: true,
+		},
+		{
 			name: "synthetic http usage limit belongs to error paths",
 			in:   "API call failed after 3 retries: HTTP 429: The usage limit has been reached",
 			want: false,

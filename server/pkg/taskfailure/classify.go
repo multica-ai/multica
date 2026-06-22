@@ -107,6 +107,7 @@ func Classify(rawError string) Reason {
 		"balance is too low",
 		"monthly usage limit",
 		"usage limit",
+		"spend limit", // CEREBRO-PATCH(taskfailure-spend-limit): FIR-1889 — Claude monthly spend cap wording
 		"you've hit your limit",
 		// Curly apostrophe variant: providers and copy-pasted error
 		// strings sometimes use U+2019 instead of ASCII '. SQL ILIKE

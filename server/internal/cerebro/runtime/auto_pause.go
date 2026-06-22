@@ -31,6 +31,11 @@ import (
 //     unpause_at so the sweeper never picks it up) and post an issue analysis
 //     that tags the runtime owner. CompleteTask resets the counter on the next
 //     success.
+//
+// Exception (FIR-1889): a raisable monthly spend cap ("You've hit your monthly
+// spend limit") opts into a flat hourly re-check and never trips the breaker —
+// a human can raise the limit at any moment, so the runtime should keep probing
+// on a short cadence rather than give up for the rest of the month.
 const (
 	autoPauseCircuitLimit = 4
 )
@@ -89,6 +94,10 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 
 	circuitOpen := circuitOpenForAutoPause(count, decision)
 	unpauseAt := nextUnpauseAt(count, decision.resetAt, decision.hasReset, now)
+	if decision.flatRetry > 0 && !decision.hasReset {
+		// FIR-1889: fixed hourly re-check for a raisable spend cap.
+		unpauseAt = now.Add(decision.flatRetry)
+	}
 
 	opts := handler.RuntimePauseOptions{Reason: decision.pauseReason}
 	if !circuitOpen {
@@ -127,7 +136,13 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 	// reset time. Best-effort: a card failure never blocks the pause.
 	s.upsertRuntimePauseCard(ctx, task.RuntimeID, count, unpauseAt, circuitOpen)
 
-	s.notifyAutoPauseFailure(ctx, task, decision, unpauseAt, circuitOpen, count)
+	// For the hourly spend-cap re-check (FIR-1889) post the issue comment only
+	// on the first pause of a chain; the daily runtime pause card above keeps
+	// the aggregate fresh, so we avoid an hourly comment on every issue the
+	// re-check happens to land on. The counter resets on the next success.
+	if decision.flatRetry == 0 || count <= 1 {
+		s.notifyAutoPauseFailure(ctx, task, decision, unpauseAt, circuitOpen, count)
+	}
 
 	slog.Info("auto-paused runtime on task failure",
 		"runtime_id", util.UUIDToString(task.RuntimeID),
@@ -166,6 +181,12 @@ type autoPauseDecision struct {
 	failureReason string
 	title         string
 	detail        string
+	// flatRetry, when > 0, overrides the growing 2h/4h/6h backoff with a
+	// fixed re-check interval AND keeps the circuit breaker closed forever
+	// (FIR-1889). A monthly spend cap is raisable by a human at any time
+	// (claude.ai/settings/usage), so the runtime should keep probing on a
+	// short cadence until the limit is lifted instead of giving up.
+	flatRetry time.Duration
 }
 
 // classifyAutoPause is the pure decision half of MaybeAutoPauseOnFailure.
@@ -209,7 +230,7 @@ func classifyAutoPause(task db.AgentTaskQueue, now time.Time) autoPauseDecision 
 	if !pauseWorthy {
 		return autoPauseDecision{}
 	}
-	return autoPauseDecision{
+	decision := autoPauseDecision{
 		pauseWorthy:   true,
 		hasReset:      hasReset,
 		resetAt:       resetAt,
@@ -218,12 +239,29 @@ func classifyAutoPause(task db.AgentTaskQueue, now time.Time) autoPauseDecision 
 		title:         "Usage or rate limit reached",
 		detail:        "Runtimen er midlertidigt sat på pause, så den ikke brænder flere forsøg mens udbyderen afviser kørsler.",
 	}
+	// FIR-1889: a monthly spend cap with no provider reset time is raisable by
+	// a human at any moment, so re-check every hour and never trip the circuit
+	// breaker — the alternative (2h/4h/6h then give up) leaves the runtime dead
+	// for the rest of the month after the limit is raised. A concrete reset
+	// time, when present, still wins via hasReset.
+	if !hasReset && isMonthlySpendLimit(task.Error.String) {
+		decision.flatRetry = time.Hour
+	}
+	return decision
 }
 
 func isProviderAuthError(errText string) bool {
 	lower := strings.ToLower(errText)
 	return strings.Contains(lower, "401 invalid authentication credentials") ||
 		strings.Contains(lower, "failed to authenticate")
+}
+
+// isMonthlySpendLimit reports whether the provider error is Anthropic's
+// raisable monthly spend cap ("You've hit your monthly spend limit"). Kept
+// separate from the broad rate-limit detector because only this raisable cap
+// gets the flat hourly re-check (FIR-1889).
+func isMonthlySpendLimit(errText string) bool {
+	return strings.Contains(strings.ToLower(errText), "spend limit")
 }
 
 // nextUnpauseAt computes the scheduled unpause time for a non-circuit-open
@@ -255,6 +293,11 @@ func growingBackoff(count int32) time.Duration {
 func circuitOpenForAutoPause(count int32, decision autoPauseDecision) bool {
 	if decision.manualOnly {
 		return true
+	}
+	// FIR-1889: a raisable monthly spend cap keeps re-checking hourly; never
+	// trip the breaker, so a raised limit resumes within the hour.
+	if decision.flatRetry > 0 {
+		return false
 	}
 	if decision.hasReset {
 		return false

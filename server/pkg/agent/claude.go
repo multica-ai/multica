@@ -343,7 +343,8 @@ func isClaudeProviderLimitOutput(output string) bool {
 	}
 	lower := strings.ToLower(trimmed)
 	return strings.Contains(lower, "org's monthly usage limit") ||
-		strings.Contains(lower, "monthly usage limit")
+		strings.Contains(lower, "monthly usage limit") ||
+		strings.Contains(lower, "spend limit") // CEREBRO-PATCH(agent-claude-provider-limit-output): FIR-1889 — Claude "You've hit your monthly spend limit" wording
 }
 
 // CEREBRO-PATCH(agent-claude-context-footprint): FIR-1870 lastTurn captures the final turn's prompt footprint for the context-window indicator.

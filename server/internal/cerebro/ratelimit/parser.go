@@ -24,7 +24,7 @@ const DefaultBackoff = 5 * time.Minute
 // ~360 such failures mis-labelled as generic agent_error.
 var rateLimitDetectorRe = regexp.MustCompile(
 	`rate[ -]?limit(?:ed|ing)?|ratelimit|limiting requests|\b429\b|` +
-		`quota exceeded|insufficient_quota|monthly usage limit|` +
+		`quota exceeded|insufficient_quota|monthly usage limit|spend limit|` +
 		`org's monthly usage|out of tokens|out of extra usage|401 invalid authentication|` +
 		`hit your usage limit|usage limit reached|usage limit has been reached|reached your usage limit|` +
 		`refresh token (?:was )?(?:already used|revoked|expired)|token (?:was )?(?:already used|revoked)|` +

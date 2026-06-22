@@ -25,13 +25,14 @@ func TestClassifyAutoPause(t *testing.T) {
 	}
 
 	cases := []struct {
-		name        string
-		task        db.AgentTaskQueue
-		wantWorthy  bool
-		wantReset   bool
-		wantResetAt time.Time // only checked when wantReset
-		wantReason  string
-		wantManual  bool
+		name          string
+		task          db.AgentTaskQueue
+		wantWorthy    bool
+		wantReset     bool
+		wantResetAt   time.Time // only checked when wantReset
+		wantReason    string
+		wantManual    bool
+		wantFlatRetry time.Duration // 0 = growing backoff; >0 = fixed re-check
 	}{
 		{
 			name:       "no runtime — never pause",
@@ -54,6 +55,16 @@ func TestClassifyAutoPause(t *testing.T) {
 			wantWorthy: true,
 			wantReset:  false,
 			wantReason: "rate_limit",
+		},
+		{
+			// FIR-1889: the raisable monthly SPEND cap gets a flat hourly
+			// re-check instead of the 2h/4h/6h give-up backoff.
+			name:          "anthropic monthly spend limit — flat hourly re-check",
+			task:          mkTask(validRuntime, "You've hit your monthly spend limit · raise it at claude.ai/settings/usage"),
+			wantWorthy:    true,
+			wantReset:     false,
+			wantReason:    "rate_limit",
+			wantFlatRetry: time.Hour,
 		},
 		{
 			name:       "401 invalid auth — pause-worthy, no parseable reset",
@@ -122,6 +133,9 @@ func TestClassifyAutoPause(t *testing.T) {
 			if got.manualOnly != tc.wantManual {
 				t.Fatalf("manualOnly=%v, want %v", got.manualOnly, tc.wantManual)
 			}
+			if got.flatRetry != tc.wantFlatRetry {
+				t.Fatalf("flatRetry=%s, want %s", got.flatRetry, tc.wantFlatRetry)
+			}
 			if tc.wantReset && !got.resetAt.Equal(tc.wantResetAt) {
 				t.Fatalf("resetAt=%s, want %s", got.resetAt.Format(time.RFC3339), tc.wantResetAt.Format(time.RFC3339))
 			}
@@ -188,6 +202,22 @@ func TestCircuitBreakerThreshold(t *testing.T) {
 			if notifyOnce {
 				t.Errorf("count=%d: must not re-notify past the trip", count)
 			}
+		}
+	}
+}
+
+// TestFlatRetryNeverOpensCircuit documents FIR-1889: a raisable monthly spend
+// cap re-checks hourly forever and must never trip the circuit breaker, even
+// well past the count that would open it for a generic no-reset rate limit.
+func TestFlatRetryNeverOpensCircuit(t *testing.T) {
+	decision := autoPauseDecision{
+		pauseWorthy: true,
+		pauseReason: "rate_limit",
+		flatRetry:   time.Hour,
+	}
+	for count := int32(1); count <= autoPauseCircuitLimit+5; count++ {
+		if circuitOpenForAutoPause(count, decision) {
+			t.Fatalf("count=%d: flat-retry spend cap must keep the circuit closed", count)
 		}
 	}
 }

@@ -26,6 +26,9 @@ func TestClassifyReset_AuthCapacityGap(t *testing.T) {
 		{"not logged in", "You are not logged in. Please run /login to continue."},
 		{"please run codex login", "Authentication required: please run codex login"},
 		{"capacity exhausted", "You've exhausted your current capacity for this model"},
+		// FIR-1889: Claude's raisable monthly spend cap uses "spend limit", not
+		// "usage limit". No reset time, so the caller applies its backoff.
+		{"monthly spend limit", "You've hit your monthly spend limit · raise it at claude.ai/settings/usage"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
