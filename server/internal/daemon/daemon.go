@@ -155,8 +155,8 @@ type Daemon struct {
 	// command resolves; read by runTask via customCommandPathForRuntime to
 	// launch the custom command for a claimed task. Guarded by mu.
 	profileCommandPaths map[string]string
-	reloading    sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSet   *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+	reloading           sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSet          *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -3077,6 +3077,56 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
+const (
+	maxClaudeInitialImages     = 4
+	maxClaudeInitialImageBytes = 10 * 1024 * 1024
+)
+
+func (d *Daemon) claudeInitialImages(ctx context.Context, task Task, taskLog *slog.Logger) []agent.InputImage {
+	attachments := make([]AttachmentMeta, 0, len(task.IssueAttachments)+len(task.ChatMessageAttachments))
+	attachments = append(attachments, task.IssueAttachments...)
+	attachments = append(attachments, task.ChatMessageAttachments...)
+	if len(attachments) == 0 {
+		return nil
+	}
+
+	images := make([]agent.InputImage, 0, min(len(attachments), maxClaudeInitialImages))
+	for _, attachment := range attachments {
+		if len(images) >= maxClaudeInitialImages {
+			break
+		}
+		if attachment.ID == "" || !strings.HasPrefix(strings.ToLower(attachment.ContentType), "image/") {
+			continue
+		}
+		meta, data, err := d.client.DownloadAttachment(ctx, attachment.ID)
+		if err != nil {
+			taskLog.Warn("claude initial image download failed", "attachment_id", attachment.ID, "error", err)
+			continue
+		}
+		if len(data) == 0 || len(data) > maxClaudeInitialImageBytes {
+			taskLog.Warn("claude initial image skipped due to size", "attachment_id", attachment.ID, "bytes", len(data))
+			continue
+		}
+		mediaType := attachment.ContentType
+		if meta != nil && meta.ContentType != "" {
+			mediaType = meta.ContentType
+		}
+		if !strings.HasPrefix(strings.ToLower(mediaType), "image/") {
+			continue
+		}
+		filename := attachment.Filename
+		if meta != nil && meta.Filename != "" {
+			filename = meta.Filename
+		}
+		images = append(images, agent.InputImage{
+			Filename:  filename,
+			MediaType: mediaType,
+			Data:      data,
+		})
+	}
+	return images
+}
+
 // gateResumeToReusedWorkdir clears the task's prior session unless the task
 // runs in the exact workdir the session was recorded against, and reports
 // whether that workdir was reused. CLI backends key their session stores to
@@ -3505,6 +3555,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
 		OpenclawMode:              openclawMode,
+	}
+	if provider == "claude" {
+		execOpts.InitialImages = d.claudeInitialImages(ctx, task, taskLog)
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:

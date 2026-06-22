@@ -56,7 +56,16 @@ type ExecOptions struct {
 	// see server/internal/daemon/execenv/openclaw_config.go). Other backends
 	// ignore this field, mirroring ThinkingLevel's renderer-side fall-through
 	// pattern. See issue #3260.
-	OpenclawMode string
+	OpenclawMode  string
+	InitialImages []InputImage // image blocks to include in Claude's initial user message; ignored by text-only backends
+}
+
+// InputImage is an image attachment that a backend can embed directly in the
+// initial user message instead of relying on an agent-side file Read tool.
+type InputImage struct {
+	Filename  string
+	MediaType string
+	Data      []byte
 }
 
 // runContext derives the execution context for an agent subprocess from the
