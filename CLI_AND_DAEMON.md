@@ -404,12 +404,12 @@ multica issue comment list <issue-id> --thread <comment-id> --tail 30 \
 # Most recently active threads (root + every descendant), grouped by
 # thread. Returns N complete conversational arcs, oldest-active first so
 # the freshest thread sits closest to "now" in an agent prompt.
-multica issue comment list <issue-id> --recent 20
+multica issue comment list <issue-id> --recent 10
 
 # Scroll older threads. Under --recent, --before / --before-id are a
 # THREAD cursor (thread last_activity_at + root id), emitted on stderr as
 # `Next thread cursor: --before <ts> --before-id <root-id>`.
-multica issue comment list <issue-id> --recent 20 \
+multica issue comment list <issue-id> --recent 10 \
     --before <ts> --before-id <root-id>
 
 # Incremental polling. Combines with --thread or --recent; filters out
