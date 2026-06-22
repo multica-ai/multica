@@ -34,6 +34,7 @@ import {
   buildColumns,
   computePosition,
   findColumn,
+  insertIdByPosition,
   issueMatchesGroup,
   getMoveUpdates,
 } from "../utils/drag-utils";
@@ -253,6 +254,22 @@ export function ListView({
           resetColumns();
           return;
         }
+        // Optimistically move the row into the target group *now*. Without this
+        // the sortBy != "position" branch never touched local columns on drop,
+        // so the row sat in its origin group for the whole request and only
+        // jumped across when the mutation settled — the same "snaps back, then
+        // moves" glitch the board view had. Placement mirrors the cache
+        // (insertIdByPosition) so the settle rebuild is a visual no-op.
+        setColumns((prev) => {
+          const fromIds = (prev[activeCol] ?? []).filter((cid) => cid !== activeId);
+          const toIds = insertIdByPosition(
+            prev[finalCol] ?? [],
+            activeId,
+            currentIssue.position,
+            map,
+          );
+          return { ...prev, [activeCol]: fromIds, [finalCol]: toIds };
+        });
         isSettlingRef.current = true;
         onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position), () => {
           isSettlingRef.current = false;
