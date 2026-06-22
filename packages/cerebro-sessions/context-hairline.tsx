@@ -1,7 +1,7 @@
 "use client";
 
-// A whisper-subtle context-window indicator for the active chapter (FIR-1769
-// P3). It is a hairline that only warms as the active chapter's context fills
+// A whisper-subtle context-window indicator for the active session (FIR-1769
+// P3). It is a hairline that only warms as the active session's context fills
 // toward the model's window; near full it shows a single muted nudge to Start
 // fresh. The fraction comes from real per-run token usage when available
 // (cross-runtime/model, FIR-1709) and falls back to a char-count estimate
@@ -44,7 +44,7 @@ export function SessionContextHairline({
       </div>
       {pct >= NUDGE_THRESHOLD ? (
         <p className="mt-1 text-[11px] text-muted-foreground">
-          This chapter is almost full — consider <span className="font-medium">Start fresh</span>.
+          This session is almost full — consider <span className="font-medium">Start fresh</span>.
         </p>
       ) : null}
     </div>

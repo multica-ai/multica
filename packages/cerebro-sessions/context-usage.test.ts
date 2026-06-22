@@ -42,9 +42,11 @@ describe("context-usage api compatibility", () => {
       session_id: "s1",
       has_data: true,
       model: "claude-opus-4-8",
-      input_tokens: 124000,
+      input_tokens: 24000,
       cache_read_tokens: 100000,
+      cache_write_tokens: 0,
       output_tokens: 2000,
+      context_tokens: 124000,
       max_context_tokens: 200000,
       used_percent: 62,
       cache_share_percent: 80,
@@ -53,6 +55,7 @@ describe("context-usage api compatibility", () => {
     expect(res.model).toBe("claude-opus-4-8");
     expect(res.used_percent).toBe(62);
     expect(res.cache_share_percent).toBe(80);
+    expect(res.context_tokens).toBe(124000);
     expect(res.max_context_tokens).toBe(200000);
   });
 });

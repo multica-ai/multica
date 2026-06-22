@@ -8,11 +8,15 @@ package sessions
 // "how full is the active session's context window right now, and how much of it
 // was cache?" — from ground truth (task_usage), never a guess.
 //
-// Definition: the fullness of a session's context window is the input-token
+// Definition: the fullness of a session's context window is the WHOLE prompt
 // footprint of the most recent agent run that happened inside that session
 // (task.created_at within the session's [start,next) window). That is literally
-// how many tokens the model last had to read. cache_share = cache_read /
-// input — the proportion that came from cache rather than fresh tokens.
+// how many tokens the model last had to read — and the prompt is
+// input + cache_read + cache_write (fresh + cache-hits + cache-creation), NOT
+// just the fresh `input_tokens`. With prompt caching warm, almost the entire
+// prompt is served from cache, so counting `input_tokens` alone reported ~0%
+// even when the window was ~40% full (FIR-1839 1D). cache_share = cache_read /
+// context — the proportion of that prompt that came from cache rather than fresh.
 
 import (
 	"context"
@@ -31,7 +35,12 @@ type contextUsageResponse struct {
 	Model             string `json:"model"`
 	InputTokens       int64  `json:"input_tokens"`
 	CacheReadTokens   int64  `json:"cache_read_tokens"`
+	CacheWriteTokens  int64  `json:"cache_write_tokens"`
 	OutputTokens      int64  `json:"output_tokens"`
+	// ContextTokens is the whole prompt the model last read: input + cache_read
+	// + cache_write. This — not InputTokens alone — is the numerator for window
+	// fullness, and the figure the indicator should display.
+	ContextTokens     int64  `json:"context_tokens"`
 	MaxContextTokens  int64  `json:"max_context_tokens"`
 	UsedPercent       int    `json:"used_percent"`
 	CacheSharePercent int    `json:"cache_share_percent"`
@@ -61,6 +70,7 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	const q = `
 		SELECT COALESCE(SUM(tu.input_tokens), 0),
 		       COALESCE(SUM(tu.cache_read_tokens), 0),
+		       COALESCE(SUM(tu.cache_write_tokens), 0),
 		       COALESCE(SUM(tu.output_tokens), 0),
 		       MAX(tu.model)
 		FROM agent_task_queue t
@@ -76,9 +86,9 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	if hasEnd {
 		endParam = end
 	}
-	var input, cacheRead, output int64
+	var input, cacheRead, cacheWrite, output int64
 	var model pgtype.Text
-	err = h.pool.QueryRow(r.Context(), q, issue.ID, start, endParam).Scan(&input, &cacheRead, &output, &model)
+	err = h.pool.QueryRow(r.Context(), q, issue.ID, start, endParam).Scan(&input, &cacheRead, &cacheWrite, &output, &model)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeJSON(w, http.StatusOK, resp) // no run with usage yet — has_data stays false
@@ -92,15 +102,30 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	resp.Model = model.String
 	resp.InputTokens = input
 	resp.CacheReadTokens = cacheRead
+	resp.CacheWriteTokens = cacheWrite
 	resp.OutputTokens = output
-	resp.MaxContextTokens = contextWindowForModel(model.String)
-	if resp.MaxContextTokens > 0 {
-		resp.UsedPercent = clampPercent(int(input * 100 / resp.MaxContextTokens))
-	}
-	if input > 0 {
-		resp.CacheSharePercent = clampPercent(int(cacheRead * 100 / input))
-	}
+	resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent =
+		computeContextUsage(input, cacheRead, cacheWrite, model.String)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// computeContextUsage is the pure core of the measurement: from a run's raw
+// token components it derives the whole-prompt context size, the model window,
+// fullness percent and cache share. The prompt the model actually read is
+// input + cache_read + cache_write (fresh + cache hits + cache creation) — NOT
+// `input` alone, which is a tiny slice once prompt caching is warm. Counting
+// `input` only is what made the indicator read ~0% on a session that was
+// ~40% full (FIR-1839 1D).
+func computeContextUsage(input, cacheRead, cacheWrite int64, model string) (contextTokens, maxContext int64, usedPercent, cacheSharePercent int) {
+	contextTokens = input + cacheRead + cacheWrite
+	maxContext = contextWindowForModel(model)
+	if maxContext > 0 {
+		usedPercent = clampPercent(int(contextTokens * 100 / maxContext))
+	}
+	if contextTokens > 0 {
+		cacheSharePercent = clampPercent(int(cacheRead * 100 / contextTokens))
+	}
+	return contextTokens, maxContext, usedPercent, cacheSharePercent
 }
 
 func clampPercent(p int) int {

@@ -4,7 +4,6 @@ export * from "./partition";
 export * from "./context-estimate";
 export * from "./session-header";
 export * from "./session-handoff";
-export * from "./session-activity";
 export * from "./context-hairline";
 export * from "./active-context-hairline";
 export * from "./context-bar";

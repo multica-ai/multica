@@ -122,7 +122,7 @@ import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
 // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 groups the comment timeline into sessions derived from start markers.
 // CEREBRO-PATCH(session-activity-context): FIR-1769 P2/P3 — per-session activity fold + context hairline.
 // CEREBRO-PATCH(session-review-fir1787): context indicator moves above the composer (SessionContextBar) per FIR-1787 review.
-import { SessionHeader, SessionHandoff, StartFresh, SessionActivity, SessionContextBar, groupTimelineBySession, partitionSessionGroups, countActivityEntries, useSessions } from "@multica/cerebro-sessions";
+import { SessionHeader, SessionHandoff, StartFresh, SessionContextBar, groupTimelineBySession, partitionSessionGroups, hasHandoffBrief, useSessions } from "@multica/cerebro-sessions";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -1095,6 +1095,17 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   useEffect(() => {
     setOpenSessionId(activeSessionId);
   }, [activeSessionId]);
+  // CEREBRO-PATCH(session-handoff-header-toggle): FIR-1839 point 7 — which sessions
+  // currently have their Handoff brief revealed (default folded; the header button toggles it).
+  const [openHandoffIds, setOpenHandoffIds] = useState<Set<string>>(() => new Set());
+  const toggleHandoff = useCallback((sessionId: string) => {
+    setOpenHandoffIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  }, []);
 
   const {
     reactions: issueReactions,
@@ -1203,6 +1214,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   // CEREBRO-PATCH(session-activity-context): FIR-1769 P2/P3 gates; both no-op unless sessions on.
   const sessionActivityFoldEnabled = useFeatureFlag("cerebro_session_activity_fold");
   const sessionContextHairlineEnabled = useFeatureFlag("cerebro_session_context_hairline");
+  // CEREBRO-PATCH(cli-runs-tab-flag): FIR-1839 — the former "Sessions" tab (local CLI work-sessions), renamed "CLI runs" and hidden unless opted in.
+  const cliRunsTabEnabled = useFeatureFlag("cerebro_cli_runs_tab");
   const issueKind = issue?.kind ?? "issue";
   // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
   // agent the backend trigger logic will wake when a member posts a
@@ -2508,7 +2521,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 <TabsList variant="line">
                   <TabsTrigger value="comments">Comments</TabsTrigger>
                   <TabsTrigger value="agent-runs">Agent Runs</TabsTrigger>
-                  <TabsTrigger value="sessions">Sessions</TabsTrigger>
+                  {/* CEREBRO-PATCH(cli-runs-tab-flag): FIR-1839 — "Sessions" tab renamed to "CLI runs", hidden unless cerebro_cli_runs_tab is on. */}
+                  {cliRunsTabEnabled && <TabsTrigger value="cli-runs">CLI runs</TabsTrigger>}
                 </TabsList>
               )}
 
@@ -2520,8 +2534,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 </TabsContent>
               )}
 
-              {!isChat && (
-                <TabsContent value="sessions">
+              {!isChat && cliRunsTabEnabled && (
+                <TabsContent value="cli-runs">
                   <div className="mt-2">
                     <WorkSessionHistory issueId={id} />
                   </div>
@@ -2546,7 +2560,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 // group (a comment thread or a coalesced activity block).
                 // CEREBRO-PATCH(session-thread-box): FIR-1787 — `bare` drops a
                 // comment card's own border so it sits flush inside a session box.
-                const renderGroup = (group: typeof timelineView.groups[number], bare = false) => {
+                // CEREBRO-PATCH(session-activity-below-box): FIR-1839 1-3 — when an
+                // activity block renders below a session box, it always shows the 5
+                // newest entries and folds the rest (`forceTruncate`), expanded by
+                // default so recent activity is visible without a click.
+                const renderGroup = (group: typeof timelineView.groups[number], bare = false, forceTruncate = false) => {
                   if (group.type === "comment") {
                     const entry = group.entries[0]!;
                     // CEREBRO-PATCH(cerebro-wakeup-note): TECH-3298 — render an
@@ -2602,14 +2620,14 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                     ? true
                     : collapsedActivityIds.has(activityId)
                       ? false
-                      : activityId === lastActivityGroupId;
+                      : forceTruncate || activityId === lastActivityGroupId;
                   return (
                     <ActivityBlock
                       key={activityId}
                       entries={group.entries}
                       expanded={expanded}
                       onToggle={() => toggleActivityBlock(activityId, expanded)}
-                      truncateOlder={activityId === lastActivityGroupId}
+                      truncateOlder={forceTruncate || activityId === lastActivityGroupId}
                       showOlder={showOlderActivityIds.has(activityId)}
                       onToggleShowOlder={() => showOlderActivities(activityId)}
                       getActorName={getActorName}
@@ -2631,40 +2649,48 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 const sessionGroups = groupTimelineBySession(id, sessionsQuery.data, timelineView.groups);
                 return sessionGroups.map((sg) => {
                   // CEREBRO-PATCH(session-thread-box): FIR-1787 — the active session is
-                  // always expanded and not collapsible; closed sessions fold to a chapter.
+                  // always expanded and not collapsible; closed sessions fold to a collapsed box.
                   const isActive = sg.session.id === activeSessionId;
                   const open = isActive || sg.session.id === openSessionId;
                   // CEREBRO-PATCH(session-activity-context): FIR-1769 P2 — split comments from activity.
                   const { commentGroups, activityGroups } = partitionSessionGroups(sg.groups);
                   // CEREBRO-PATCH(session-review-fir1787): a session appears only once its first comment exists.
                   if (commentGroups.length === 0) return null;
+                  // FIR-1839 1-3: when the activity-fold flag is on, activity moves
+                  // OUT of the box (rendered below it, chronologically, 5 newest +
+                  // fold). Off → unchanged inline interleave inside the box.
                   const bodyGroups = sessionActivityFoldEnabled ? commentGroups : sg.groups;
+                  // FIR-1839 point 7: handoff brief is revealed by the header button.
+                  const showHandoff = hasHandoffBrief(sg.session.handoff);
+                  const handoffOpen = openHandoffIds.has(sg.session.id);
                   return (
-                    <div key={sg.session.id} className="overflow-hidden rounded-lg border bg-card">
-                      {/* CEREBRO-PATCH(session-thread-box): FIR-1787 — header is the top of the thread box. */}
-                      <SessionHeader
-                        issueId={id}
-                        session={sg.session}
-                        open={open}
-                        active={isActive}
-                        onToggle={() => setOpenSessionId(open ? "" : sg.session.id)}
-                      />
-                      {open ? (
-                        <SessionHandoff session={sg.session} bare />
-                      ) : sg.session.handoff?.summary ? (
-                        <div className="px-4 py-2 text-xs text-muted-foreground">{sg.session.handoff.summary}</div>
-                      ) : null}
-                      {open ? (
-                        <div className="flex flex-col divide-y">
-                          {bodyGroups.map((g) => renderGroup(g, true))}
-                        </div>
-                      ) : null}
-                      {/* CEREBRO-PATCH(session-activity-context): FIR-1769 P2 — folded activity section. */}
-                      {open && sessionActivityFoldEnabled ? (
-                        <div className="border-t py-3">
-                          <SessionActivity count={countActivityEntries(activityGroups)}>
-                            {activityGroups.map((g) => renderGroup(g, true))}
-                          </SessionActivity>
+                    <div key={sg.session.id}>
+                      <div className="overflow-hidden rounded-lg border bg-card">
+                        {/* CEREBRO-PATCH(session-thread-box): FIR-1787 — header is the top of the thread box. */}
+                        {/* CEREBRO-PATCH(session-handoff-header-toggle): FIR-1839 point 7 — Handoff is a header button. */}
+                        <SessionHeader
+                          issueId={id}
+                          session={sg.session}
+                          open={open}
+                          active={isActive}
+                          onToggle={() => setOpenSessionId(open ? "" : sg.session.id)}
+                          hasHandoff={showHandoff}
+                          handoffOpen={handoffOpen}
+                          onToggleHandoff={showHandoff ? () => toggleHandoff(sg.session.id) : undefined}
+                        />
+                        {showHandoff && handoffOpen ? (
+                          <SessionHandoff session={sg.session} bare controlled open />
+                        ) : null}
+                        {open ? (
+                          <div className="flex flex-col divide-y">
+                            {bodyGroups.map((g) => renderGroup(g, true))}
+                          </div>
+                        ) : null}
+                      </div>
+                      {/* CEREBRO-PATCH(session-activity-below-box): FIR-1839 1-3 — activity sits BELOW the thread box, chronological, 5 newest + fold. */}
+                      {open && sessionActivityFoldEnabled && activityGroups.length > 0 ? (
+                        <div className="mt-1 flex flex-col gap-1">
+                          {activityGroups.map((g) => renderGroup(g, false, true))}
                         </div>
                       ) : null}
                     </div>
@@ -2677,16 +2703,18 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
-              {/* CEREBRO-PATCH(session-review-fir1787): FIR-1787 — context bar is the line above the input (colour + handoff). */}
-              {sessionsEnabled && sessionContextHairlineEnabled ? (
-                <SessionContextBar issueId={id} groups={timelineView.groups} />
-              ) : null}
               {/* CEREBRO-PATCH(issue-detail-pin-comment-input): JEH-1065 — opt
                   this input into the pin toggle. Channels/DMs (which also
                   mount CommentInput via channel-detail.tsx) leave pinnable
                   off so chat-style surfaces stay unchanged. */}
               {/* CEREBRO-PATCH(issue-composer-unify): FIR-1748 — shared CommentComposer (new-comment variant). */}
               <CommentComposer issueId={id} onSubmit={submitComment} pinnable triggerAgentId={triggerAgentId} />
+              {/* CEREBRO-PATCH(session-context-below-input): FIR-1839 1C — the active session's own context measurement sits directly under the input box, not above it. */}
+              {sessionsEnabled && sessionContextHairlineEnabled ? (
+                <div className="mt-2">
+                  <SessionContextBar issueId={id} groups={timelineView.groups} />
+                </div>
+              ) : null}
             </div>
               </TabsContent>
             </Tabs>

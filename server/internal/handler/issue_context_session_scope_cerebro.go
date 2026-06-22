@@ -50,7 +50,7 @@ func (h *Handler) cerebroCommentChaptersEnabled(ctx context.Context, workspaceID
 	var wsEnabled, wsLocked, wsFound bool
 	wsRows, err := h.CerebroQueries.ListCerebroWorkspaceFeatureFlags(ctx, workspaceID)
 	if err != nil {
-		slog.Warn("comment chapters flag: workspace flag lookup failed", "error", err)
+		slog.Warn("comment sessions flag: workspace flag lookup failed", "error", err)
 		return false
 	}
 	for _, row := range wsRows {
@@ -74,7 +74,7 @@ func (h *Handler) cerebroCommentChaptersEnabled(ctx context.Context, workspaceID
 				return on
 			}
 			if !errors.Is(perr, pgx.ErrNoRows) {
-				slog.Warn("comment chapters flag: personal flag lookup failed", "error", perr)
+				slog.Warn("comment sessions flag: personal flag lookup failed", "error", perr)
 				return false
 			}
 		}

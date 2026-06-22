@@ -60,7 +60,7 @@ func TestSessionNameFromHandoff(t *testing.T) {
 	if got := sessionNameFromHandoff(&handoffBrief{Summary: "   "}, true); got != "" {
 		t.Errorf("blank summary = %q, want empty", got)
 	}
-	// Agent-authored: first line only, becomes the chapter title.
+	// Agent-authored: first line only, becomes the session title.
 	if got := sessionNameFromHandoff(&handoffBrief{Summary: "Shipped login redirect fix\nmore detail"}, true); got != "Shipped login redirect fix" {
 		t.Errorf("name = %q, want first line only", got)
 	}

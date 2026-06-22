@@ -904,6 +904,8 @@ function ErrorRow({ item }: { item: TimelineItem }) {
 }
 
 // ─── Work Session History (Claude Code MCP sessions) ────────────────────────
+// CEREBRO-PATCH(cli-runs-tab-flag): FIR-1839 — this list renders under the "CLI runs"
+// tab; user-facing strings say "CLI run" (the WorkSession type/API name is unchanged).
 
 interface WorkSessionHistoryProps {
   issueId: string;
@@ -923,7 +925,7 @@ export function WorkSessionHistory({ issueId }: WorkSessionHistoryProps) {
   const copyStartCommand = () => {
     const cmd = `claude --resume "Work on issue ${issueId}"`;
     navigator.clipboard.writeText(cmd).then(() => {
-      toast.success("Command copied — paste in terminal to start a Claude Code session");
+      toast.success("Command copied — paste in terminal to start a CLI run");
     }).catch(() => {
       toast.error("Failed to copy");
     });
@@ -937,13 +939,13 @@ export function WorkSessionHistory({ issueId }: WorkSessionHistoryProps) {
         className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       >
         <Plus className="h-3 w-3" />
-        <span>Start new session</span>
+        <span>Start new CLI run</span>
       </button>
       {sessions.map((ws) => (
         <WorkSessionEntry key={ws.id} session={ws} onUpdate={refresh} />
       ))}
       {sessions.length === 0 && (
-        <p className="text-xs text-muted-foreground py-2">No sessions yet. Start one from your terminal.</p>
+        <p className="text-xs text-muted-foreground py-2">No CLI runs yet. Start one from your terminal.</p>
       )}
     </div>
   );
@@ -971,25 +973,25 @@ function WorkSessionEntry({ session, onUpdate }: { session: WorkSession; onUpdat
   const handleStop = (e: React.MouseEvent) => {
     e.stopPropagation();
     api.completeWorkSession(session.id, "Stopped from UI").then(() => {
-      toast.success("Session stopped");
+      toast.success("CLI run stopped");
       onUpdate();
-    }).catch(() => toast.error("Failed to stop session"));
+    }).catch(() => toast.error("Failed to stop CLI run"));
   };
 
   const handleResume = (e: React.MouseEvent) => {
     e.stopPropagation();
     api.resumeWorkSession(session.id).then(() => {
-      toast.success("Session resumed — next Claude Code session will auto-attach");
+      toast.success("CLI run resumed — the next CLI run will auto-attach");
       onUpdate();
-    }).catch(() => toast.error("Failed to resume session"));
+    }).catch(() => toast.error("Failed to resume CLI run"));
   };
 
   const handleFork = (e: React.MouseEvent) => {
     e.stopPropagation();
     api.forkWorkSession(session.id).then(() => {
-      toast.success("Session forked — next Claude Code session will auto-attach");
+      toast.success("CLI run forked — the next CLI run will auto-attach");
       onUpdate();
-    }).catch(() => toast.error("Failed to fork session"));
+    }).catch(() => toast.error("Failed to fork CLI run"));
   };
 
   const statusColor = session.status === "completed" ? "text-success"
@@ -1029,7 +1031,7 @@ function WorkSessionEntry({ session, onUpdate }: { session: WorkSession; onUpdat
             onClick={handleStop}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); handleStop(e as unknown as React.MouseEvent); } }}
             className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-destructive hover:bg-accent/50 transition-colors cursor-pointer"
-            title="Stop session"
+            title="Stop CLI run"
           >
             <Square className="h-3 w-3" />
           </span>
@@ -1042,7 +1044,7 @@ function WorkSessionEntry({ session, onUpdate }: { session: WorkSession; onUpdat
               onClick={handleResume}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); handleResume(e as unknown as React.MouseEvent); } }}
               className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
-              title="Resume session"
+              title="Resume CLI run"
             >
               <Play className="h-3 w-3" />
             </span>
@@ -1052,7 +1054,7 @@ function WorkSessionEntry({ session, onUpdate }: { session: WorkSession; onUpdat
               onClick={handleFork}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); handleFork(e as unknown as React.MouseEvent); } }}
               className="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors cursor-pointer"
-              title="Fork session"
+              title="Fork CLI run"
             >
               <GitFork className="h-3 w-3" />
             </span>

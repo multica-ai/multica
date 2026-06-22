@@ -35,8 +35,11 @@ export function ActiveSessionContextHairline({
     const cache =
       data.cache_share_percent > 0 ? ` · ${data.cache_share_percent}% from cache` : "";
     const model = data.model ? ` · ${data.model}` : "";
+    const ctxTokens =
+      data.context_tokens ||
+      data.input_tokens + data.cache_read_tokens + data.cache_write_tokens;
     const detail = `${data.used_percent}% of context window (${formatTokens(
-      data.input_tokens,
+      ctxTokens,
     )} / ${formatTokens(data.max_context_tokens)} tokens${cache}${model})`;
     return (
       <SessionContextHairline fraction={fraction} approximate={false} detail={detail} />

@@ -29,6 +29,33 @@ func TestContextWindowForModel_ExactPerModel(t *testing.T) {
 	}
 }
 
+func TestComputeContextUsage_CountsCachedPrompt(t *testing.T) {
+	// FIR-1839 1D regression: Jesper's screenshot — a warm session on
+	// claude-opus-4-8[1m] with only 8k fresh input but 409.2k served from cache.
+	// The old formula counted `input` alone → 0% used and a nonsense 100% cache
+	// share. The whole prompt is input + cache_read + cache_write.
+	ctx, maxCtx, used, cacheShare := computeContextUsage(8_000, 409_200, 0, "claude-opus-4-8[1m]")
+	if ctx != 417_200 {
+		t.Errorf("context tokens = %d, want 417200", ctx)
+	}
+	if maxCtx != 1_000_000 {
+		t.Errorf("max context = %d, want 1000000", maxCtx)
+	}
+	if used != 41 { // 417200 / 1_000_000 = 41.72% → 41, not 0
+		t.Errorf("used percent = %d, want 41", used)
+	}
+	if cacheShare != 98 { // 409200 / 417200 = 98%, not a clamped 100
+		t.Errorf("cache share = %d, want 98", cacheShare)
+	}
+}
+
+func TestComputeContextUsage_NoTokens(t *testing.T) {
+	ctx, _, used, cacheShare := computeContextUsage(0, 0, 0, "claude-opus-4-8")
+	if ctx != 0 || used != 0 || cacheShare != 0 {
+		t.Errorf("zero usage = (%d,%d,%d), want all zero", ctx, used, cacheShare)
+	}
+}
+
 func TestClampPercent(t *testing.T) {
 	cases := []struct{ in, want int }{
 		{-5, 0}, {0, 0}, {50, 50}, {100, 100}, {137, 100},

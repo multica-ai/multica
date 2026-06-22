@@ -45,7 +45,12 @@ export function SessionContextBar({
     const cache =
       data.cache_share_percent > 0 ? ` · ${data.cache_share_percent}% from cache` : "";
     const model = data.model ? ` · ${data.model}` : "";
-    detail = `${formatTokens(data.input_tokens)} / ${formatTokens(
+    // Show the whole prompt the model read, not just fresh input. Fall back to
+    // deriving it if an older server hasn't sent context_tokens yet.
+    const ctxTokens =
+      data.context_tokens ||
+      data.input_tokens + data.cache_read_tokens + data.cache_write_tokens;
+    detail = `${formatTokens(ctxTokens)} / ${formatTokens(
       data.max_context_tokens,
     )} tokens${cache}${model}`;
   } else {

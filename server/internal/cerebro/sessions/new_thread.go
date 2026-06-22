@@ -27,7 +27,7 @@ import (
 // (issue_id, position) index is the DB backstop. New-thread sessions carry no
 // handoff — decision A is "fresh context", so nothing is inherited and the
 // closing session is left untouched (an explicit Handoff is still the way to
-// brief/name a chapter, point 2 / 2b).
+// brief/name a session, point 2 / 2b).
 //
 // The caller is responsible for gating on the cerebro_comment_chapters flag and
 // for skipping non-thread surfaces (channels); this function assumes it should

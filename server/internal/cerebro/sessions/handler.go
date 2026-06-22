@@ -246,7 +246,7 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 		} else {
 			histHandoff = normalizeHandoff(histHandoff)
 		}
-		// FIR-1787 point 2: an agent-authored handoff names the chapter it closes.
+		// FIR-1787 point 2: an agent-authored handoff names the session it closes.
 		session1Name := "Session 1"
 		if n := sessionNameFromHandoff(histHandoff, req.Handoff != nil); n != "" {
 			session1Name = n
@@ -394,7 +394,7 @@ func (h *Handler) generateHandoff(ctx context.Context, tx pgx.Tx, issueID pgtype
 // server auto-generated briefs (so the default "Session N" stays) and for empty
 // summaries. This is the server half of FIR-1787 point 2 — "the agent also names
 // the session at handoff" — without a new API field: the agent already supplies
-// the brief, so its summary titles the chapter it just finished.
+// the brief, so its summary titles the session it just finished.
 func sessionNameFromHandoff(brief *handoffBrief, agentAuthored bool) string {
 	if !agentAuthored || brief == nil {
 		return ""

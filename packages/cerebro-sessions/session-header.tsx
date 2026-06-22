@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight, Pencil } from "lucide-react";
+import { ChevronRight, Pencil, ScrollText } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
+import { cn } from "@multica/ui/lib/utils";
 import type { Session } from "./types";
 import { useUpdateSession } from "./use-sessions";
 
@@ -20,19 +21,28 @@ const statusLabel = {
 //
 // The active session is NOT collapsible — it always shows its thread (Jesper:
 // "den aktive session skal ikke være collapsed"). Only closed/past sessions get
-// the collapse chevron so they can fold into a chapter.
+// the collapse chevron so they can fold into a collapsed session.
 export function SessionHeader({
   issueId,
   session,
   open,
   active = false,
   onToggle,
+  hasHandoff = false,
+  handoffOpen = false,
+  onToggleHandoff,
 }: {
   issueId: string;
   session: Session;
   open: boolean;
   active?: boolean;
   onToggle: () => void;
+  // FIR-1839 point 7: when the session has a handoff brief, the header shows a
+  // "Handoff" toggle so the brief reads as part of the headline and only opens
+  // on demand. The body itself is rendered by the host (SessionHandoff).
+  hasHandoff?: boolean;
+  handoffOpen?: boolean;
+  onToggleHandoff?: () => void;
 }) {
   const update = useUpdateSession(issueId);
   const [editing, setEditing] = useState(false);
@@ -88,6 +98,23 @@ export function SessionHeader({
         />
       ) : (
         <div className="flex shrink-0 items-center gap-2">
+          {hasHandoff && onToggleHandoff ? (
+            <button
+              type="button"
+              onClick={onToggleHandoff}
+              aria-pressed={handoffOpen}
+              className={cn(
+                "flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-colors",
+                handoffOpen
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+              )}
+              title="Show the handoff brief for this session"
+            >
+              <ScrollText className="h-3.5 w-3.5" />
+              Handoff
+            </button>
+          ) : null}
           {canRename ? (
             <button
               type="button"
