@@ -163,6 +163,7 @@ func dispatchCreateIssueAutopilot(t *testing.T, title string) linkedIssueAutopil
 		Status:             "active",
 		ExecutionMode:      "create_issue",
 		IssueTitleTemplate: pgtype.Text{String: "Linked issue", Valid: true},
+		ManualOptions:      []string{},
 		CreatedByType:      "member",
 		CreatedByID:        parseUUID(testUserID),
 	})
