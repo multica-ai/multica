@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
@@ -14,16 +14,25 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-import type { UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
+import { commonIssueFields } from "@multica/core/issues/batch";
 import { useBatchUpdateIssues, useBatchDeleteIssues } from "@multica/core/issues/mutations";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 import { useT } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
 
 export function BatchActionToolbar({
+  issues,
   placement = "fixed-bottom",
 }: {
+  /**
+   * The universe of selectable issues at this call site (the same list the
+   * rows are rendered from). The toolbar filters it by the global selection to
+   * reflect the real common status / priority / assignee of the selected
+   * issues, mirroring how the skill list filters its rows by `selectedIds`.
+   */
+  issues: Issue[];
   /**
    * "fixed-bottom" — floats at the bottom of the viewport (default; used by
    * full-screen issue lists).
@@ -36,6 +45,14 @@ export function BatchActionToolbar({
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
   const clear = useIssueSelectionStore((s) => s.clear);
   const count = selectedIds.size;
+
+  // Reflect the real shared value of the selected issues in each picker; fall
+  // back to an empty (no-checkmark) state when the selection is mixed, instead
+  // of asserting a hardcoded default.
+  const common = useMemo(
+    () => commonIssueFields(issues.filter((i) => selectedIds.has(i.id))),
+    [issues, selectedIds],
+  );
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
@@ -101,7 +118,7 @@ export function BatchActionToolbar({
 
         {/* Status */}
         <StatusPicker
-          status="todo"
+          status={common.status}
           onUpdate={handleBatchUpdate}
           open={statusOpen}
           onOpenChange={setStatusOpen}
@@ -112,7 +129,7 @@ export function BatchActionToolbar({
 
         {/* Priority */}
         <PriorityPicker
-          priority="none"
+          priority={common.priority}
           onUpdate={handleBatchUpdate}
           open={priorityOpen}
           onOpenChange={setPriorityOpen}
@@ -123,8 +140,9 @@ export function BatchActionToolbar({
 
         {/* Assignee */}
         <AssigneePicker
-          assigneeType={null}
-          assigneeId={null}
+          assigneeType={common.assignee?.type ?? null}
+          assigneeId={common.assignee?.id ?? null}
+          mixed={common.assignee === null}
           onUpdate={handleBatchUpdate}
           open={assigneeOpen}
           onOpenChange={setAssigneeOpen}

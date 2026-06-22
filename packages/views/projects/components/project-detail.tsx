@@ -405,7 +405,7 @@ function ProjectIssuesSurface({
         sort={sort}
         ganttIssues={ganttIssues}
       />
-      <BatchActionToolbar />
+      <BatchActionToolbar issues={projectIssues} />
     </>
   );
 }
