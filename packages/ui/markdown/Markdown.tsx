@@ -757,12 +757,19 @@ export function Markdown({
 
   const wrapperRef = React.useRef<HTMLDivElement>(null)
 
-  // Notify caller of wrapper ref for link-hover-card attachment
-  React.useEffect(() => {
-    if (onLinkHover && mode === 'editor-parity') {
-      onLinkHover(wrapperRef)
-    }
-  }, [onLinkHover, mode])
+  // Callback ref: fires during the commit phase (before effects), so the
+  // views wrapper's useLinkHover — which attaches listeners in its own
+  // useEffect — sees a populated ref.  A plain useEffect here would fire
+  // AFTER effects, leaving the first render's hover listeners bound to null.
+  const setWrapperRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      (wrapperRef as React.MutableRefObject<HTMLDivElement | null>).current = node
+      if (onLinkHover && mode === 'editor-parity' && node) {
+        onLinkHover(wrapperRef)
+      }
+    },
+    [onLinkHover, mode],
+  )
 
   // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content.
   // If a `postprocess` hook is provided (by the views wrapper for editor-parity
@@ -787,7 +794,7 @@ export function Markdown({
     : cn('markdown-content break-words', className)
 
   return (
-    <div ref={wrapperRef} className={wrapperClass}>
+    <div ref={setWrapperRef} className={wrapperClass}>
       <ReactMarkdown
         remarkPlugins={[
           [remarkMath, { singleDollarTextMath: false }],
@@ -810,16 +817,5 @@ export function Markdown({
  * Splits content into blocks and memoizes each block separately,
  * so only new/changed blocks re-render during streaming.
  */
-export const MemoizedMarkdown = React.memo(Markdown, (prevProps, nextProps) => {
-  // If id is provided, use it for memoization
-  if (prevProps.id && nextProps.id) {
-    return (
-      prevProps.id === nextProps.id &&
-      prevProps.children === nextProps.children &&
-      prevProps.mode === nextProps.mode
-    )
-  }
-  // Otherwise compare content and mode
-  return prevProps.children === nextProps.children && prevProps.mode === nextProps.mode
-})
+export const MemoizedMarkdown = React.memo(Markdown)
 MemoizedMarkdown.displayName = 'MemoizedMarkdown'
