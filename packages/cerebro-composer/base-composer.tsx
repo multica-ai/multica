@@ -135,9 +135,6 @@ export interface BaseComposerProps {
 
   // --- slots (chat) ---
   topSlot?: ReactNode;
-  /** Rendered inside the framed box, directly under the input (FIR-1870 —
-   *  the session context line lives under the comment input, inside the box). */
-  footerSlot?: ReactNode;
   leftAdornment?: ReactNode;
   rightAdornment?: ReactNode;
   isRunning?: boolean;
@@ -194,7 +191,6 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
   avatar = null,
   size = "default",
   topSlot,
-  footerSlot,
   leftAdornment,
   rightAdornment,
   isRunning = false,
@@ -506,8 +502,6 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
               >
                 {editor}
               </div>
-              {/* FIR-1870: session context line — directly under the input, inside the box, above the action toolbar. */}
-              {footerSlot ? <div className="px-3">{footerSlot}</div> : null}
               <div className="absolute bottom-1 left-1.5 flex items-center gap-1">
                 {attachButton}
                 {dictationMic}

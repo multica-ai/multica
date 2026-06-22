@@ -2691,15 +2691,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                         {showHandoff && handoffOpen ? (
                           <SessionHandoff session={sg.session} bare controlled open />
                         ) : null}
-                        {open ? (
-                          <div className="flex flex-col divide-y">
-                            {bodyGroups.map((g) => renderGroup(g, true))}
+                        {/* CEREBRO-PATCH(session-context-under-header): FIR-1870 — a thread IS a session, so each session shows its OWN context window directly under its own header (visible whether open or collapsed). No page-bottom line; the figure is never one number for the whole issue. */}
+                        {sessionContextHairlineEnabled ? (
+                          <div className="border-t px-3 py-2">
+                            <SessionContextBar issueId={id} sessionId={sg.session.id} groups={sg.groups} active={isActive} />
                           </div>
                         ) : null}
-                        {/* CEREBRO-PATCH(session-context-per-session): FIR-1870 — every session shows its own context window INSIDE the box. The active session's line lives under the composer input (footerSlot below); closed sessions show it here at the bottom of their box. */}
-                        {open && !isActive && sessionContextHairlineEnabled ? (
-                          <div className="border-t px-3 py-2">
-                            <SessionContextBar issueId={id} sessionId={sg.session.id} groups={sg.groups} active={false} />
+                        {open ? (
+                          <div className="flex flex-col divide-y border-t">
+                            {bodyGroups.map((g) => renderGroup(g, true))}
                           </div>
                         ) : null}
                       </div>
@@ -2724,17 +2724,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   mount CommentInput via channel-detail.tsx) leave pinnable
                   off so chat-style surfaces stay unchanged. */}
               {/* CEREBRO-PATCH(issue-composer-unify): FIR-1748 — shared CommentComposer (new-comment variant). */}
-              {/* CEREBRO-PATCH(session-context-per-session): FIR-1870 — the active session's context line sits directly under the input, INSIDE the composer box (footerSlot). */}
+              {/* CEREBRO-PATCH(session-context-no-bottom-line): FIR-1870 — no context line under the bottom composer; each session carries its own line under its header (thread = session), so a page-bottom figure is meaningless. */}
               <CommentComposer
                 issueId={id}
                 onSubmit={submitComment}
                 pinnable
                 triggerAgentId={triggerAgentId}
-                footerSlot={
-                  sessionsEnabled && sessionContextHairlineEnabled ? (
-                    <SessionContextBar issueId={id} sessionId={activeSessionId} groups={timelineView.groups} active />
-                  ) : undefined
-                }
               />
             </div>
               </TabsContent>

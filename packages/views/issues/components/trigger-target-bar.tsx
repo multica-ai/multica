@@ -154,7 +154,7 @@ function TriggerTargetBar({ markdown, triggerAgentId, onTagOwner, faded = false 
             key={agent.id}
             className="pointer-events-auto inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-medium text-emerald-700 dark:text-emerald-300"
           >
-            <ActorAvatar actorType="agent" actorId={agent.id} size={14} />
+            {/* CEREBRO-PATCH(reply-target-no-photo): FIR-1870 — name-only target chip; no avatar photo of the agent that will reply. */}
             <span className="truncate">{agent.name}</span>
           </span>
         );

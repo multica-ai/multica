@@ -1022,13 +1022,13 @@ function CommentCardImpl({
           ) : (
             <div className="border-t border-border/50 px-3 sm:px-4 py-2.5">
               {/* CEREBRO-PATCH(issue-composer-unify): FIR-1748 — shared CommentComposer, reply variant. */}
+              {/* CEREBRO-PATCH(reply-composer-full-width): FIR-1870 — no left avatar gutter; the reply input runs full width like the mockup. */}
               <CommentComposer
                 issueId={issueId}
                 variant="reply"
                 rootCommentId={entry.id}
                 placeholder={t(($) => $.reply.placeholder)}
                 size="sm"
-                avatar={{ type: "member", id: currentUserId ?? "" }}
                 // CEREBRO-PATCH(reply-target-indicator): FIR-2392 show the agent the trigger logic will actually wake (issue assignee / squad leader), not the replied-to comment author.
                 triggerAgentId={triggerAgentId}
                 onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
