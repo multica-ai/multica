@@ -1716,6 +1716,13 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 		return
 	}
 
+	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
+		item, _ := params["item"].(map[string]any)
+		itemType, _ := item["type"].(string)
+		itemID, _ := item["id"].(string)
+		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
+	}
+
 	switch method {
 	case "turn/started":
 		c.turnStarted = true
@@ -1813,9 +1820,6 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	item, _ := params["item"].(map[string]any)
 	itemType, _ := item["type"].(string)
 	itemID, _ := item["id"].(string)
-	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
-		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
-	}
 	if item == nil {
 		return
 	}
@@ -1892,14 +1896,27 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 
 	case method == "item/completed" && itemType == "agentMessage":
 		text, _ := item["text"].(string)
+		phase, hasPhase := item["phase"].(string)
+		// #3339: Only messages explicitly marked as non-final_answer (e.g. "progress")
+		// should be classified as thinking (and excluded from Result.Output).
+		// Messages without phase or with phase="final_answer" contribute to output.
+		isIntermediateProgress := hasPhase && phase != "final_answer"
 		if text != "" && c.onMessage != nil {
-			c.onMessage(Message{Type: MessageText, Content: text})
+			if isIntermediateProgress {
+				c.onMessage(Message{Type: MessageThinking, Content: text})
+			} else {
+				c.onMessage(Message{Type: MessageText, Content: text})
+			}
 		}
 		if text != "" && c.traceCallback != nil {
 			c.traceCallback("normalized", text, "")
 		}
 		if text != "" {
-			emitDisplayEvent(c.traceCallback, "assistant_text", "Codex", text, nil)
+			eventType := "assistant_text"
+			if isIntermediateProgress {
+				eventType = "thinking"
+			}
+			emitDisplayEvent(c.traceCallback, eventType, "Codex", text, nil)
 		}
 	}
 }

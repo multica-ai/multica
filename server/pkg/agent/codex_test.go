@@ -830,6 +830,43 @@ func TestCodexRawItemAgentMessageFinalAnswerFromSubagentIgnored(t *testing.T) {
 	}
 }
 
+// #3339: Only agentMessage with explicit non-final_answer phase (e.g. "progress")
+// should be classified as MessageThinking (and excluded from Result.Output).
+// Messages without phase or with phase="final_answer" contribute to output (MessageText).
+// This maintains backward compatibility for existing Codex versions that don't
+// use phase markers.
+func TestCodexOnlyExplicitProgressPhaseIsClassifiedAsThinking(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var messages []Message
+	c.onMessage = func(msg Message) {
+		messages = append(messages, msg)
+	}
+
+	// Message without phase -> defaults to MessageText (backward compatibility)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-1","text":"normal message without phase"}}}`)
+	if len(messages) != 1 || messages[0].Type != MessageText {
+		t.Fatalf("expected MessageText for message without phase (backward compat), got %+v", messages)
+	}
+
+	// Message with explicit phase="progress" (intermediate) -> MessageThinking
+	messages = nil
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-2","text":"still working on it","phase":"progress"}}}`)
+	if len(messages) != 1 || messages[0].Type != MessageThinking {
+		t.Fatalf("expected MessageThinking for phase=progress message, got %+v", messages)
+	}
+
+	// Message with phase="final_answer" -> MessageText
+	messages = nil
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-3","text":"The bug is fixed","phase":"final_answer"}}}`)
+	if len(messages) != 1 || messages[0].Type != MessageText {
+		t.Fatalf("expected MessageText for phase=final_answer, got %+v", messages)
+	}
+}
+
 func TestCodexCloseAllPending(t *testing.T) {
 	t.Parallel()
 
@@ -1624,7 +1661,7 @@ func TestCodexExecuteLegacyFirstTurnMessageSatisfiesProgress(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_started"}}}'`+"\n"+
 		`sleep 0.05`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"legacy alive"}}}'`+"\n"+
-		`sleep 0.07`+"\n"+
+		`sleep 0.02`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_complete"}}}'`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
@@ -1655,21 +1692,28 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousMessages(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-progress","turn":{"id":"turn-progress"}}}'`+"\n"+
 		`sleep 0.05`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-progress","item":{"type":"agentMessage","id":"msg-1","text":"still working"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-progress","item":{"type":"agentMessage","id":"msg-1","text":"still working","phase":"progress"}}}'`+"\n"+
 		`sleep 0.05`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-progress","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"ok"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-progress","item":{"type":"agentMessage","id":"msg-2","text":"done now","phase":"final_answer"}}}'`+"\n"+
 		`sleep 0.05`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-progress","turn":{"id":"turn-progress","status":"completed"}}}'`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
-		SemanticInactivityTimeout: 90 * time.Millisecond,
+		SemanticInactivityTimeout: 500 * time.Millisecond,
 	})
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
 	}
-	if !strings.Contains(result.Output, "still working") {
-		t.Fatalf("expected streamed text in output, got %q", result.Output)
+	// Intermediate progress messages (with phase="progress") must NOT leak into output
+	if strings.Contains(result.Output, "still working") {
+		t.Fatalf("intermediate progress (phase=progress) must not leak into output, got %q", result.Output)
+	}
+	// final_answer messages should appear in output
+	if !strings.Contains(result.Output, "done now") {
+		t.Fatalf("expected final_answer text in output, got %q", result.Output)
 	}
 }
 
