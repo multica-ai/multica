@@ -26,6 +26,11 @@ import (
 //   - issue.ParentIssueID must be set
 //   - parent must not be "done" or "cancelled" — the parent is already
 //     closed and a notification has no follow-up to drive
+//   - parent must not be "backlog" — a parent parked in backlog is being
+//     deliberately held for later; waking its assignee (which can then
+//     promote sibling backlog sub-issues into todo) is exactly the
+//     unwanted auto-activation reported in #4320 / MUL-3497. A parked
+//     parent stays inert until the user explicitly moves it out of backlog.
 //   - parent assignee must not be a member (human). Humans read their
 //     issues manually; an automated system comment is pure noise for them
 //     and there is nothing to "trigger" on a human assignee. Skipping the
@@ -64,6 +69,14 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 		return
 	}
 	if parent.Status == "done" || parent.Status == "cancelled" {
+		return
+	}
+	// A parent parked in backlog is deliberately held for later. Posting the
+	// system comment would wake its assignee, and the woken agent can then
+	// promote sibling backlog sub-issues into todo — the surprise auto-
+	// activation reported in #4320 / MUL-3497. Skip the whole notification so
+	// a backlog parent stays inert until the user explicitly promotes it.
+	if parent.Status == "backlog" {
 		return
 	}
 	// Human-assigned parents read their own timeline; an automated system
