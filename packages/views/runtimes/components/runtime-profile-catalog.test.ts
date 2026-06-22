@@ -105,10 +105,25 @@ describe("parseCommandLine", () => {
     });
   });
 
+  it("allows literal shell-looking characters inside single quotes", () => {
+    expect(parseCommandLine("agent --note '$5 reward `literal`'")).toEqual({
+      ok: true,
+      commandName: "agent",
+      fixedArgs: ["--note", "$5 reward `literal`"],
+    });
+  });
+
   it("rejects unclosed quotes", () => {
     expect(parseCommandLine(`agent --flag "unterminated`)).toEqual({
       ok: false,
       error: "unclosed_quote",
+    });
+  });
+
+  it("rejects a trailing escape", () => {
+    expect(parseCommandLine("agent \\")).toEqual({
+      ok: false,
+      error: "trailing_escape",
     });
   });
 });

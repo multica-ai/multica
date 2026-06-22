@@ -705,8 +705,8 @@ function ProfileDetailsForm({
     setFormError(null);
     setDuplicateName(false);
     const validationErrors = validateProfileForm(values);
-    if (!validationErrors.includes("commandName") && !parsedCommand.ok) {
-      validationErrors.push("commandName");
+    if (!validationErrors.includes("commandLine") && !parsedCommand.ok) {
+      validationErrors.push("commandLine");
     }
     setErrors(validationErrors);
     if (validationErrors.length > 0) return;
@@ -759,15 +759,17 @@ function ProfileDetailsForm({
   const parseErrorMessage =
     !parsedCommand.ok && parsedCommand.error === "unclosed_quote"
       ? t(($) => $.profiles.form.error_command_unclosed_quote)
+      : !parsedCommand.ok && parsedCommand.error === "trailing_escape"
+        ? t(($) => $.profiles.form.error_command_trailing_escape)
       : !parsedCommand.ok && parsedCommand.error === "shell_expansion"
         ? t(($) => $.profiles.form.error_command_shell_expansion)
         : !parsedCommand.ok && parsedCommand.error === "shell_syntax"
           ? t(($) => $.profiles.form.error_command_shell_syntax)
           : null;
   const commandError =
-    hasError("commandName") && !values.commandLine.trim()
+    hasError("commandLine") && !values.commandLine.trim()
       ? t(($) => $.profiles.form.error_command_required)
-      : hasError("commandName") && !parsedCommand.ok
+      : hasError("commandLine") && !parsedCommand.ok
         ? (parseErrorMessage ?? t(($) => $.profiles.form.error_command_required))
         : null;
 
@@ -847,9 +849,9 @@ function ProfileDetailsForm({
             value={values.commandLine}
             onChange={(e) => setField("commandLine", e.target.value)}
             placeholder={t(($) => $.profiles.form.command_name_placeholder)}
-            aria-invalid={hasError("commandName")}
+            aria-invalid={hasError("commandLine")}
             aria-describedby={
-              hasError("commandName") ? `${idPrefix}-command-error` : undefined
+              hasError("commandLine") ? `${idPrefix}-command-error` : undefined
             }
             className="h-9 font-mono text-sm"
           />

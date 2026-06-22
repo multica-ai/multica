@@ -69,11 +69,12 @@ export interface ProfileFormValues {
   description: string;
 }
 
-export type ProfileFormErrorField = "displayName" | "commandName";
+export type ProfileFormErrorField = "displayName" | "commandLine";
 
 export type CommandLineParseError =
   | "empty"
   | "unclosed_quote"
+  | "trailing_escape"
   | "shell_syntax"
   | "shell_expansion";
 
@@ -121,6 +122,9 @@ export function parseCommandLine(input: string): ParsedCommandLine {
         i += 1;
         continue;
       }
+      if (ch === "\\") {
+        return { ok: false, error: "trailing_escape" };
+      }
       if (ch === "'" || ch === '"') {
         quote = ch;
         tokenStarted = true;
@@ -142,7 +146,10 @@ export function parseCommandLine(input: string): ParsedCommandLine {
       i += 1;
       continue;
     }
-    if (ch === "`" || ch === "$") {
+    if (quote === '"' && ch === "\\") {
+      return { ok: false, error: "trailing_escape" };
+    }
+    if (quote !== "'" && (ch === "`" || ch === "$")) {
       return {
         ok: false,
         error: ch === "$" ? "shell_expansion" : "shell_syntax",
@@ -179,7 +186,7 @@ export function validateProfileForm(
 ): ProfileFormErrorField[] {
   const errors: ProfileFormErrorField[] = [];
   if (!values.displayName.trim()) errors.push("displayName");
-  if (!values.commandLine.trim()) errors.push("commandName");
+  if (!values.commandLine.trim()) errors.push("commandLine");
   return errors;
 }
 

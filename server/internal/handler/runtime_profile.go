@@ -294,10 +294,6 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CommandName != nil {
 		cmd := strings.TrimSpace(*req.CommandName)
-		if cmd == "" {
-			writeError(w, http.StatusBadRequest, "command_name cannot be empty")
-			return
-		}
 		if err := validateRuntimeProfileCommandName(cmd); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

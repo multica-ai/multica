@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { RuntimeProfile } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
@@ -10,6 +10,10 @@ import enRuntimes from "../../locales/en/runtimes.json";
 const queryState = vi.hoisted(() => ({
   profiles: [] as RuntimeProfile[],
   isLoading: false,
+}));
+const mutationState = vi.hoisted(() => ({
+  createProfile: vi.fn(),
+  updateProfile: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -28,6 +32,20 @@ vi.mock("@tanstack/react-query", async () => {
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
+}));
+
+vi.mock("@multica/core/runtimes", () => ({
+  runtimeProfileListOptions: vi.fn((wsId: string) => ({
+    queryKey: ["runtime-profiles", wsId, "list"],
+  })),
+  useCreateRuntimeProfile: vi.fn(() => ({
+    isPending: false,
+    mutateAsync: mutationState.createProfile,
+  })),
+  useUpdateRuntimeProfile: vi.fn(() => ({
+    isPending: false,
+    mutateAsync: mutationState.updateProfile,
+  })),
 }));
 
 vi.mock("./delete-runtime-profile-dialog", () => ({
@@ -73,6 +91,13 @@ describe("RuntimeProfilesDialog", () => {
     queryState.profiles = [];
     queryState.isLoading = false;
     vi.clearAllMocks();
+    mutationState.createProfile.mockResolvedValue(
+      profile({
+        command_name: "agent",
+        fixed_args: ["--model", "composer-2.5"],
+      }),
+    );
+    mutationState.updateProfile.mockResolvedValue(profile());
   });
 
   it("shows the custom empty state and keeps built-in protocols collapsed", () => {
@@ -141,5 +166,38 @@ describe("RuntimeProfilesDialog", () => {
     expect(
       screen.queryByText(/claude is a built-in protocol family/),
     ).not.toBeInTheDocument();
+  });
+
+  it("parses a pasted command line into fixed_args on create", async () => {
+    renderDialog();
+
+    const newRuntimeButtons = screen.getAllByRole("button", {
+      name: "New custom runtime",
+    });
+    expect(newRuntimeButtons[0]).toBeDefined();
+    fireEvent.click(newRuntimeButtons[0]!);
+    fireEvent.click(screen.getByRole("radio", { name: /codex/i }));
+    fireEvent.change(screen.getByLabelText("Display name"), {
+      target: { value: "Composer Agent" },
+    });
+    fireEvent.change(screen.getByLabelText("Command"), {
+      target: { value: "agent --model composer-2.5" },
+    });
+
+    expect(screen.getByText("Executable:")).toBeInTheDocument();
+    expect(screen.getByText("agent")).toBeInTheDocument();
+    expect(screen.getByText("--model")).toBeInTheDocument();
+    expect(screen.getByText("composer-2.5")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create runtime" }));
+
+    await waitFor(() =>
+      expect(mutationState.createProfile).toHaveBeenCalledWith({
+        display_name: "Composer Agent",
+        protocol_family: "codex",
+        command_name: "agent",
+        fixed_args: ["--model", "composer-2.5"],
+      }),
+    );
   });
 });
