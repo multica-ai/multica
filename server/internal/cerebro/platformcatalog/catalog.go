@@ -593,6 +593,16 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:         "manage_collections",
+		Title:       "Manage Collections folder access",
+		Category:    CategoryPermissions,
+		Description: "Set or remove who may see a Collections folder (and everything inside it) — the per-folder access grants behind Settings → Collections, across Documents, Notes, Autopilots, and Skills (FIR-1590).",
+		Ops: []string{
+			"PUT /api/cerebro/folder-grants/",
+			"DELETE /api/cerebro/folder-grants/",
+		},
+	},
+	{
 		Key:         "manage_roles",
 		Title:       "Manage roles",
 		Category:    CategoryPermissions,
