@@ -8,7 +8,8 @@
     "show_archived": "아카이브 표시",
     "hide_archived": "아카이브 숨기기",
     "top_level_only": "최상위만",
-    "show_all_issues": "모든 이슈 표시"
+    "show_all_issues": "모든 이슈 표시",
+    "top_level_only_disabled_by_parent": "상위 이슈로 그룹화된 경우 사용할 수 없음"
   },
   "status": {
     "backlog": "백로그",
