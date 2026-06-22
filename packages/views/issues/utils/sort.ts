@@ -45,5 +45,10 @@ export function sortIssues(
         return a.position - b.position;
     }
   });
+  // `position` (manual order) is directionless by contract: the page query
+  // sends sort_direction=undefined for it, and the header hides the direction
+  // toggle in manual mode. A stale "desc" left over from a prior field-sort
+  // must not reverse the manual order, so never apply direction to position.
+  if (field === "position") return sorted;
   return direction === "desc" ? sorted.reverse() : sorted;
 }
