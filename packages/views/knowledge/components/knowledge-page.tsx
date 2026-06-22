@@ -149,6 +149,10 @@ function statusTimestamp(item: KnowledgeItem): string | null {
   return item.published_at ?? item.reviewed_at ?? item.archived_at ?? item.deprecated_at ?? item.updated_at;
 }
 
+function knowledgeStatusLabel(status: KnowledgeStatusView, t: ReturnType<typeof useT<"knowledge">>["t"]): string {
+  return status === "all" ? t(($) => $.status.all) : t(($) => $.status[status]);
+}
+
 function feedbackLabel(value: string, t: ReturnType<typeof useT<"knowledge">>["t"]): string {
   switch (value) {
     case "helpful":
@@ -1251,16 +1255,32 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold">{t(($) => $.page.title)}</h1>
         </div>
-        <div className="relative hidden w-72 md:block">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t(($) => $.page.search)}
-            className="pl-8"
-          />
-        </div>
-        <div className="flex items-center gap-1 rounded-md border p-1">
+        {workspaceView === "knowledge" && (
+          <div className="hidden items-center gap-2 md:flex">
+            <div className="relative w-72">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t(($) => $.page.search)}
+                className="h-9 pl-8"
+              />
+            </div>
+            <Select value={view} onValueChange={(value) => setView(value as KnowledgeStatusView)}>
+              <SelectTrigger size="sm" className="!h-9 w-28">
+                <SelectValue>{knowledgeStatusLabel(view, t)}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_OPTIONS.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {knowledgeStatusLabel(status, t)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        <div className="flex h-9 items-center gap-1 rounded-md border p-0.5">
           {(["knowledge", "review", "candidates", "analytics"] as KnowledgeWorkspaceView[]).map((mode) => (
             <Button
               key={mode}
@@ -1273,7 +1293,7 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
           ))}
         </div>
         {workspaceView === "analytics" && (
-          <div className="flex items-center gap-1 rounded-md border p-1">
+          <div className="flex h-9 items-center gap-1 rounded-md border p-0.5">
             {(["items", "effect"] as AnalyticsSubView[]).map((sub) => (
               <Button
                 key={sub}
@@ -1286,34 +1306,34 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
             ))}
           </div>
         )}
-        {workspaceView === "knowledge" && (
-          <Select value={view} onValueChange={(value) => setView(value as KnowledgeStatusView)}>
-            <SelectTrigger size="sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_OPTIONS.map((status) => (
-                <SelectItem key={status} value={status}>
-                  {status === "all" ? t(($) => $.status.all) : t(($) => $.status[status])}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
       </PageHeader>
 
       <div className="flex min-h-0 flex-1">
         {workspaceView === "knowledge" && (
           <aside className="flex w-96 shrink-0 flex-col border-r">
           <div className="border-b p-3 md:hidden">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t(($) => $.page.search)}
-                className="pl-8"
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={t(($) => $.page.search)}
+                  className="h-9 pl-8"
+                />
+              </div>
+              <Select value={view} onValueChange={(value) => setView(value as KnowledgeStatusView)}>
+                <SelectTrigger size="sm" className="!h-9 w-28 shrink-0">
+                  <SelectValue>{knowledgeStatusLabel(view, t)}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {knowledgeStatusLabel(status, t)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
