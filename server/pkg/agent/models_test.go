@@ -331,6 +331,21 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	}
 }
 
+func TestListModelsQoderWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "qoder")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "qoder", "/nonexistent/qodercli")
+	if err != nil {
+		t.Fatalf("ListModels(qoder) error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
 func TestListModelsUnknownProvider(t *testing.T) {
 	ctx := context.Background()
 	_, err := ListModels(ctx, "nonexistent", "")
