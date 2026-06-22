@@ -35,6 +35,72 @@ export function addDaysDateOnly(days: number): string {
   return toDateOnly(d);
 }
 
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — dynamic relative date ranges.
+// A relative range is stored as (direction × amount × unit) and re-derived from
+// "today" every time it is matched/rendered, so "in the last 7 days" stays live
+// instead of freezing to the day it was picked. See relativeDateWindow().
+export type RelativeDateUnit = "day" | "week" | "month" | "quarter" | "year";
+export type RelativeDateDirection = "past" | "next";
+
+export interface RelativeDateSpec {
+  direction: RelativeDateDirection;
+  amount: number;
+  unit: RelativeDateUnit;
+}
+
+/**
+ * Shift a Date by `amount` of `unit`, mutating in place. Month/quarter/year use
+ * calendar math (setMonth/setFullYear) so "1 month ago" tracks the calendar,
+ * not a fixed 30 days; day/week use day math.
+ */
+function shiftByUnit(d: Date, amount: number, unit: RelativeDateUnit): void {
+  switch (unit) {
+    case "day":
+      d.setDate(d.getDate() + amount);
+      break;
+    case "week":
+      d.setDate(d.getDate() + amount * 7);
+      break;
+    case "month":
+      d.setMonth(d.getMonth() + amount);
+      break;
+    case "quarter":
+      d.setMonth(d.getMonth() + amount * 3);
+      break;
+    case "year":
+      d.setFullYear(d.getFullYear() + amount);
+      break;
+  }
+}
+
+/**
+ * Resolve a relative spec to a concrete [from, to] calendar-day window anchored
+ * at today (viewer's local calendar). "Past" ends today and reaches back;
+ * "next" starts today and reaches forward. For the day unit the window is
+ * inclusive-of-today over `amount` days (so "last 7 days" = today and the 6
+ * days before, matching how Linear/shadcn label it); other units use a plain
+ * calendar shift from today.
+ */
+export function relativeDateWindow(spec: RelativeDateSpec): {
+  from: string;
+  to: string;
+} {
+  const amount = Math.max(1, Math.floor(spec.amount || 1));
+  const today = new Date();
+  if (spec.unit === "day") {
+    const offset = amount - 1;
+    return spec.direction === "past"
+      ? { from: addDaysDateOnly(-offset), to: todayDateOnly() }
+      : { from: todayDateOnly(), to: addDaysDateOnly(offset) };
+  }
+  const edge = new Date(today);
+  shiftByUnit(edge, spec.direction === "past" ? -amount : amount, spec.unit);
+  const edgeStr = toDateOnly(edge);
+  return spec.direction === "past"
+    ? { from: edgeStr, to: todayDateOnly() }
+    : { from: todayDateOnly(), to: edgeStr };
+}
+
 /**
  * Parse a date-only string into [year, month, day], tolerating a legacy full
  * ISO timestamp by reading its UTC calendar day. Returns null when unparseable.

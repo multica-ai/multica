@@ -82,7 +82,12 @@ import {
   type ViewMode,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
-import { addDaysDateOnly, dateOnlyToLocalDate, formatDateOnly, toDateOnly, todayDateOnly } from "@multica/core/issues/date";
+import { addDaysDateOnly, dateOnlyToLocalDate, formatDateOnly, toDateOnly, todayDateOnly, relativeDateWindow } from "@multica/core/issues/date";
+import type { RelativeDateSpec, RelativeDateUnit, RelativeDateDirection } from "@multica/core/issues/date";
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — shared preset helpers + dynamic resolver.
+import { buildDatePreset, RELATIVE_PRESETS, DUE_PRESETS, DATE_PRESET_LABEL_KEY } from "../utils/cerebro-date-presets";
+import { NativeSelect, NativeSelectOption } from "@multica/ui/components/ui/native-select";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   useIssuesScopeStore,
   type IssuesScope,
@@ -543,51 +548,22 @@ function LabelSubContent({
 // Date sub-menu content
 // ---------------------------------------------------------------------------
 
-// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date-condition
-// builder for My Issues. Maps each preset id to an existing i18n label key.
-const DATE_PRESET_LABEL_KEY: Record<
-  Exclude<IssueDatePreset, "custom">,
-  | "date_today"
-  | "date_last_3_days"
-  | "date_last_7_days"
-  | "date_due_overdue"
-  | "date_due_this_week"
-  | "date_due_none"
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — preset helpers, presets and
+// the dynamic window resolver now live in ./utils/cerebro-date-presets so the
+// matcher and the UI share one source of truth (imported at the top of file).
+
+const RELATIVE_UNITS: RelativeDateUnit[] = ["day", "week", "month", "quarter", "year"];
+
+const DATE_UNIT_LABEL_KEY: Record<
+  RelativeDateUnit,
+  "date_unit_day" | "date_unit_week" | "date_unit_month" | "date_unit_quarter" | "date_unit_year"
 > = {
-  today: "date_today",
-  last_3_days: "date_last_3_days",
-  last_7_days: "date_last_7_days",
-  overdue: "date_due_overdue",
-  this_week: "date_due_this_week",
-  none: "date_due_none",
+  day: "date_unit_day",
+  week: "date_unit_week",
+  month: "date_unit_month",
+  quarter: "date_unit_quarter",
+  year: "date_unit_year",
 };
-
-const RELATIVE_PRESETS = ["today", "last_3_days", "last_7_days"] as const;
-const DUE_PRESETS = ["overdue", "this_week", "none"] as const;
-
-// Build a concrete IssueDateFilter for a preset. Due-date presets pin
-// field=due_date by construction; relative presets honour the chosen field.
-function buildDatePreset(
-  field: IssueDateField,
-  preset: IssueDatePreset,
-): IssueDateFilter {
-  switch (preset) {
-    case "today":
-      return { field, from: todayDateOnly(), to: todayDateOnly(), preset };
-    case "last_3_days":
-      return { field, from: addDaysDateOnly(-2), to: todayDateOnly(), preset };
-    case "last_7_days":
-      return { field, from: addDaysDateOnly(-6), to: todayDateOnly(), preset };
-    case "overdue":
-      return { field: "due_date", from: "1970-01-01", to: addDaysDateOnly(-1), preset };
-    case "this_week":
-      return { field: "due_date", from: todayDateOnly(), to: addDaysDateOnly(6), preset };
-    case "none":
-      return { field: "due_date", from: todayDateOnly(), to: todayDateOnly(), mode: "none", preset };
-    default:
-      return { field, from: todayDateOnly(), to: todayDateOnly(), preset: "custom" };
-  }
-}
 
 // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — editor for ONE stacked date
 // condition (field + value). onChange replaces the condition; onRemove drops it.
@@ -601,11 +577,21 @@ function DateConditionEditor({
   onRemove: () => void;
 }) {
   const { t } = useT("issues");
-  const [range, setRange] = useState<LocalDateRange | undefined>(() => {
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — staged popover state. The
+  // custom-range popover is CONTROLLED so Apply can both commit and close it;
+  // edits stage locally and commit only on Apply (close-on-apply was the bug).
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"relative" | "absolute">(value.relative ? "relative" : "absolute");
+  const [direction, setDirection] = useState<RelativeDateDirection>(value.relative?.direction ?? "past");
+  const [amount, setAmount] = useState<number>(value.relative?.amount ?? 7);
+  const [unit, setUnit] = useState<RelativeDateUnit>(value.relative?.unit ?? "day");
+  const initialRange = (): LocalDateRange | undefined => {
+    if (value.relative) return undefined;
     const from = dateOnlyToLocalDate(value.from);
     if (!from) return undefined;
     return { from, to: dateOnlyToLocalDate(value.to) };
-  });
+  };
+  const [range, setRange] = useState<LocalDateRange | undefined>(initialRange);
 
   const changeField = (nextField: IssueDateField) => {
     if (nextField === value.field) return;
@@ -621,13 +607,40 @@ function DateConditionEditor({
     }
   };
 
+  const resetStaged = () => {
+    setMode(value.relative ? "relative" : "absolute");
+    setDirection(value.relative?.direction ?? "past");
+    setAmount(value.relative?.amount ?? 7);
+    setUnit(value.relative?.unit ?? "day");
+    setRange(initialRange());
+  };
+
+  // Apply commits the staged value AND closes the popover. Relative ranges store
+  // a `relative` spec so they re-derive dynamically; absolute ranges store fixed
+  // from/to. This is the fix for "Apply does nothing / window stays open".
   const applyCustom = () => {
-    if (!range?.from) return;
-    const [from, to] = normalizeDateRange(range.from, range.to ?? range.from);
-    onChange({ field: value.field, from: toDateOnly(from), to: toDateOnly(to), preset: "custom" });
+    if (mode === "relative") {
+      const safe = Math.max(1, Math.floor(amount || 1));
+      const spec: RelativeDateSpec = { direction, amount: safe, unit };
+      const win = relativeDateWindow(spec);
+      onChange({ field: value.field, from: win.from, to: win.to, preset: "custom", relative: spec });
+    } else {
+      if (!range?.from) return;
+      const [from, to] = normalizeDateRange(range.from, range.to ?? range.from);
+      onChange({ field: value.field, from: toDateOnly(from), to: toDateOnly(to), preset: "custom" });
+    }
+    setOpen(false);
+  };
+
+  const cancelCustom = () => {
+    resetStaged();
+    setOpen(false);
   };
 
   const valueOptions = value.field === "due_date" ? DUE_PRESETS : RELATIVE_PRESETS;
+  const applyDisabled = mode === "absolute" && !range?.from;
+  const toggleBtn = (active: boolean) =>
+    `h-7 flex-1 ${active ? "" : "text-muted-foreground"}`;
 
   return (
     <>
@@ -658,7 +671,7 @@ function DateConditionEditor({
       </DropdownMenuRadioGroup>
 
       <div className="px-1.5 py-1">
-        <Popover>
+        <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger
             render={
               <Button
@@ -670,15 +683,82 @@ function DateConditionEditor({
               </Button>
             }
           />
-          <PopoverContent align="start" side="right" className="w-auto gap-0 p-0">
-            <Calendar
-              mode="range"
-              selected={range}
-              onSelect={(next) => setRange(next)}
-              captionLayout="dropdown"
-            />
-            <div className="flex justify-end border-t p-2">
-              <Button size="sm" onClick={applyCustom} disabled={!range?.from}>
+          <PopoverContent align="start" side="right" className="w-72 gap-0 p-0">
+            <div className="flex gap-1 border-b p-1.5">
+              <Button
+                variant={mode === "relative" ? "secondary" : "ghost"}
+                size="sm"
+                className={toggleBtn(mode === "relative")}
+                onClick={() => setMode("relative")}
+              >
+                {t(($) => $.filters.date_mode_relative)}
+              </Button>
+              <Button
+                variant={mode === "absolute" ? "secondary" : "ghost"}
+                size="sm"
+                className={toggleBtn(mode === "absolute")}
+                onClick={() => setMode("absolute")}
+              >
+                {t(($) => $.filters.date_mode_absolute)}
+              </Button>
+            </div>
+
+            {mode === "relative" ? (
+              <div className="flex flex-col gap-2 p-2">
+                <div className="flex gap-1">
+                  <Button
+                    variant={direction === "past" ? "secondary" : "ghost"}
+                    size="sm"
+                    className={toggleBtn(direction === "past")}
+                    onClick={() => setDirection("past")}
+                  >
+                    {t(($) => $.filters.date_dir_past)}
+                  </Button>
+                  <Button
+                    variant={direction === "next" ? "secondary" : "ghost"}
+                    size="sm"
+                    className={toggleBtn(direction === "next")}
+                    onClick={() => setDirection("next")}
+                  >
+                    {t(($) => $.filters.date_dir_next)}
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    value={amount}
+                    onChange={(e) => setAmount(Number(e.target.value))}
+                    className="h-8 w-16"
+                  />
+                  <NativeSelect
+                    className="flex-1"
+                    value={unit}
+                    onChange={(e) => setUnit(e.target.value as RelativeDateUnit)}
+                  >
+                    {RELATIVE_UNITS.map((u) => (
+                      <NativeSelectOption key={u} value={u}>
+                        {t(($) => $.filters[DATE_UNIT_LABEL_KEY[u]])}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </div>
+              </div>
+            ) : (
+              <Calendar
+                mode="range"
+                numberOfMonths={2}
+                selected={range}
+                onSelect={(next) => setRange(next)}
+                captionLayout="dropdown"
+              />
+            )}
+
+            <div className="flex justify-end gap-2 border-t p-2">
+              <Button variant="ghost" size="sm" onClick={cancelCustom}>
+                {t(($) => $.filters.date_cancel)}
+              </Button>
+              <Button size="sm" onClick={applyCustom} disabled={applyDisabled}>
                 {t(($) => $.filters.date_apply)}
               </Button>
             </div>
@@ -709,6 +789,15 @@ function DateBuilderSubContent({
   const valueLabel = (c: IssueDateFilter): string => {
     if (c.preset && c.preset !== "custom") return t(($) => $.filters[DATE_PRESET_LABEL_KEY[c.preset as Exclude<IssueDatePreset, "custom">]]);
     if (c.mode === "none") return t(($) => $.filters.date_due_none);
+    // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — dynamic relative range
+    // reads as a sentence ("In the last 7 days") instead of frozen dates.
+    if (c.relative) {
+      const unit = t(($) => $.filters[DATE_UNIT_LABEL_KEY[c.relative!.unit]]);
+      const dir = c.relative.direction === "past"
+        ? t(($) => $.filters.date_dir_past)
+        : t(($) => $.filters.date_dir_next);
+      return `${dir} ${c.relative.amount} ${unit}`;
+    }
     const from = formatDateOnly(c.from);
     const to = formatDateOnly(c.to);
     return from === to ? from : `${from} – ${to}`;

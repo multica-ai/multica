@@ -10,6 +10,8 @@ import type { IssueStatus, IssuePriority } from "../../types";
 import { ALL_STATUSES } from "../config";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — dynamic relative date spec.
+import type { RelativeDateSpec } from "../date";
 
 export type ViewMode = "board" | "list" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
@@ -36,6 +38,12 @@ export interface IssueDateFilter {
   // days", "This week", …) without reverse-engineering the from/to range.
   // Purely cosmetic: matching and the server ignore it. Absent → "Custom".
   preset?: IssueDatePreset;
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — when present, this is a
+  // DYNAMIC range: matching re-derives [from,to] from "today" via
+  // relativeDateWindow() on every render, so "in the last 7 days" stays live.
+  // from/to are kept only as a display/last-known cache. Absent → from/to are
+  // authoritative (an absolute calendar range or a named-preset re-derivation).
+  relative?: RelativeDateSpec;
 }
 
 // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — preset identifiers for the

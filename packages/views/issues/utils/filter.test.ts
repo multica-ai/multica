@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Issue } from "@multica/core/types";
 import { filterIssues, type IssueFilters } from "./filter";
+import { addDaysDateOnly, todayDateOnly } from "@multica/core/issues/date";
 
 const NO_FILTER: IssueFilters = {
   statusFilters: [],
@@ -344,5 +345,57 @@ describe("filterIssues dateFilters (stacked, AND)", () => {
       dateFilters: [{ field: "due_date", from: "x", to: "x", mode: "none" }],
     });
     expect(result.map((i) => i.id)).toEqual(["S4"]);
+  });
+});
+
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — dynamic ranges must re-derive
+// their window from "today" at match time, ignoring the stale cached from/to. A
+// stored ancient from/to proves the matcher recomputes rather than freezing.
+describe("filterIssues dynamic date ranges (FIR-1658)", () => {
+  const today = todayDateOnly();
+  const createdToday = makeIssue({ id: "today", created_at: today });
+  const created30dAgo = makeIssue({ id: "old", created_at: addDaysDateOnly(-30) });
+  const dueIn3d = makeIssue({ id: "soon", due_date: addDaysDateOnly(3) });
+  const dueIn30d = makeIssue({ id: "later", due_date: addDaysDateOnly(30) });
+  const pool = [createdToday, created30dAgo, dueIn3d, dueIn30d];
+
+  it("re-derives a relative 'in the last 7 days' range, ignoring stale from/to", () => {
+    const result = filterIssues(pool, {
+      ...NO_FILTER,
+      dateFilters: [
+        { field: "created_at", from: "2000-01-01", to: "2000-01-02", preset: "custom", relative: { direction: "past", amount: 7, unit: "day" } },
+      ],
+    });
+    expect(result.map((i) => i.id)).toEqual(["today"]);
+  });
+
+  it("re-derives a relative 'in the next 7 days' due range", () => {
+    const result = filterIssues(pool, {
+      ...NO_FILTER,
+      dateFilters: [
+        { field: "due_date", from: "2000-01-01", to: "2000-01-02", preset: "custom", relative: { direction: "next", amount: 7, unit: "day" } },
+      ],
+    });
+    expect(result.map((i) => i.id)).toEqual(["soon"]);
+  });
+
+  it("re-derives a named preset (last_7_days) from today, ignoring stale from/to", () => {
+    const result = filterIssues(pool, {
+      ...NO_FILTER,
+      dateFilters: [
+        { field: "created_at", from: "2000-01-01", to: "2000-01-02", preset: "last_7_days" },
+      ],
+    });
+    expect(result.map((i) => i.id)).toEqual(["today"]);
+  });
+
+  it("keeps absolute custom ranges fixed (no relative spec)", () => {
+    const result = filterIssues(pool, {
+      ...NO_FILTER,
+      dateFilters: [
+        { field: "created_at", from: addDaysDateOnly(-1), to: addDaysDateOnly(1), preset: "custom" },
+      ],
+    });
+    expect(result.map((i) => i.id)).toEqual(["today"]);
   });
 });

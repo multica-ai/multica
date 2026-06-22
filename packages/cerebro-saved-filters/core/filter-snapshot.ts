@@ -1,6 +1,16 @@
-import type { IssueViewState } from "@multica/core/issues/stores/view-store";
+import type { IssueDateFilter, IssueViewState } from "@multica/core/issues/stores/view-store";
 
 import type { FilterSnapshot } from "./types";
+
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — structural id for a date
+// condition. Relative ranges key on their spec (the from/to are a drifting
+// cache); everything else keys on field+from+to+mode.
+function dateSignature(d: IssueDateFilter): string {
+  if (d.relative) {
+    return `${d.field}:rel:${d.relative.direction}:${d.relative.amount}:${d.relative.unit}`;
+  }
+  return `${d.field}:${d.from}:${d.to}:${d.mode ?? "range"}`;
+}
 
 /**
  * extractFilterSnapshot copies the filter-relevant slice out of the live view
@@ -91,10 +101,11 @@ export function snapshotsEqual(a: FilterSnapshot, b: FilterSnapshot): boolean {
     setEq(a.onBehalfOfFilters, b.onBehalfOfFilters) &&
     a.agentRunningFilter === b.agentRunningFilter &&
     // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — compare stacked dates
-    // (order-insensitive on the field+from+to+mode signature).
+    // (order-insensitive). A relative range is identified by its spec, not its
+    // cached from/to (which drift daily); absolute ranges use field+from+to+mode.
     setEq(
-      (a.dateFilters ?? []).map((d) => `${d.field}:${d.from}:${d.to}:${d.mode ?? "range"}`),
-      (b.dateFilters ?? []).map((d) => `${d.field}:${d.from}:${d.to}:${d.mode ?? "range"}`),
+      (a.dateFilters ?? []).map(dateSignature),
+      (b.dateFilters ?? []).map(dateSignature),
     )
   );
 }

@@ -2,6 +2,9 @@ import type { Issue, IssueStatus, IssuePriority } from "@multica/core/types";
 import type { ActorFilterValue, IssueDateFilter } from "@multica/core/issues/stores/view-store";
 // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — client-side date matching for My Issues.
 import { dateOnlyToUTCDate } from "@multica/core/issues/date";
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — dynamic window resolver so
+// presets and relative ranges re-derive from "today" instead of frozen from/to.
+import { resolveDateWindow } from "./cerebro-date-presets";
 
 export interface IssueFilters {
   statusFilters: IssueStatus[];
@@ -48,9 +51,11 @@ function matchesDateFilter(issue: Issue, filter: IssueDateFilter): boolean {
         ? issue.created_at
         : issue.updated_at;
   if (!raw) return false;
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — re-derive the window now.
+  const win = resolveDateWindow(filter);
   const day = dateOnlyToUTCDate(raw);
-  const from = dateOnlyToUTCDate(filter.from);
-  const to = dateOnlyToUTCDate(filter.to);
+  const from = dateOnlyToUTCDate(win.from);
+  const to = dateOnlyToUTCDate(win.to);
   if (!day || !from || !to) return false;
   return day.getTime() >= from.getTime() && day.getTime() <= to.getTime();
 }

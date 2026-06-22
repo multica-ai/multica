@@ -32,6 +32,15 @@ const dateFilterSchema = z.object({
   preset: z
     .enum(["today", "last_3_days", "last_7_days", "overdue", "this_week", "none", "custom"])
     .optional(),
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — dynamic relative range so
+  // a saved filter re-derives its window from "today" on apply.
+  relative: z
+    .object({
+      direction: z.enum(["past", "next"]),
+      amount: z.number(),
+      unit: z.enum(["day", "week", "month", "quarter", "year"]),
+    })
+    .optional(),
 });
 
 // Every field defaults so a partial / drifted snapshot from an older client

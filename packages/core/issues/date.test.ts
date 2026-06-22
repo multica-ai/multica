@@ -7,6 +7,7 @@ import {
   dateOnlyToLocalDate,
   formatDateOnly,
   isPastDateOnly,
+  relativeDateWindow,
 } from "./date";
 
 describe("issue date-only helpers", () => {
@@ -62,5 +63,38 @@ describe("issue date-only helpers", () => {
     expect(isPastDateOnly(todayDateOnly())).toBe(false);
     expect(isPastDateOnly(addDaysDateOnly(1))).toBe(false);
     expect(isPastDateOnly(null)).toBe(false);
+  });
+
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — dynamic relative windows.
+  describe("relativeDateWindow", () => {
+    it("past N days is inclusive of today (last 7 days = today and 6 before)", () => {
+      const w = relativeDateWindow({ direction: "past", amount: 7, unit: "day" });
+      expect(w.to).toBe(todayDateOnly());
+      expect(w.from).toBe(addDaysDateOnly(-6));
+    });
+
+    it("next N days starts today (next 7 days = today and 6 after)", () => {
+      const w = relativeDateWindow({ direction: "next", amount: 7, unit: "day" });
+      expect(w.from).toBe(todayDateOnly());
+      expect(w.to).toBe(addDaysDateOnly(6));
+    });
+
+    it("past 1 day collapses to just today", () => {
+      const w = relativeDateWindow({ direction: "past", amount: 1, unit: "day" });
+      expect(w.from).toBe(todayDateOnly());
+      expect(w.to).toBe(todayDateOnly());
+    });
+
+    it("weeks use a 7-day-per-week shift from today", () => {
+      const w = relativeDateWindow({ direction: "past", amount: 2, unit: "week" });
+      expect(w.to).toBe(todayDateOnly());
+      expect(w.from).toBe(addDaysDateOnly(-14));
+    });
+
+    it("clamps a non-positive amount to 1", () => {
+      const w = relativeDateWindow({ direction: "past", amount: 0, unit: "day" });
+      expect(w.from).toBe(todayDateOnly());
+      expect(w.to).toBe(todayDateOnly());
+    });
   });
 });
