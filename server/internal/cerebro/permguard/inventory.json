@@ -685,6 +685,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/channels/{id}/threads/{rootId}/read",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/channels/{id}/unread",
       "gate": "workspace_member"
     },

@@ -63,6 +63,18 @@ WHERE recipient_type = 'member'
   AND read = FALSE
   AND archived = FALSE;
 
+-- CEREBRO-PATCH(inbox-thread-split-unread): FIR-1854 — channel badge that
+-- excludes thread replies (details.thread_root_id present). A reply living
+-- inside a thread shows on its own split inbox row, not on the channel count.
+-- name: CountUnreadInboxForChannelExcludingThreads :one
+SELECT count(*) FROM inbox_item
+WHERE recipient_type = 'member'
+  AND recipient_id = $1
+  AND issue_id = $2
+  AND read = FALSE
+  AND archived = FALSE
+  AND (details->>'thread_root_id') IS NULL;
+
 -- CEREBRO-PATCH(sqlc-channel-dm-promote): JEH-1131 — DM auto-promotion
 -- on third-party mention. The PromoteDMToChannel and
 -- ListChannelParticipantNames queries below are cerebro-only; upstream

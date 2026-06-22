@@ -929,3 +929,66 @@ func (q *Queries) MarkInboxReadByIssue(ctx context.Context, arg MarkInboxReadByI
 	}
 	return result.RowsAffected(), nil
 }
+
+const markInboxReadByIssueExcludingThreads = `-- name: MarkInboxReadByIssueExcludingThreads :execrows
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4
+  AND read = false AND archived = false
+  AND (details->>'thread_root_id') IS NULL
+`
+
+type MarkInboxReadByIssueExcludingThreadsParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+}
+
+// CEREBRO-PATCH(inbox-thread-split-markread): FIR-1854 — mark a channel/DM read
+// WITHOUT touching replies that live in a thread (details.thread_root_id set),
+// so opening the conversation leaves unread thread rows intact (Slack-style
+// independent thread read state).
+func (q *Queries) MarkInboxReadByIssueExcludingThreads(ctx context.Context, arg MarkInboxReadByIssueExcludingThreadsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markInboxReadByIssueExcludingThreads,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.IssueID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markInboxReadByThreadRoot = `-- name: MarkInboxReadByThreadRoot :execrows
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4
+  AND (details->>'thread_root_id') = $5::text
+  AND read = false AND archived = false
+`
+
+type MarkInboxReadByThreadRootParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	ThreadRootID  string      `json:"thread_root_id"`
+}
+
+// CEREBRO-PATCH(inbox-thread-split-threadread): FIR-1854 — mark only the inbox
+// rows belonging to one thread (matched on details.thread_root_id) read, so
+// opening a thread clears just that thread and not the rest of the channel.
+func (q *Queries) MarkInboxReadByThreadRoot(ctx context.Context, arg MarkInboxReadByThreadRootParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markInboxReadByThreadRoot,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.IssueID,
+		arg.ThreadRootID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

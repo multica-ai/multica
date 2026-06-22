@@ -329,10 +329,11 @@ func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 			CreatorType:  row.CreatorType,
 			CreatorID:    uuidToString(row.CreatorID),
 			Participants: h.loadParticipants(r.Context(), row.ID),
-			UnreadCount:  h.unreadInboxCount(r.Context(), userID, row.ID),
-			LastMessage:  lastMessages[uuidToString(row.ID)],
-			CreatedAt:    timestampToString(row.CreatedAt),
-			UpdatedAt:    timestampToString(row.UpdatedAt),
+			// CEREBRO-PATCH(inbox-thread-split-unread): FIR-1854 — pass workspace for the thread-split flag.
+			UnreadCount: h.unreadInboxCount(r.Context(), row.WorkspaceID, userID, row.ID),
+			LastMessage: lastMessages[uuidToString(row.ID)],
+			CreatedAt:   timestampToString(row.CreatedAt),
+			UpdatedAt:   timestampToString(row.UpdatedAt),
 		}
 		applyChannelState(&channel, mutedStates, unreadStates) // CEREBRO-PATCH(channel-state-apply): TECH-3352
 		resp = append(resp, channel)
@@ -437,12 +438,8 @@ func (h *Handler) MarkChannelRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := h.Queries.MarkInboxReadByIssue(r.Context(), db.MarkInboxReadByIssueParams{
-		WorkspaceID:   parseUUID(workspaceID),
-		RecipientType: "member",
-		RecipientID:   parseUUID(userID),
-		IssueID:       issue.ID,
-	})
+	// CEREBRO-PATCH(inbox-thread-split-markread): FIR-1854 — leave unread thread replies intact when marking the channel read.
+	count, err := h.cerebroMarkChannelRead(r.Context(), parseUUID(workspaceID), parseUUID(userID), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark channel read")
 		return
@@ -484,10 +481,11 @@ func (h *Handler) channelToResponse(ctx context.Context, i db.Issue, viewerUserI
 		CreatorType:  i.CreatorType,
 		CreatorID:    uuidToString(i.CreatorID),
 		Participants: h.loadParticipants(ctx, i.ID),
-		UnreadCount:  h.unreadInboxCount(ctx, viewerUserID, i.ID),
-		LastMessage:  lastMessages[uuidToString(i.ID)],
-		CreatedAt:    timestampToString(i.CreatedAt),
-		UpdatedAt:    timestampToString(i.UpdatedAt),
+		// CEREBRO-PATCH(inbox-thread-split-unread): FIR-1854 — pass workspace for the thread-split flag.
+		UnreadCount: h.unreadInboxCount(ctx, i.WorkspaceID, viewerUserID, i.ID),
+		LastMessage: lastMessages[uuidToString(i.ID)],
+		CreatedAt:   timestampToString(i.CreatedAt),
+		UpdatedAt:   timestampToString(i.UpdatedAt),
 	}
 	// CEREBRO-PATCH(channel-state-apply): TECH-3352 — per-user snooze/unread overlay.
 	muted, unreadAt := h.channelStates(ctx, viewerUserID)
@@ -510,15 +508,9 @@ func (h *Handler) loadParticipants(ctx context.Context, issueID pgtype.UUID) []C
 	return out
 }
 
-func (h *Handler) unreadInboxCount(ctx context.Context, userID string, issueID pgtype.UUID) int64 {
-	count, err := h.Queries.CountUnreadInboxForChannel(ctx, db.CountUnreadInboxForChannelParams{
-		RecipientID: parseUUID(userID),
-		IssueID:     issueID,
-	})
-	if err != nil {
-		return 0
-	}
-	return count
+func (h *Handler) unreadInboxCount(ctx context.Context, workspaceID pgtype.UUID, userID string, issueID pgtype.UUID) int64 {
+	// CEREBRO-PATCH(inbox-thread-split-unread): FIR-1854 — exclude thread replies from the channel badge when split is on.
+	return h.cerebroChannelUnreadCount(ctx, workspaceID, userID, issueID)
 }
 
 // CEREBRO-PATCH(channel-state-apply): TECH-3352 — per-user snooze + manual-
@@ -588,10 +580,11 @@ func (h *Handler) listAllChannels(w http.ResponseWriter, r *http.Request, worksp
 			CreatorType:  row.CreatorType,
 			CreatorID:    uuidToString(row.CreatorID),
 			Participants: h.loadParticipants(r.Context(), row.ID),
-			UnreadCount:  h.unreadInboxCount(r.Context(), userID, row.ID),
-			LastMessage:  lastMessages[uuidToString(row.ID)],
-			CreatedAt:    timestampToString(row.CreatedAt),
-			UpdatedAt:    timestampToString(row.UpdatedAt),
+			// CEREBRO-PATCH(inbox-thread-split-unread): FIR-1854 — pass workspace for the thread-split flag.
+			UnreadCount: h.unreadInboxCount(r.Context(), row.WorkspaceID, userID, row.ID),
+			LastMessage: lastMessages[uuidToString(row.ID)],
+			CreatedAt:   timestampToString(row.CreatedAt),
+			UpdatedAt:   timestampToString(row.UpdatedAt),
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)

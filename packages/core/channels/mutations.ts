@@ -47,7 +47,10 @@ export function useMarkChannelRead() {
       );
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
         old?.map((item) =>
-          item.issue_id === channelId && !item.read ? { ...item, read: true } : item,
+          // CEREBRO-PATCH(inbox-thread-split-channel-read-optimistic): FIR-1854 — keep thread replies unread when marking the channel read (mirrors server MarkInboxReadByIssueExcludingThreads).
+          item.issue_id === channelId && !item.read && !item.details?.thread_root_id
+            ? { ...item, read: true }
+            : item,
         ),
       );
 

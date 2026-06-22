@@ -1008,15 +1008,16 @@ var excluded = map[string]string{
 	// not by gating this route; the route is workspace-member + own-agent scoped.
 	"POST /api/agents/{id}/tools/{name}/invoke": "tool-execution — per-tool authorization is enforced by the executor grant cascade (TECH-3226), not by gating the invoke route; route is workspace-member + own-agent scoped",
 
-	"POST /api/invitations/{id}/accept":      "self_only — caller accepting their own invitation",
-	"POST /api/invitations/{id}/decline":     "self_only — caller declining their own invitation",
-	"POST /api/channels/{id}/read":           "self_only — caller marking a channel read",
-	"POST /api/channels/{id}/unread":         "self_only — caller marking a channel unread in their own inbox (TECH-3352)",
-	"POST /api/channels/{id}/mute":           "self_only — caller snoozing a channel in their own inbox (TECH-3352)",
-	"DELETE /api/channels/{id}/mute":         "self_only — caller un-snoozing a channel in their own inbox (TECH-3352)",
-	"POST /api/cerebro/channels/{id}/typing": "self_only — caller broadcasting their own typing indicator to a channel (TECH-3422); no capability gate needed",
-	"POST /api/cerebro/presence/ping":        "self_only — caller pinging their own presence heartbeat (TECH-3422); no capability gate needed",
-	"POST /api/lark/binding/redeem":          "self_only — caller binding their own Lark open_id to their Multica account",
+	"POST /api/invitations/{id}/accept":             "self_only — caller accepting their own invitation",
+	"POST /api/invitations/{id}/decline":            "self_only — caller declining their own invitation",
+	"POST /api/channels/{id}/read":                  "self_only — caller marking a channel read",
+	"POST /api/channels/{id}/threads/{rootId}/read": "self_only — caller marking one channel/DM thread read (FIR-1854)",
+	"POST /api/channels/{id}/unread":                "self_only — caller marking a channel unread in their own inbox (TECH-3352)",
+	"POST /api/channels/{id}/mute":                  "self_only — caller snoozing a channel in their own inbox (TECH-3352)",
+	"DELETE /api/channels/{id}/mute":                "self_only — caller un-snoozing a channel in their own inbox (TECH-3352)",
+	"POST /api/cerebro/channels/{id}/typing":        "self_only — caller broadcasting their own typing indicator to a channel (TECH-3422); no capability gate needed",
+	"POST /api/cerebro/presence/ping":               "self_only — caller pinging their own presence heartbeat (TECH-3422); no capability gate needed",
+	"POST /api/lark/binding/redeem":                 "self_only — caller binding their own Lark open_id to their Multica account",
 
 	// chat sessions — the caller's own AI chat, not an admin-governed action.
 	"POST /api/chat/sessions/":                             "personal-chat — caller's own AI chat session",

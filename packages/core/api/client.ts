@@ -2674,6 +2674,13 @@ export class ApiClient {
     return this.fetch(`/api/channels/${id}/read`, { method: "POST" });
   }
 
+  // CEREBRO-PATCH(inbox-thread-split-threadread-client): FIR-1854 — mark one
+  // channel/DM thread read, independent of the channel's own read state, so
+  // reading a thread does not clear the channel and vice versa.
+  async markThreadRead(channelId: string, rootId: string): Promise<{ count: number }> {
+    return this.fetch(`/api/channels/${channelId}/threads/${rootId}/read`, { method: "POST" });
+  }
+
   // CEREBRO-PATCH(channel-archive-client): JEH-851 — per-user channel archive
   // endpoints. Archive hides the channel from the user's channel list until
   // a new inbox_item lands for it (server clears the row in re-surface

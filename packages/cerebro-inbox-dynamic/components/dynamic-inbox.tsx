@@ -61,6 +61,7 @@ import {
 } from "@multica/core/inbox/mutations";
 import { listenForInboxDefaultTab } from "@multica/core/inbox";
 import { useArchiveChannel } from "@multica/cerebro-channels";
+import { useMarkThreadRead } from "../use-mark-thread-read";
 import {
   GlobalInboxReminderDialog,
   formatPlannedDateTime,
@@ -185,6 +186,8 @@ export function DynamicInbox() {
   const isMobile = useIsMobile();
 
   const markRead = useMarkInboxRead();
+  // FIR-1854 — opening a thread row clears only that thread, not the channel.
+  const markThreadRead = useMarkThreadRead();
   const archiveInbox = useArchiveInbox();
   const archiveChannel = useArchiveChannel();
   // TECH-3541 #2 — workspace-wide bulk maintenance, identical to the classic
@@ -349,6 +352,10 @@ export function DynamicInbox() {
     // TECH-3413 #7 — selecting never auto-advances to the next row; we only
     // ever set the row the user clicked.
     if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
+    // FIR-1854 — opening a thread row clears only that thread (independent of
+    // the channel's own read state).
+    if (entry.kind === "thread" && !entry.item.read)
+      markThreadRead.mutate({ channelId: entry.channelId, rootId: entry.threadRootId });
     // TECH-3598 #2 — non-issue notifs deep-link away instead of opening the pane.
     if (entry.kind === "notif" && routeNonIssueNotif(entry.item)) return;
     setSecretarySelectedKey(null);
@@ -359,6 +366,8 @@ export function DynamicInbox() {
   };
   const onSecretarySelect = (entry: DynInboxEntry) => {
     if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
+    if (entry.kind === "thread" && !entry.item.read)
+      markThreadRead.mutate({ channelId: entry.channelId, rootId: entry.threadRootId });
     if (entry.kind === "notif" && routeNonIssueNotif(entry.item)) return;
     setSecretarySelectedKey(secretaryEntryKey(entry));
     setNewChat(null);
@@ -735,6 +744,9 @@ export function DynamicInbox() {
             key={selected.channelId}
             channelId={selected.channelId}
             initialCommentId={selected.item.details?.comment_id ?? undefined}
+            // FIR-1854 — opening from a thread row must not auto-mark the whole
+            // channel read; onSelect already cleared just this thread.
+            suppressAutoMarkRead
             onArchive={clearSelection}
           />
         </ErrorBoundary>

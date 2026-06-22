@@ -75,9 +75,13 @@ interface ChannelDetailProps {
   // find this comment in the timeline and auto-open its parent thread so the
   // user lands directly on the relevant reply instead of having to scroll/guess.
   initialCommentId?: string;
+  // CEREBRO-PATCH(inbox-thread-split-suppress-automark): FIR-1854 — when opened
+  // from an inbox thread row, the thread is already marked read on select; do
+  // not auto-mark the whole channel read (that would clear unrelated unreads).
+  suppressAutoMarkRead?: boolean;
 }
 
-export function ChannelDetail({ channelId, initialChannel, onArchive, initialCommentId }: ChannelDetailProps) {
+export function ChannelDetail({ channelId, initialChannel, onArchive, initialCommentId, suppressAutoMarkRead }: ChannelDetailProps) {
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
   // CEREBRO-PATCH(channel-moderation-delete): TECH-3698 — workspace admins/owners
@@ -117,7 +121,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
   // stayed unread when focus flickered) and keeps the TECH-3300 focus guard only
   // for new messages that arrive while the conversation is already open.
   // CEREBRO-PATCH(channel-auto-mark-read-hook): TECH-3352 — see cerebro-channels.
-  useChannelAutoMarkRead(channelId, channel?.unread_count);
+  // CEREBRO-PATCH(inbox-thread-split-suppress-automark): FIR-1854 — undefined unread suppresses auto-mark when opened from a thread row.
+  useChannelAutoMarkRead(channelId, suppressAutoMarkRead ? undefined : channel?.unread_count);
 
   // CEREBRO-PATCH(channel-typing): TECH-3664 — live "is typing…" for this channel/DM.
   const { typingUserIds, notifyTyping } = useChannelTyping(channelId);

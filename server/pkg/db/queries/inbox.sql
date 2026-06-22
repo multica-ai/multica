@@ -137,6 +137,25 @@ UPDATE inbox_item SET read = true
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4
   AND read = false AND archived = false;
 
+-- CEREBRO-PATCH(inbox-thread-split-markread): FIR-1854 — mark a channel/DM read
+-- WITHOUT touching replies that live in a thread (details.thread_root_id set),
+-- so opening the conversation leaves unread thread rows intact (Slack-style
+-- independent thread read state).
+-- name: MarkInboxReadByIssueExcludingThreads :execrows
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4
+  AND read = false AND archived = false
+  AND (details->>'thread_root_id') IS NULL;
+
+-- CEREBRO-PATCH(inbox-thread-split-threadread): FIR-1854 — mark only the inbox
+-- rows belonging to one thread (matched on details.thread_root_id) read, so
+-- opening a thread clears just that thread and not the rest of the channel.
+-- name: MarkInboxReadByThreadRoot :execrows
+UPDATE inbox_item SET read = true
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4
+  AND (details->>'thread_root_id') = sqlc.arg(thread_root_id)::text
+  AND read = false AND archived = false;
+
 -- name: ArchiveInboxByIssueAndType :many
 UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false

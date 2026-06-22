@@ -55,6 +55,7 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   start_date_changed: "Start date changed",
   due_date_changed: "Due date changed",
   new_comment: "New comment",
+  dm_message: "Direct message",
   mentioned: "Mentioned",
   review_requested: "Review requested",
   task_completed: "Task completed",

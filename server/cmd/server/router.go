@@ -959,11 +959,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			agentToolScope := middleware.AllowTaskScopeForAgent("id")
 			r.With(agentToolScope).Get("/api/agents/{id}/tools", h.ListAgentTools)
 			r.With(agentToolScope).Post("/api/agents/{id}/tools/{name}/invoke", h.InvokeAgentTool)
-			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess)  // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
-			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/tool-grants", h.AddAgentToolGrant)      // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
-			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/tool-grants", h.RemoveAgentToolGrant) // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
-			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/credential-grants", h.ListAgentCredentialGrants)      // CEREBRO-PATCH(cerebro-agent-credential-grant-write): FIR-1479 agent-centric credential grant write (flag-gated).
-			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/credential-grants", h.AddAgentCredentialGrant)       // CEREBRO-PATCH(cerebro-agent-credential-grant-write): FIR-1479 agent-centric credential grant write (flag-gated).
+			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess)              // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
+			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/tool-grants", h.AddAgentToolGrant)                  // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
+			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/tool-grants", h.RemoveAgentToolGrant)             // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
+			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/credential-grants", h.ListAgentCredentialGrants)     // CEREBRO-PATCH(cerebro-agent-credential-grant-write): FIR-1479 agent-centric credential grant write (flag-gated).
+			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/credential-grants", h.AddAgentCredentialGrant)      // CEREBRO-PATCH(cerebro-agent-credential-grant-write): FIR-1479 agent-centric credential grant write (flag-gated).
 			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/credential-grants", h.RemoveAgentCredentialGrant) // CEREBRO-PATCH(cerebro-agent-credential-grant-write): FIR-1479 agent-centric credential grant write (flag-gated).
 
 			// Issue routes registered flat (not via r.Route) so they
@@ -1751,6 +1751,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// CEREBRO-PATCH(channel-message-search): FIR-407 — full-text search of one channel/DM's messages.
 				r.Get("/{id}/messages/search", h.SearchChannelMessages)
 				r.Post("/{id}/read", h.MarkChannelRead)
+				// CEREBRO-PATCH(inbox-thread-split-threadread): FIR-1854 — mark one channel/DM thread read, independent of the channel.
+				r.Post("/{id}/threads/{rootId}/read", h.MarkThreadRead)
 				// CEREBRO-PATCH(channel-listen-routes): per-(channel, agent)
 				// listen-mode toggle.
 				r.Get("/{id}/agent-settings", channelListenSvc.ListSettings)
