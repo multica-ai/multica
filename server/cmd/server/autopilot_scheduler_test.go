@@ -37,12 +37,15 @@ func TestClaimDueScheduleTriggersReturnsScheduledFireAt(t *testing.T) {
 	if !got.ScheduledFireAt.Valid || !got.ScheduledFireAt.Time.Equal(fireAt) {
 		t.Fatalf("expected scheduled_fire_at %s, got %+v", fireAt, got.ScheduledFireAt)
 	}
+	if !got.ClaimedAt.Valid {
+		t.Fatal("expected claimed_at to be set")
+	}
 	if got.NextRunAt.Valid {
 		t.Fatalf("expected claimed trigger next_run_at to be cleared, got %s", got.NextRunAt.Time)
 	}
 }
 
-func TestAdvanceNextRunUsesClaimedScheduledFireAt(t *testing.T) {
+func TestAdvanceNextRunUsesClaimTime(t *testing.T) {
 	ctx := context.Background()
 	queries := db.New(testPool)
 	ap := seedAutopilot(t, queries, "Scheduler advance from occurrence", "member", parseUUID(testUserID), pickFixtureAgent(t))
@@ -54,6 +57,7 @@ func TestAdvanceNextRunUsesClaimedScheduledFireAt(t *testing.T) {
 		CronExpression:  pgtype.Text{String: "0 10 * * *", Valid: true},
 		Timezone:        pgtype.Text{String: "UTC", Valid: true},
 		ScheduledFireAt: pgtype.Timestamptz{Time: fireAt, Valid: true},
+		ClaimedAt:       pgtype.Timestamptz{Time: fireAt, Valid: true},
 	})
 
 	updated, err := queries.GetAutopilotTrigger(ctx, trigger.ID)
@@ -61,6 +65,32 @@ func TestAdvanceNextRunUsesClaimedScheduledFireAt(t *testing.T) {
 		t.Fatalf("GetAutopilotTrigger: %v", err)
 	}
 	want := time.Date(2099, 1, 3, 10, 0, 0, 0, time.UTC)
+	if !updated.NextRunAt.Valid || !updated.NextRunAt.Time.Equal(want) {
+		t.Fatalf("expected next_run_at %s, got %+v", want, updated.NextRunAt)
+	}
+}
+
+func TestAdvanceNextRunCollapsesMissedOccurrencesAtClaimTime(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	ap := seedAutopilot(t, queries, "Scheduler advance skips missed occurrences", "member", parseUUID(testUserID), pickFixtureAgent(t))
+	fireAt := time.Date(2020, 1, 2, 10, 0, 0, 0, time.UTC)
+	claimTime := fireAt.Add(2 * time.Hour)
+	trigger := createScheduleTrigger(t, queries, ap.ID, fireAt, "*/5 * * * *")
+
+	advanceNextRun(ctx, queries, db.ClaimDueScheduleTriggersRow{
+		ID:              trigger.ID,
+		CronExpression:  pgtype.Text{String: "*/5 * * * *", Valid: true},
+		Timezone:        pgtype.Text{String: "UTC", Valid: true},
+		ScheduledFireAt: pgtype.Timestamptz{Time: fireAt, Valid: true},
+		ClaimedAt:       pgtype.Timestamptz{Time: claimTime, Valid: true},
+	})
+
+	updated, err := queries.GetAutopilotTrigger(ctx, trigger.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotTrigger: %v", err)
+	}
+	want := claimTime.Add(5 * time.Minute)
 	if !updated.NextRunAt.Valid || !updated.NextRunAt.Time.Equal(want) {
 		t.Fatalf("expected next_run_at %s, got %+v", want, updated.NextRunAt)
 	}

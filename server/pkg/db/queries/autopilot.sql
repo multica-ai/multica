@@ -259,6 +259,7 @@ WITH due AS (
     SELECT
         t.id,
         t.next_run_at AS scheduled_fire_at,
+        now()::timestamptz AS claimed_at,
         a.workspace_id AS autopilot_workspace_id
     FROM autopilot_trigger t
     JOIN autopilot a ON t.autopilot_id = a.id
@@ -274,7 +275,7 @@ UPDATE autopilot_trigger t
 SET next_run_at = NULL
 FROM due
 WHERE t.id = due.id
-RETURNING t.*, due.scheduled_fire_at, due.autopilot_workspace_id;
+RETURNING t.*, due.scheduled_fire_at, due.claimed_at, due.autopilot_workspace_id;
 
 -- =====================
 -- Task Queue (run_only mode)

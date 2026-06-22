@@ -52,6 +52,7 @@ WITH due AS (
     SELECT
         t.id,
         t.next_run_at AS scheduled_fire_at,
+        now()::timestamptz AS claimed_at,
         a.workspace_id AS autopilot_workspace_id
     FROM autopilot_trigger t
     JOIN autopilot a ON t.autopilot_id = a.id
@@ -67,7 +68,7 @@ UPDATE autopilot_trigger t
 SET next_run_at = NULL
 FROM due
 WHERE t.id = due.id
-RETURNING t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, due.scheduled_fire_at, due.autopilot_workspace_id
+RETURNING t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, due.scheduled_fire_at, due.claimed_at, due.autopilot_workspace_id
 `
 
 type ClaimDueScheduleTriggersRow struct {
@@ -87,6 +88,7 @@ type ClaimDueScheduleTriggersRow struct {
 	SigningSecret        pgtype.Text        `json:"signing_secret"`
 	EventFilters         []byte             `json:"event_filters"`
 	ScheduledFireAt      pgtype.Timestamptz `json:"scheduled_fire_at"`
+	ClaimedAt            pgtype.Timestamptz `json:"claimed_at"`
 	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
 }
 
@@ -121,6 +123,7 @@ func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueSched
 			&i.SigningSecret,
 			&i.EventFilters,
 			&i.ScheduledFireAt,
+			&i.ClaimedAt,
 			&i.AutopilotWorkspaceID,
 		); err != nil {
 			return nil, err

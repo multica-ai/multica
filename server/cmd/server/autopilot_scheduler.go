@@ -117,13 +117,19 @@ func advanceNextRun(ctx context.Context, queries *db.Queries, t db.ClaimDueSched
 		)
 		return
 	}
+	if !t.ClaimedAt.Valid {
+		slog.Warn("autopilot scheduler: claimed trigger missing claim time",
+			"trigger_id", util.UUIDToString(t.ID),
+		)
+		return
+	}
 
 	tz := service.DefaultAutopilotTriggerTimezone
 	if t.Timezone.Valid && t.Timezone.String != "" {
 		tz = t.Timezone.String
 	}
 
-	next, err := service.ComputeNextRunAfter(t.CronExpression.String, tz, t.ScheduledFireAt.Time)
+	next, err := service.ComputeNextRunAfter(t.CronExpression.String, tz, t.ClaimedAt.Time)
 	if err != nil {
 		slog.Warn("autopilot scheduler: failed to compute next run",
 			"trigger_id", util.UUIDToString(t.ID),
