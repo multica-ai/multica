@@ -34,6 +34,9 @@ COPY --chmod=755 gh-platform-bot-wrapper.sh      /usr/local/bin/gh
 COPY agent-templates/                     /etc/multica/agent-templates/
 RUN chmod -R a+r /etc/multica/agent-templates/
 
+COPY skill-templates/                     /etc/multica/skill-templates/
+RUN chmod -R a+r /etc/multica/skill-templates/
+
 USER agent
 ENV HOME=/home/agent
 

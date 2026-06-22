@@ -153,6 +153,90 @@ for tmpl in /etc/multica/agent-templates/*.yaml; do
   else
     echo "agentfarm-bootstrap: agent '${name}' created"
   fi
+
+  # ── Create/update and bind skills declared in this template. ─────────────────
+  #    Skills are bundled in the image under /etc/multica/skill-templates/.
+  #    We use multica skill create / update directly (not import) because the
+  #    multica CLI cannot authenticate to private GitHub URLs.
+  #    Non-fatal: failures log a warning and let boot continue.
+  _agent_id="$(multica agent list --output json \
+    | jq -r --arg n "${name}" '.[] | select(.name==$n) | .id' \
+    | head -n1 || true)"
+
+  if [[ -n "${_agent_id}" ]]; then
+    _skill_ids=()
+    while IFS= read -r _sdir; do
+      [[ -z "${_sdir}" ]] && continue
+      _skill_file="/etc/multica/skill-templates/${_sdir}/SKILL.md"
+      if [[ ! -f "${_skill_file}" ]]; then
+        echo "agentfarm-bootstrap: skill template not found: ${_skill_file} — skipping" >&2
+        continue
+      fi
+
+      # Parse name and description from SKILL.md frontmatter (between --- delimiters).
+      _second_dash="$(grep -n '^---$' "${_skill_file}" | sed -n '2p' | cut -d: -f1)"
+      _frontmatter="$(sed -n "2,$((${_second_dash} - 1))p" "${_skill_file}")"
+      _skill_name="$(printf '%s' "${_frontmatter}" | yq -r '.name' 2>/dev/null | tr -d '\n' || true)"
+      _skill_desc="$(printf '%s' "${_frontmatter}" | yq -r '.description' 2>/dev/null | tr -d '\n' || true)"
+
+      if [[ -z "${_skill_name}" ]]; then
+        echo "agentfarm-bootstrap: cannot parse skill name from ${_skill_file} — skipping" >&2
+        continue
+      fi
+
+      # Extract body (everything after closing ---).
+      _skill_body_file="$(mktemp)"
+      tail -n +"$(( ${_second_dash} + 1 ))" "${_skill_file}" > "${_skill_body_file}"
+
+      # Check if a skill with this name already exists in the workspace.
+      _existing_id="$(multica skill list --output json \
+        | jq -r --arg n "${_skill_name}" '.[] | select(.name==$n) | .id' \
+        | head -n1 || true)"
+
+      if [[ -z "${_existing_id}" ]]; then
+        set +e
+        _create_out="$(multica skill create \
+          --name "${_skill_name}" \
+          --description "${_skill_desc}" \
+          --content-file "${_skill_body_file}" \
+          --output json 2>/dev/null)"
+        _src=$?
+        set -e
+        _sid="$(printf '%s' "${_create_out}" | jq -r '.id // empty' 2>/dev/null || true)"
+        if [[ -n "${_sid}" ]]; then
+          _skill_ids+=("${_sid}")
+          echo "agentfarm-bootstrap: skill created: '${_skill_name}' (${_sid})"
+        else
+          echo "agentfarm-bootstrap: skill create failed for '${_skill_name}' (rc=${_src}) — continuing" >&2
+        fi
+      else
+        # Skill exists — sync content from the bundled file.
+        set +e
+        multica skill update "${_existing_id}" \
+          --content-file "${_skill_body_file}" \
+          --output json > /dev/null 2>/dev/null
+        _src=$?
+        set -e
+        _skill_ids+=("${_existing_id}")
+        [[ ${_src} -eq 0 ]] \
+          && echo "agentfarm-bootstrap: skill updated: '${_skill_name}' (${_existing_id})" \
+          || echo "agentfarm-bootstrap: skill update failed for '${_skill_name}' (rc=${_src}) — using existing" >&2
+      fi
+
+      rm -f "${_skill_body_file}"
+    done < <(yq -r '.skill_dirs // [] | .[]' "${tmpl}" 2>/dev/null || true)
+
+    if [[ ${#_skill_ids[@]} -gt 0 ]]; then
+      _sids_csv="$(IFS=,; echo "${_skill_ids[*]}")"
+      set +e
+      multica agent skills add "${_agent_id}" --skill-ids "${_sids_csv}" --output json > /dev/null
+      _sarc=$?
+      set -e
+      [[ ${_sarc} -eq 0 ]] \
+        && echo "agentfarm-bootstrap: ${#_skill_ids[@]} skill(s) bound to agent '${name}' (${_agent_id})" \
+        || echo "agentfarm-bootstrap: skill binding failed for '${name}' (rc=${_sarc}) — continuing" >&2
+    fi
+  fi
 done
 
 rm -f "${CUSTOM_ENV_FILE}"

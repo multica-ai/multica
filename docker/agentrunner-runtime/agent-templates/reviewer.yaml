@@ -6,3 +6,6 @@ model: "claude-sonnet-4-6"
 max_concurrent_tasks: 6
 visibility: "workspace"
 instructions_file: "reviewer.instructions.md"
+skill_dirs:
+  - "acli"
+  - "multica-repo-workspace"
