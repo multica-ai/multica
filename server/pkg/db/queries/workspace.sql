@@ -34,14 +34,11 @@ WHERE id = $1
 RETURNING *;
 
 -- name: ListWorkspacesWithRepos :many
--- Workspaces that have at least one repository in their registry, returning
--- only the id and the repos JSONB. Used to route an inbound GitHub webhook to
--- the workspace that actually owns the event's repository (instead of the
--- single workspace the delivering App installation happens to be mapped to —
--- one GitHub account/installation can serve repos belonging to several
--- workspaces).
+-- Workspaces with a non-empty repo registry, to route a webhook to the repo's
+-- owning workspace. ORDER BY id keeps the resolver's tie-break stable on replay.
 SELECT id, repos FROM workspace
-WHERE repos IS NOT NULL AND repos <> '[]'::jsonb;
+WHERE repos IS NOT NULL AND repos <> '[]'::jsonb
+ORDER BY id;
 
 -- name: IncrementIssueCounter :one
 UPDATE workspace SET issue_counter = issue_counter + 1

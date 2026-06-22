@@ -819,15 +819,9 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		return
 	}
 
-	// Route the event to the workspace that actually owns this repository,
-	// not the single workspace the delivering installation is mapped to. One
-	// GitHub account/installation can serve repos that live in different
-	// workspaces (e.g. owner/foo in workspace A, owner/bar in workspace B);
-	// attributing every event to the installation's workspace mis-files the
-	// PR and scans it against the wrong issue prefix, so identifiers never
-	// match and the PR is never linked. Falls back to the installation's
-	// workspace when the repo isn't in any workspace's registry.
-	wsID := h.resolveWorkspaceForRepo(ctx, inst.WorkspaceID, p.Repository.Owner.Login, p.Repository.Name)
+	// Route to the workspace that owns this repo, not the installation's single
+	// workspace — one installation can serve repos across several workspaces.
+	wsID := h.resolveWorkspaceForRepo(ctx, inst.WorkspaceID, inst.AccountLogin, p.Repository.Owner.Login, p.Repository.Name)
 
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
 	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
@@ -1038,7 +1032,7 @@ func (h *Handler) handleCheckSuiteEvent(ctx context.Context, body []byte) {
 	// Route to the workspace that owns this repository (see
 	// handlePullRequestEvent) so the suite lands on the same PR row the
 	// pull_request webhook mirrored, rather than the installation's workspace.
-	wsID := h.resolveWorkspaceForRepo(ctx, inst.WorkspaceID, p.Repository.Owner.Login, p.Repository.Name)
+	wsID := h.resolveWorkspaceForRepo(ctx, inst.WorkspaceID, inst.AccountLogin, p.Repository.Owner.Login, p.Repository.Name)
 
 	affectedWorkspaces := map[string]struct{}{}
 	affectedIssues := map[string]struct{}{}
@@ -1231,20 +1225,26 @@ func parseGHTimeRequired(s string) pgtype.Timestamptz {
 	return t
 }
 
-// resolveWorkspaceForRepo returns the workspace whose repository registry
-// (workspace.repos) owns the given owner/name, so a GitHub webhook is
-// attributed to the right workspace even when one App installation serves
-// repos belonging to several workspaces. It falls back to the supplied
-// installation workspace when the repo isn't registered anywhere (preserving
-// legacy behavior for repos never added to a registry). If more than one
-// workspace registers the same repo it prefers the installation's own
-// workspace when that is one of the matches, otherwise the first match — kept
-// deterministic so replaying a delivery is stable.
-func (h *Handler) resolveWorkspaceForRepo(ctx context.Context, fallback pgtype.UUID, owner, name string) pgtype.UUID {
-	slug := strings.ToLower(strings.TrimSpace(owner) + "/" + strings.TrimSpace(name))
-	if slug == "/" {
+const githubWebhookHost = "github.com"
+
+// resolveWorkspaceForRepo routes a delivery to the workspace whose repos
+// registry owns github.com/owner/name, so one installation can serve repos in
+// several workspaces; falls back to the installation workspace when unmatched.
+// The registry is admin-editable, so it overrides the verified installation
+// binding only when owner == the delivering account (accountLogin) and the host
+// matches — no cross-account capture. On ties the installation's own workspace
+// wins, else the lowest id (query is ORDER BY id).
+func (h *Handler) resolveWorkspaceForRepo(ctx context.Context, fallback pgtype.UUID, accountLogin, owner, name string) pgtype.UUID {
+	owner = strings.TrimSpace(owner)
+	name = strings.TrimSpace(name)
+	if owner == "" || name == "" {
 		return fallback
 	}
+	// Only the delivering account's repos may be re-routed by the registry.
+	if !strings.EqualFold(strings.TrimSpace(accountLogin), owner) {
+		return fallback
+	}
+	target := githubWebhookHost + "/" + strings.ToLower(owner) + "/" + strings.ToLower(name)
 	rows, err := h.Queries.ListWorkspacesWithRepos(ctx)
 	if err != nil {
 		slog.Warn("github: list workspaces with repos failed", "err", err)
@@ -1259,7 +1259,7 @@ func (h *Handler) resolveWorkspaceForRepo(ctx context.Context, fallback pgtype.U
 			continue
 		}
 		for _, rp := range repos {
-			if repoSlugFromURL(rp.URL) == slug {
+			if repoIdentityFromURL(rp.URL) == target {
 				matches = append(matches, row.ID)
 				break
 			}
@@ -1280,19 +1280,24 @@ func (h *Handler) resolveWorkspaceForRepo(ctx context.Context, fallback pgtype.U
 	}
 }
 
-// repoSlugFromURL extracts the lowercased "owner/name" slug from a git remote
-// URL in either https (https://host/owner/name[.git]) or scp-like ssh
-// (git@host:owner/name[.git]) form. Returns "" when it can't find two
-// trailing path segments.
-func repoSlugFromURL(raw string) string {
+// repoIdentityFromURL returns lowercased "host/owner/name" from an https, scp
+// ssh (git@host:owner/name) or ssh:// git URL, or "" if it can't.
+func repoIdentityFromURL(raw string) string {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	if s == "" {
 		return ""
 	}
+	// Trim trailing slashes before ".git" so "…/foo.git/" resolves.
+	s = strings.TrimRight(s, "/")
 	s = strings.TrimSuffix(s, ".git")
 	s = strings.TrimRight(s, "/")
-	// Fold the scp-like "host:owner/name" separator into a path separator so a
-	// single split handles both URL shapes.
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.Index(s, "@"); i >= 0 {
+		s = s[i+1:]
+	}
+	// Fold scp-like "host:owner/name" into a path so one split handles all forms.
 	s = strings.ReplaceAll(s, ":", "/")
 	segments := make([]string, 0, 4)
 	for _, seg := range strings.Split(s, "/") {
@@ -1300,10 +1305,10 @@ func repoSlugFromURL(raw string) string {
 			segments = append(segments, seg)
 		}
 	}
-	if len(segments) < 2 {
+	if len(segments) < 3 {
 		return ""
 	}
-	return segments[len(segments)-2] + "/" + segments[len(segments)-1]
+	return segments[0] + "/" + segments[len(segments)-2] + "/" + segments[len(segments)-1]
 }
 
 // extractIdentifiers pulls every "PREFIX-NUMBER" match across the supplied

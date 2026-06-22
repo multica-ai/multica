@@ -172,6 +172,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 const listWorkspacesWithRepos = `-- name: ListWorkspacesWithRepos :many
 SELECT id, repos FROM workspace
 WHERE repos IS NOT NULL AND repos <> '[]'::jsonb
+ORDER BY id
 `
 
 type ListWorkspacesWithReposRow struct {
@@ -185,6 +186,8 @@ type ListWorkspacesWithReposRow struct {
 // single workspace the delivering App installation happens to be mapped to —
 // one GitHub account/installation can serve repos belonging to several
 // workspaces).
+// ORDER BY id so the multi-match tie-break in resolveWorkspaceForRepo is
+// stable across webhook replays.
 func (q *Queries) ListWorkspacesWithRepos(ctx context.Context) ([]ListWorkspacesWithReposRow, error) {
 	rows, err := q.db.Query(ctx, listWorkspacesWithRepos)
 	if err != nil {
