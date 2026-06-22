@@ -444,10 +444,21 @@ export function useBatchUpdateIssues() {
       updates: UpdateIssueRequest;
     }) => api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
+      // Patch BOTH the workspace board (issueKeys.list) and the filtered
+      // My-Issues / Project / actor lists (issueKeys.myAll). The single-issue
+      // update already patches both; batch only touched issueKeys.list, so a
+      // batch edit on a My-Issues board had no optimistic effect and relied
+      // entirely on the settle refetch. Filter to bucketed (byStatus) caches so
+      // grouped/flat caches under the same prefix are skipped.
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
-      const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+      await qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
+      const prevLists = [
+        ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) }),
+        ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.myAll(wsId) }),
+      ].filter(
+        (entry): entry is [QueryKey, ListIssuesCache] => !!entry[1]?.byStatus,
+      );
       for (const [key, cached] of prevLists) {
-        if (!cached) continue;
         let next = cached;
         for (const id of ids) next = patchIssueInBuckets(next, id, updates);
         qc.setQueryData<ListIssuesCache>(key, next);
@@ -487,7 +498,13 @@ export function useBatchUpdateIssues() {
       }
     },
     onSettled: (_data, _err, _vars, ctx) => {
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      // Deliberately NOT invalidating issueKeys.list / myAll here: the onMutate
+      // patch above is a complete surgical reconcile for these bucketed boards
+      // (batch changes status / priority / project — never a server-computed
+      // value), so a full-board refetch on settle would only re-introduce the
+      // flicker the single-issue update already removed. Aggregate / grouped
+      // caches that cannot be recomputed from a single-issue patch are still
+      // refreshed below.
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
