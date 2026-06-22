@@ -43,7 +43,7 @@ import { CerebroStatusModelProvider, useStatusPresentation } from "@multica/cere
 import { ProjectDocuments } from "@multica/cerebro-artifacts/views/components";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
-import { filterRunningAssigneeGroups } from "./project-issue-filters";
+import { filterDateAssigneeGroups, filterRunningAssigneeGroups } from "./project-issue-filters";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
@@ -168,8 +168,9 @@ function ProjectIssuesContent({
   const labelFilters = useViewStore((s) => s.labelFilters);
   const subIssueDisplay = useViewStore((s) => s.subIssueDisplay);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
-  // CEREBRO-PATCH(boards-date-filter): FIR-1724 date filter applied client-side, same as My Issues.
-  const dateFilter = useViewStore((s) => s.dateFilter);
+  // CEREBRO-PATCH(boards-date-filter): FIR-1871 use the shared stacked date
+  // builder on project/sprint boards, same as My Issues and global Issues.
+  const dateFilters = useViewStore((s) => s.dateFilters);
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   const runningIssueIds = useMemo(() => {
@@ -188,8 +189,8 @@ function ProjectIssuesContent({
 
   const issues = useMemo(
     // CEREBRO-PATCH(boards-date-filter): FIR-1724 include date filter in board/list filtering.
-    () => filterIssues(displayIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds, dateFilter }),
-    [displayIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds, dateFilter],
+    () => filterIssues(displayIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds, dateFilters }),
+    [displayIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds, dateFilters],
   );
   const doneColumnCount = useMemo(
     () => displayIssues.filter((issue) => issue.status === "done").length,
@@ -203,8 +204,8 @@ function ProjectIssuesContent({
   // Status-unfiltered companion for Swimlane.
   const swimlaneIssues = useMemo(
     // CEREBRO-PATCH(boards-date-filter): FIR-1724 swimlane companion respects the date filter too.
-    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds, dateFilter }),
-    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds, dateFilter],
+    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds, dateFilters }),
+    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds, dateFilters],
   );
 
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
@@ -212,13 +213,16 @@ function ProjectIssuesContent({
   // apply so toggling priority / assignee / label hides the same bars.
   const filteredGanttIssues = useMemo(
     // CEREBRO-PATCH(boards-date-filter): FIR-1724 gantt bars respect the date filter too.
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds, dateFilter }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds, dateFilter],
+    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds, dateFilters }),
+    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds, dateFilters],
   );
 
   const filteredAssigneeGroups = useMemo(
-    () => filterRunningAssigneeGroups(assigneeGroups, agentRunningFilter, runningIssueIds),
-    [assigneeGroups, agentRunningFilter, runningIssueIds],
+    () => filterDateAssigneeGroups(
+      filterRunningAssigneeGroups(assigneeGroups, agentRunningFilter, runningIssueIds),
+      dateFilters,
+    ),
+    [assigneeGroups, agentRunningFilter, runningIssueIds, dateFilters],
   );
 
   // Build children-by-parent map for inline nesting in "on-parent" mode
@@ -381,8 +385,8 @@ export function ProjectIssuesSurface({
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of filter on project pages.
   const onBehalfOfFilters = useViewStore((s) => s.onBehalfOfFilters);
   // CEREBRO-PATCH(boards-date-filter): FIR-1724 date filter on project + sprint boards (same as My Issues).
-  const dateFilter = useViewStore((s) => s.dateFilter);
-  const setDateFilter = useViewStore((s) => s.setDateFilter);
+  const dateFilters = useViewStore((s) => s.dateFilters);
+  const setDateFilters = useViewStore((s) => s.setDateFilters);
   // CEREBRO-PATCH(project-detail-sprint-filter): TECH-3620 filter project board/list by real sprint membership.
   const sprintsFlag = useFeatureFlag("cerebro_sprints");
   // CEREBRO-PATCH(sprint-board-reuse): TECH-3684 seed from the sprint page's route param.
@@ -450,7 +454,13 @@ export function ProjectIssuesSurface({
     // CEREBRO-PATCH(project-detail-status-model): FIR-1550 provide the project's status-model presentation to header + board
     <CerebroStatusModelProvider projectId={projectId}>
       {/* CEREBRO-PATCH(boards-date-filter): FIR-1724 wire the My-Issues date filter into the project/sprint board header. */}
-      <IssuesHeader scopedIssues={projectIssues} allowGantt dateFilter={dateFilter} onDateFilterChange={setDateFilter} dueDatePresets />
+      <IssuesHeader
+        scopedIssues={projectIssues}
+        allowGantt
+        dateFilters={dateFilters}
+        onDateFiltersChange={setDateFilters}
+        dueDatePresets
+      />
       {/* CEREBRO-PATCH(project-detail-sprint-filter): FIR-2666 sprint selector for project board/list. */}
       {/* CEREBRO-PATCH(sprint-board-reuse): TECH-3684 hide the sprint switcher when locked to one sprint. */}
       {sprintsFlag && !lockSprint && (viewMode === "board" || viewMode === "list") && (

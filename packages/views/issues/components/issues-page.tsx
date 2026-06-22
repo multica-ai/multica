@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { toast } from "sonner";
 import { ListTodo } from "lucide-react";
-import type { UpdateIssueRequest } from "@multica/core/types";
+import type { IssueAssigneeGroup, UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { useIssueViewStore, useClearFiltersOnWorkspaceChange, type IssueDateFilter } from "@multica/core/issues/stores/view-store";
@@ -61,6 +61,31 @@ function issueDateFilterToApiParams(filter: IssueDateFilter | null) {
   };
 }
 
+// CEREBRO-PATCH(boards-date-filter): FIR-1871 apply stacked date filters to
+// assignee-board groups on /issues so board/list/swimlane stay aligned.
+function filterAssigneeGroupsByDate(
+  groups: IssueAssigneeGroup[] | undefined,
+  dateFilters: IssueDateFilter[] = [],
+) {
+  if (!groups || dateFilters.length === 0) return groups;
+  return groups
+    .map((group) => {
+      const issues = filterIssues(group.issues, {
+        statusFilters: [],
+        priorityFilters: [],
+        assigneeFilters: [],
+        includeNoAssignee: false,
+        creatorFilters: [],
+        projectFilters: [],
+        includeNoProject: false,
+        labelFilters: [],
+        dateFilters,
+      });
+      return { ...group, issues, total: issues.length };
+    })
+    .filter((group) => group.issues.length > 0);
+}
+
 export function IssuesPage({
   referenceFilterControl,
 }: {
@@ -73,7 +98,8 @@ export function IssuesPage({
   const scope = useIssuesScopeStore((s) => s.scope);
   const viewMode = useIssueViewStore((s) => s.viewMode);
   const dateFilter = useIssueViewStore((s) => s.dateFilter);
-  const setDateFilter = useIssueViewStore((s) => s.setDateFilter);
+  const dateFilters = useIssueViewStore((s) => s.dateFilters);
+  const setDateFilters = useIssueViewStore((s) => s.setDateFilters);
   const grouping = useIssueViewStore((s) => s.grouping);
   const statusFilters = useIssueViewStore((s) => s.statusFilters);
   const priorityFilters = useIssueViewStore((s) => s.priorityFilters);
@@ -159,9 +185,13 @@ export function IssuesPage({
     () => statusIssuesQuery.data ?? [],
     [statusIssuesQuery.data],
   );
+  const dateFilteredAssigneeGroups = useMemo(
+    () => filterAssigneeGroupsByDate(assigneeGroupsQuery.data?.groups, dateFilters),
+    [assigneeGroupsQuery.data, dateFilters],
+  );
   const assigneeIssues = useMemo(
-    () => assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [],
-    [assigneeGroupsQuery.data],
+    () => dateFilteredAssigneeGroups?.flatMap((group) => group.issues) ?? [],
+    [dateFilteredAssigneeGroups],
   );
   const loading = usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading
@@ -191,16 +221,16 @@ export function IssuesPage({
   }, [scopedIssues, subIssueDisplay]);
 
   const issues = useMemo(
-    () => filterIssues(displayIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [displayIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(displayIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, dateFilters }),
+    [displayIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, dateFilters],
   );
   const headerIssues = usesAssigneeBoard ? assigneeIssues : issues;
 
   // Status-unfiltered companion for Swimlane — same narrowing as `issues`
   // minus the status filter.
   const swimlaneIssues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, dateFilters }),
+    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, dateFilters],
   );
 
   // Fetch sub-issue progress from the backend so counts are accurate
@@ -282,8 +312,8 @@ export function IssuesPage({
         <IssuesHeader
           scopedIssues={headerIssues}
           referenceFilterControl={referenceFilterControl}
-          dateFilter={dateFilter}
-          onDateFilterChange={setDateFilter}
+          dateFilters={dateFilters}
+          onDateFiltersChange={setDateFilters}
           // CEREBRO-PATCH(boards-date-filter): FIR-1724 due-date presets so the global board matches My Issues.
           dueDatePresets
         />
@@ -299,7 +329,7 @@ export function IssuesPage({
             {viewMode === "board" ? (
               <BoardView
                 issues={usesAssigneeBoard ? assigneeIssues : issues}
-                assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+                assigneeGroups={usesAssigneeBoard ? dateFilteredAssigneeGroups : undefined}
                 assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
                 assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
                 visibleStatuses={visibleStatuses}

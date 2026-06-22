@@ -29,7 +29,7 @@ vi.mock("@multica/cerebro-saved-filters/views", () => ({
 import { createIssueViewStore, type IssueDateFilter } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { useCerebroFeatureFlagsStore } from "@multica/cerebro-feature-flags";
-import { IssueDisplayControls } from "./issues-header";
+import { IssueDisplayControls, IssuesHeader } from "./issues-header";
 
 function renderBuilderControls(
   dateFilters: IssueDateFilter[],
@@ -44,6 +44,29 @@ function renderBuilderControls(
       <QueryClientProvider client={qc}>
         <ViewStoreProvider store={store}>
           <IssueDisplayControls
+            scopedIssues={[]}
+            dateFilters={dateFilters}
+            onDateFiltersChange={onDateFiltersChange}
+          />
+        </ViewStoreProvider>
+      </QueryClientProvider>
+    </I18nProvider>,
+  );
+}
+
+function renderHeaderWithDateBuilder(
+  dateFilters: IssueDateFilter[],
+  onDateFiltersChange: (next: IssueDateFilter[]) => void,
+) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+  });
+  const store = createIssueViewStore("test-header-date-builder");
+  return render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={qc}>
+        <ViewStoreProvider store={store}>
+          <IssuesHeader
             scopedIssues={[]}
             dateFilters={dateFilters}
             onDateFiltersChange={onDateFiltersChange}
@@ -118,5 +141,16 @@ describe("date builder relative amount input (FIR-1871)", () => {
     expect(onChange).toHaveBeenCalled();
     const committed = onChange.mock.calls.at(-1)![0] as IssueDateFilter[];
     expect(committed[0]?.relative?.amount).toBe(14);
+  });
+
+  it("lets shared IssuesHeader surfaces use the same date builder as My Issues", async () => {
+    const onChange = vi.fn();
+    renderHeaderWithDateBuilder([], onChange);
+
+    fireEvent.click(await screen.findByText("Filter"));
+    fireEvent.click(await screen.findByText("Date"));
+
+    expect(await screen.findByText("No date filters yet")).toBeInTheDocument();
+    expect(screen.getByText("Add filter")).toBeInTheDocument();
   });
 });

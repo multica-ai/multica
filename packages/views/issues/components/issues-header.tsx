@@ -1400,6 +1400,10 @@ export function IssuesHeader({
   allowGantt = false,
   dateFilter = null,
   onDateFilterChange,
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1871 share the stacked date
+  // builder with /issues and project/sprint boards, not only My Issues.
+  dateFilters,
+  onDateFiltersChange,
   // CEREBRO-PATCH(boards-date-filter): FIR-1724 forward due-date presets so boards match My Issues.
   dueDatePresets = false,
 }: {
@@ -1409,6 +1413,8 @@ export function IssuesHeader({
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
+  dateFilters?: IssueDateFilter[];
+  onDateFiltersChange?: (filters: IssueDateFilter[]) => void;
   // CEREBRO-PATCH(boards-date-filter): FIR-1724 offer the My-Issues due-date presets on boards.
   dueDatePresets?: boolean;
 }) {
@@ -1514,6 +1520,8 @@ export function IssuesHeader({
             allowGantt={allowGantt}
             dateFilter={dateFilter}
             onDateFilterChange={onDateFilterChange}
+            dateFilters={dateFilters}
+            onDateFiltersChange={onDateFiltersChange}
             // CEREBRO-PATCH(boards-date-filter): FIR-1724 pass presets through to the date filter control.
             dueDatePresets={dueDatePresets}
           />
