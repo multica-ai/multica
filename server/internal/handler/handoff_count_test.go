@@ -26,8 +26,11 @@ func TestHandoffRecordExcludedFromNewCommentCount(t *testing.T) {
 		IssueID:     issueUUID,
 		WorkspaceID: wsUUID,
 		Since:       since,
-		AnchorID:    pgtype.UUID{}, // no anchor to exclude
-		AuthorID:    parseUUID(agentID),
+		// A valid anchor that matches no real comment id. The query uses
+		// `id <> @anchor_id`, and SQL `id <> NULL` is NULL (excludes every row),
+		// so the production caller always passes a real anchor — mirror that.
+		AnchorID: parseUUID("00000000-0000-0000-0000-000000000001"),
+		AuthorID: parseUUID(agentID),
 	}
 
 	// A normal member comment is counted.
