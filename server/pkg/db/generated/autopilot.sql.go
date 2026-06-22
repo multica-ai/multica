@@ -914,6 +914,25 @@ func (q *Queries) RecoverLostTriggers(ctx context.Context) ([]RecoverLostTrigger
 	return items, nil
 }
 
+const restoreClaimedTriggerNextRun = `-- name: RestoreClaimedTriggerNextRun :exec
+UPDATE autopilot_trigger
+SET next_run_at = $2,
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'schedule'
+  AND next_run_at IS NULL
+`
+
+type RestoreClaimedTriggerNextRunParams struct {
+	ID        pgtype.UUID        `json:"id"`
+	NextRunAt pgtype.Timestamptz `json:"next_run_at"`
+}
+
+func (q *Queries) RestoreClaimedTriggerNextRun(ctx context.Context, arg RestoreClaimedTriggerNextRunParams) error {
+	_, err := q.db.Exec(ctx, restoreClaimedTriggerNextRun, arg.ID, arg.NextRunAt)
+	return err
+}
+
 const rotateAutopilotTriggerWebhookToken = `-- name: RotateAutopilotTriggerWebhookToken :one
 UPDATE autopilot_trigger
 SET webhook_token = $2,

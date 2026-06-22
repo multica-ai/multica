@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -93,6 +96,58 @@ func TestAdvanceNextRunCollapsesMissedOccurrencesAtClaimTime(t *testing.T) {
 	want := claimTime.Add(5 * time.Minute)
 	if !updated.NextRunAt.Valid || !updated.NextRunAt.Time.Equal(want) {
 		t.Fatalf("expected next_run_at %s, got %+v", want, updated.NextRunAt)
+	}
+}
+
+func TestRestoreClaimedTriggerNextRunRequeuesOccurrence(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	ap := seedAutopilot(t, queries, "Scheduler restore claimed occurrence", "member", parseUUID(testUserID), pickFixtureAgent(t))
+	fireAt := time.Date(2020, 1, 2, 10, 0, 0, 0, time.UTC)
+	trigger := createScheduleTrigger(t, queries, ap.ID, fireAt, "0 10 * * *")
+
+	claimed, err := queries.ClaimDueScheduleTriggers(ctx)
+	if err != nil {
+		t.Fatalf("ClaimDueScheduleTriggers: %v", err)
+	}
+	var got *db.ClaimDueScheduleTriggersRow
+	for i := range claimed {
+		if claimed[i].ID == trigger.ID {
+			got = &claimed[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("claimed triggers did not include test trigger %v", trigger.ID)
+	}
+
+	restoreClaimedTrigger(ctx, queries, *got)
+
+	updated, err := queries.GetAutopilotTrigger(ctx, trigger.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotTrigger: %v", err)
+	}
+	if !updated.NextRunAt.Valid || !updated.NextRunAt.Time.Equal(fireAt) {
+		t.Fatalf("expected restored next_run_at %s, got %+v", fireAt, updated.NextRunAt)
+	}
+}
+
+func TestShouldAdvanceAfterScheduleDispatch(t *testing.T) {
+	if !shouldAdvanceAfterScheduleDispatch(nil, nil) {
+		t.Fatal("expected successful dispatch to advance")
+	}
+	if !shouldAdvanceAfterScheduleDispatch(&db.AutopilotRun{}, errors.New("recorded failure")) {
+		t.Fatal("expected dispatch with a recorded run to advance")
+	}
+	duplicate := fmt.Errorf("create run: %w", &pgconn.PgError{
+		Code:           "23505",
+		ConstraintName: "idx_autopilot_run_schedule_occurrence",
+	})
+	if !shouldAdvanceAfterScheduleDispatch(nil, duplicate) {
+		t.Fatal("expected duplicate scheduled occurrence to advance")
+	}
+	if shouldAdvanceAfterScheduleDispatch(nil, errors.New("temporary database error")) {
+		t.Fatal("expected unrecorded transient failure to restore instead of advance")
 	}
 }
 

@@ -119,6 +119,14 @@ SET next_run_at = sqlc.narg('next_run_at'),
     updated_at = now()
 WHERE id = $1;
 
+-- name: RestoreClaimedTriggerNextRun :exec
+UPDATE autopilot_trigger
+SET next_run_at = sqlc.narg('next_run_at'),
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'schedule'
+  AND next_run_at IS NULL;
+
 -- name: GetWebhookTriggerByToken :one
 -- Look up a webhook trigger by its public bearer token. Joined to autopilot
 -- so the webhook handler can derive the workspace from the trigger's parent

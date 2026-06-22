@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -89,20 +91,54 @@ func tickScheduledAutopilots(ctx context.Context, queries *db.Queries, svc *serv
 				"autopilot_id", util.UUIDToString(t.AutopilotID),
 				"error", err,
 			)
+			restoreClaimedTrigger(ctx, queries, t)
 			continue
 		}
 
 		// Dispatch the claimed schedule occurrence.
-		if _, err := svc.DispatchScheduledAutopilot(ctx, autopilot, t.ID, t.ScheduledFireAt); err != nil {
+		run, err := svc.DispatchScheduledAutopilot(ctx, autopilot, t.ID, t.ScheduledFireAt)
+		if err != nil {
 			slog.Warn("autopilot scheduler: dispatch failed",
 				"autopilot_id", util.UUIDToString(autopilot.ID),
 				"trigger_id", util.UUIDToString(t.ID),
 				"error", err,
 			)
+			if !shouldAdvanceAfterScheduleDispatch(run, err) {
+				restoreClaimedTrigger(ctx, queries, t)
+				continue
+			}
 		}
 
 		// Advance next_run_at for this trigger.
 		advanceNextRun(ctx, queries, t)
+	}
+}
+
+func shouldAdvanceAfterScheduleDispatch(run *db.AutopilotRun, err error) bool {
+	if err == nil || run != nil {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) &&
+		pgErr.Code == "23505" &&
+		pgErr.ConstraintName == "idx_autopilot_run_schedule_occurrence"
+}
+
+func restoreClaimedTrigger(ctx context.Context, queries *db.Queries, t db.ClaimDueScheduleTriggersRow) {
+	if !t.ScheduledFireAt.Valid {
+		slog.Warn("autopilot scheduler: cannot restore claimed trigger without scheduled fire time",
+			"trigger_id", util.UUIDToString(t.ID),
+		)
+		return
+	}
+	if err := queries.RestoreClaimedTriggerNextRun(ctx, db.RestoreClaimedTriggerNextRunParams{
+		ID:        t.ID,
+		NextRunAt: t.ScheduledFireAt,
+	}); err != nil {
+		slog.Warn("autopilot scheduler: failed to restore claimed trigger",
+			"trigger_id", util.UUIDToString(t.ID),
+			"error", err,
+		)
 	}
 }
 
