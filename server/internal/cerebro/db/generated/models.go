@@ -627,6 +627,17 @@ type CerebroFocusListItem struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroFolderGrant struct {
+	ID          pgtype.UUID        `json:"id"`
+	Surface     string             `json:"surface"`
+	FolderID    pgtype.UUID        `json:"folder_id"`
+	GranteeType string             `json:"grantee_type"`
+	GranteeID   pgtype.UUID        `json:"grantee_id"`
+	Role        string             `json:"role"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+}
+
 type CerebroGroup struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`

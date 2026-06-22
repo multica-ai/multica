@@ -48,6 +48,11 @@ export type CerebroFlagKey =
   // this on, only they + workspace admins may delete/rename/move folders they
   // own. Resolved per folder OWNER so it can roll out to one user first.
   | "cerebro_folder_action_guard"
+  // FIR-1590 → Collections: the Settings → Collections surface and the
+  // per-folder "Valgt her / Arvet" access editor (grant folders to groups /
+  // members / workspace / agents / runtimes). Gates the whole Collections
+  // feature; OFF until Phase 1 is built + verified.
+  | "cerebro_collections"
   // TECH-3556 (Wave 3): the heavy Google-Docs note features, each independently
   // flagged so they can ship + be QA'd one at a time on staging.
   //   - comments + suggestions on a span of a note (margin comments, replies,
@@ -341,6 +346,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // own; everyone else's folders are unaffected. Server enforces by resolving
   // the flag for the folder's OWNER, so it can roll out to one user at a time.
   cerebro_folder_action_guard: false,
+  // FIR-1590 → Collections: OFF until Phase 1 (Settings → Collections + the
+  // per-folder "Valgt her / Arvet" access editor for groups/members/workspace)
+  // is built and verified. Nothing reads cerebro_folder_grant until then.
+  cerebro_collections: false,
   // TECH-3556 (Wave 3): comments + suggestions on notes/documents. ON (FIR-1647):
   // shared surface + the comment composer can @-tag people/agents/issues.
   cerebro_note_comments: true,
@@ -712,6 +721,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "When on, only you and workspace admins can delete, rename, or move folders you own. Other people's folders are unaffected until they turn this on too.",
+  },
+  {
+    key: "cerebro_collections",
+    label: "Collections",
+    group: "permissions",
+    description:
+      "Open the Settings → Collections surface and the per-folder access editor (Valgt her / Arvet): grant a folder to groups, members, the whole workspace, agents, or runtimes, with a viewer/editor/full access role. Grants cascade to sub-folders.",
   },
   {
     key: "cerebro_members_admin",

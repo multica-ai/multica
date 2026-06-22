@@ -53,6 +53,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cerebro/folder-grants/",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/issues/{issueID}/recurrence/",
       "gate": "workspace_member"
     },
@@ -1390,6 +1394,10 @@
     },
     {
       "id": "PUT /api/cerebro/entity-folders/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/folder-grants/",
       "gate": "workspace_member"
     },
     {

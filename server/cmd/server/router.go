@@ -108,6 +108,8 @@ import (
 	cerebronotetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
 	// CEREBRO-PATCH(cerebro-entity-folders-routes): FIR-1412 skill/autopilot folder handler import
 	cerebroentityfolder "github.com/multica-ai/multica/server/internal/cerebro/entityfolder"
+	// CEREBRO-PATCH(cerebro-folder-grants-routes): FIR-1590 Collections per-folder access grant handler import
+	cerebrofoldergrant "github.com/multica-ai/multica/server/internal/cerebro/foldergrant"
 	// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list for inbox
 	cerebrofocuslist "github.com/multica-ai/multica/server/internal/cerebro/focus_list"
 	// CEREBRO-PATCH(cerebro-reminder): FIR-394 reminder as its own entity
@@ -740,6 +742,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroNoteTypesHandler := cerebronotetypes.NewHandler(cerebroQueries, pool)
 	// CEREBRO-PATCH(cerebro-entity-folders-routes): FIR-1412 skill/autopilot folder handler instance
 	cerebroEntityFolderHandler := cerebroentityfolder.NewHandler(cerebroQueries)
+	// CEREBRO-PATCH(cerebro-folder-grants-routes): FIR-1590 Collections per-folder access grant handler instance
+	cerebroFolderGrantHandler := cerebrofoldergrant.NewHandler(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list handler instance
 	cerebroFocusListHandler := cerebrofocuslist.New(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-reminder): FIR-394 reminder entity handler.
@@ -1968,6 +1972,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/cerebro/entity-folder-items", func(r chi.Router) {
 				r.Get("/", cerebroEntityFolderHandler.ListItems)
 				r.Put("/", cerebroEntityFolderHandler.SetItem)
+			})
+			// CEREBRO-PATCH(cerebro-folder-grants-routes): FIR-1590 Collections per-folder access grants (Valgt her/Arvet).
+			r.Route("/api/cerebro/folder-grants", func(r chi.Router) {
+				r.Get("/", cerebroFolderGrantHandler.ListGrants)
+				r.Put("/", cerebroFolderGrantHandler.UpsertGrant)
+				r.Delete("/", cerebroFolderGrantHandler.RemoveGrant)
 			})
 			// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint REST surface.
 			r.Route("/api/cerebro/projects/{projectID}/sprint-settings", func(r chi.Router) {

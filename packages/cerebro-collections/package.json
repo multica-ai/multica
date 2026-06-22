@@ -1,5 +1,5 @@
 {
-  "name": "@multica/cerebro-entity-folders",
+  "name": "@multica/cerebro-collections",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,8 +12,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@multica/cerebro-collections": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/cerebro-groups": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "lucide-react": "catalog:",

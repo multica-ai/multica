@@ -62,6 +62,7 @@ import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-
 import { cerebroNotesSettingsTabs } from "@multica/cerebro-notes/settings-tabs";
 import { cerebroCostOptimizationTabs } from "@multica/cerebro-cost-optimization/views";
 import { useCerebroToolPolicySettingsTabs } from "@multica/cerebro-tool-policy/views";
+import { useCerebroCollectionsSettingsTabs } from "@multica/cerebro-collections/views";
 import { IssueListReferenceFilter } from "@multica/cerebro-references/views";
 import { ReferencesByObjectPage } from "@multica/cerebro-references/views/pages";
 
@@ -101,6 +102,9 @@ function SettingsRoute() {
   // FIR-2284 Bid 5: workspace Permissions tab, present only when the
   // cerebro_tool_policy flag is on.
   const toolPolicyTabs = useCerebroToolPolicySettingsTabs();
+  // FIR-1590 → Collections: the Collections tab, present only when the
+  // cerebro_collections flag is on.
+  const collectionsTabs = useCerebroCollectionsSettingsTabs();
 
   return (
     <SettingsPage
@@ -122,6 +126,7 @@ function SettingsRoute() {
         ...cerebroNotesSettingsTabs,
         ...cerebroFeatureFlagTabs,
         ...toolPolicyTabs,
+        ...collectionsTabs,
       ]}
       membersTabCerebroExtras={membersTabCerebroExtras}
     />

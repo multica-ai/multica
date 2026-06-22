@@ -52,6 +52,7 @@ import {
   useSetEntityFolderItem,
   useUpdateEntityFolder,
 } from "../mutations";
+import { FolderAccessColumn } from "@multica/cerebro-collections/views";
 import {
   hasEntityFolderDragData,
   readEntityFolderDragData,
@@ -247,6 +248,13 @@ export function EntityFolderSidebar({
               </span>
             )}
           </button>
+          {/* FIR-1590 → Collections: per-folder grant editor (Valgt her/Arvet). */}
+          <FolderAccessColumn
+            surface="entity"
+            folderId={node.id}
+            folderName={node.name}
+            className="group-hover/folder:opacity-100"
+          />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={

@@ -18,6 +18,9 @@ import { useCerebroConnectionsSettingsTabs } from "@multica/cerebro-connections/
 import { useCerebroWorkspaceCopySettingsTabs } from "@multica/cerebro-workspace-copy/views";
 // TECH-3522: web_fetch URL policy tab.
 import { useCerebroWebFetchPolicySettingsTabs } from "@multica/cerebro-web-fetch-policy/views";
+// FIR-1590 → Collections: the Settings → Collections tab, present only when the
+// cerebro_collections flag is on.
+import { useCerebroCollectionsSettingsTabs } from "@multica/cerebro-collections/views";
 
 // Assembled here, inside the client boundary, so the lucide icon components
 // carried in each tab's `icon` field are never serialized from a Server
@@ -56,6 +59,9 @@ export function SettingsPageClient({
   // TECH-3522: the workspace Web fetch tab, present only when the
   // cerebro_web_fetch_policy flag is on.
   const webFetchPolicyTabs = useCerebroWebFetchPolicySettingsTabs();
+  // FIR-1590 → Collections: the Collections tab, present only when the
+  // cerebro_collections flag is on.
+  const collectionsTabs = useCerebroCollectionsSettingsTabs();
   const accountTabs = useMemo(
     () => [
       ...extraAccountTabs,
@@ -65,6 +71,7 @@ export function SettingsPageClient({
       ...connectionsTabs,
       ...workspaceCopyTabs,
       ...webFetchPolicyTabs,
+      ...collectionsTabs,
     ],
     [
       toolPolicyTabs,
@@ -73,6 +80,7 @@ export function SettingsPageClient({
       connectionsTabs,
       workspaceCopyTabs,
       webFetchPolicyTabs,
+      collectionsTabs,
     ],
   );
 

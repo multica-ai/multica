@@ -19,6 +19,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { NoteTypesPanel } from "./note-types-panel";
 import { FolderAccessControl } from "./folder-access-control";
+import { FolderAccessColumn } from "@multica/cerebro-collections/views";
 import { Input } from "@multica/ui/components/ui/input";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -397,6 +398,12 @@ function FolderTreeItem({
           </button>
           {/* FIR-1590: per-folder access control. */}
           <FolderAccessControl folder={node} />
+          {/* FIR-1590 → Collections: per-folder grant editor (Valgt her/Arvet). */}
+          <FolderAccessColumn
+            surface="artifact"
+            folderId={node.id}
+            folderName={node.name}
+          />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
