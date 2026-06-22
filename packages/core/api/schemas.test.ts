@@ -8,6 +8,8 @@ import {
   EMPTY_USER,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
+  RuntimeDeviceListSchema,
+  RuntimeDeviceSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
@@ -15,8 +17,71 @@ import {
   SquadSchema,
   TimelineEntriesSchema,
   UserSchema,
+  EMPTY_RUNTIME_DEVICE_LIST,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
+
+describe("RuntimeDeviceSchema claim-window drift", () => {
+  const oldRuntime = {
+    id: "rt-1",
+    workspace_id: "ws-1",
+    name: "Claude",
+    runtime_mode: "local",
+    provider: "claude",
+    status: "online",
+  };
+
+  it("defaults fields omitted by older servers", () => {
+    const parsed = RuntimeDeviceSchema.parse(oldRuntime);
+    expect(parsed.claim_window_start).toBeNull();
+    expect(parsed.claim_window_timezone).toBeNull();
+    expect(parsed.claim_window_duration_minutes).toBe(300);
+    expect(parsed.claim_window_open).toBeNull();
+    expect(parsed.claim_window_transition_at).toBeNull();
+  });
+
+  it("preserves a valid scheduled runtime", () => {
+    const parsed = RuntimeDeviceSchema.parse({
+      ...oldRuntime,
+      claim_window_start: "02:00",
+      claim_window_timezone: "Europe/Warsaw",
+      claim_window_duration_minutes: 300,
+      claim_window_open: false,
+      claim_window_transition_at: "2026-06-23T00:00:00Z",
+    });
+    expect(parsed.claim_window_start).toBe("02:00");
+    expect(parsed.claim_window_timezone).toBe("Europe/Warsaw");
+    expect(parsed.claim_window_duration_minutes).toBe(300);
+    expect(parsed.claim_window_open).toBe(false);
+  });
+
+  it("degrades malformed optional schedule fields without dropping the runtime", () => {
+    const parsed = RuntimeDeviceSchema.parse({
+      ...oldRuntime,
+      claim_window_start: "2am",
+      claim_window_timezone: 42,
+      claim_window_duration_minutes: "five hours",
+      claim_window_open: "yes",
+      claim_window_transition_at: { at: "later" },
+    });
+    expect(parsed.id).toBe("rt-1");
+    expect(parsed.claim_window_start).toBeNull();
+    expect(parsed.claim_window_timezone).toBeNull();
+    expect(parsed.claim_window_duration_minutes).toBe(300);
+    expect(parsed.claim_window_open).toBeNull();
+    expect(parsed.claim_window_transition_at).toBeNull();
+  });
+
+  it("falls back to an empty list for a non-array response", () => {
+    const parsed = parseWithFallback(
+      { runtimes: [] },
+      RuntimeDeviceListSchema,
+      EMPTY_RUNTIME_DEVICE_LIST,
+      { endpoint: "GET /api/runtimes" },
+    );
+    expect(parsed).toEqual([]);
+  });
+});
 
 const baseIssue = {
   id: "11111111-1111-1111-1111-111111111111",

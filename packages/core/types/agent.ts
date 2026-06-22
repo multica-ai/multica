@@ -12,6 +12,16 @@ export type AgentVisibility = "workspace" | "private";
 // "private" so the strictest behavior is the fallback.
 export type RuntimeVisibility = "private" | "public";
 
+export interface RuntimeClaimWindowInput {
+  start_time: string;
+  timezone: string;
+}
+
+export interface UpdateRuntimeRequest {
+  visibility?: RuntimeVisibility;
+  claim_window?: RuntimeClaimWindowInput | null;
+}
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -37,6 +47,11 @@ export interface RuntimeDevice {
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
+  claim_window_start?: string | null;
+  claim_window_timezone?: string | null;
+  claim_window_duration_minutes?: number;
+  claim_window_open?: boolean | null;
+  claim_window_transition_at?: string | null;
 }
 
 export type AgentRuntime = RuntimeDevice;

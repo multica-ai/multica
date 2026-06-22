@@ -17,12 +17,45 @@ import type {
   GroupedIssuesResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
+  AgentRuntime,
   Squad,
   TimelineEntry,
   User,
   WebhookDelivery,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
+
+const RuntimeClaimWindowStartSchema = z.string().refine((value) => {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  return match !== null && Number(match[1]) <= 23 && Number(match[2]) <= 59;
+});
+
+export const RuntimeDeviceSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  daemon_id: z.string().nullable().optional().catch(null).default(null),
+  name: z.string(),
+  runtime_mode: z.string(),
+  provider: z.string(),
+  launch_header: z.string().optional().catch("").default(""),
+  status: z.string(),
+  device_info: z.string().optional().catch("").default(""),
+  metadata: z.record(z.string(), z.unknown()).optional().catch({}).default({}),
+  owner_id: z.string().nullable().optional().catch(null).default(null),
+  visibility: z.enum(["private", "public"]).optional().catch("private").default("private"),
+  profile_id: z.string().nullable().optional().catch(null).default(null),
+  last_seen_at: z.string().nullable().optional().catch(null).default(null),
+  created_at: z.string().optional().catch("").default(""),
+  updated_at: z.string().optional().catch("").default(""),
+  claim_window_start: RuntimeClaimWindowStartSchema.nullable().optional().catch(null).default(null),
+  claim_window_timezone: z.string().min(1).nullable().optional().catch(null).default(null),
+  claim_window_duration_minutes: z.literal(300).optional().catch(300).default(300),
+  claim_window_open: z.boolean().nullable().optional().catch(null).default(null),
+  claim_window_transition_at: z.string().nullable().optional().catch(null).default(null),
+}).loose();
+
+export const RuntimeDeviceListSchema = z.array(RuntimeDeviceSchema);
+export const EMPTY_RUNTIME_DEVICE_LIST: AgentRuntime[] = [];
 
 export interface AppConfigResponse {
   cdn_domain: string;

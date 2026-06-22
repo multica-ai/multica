@@ -24,6 +24,7 @@ import type {
   AgentActivityBucket,
   AgentRunCount,
   AgentRuntime,
+  UpdateRuntimeRequest,
   RuntimeProfile,
   CreateRuntimeProfileRequest,
   UpdateRuntimeProfileRequest,
@@ -174,6 +175,9 @@ import {
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  RuntimeDeviceListSchema,
+  RuntimeDeviceSchema,
+  EMPTY_RUNTIME_DEVICE_LIST,
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
@@ -894,7 +898,10 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.owner) search.set("owner", params.owner);
-    return this.fetch(`/api/runtimes?${search}`);
+    const raw = await this.fetch<unknown>(`/api/runtimes?${search}`);
+    return parseWithFallback(raw, RuntimeDeviceListSchema, EMPTY_RUNTIME_DEVICE_LIST, {
+      endpoint: "GET /api/runtimes",
+    });
   }
 
   async listCloudRuntimeNodes(
@@ -1093,12 +1100,22 @@ export class ApiClient {
 
   async updateRuntime(
     runtimeId: string,
-    patch: { visibility?: "private" | "public" },
+    patch: UpdateRuntimeRequest,
   ): Promise<AgentRuntime> {
-    return this.fetch(`/api/runtimes/${runtimeId}`, {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     });
+    const parsed = parseWithFallback<AgentRuntime | null>(
+      raw,
+      RuntimeDeviceSchema,
+      null,
+      { endpoint: "PATCH /api/runtimes/:id" },
+    );
+    if (parsed === null) {
+      throw new ApiError("Invalid runtime response", 502, "Bad Gateway", raw);
+    }
+    return parsed;
   }
 
   // ---------------------------------------------------------------------

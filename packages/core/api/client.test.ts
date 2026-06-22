@@ -33,6 +33,69 @@ describe("ApiClient", () => {
     }
   });
 
+  it("degrades a malformed runtime list response to an empty list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ runtimes: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listRuntimes()).resolves.toEqual([]);
+  });
+
+  it("sends and parses runtime claim-window patches", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        id: "rt-1",
+        workspace_id: "ws-1",
+        name: "Claude",
+        runtime_mode: "local",
+        provider: "claude",
+        status: "online",
+        claim_window_start: "02:00",
+        claim_window_timezone: "Europe/Warsaw",
+        claim_window_duration_minutes: 300,
+        claim_window_open: false,
+        claim_window_transition_at: "2026-06-23T00:00:00Z",
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const runtime = await client.updateRuntime("rt-1", {
+      claim_window: { start_time: "02:00", timezone: "Europe/Warsaw" },
+    });
+
+    expect(runtime.claim_window_start).toBe("02:00");
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
+      claim_window: { start_time: "02:00", timezone: "Europe/Warsaw" },
+    }));
+  });
+
+  it("rejects a malformed successful runtime update response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status: "ok" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.updateRuntime("rt-1", { claim_window: null })).rejects.toMatchObject({
+      status: 502,
+      message: "Invalid runtime response",
+    });
+  });
+
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ autopilots: [], runs: [], total: 0 }), {

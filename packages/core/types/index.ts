@@ -10,6 +10,8 @@ export type {
   TaskFailureReason,
   AgentRuntime,
   RuntimeDevice,
+  RuntimeClaimWindowInput,
+  UpdateRuntimeRequest,
   RuntimeProfile,
   RuntimeProtocolFamily,
   RuntimeProfileVisibility,

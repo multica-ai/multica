@@ -3,6 +3,7 @@ import { api } from "../api";
 import { runtimeKeys } from "./queries";
 import { workspaceKeys } from "../workspace/queries";
 import { agentTaskSnapshotKeys } from "../agents/queries";
+import type { UpdateRuntimeRequest } from "../types";
 
 export function useDeleteRuntime(wsId: string) {
   const qc = useQueryClient();
@@ -42,7 +43,7 @@ export function useArchiveAgentsAndDeleteRuntime(wsId: string) {
   });
 }
 
-// useUpdateRuntime patches editable fields on a runtime (visibility).
+// useUpdateRuntime patches user-editable runtime metadata.
 // Invalidates the runtime list so the picker disabled-state recomputes.
 export function useUpdateRuntime(wsId: string) {
   const qc = useQueryClient();
@@ -52,7 +53,7 @@ export function useUpdateRuntime(wsId: string) {
       patch,
     }: {
       runtimeId: string;
-      patch: { visibility?: "private" | "public" };
+      patch: UpdateRuntimeRequest;
     }) => api.updateRuntime(runtimeId, patch),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
