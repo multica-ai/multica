@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -23,15 +24,19 @@ import (
 // message is an interaction with the Bot (@-mention or reply to a
 // Bot card). For p2p messages this field is ignored.
 type InboundMessage struct {
-	EventType      string
-	EventID        string
-	AppID          string
-	ChatID         ChatID
-	ChatType       ChatType
-	MessageID      string
-	SenderOpenID   OpenID
-	Body           string
-	AddressedToBot bool
+	EventType    string
+	EventID      string
+	AppID        string
+	ChatID       ChatID
+	ChatType     ChatType
+	MessageID    string
+	SenderOpenID OpenID
+	Body         string
+	// ForceFreshSession marks this dispatch as a one-off fresh start:
+	// the daemon should skip prior session resume when it claims the
+	// resulting chat task.
+	ForceFreshSession bool
+	AddressedToBot    bool
 
 	// MessageType is the raw Lark msg_type ("text", "post",
 	// "merge_forward", "image", "interactive", …). The decoder
@@ -161,7 +166,7 @@ type IssueCreator interface {
 // the Dispatcher is small enough that depending on the whole
 // TaskService struct is gratuitous.
 type ChatTaskEnqueuer interface {
-	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID) (db.AgentTaskQueue, error)
+	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error)
 }
 
 // DispatcherQueries is the narrow subset of *db.Queries the Dispatcher
@@ -235,6 +240,13 @@ type Dispatcher struct {
 	// config) the run fires inline with no debounce — a zero-length
 	// window, not a separate code path.
 	batcher *pendingBatcher
+
+	// pendingFresh tracks whether any message in the current debounced
+	// session window asked for a fresh run. The debouncer intentionally
+	// keeps the latest flush closure so the latest sender wins, but the
+	// fresh-start directive is sticky across the window.
+	pendingFreshMu sync.Mutex
+	pendingFresh   map[string]bool
 }
 
 // FlushReplyFunc matches OutcomeReplier.Reply so the production replier can
@@ -576,7 +588,8 @@ func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, ins
 // message's installation + InboundMessage so the offline/archived notice,
 // if any, targets the right chat; the latest message in a window wins.
 func (d *Dispatcher) scheduleRun(inst db.LarkInstallation, msg InboundMessage, sessionID pgtype.UUID, initiatorUserID pgtype.UUID) {
-	flush := func() { d.flushChatRun(inst, msg, sessionID, initiatorUserID) }
+	key := keyForSession(sessionID)
+	flush := func() { d.flushChatRun(inst, msg, sessionID, initiatorUserID, msg.ForceFreshSession) }
 	if d.batcher == nil {
 		// Batching disabled (unit tests / degenerate config): trigger the
 		// run immediately. Production always installs a batcher via
@@ -584,7 +597,13 @@ func (d *Dispatcher) scheduleRun(inst db.LarkInstallation, msg InboundMessage, s
 		flush()
 		return
 	}
-	d.batcher.Schedule(keyForSession(sessionID), flush)
+	if msg.ForceFreshSession {
+		d.markPendingFresh(key)
+	}
+	flush = func() {
+		d.flushChatRun(inst, msg, sessionID, initiatorUserID, d.takePendingFresh(key, msg.ForceFreshSession))
+	}
+	d.batcher.Schedule(key, flush)
 }
 
 // flushChatRun is the debounced run-trigger. It runs once per silence
@@ -596,7 +615,7 @@ func (d *Dispatcher) scheduleRun(inst db.LarkInstallation, msg InboundMessage, s
 // returned to a caller (the message is already ACKed and durable), so they
 // are logged: a failed enqueue leaves the message in the session to be
 // picked up by the next message's run.
-func (d *Dispatcher) flushChatRun(inst db.LarkInstallation, msg InboundMessage, sessionID pgtype.UUID, initiatorUserID pgtype.UUID) {
+func (d *Dispatcher) flushChatRun(inst db.LarkInstallation, msg InboundMessage, sessionID pgtype.UUID, initiatorUserID pgtype.UUID, forceFreshSession bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), chatRunFlushTimeout)
 	defer cancel()
 
@@ -608,7 +627,7 @@ func (d *Dispatcher) flushChatRun(inst db.LarkInstallation, msg InboundMessage, 
 		)
 		return
 	}
-	if _, err := d.TaskService.EnqueueChatTask(ctx, session, initiatorUserID); err != nil {
+	if _, err := d.TaskService.EnqueueChatTask(ctx, session, initiatorUserID, forceFreshSession); err != nil {
 		switch {
 		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):
 			d.emitFlushReply(ctx, inst, msg, sessionID, OutcomeAgentOffline)
@@ -625,6 +644,26 @@ func (d *Dispatcher) flushChatRun(inst db.LarkInstallation, msg InboundMessage, 
 			)
 		}
 	}
+}
+
+func (d *Dispatcher) markPendingFresh(key string) {
+	d.pendingFreshMu.Lock()
+	defer d.pendingFreshMu.Unlock()
+	if d.pendingFresh == nil {
+		d.pendingFresh = make(map[string]bool)
+	}
+	d.pendingFresh[key] = true
+}
+
+func (d *Dispatcher) takePendingFresh(key string, fallback bool) bool {
+	d.pendingFreshMu.Lock()
+	defer d.pendingFreshMu.Unlock()
+	fresh := fallback
+	if d.pendingFresh != nil {
+		fresh = fresh || d.pendingFresh[key]
+		delete(d.pendingFresh, key)
+	}
+	return fresh
 }
 
 // emitFlushReply delivers an offline/archived notice for a flushed run.

@@ -289,11 +289,13 @@ type fakeEnqueuer struct {
 	task             db.AgentTaskQueue
 	err              error
 	lastInitiatorUID pgtype.UUID
+	lastForceFresh   bool
 }
 
-func (f *fakeEnqueuer) EnqueueChatTask(ctx context.Context, _ db.ChatSession, initiatorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (f *fakeEnqueuer) EnqueueChatTask(ctx context.Context, _ db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
 	f.called++
 	f.lastInitiatorUID = initiatorUserID
+	f.lastForceFresh = forceFreshSession
 	return f.task, f.err
 }
 
@@ -473,6 +475,44 @@ func TestDispatcher_PlainMessageEnqueuesTask(t *testing.T) {
 	if enq.lastInitiatorUID != queries.userBinding.MulticaUserID {
 		t.Fatalf("p2p task initiator should be sender; got %+v want %+v",
 			enq.lastInitiatorUID, queries.userBinding.MulticaUserID)
+	}
+	if enq.lastForceFresh {
+		t.Fatalf("plain chat message must not force a fresh session")
+	}
+}
+
+func TestDispatcher_FreshMessageEnqueuesFreshTask(t *testing.T) {
+	sessionID := validUUID(0x66)
+	queries := &fakeQueries{
+		installationByApp: activeInstallation(),
+		userBinding:       boundUser(),
+		chatSession:       db.ChatSession{ID: sessionID, AgentID: validUUID(0x33)},
+	}
+	chat := &fakeChat{ensureID: sessionID, appendResult: AppendResult{}}
+	enq := &fakeEnqueuer{task: db.AgentTaskQueue{ID: validUUID(0x77)}}
+	d := &Dispatcher{
+		Queries:     queries,
+		Chat:        chat,
+		Audit:       &fakeAudit{},
+		TaskService: enq,
+	}
+
+	_, err := d.Handle(context.Background(), InboundMessage{
+		AppID:             "ok",
+		ChatType:          ChatTypeP2P,
+		SenderOpenID:      "ou_user_a",
+		Body:              "rebuild the plan",
+		ForceFreshSession: true,
+		MessageID:         "msg-fresh",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if enq.called != 1 {
+		t.Fatalf("expected exactly one EnqueueChatTask at flush; called=%d", enq.called)
+	}
+	if !enq.lastForceFresh {
+		t.Fatalf("fresh Lark message should force a fresh chat task")
 	}
 }
 
@@ -1098,6 +1138,47 @@ func TestDispatcher_DebounceCoalescesRunTrigger(t *testing.T) {
 	f.fireArmed()
 	if enq.called != 2 {
 		t.Fatalf("a message after the window must start a new run; called=%d", enq.called)
+	}
+}
+
+func TestDispatcher_DebouncePreservesFreshAcrossWindow(t *testing.T) {
+	// If any message in the coalesced window is /fresh, the single
+	// resulting run must be fresh even though the latest sender/message
+	// still supplies the reply target and initiator.
+	sessionID := validUUID(0x66)
+	queries := &fakeQueries{
+		installationByApp: activeInstallation(),
+		userBinding:       boundUser(),
+		chatSession:       db.ChatSession{ID: sessionID, AgentID: validUUID(0x33)},
+	}
+	chat := &fakeChat{ensureID: sessionID, appendResult: AppendResult{}}
+	enq := &fakeEnqueuer{task: db.AgentTaskQueue{ID: validUUID(0x77)}}
+	f := &fakeTimerFactory{}
+	d := &Dispatcher{Queries: queries, Chat: chat, Audit: &fakeAudit{}, TaskService: enq}
+	d.batcher = newTestBatcher(f)
+
+	send := func(id string, forceFresh bool) {
+		if _, err := d.Handle(context.Background(), InboundMessage{
+			AppID:             "ok",
+			ChatType:          ChatTypeP2P,
+			SenderOpenID:      "ou_user_a",
+			Body:              "hi",
+			ForceFreshSession: forceFresh,
+			MessageID:         id,
+		}); err != nil {
+			t.Fatalf("unexpected error for %s: %v", id, err)
+		}
+	}
+
+	send("m-fresh", true)
+	send("m-normal", false)
+	f.fireArmed()
+
+	if enq.called != 1 {
+		t.Fatalf("a coalesced burst must enqueue exactly once; called=%d", enq.called)
+	}
+	if !enq.lastForceFresh {
+		t.Fatalf("fresh directive should stick across the debounced window")
 	}
 }
 
