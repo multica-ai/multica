@@ -220,6 +220,8 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	var usage TokenUsage
 	finalStatus := "completed"
 	var finalError string
+	// CEREBRO-PATCH(agent-opencode-context-footprint): FIR-1870 last-turn footprint for the context-window indicator (cumulative usage over-counts the cached prefix).
+	var lastTurn lastTurnFootprint
 
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -251,12 +253,16 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		case "step_finish":
 			// Accumulate token usage from step_finish events.
 			if t := event.Part.Tokens; t != nil {
+				var cr, cw int64
+				if t.Cache != nil {
+					cr, cw = t.Cache.Read, t.Cache.Write
+				}
 				usage.InputTokens += t.Input
 				usage.OutputTokens += t.Output
-				if t.Cache != nil {
-					usage.CacheReadTokens += t.Cache.Read
-					usage.CacheWriteTokens += t.Cache.Write
-				}
+				usage.CacheReadTokens += cr
+				usage.CacheWriteTokens += cw
+				// CEREBRO-PATCH(agent-opencode-context-footprint): FIR-1870 last-turn footprint; Anthropic-style input excludes cache, so whole prompt = input + cacheRead + cacheWrite.
+				lastTurn.observe("", t.Input+cr+cw, cr)
 			}
 		}
 	}
@@ -269,6 +275,8 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			finalError = fmt.Sprintf("stdout read error: %v", scanErr)
 		}
 	}
+
+	lastTurn.apply(&usage) // CEREBRO-PATCH(agent-opencode-context-footprint): FIR-1870 overlay last-turn footprint onto the cumulative usage.
 
 	return eventResult{
 		status:    finalStatus,

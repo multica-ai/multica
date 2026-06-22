@@ -67,11 +67,15 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	// Latest run inside the window that has recorded token usage. Membership is
 	// by run start time relative to the session markers — the same Model B order
 	// the surface uses, so the indicator and the timeline agree.
-	// cf.* is the FIR-1856 last-turn footprint (Codex/gpt only): the size of the
-	// prompt the model last read, i.e. how full the window is. When present it is
-	// the authoritative numerator; the task_usage SUMs below stay the fallback for
-	// runtimes that report a per-turn footprint already (Claude et al.). For Codex
-	// the task_usage figure is the lifetime sum and would pin the gauge at 100%.
+	// cf.* is the last-turn footprint: the size of the prompt the model last read,
+	// i.e. how full the window is. When present it is the authoritative numerator.
+	// FIR-1856 recorded it for Codex; FIR-1870 extended it to the other streaming
+	// runtimes (Claude, Cursor, Pi, OpenCode, OpenClaw, the local runtime) because
+	// the task_usage figure is the LIFETIME SUM for them too — with prompt caching
+	// warm each turn re-reads the cached prefix, so the summed cache_read is several
+	// times the window and pins the gauge at 100% (FIR-1870's 3350k/1000k). The
+	// task_usage SUMs below remain the fallback only for runtimes that report no
+	// footprint yet.
 	const q = `
 		SELECT COALESCE(SUM(tu.input_tokens), 0),
 		       COALESCE(SUM(tu.cache_read_tokens), 0),

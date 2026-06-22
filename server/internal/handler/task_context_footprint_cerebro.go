@@ -10,10 +10,15 @@ import (
 // task_usage stay the source of truth for cost; this side table holds the size
 // of the prompt the model last read — how full the window actually is.
 //
-// Only Codex/gpt runtimes report a footprint (codex.go reads Codex'
-// last_token_usage). Everything else leaves it zero, and the indicator falls
-// back to the input+cache_read+cache_write formula in
-// server/internal/cerebro/sessions, which is already correct for those runtimes.
+// FIR-1870: the footprint is no longer Codex-only. The streaming runtimes
+// (Claude, Cursor, Pi, OpenCode, OpenClaw, the local OpenAI-compatible runtime)
+// accumulate per-turn usage, so the cumulative input+cache_read+cache_write sum
+// over-counts the cached prefix and pins the gauge at 100% — exactly the Codex
+// bug, just on every other runtime. Those backends now report a last-turn
+// footprint too (see server/pkg/agent/cerebro_context_footprint.go). Runtimes
+// that report no token usage, or only a cumulative snapshot we cannot safely
+// split into a last turn, still leave this zero and fall back to the cumulative
+// formula in server/internal/cerebro/sessions.
 func (h *Handler) recordCerebroTaskContextFootprint(ctx context.Context, taskID string, u TaskUsagePayload) {
 	if h.DB == nil || u.ContextInputTokens <= 0 {
 		return

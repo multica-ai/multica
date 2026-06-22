@@ -211,6 +211,11 @@ func (b *firtalLocalBackend) runLoop(ctx context.Context, cfg firtalLocalConfig,
 		if r.Usage != nil {
 			usage.InputTokens += r.Usage.PromptTokens
 			usage.OutputTokens += r.Usage.CompletionTokens
+			// CEREBRO-PATCH(agent-firtal-local-context-footprint): FIR-1870 the window indicator needs the last call's whole prompt, not the sum across tool rounds; OpenAI-style prompt_tokens already includes everything, no separate cache.
+			if r.Usage.PromptTokens > 0 {
+				usage.ContextInputTokens = r.Usage.PromptTokens
+				usage.ContextCacheReadTokens = 0
+			}
 		}
 	}
 
@@ -867,8 +872,8 @@ func firtalLocalAllToolDefs() []firtalLocalToolDef {
 			Name:        "list_projects",
 			Description: "List all projects in the workspace.",
 			Parameters: map[string]any{
-				"type":     "object",
-				"required": []string{},
+				"type":       "object",
+				"required":   []string{},
 				"properties": map[string]any{},
 			},
 		}},
@@ -876,8 +881,8 @@ func firtalLocalAllToolDefs() []firtalLocalToolDef {
 			Name:        "get_me",
 			Description: "Return your own agent ID, name, and workspace context.",
 			Parameters: map[string]any{
-				"type":     "object",
-				"required": []string{},
+				"type":       "object",
+				"required":   []string{},
 				"properties": map[string]any{},
 			},
 		}},

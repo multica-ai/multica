@@ -158,6 +158,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		finalStatus := "completed"
 		var finalError string
 		usage := make(map[string]TokenUsage)
+		// CEREBRO-PATCH(agent-claude-context-footprint): FIR-1870 track the last turn's prompt footprint for the context-window indicator (cumulative usage over-counts the cached prefix).
+		var lastTurn lastTurnFootprint
 		// Diagnostics for the empty-output fail mode (JEH-405): count how
 		// many lines we couldn't parse and remember the first one. A surge
 		// of unparseable lines almost always means the claude stream-json
@@ -196,7 +198,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			switch msg.Type {
 			case "assistant":
-				b.handleAssistant(msg, msgCh, &output, usage)
+				b.handleAssistant(msg, msgCh, &output, usage, &lastTurn)
 			case "user":
 				b.handleUser(msg, msgCh)
 			case "system":
@@ -213,6 +215,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if resultUsage := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
 				}
+				// CEREBRO-PATCH(agent-claude-context-footprint): FIR-1870 the result message's modelUsage is the lifetime sum; overlay the last turn's footprint so the window indicator reads occupancy, not the sum.
+				lastTurn.applyToMap(usage)
 				if msg.IsError {
 					finalStatus = "failed"
 					finalError = msg.ResultText
@@ -342,7 +346,8 @@ func isClaudeProviderLimitOutput(output string) bool {
 		strings.Contains(lower, "monthly usage limit")
 }
 
-func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage) {
+// CEREBRO-PATCH(agent-claude-context-footprint): FIR-1870 lastTurn captures the final turn's prompt footprint for the context-window indicator.
+func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage, lastTurn *lastTurnFootprint) {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		return
@@ -356,6 +361,11 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 		u.CacheReadTokens += content.Usage.CacheReadInputTokens
 		u.CacheWriteTokens += content.Usage.CacheCreationInputTokens
 		usage[content.Model] = u
+		// Anthropic reports input EXCLUSIVE of cache, so the whole prompt this
+		// turn read is input + cache_read + cache_creation.
+		lastTurn.observe(content.Model,
+			content.Usage.InputTokens+content.Usage.CacheReadInputTokens+content.Usage.CacheCreationInputTokens,
+			content.Usage.CacheReadInputTokens)
 	}
 
 	for _, block := range content.Content {

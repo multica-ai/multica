@@ -336,6 +336,8 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 	var usage TokenUsage
 	finalStatus := "completed"
 	var finalError string
+	// CEREBRO-PATCH(agent-openclaw-context-footprint): FIR-1870 last-turn footprint for the context-window indicator (cumulative usage over-counts the cached prefix).
+	var lastTurn lastTurnFootprint
 	gotEvents := false // true if we parsed at least one streaming event or result
 
 	var rawLines []string
@@ -399,6 +401,8 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 					usage.OutputTokens += u.OutputTokens
 					usage.CacheReadTokens += u.CacheReadTokens
 					usage.CacheWriteTokens += u.CacheWriteTokens
+					// CEREBRO-PATCH(agent-openclaw-context-footprint): FIR-1870 last-turn footprint; Anthropic-style input excludes cache.
+					lastTurn.observe("", u.InputTokens+u.CacheReadTokens+u.CacheWriteTokens, u.CacheReadTokens)
 				}
 			}
 			continue
@@ -446,6 +450,8 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 			errMsg: openclawNoParseableOutput,
 		}
 	}
+
+	lastTurn.apply(&usage) // CEREBRO-PATCH(agent-openclaw-context-footprint): FIR-1870 overlay last-turn footprint onto the cumulative usage.
 
 	return openclawEventResult{
 		status:    finalStatus,

@@ -116,6 +116,8 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		stepUsage := make(map[string]TokenUsage)
 		resultUsage := make(map[string]TokenUsage)
 		hasResultUsage := false
+		// CEREBRO-PATCH(agent-cursor-context-footprint): FIR-1870 last-turn footprint for the context-window indicator; the result event's usage is the cumulative session total and over-counts the cached prefix.
+		var lastTurn lastTurnFootprint
 
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -213,6 +215,8 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					u.OutputTokens += int64(part.Tokens.Output)
 					u.CacheReadTokens += int64(part.Tokens.Cache.Read)
 					stepUsage[model] = u
+					// CEREBRO-PATCH(agent-cursor-context-footprint): FIR-1870 last-turn footprint; input excludes cache, so whole prompt = input + cache.read.
+					lastTurn.observe(model, int64(part.Tokens.Input)+int64(part.Tokens.Cache.Read), int64(part.Tokens.Cache.Read))
 				}
 			}
 		}
@@ -222,6 +226,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		if !hasResultUsage {
 			resultUsage = stepUsage
 		}
+		lastTurn.applyToMap(resultUsage) // CEREBRO-PATCH(agent-cursor-context-footprint): FIR-1870 overlay last-turn footprint onto the cumulative session totals.
 
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)

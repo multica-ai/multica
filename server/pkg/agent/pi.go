@@ -261,6 +261,8 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		finalStatus := "completed"
 		var finalError string
 		usage := make(map[string]TokenUsage)
+		// CEREBRO-PATCH(agent-pi-context-footprint): FIR-1870 last-turn footprint for the context-window indicator (cumulative usage over-counts the cached prefix).
+		var lastTurn lastTurnFootprint
 
 		scanner := bufio.NewScanner(stdout)
 		// Pi message_update events can be large (they embed the full message
@@ -332,6 +334,8 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					u.CacheReadTokens += msg.Usage.CacheRead
 					u.CacheWriteTokens += msg.Usage.CacheWrite
 					usage[model] = u
+					// CEREBRO-PATCH(agent-pi-context-footprint): FIR-1870 Anthropic-style input excludes cache; whole prompt = input + cacheRead + cacheWrite.
+					lastTurn.observe(model, msg.Usage.Input+msg.Usage.CacheRead+msg.Usage.CacheWrite, msg.Usage.CacheRead)
 				}
 
 			case "error":
@@ -374,6 +378,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 		b.cfg.Logger.Info("pi finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
+		lastTurn.applyToMap(usage) // CEREBRO-PATCH(agent-pi-context-footprint): FIR-1870 overlay last-turn footprint onto the cumulative usage map.
 		resCh <- Result{
 			Status:     finalStatus,
 			Output:     output.String(),

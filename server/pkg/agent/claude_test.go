@@ -30,7 +30,7 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), &lastTurnFootprint{}) // CEREBRO-PATCH(agent-claude-context-footprint): FIR-1870 lastTurn arg
 
 	if output.String() != "Hello world" {
 		t.Fatalf("expected output 'Hello world', got %q", output.String())
@@ -67,7 +67,7 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), &lastTurnFootprint{}) // CEREBRO-PATCH(agent-claude-context-footprint): FIR-1870 lastTurn arg
 
 	if output.String() != "" {
 		t.Fatalf("tool_use should not add to output, got %q", output.String())
@@ -167,7 +167,7 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 
 	// Should not panic
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage), &lastTurnFootprint{}) // CEREBRO-PATCH(agent-claude-context-footprint): FIR-1870 lastTurn arg
 
 	if output.String() != "" {
 		t.Fatalf("expected empty output for invalid JSON, got %q", output.String())
