@@ -1134,6 +1134,87 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	return claimed, nil
 }
 
+// ExpireStaleQueuedTasks advances queued-task TTL only while a scheduled
+// runtime is inside its claim window. Unscheduled runtimes retain the existing
+// wall-clock TTL behavior.
+func (s *TaskService) ExpireStaleQueuedTasks(
+	ctx context.Context,
+	ttl time.Duration,
+	maxPerTick int32,
+) ([]db.AgentTaskQueue, error) {
+	if ttl <= 0 || maxPerTick <= 0 {
+		return []db.AgentTaskQueue{}, nil
+	}
+
+	failed, err := s.Queries.ExpireStaleQueuedTasksUnscheduled(ctx, db.ExpireStaleQueuedTasksUnscheduledParams{
+		TtlSecs:    ttl.Seconds(),
+		MaxPerTick: maxPerTick,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("expire stale unscheduled queued tasks: %w", err)
+	}
+	remaining := maxPerTick - int32(len(failed))
+	if remaining <= 0 {
+		return failed, nil
+	}
+
+	runtimes, err := s.Queries.ListScheduledRuntimesWithStaleQueuedTasks(ctx, ttl.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("list scheduled runtimes with stale queued tasks: %w", err)
+	}
+	now := time.Now()
+	runtimeIDs := make([]pgtype.UUID, 0, len(runtimes))
+	windowStarts := make([]pgtype.Timestamptz, 0, len(runtimes))
+	minuteMicros := int64(time.Minute / time.Microsecond)
+	dayMicros := int64(24 * time.Hour / time.Microsecond)
+	for _, runtime := range runtimes {
+		runtimeID := util.UUIDToString(runtime.ID)
+		if !runtime.ClaimWindowStart.Valid || !runtime.ClaimWindowTimezone.Valid ||
+			runtime.ClaimWindowStart.Microseconds < 0 ||
+			runtime.ClaimWindowStart.Microseconds >= dayMicros ||
+			runtime.ClaimWindowStart.Microseconds%minuteMicros != 0 {
+			slog.Warn("queued expiry: malformed runtime claim window",
+				"runtime_id", runtimeID,
+				"timezone", runtime.ClaimWindowTimezone.String,
+			)
+			continue
+		}
+
+		startMinutes := int(runtime.ClaimWindowStart.Microseconds / minuteMicros)
+		state, err := claimwindow.Evaluate(now, startMinutes, runtime.ClaimWindowTimezone.String)
+		if err != nil {
+			slog.Warn("queued expiry: malformed runtime claim window",
+				"runtime_id", runtimeID,
+				"timezone", runtime.ClaimWindowTimezone.String,
+				"error", err,
+			)
+			continue
+		}
+		if !state.Open {
+			continue
+		}
+		runtimeIDs = append(runtimeIDs, runtime.ID)
+		windowStarts = append(windowStarts, pgtype.Timestamptz{Time: state.Start, Valid: true})
+	}
+	if len(runtimeIDs) == 0 {
+		return failed, nil
+	}
+
+	scheduledFailed, err := s.Queries.ExpireStaleQueuedTasksForScheduledRuntimes(
+		ctx,
+		db.ExpireStaleQueuedTasksForScheduledRuntimesParams{
+			RuntimeIds:   runtimeIDs,
+			WindowStarts: windowStarts,
+			TtlSecs:      ttl.Seconds(),
+			MaxPerTick:   remaining,
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("expire stale scheduled queued tasks: %w", err)
+	}
+	return append(failed, scheduledFailed...), nil
+}
+
 // maybeLogClaimSlow emits one structured log per ClaimTask call when its total
 // latency exceeds 300ms, so the prod tail can be diagnosed without flooding
 // logs at normal poll rates. Called via defer so it captures the full path

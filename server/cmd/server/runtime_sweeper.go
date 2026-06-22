@@ -84,7 +84,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 		case <-ticker.C:
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
-			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
+			sweepExpiredQueuedTasks(ctx, taskSvc)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -261,17 +261,14 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
 }
 
-// sweepExpiredQueuedTasks fails tasks that have been sitting in 'queued' for
-// longer than the TTL. Companion to the dispatch-time admission gate added
-// in MUL-1899: that gate prevents new doomed enqueues; this gate drains the
-// historical backlog and catches the race where a runtime goes offline AFTER
-// a task is already queued. Capped to queuedExpireBatchSize per tick so a
-// big backlog can't monopolise the DB.
-func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService) {
-	failedTasks, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    queuedTTLSeconds,
-		MaxPerTick: queuedExpireBatchSize,
-	})
+// sweepExpiredQueuedTasks fails tasks whose claimable queue time exceeds the
+// TTL. Scheduled runtimes pause that clock outside their daily claim window.
+func sweepExpiredQueuedTasks(ctx context.Context, taskSvc *service.TaskService) {
+	failedTasks, err := taskSvc.ExpireStaleQueuedTasks(
+		ctx,
+		time.Duration(queuedTTLSeconds)*time.Second,
+		queuedExpireBatchSize,
+	)
 	if err != nil {
 		slog.Warn("task sweeper: failed to expire stale queued tasks", "error", err)
 		return

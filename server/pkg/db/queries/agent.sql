@@ -470,48 +470,6 @@ WHERE (status = 'dispatched' AND dispatched_at < now() - make_interval(secs => @
    OR (status = 'running' AND started_at < now() - make_interval(secs => @running_timeout_secs::double precision))
 RETURNING *;
 
--- name: ExpireStaleQueuedTasks :many
--- Fails tasks that have been sitting in 'queued' for longer than the TTL.
--- This is the cleanup arm of the MUL-1899 "queued backlog" fix: even with the
--- new dispatch-time admission gate that refuses to enqueue when the runtime
--- is offline, we still need to drain the historical 87k+ doomed rows and
--- handle edge cases where a runtime goes offline AFTER a task is already
--- queued (the admission check protects new enqueues, not in-flight queue
--- depth).
---
--- Concurrency safety: the daemon's claim path may race with this sweeper to
--- transition the same row out of 'queued'. We protect against that two
--- ways:
---   1. The CTE selects victims with FOR UPDATE SKIP LOCKED so a row that is
---      currently being claimed (or otherwise locked) is skipped — no lock
---      contention with the dispatch path, and we won't queue up behind it.
---   2. The outer UPDATE re-checks status='queued' AND the TTL predicate at
---      apply time. If a daemon claimed the row between selection and update
---      (e.g. lock released after the claim transaction commits), the row is
---      already 'dispatched'/'running' and the WHERE clause filters it out
---      so we cannot clobber an in-flight task.
--- Capped via LIMIT inside the CTE so a single sweep tick cannot monopolise
--- the DB when the backlog is large — the sweeper drains the rest on
--- subsequent ticks.
-WITH victims AS (
-    SELECT id FROM agent_task_queue
-    WHERE status = 'queued'
-      AND created_at < now() - make_interval(secs => @ttl_secs::double precision)
-    ORDER BY created_at ASC
-    LIMIT @max_per_tick::int
-    FOR UPDATE SKIP LOCKED
-)
-UPDATE agent_task_queue t
-SET status = 'failed',
-    completed_at = now(),
-    error = 'task expired in queue',
-    failure_reason = 'queued_expired'
-FROM victims v
-WHERE t.id = v.id
-  AND t.status = 'queued'
-  AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
-RETURNING t.*;
-
 -- name: ExpireStaleQueuedTasksUnscheduled :many
 WITH victims AS (
     SELECT t.id

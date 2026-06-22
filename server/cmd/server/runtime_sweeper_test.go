@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -570,10 +575,8 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	}
 
 	queries := db.New(testPool)
-	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    3600.0, // 1h TTL — old task is 5h, fresh task is 0s
-		MaxPerTick: 100,
-	})
+	taskSvc := service.NewTaskService(queries, testPool, nil, events.New())
+	failed, err := taskSvc.ExpireStaleQueuedTasks(ctx, time.Hour, 100)
 	if err != nil {
 		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
 	}
@@ -666,10 +669,8 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 	}
 
 	queries := db.New(testPool)
-	failed, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    3600.0,
-		MaxPerTick: 2, // cap below the backlog
-	})
+	taskSvc := service.NewTaskService(queries, testPool, nil, events.New())
+	failed, err := taskSvc.ExpireStaleQueuedTasks(ctx, time.Hour, 2)
 	if err != nil {
 		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
 	}
@@ -690,6 +691,119 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 }
 
 // parseUUIDBytes converts a UUID string to the 16-byte array used by pgtype.UUID.
+func createScheduledQueuedExpiryFixture(
+	t *testing.T,
+	label string,
+	startOffset time.Duration,
+	timezone string,
+) (runtimeID, taskID string) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	startMinutes := (now.Hour()*60 + now.Minute() + int(startOffset/time.Minute)) % (24 * 60)
+	if startMinutes < 0 {
+		startMinutes += 24 * 60
+	}
+	start := fmt.Sprintf("%02d:%02d", startMinutes/60, startMinutes%60)
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, last_seen_at,
+			claim_window_start, claim_window_timezone
+		)
+		VALUES ($1, NULL, $2, 'local', $3, 'online', '', '{}'::jsonb, $4, now(), $5::time, $6)
+		RETURNING id
+	`, testWorkspaceID, label+" runtime", "expiry_"+label, testUserID, start, timezone).Scan(&runtimeID); err != nil {
+		t.Fatalf("create %s runtime: %v", label, err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'local', '{}'::jsonb, $3, 'private', 1, $4)
+		RETURNING id
+	`, testWorkspaceID, label+" agent", runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create %s agent: %v", label, err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		WITH bumped AS (
+			UPDATE workspace SET issue_counter = issue_counter + 1
+			WHERE id = $1 RETURNING issue_counter
+		)
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			assignee_type, assignee_id, number
+		)
+		VALUES ($1, $2, 'todo', 'none', 'member', $3, 'agent', $4, (SELECT issue_counter FROM bumped))
+		RETURNING id
+	`, testWorkspaceID, label+" issue", testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("create %s issue: %v", label, err)
+	}
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, created_at
+		)
+		VALUES ($1, $2, $3, 'queued', 0, now() - interval '24 hours')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("create %s task: %v", label, err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	return runtimeID, taskID
+}
+
+func TestExpireStaleQueuedTasksScheduledWindows(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	_, closedTaskID := createScheduledQueuedExpiryFixture(t, "closed", time.Hour, "UTC")
+	_, recentOpenTaskID := createScheduledQueuedExpiryFixture(t, "recent_open", -time.Hour, "UTC")
+	_, oldOpenTaskID := createScheduledQueuedExpiryFixture(t, "old_open", -3*time.Hour, "UTC")
+	malformedRuntimeID, malformedTaskID := createScheduledQueuedExpiryFixture(t, "malformed", -3*time.Hour, "Mars/Olympus")
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	queries := db.New(testPool)
+	taskSvc := service.NewTaskService(queries, testPool, nil, events.New())
+	failed, err := taskSvc.ExpireStaleQueuedTasks(context.Background(), 2*time.Hour, 100)
+	if err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
+	}
+	if len(failed) != 1 || failed[0].ID.Bytes != parseUUIDBytes(oldOpenTaskID) {
+		t.Fatalf("expired tasks = %+v; want only %s", failed, oldOpenTaskID)
+	}
+
+	for _, taskID := range []string{closedTaskID, recentOpenTaskID, malformedTaskID} {
+		var status string
+		if err := testPool.QueryRow(context.Background(), `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
+			t.Fatalf("load task %s: %v", taskID, err)
+		}
+		if status != "queued" {
+			t.Fatalf("task %s status = %s; want queued", taskID, status)
+		}
+	}
+	if !strings.Contains(logs.String(), malformedRuntimeID) || !strings.Contains(logs.String(), "Mars/Olympus") {
+		t.Fatalf("malformed schedule log missing runtime/timezone: %s", logs.String())
+	}
+}
+
 func parseUUIDBytes(s string) [16]byte {
 	s = strings.ReplaceAll(s, "-", "")
 	var b [16]byte
