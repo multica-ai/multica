@@ -22,7 +22,7 @@ Image: `ghcr.io/g2crowd/agent-runtime-base:<tag>` — multi-arch
 
 | Tool      | Distribution                                    | Version pinned via       |
 |-----------|-------------------------------------------------|--------------------------|
-| `multica` | Built from `server/cmd/multica` (this repo)     | repo commit at bake time |
+| `multica` | Built from `server/cmd/multica` (this repo)     | `MULTICA_VERSION` (semver)|
 | `claude`  | npm `@anthropic-ai/claude-code`                 | `CLAUDE_CODE_VERSION`    |
 | `codex`   | npm `@openai/codex`                             | `CODEX_VERSION`          |
 | `opencode`| npm `opencode-ai`                               | `OPENCODE_VERSION`       |
@@ -51,7 +51,7 @@ All version-pinned via build args. Defaults match the Dockerfile so a bare
 |------------------------|------------------------------------------|--------------------------------------------------------------------|
 | `NODE_VERSION`         | `22`                                     | Node LTS major. Bump in lockstep with hermes' supported Node range.|
 | `GO_VERSION`           | `1.26.1`                                 | Matches CI (`CLAUDE.md`: "CI runs on Node 22 and Go 1.26.1").       |
-| `MULTICA_VERSION`      | `dev`                                    | `-X main.version=` ldflag. CI passes the IMG_SHA or release tag.    |
+| `MULTICA_VERSION`      | `0.3.21`                                 | `-X main.version=` ldflag → the version the daemon reports. Must parse as semver ≥ `0.2.21` or the quick-create gate rejects the daemon ("doesn't report a CLI version"). CI does **not** override this, so the default ships; bump it when the fork's `server/` is synced to a newer upstream tag. |
 | `MULTICA_COMMIT`       | `unknown`                                | `-X main.commit=` ldflag. CI passes the agentfarm commit SHA.       |
 | `CLAUDE_CODE_VERSION`  | `latest`                                 | npm tag or version. Pin for prod (e.g. `1.7.4`).                    |
 | `CODEX_VERSION`        | `latest`                                 | npm tag or version.                                                 |

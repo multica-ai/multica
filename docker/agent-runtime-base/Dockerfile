@@ -40,7 +40,11 @@ ARG GO_VERSION=1.26.1
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-bookworm AS multica-builder
 ARG TARGETOS
 ARG TARGETARCH
-ARG MULTICA_VERSION=dev
+# Concrete semver, not "dev": the daemon reports this as its CLI version, and
+# the quick-create gate rejects anything unparsable as ≥ 0.2.21 ("daemon doesn't
+# report a CLI version"). Kept in sync with docker-bake.hcl's default. See the
+# bake file for why 0.3.21.
+ARG MULTICA_VERSION=0.3.21
 ARG MULTICA_COMMIT=unknown
 
 WORKDIR /src
@@ -168,8 +172,6 @@ RUN apt-get update \
  && apt-get purge -y --auto-remove build-essential \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=multica-builder /out/multica /usr/local/bin/multica
-
 # Non-root runtime user. Matches the description's UID=1000 default; pass
 # UID/GID build args to align with hosts that need a different mapping
 # (devenv overlays uid=1000 onto the EFS PVC owner).
@@ -177,6 +179,20 @@ RUN groupadd -g "${GID}" agent \
  && useradd -m -d /home/agent -s /bin/bash -u "${UID}" -g agent agent \
  && mkdir -p /home/agent/.multica /home/agent/multica_workspaces \
  && chown -R agent:agent /home/agent
+
+# multica lives in its own agent-owned directory, not the shared /usr/local/bin
+# toolchain dir. The CLI self-updates by writing a temp file into the binary's
+# directory and renaming it over the original (internal/cli/update.go
+# UpdateViaDownload) — that needs write on the *directory*, not just the file,
+# and the daemon runs as the non-root `agent` user. A dedicated /opt/multica/bin
+# grants that write without making the rest of the toolchain dir agent-writable.
+# /opt (not $HOME) keeps the baked binary clear of the work PVC mounted into the
+# agentrunner at runtime, which can shadow paths under /home/agent. Added to
+# PATH below so every `multica` invocation (smoke tests, entrypoint, daemon)
+# still resolves it. Placed after useradd so --chown can reference the agent user.
+RUN install -d -o agent -g agent -m 755 /opt/multica/bin
+COPY --chown=agent:agent --from=multica-builder /out/multica /opt/multica/bin/multica
+ENV PATH="/opt/multica/bin:${PATH}"
 
 # G2 LLM proxy defaults — route Anthropic + OpenAI through llmproxy.g2.com.
 # Per-CLI override surface (most authoritative one is seeded):
