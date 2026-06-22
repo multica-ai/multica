@@ -136,6 +136,7 @@ function Segmented<T extends string | number>({
         <button
           key={String(o.value)}
           type="button"
+          aria-pressed={o.value === value}
           onClick={() => onChange(o.value)}
           className={`rounded-sm px-2.5 py-1 text-xs font-medium transition-colors ${
             o.value === value
@@ -438,7 +439,6 @@ export function DashboardPage() {
                   hint={t(($) => $.kpi.tasks_hint, {
                     failed: runTimeTotals.failedCount,
                   })}
-                  accent={runTimeTotals.failedCount > 0 ? "default" : "default"}
                 />
               </div>
 
@@ -875,7 +875,7 @@ function AgentLeaderboardRow({
     <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2">
       <div className="flex min-w-0 items-center gap-2">
         <ActorAvatar actorType="agent" actorId={row.agentId} size={22} enableHoverCard />
-        <span className="cursor-pointer truncate text-sm font-medium">{agentName}</span>
+        <span className="truncate text-sm font-medium">{agentName}</span>
       </div>
       <ProgressBar pct={pct} />
       <MetricCell active={sortBy === "tokens"}>{formatTokens(row.tokens)}</MetricCell>
