@@ -55,13 +55,25 @@ describe("costrict-bridge", () => {
       );
     });
 
-    it("no-ops when sessionId or workDir is missing", () => {
+    it("posts without workDir when it is absent", () => {
+      const postMessage = vi.fn();
+      const parent = { postMessage } as unknown as Window;
+      vi.stubGlobal("window", { parent } as unknown as Window);
+
+      postCostrictNavigateToSession({ sessionId: "s1" });
+
+      expect(postMessage).toHaveBeenCalledWith(
+        { type: "multica:navigate", target: "session", sessionId: "s1" },
+        "*",
+      );
+    });
+
+    it("no-ops when sessionId is missing", () => {
       const postMessage = vi.fn();
       const parent = { postMessage } as unknown as Window;
       vi.stubGlobal("window", { parent } as unknown as Window);
 
       postCostrictNavigateToSession({ sessionId: "", workDir: "/p" });
-      postCostrictNavigateToSession({ sessionId: "s1", workDir: "" });
 
       expect(postMessage).not.toHaveBeenCalled();
     });

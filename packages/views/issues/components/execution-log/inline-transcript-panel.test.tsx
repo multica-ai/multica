@@ -84,6 +84,15 @@ describe("InlineTranscriptPanel", () => {
       expect(screen.queryByRole("button", { name: /view in costrict/i })).not.toBeInTheDocument();
     });
 
+    it("renders the link when embedded with a session_id even if work_dir is absent", async () => {
+      mockIsEmbedded.mockReturnValue(true);
+      const noWorkDir = { ...task, session_id: "sess-xyz" } as AgentTask;
+      render(<InlineTranscriptPanel task={noWorkDir} />, { wrapper: Wrapper });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /view in costrict/i })).toBeInTheDocument(),
+      );
+    });
+
     it("hides the link when embedded but session_id is missing", async () => {
       mockIsEmbedded.mockReturnValue(true);
       const noSession = { ...task, work_dir: "/home/user/proj" } as AgentTask;

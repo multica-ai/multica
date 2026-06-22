@@ -60,7 +60,7 @@ export function InlineTranscriptPanel({ task, isLive, defaultOpen = false }: Inl
 
   const isRunning = isLive && task.status === "running";
 
-  const canViewInCostrict = embedded && !!task.session_id && !!task.work_dir;
+  const canViewInCostrict = embedded && !!task.session_id;
 
   return (
     <div className="mt-1">
@@ -86,7 +86,7 @@ export function InlineTranscriptPanel({ task, isLive, defaultOpen = false }: Inl
             onClick={() =>
               postCostrictNavigateToSession({
                 sessionId: task.session_id as string,
-                workDir: task.work_dir as string,
+                workDir: task.work_dir,
               })
             }
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"

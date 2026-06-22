@@ -37,27 +37,32 @@ export interface CostrictNavigateSessionMessage {
   type: "multica:navigate";
   target: "session";
   sessionId: string;
-  workDir: string;
+  /**
+   * Working directory the session ran in, when known. Best-effort only — the
+   * parent opens the session by id and uses workDir merely as a hint to pick
+   * the landing workspace, so an empty value is fine.
+   */
+  workDir?: string;
 }
 
 /**
  * Ask the costrict-web parent to open a csc conversation session. The parent
- * resolves which workspace owns `workDir` and navigates to
- * `/workspace/<workspaceID>?session=<sessionId>`. No-op when not embedded or
- * when required fields are missing.
+ * opens the session by `sessionId` (landing in the owning or default
+ * workspace) — `workDir` is an optional hint. No-op when not embedded or when
+ * `sessionId` is missing.
  */
 export function postCostrictNavigateToSession(args: {
   sessionId: string;
-  workDir: string;
+  workDir?: string;
 }): void {
   if (typeof window === "undefined") return;
-  if (!args.sessionId || !args.workDir) return;
+  if (!args.sessionId) return;
   if (window.parent === window) return;
   const message: CostrictNavigateSessionMessage = {
     type: "multica:navigate",
     target: "session",
     sessionId: args.sessionId,
-    workDir: args.workDir,
+    ...(args.workDir ? { workDir: args.workDir } : {}),
   };
   // Target origin "*" mirrors the existing parent contract; the parent
   // validates event.origin on its side.
