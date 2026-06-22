@@ -32,9 +32,10 @@ import { useT } from "../../i18n";
 //   - queued only        → "{name} is queued" / "N agents queued",
 //                          half-opacity avatars / muted text (no beam)
 //
-// Click opens a compact Popover card with the same active rows as the right
-// panel. Those rows show necessary status/time and task entry actions, but do
-// not render event counts or prefetch task messages for a count.
+// Hovering the chip opens a compact Popover card with the same active rows as
+// the right panel (click / keyboard still toggle it for touch and a11y). Those
+// rows show necessary status/time and task entry actions, but do not render
+// event counts or prefetch task messages for a count.
 
 interface IssueAgentHeaderChipProps {
   issueId: string;
@@ -106,7 +107,18 @@ function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
   return (
     <div className="flex items-center gap-1">
       <Popover>
+        {/* Hover opens the card so the live activity reads as a glanceable
+            status surface, not a click target. In Base UI the hover config
+            lives on the Trigger (a popover can have multiple triggers), not
+            the Root. The trigger stays a real button, so click and keyboard
+            (Enter/Space) still toggle it for touch and a11y. A short open
+            delay avoids flicker when the pointer merely passes over the chip;
+            the close delay keeps it open while the pointer travels across the
+            hover bridge into the interactive rows. */}
         <PopoverTrigger
+          openOnHover
+          delay={150}
+          closeDelay={200}
           render={
             <button
               type="button"

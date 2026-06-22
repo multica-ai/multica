@@ -8,6 +8,9 @@ import { renderWithI18n } from "../../test/i18n";
 const mockState = vi.hoisted(() => ({
   snapshot: [] as unknown[],
   taskMessagesOptions: vi.fn(),
+  // Captures the props the chip passes to PopoverTrigger so a test can assert
+  // the card is wired to open on hover, not only on click.
+  triggerProps: undefined as Record<string, unknown> | undefined,
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -43,10 +46,14 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
     PopoverTrigger: ({
       render,
       children,
+      ...props
     }: {
       render: React.ReactElement;
       children: React.ReactNode;
-    }) => React.cloneElement(render, undefined, children),
+    } & Record<string, unknown>) => {
+      mockState.triggerProps = props;
+      return React.cloneElement(render, undefined, children);
+    },
     PopoverContent: ({ children }: { children: React.ReactNode }) => (
       <div data-testid="agent-popover-content">{children}</div>
     ),
@@ -100,6 +107,7 @@ beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
   mockState.snapshot = [];
+  mockState.triggerProps = undefined;
 });
 
 describe("IssueAgentHeaderChip", () => {
@@ -127,6 +135,20 @@ describe("IssueAgentHeaderChip", () => {
       "task-running",
     );
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
+  });
+
+  it("opens the activity card on hover, not only on click", () => {
+    mockState.snapshot = [makeTask({})];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    // Base UI gates hover-to-open on `openOnHover` on the trigger. Without it
+    // the chip would be click-only, which is the behavior MUL-3507 replaces.
+    // The trigger stays a real <button>, so click/keyboard access is retained.
+    expect(mockState.triggerProps?.openOnHover).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Walt is working" }),
+    ).toBeInTheDocument();
   });
 
   it("uses the concise multi-agent working label", () => {
