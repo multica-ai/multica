@@ -304,10 +304,13 @@ function AgentPicker({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
-        {/* CEREBRO-PATCH(chat-selector-align): FIR-1789 — 14px avatar so the
-            "Talking to" selector matches the "Replying to" trigger-target bar
-            (trigger-target-bar.tsx). Same size in inbox + chat-window. */}
+      {/* CEREBRO-PATCH(chat-selector-align): FIR-1789 — match the whole green
+          "Talking to" badge to the "Replying to" trigger-target bar
+          (trigger-target-bar.tsx): the badge wrapper (ChatComposer green chip)
+          is identical, so the trigger inside must add NO extra height. Drop the
+          trigger's own py- padding (chip py-0.5 sets the height), use gap-1 and
+          text-[11px] like the reference. Only the chevron is extra. */}
+      <DropdownMenuTrigger className="flex items-center gap-1 rounded-md px-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
         <ActorAvatar
           actorType="agent"
           actorId={activeAgent.id}
@@ -315,7 +318,7 @@ function AgentPicker({
           enableHoverCard
           showStatusDot
         />
-        <span className="text-xs font-medium max-w-28 truncate">{activeAgent.name}</span>
+        <span className="text-[11px] font-medium max-w-28 truncate">{activeAgent.name}</span>
         <ChevronDown className="size-3 text-muted-foreground shrink-0" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="max-h-80 w-auto max-w-64">
