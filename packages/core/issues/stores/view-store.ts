@@ -266,7 +266,10 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.listCollapsedStatuses.filter((s) => s !== status)
         : [...state.listCollapsedStatuses, status],
     })),
-  setSwimlaneGrouping: (grouping) => set({ swimlaneGrouping: grouping }),
+  setSwimlaneGrouping: (grouping) => set((state) => ({
+    swimlaneGrouping: grouping,
+    topLevelOnly: grouping === "parent" ? false : state.topLevelOnly,
+  })),
   setSwimlaneOrder: (order) =>
     set((state) => ({
       swimlaneOrders: { ...state.swimlaneOrders, [state.swimlaneGrouping]: order },
