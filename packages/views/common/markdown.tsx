@@ -166,13 +166,22 @@ export function Markdown(props: MarkdownProps): React.JSX.Element {
     [slug],
   );
 
+  // Stable postprocess function: highlightToHtml and preprocessJsonLiterals are
+  // module-level pure functions with no external dependencies, so the callback
+  // never needs to be recreated. Without useCallback, a new lambda is created on
+  // every parent render, busting the processedContent useMemo in MarkdownBase.
+  const handlePostprocess = React.useCallback(
+    (c: string) => highlightToHtml(preprocessJsonLiterals(c)),
+    [],
+  );
+
   const editorParityProps = isEditorParity
     ? {
         renderMermaid,
         renderHtmlBlock,
         onLinkHover: handleLinkHover,
         onUrlClick: handleUrlClick,
-        postprocess: (c: string) => highlightToHtml(preprocessJsonLiterals(c)),
+        postprocess: handlePostprocess,
       }
     : {};
 
@@ -191,5 +200,28 @@ export function Markdown(props: MarkdownProps): React.JSX.Element {
   );
 }
 
-export const MemoizedMarkdown = React.memo(Markdown);
+export const MemoizedMarkdown = React.memo(Markdown, (prev, next) => {
+  // Standard shallow compare for most props
+  const prevKeys = Object.keys(prev) as (keyof typeof prev)[];
+  const nextKeys = Object.keys(next) as (keyof typeof next)[];
+  if (prevKeys.length !== nextKeys.length) return false;
+  for (const key of nextKeys) {
+    if (key === "attachments") {
+      // Element-wise compare for the attachments array — callers may pass a
+      // fresh array reference on each render (e.g. `issue.attachments || []`)
+      // even when the contents are unchanged.
+      const pa = prev.attachments;
+      const na = next.attachments;
+      if (pa?.length !== na?.length) return false;
+      if (pa && na) {
+        for (let i = 0; i < pa.length; i++) {
+          if (pa[i] !== na[i]) return false;
+        }
+      }
+    } else if (prev[key] !== next[key]) {
+      return false;
+    }
+  }
+  return true;
+});
 MemoizedMarkdown.displayName = "MemoizedMarkdown";
