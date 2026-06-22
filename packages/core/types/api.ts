@@ -12,6 +12,8 @@ export interface CreateIssueRequest {
   assignee_id?: string;
   parent_issue_id?: string;
   project_id?: string;
+  /** Ordered stage (>= 1) grouping this sub-issue under its parent. */
+  stage?: number;
   start_date?: string;
   due_date?: string;
   attachment_ids?: string[];
@@ -29,6 +31,8 @@ export interface UpdateIssueRequest {
   due_date?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
+  /** Ordered stage (>= 1); null clears it (unstaged). */
+  stage?: number | null;
   /** Attachment IDs to bind to this issue alongside the description update.
    *  Used by the description editor to register newly uploaded files so they
    *  surface in `issueAttachments` and keep their preview Eye on refresh. */

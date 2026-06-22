@@ -391,6 +391,7 @@ type Issue struct {
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
+	Stage              pgtype.Int4        `json:"stage"`
 }
 
 type IssueDependency struct {

@@ -22,6 +22,10 @@
     "low": "낮음",
     "none": "우선순위 없음"
   },
+  "stage": {
+    "none": "단계 없음",
+    "value": "{{n}}단계"
+  },
   "scope": {
     "all_label": "전체",
     "all_description": "이 워크스페이스의 모든 이슈",
@@ -196,6 +200,7 @@
     "pull_request_card_show_less": "간단히 보기",
     "prop_status": "상태",
     "prop_priority": "우선순위",
+    "prop_stage": "단계",
     "prop_assignee": "담당자",
     "prop_start_date": "시작일",
     "prop_due_date": "마감일",

@@ -22,6 +22,10 @@
     "low": "Low",
     "none": "No priority"
   },
+  "stage": {
+    "none": "No stage",
+    "value": "Stage {{n}}"
+  },
   "scope": {
     "all_label": "All",
     "all_description": "All issues in this workspace",
@@ -196,6 +200,7 @@
     "pull_request_card_show_less": "Show less",
     "prop_status": "Status",
     "prop_priority": "Priority",
+    "prop_stage": "Stage",
     "prop_assignee": "Assignee",
     "prop_start_date": "Start date",
     "prop_due_date": "Due date",

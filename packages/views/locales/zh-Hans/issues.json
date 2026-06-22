@@ -22,6 +22,10 @@
     "low": "低",
     "none": "无优先级"
   },
+  "stage": {
+    "none": "无阶段",
+    "value": "阶段 {{n}}"
+  },
   "scope": {
     "all_label": "全部",
     "all_description": "工作区内的全部 issue",
@@ -194,6 +198,7 @@
     "pull_request_card_show_less": "收起",
     "prop_status": "状态",
     "prop_priority": "优先级",
+    "prop_stage": "阶段",
     "prop_assignee": "负责人",
     "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
