@@ -222,6 +222,19 @@ WHERE installation_id = $1 AND lark_chat_id = $2;
 SELECT * FROM lark_chat_session_binding
 WHERE chat_session_id = $1;
 
+-- name: UpdateLarkChatSessionBindingReplyTarget :exec
+-- Records the most recent inbound trigger message + the Lark topic
+-- (thread) it belongs to, so the decoupled outbound patcher can thread
+-- its reply back into the originating 话题. Called on every ingested
+-- message (in the same tx as the chat_message write). last_lark_thread_id
+-- is NULL for non-thread messages, which keeps the outbound on the
+-- existing chat-level send path; a non-NULL value flips the next reply
+-- into a thread reply targeting last_lark_message_id.
+UPDATE lark_chat_session_binding
+SET last_lark_message_id = sqlc.narg('last_lark_message_id'),
+    last_lark_thread_id  = sqlc.narg('last_lark_thread_id')
+WHERE chat_session_id = $1;
+
 -- =====================
 -- lark_inbound_message_dedup
 -- =====================

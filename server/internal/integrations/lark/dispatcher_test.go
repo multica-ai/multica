@@ -476,6 +476,48 @@ func TestDispatcher_PlainMessageEnqueuesTask(t *testing.T) {
 	}
 }
 
+// TestDispatcher_ForwardsThreadIDToAppend verifies the dispatcher
+// threads the inbound message's thread_id into AppendUserMessage, which
+// is what lets the chat binding remember the topic so the outbound
+// patcher can reply back into it.
+func TestDispatcher_ForwardsThreadIDToAppend(t *testing.T) {
+	inst := activeInstallation()
+	sessionID := validUUID(0x66)
+	queries := &fakeQueries{
+		installationByApp: inst,
+		userBinding:       boundUser(),
+		chatSession:       db.ChatSession{ID: sessionID, AgentID: inst.AgentID},
+	}
+	chat := &fakeChat{ensureID: sessionID, appendResult: AppendResult{}}
+	d := &Dispatcher{
+		Queries:     queries,
+		Chat:        chat,
+		Audit:       &fakeAudit{},
+		TaskService: &fakeEnqueuer{task: db.AgentTaskQueue{ID: validUUID(0x77)}},
+	}
+
+	_, err := d.Handle(context.Background(), InboundMessage{
+		AppID:          "ok",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		SenderOpenID:   "ou_user_a",
+		Body:           "hey in a topic",
+		MessageID:      "om_in_thread",
+		ThreadID:       "omt_topic_42",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if chat.lastAppendParams.LarkThreadID != "omt_topic_42" {
+		t.Errorf("LarkThreadID forwarded to AppendUserMessage: got %q want omt_topic_42",
+			chat.lastAppendParams.LarkThreadID)
+	}
+	if chat.lastAppendParams.LarkMessageID != "om_in_thread" {
+		t.Errorf("LarkMessageID forwarded to AppendUserMessage: got %q want om_in_thread",
+			chat.lastAppendParams.LarkMessageID)
+	}
+}
+
 func TestDispatcher_GroupMessageUsesInstallerAsCreator(t *testing.T) {
 	inst := activeInstallation()
 	sessionID := validUUID(0x66)
