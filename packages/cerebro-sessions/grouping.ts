@@ -94,3 +94,25 @@ export function sessionForTime(
   }
   return list[idx] ?? list[0] ?? null;
 }
+
+// Resolve which session owns a single comment by id (FIR-1839 point 8). A
+// session owns whole threads keyed by the thread root's time, so a reply is
+// walked up to its root before resolving. `timeline` is the full flat list of
+// comment + activity entries. Returns the owning session's id, or null when the
+// comment isn't found or there are no real sessions yet (implicit Session 1).
+export function sessionIdForComment(
+  timeline: TimelineEntry[],
+  sessions: Session[] | undefined,
+  commentId: string,
+): string | null {
+  if (!sessions || sessions.length === 0) return null;
+  const byId = new Map(timeline.map((e) => [e.id, e] as const));
+  let entry = byId.get(commentId);
+  if (!entry) return null;
+  while (entry.parent_id) {
+    const parent = byId.get(entry.parent_id);
+    if (!parent) break;
+    entry = parent;
+  }
+  return sessionForTime(sessions, entry.created_at)?.id ?? null;
+}

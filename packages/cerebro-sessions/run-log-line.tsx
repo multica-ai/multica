@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { AgentTask } from "@multica/core/types/agent";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { sessionForTime } from "./grouping";
@@ -19,6 +20,9 @@ import { useSessions } from "./use-sessions";
 export function RunLogPromptLine({ task }: { task: AgentTask }) {
   const enabled = useFeatureFlag("cerebro_comment_chapters");
   const { data: sessions } = useSessions(task.issue_id);
+  // FIR-1839 point 5: clicking the prompt opens it in full (truncate → wrap),
+  // so the whole initial prompt is readable inline, not only on hover.
+  const [expanded, setExpanded] = useState(false);
 
   if (!enabled) return null;
 
@@ -34,9 +38,21 @@ export function RunLogPromptLine({ task }: { task: AgentTask }) {
         </span>
       )}
       {prompt && (
-        <span className="truncate" title={prompt}>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+          title={expanded ? undefined : prompt}
+          className={
+            expanded
+              ? "min-w-0 flex-1 whitespace-pre-wrap break-words text-left text-foreground/80 hover:text-foreground"
+              : "min-w-0 flex-1 truncate text-left hover:text-foreground"
+          }
+        >
           {prompt}
-        </span>
+        </button>
       )}
     </div>
   );

@@ -10,3 +10,4 @@ export * from "./context-bar";
 export * from "./start-fresh";
 export * from "./use-sessions";
 export * from "./run-log-line";
+export * from "./run-prompt-disclosure";

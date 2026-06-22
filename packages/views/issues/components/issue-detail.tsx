@@ -122,7 +122,7 @@ import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
 // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 groups the comment timeline into sessions derived from start markers.
 // CEREBRO-PATCH(session-activity-context): FIR-1769 P2/P3 — per-session activity fold + context hairline.
 // CEREBRO-PATCH(session-review-fir1787): context indicator moves above the composer (SessionContextBar) per FIR-1787 review.
-import { SessionHeader, SessionHandoff, StartFresh, SessionContextBar, groupTimelineBySession, partitionSessionGroups, hasHandoffBrief, useSessions } from "@multica/cerebro-sessions";
+import { SessionHeader, SessionHandoff, StartFresh, SessionContextBar, groupTimelineBySession, partitionSessionGroups, hasHandoffBrief, useSessions, sessionIdForComment } from "@multica/cerebro-sessions";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -1095,6 +1095,16 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   useEffect(() => {
     setOpenSessionId(activeSessionId);
   }, [activeSessionId]);
+  // CEREBRO-PATCH(session-open-on-inbox-deeplink): FIR-1839 point 8 — opening a
+  // comment from the inbox must always reveal it. The active session is already
+  // always expanded; this additionally force-opens the (possibly older) session
+  // that owns the deep-linked comment, so the highlighted comment never stays
+  // hidden behind a collapsed session box.
+  useEffect(() => {
+    if (!highlightCommentId) return;
+    const owning = sessionIdForComment(timeline, sessionsQuery.data, highlightCommentId);
+    if (owning) setOpenSessionId(owning);
+  }, [highlightCommentId, sessionsQuery.data, timeline]);
   // CEREBRO-PATCH(session-handoff-header-toggle): FIR-1839 point 7 — which sessions
   // currently have their Handoff brief revealed (default folded; the header button toggles it).
   const [openHandoffIds, setOpenHandoffIds] = useState<Set<string>>(() => new Set());

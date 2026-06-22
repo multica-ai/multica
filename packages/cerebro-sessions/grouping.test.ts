@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineEntry } from "@multica/core/types";
-import { groupTimelineBySession, sessionForTime } from "./grouping";
+import { groupTimelineBySession, sessionForTime, sessionIdForComment } from "./grouping";
 import type { Session } from "./types";
 
 const entry = (id: string, created_at: string): TimelineEntry => ({
@@ -108,5 +108,45 @@ describe("sessionForTime", () => {
       session("s1", 1, "2026-06-21T00:00:00Z"),
     ];
     expect(sessionForTime(sessions, "2026-06-21T02:30:00Z")?.id).toBe("s2");
+  });
+});
+
+describe("sessionIdForComment (FIR-1839 point 8)", () => {
+  const reply = (id: string, parent_id: string, created_at: string): TimelineEntry => ({
+    type: "comment",
+    id,
+    actor_type: "member",
+    actor_id: "u1",
+    content: id,
+    parent_id,
+    created_at,
+  });
+
+  const sessions = [
+    session("s1", 1, "2026-06-21T00:00:00Z"),
+    session("s2", 2, "2026-06-21T02:00:00Z"),
+  ];
+
+  it("resolves a root comment to the session that owns its time", () => {
+    const timeline = [entry("a", "2026-06-21T01:00:00Z"), entry("b", "2026-06-21T03:00:00Z")];
+    expect(sessionIdForComment(timeline, sessions, "a")).toBe("s1");
+    expect(sessionIdForComment(timeline, sessions, "b")).toBe("s2");
+  });
+
+  it("walks a reply up to its thread root, so a late reply stays in the root's session", () => {
+    // Root 'a' lives in s1; a reply made at 03:00 (in s2's window) must still
+    // resolve to s1 because its thread root belongs to s1.
+    const timeline = [
+      entry("a", "2026-06-21T01:00:00Z"),
+      reply("r", "a", "2026-06-21T03:30:00Z"),
+    ];
+    expect(sessionIdForComment(timeline, sessions, "r")).toBe("s1");
+  });
+
+  it("returns null when the comment isn't in the timeline or there are no sessions", () => {
+    const timeline = [entry("a", "2026-06-21T01:00:00Z")];
+    expect(sessionIdForComment(timeline, sessions, "missing")).toBeNull();
+    expect(sessionIdForComment(timeline, [], "a")).toBeNull();
+    expect(sessionIdForComment(timeline, undefined, "a")).toBeNull();
   });
 });

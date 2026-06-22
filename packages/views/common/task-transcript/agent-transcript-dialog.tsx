@@ -40,6 +40,8 @@ import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
 import { useT } from "../../i18n";
+// CEREBRO-PATCH(run-prompt-disclosure): FIR-1839 point 5 — surface the run's full initial prompt in the transcript modal.
+import { RunPromptDisclosure } from "@multica/cerebro-sessions";
 
 interface AgentTranscriptDialogProps {
   open: boolean;
@@ -515,6 +517,9 @@ export function AgentTranscriptDialog({
               </MetadataChip>
             )}
           </div>
+
+          {/* CEREBRO-PATCH(run-prompt-disclosure): FIR-1839 point 5 — full initial prompt, openable. */}
+          <RunPromptDisclosure task={task} />
         </div>
 
         {/* ── Timeline progress bar ─────────────────────────────── */}
