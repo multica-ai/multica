@@ -185,7 +185,7 @@ func (h *Handler) SendComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	object, refID, ok := h.resolveCoupling(w, r, noteID, req.DestinationObject, req.DestinationRefID)
+	object, refID, ok := h.resolveCoupling(w, r, noteID, uuidStr(artifact.IssueID), req.DestinationObject, req.DestinationRefID)
 	if !ok {
 		return
 	}
@@ -267,7 +267,7 @@ func (h *Handler) SendComments(w http.ResponseWriter, r *http.Request) {
 //   - no hint + multiple couplings → 409 telling the caller to choose. A
 //     current client always passes the hint in this case, so this only fires
 //     for an older client that cannot.
-func (h *Handler) resolveCoupling(w http.ResponseWriter, r *http.Request, noteID pgtype.UUID, hintObject, hintRefID string) (object, refID string, ok bool) {
+func (h *Handler) resolveCoupling(w http.ResponseWriter, r *http.Request, noteID pgtype.UUID, issueID, hintObject, hintRefID string) (object, refID string, ok bool) {
 	refs, err := h.Cerebro.ListNoteReferencesByNote(r.Context(), noteID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load note references")
@@ -280,6 +280,15 @@ func (h *Handler) resolveCoupling(w http.ResponseWriter, r *http.Request, noteID
 		}
 	}
 	if len(found) == 0 {
+		// FIR-1852/FIR-1782 — a note unified to an issue via issue_id (the same
+		// white-card link a document uses) carries no explicit reference row, but
+		// that issue_id IS its issue coupling. Fall back to it so the note's
+		// comments can be sent to the issue without a duplicate reference row.
+		// This only runs when there are no explicit references, so notes that the
+		// user has explicitly coupled keep their exact prior behaviour.
+		if issueID != "" {
+			return couplingIssue, issueID, true
+		}
 		writeError(w, http.StatusConflict, "note is not coupled to an issue or chat — couple it first")
 		return "", "", false
 	}

@@ -26,12 +26,14 @@ import {
   useDecideNoteSuggestion,
   useSendNoteComments,
   useNoteReferences,
+  noteDetailOptions,
   isUnsentToAgent,
   parseIssueMentions,
   buildThreads,
   noteKeys,
   type IssueMention,
   type NoteComment,
+  type NoteReference,
   type NoteThread,
 } from "../core";
 import type { Editor } from "@tiptap/react";
@@ -127,17 +129,45 @@ export function NoteCommentsPanel({
   const { data: references = [] } = useNoteReferences(
     collabEnabled ? noteId : undefined,
   );
+  // FIR-1852 — read the note's own issue_id (the unified white-card link). A
+  // note linked to an issue this way has no explicit reference row, but issue_id
+  // IS its issue coupling, so it is a valid send destination (the server's
+  // resolveCoupling applies the same fallback).
+  const { data: note } = useQuery({
+    ...noteDetailOptions(wsId, noteId),
+    enabled: collabEnabled && Boolean(noteId),
+  });
   // FIR-1753 — a note can be linked to more than one issue/chat (References
   // allows several issue links for context). The whole list of couplings is the
   // set of valid send destinations; `coupling` is the first, kept for the
   // single-coupling label + the per-comment select affordance.
-  const couplings = React.useMemo(
-    () =>
-      references.filter(
-        (r) => r.object === COUPLE_ISSUE || r.object === COUPLE_CHAT,
-      ),
-    [references],
-  );
+  const couplings = React.useMemo(() => {
+    const explicit = references.filter(
+      (r) => r.object === COUPLE_ISSUE || r.object === COUPLE_CHAT,
+    );
+    if (explicit.length > 0) return explicit;
+    // FIR-1852 — no explicit reference, but the note is unified to an issue via
+    // issue_id: surface that as an implicit issue coupling so the Send buttons
+    // appear and the comments go to the issue. Explicit references take
+    // precedence (handled above), matching the server.
+    const issueId = note?.issue_id;
+    if (issueId) {
+      const implicit: NoteReference = {
+        id: `issue:${issueId}`,
+        note_id: noteId,
+        object: COUPLE_ISSUE,
+        type: null,
+        ref_id: issueId,
+        label: null,
+        url: null,
+        metadata: {},
+        created_at: "",
+        updated_at: "",
+      };
+      return [implicit];
+    }
+    return [];
+  }, [references, note?.issue_id, noteId]);
   const coupling = couplings[0] ?? null;
   const multiCoupled = couplings.length > 1;
 
