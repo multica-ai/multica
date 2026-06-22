@@ -21,10 +21,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"       // CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108 merge workspace connections into RuntimeToolsConfig
-	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy" // CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 staged local-runtime enforcement mode at claim
-	cerebropersona "github.com/multica-ai/multica/server/internal/cerebro/persona"
-	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy" // CEREBRO-PATCH(daemon-repo-toolpolicy): FIR-2505 repo-capability resolved via tool-policy chain
+	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"          // CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108 merge workspace connections into RuntimeToolsConfig
+	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"    // CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 staged local-runtime enforcement mode at claim
+	cerebrospawn "github.com/multica-ai/multica/server/internal/cerebro/spawn" // CEREBRO-PATCH(daemon-spawn-subject): JEH-1080 resolve spawning user+groups at claim
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"         // CEREBRO-PATCH(daemon-repo-toolpolicy): FIR-2505 repo-capability resolved via tool-policy chain
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -1555,8 +1555,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.ParentIssueTitle = parent.Title
 				}
 			}
-			// CEREBRO-PATCH(persona-spawn-subject): JEH-1080 — resolve the spawning user + groups for the persona-hook facts.
-			sub := cerebropersona.ResolveSpawnSubject(r.Context(), h.GroupPermissions, issue)
+			// CEREBRO-PATCH(daemon-spawn-subject): JEH-1080 — resolve the spawning user + groups for the spawn-context facts.
+			sub := cerebrospawn.ResolveSpawnSubject(r.Context(), h.GroupPermissions, issue)
 			resp.PersonaSpawnUserID = sub.UserID
 			resp.PersonaSpawnGroupIDs = sub.GroupIDs
 

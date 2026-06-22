@@ -1,13 +1,13 @@
-// Package persona owns the cerebro-side helpers for the firtal-persona
-// integration. JEH-1080: at task-claim time the daemon needs to know which
-// human user the agent is acting on behalf of, so the persona-hook can
-// carry that user's group memberships as facts in /v1/check args.
+// Package spawn owns the cerebro-side helpers that resolve who an agent run
+// acts on behalf of. JEH-1080: at task-claim time the daemon needs to know
+// which human user the agent is acting on behalf of, so the spawn context can
+// carry that user's group memberships as facts in capability-check args.
 //
 // Helpers in this file resolve the (user_id, group_ids) tuple from an
 // already-loaded issue row. They live outside server/internal/handler so
 // the dependency direction stays one-way: handlers may call this package,
 // nothing here imports handler.
-package persona
+package spawn
 
 import (
 	"context"
@@ -17,10 +17,9 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// SpawnSubject is the persona-side identity for one task spawn. UserID is the
+// SpawnSubject is the resolved identity for one task spawn. UserID is the
 // human user the agent is acting on behalf of; GroupIDs is that user's group
-// memberships at claim time, opaque UUID strings persona stores as fact
-// tokens.
+// memberships at claim time, opaque UUID strings carried as fact tokens.
 //
 // Empty UserID and nil GroupIDs are the "no spawning user" case — agent-only
 // tasks (autopilot system-runs, chat sessions without a member). The daemon
@@ -38,8 +37,8 @@ type SpawnSubject struct {
 //  2. issue.creator_id when creator_type == "member"
 //
 // An agent-assigned issue with an agent creator returns ("", false) — no
-// human is meaningfully the spawner, and persona group grants therefore
-// don't apply. Callers should treat this as "skip group resolution".
+// human is meaningfully the spawner, and group grants therefore don't
+// apply. Callers should treat this as "skip group resolution".
 //
 // Pure function, no I/O — kept testable in isolation.
 func IssueSpawningUser(issue db.Issue) (pgtype.UUID, bool) {
@@ -52,7 +51,7 @@ func IssueSpawningUser(issue db.Issue) (pgtype.UUID, bool) {
 	return pgtype.UUID{}, false
 }
 
-// ResolveSpawnSubject loads (UserID, GroupIDs) for a spawn-time persona
+// ResolveSpawnSubject loads (UserID, GroupIDs) for a spawn-time subject
 // context. Returns a zero-value SpawnSubject when no human user is
 // resolvable for the issue, or when group resolution fails — callers must
 // treat a degraded SpawnSubject as "no group grants", never as an error
@@ -78,7 +77,7 @@ func ResolveSpawnSubject(ctx context.Context, gp GroupResolver, issue db.Issue) 
 	ids, err := gp.ResolveGroupIDs(ctx, issue.WorkspaceID, userUUID)
 	if err != nil {
 		// Failing to resolve groups must not fail the claim. The agent
-		// still runs; the persona hook just won't carry group facts and
+		// still runs; the spawn context just won't carry group facts and
 		// any group-grants will fall through to deny — fail-safe.
 		return sub
 	}
@@ -106,7 +105,7 @@ func uuidString(u pgtype.UUID) string {
 		return ""
 	}
 	// pgtype.UUID's String() returns the canonical 8-4-4-4-12 hex form.
-	// We rely on the same canonicalisation persona uses (lowercase, dashes).
+	// We rely on the canonical form (lowercase, dashes).
 	const hexDigits = "0123456789abcdef"
 	var out [36]byte
 	pos := 0
