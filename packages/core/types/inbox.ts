@@ -44,7 +44,9 @@ export type InboxItemType =
   // CEREBRO-PATCH(cerebro-inbox-add-issue): manually added by the member via the issue action menu.
   | "manually_added"
   // CEREBRO-PATCH(core-types-inbox-drift): TECH-3738 Bid C — an agent used a tool its policy denies; the drift watcher alerts owners/admins.
-  | "agent_capability_drift";
+  | "agent_capability_drift"
+  // CEREBRO-PATCH(core-types-inbox): FIR-308 / FIR-1854 — a comment on a kind='dm' issue routes under its own key (notification_listeners.go) so DM threads split into their own inbox rows.
+  | "dm_message";
 
 // Where the item is rendered in the UI. 'inbox' = persistent inbox queue.
 // 'notifications' = lightweight notifications page anchored in the bottom of

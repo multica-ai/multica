@@ -26,6 +26,7 @@ vi.mock("@multica/cerebro-saved-filters/views", () => ({
 
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
+import { useCerebroFeatureFlagsStore } from "@multica/cerebro-feature-flags";
 import { IssueDisplayControls } from "./issues-header";
 
 function renderBuilderControls(
@@ -53,9 +54,14 @@ function renderBuilderControls(
 describe("my-issues stacked date builder submenu (FIR-1658 / FIR-1799)", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
+    // This regression guards the legacy stacked date submenu, which is the
+    // cerebro_date_filter_v2=off fallback. FIR-1812 GA'd v2 (default on), so
+    // force the flag off to exercise the path this test asserts on.
+    useCerebroFeatureFlagsStore.getState().setFlag("cerebro_date_filter_v2", false);
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    useCerebroFeatureFlagsStore.getState().setFlag("cerebro_date_filter_v2", undefined);
   });
 
   it("opens the empty Date builder submenu without crashing", async () => {
