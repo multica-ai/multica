@@ -8,7 +8,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
-import { CalendarClock, CalendarDays } from "lucide-react";
+import { CalendarClock, CalendarDays, CornerDownRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -194,6 +194,9 @@ export const BoardCardContent = memo(function BoardCardContent({
 
       {/* Row 2: Title */}
       <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">
+        {issue.parent_issue_id && (
+          <CornerDownRight className="inline-block size-3.5 text-muted-foreground/70 shrink-0 mr-1.5 align-text-bottom" />
+        )}
         {issue.title}
       </p>
 
