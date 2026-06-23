@@ -1636,6 +1636,30 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if run, err := h.Queries.GetAutopilotRun(r.Context(), task.AutopilotRunID); err == nil {
 			resp.AutopilotID = uuidToString(run.AutopilotID)
 			resp.AutopilotSource = run.Source
+
+			// Resume the prior session for this (agent, autopilot) pair. Run-only
+			// autopilot ticks carry no issue_id, so the (agent, issue) lookup
+			// above never matched them and every tick started a fresh agent
+			// session. For stateful backends like opencode -- which persist each
+			// run as a durable session in a shared DB the UI also reads -- that
+			// leaked one session per tick forever, bloating the DB until it
+			// thrashed the host. Keying the resume on the autopilot id lets a
+			// watchdog's consecutive ticks continue one session instead. Honor
+			// force_fresh_session (manual rerun) and require the same runtime,
+			// matching the issue-resume path above.
+			if !task.ForceFreshSession {
+				if prior, err := h.Queries.GetLastAutopilotTaskSession(r.Context(), db.GetLastAutopilotTaskSessionParams{
+					AgentID:     task.AgentID,
+					AutopilotID: run.AutopilotID,
+				}); err == nil && prior.SessionID.Valid {
+					if prior.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = prior.SessionID.String
+					}
+					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+						resp.PriorWorkDir = prior.WorkDir.String
+					}
+				}
+			}
 			if run.TriggerPayload != nil {
 				resp.AutopilotTriggerPayload = json.RawMessage(run.TriggerPayload)
 			}
