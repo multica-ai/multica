@@ -1091,6 +1091,13 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         return false;
       }
       if (
+        filters.workload.length > 0 &&
+        (!row.presence ||
+          !filters.workload.includes(row.presence.workload))
+      ) {
+        return false;
+      }
+      if (
         filters.runtimes.length > 0 &&
         !filters.runtimes.includes(row.agent.runtime_id)
       ) {

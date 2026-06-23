@@ -7,7 +7,7 @@ import {
   Filter,
   X,
 } from "lucide-react";
-import type { AgentAvailability } from "@multica/core/agents";
+import type { AgentAvailability, Workload } from "@multica/core/agents";
 import type { MemberWithUser } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
@@ -43,7 +43,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
-import { availabilityConfig } from "../presence";
+import { availabilityConfig, workloadConfig } from "../presence";
 import { useT } from "../../i18n";
 import type { AgentListRow } from "./agents-page";
 
@@ -70,11 +70,18 @@ const AVAILABILITY_VALUES: AgentAvailability[] = [
   "offline",
 ];
 
+const WORKLOAD_VALUES: Workload[] = [
+  "working",
+  "queued",
+  "idle",
+];
+
 export function countActiveFilterDimensions(
   filters: AgentListFilters,
 ): number {
   let count = 0;
   if (filters.availability.length > 0) count++;
+  if (filters.workload.length > 0) count++;
   if (filters.runtimes.length > 0) count++;
   if (filters.owners.length > 0) count++;
   if (filters.models.length > 0) count++;
@@ -126,12 +133,17 @@ export function AgentListToolbar({
   // Option lists with counts, derived from the scope's unfiltered rows so
   // toggling one dimension doesn't make the others' options vanish.
   const availabilityCounts = new Map<string, number>();
+  const workloadCounts = new Map<string, number>();
   const runtimeOptions = new Map<string, { name: string; count: number }>();
   for (const row of allRows) {
     if (row.presence) {
       availabilityCounts.set(
         row.presence.availability,
         (availabilityCounts.get(row.presence.availability) ?? 0) + 1,
+      );
+      workloadCounts.set(
+        row.presence.workload,
+        (workloadCounts.get(row.presence.workload) ?? 0) + 1,
       );
     }
     const rt = row.runtime;
@@ -333,6 +345,41 @@ export function AgentListToolbar({
                       />
                       {t(($) => $.availability[value])}
                       {countBadge(availabilityCounts.get(value) ?? 0)}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            {/* Workload */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <span className="flex-1">
+                  {t(($) => $.toolbar.section_workload)}
+                </span>
+                {filters.workload.length > 0 && (
+                  <span className="text-xs font-medium text-primary">
+                    {filters.workload.length}
+                  </span>
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-auto min-w-44">
+                {WORKLOAD_VALUES.map((value) => {
+                  const visual = workloadConfig[value];
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={value}
+                      checked={filters.workload.includes(value)}
+                      onCheckedChange={() =>
+                        onToggleFilter("workload", value)
+                      }
+                      className={FILTER_ITEM_CLASS}
+                    >
+                      <HoverCheck
+                        checked={filters.workload.includes(value)}
+                      />
+                      {t(($) => $.workload[value])}
+                      {countBadge(workloadCounts.get(value) ?? 0)}
                     </DropdownMenuCheckboxItem>
                   );
                 })}

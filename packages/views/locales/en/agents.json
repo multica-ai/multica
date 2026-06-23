@@ -582,6 +582,7 @@
     "filter_active_count_other": "{{count}} filters",
     "clear_filters": "Clear filters",
     "section_availability": "Availability",
+    "section_workload": "Work Status",
     "section_runtime": "Runtime",
     "display": "Display",
     "sort_by": "Sort by",

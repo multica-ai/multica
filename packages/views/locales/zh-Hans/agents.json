@@ -570,6 +570,7 @@
     "filter_active_count_other": "{{count}} 项筛选",
     "clear_filters": "清除筛选",
     "section_availability": "可用性",
+    "section_workload": "工作状态",
     "section_runtime": "运行时",
     "display": "显示",
     "sort_by": "排序",

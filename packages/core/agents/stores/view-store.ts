@@ -40,6 +40,8 @@ export const AGENT_SORT_DEFAULT_DIRECTION: Record<
 export interface AgentListFilters {
   /** AgentAvailability values (online / unstable / offline). */
   availability: string[];
+  /** Workload values (working / queued / idle). */
+  workload: string[];
   /** Runtime ids. */
   runtimes: string[];
   /** Owner user ids. Owner is the same person-axis as the Mine scope: the
@@ -54,6 +56,7 @@ export interface AgentListFilters {
 
 export const EMPTY_AGENT_FILTERS: AgentListFilters = {
   availability: [],
+  workload: [],
   runtimes: [],
   owners: [],
   models: [],
