@@ -127,20 +127,21 @@ export function ListView({
             el.scrollIntoView({ behavior: "auto", block: "center" });
             // Flash highlight: outline ring + background using rgba()
             // (color-mix() + requestAnimationFrame reflow is invisible on Edge/macOS).
-            el.style.transition = "background-color 500ms ease-out, outline-color 500ms ease-out";
+            el.style.transition = "background-color 800ms ease-out, outline-color 800ms ease-out";
             el.style.backgroundColor = "rgba(167, 139, 250, 0.3)";
             el.style.outline = "4px solid #a78bfa";
-            // Let the highlight render for at least one frame, then clear.
+            // Hold the highlight visible for 800ms, then clear to trigger the
+            // 800ms CSS transition fade-out.
             setTimeout(() => {
               el.style.backgroundColor = "";
               el.style.outline = "";
-            }, 100);
-            // Clean up inline properties after the transition completes.
+            }, 800);
+            // Clean up inline properties after hold + transition complete.
             setTimeout(() => {
               el.style.removeProperty("transition");
               el.style.removeProperty("background-color");
               el.style.removeProperty("outline");
-            }, 700);
+            }, 1700);
           }
         });
       });
