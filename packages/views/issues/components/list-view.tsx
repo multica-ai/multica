@@ -125,23 +125,27 @@ export function ListView({
           const el = document.querySelector(`[data-issue-id="${parentId}"]`) as HTMLElement | null;
           if (el) {
             el.scrollIntoView({ behavior: "auto", block: "center" });
-            // Flash highlight: outline ring + background using rgba()
-            // (color-mix() + requestAnimationFrame reflow is invisible on Edge/macOS).
+            // Flash highlight: outline ring + background using rgba().
             el.style.transition = "background-color 800ms ease-out, outline-color 800ms ease-out";
             el.style.backgroundColor = "rgba(167, 139, 250, 0.3)";
             el.style.outline = "4px solid #a78bfa";
-            // Hold the highlight visible for 800ms, then clear to trigger the
-            // 800ms CSS transition fade-out.
+            // Hold the highlight for 150ms (safe margin for 30fps low-end devices),
+            // then clear to trigger the CSS transition fade-out.
             setTimeout(() => {
               el.style.backgroundColor = "";
-              el.style.outline = "";
-            }, 800);
-            // Clean up inline properties after hold + transition complete.
-            setTimeout(() => {
+              // Only clear outlineColor so the outline fades via transition instead
+              // of hard-cutting (clearing outline-style would remove it instantly).
+              el.style.outlineColor = "rgba(167, 139, 250, 0)";
+            }, 150);
+            // Clean up inline properties exactly when the transition ends.
+            const onEnd = () => {
+              el.removeEventListener("transitionend", onEnd);
               el.style.removeProperty("transition");
               el.style.removeProperty("background-color");
               el.style.removeProperty("outline");
-            }, 1700);
+              el.style.removeProperty("outline-color");
+            };
+            el.addEventListener("transitionend", onEnd);
           }
         });
       });
