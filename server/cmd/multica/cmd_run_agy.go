@@ -103,10 +103,14 @@ type agyTranscriptTracker struct {
 	// Turn completion is detected by:
 	// 1. Next USER_INPUT arrives (same as Claude's currentTurnReply pattern)
 	// 2. Transcript idle for agyTurnIdleFlush (approximates stop_reason == "end_turn")
-	pendingFinal          *localCLIMessage
-	pendingFinalStep      int
-	lastUserStep          int  // step_index of the most recent USER_INPUT
-	lastStepHadToolCalls  bool // true if the previous MODEL step dispatched tool calls
+	//
+	// AGY transcript format note: tool results appear as independent MODEL steps
+	// with type=LIST_DIRECTORY / RUN_COMMAND / GREP_SEARCH etc., NOT embedded in the
+	// next PLANNER_RESPONSE's content. mapEntry filters these out by only processing
+	// MODEL steps whose type == "PLANNER_RESPONSE".
+	pendingFinal     *localCLIMessage
+	pendingFinalStep int
+	lastUserStep     int // step_index of the most recent USER_INPUT
 	done             chan struct{}
 	stopped          chan struct{}
 	startOnce        sync.Once
@@ -308,7 +312,14 @@ func (t *agyTranscriptTracker) mapEntry(entry *agyTranscriptEntry) {
 	case "USER_EXPLICIT":
 		t.mapUserInput(entry)
 	case "MODEL":
-		t.mapModelResponse(entry)
+		// AGY emits tool results as independent MODEL steps with a type that
+		// reflects the tool name (LIST_DIRECTORY, RUN_COMMAND, GREP_SEARCH, etc.).
+		// Only PLANNER_RESPONSE steps contain genuine model output; all other
+		// MODEL steps are tool results and must be skipped to prevent raw tool
+		// output from being posted as issue comments.
+		if entry.Type == "PLANNER_RESPONSE" {
+			t.mapModelResponse(entry)
+		}
 	}
 }
 
@@ -316,8 +327,6 @@ func (t *agyTranscriptTracker) mapUserInput(entry *agyTranscriptEntry) {
 	// Flush the previous turn's final response before starting a new turn.
 	t.flushPendingFinalLocked()
 	t.lastUserStep = entry.StepIndex
-	// Reset tool-call chain tracking: a new user turn starts fresh.
-	t.lastStepHadToolCalls = false
 
 	content := agyExtractUserContent(entry.Content)
 	if content == "" {
@@ -344,17 +353,12 @@ func (t *agyTranscriptTracker) mapUserInput(entry *agyTranscriptEntry) {
 }
 
 func (t *agyTranscriptTracker) mapModelResponse(entry *agyTranscriptEntry) {
+	// Only called for type=PLANNER_RESPONSE steps (enforced by mapEntry).
+	// Tool results appear as separate MODEL steps with other type values and are
+	// already excluded before this function is reached.
 	hasToolCalls := len(entry.ToolCalls) > 0
 
-	if entry.Content != "" {
-		t.post(localCLIMessage{
-			Type:      "text",
-			Content:   entry.Content,
-			SourceKey: "agy:step:" + strconv.Itoa(entry.StepIndex) + ":text",
-		})
-	}
-
-	// Post tool calls (for run log display only; tool_use is never an issue comment).
+	// Post tool calls for run-log display (tool_use is never an issue comment).
 	for i, tc := range entry.ToolCalls {
 		tool := tc.Name
 		if tool == "" {
@@ -368,26 +372,14 @@ func (t *agyTranscriptTracker) mapModelResponse(entry *agyTranscriptEntry) {
 		})
 	}
 
-	// Determine whether this step is a genuine user-facing reply.
+	// A PLANNER_RESPONSE with no outgoing tool calls and non-empty, non-status
+	// content is a genuine user-facing reply. Buffer it as pendingFinal; it will
+	// be flushed (posted as an issue comment) when the next USER_INPUT arrives or
+	// after agyTurnIdleFlush of transcript silence.
 	//
-	// A PLANNER_RESPONSE step is a candidate for a final Issue comment only when:
-	//   1. It has no outgoing tool calls (not dispatching more tools)
-	//   2. The PREVIOUS model step did NOT have tool calls (not processing tool output)
-	//
-	// Condition 2 is the critical fix: after a tool executes, the very next model
-	// step contains the raw tool output in its Content field (test logs, git diffs,
-	// command stdout, etc.). That step has tool_calls=[] — exactly like a real reply —
-	// but its content is machine output, not a user-facing message.
-	// Skipping it here prevents tool output from being posted as an Issue comment.
-	//
-	// This mirrors Claude's stop_reason=="end_turn" signal: we identify the end of a
-	// tool-execution chain rather than individual steps.
-	isFinalCandidate := !hasToolCalls &&
-		!t.lastStepHadToolCalls &&
-		entry.Content != "" &&
-		!isStatusOnly(entry.Content)
-
-	if isFinalCandidate {
+	// Steps that dispatch tool calls are skipped here — their content (if any) is
+	// internal planning text, not a reply intended for the user.
+	if !hasToolCalls && entry.Content != "" && !isStatusOnly(entry.Content) {
 		msg := localCLIMessage{
 			Type:      "final",
 			Content:   entry.Content,
@@ -396,9 +388,6 @@ func (t *agyTranscriptTracker) mapModelResponse(entry *agyTranscriptEntry) {
 		t.pendingFinal = &msg
 		t.pendingFinalStep = entry.StepIndex
 	}
-
-	// Update the flag for the next step.
-	t.lastStepHadToolCalls = hasToolCalls
 }
 
 // flushPendingFinalLocked posts the buffered final message if any.

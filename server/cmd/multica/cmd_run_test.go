@@ -485,18 +485,18 @@ func TestAgyTranscriptTrackerSync(t *testing.T) {
 		t.Fatalf("expected pendingFinal content to be %q, got %q", "new reply", tracker.pendingFinal.Content)
 	}
 
-	// Verify that a model step immediately following a tool-calling step does NOT set pendingFinal
-	// by simulating a tool call in a fresh tracker.
+	// Verify that an AGY-style tool-result step (source=MODEL, type!=PLANNER_RESPONSE)
+	// does NOT set pendingFinal.
 	tracker2 := &agyTranscriptTracker{
 		reporter: &localRunReporter{},
 		seen:     make(map[int]bool),
 	}
-	// step 0: tool call
-	tracker2.mapEntry(&agyTranscriptEntry{StepIndex: 0, Source: "MODEL", Type: "PLANNER_RESPONSE", ToolCalls: []agyTranscriptTool{{Name: "test"}}})
-	// step 1: tool output
-	tracker2.mapEntry(&agyTranscriptEntry{StepIndex: 1, Source: "MODEL", Type: "PLANNER_RESPONSE", Content: "tool output"})
+	// step 0: PLANNER_RESPONSE dispatching a tool
+	tracker2.mapEntry(&agyTranscriptEntry{StepIndex: 0, Source: "MODEL", Type: "PLANNER_RESPONSE", ToolCalls: []agyTranscriptTool{{Name: "run_command"}}})
+	// step 1: AGY-style tool result step (type=RUN_COMMAND, NOT PLANNER_RESPONSE)
+	tracker2.mapEntry(&agyTranscriptEntry{StepIndex: 1, Source: "MODEL", Type: "RUN_COMMAND", Content: "Created At: ...\ncommand output"})
 	if tracker2.pendingFinal != nil {
-		t.Fatalf("expected pendingFinal to be nil after tool output, got %v", tracker2.pendingFinal)
+		t.Fatalf("expected pendingFinal to be nil for tool-result step, got %v", tracker2.pendingFinal)
 	}
 
 	// Re-sync should not process anything new
@@ -527,8 +527,8 @@ func TestAgyTranscriptTrackerToolOutputNotFinal(t *testing.T) {
 		{StepIndex: 1, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
 			Content:   "I'll run the tests now.",
 			ToolCalls: []agyTranscriptTool{{Name: "run_command", Args: map[string]any{"CommandLine": "go test ./..."}}}},
-		// step 2: model processes raw tool output — MUST NOT become pendingFinal
-		{StepIndex: 2, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+		// step 2: AGY-style tool result (type=RUN_COMMAND, NOT PLANNER_RESPONSE) — MUST NOT become pendingFinal
+		{StepIndex: 2, Source: "MODEL", Type: "RUN_COMMAND", CreatedAt: now.Format(time.RFC3339),
 			Content: "=== RUN   TestFoo\n--- PASS: TestFoo (0.01s)\nok  \tsome/pkg\t0.123s"},
 		// step 3: genuine human-readable reply — MUST become pendingFinal
 		{StepIndex: 3, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
@@ -565,19 +565,19 @@ func TestAgyTranscriptTrackerToolOutputChainNotFinal(t *testing.T) {
 	entries := []*agyTranscriptEntry{
 		{StepIndex: 0, Source: "USER_EXPLICIT", Type: "USER_INPUT", CreatedAt: now.Format(time.RFC3339),
 			Content: "<USER_REQUEST>\ncheck git status and run tests\n</USER_REQUEST>"},
-		// Tool A
+		// Tool A: PLANNER_RESPONSE dispatching run_command
 		{StepIndex: 1, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
 			Content:   "Let me check git status first.",
 			ToolCalls: []agyTranscriptTool{{Name: "run_command", Args: map[string]any{"CommandLine": "git status"}}}},
-		// Output A — must NOT be final
-		{StepIndex: 2, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+		// Output A: AGY-style tool result step (type=RUN_COMMAND) — must NOT be final
+		{StepIndex: 2, Source: "MODEL", Type: "RUN_COMMAND", CreatedAt: now.Format(time.RFC3339),
 			Content: "On branch feat/fix\nnothing to commit, working tree clean"},
-		// Tool B
+		// Tool B: PLANNER_RESPONSE dispatching another run_command
 		{StepIndex: 3, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
 			Content:   "Good. Now I'll run the tests.",
 			ToolCalls: []agyTranscriptTool{{Name: "run_command", Args: map[string]any{"CommandLine": "go test ./..."}}}},
-		// Output B — must NOT be final
-		{StepIndex: 4, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+		// Output B: AGY-style tool result step (type=RUN_COMMAND) — must NOT be final
+		{StepIndex: 4, Source: "MODEL", Type: "RUN_COMMAND", CreatedAt: now.Format(time.RFC3339),
 			Content: "=== RUN   TestBar\n--- PASS: TestBar (0.00s)"},
 		// Real summary — MUST be final
 		{StepIndex: 5, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
@@ -592,6 +592,57 @@ func TestAgyTranscriptTrackerToolOutputChainNotFinal(t *testing.T) {
 	want := "Everything looks good: git status is clean and all tests pass."
 	if tracker.pendingFinal.Content != want {
 		t.Errorf("pendingFinal.Content = %q\nwant               = %q", tracker.pendingFinal.Content, want)
+	}
+}
+
+// TestAgyTranscriptTrackerToolResultStepFiltered verifies that AGY-style tool
+// result steps (source=MODEL, type!=PLANNER_RESPONSE such as LIST_DIRECTORY,
+// RUN_COMMAND, GREP_SEARCH) are completely ignored and never set pendingFinal.
+// This is the fix for OPE-3445 noise: real AGY transcripts emit tool results as
+// independent steps with a type matching the tool name, not embedded in the
+// next PLANNER_RESPONSE content.
+func TestAgyTranscriptTrackerToolResultStepFiltered(t *testing.T) {
+	now := time.Now().UTC()
+	tracker := &agyTranscriptTracker{
+		reporter:  &localRunReporter{},
+		startedAt: now.Add(-1 * time.Second),
+		ticker:    time.NewTicker(time.Hour),
+		seen:      make(map[int]bool),
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+	}
+
+	// Simulate the real AGY transcript pattern observed in production:
+	// PLANNER_RESPONSE (tool dispatch) → tool-result step → PLANNER_RESPONSE (reply)
+	toolResultTypes := []string{"LIST_DIRECTORY", "RUN_COMMAND", "GREP_SEARCH", "VIEW_FILE", "WRITE_FILE"}
+	for _, toolType := range toolResultTypes {
+		tracker.pendingFinal = nil
+		// Tool-result step: must be filtered out entirely
+		tracker.mapEntry(&agyTranscriptEntry{
+			StepIndex: 10,
+			Source:    "MODEL",
+			Type:      toolType,
+			CreatedAt: now.Format(time.RFC3339),
+			Content:   "Created At: 2026-06-23T02:08:01Z\nCompleted At: 2026-06-23T02:08:02Z\n{raw tool output}",
+		})
+		if tracker.pendingFinal != nil {
+			t.Errorf("tool-result step type=%q set pendingFinal; want nil", toolType)
+		}
+	}
+
+	// A genuine PLANNER_RESPONSE with no tool calls MUST still set pendingFinal.
+	tracker.mapEntry(&agyTranscriptEntry{
+		StepIndex: 20,
+		Source:    "MODEL",
+		Type:      "PLANNER_RESPONSE",
+		CreatedAt: now.Format(time.RFC3339),
+		Content:   "Here is the summary of my findings.",
+	})
+	if tracker.pendingFinal == nil {
+		t.Fatal("PLANNER_RESPONSE with no tool calls should set pendingFinal")
+	}
+	if tracker.pendingFinal.Content != "Here is the summary of my findings." {
+		t.Errorf("pendingFinal.Content = %q", tracker.pendingFinal.Content)
 	}
 }
 
