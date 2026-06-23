@@ -2,11 +2,14 @@ package sessions
 
 // Context-window sizes per model — the denominator for "how full is the
 // context window". This is the EXACT per-model spec, not a prefix guess: the
-// earlier `strings.Contains(model,"claude") → 200k` was wrong for the Claude
-// models that ship a 1M window (Sonnet 4.x), which is exactly the inaccuracy
-// Jesper flagged. Keys mirror server/pkg/pricing.modelPricing so the two
-// curated tables stay aligned; values are the model's documented max input
-// window.
+// earlier `strings.Contains(model,"claude") → 200k` was wrong for every Claude
+// model that ships a 1M window — Sonnet 4.x AND the current Opus 4.x line. Opus
+// 4.6 / 4.7 / 4.8 each ship a 1M-token window as STANDARD (standard API pricing,
+// no `[1m]` beta tag required). Treating Opus as a flat 200k pinned the indicator
+// at 100% on real sessions — FIR-1931, Jesper's screenshot: 330k read into a run
+// the table claimed had a 200k window. Keys mirror server/pkg/pricing.modelPricing
+// so the two curated tables stay aligned; values are the model's documented max
+// input window.
 //
 // Source of truth note: the Firtal gateway's /v1/models discovery does NOT
 // return a context window today (it sends only id/owned_by/display_name), so we
@@ -25,10 +28,12 @@ import (
 const defaultContextWindow int64 = 200_000
 
 var modelContextWindows = map[string]int64{
-	// Anthropic — Opus: 200k.
-	"claude-opus-4-8": 200_000,
-	"claude-opus-4-7": 200_000,
-	"claude-opus-4-6": 200_000,
+	// Anthropic — current Opus (4.6/4.7/4.8) ships the 1M window as standard.
+	"claude-opus-4-8": 1_000_000,
+	"claude-opus-4-7": 1_000_000,
+	"claude-opus-4-6": 1_000_000,
+	// Older Opus kept at the conservative 200k until a 1M window is confirmed
+	// for each — under-stating fullness is the safe direction (see header note).
 	"claude-opus-4-5": 200_000,
 	"claude-opus-4-1": 200_000,
 	"claude-opus-4":   200_000,
@@ -56,13 +61,12 @@ var modelContextWindows = map[string]int64{
 // pricing package so `claude-sonnet-4-5-20251101` resolves to the family row.
 var dateSuffix = regexp.MustCompile(`-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$`)
 
-// oneMillionMarker matches Anthropic's "[1m]" long-context beta tag, e.g.
-// `claude-opus-4-8[1m]`. The tag itself declares a 1M-token window — it is the
-// whole reason the variant exists — so it overrides the base family row, which
-// would otherwise resolve Opus to its standard 200k and understate headroom
-// ~5x. This was the live miss Jesper flagged: a `claude-opus-4-8[1m]` run
-// reported a 200k denominator, so the hairline read "fuller" than reality. The
-// gateway emits the bracketed tag verbatim in task_usage, so we match it here.
+// oneMillionMarker matches Anthropic's "[1m]" long-context tag, e.g.
+// `claude-opus-4-8[1m]`. The tag declares a 1M-token window regardless of family,
+// so it overrides the base family row — this keeps the indicator correct for any
+// model whose base row is still a smaller window (older Opus, Haiku) when it runs
+// with the long-context variant. The gateway emits the bracketed tag verbatim in
+// task_usage, so we match it here.
 var oneMillionMarker = regexp.MustCompile(`\[1m\]`)
 
 // capabilityTag strips a trailing bracketed capability tag (e.g. `[1m]`) so a

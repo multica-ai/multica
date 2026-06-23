@@ -7,7 +7,10 @@ func TestContextWindowForModel_ExactPerModel(t *testing.T) {
 		model string
 		want  int64
 	}{
-		{"claude-opus-4-8", 200_000},
+		{"claude-opus-4-8", 1_000_000},   // current Opus ships the 1M window as standard (FIR-1931)
+		{"claude-opus-4-7", 1_000_000},
+		{"claude-opus-4-6", 1_000_000},
+		{"claude-opus-4-5", 200_000},     // older Opus stays conservative until a 1M window is confirmed
 		{"claude-sonnet-4-6", 1_000_000}, // Sonnet 4.x ships the 1M window — the case the old prefix guess got wrong
 		{"claude-sonnet-4-5", 1_000_000},
 		{"claude-haiku-4-5", 200_000},
@@ -15,10 +18,11 @@ func TestContextWindowForModel_ExactPerModel(t *testing.T) {
 		{"gpt-5", 272_000},
 		{"gemini-2.5-pro", 1_000_000},
 		{"Claude-Sonnet-4-5-20251101", 1_000_000},   // dated snapshot resolves to the family row
-		{"claude-opus-4-8[1m]", 1_000_000},          // [1m] long-context beta tag → 1M, not the base Opus 200k (the live miss Jesper flagged)
+		{"claude-opus-4-8[1m]", 1_000_000},          // [1m] long-context tag → 1M
 		{"Claude-Opus-4-8[1m]", 1_000_000},          // case-insensitive
 		{"claude-opus-4-8[1m]-20260101", 1_000_000}, // [1m] tag wins even with a trailing date
-		{"claude-opus-4-8[exp]", 200_000},           // an unrelated bracketed tag strips to the base family (200k)
+		{"claude-opus-4-8[exp]", 1_000_000},         // an unrelated bracketed tag strips to the base family (now 1M)
+		{"claude-opus-4-5[exp]", 200_000},           // older Opus base still resolves to 200k after stripping a tag
 		{"", 200_000},                               // unknown/empty falls back to the conservative default
 		{"some-future-model", 200_000},
 	}
