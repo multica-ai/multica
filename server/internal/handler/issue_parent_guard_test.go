@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -169,6 +170,23 @@ func TestSquadParentChildOwnershipGuard_Update(t *testing.T) {
 
 	// An unrelated edit on a coherent squad child is not retroactively rejected.
 	updateIssueExpect(t, child.ID, map[string]any{"title": "renamed"}, http.StatusOK)
+
+	// Review gap: reparenting an UNASSIGNED orphan under a squad parent must not
+	// leave it unassigned — fail closed (no ghost surface).
+	unassignedOrphan, _ := createIssueExpect(t, map[string]any{
+		"title": "unassigned orphan", "status": "backlog",
+	}, http.StatusCreated)
+	ub := updateIssueExpect(t, unassignedOrphan.ID, map[string]any{"parent_issue_id": parent.ID}, http.StatusBadRequest)
+	if !strings.Contains(ub, "unassigned") {
+		t.Errorf("reparent unassigned orphan: expected unassigned error, got %s", ub)
+	}
+
+	// Review gap: an explicit unassign of a same-squad child under a squad parent
+	// must fail (do not silently drop ownership into a ghost).
+	eub := updateIssueExpect(t, child.ID, map[string]any{"assignee_type": nil, "assignee_id": nil}, http.StatusBadRequest)
+	if !strings.Contains(eub, "unassigned") {
+		t.Errorf("explicit unassign under squad parent: expected unassigned error, got %s", eub)
+	}
 }
 
 func TestSquadParentChildOwnershipGuard_Batch(t *testing.T) {
@@ -208,6 +226,38 @@ func TestSquadParentChildOwnershipGuard_Batch(t *testing.T) {
 	testHandler.BatchUpdateIssues(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("non-ownership batch: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Review gap: batch reparent of an UNASSIGNED orphan under a squad parent
+	// must fail the whole batch explicitly (no ghost surface).
+	orphan, _ := createIssueExpect(t, map[string]any{
+		"title": "batch unassigned orphan", "status": "backlog",
+	}, http.StatusCreated)
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{orphan.ID},
+		"updates":   map[string]any{"parent_issue_id": parent.ID},
+	})
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("batch reparent unassigned orphan: want 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Review gap: batch explicit unassign of a same-squad child must fail.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{child.ID},
+		"updates":   map[string]any{"assignee_type": nil, "assignee_id": nil},
+	})
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("batch explicit unassign: want 400, got %d: %s", w.Code, w.Body.String())
+	}
+	// The child stays squad-owned after the rejected batch.
+	var stillType string
+	testPool.QueryRow(context.Background(), `SELECT assignee_type FROM issue WHERE id = $1`, child.ID).Scan(&stillType)
+	if stillType != "squad" {
+		t.Fatalf("child assignee_type after rejected unassign batch = %q, want squad", stillType)
 	}
 }
 
@@ -277,6 +327,25 @@ func TestActiveDependencyMetadataGuard(t *testing.T) {
 	}, http.StatusCreated)
 	setMetaExpect(t, deferred.ID, "deferred_reason", `"waiting upstream contract"`, http.StatusOK)
 	setMetaExpect(t, parent.ID, "linked_child", `"`+deferred.ID+`"`, http.StatusOK)
+
+	// Review gap: a non-string (or empty) deferred value must NOT count as
+	// DEFERRED — no metadata type-sniffing bypass. waiting_on=false /
+	// deferred_reason=0 / deferred_reason="" leave the child inert, so linking
+	// it is rejected.
+	for i, neg := range []struct{ key, val string }{
+		{"waiting_on", `false`},
+		{"deferred_reason", `0`},
+		{"deferred_reason", `""`},
+	} {
+		bad, _ := createIssueExpect(t, map[string]any{
+			"title": fmt.Sprintf("bad-deferred-%d", i), "status": "backlog", "parent_issue_id": parent.ID,
+		}, http.StatusCreated)
+		setMetaExpect(t, bad.ID, neg.key, neg.val, http.StatusOK)
+		nb := setMetaExpect(t, parent.ID, "linked_child", `"`+bad.ID+`"`, http.StatusBadRequest)
+		if !strings.Contains(nb, "inert") {
+			t.Errorf("deferred %s=%s should be inert (not a valid deferral), got %s", neg.key, neg.val, nb)
+		}
+	}
 }
 
 // TestCompleteTaskCapturesBranchName locks the readback fix: the branch_name

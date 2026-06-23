@@ -30,11 +30,12 @@ import (
 // Stable validation messages. Kept as constants so tests and API clients can
 // assert on a fixed substring instead of brittle inline strings.
 const (
-	errChildMustBeSquadOwned = "child of a squad-owned parent must be owned by the same squad as the parent; explicit agent/member or a different squad is not allowed (omit the assignee to inherit the parent squad)"
-	errLinkedChildMustBeRef  = "active dependency metadata must be an issue id or identifier string"
-	errLinkedChildNotFound   = "active dependency metadata does not refer to an issue in this workspace"
-	errLinkedChildOwnership  = "active dependency child must be owned by the same squad as this issue"
-	errLinkedChildInert      = "active dependency child is inert: it must be LAUNCHED (active or completed run, or a comment) or explicitly DEFERRED (deferred_until / blocked_by / waiting_on / deferred_reason)"
+	errChildMustBeSquadOwned           = "child of a squad-owned parent must be owned by the same squad as the parent; explicit agent/member or a different squad is not allowed (omit the assignee to inherit the parent squad)"
+	errChildUnassignedUnderSquadParent = "child of a squad-owned parent cannot be left unassigned; it must stay owned by the same squad (omit the assignee on create to inherit it, or assign the parent squad explicitly)"
+	errLinkedChildMustBeRef            = "active dependency metadata must be an issue id or identifier string"
+	errLinkedChildNotFound             = "active dependency metadata does not refer to an issue in this workspace"
+	errLinkedChildOwnership            = "active dependency child must be owned by the same squad as this issue"
+	errLinkedChildInert                = "active dependency child is inert: it must be LAUNCHED (active or completed run, or a comment) or explicitly DEFERRED (deferred_until / blocked_by / waiting_on / deferred_reason)"
 )
 
 // activeDependencyMetadataKeys are the metadata keys that record a parent->child
@@ -53,17 +54,20 @@ var deferredMetadataKeys = []string{"deferred_until", "blocked_by", "waiting_on"
 // stays owned by the same squad. It returns "" when the (parent, child)
 // ownership pair is allowed, or a stable error string when it must be rejected.
 //
-// Only squad-owned parents constrain their children. An unset child assignee is
-// allowed here: create defaults it to the parent squad before calling, and
-// update treats an explicit unassign as a non-handoff (an unowned child is not
-// a role handoff, and the active-dependency guard catches it if a parent later
-// tries to depend on it while it is still inert).
+// Only squad-owned parents constrain their children. A child of a squad-owned
+// parent must NOT be left unassigned: an unset child assignee is a ghost surface
+// (the parent-child link records an active dependency while the child has no
+// owner). Create handles its own default — it inherits the parent squad before
+// calling this helper, so create never reaches the unset branch here. Every
+// other caller (update / batch reparent, link, explicit unassign) that would
+// leave the child unassigned under a squad parent is rejected, so the only way
+// to keep such a child is same-squad ownership.
 func squadParentChildOwnershipError(parentType pgtype.Text, parentID pgtype.UUID, childType pgtype.Text, childID pgtype.UUID) string {
 	if !(parentType.Valid && parentType.String == "squad") {
 		return ""
 	}
 	if !childType.Valid && !childID.Valid {
-		return ""
+		return errChildUnassignedUnderSquadParent
 	}
 	if childType.String != "squad" || childID != parentID {
 		return errChildMustBeSquadOwned
@@ -124,23 +128,18 @@ func (h *Handler) issueIsLaunched(ctx context.Context, child db.Issue) bool {
 	return false
 }
 
-// issueIsDeferred reports whether a child is explicitly parked: any of the
-// deferred metadata keys is present with a non-empty value.
+// issueIsDeferred reports whether a child is explicitly parked. v1 contract: a
+// deferral signal is a non-empty (trimmed) STRING value on one of the deferred
+// metadata keys. A bool or number — e.g. waiting_on=false, deferred_reason=0 —
+// is NOT a valid deferral; accepting it would let an inert child masquerade as
+// DEFERRED through metadata type sniffing, which is the prose-bypass this guard
+// must close.
 func issueIsDeferred(child db.Issue) bool {
 	md := parseIssueMetadata(child.Metadata)
 	for _, k := range deferredMetadataKeys {
-		v, ok := md[k]
-		if !ok {
-			continue
+		if s, isStr := md[k].(string); isStr && strings.TrimSpace(s) != "" {
+			return true
 		}
-		if s, isStr := v.(string); isStr {
-			if strings.TrimSpace(s) != "" {
-				return true
-			}
-			continue
-		}
-		// Non-string present value (number/bool) counts as an explicit signal.
-		return true
 	}
 	return false
 }
