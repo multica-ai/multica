@@ -26,6 +26,7 @@ export class TestApiClient {
   private createdIssueIds: string[] = [];
   private createdWorkflowIds: string[] = [];
   private createdWorkflowStageIds: string[] = [];
+  private createdAgentIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -161,19 +162,27 @@ export class TestApiClient {
     position_x?: number;
     position_y?: number;
     worker_type?: string;
+    worker_id?: string | null;
     critic_type?: string;
+    critic_id?: string | null;
     stage_id?: string | null;
+    format_schema?: unknown;
   }) {
+    const body: Record<string, unknown> = {
+      title: data.title,
+      description: data.description ?? "",
+      position_x: data.position_x ?? 0,
+      position_y: data.position_y ?? 0,
+      worker_type: data.worker_type ?? "agent",
+      critic_type: data.critic_type ?? "human",
+    };
+    if (data.worker_id !== undefined) body.worker_id = data.worker_id;
+    if (data.critic_id !== undefined) body.critic_id = data.critic_id;
+    if (data.format_schema !== undefined) body.format_schema = data.format_schema;
+
     const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes`, {
       method: "POST",
-      body: JSON.stringify({
-        title: data.title,
-        description: data.description ?? "",
-        position_x: data.position_x ?? 0,
-        position_y: data.position_y ?? 0,
-        worker_type: data.worker_type ?? "agent",
-        critic_type: data.critic_type ?? "human",
-      }),
+      body: JSON.stringify(body),
     });
     const node = await res.json();
 
@@ -211,7 +220,73 @@ export class TestApiClient {
     return res.json();
   }
 
-  async deleteIssue(id: string) {
+  // ── Agent / Runtime / Plugin methods ──
+
+  async listRuntimes(params?: { owner?: string }) {
+    const query = new URLSearchParams();
+    if (params?.owner) query.set("owner", params.owner);
+    const qs = query.toString();
+    const res = await this.authedFetch(`/api/runtimes${qs ? `?${qs}` : ""}`);
+    return res.json();
+  }
+
+  async createAgent(data: {
+    name: string;
+    description?: string;
+    instructions?: string;
+    runtime_id: string;
+    runtime_mode?: string;
+    visibility?: string;
+    model?: string;
+    thinking_level?: string;
+    max_concurrent_tasks?: number;
+    plugin_id?: string;
+  }) {
+    const res = await this.authedFetch("/api/agents", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const agent = await res.json();
+    this.createdAgentIds.push(agent.id);
+    return agent;
+  }
+
+  async deleteAgent(id: string) {
+    await this.authedFetch(`/api/agents/${id}`, { method: "DELETE" });
+  }
+
+  async getAgent(id: string) {
+    const res = await this.authedFetch(`/api/agents/${id}`);
+    return res.json();
+  }
+
+  async listBuiltinPlugins() {
+    const res = await this.authedFetch("/api/plugins/builtin");
+    return res.json();
+  }
+
+  // ── Workflow node update (for setting worker_id on existing nodes) ──
+
+  async updateWorkflowNode(workflowId: string, nodeId: string, data: {
+    title?: string;
+    description?: string;
+    worker_type?: string;
+    worker_id?: string | null;
+    critic_type?: string;
+    critic_id?: string | null;
+    stage_id?: string | null;
+    format_schema?: unknown;
+    position_x?: number;
+    position_y?: number;
+  }) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes/${nodeId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  }
+
+  // ── Cleanup helpers ──
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
@@ -219,7 +294,7 @@ export class TestApiClient {
     await this.authedFetch(`/api/workflows/${id}`, { method: "DELETE" });
   }
 
-  /** Clean up all issues, workflows created during this test.
+  /** Clean up all issues, workflows, agents created during this test.
    *  Workflow cascade deletion handles associated stages and nodes. */
   async cleanup() {
     for (const id of this.createdWorkflowIds) {
@@ -231,6 +306,15 @@ export class TestApiClient {
     }
     this.createdWorkflowIds = [];
     this.createdWorkflowStageIds = [];
+
+    for (const id of this.createdAgentIds) {
+      try {
+        await this.deleteAgent(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdAgentIds = [];
 
     for (const id of this.createdIssueIds) {
       try {

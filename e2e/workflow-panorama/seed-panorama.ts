@@ -68,3 +68,5 @@ const test = baseTest.extend<PanoramaFixtures>({
 });
 
 export { test, expect, DEMO_EMAIL, DEMO_NAME, DEMO_WORKSPACE };
+export { seedFullPanoramaWorkflow, FULL_PANORAMA_STATS } from "./seed-full-panorama";
+export type { FullPanoramaSeed, PanoramaSeedAgent, PanoramaSeedStage, PanoramaSeedNode, PanoramaSeedEdge } from "./seed-full-panorama";
