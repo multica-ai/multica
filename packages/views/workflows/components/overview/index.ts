@@ -9,3 +9,5 @@ export { StageNodeDag } from "./stage-node-dag";
 export type { StageNodeDagProps } from "./stage-node-dag";
 export { NodeDetailPanel } from "./node-detail-panel";
 export { StageCreateDialog } from "./stage-create-dialog";
+export { CriticBadge } from "./critic-badge";
+export type { CriticBadgeProps } from "./critic-badge";
