@@ -33,6 +33,12 @@ type AppConfig struct {
 	// build. Empty for builds where the operator has not set SERVER_URL.
 	ServerURL string `json:"server_url,omitempty"`
 
+	// CliServerURL is the URL shown in CLI setup commands (e.g. `multica login`).
+	// Defaults to ServerURL so self-hosted deployments do not need an extra
+	// env var unless they want a dedicated CLI endpoint (e.g. a local daemon
+	// that is different from the public web address).
+	CliServerURL string `json:"cli_server_url,omitempty"`
+
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
 	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
@@ -69,6 +75,10 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.ServerURL = os.Getenv("SERVER_URL")
 	if config.ServerURL == "" {
 		config.ServerURL = os.Getenv("REMOTE_API_URL")
+	}
+	config.CliServerURL = os.Getenv("CLI_SERVER_URL")
+	if config.CliServerURL == "" {
+		config.CliServerURL = config.ServerURL
 	}
 
 	// Re-read from env on every request so operators can rotate keys via
