@@ -145,6 +145,11 @@ import type {
   NotificationPreferences,
   AgentDefaults,
   AgentDefaultsWithUser,
+  AgentConfigTemplate,
+  CreateAgentConfigTemplateRequest,
+  UpdateAgentConfigTemplateRequest,
+  AgentTemplateBinding,
+  UpdateAgentTemplateBindingRequest,
   InstructionsHistoryScope,
   InstructionsHistoryDetail,
   ListInstructionsHistoryResponse,
@@ -3234,6 +3239,71 @@ export class ApiClient {
   async duplicateAgentDefaults(workspaceId: string, configId: string): Promise<AgentDefaults> {
     return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/duplicate/${configId}`, {
       method: "POST",
+    });
+  }
+
+  // --- Agent Config Templates ---
+
+  async listAgentConfigTemplates(
+    workspaceId: string,
+    scope?: "system" | "personal",
+  ): Promise<AgentConfigTemplate[]> {
+    const search = scope ? `?scope=${scope}` : "";
+    return this.fetch(`/api/agent-config-templates${search}`);
+  }
+
+  async getAgentConfigTemplate(
+    workspaceId: string,
+    templateId: string,
+  ): Promise<AgentConfigTemplate> {
+    return this.fetch(`/api/agent-config-templates/${templateId}`);
+  }
+
+  async createAgentConfigTemplate(
+    workspaceId: string,
+    req: CreateAgentConfigTemplateRequest,
+  ): Promise<AgentConfigTemplate> {
+    return this.fetch("/api/agent-config-templates", {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
+  }
+
+  async updateAgentConfigTemplate(
+    workspaceId: string,
+    templateId: string,
+    req: UpdateAgentConfigTemplateRequest,
+  ): Promise<AgentConfigTemplate> {
+    return this.fetch(`/api/agent-config-templates/${templateId}`, {
+      method: "PUT",
+      body: JSON.stringify(req),
+    });
+  }
+
+  async deleteAgentConfigTemplate(
+    workspaceId: string,
+    templateId: string,
+  ): Promise<void> {
+    return this.fetch(`/api/agent-config-templates/${templateId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getAgentTemplateBinding(
+    workspaceId: string,
+    agentId: string,
+  ): Promise<AgentTemplateBinding> {
+    return this.fetch(`/api/agents/${agentId}/template-binding`);
+  }
+
+  async updateAgentTemplateBinding(
+    workspaceId: string,
+    agentId: string,
+    req: UpdateAgentTemplateBindingRequest,
+  ): Promise<AgentTemplateBinding> {
+    return this.fetch(`/api/agents/${agentId}/template-binding`, {
+      method: "PUT",
+      body: JSON.stringify(req),
     });
   }
 

@@ -219,6 +219,13 @@ export type {
   ListInstructionsHistoryResponse,
 } from "./agent-defaults";
 export type {
+  AgentConfigTemplate,
+  CreateAgentConfigTemplateRequest,
+  UpdateAgentConfigTemplateRequest,
+  AgentTemplateBinding,
+  UpdateAgentTemplateBindingRequest,
+} from "./agent-config-template";
+export type {
   WikiPage,
   WikiPageSummary,
   WikiPageType,
