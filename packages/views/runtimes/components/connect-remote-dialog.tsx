@@ -157,7 +157,8 @@ function CommandStep({
 function InstructionsStep({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
   const serverUrl = useConfigStore((s) => s.serverUrl);
-  const tokenCmd = makeTokenCmd(serverUrl);
+  const cliServerUrl = useConfigStore((s) => s.cliServerUrl);
+  const tokenCmd = makeTokenCmd(cliServerUrl || serverUrl);
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-2">
