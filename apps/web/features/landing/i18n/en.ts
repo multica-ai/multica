@@ -294,6 +294,31 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.28",
+        date: "2026-06-23",
+        title: "Staged Sub-Issues and Qoder Runtime Support",
+        changes: [],
+        features: [
+          "Sub-Issues can now be organized into stages, so parallel work moves forward together and the parent Issue is updated only when a stage is complete",
+          "Assigning or batch-updating an Issue now confirms upfront whether it will start an agent — and which one — so you can apply the change without launching a run; when a run does start, you can attach a handoff note that the agent receives as context for that run",
+          "Qoder is now available as an agent provider, including model discovery and provider branding",
+          "Custom runtimes can include fixed launch arguments, with clearer feedback when a saved runtime cannot register",
+        ],
+        improvements: [
+          "Project descriptions now travel with agent work, giving agents more durable context from the project they are working in",
+          "Command line workflows now cover comment resolve actions, Issue usage summaries, and autopilot subscriber management",
+          "Readonly code blocks include a copy button, and the marketing header now shows the live GitHub star count",
+          "Agent skill delivery is more efficient for newer daemons while keeping older daemons compatible",
+        ],
+        fixes: [
+          "Issue batch edit menus now show the real shared status, priority, and assignee for the selected Issues",
+          "Dragging Issues across board and list views no longer snaps cards back before settling",
+          "GitHub PR links and check updates are routed to the workspace that owns the repository",
+          "Live task transcripts now keep updating while a run is still in progress",
+          "Custom runtime deletion now removes the saved profile instead of only removing a row that could return later",
+        ],
+      },
+      {
         version: "0.3.27",
         date: "2026-06-22",
         title: "Threaded Lark Replies and Smoother Team Workflows",
