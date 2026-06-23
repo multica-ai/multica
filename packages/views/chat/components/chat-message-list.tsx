@@ -352,7 +352,7 @@ function MessageCopyButton({
             className="text-muted-foreground/70 hover:text-foreground"
             onClick={handleCopy}
             aria-label={t(($) => $.message_list.copy_action)}
-            data-acceptance="copy-message"
+            data-acceptance="chat-message-copy-button"
             data-testid="copy-message"
           />
         }
