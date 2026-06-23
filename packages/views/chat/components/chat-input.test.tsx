@@ -87,8 +87,13 @@ vi.mock("@multica/core/logger", () => ({
   noopLogger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@multica/cerebro-feature-flags", () => ({
+vi.mock("@multica/cerebro-feature-flags", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/cerebro-feature-flags")>()),
   useFeatureFlag: () => true,
+  // EditorDictationMic (injected into the composer) calls useDictationSettings,
+  // which reads the global auth store registered at app boot. Tests don't boot
+  // the platform, so stub it; glossaryToHint and the rest stay real.
+  useDictationSettings: () => ({ glossary: "", cleanup: true }),
 }));
 
 vi.mock("@multica/cerebro-preferences/views", () => ({

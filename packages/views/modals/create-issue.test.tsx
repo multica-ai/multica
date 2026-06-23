@@ -100,6 +100,14 @@ vi.mock("@multica/core/api", () => ({
   api: {},
 }));
 
+vi.mock("@multica/cerebro-feature-flags", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/cerebro-feature-flags")>()),
+  // EditorDictationMic (injected into the description composer) calls
+  // useDictationSettings, which reads the global auth store registered at app
+  // boot. Tests don't boot the platform, so stub it; everything else stays real.
+  useDictationSettings: () => ({ glossary: "", cleanup: true }),
+}));
+
 vi.mock("../editor", () => {
   const ContentEditor = forwardRef(({ defaultValue, onUpdate, placeholder }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");

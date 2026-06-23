@@ -31,3 +31,10 @@ func TestWorkspaceGlossaryNoQueriesIsEmpty(t *testing.T) {
 		t.Errorf("workspaceGlossary without queries = %q, want empty", got)
 	}
 }
+
+func TestBusinessObjectGlossaryDisabledWhenUnset(t *testing.T) {
+	t.Setenv(envBusinessObjectsBQProject, "")
+	if got := businessObjectGlossary(context.Background()); got != "" {
+		t.Errorf("businessObjectGlossary without BQ project = %q, want empty", got)
+	}
+}

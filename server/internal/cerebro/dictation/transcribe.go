@@ -80,13 +80,15 @@ func (h *Handler) Transcribe(w http.ResponseWriter, r *http.Request) {
 	if header != nil && header.Filename != "" {
 		filename = header.Filename
 	}
-	// FIR-1797: bias decoding toward this workspace's proper nouns and run the
-	// optional cleanup pass. The glossary is built automatically from the
-	// workspace's business objects (agents, squads, projects, teammates) and the
-	// user's manual terms are merged on top. Both glossary and cleanup are
-	// advisory — the inference service ignores an empty glossary and only cleans
-	// up when its own key is configured.
-	glossary := mergeGlossary(r.FormValue("glossary"), h.workspaceGlossary(r.Context(), workspaceID))
+	// FIR-1797: bias decoding toward the proper nouns people actually say, and
+	// run the optional cleanup pass. The glossary is built automatically from
+	// (1) the workspace's own objects (agents, squads, projects, teammates) and
+	// (2) Firtal's business objects from the data catalog (brands, categories,
+	// suppliers); the user's manual terms are merged on top. Both glossary and
+	// cleanup are advisory — the inference service ignores an empty glossary and
+	// only cleans up when its own key is configured.
+	autoGlossary := mergeGlossary(h.workspaceGlossary(r.Context(), workspaceID), businessObjectGlossary(r.Context()))
+	glossary := mergeGlossary(r.FormValue("glossary"), autoGlossary)
 	body, contentType, err := buildMultipart(file, filename, r.FormValue("language"), glossary, r.FormValue("cleanup"))
 	if err != nil {
 		slog.Warn("dictation transcribe request build failed", "error", err)
