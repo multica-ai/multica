@@ -169,6 +169,22 @@ function getChannelListBounds(containerWidth: number, showRightPanel: boolean, s
   return { min: CHANNEL_LIST_MIN_WIDTH, max };
 }
 
+/** Center `target` vertically within `container` by setting scrollTop directly.
+ *  Uses instant (non-smooth) scrolling: deep-links jump a potentially large
+ *  distance, where a smooth animation is both disorienting and fragile — a
+ *  WS-driven message refetch or a side-panel layout shift mid-animation
+ *  cancels it. Callers wrap in requestAnimationFrame as needed so layout is
+ *  settled before the offsets are read. */
+function scrollToElement(container: HTMLElement | null, target: HTMLElement) {
+  if (!container) return;
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const offset = targetRect.top - containerRect.top + container.scrollTop;
+  container.scrollTo({
+    top: offset - container.clientHeight / 2 + targetRect.height / 2,
+  });
+}
+
 function formatTime(ts?: string): string {
   if (!ts) return "";
   const d = new Date(ts);
@@ -1103,8 +1119,16 @@ function MessageList({
       const el = document.getElementById(`channel-msg-${highlight.root_message_id}`);
       if (!el) return;
       didScrollToLinked.current = highlight.message_id;
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Open the replies panel first, then center the root message. The panel
+      // narrows the main list from full-width to (width - 360px), which reflows
+      // every message and shifts the root's vertical position. Centering before
+      // the panel mounts scrolls against pre-reflow coordinates and lands off
+      // target; the double rAF waits for the panel to mount + paint so the
+      // offsets we read are the final ones.
       onOpenReplies(highlight.root_message_id);
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => scrollToElement(scrollRef.current, el)),
+      );
       return;
     }
     // Top-level deep-link: scroll to + briefly highlight the message.
@@ -1113,9 +1137,11 @@ function MessageList({
     const el = document.getElementById(`channel-msg-${linkedMessageId}`);
     if (!el) return;
     didScrollToLinked.current = linkedMessageId;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.add("ring-2", "ring-brand/50", "rounded-md");
-    setTimeout(() => el.classList.remove("ring-2", "ring-brand/50", "rounded-md"), 3000);
+    requestAnimationFrame(() => {
+      scrollToElement(scrollRef.current, el);
+      el.classList.add("ring-2", "ring-brand/50", "rounded-md");
+      setTimeout(() => el.classList.remove("ring-2", "ring-brand/50", "rounded-md"), 3000);
+    });
   }, [linkedMessageId, messages.length, highlight, onOpenReplies]);
 
   const handleScroll = useCallback(() => {
@@ -1510,6 +1536,7 @@ function RepliesPanel({
     onDrop: (files) => editorRef.current?.uploadFiles(files),
   });
   const [isEmpty, setIsEmpty] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const paths = useWorkspacePaths();
   const nav = useNavigation();
   const openModal = useModalStore((s) => s.open);
@@ -1566,15 +1593,17 @@ function RepliesPanel({
     const el = document.getElementById(`channel-reply-${highlightMessageId}`);
     if (!el) return;
     didHighlightReply.current = highlightMessageId;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.add("ring-2", "ring-brand/50", "rounded-md");
-    setTimeout(() => el.classList.remove("ring-2", "ring-brand/50", "rounded-md"), 3000);
+    requestAnimationFrame(() => {
+      scrollToElement(scrollRef.current, el);
+      el.classList.add("ring-2", "ring-brand/50", "rounded-md");
+      setTimeout(() => el.classList.remove("ring-2", "ring-brand/50", "rounded-md"), 3000);
+    });
   }, [highlightMessageId, data]);
 
   return (
     <div className="flex h-full min-w-0 flex-col border-l bg-background shadow-sm">
       <PanelHeader title={t($ => $.panel_header.replies)} onClose={onClose} />
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
