@@ -1575,7 +1575,13 @@ function RepliesPanel({
       qc.invalidateQueries({ queryKey: channelKeys.channelMessages(wsId, channelId) });
       qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
     },
-    onError: () => toast.error(t($ => $.reply_failed)),
+    onError: (err) => {
+      // Surface the backend's specific failure reason (ApiError.message carries
+      // the server's `error` string) instead of a generic label, so intermittent
+      // reply failures on specific messages are diagnosable.
+      const reason = err instanceof Error && err.message ? err.message : t($ => $.reply_failed);
+      toast.error(reason);
+    },
   });
 
   const handleReply = useCallback(() => {

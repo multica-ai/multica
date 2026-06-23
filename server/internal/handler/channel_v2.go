@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -677,7 +679,10 @@ func (h *Handler) ReplyToMessage(w http.ResponseWriter, r *http.Request) {
 			RootMessageID: msgUUID,
 		})
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create thread")
+			slog.Error("reply: create channel thread failed",
+				"channel_id", uuidToString(cctx.channel.ID),
+				"root_message_id", msgID, "author_id", actorID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to create reply thread")
 			return
 		}
 		h.publish(protocol.EventChannelThreadCreated, workspaceID, actorType, actorID, map[string]any{
@@ -697,6 +702,10 @@ func (h *Handler) ReplyToMessage(w http.ResponseWriter, r *http.Request) {
 		AuthorID:    authorID,
 	})
 	if err != nil {
+		slog.Error("reply: insert channel reply failed",
+			"channel_id", uuidToString(cctx.channel.ID),
+			"thread_id", uuidToString(thread.ID),
+			"reply_to_id", msgID, "author_type", authorType, "author_id", actorID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to post reply")
 		return
 	}

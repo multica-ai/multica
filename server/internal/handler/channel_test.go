@@ -300,3 +300,72 @@ func TestChannelInviteOnlyAccess(t *testing.T) {
 		t.Fatalf("outsider SendChannelMessage: expected 403, got %d (%s)", rr.Code, rr.Body.String())
 	}
 }
+
+// TestChannelOpenNonMemberCanPost verifies the open-channel posting rule: a
+// workspace member who has NOT joined the channel (no channel_member row) may
+// still post and reply in an open channel. The frontend canPost gate treats
+// open channels as workspace-wide, so the backend must agree — otherwise a
+// non-member gets a 403 on send/reply despite the UI letting them type.
+func TestChannelOpenNonMemberCanPost(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM channel WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = 'open-outsider@multica.ai'`)
+	})
+
+	// Owner creates an OPEN channel and posts a top-level message.
+	rr := httptest.NewRecorder()
+	testHandler.CreateChannel(rr, newRequest(http.MethodPost, "/api/channels", map[string]any{
+		"name": "Open Channel", "access_mode": "open",
+	}))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("CreateChannel: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var channel ChannelResponse
+	decodeJSON(t, rr, &channel)
+	if channel.AccessMode != "open" {
+		t.Fatalf("expected open mode, got %s", channel.AccessMode)
+	}
+
+	rr = httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/", map[string]any{"content": "Original"}), "id", channel.ID)
+	testHandler.SendChannelMessage(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("owner SendChannelMessage: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var origMsg ChannelMessageV2Response
+	decodeJSON(t, rr, &origMsg)
+
+	// A workspace member who is NOT a channel member.
+	var outsiderID string
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO "user" (name, email) VALUES ('Open Outsider', 'open-outsider@multica.ai') RETURNING id`).Scan(&outsiderID); err != nil {
+		t.Fatalf("create outsider: %v", err)
+	}
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, outsiderID); err != nil {
+		t.Fatalf("add outsider member: %v", err)
+	}
+
+	// Non-member CAN post in the open channel.
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodPost, "/", map[string]any{"content": "non-member post"}), "id", channel.ID)
+	req.Header.Set("X-User-ID", outsiderID)
+	testHandler.SendChannelMessage(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("non-member SendChannelMessage in open channel: expected 201, got %d (%s)", rr.Code, rr.Body.String())
+	}
+
+	// Non-member CAN reply to an existing message in the open channel.
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodPost, "/", map[string]any{"content": "non-member reply"}), "id", channel.ID)
+	req = withURLParam(req, "msgId", origMsg.ID)
+	req.Header.Set("X-User-ID", outsiderID)
+	testHandler.ReplyToMessage(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("non-member ReplyToMessage in open channel: expected 201, got %d (%s)", rr.Code, rr.Body.String())
+	}
+}

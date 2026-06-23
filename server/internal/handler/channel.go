@@ -170,10 +170,16 @@ func (h *Handler) loadChannelContext(w http.ResponseWriter, r *http.Request, wsU
 func (c channelContext) canManage() bool { return c.wsAdmin || c.channelOwn }
 
 // canPost reports whether the user may post threads/messages. Locked channels
-// restrict posting to managers; otherwise any member of the channel may post.
+// restrict posting to managers. Open channels are workspace-wide — any
+// workspace member may post (matching the frontend canPost gate and the
+// open-channel notify semantics); invite-only channels require channel
+// membership. Reaching this handler already proves workspace membership.
 func (c channelContext) canPost() bool {
 	if c.channel.IsLocked {
 		return c.canManage()
+	}
+	if c.channel.AccessMode == "open" {
+		return true
 	}
 	return c.member != nil || c.wsAdmin
 }
