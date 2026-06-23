@@ -1161,7 +1161,13 @@ function MessageList({
                 message={msg}
                 onOpenReplies={onOpenReplies}
                 onCopyLink={handleCopyLink}
-                onConvertManual={(m) => openModal("create-issue", { description: m.content })}
+                onConvertManual={(m) =>
+                  openModal("create-issue", {
+                    description: m.content,
+                    source_channel_id: channelId,
+                    source_message_id: m.id,
+                  })
+                }
                 onConvertAgent={(m) =>
                   openModal("quick-create-issue", {
                     prompt: m.content,
@@ -1486,8 +1492,12 @@ function RepliesPanel({
   }, [channelId, nav, paths]);
 
   const handleConvertManual = useCallback((msg: ChannelMessage) => {
-    openModal("create-issue", { description: msg.content });
-  }, [openModal]);
+    openModal("create-issue", {
+      description: msg.content,
+      source_channel_id: channelId,
+      source_message_id: msg.id,
+    });
+  }, [channelId, openModal]);
 
   const handleConvertAgent = useCallback((msg: ChannelMessage) => {
     openModal("quick-create-issue", {

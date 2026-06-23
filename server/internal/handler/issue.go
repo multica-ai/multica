@@ -2300,6 +2300,14 @@ type CreateIssueRequest struct {
 	// it was produced from (OPE-1943 Channel feature). The thread receives a
 	// "created from thread" system message and future status changes reflow back.
 	SourceThreadID *string `json:"source_thread_id,omitempty"`
+	// SourceChannelID / SourceMessageID, when set together, link the new issue
+	// back to the channel message it was converted from (the manual "转换为
+	// Issue" path). The handler resolves (or implicitly creates) the message's
+	// thread and links the issue to it — mirroring the agent-convert completion
+	// path so both conversion routes produce structurally identical issues.
+	// SourceMessageID takes precedence over SourceThreadID when both are set.
+	SourceChannelID *string `json:"source_channel_id,omitempty"`
+	SourceMessageID *string `json:"source_message_id,omitempty"`
 }
 
 func duplicateIssueMessage(issue IssueResponse) string {
@@ -2388,6 +2396,45 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// IssueService.Create (atomically with the create), so every entry
 	// point — HTTP, Lark, future MCP — gets the same boundary check
 	// without duplicating the lookup here.
+
+	// Optional source_channel_id / source_message_id — set when the modal
+	// was opened from a channel message (manual "转换为 Issue"). Re-validate
+	// the message belongs to this channel + workspace so a forged request
+	// can't smuggle a foreign message id through (trust boundary). Both must
+	// be provided together; the linkage is applied after the issue is created.
+	var sourceChannelUUID pgtype.UUID
+	var sourceMessageUUID pgtype.UUID
+	if (req.SourceChannelID != nil && strings.TrimSpace(*req.SourceChannelID) != "") ||
+		(req.SourceMessageID != nil && strings.TrimSpace(*req.SourceMessageID) != "") {
+		if req.SourceChannelID == nil || strings.TrimSpace(*req.SourceChannelID) == "" ||
+			req.SourceMessageID == nil || strings.TrimSpace(*req.SourceMessageID) == "" {
+			writeError(w, http.StatusBadRequest, "source_channel_id and source_message_id must be provided together")
+			return
+		}
+		chUUID, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(*req.SourceChannelID), "source_channel_id")
+		if !ok {
+			return
+		}
+		msgUUID, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(*req.SourceMessageID), "source_message_id")
+		if !ok {
+			return
+		}
+		channel, err := h.Queries.GetChannel(r.Context(), db.GetChannelParams{
+			ID:          chUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "source channel not found in this workspace")
+			return
+		}
+		msg, err := h.Queries.GetChannelMessage(r.Context(), msgUUID)
+		if err != nil || uuidToString(msg.ChannelID) != uuidToString(channel.ID) {
+			writeError(w, http.StatusBadRequest, "source message not found in this channel")
+			return
+		}
+		sourceChannelUUID = chUUID
+		sourceMessageUUID = msgUUID
+	}
 
 	// project_id is mandatory for top-level issues (OPE-1372): the Web UI
 	// enforces it client-side, but CLI/API callers could otherwise create
@@ -2561,8 +2608,17 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
 	// Link the issue back to its source channel thread (OPE-1943) if produced
-	// from one, and reflow a "created from thread" note into that thread.
-	if req.SourceThreadID != nil && strings.TrimSpace(*req.SourceThreadID) != "" {
+	// from one, and reflow a "created from thread" note into that thread. The
+	// source-message path (manual "转换为 Issue" from a channel message) takes
+	// precedence — it resolves/creates the message's thread and links, mirroring
+	// the agent-convert completion path so both routes produce structurally
+	// identical issues. The source-thread path covers callers that already hold
+	// a thread id (kept for backwards compatibility).
+	if sourceMessageUUID.Valid {
+		if thread, ok := h.ensureThreadForMessage(r.Context(), sourceChannelUUID, sourceMessageUUID, wsUUID, issue.CreatorID); ok {
+			h.linkIssueToExistingThread(r.Context(), &issue, thread)
+		}
+	} else if req.SourceThreadID != nil && strings.TrimSpace(*req.SourceThreadID) != "" {
 		h.linkIssueToThread(r.Context(), &issue, strings.TrimSpace(*req.SourceThreadID))
 	}
 

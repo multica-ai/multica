@@ -125,7 +125,6 @@ func (h *Handler) LinkQuickCreateIssueToSource(ctx context.Context, issue db.Iss
 	h.linkIssueToExistingThread(ctx, &issue, thread)
 }
 
-
 // linkIssueToThreadActivity posts a "created from thread" system message into
 // the thread and a top-level channel activity. Called after the issue-thread
 // linkage is already persisted.

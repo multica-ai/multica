@@ -177,6 +177,12 @@ export function ManualCreatePanel({
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
+  // Source-channel context — seeded when the modal is opened from a channel
+  // message ("转换为 Issue"). Carried through (not an editable field) so the
+  // backend can link the produced issue back to the message's thread,
+  // mirroring the agent-convert path (OPE-1943).
+  const sourceChannelId = (data?.source_channel_id as string | undefined) ?? undefined;
+  const sourceMessageId = (data?.source_message_id as string | undefined) ?? undefined;
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   // Start date is a low-frequency field — by default it lives in the
   // overflow ⋯ menu. Clicking the menu item flips this open, which both
@@ -418,6 +424,9 @@ export function ManualCreatePanel({
         parent_issue_id: parentIssueId,
         project_id: projectId,
         label_ids: labelIds.length > 0 ? labelIds : undefined,
+        ...(sourceChannelId && sourceMessageId
+          ? { source_channel_id: sourceChannelId, source_message_id: sourceMessageId }
+          : {}),
       });
 
       // Link queued children to the new parent. Deferred to after create
@@ -606,6 +615,12 @@ export function ManualCreatePanel({
       ...(projectId ? { project_id: projectId } : {}),
       ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
       ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
+      // Forward the channel source so a manual→agent flip preserves the
+      // conversion linkage — the agent path links the produced issue back to
+      // the source thread on completion, same as the manual path.
+      ...(sourceChannelId && sourceMessageId
+        ? { source_channel_id: sourceChannelId, source_message_id: sourceMessageId }
+        : {}),
     });
   };
 
