@@ -327,7 +327,7 @@
     },
     "expand_full_text": "Expand full text",
     "loading_full_text": "Loading...",
-    "retry_load_full_text": "Retry",
+    "retry_load_full_text": "Retry"
   },
   "reply": {
     "placeholder": "Leave a reply..."

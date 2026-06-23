@@ -320,7 +320,7 @@
     },
     "expand_full_text": "展开全文",
     "loading_full_text": "加载中...",
-    "retry_load_full_text": "重试",
+    "retry_load_full_text": "重试"
   },
   "reply": {
     "placeholder": "回复..."
