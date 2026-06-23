@@ -87,6 +87,14 @@ export function BatchActionToolbar({
   // itself. Priority, member assign, and unassign never start a run — direct.
   const handleBatchStatus = (updates: Partial<UpdateIssueRequest>) => {
     if (!updates.status) return;
+    // Backlog is the parking lot — a move into backlog never starts a run
+    // (server/internal/service/issue_trigger.go), so the confirm modal would
+    // only render an empty "won't start" box with a single Apply button. Apply
+    // directly, matching the single-issue status path.
+    if (updates.status === "backlog") {
+      void handleBatchUpdate(updates);
+      return;
+    }
     openModal("issue-run-confirm", { issueIds: ids, mode: "status", status: updates.status });
   };
 
