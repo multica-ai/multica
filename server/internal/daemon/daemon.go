@@ -47,6 +47,9 @@ var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered"
 const (
 	taskSlotWaitTimeout     = 2 * time.Second
 	taskSlotCapacityBackoff = 5 * time.Second
+)
+
+var (
 	taskPrepareLeaseRefresh = 15 * time.Second
 	taskPrepareLeaseTimeout = 10 * time.Second
 )
@@ -3439,10 +3442,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// taskfailure.Classify path records the failure with the same
 	// "start task failed: <…>" string and the same failure_reason
 	// taxonomy as before — see MUL-2946 for the classifier contract.
-	stopPrepareLease()
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
+		stopPrepareLease()
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}
+	stopPrepareLease()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
