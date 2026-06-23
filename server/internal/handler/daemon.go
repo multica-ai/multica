@@ -1917,6 +1917,11 @@ type resolveSkillBundleRef struct {
 // ResolveTaskSkillBundles returns full skill content for refs from a slim
 // claim. The daemon calls this after claim and before execenv.Prepare so
 // runtimes still see complete local skill files at startup.
+//
+// If a requested hash no longer matches the agent's current skill bundle, the
+// endpoint returns the current bundle and hash. Stage 1 does not snapshot skill
+// content at claim time; the daemon validates the returned bundle before
+// writing it to cache and materializing it.
 func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	taskID := chi.URLParam(r, "taskId")
@@ -1931,6 +1936,10 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 	}
 	if taskWorkspaceID != uuidToString(runtime.WorkspaceID) || uuidToString(task.RuntimeID) != runtimeID {
 		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if task.Status != "dispatched" && task.Status != "waiting_local_directory" {
+		writeError(w, http.StatusConflict, "task is not preparing")
 		return
 	}
 
@@ -1952,6 +1961,10 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 
 	resolved := make([]service.AgentSkillData, 0, len(req.Skills))
 	for _, ref := range req.Skills {
+		if ref.ID == "" || ref.Source == "" || ref.Hash == "" {
+			writeError(w, http.StatusBadRequest, "invalid skill ref")
+			return
+		}
 		bundle, ok := allowed[ref.Source+"\x00"+ref.ID]
 		if !ok {
 			writeError(w, http.StatusNotFound, "skill bundle not found")

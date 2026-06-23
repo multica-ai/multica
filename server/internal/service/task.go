@@ -83,9 +83,10 @@ func truncateForSummary(s string, maxRunes int) string {
 const (
 	taskAnalyticsContextCacheMax = 4096
 	// claimResponseRecoveryWindow must exceed daemon client.Timeout for
-	// /tasks/claim (30s) plus /tasks/{id}/start (30s) plus scheduling slack, so
-	// an in-flight StartTask cannot be reclaimed and double-dispatched.
-	claimResponseRecoveryWindow = 90 * time.Second
+	// /tasks/claim (30s), pre-start skill bundle resolve/cache/Prepare work,
+	// /tasks/{id}/start (30s), and scheduling slack, so an in-flight task
+	// cannot be reclaimed and double-dispatched before it reaches running.
+	claimResponseRecoveryWindow = 180 * time.Second
 )
 
 // buildCommentTriggerSummary fetches the comment content and truncates
