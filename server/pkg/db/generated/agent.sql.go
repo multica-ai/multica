@@ -1630,6 +1630,37 @@ func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskI
 	return i, err
 }
 
+const getChannelLaneLastActivity = `-- name: GetChannelLaneLastActivity :one
+SELECT COALESCE(completed_at, started_at, dispatched_at, created_at) AS last_activity
+FROM agent_task_queue
+WHERE agent_id IS NOT DISTINCT FROM $2
+  AND channel_id = $1
+  AND channel_thread_id IS NOT DISTINCT FROM $3
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1
+`
+
+type GetChannelLaneLastActivityParams struct {
+	ChannelID       pgtype.UUID `json:"channel_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	ChannelThreadID pgtype.UUID `json:"channel_thread_id"`
+}
+
+// GC lane-liveness check: the most recent task activity timestamp on a
+// single (agent_id, channel_id, channel_thread_id) context lane, across ALL
+// task statuses (unlike GetLastChannelTaskSession, which filters to
+// resumable completed/failed sessions). Any task dispatched on the lane —
+// including pending/running ones — counts as activity, because a follow-up
+// task may be about to resume into an older envRoot on this lane. Returns
+// NULL when the lane has never had a task. The daemon compares this against
+// (now - GCTTL) to decide whether the lane is quiet enough to reclaim.
+func (q *Queries) GetChannelLaneLastActivity(ctx context.Context, arg GetChannelLaneLastActivityParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getChannelLaneLastActivity, arg.ChannelID, arg.AgentID, arg.ChannelThreadID)
+	var last_activity pgtype.Timestamptz
+	err := row.Scan(&last_activity)
+	return last_activity, err
+}
+
 const getLastChannelTaskSession = `-- name: GetLastChannelTaskSession :one
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND channel_id = $2

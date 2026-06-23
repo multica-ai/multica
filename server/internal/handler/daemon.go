@@ -2858,3 +2858,96 @@ func (h *Handler) GetTaskGCCheck(w http.ResponseWriter, r *http.Request) {
 		"completed_at": task.CompletedAt.Time,
 	})
 }
+
+// GetChannelLaneGCCheck answers the daemon GC loop's lane-liveness question:
+// "is there any task activity on this (agent, channel, thread) lane more
+// recent than `since`?" If yes, the lane is live and any channel envRoot on
+// it must be preserved (a follow-up task may resume into it); if no, the
+// lane is quiet and reclaim is safe.
+//
+// Path:  /api/daemon/channels/{channelId}/gc-check
+// Query: workspace_id (required, anti-enumeration), agent_id (required),
+//        thread_id (optional; absent/empty = main-timeline lane where
+//        channel_thread_id IS NULL), since (required, RFC3339 — the
+//        `now - GCTTL` cutoff the daemon computed).
+//
+// Same anti-enumeration shape as the other gc-check handlers: a workspace
+// mismatch returns 404 so a scoped daemon token cannot probe another
+// workspace's channel liveness.
+func (h *Handler) GetChannelLaneGCCheck(w http.ResponseWriter, r *http.Request) {
+	channelID := chi.URLParam(r, "channelId")
+	channelUUID, ok := parseUUIDOrBadRequest(w, channelID, "channel_id")
+	if !ok {
+		return
+	}
+
+	workspaceID := r.URL.Query().Get("workspace_id")
+	workspaceUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace_id")
+		return
+	}
+
+	// Verify the channel belongs to this workspace before doing anything
+	// else — this is the ownership check that collapses "channel not found"
+	// and "wrong workspace" into the same 404.
+	if _, err := h.Queries.GetChannel(r.Context(), db.GetChannelParams{
+		ID:          channelUUID,
+		WorkspaceID: workspaceUUID,
+	}); err != nil {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		return
+	}
+
+	agentID := r.URL.Query().Get("agent_id")
+	agentUUID, err := util.ParseUUID(agentID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid agent_id")
+		return
+	}
+
+	since, err := time.Parse(time.RFC3339Nano, r.URL.Query().Get("since"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid since")
+		return
+	}
+
+	// thread_id is optional: an empty/absent value means the channel main
+	// timeline lane (channel_thread_id IS NULL). sqlc represents that as a
+	// zero pgtype.UUID with Valid=false.
+	var threadID pgtype.UUID
+	if raw := strings.TrimSpace(r.URL.Query().Get("thread_id")); raw != "" {
+		parsed, perr := util.ParseUUID(raw)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "invalid thread_id")
+			return
+		}
+		threadID = parsed
+	}
+
+	lastActivity, err := h.Queries.GetChannelLaneLastActivity(r.Context(), db.GetChannelLaneLastActivityParams{
+		ChannelID:       channelUUID,
+		AgentID:         agentUUID,
+		ChannelThreadID: threadID,
+	})
+	if err != nil {
+		if isNotFound(err) {
+			// No task ever ran on this lane — definitely quiet.
+			writeJSON(w, http.StatusOK, map[string]any{"live": false})
+			return
+		}
+		slog.Warn("channel lane last activity failed", "channel_id", channelID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load lane activity")
+		return
+	}
+
+	live := lastActivity.Valid && lastActivity.Time.After(since)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"live":          live,
+		"last_activity": lastActivity.Time,
+	})
+}
+
