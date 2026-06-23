@@ -6,6 +6,7 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
 } from "@multica/ui/components/ui/dropdown-menu";
@@ -51,13 +52,15 @@ export function SessionHandoffMenu({
         }
       />
       <DropdownMenuContent align="end">
-        <DropdownMenuLabel>Start new session with Handoff</DropdownMenuLabel>
-        {openThreads.map((thread) => (
-          <DropdownMenuItem key={thread.id} onClick={() => void start(thread.id)}>
-            <ScrollText className="h-3.5 w-3.5" />
-            Hand off: {thread.name}
-          </DropdownMenuItem>
-        ))}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Start new session with Handoff</DropdownMenuLabel>
+          {openThreads.map((thread) => (
+            <DropdownMenuItem key={thread.id} onClick={() => void start(thread.id)}>
+              <ScrollText className="h-3.5 w-3.5" />
+              Hand off: {thread.name}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
