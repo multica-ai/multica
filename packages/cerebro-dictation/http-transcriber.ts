@@ -31,14 +31,26 @@ export function createWarmup(url: string): () => void {
  *
  * `url` is the workspace-scoped endpoint, e.g.
  * `/api/workspaces/${wsId}/cerebro/dictation/transcribe`.
+ *
+ * `glossary` (comma-separated domain terms) biases decoding toward the user's
+ * own words; `cleanup` opts into the LLM punctuation/structure pass. Both are
+ * advisory — the backend ignores an empty glossary and only cleans up when its
+ * own key is configured (FIR-1797).
  */
-export function createHttpTranscriber(url: string, language?: string): Transcriber {
+export function createHttpTranscriber(
+  url: string,
+  language?: string,
+  glossary?: string,
+  cleanup?: boolean,
+): Transcriber {
   return async (audio: Blob, signal: AbortSignal): Promise<string> => {
     const form = new FormData();
     // The filename extension is a hint; the backend decodes any container via
     // ffmpeg, so the exact value does not matter.
     form.append("file", audio, "dictation.webm");
     if (language) form.append("language", language);
+    if (glossary) form.append("glossary", glossary);
+    if (cleanup) form.append("cleanup", "true");
 
     const res = await fetch(url, {
       method: "POST",

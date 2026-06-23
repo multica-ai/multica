@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useDictationSettings, glossaryToHint } from "@multica/cerebro-feature-flags";
 import { MicButton } from "./mic-button";
 import { createHttpTranscriber, createWarmup } from "../http-transcriber";
 import type { DictationStatus } from "../types";
@@ -45,14 +46,19 @@ export function EditorDictationMic({
   successLabel,
 }: EditorDictationMicProps) {
   const workspaceId = useWorkspaceId();
+  const { glossary, cleanup } = useDictationSettings();
+  const glossaryHint = useMemo(() => glossaryToHint(glossary), [glossary]);
   const transcribe = useMemo(
     () =>
       workspaceId
         ? createHttpTranscriber(
             `/api/workspaces/${workspaceId}/cerebro/dictation/transcribe`,
+            undefined,
+            glossaryHint || undefined,
+            cleanup,
           )
         : undefined,
-    [workspaceId],
+    [workspaceId, glossaryHint, cleanup],
   );
   const warmup = useMemo(
     () =>

@@ -32,6 +32,23 @@ class Settings(BaseSettings):
     # Long-form chunking window (seconds) for the ASR pipeline.
     hviske_chunk_length_s: int = 30
 
+    # FIR-1797 — optional LLM cleanup of the raw transcript (punctuation,
+    # capitalisation, paragraph breaks; the "Wispr Flow"-style polish). All AI
+    # goes through the Firtal AI gateway (the OpenAI-compatible proxy the cerebro
+    # server runtime also uses) — never a provider API directly. The backend
+    # forwards a per-request `cleanup` flag from the user's dictation setting;
+    # cleanup only runs when that flag is set AND the gateway URL + key are
+    # configured here, so it degrades to a no-op (returns the raw text) when
+    # unconfigured. `hviske_cleanup_enabled` is a global kill-switch.
+    hviske_cleanup_enabled: bool = True
+    firtal_ai_gateway_url: str = Field(
+        default="", description="Firtal AI gateway base URL (proxy path is appended)."
+    )
+    firtal_ai_gateway_key: str = Field(
+        default="", description="Firtal AI gateway API key (Bearer)."
+    )
+    hviske_cleanup_model: str = "claude-haiku-4-5-20251001"
+
     log_level: str = "INFO"
 
 

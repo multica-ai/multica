@@ -17,6 +17,7 @@ import { AgentStartSettings } from "@multica/cerebro-issue-datetime/views";
 import { CEREBRO_FLAG_GROUPS, flagsForGroup, type CerebroFlagKey } from "./registry";
 import { SecretaryCriteriaSettings } from "./secretary-criteria-settings";
 import { RemindersSettings } from "./reminders-settings";
+import { DictationSettings } from "./dictation-settings-tab";
 import {
   useFeatureFlag,
   useFeatureFlagsQuery,
@@ -34,6 +35,7 @@ const FLAG_SETTINGS: Partial<Record<CerebroFlagKey, ComponentType>> = {
   cerebro_issue_date_times: AgentStartSettings,
   cerebro_inbox_secretary: SecretaryCriteriaSettings,
   cerebro_reminders: RemindersSettings,
+  cerebro_voice_dictation_enabled: DictationSettings,
 };
 
 // Exported so a feature can render its own toggles in a dedicated settings tab

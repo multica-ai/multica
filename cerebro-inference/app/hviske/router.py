@@ -1,6 +1,10 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 
 from app.auth import require_bearer
+from app.config import get_settings
+from app.hviske.cleanup import cleanup_transcript
 from app.hviske.model import HviskeModel
 
 router = APIRouter(prefix="/hviske", tags=["hviske"])
@@ -15,6 +19,10 @@ async def transcribe(
     request: Request,
     file: UploadFile = File(...),
     language: str | None = Form(default=None),
+    # FIR-1797: optional comma-separated domain terms to bias decoding, and an
+    # opt-in flag to run the LLM punctuation/structure cleanup pass.
+    glossary: str | None = Form(default=None),
+    cleanup: bool = Form(default=False),
 ) -> dict[str, str]:
     hviske: HviskeModel = request.app.state.hviske
     if hviske is None or not hviske.ready:
@@ -35,5 +43,8 @@ async def transcribe(
             detail=f"audio exceeds {MAX_AUDIO_BYTES} bytes",
         )
 
-    text = hviske.transcribe(audio, language=language)
+    text = hviske.transcribe(audio, language=language, glossary=glossary)
+    if cleanup and text.strip():
+        # Off the event loop: the cleanup call is a blocking stdlib HTTP request.
+        text = await asyncio.to_thread(cleanup_transcript, get_settings(), text)
     return {"text": text, "language": language or hviske.default_language}

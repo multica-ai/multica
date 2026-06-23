@@ -80,7 +80,14 @@ func (h *Handler) Transcribe(w http.ResponseWriter, r *http.Request) {
 	if header != nil && header.Filename != "" {
 		filename = header.Filename
 	}
-	body, contentType, err := buildMultipart(file, filename, r.FormValue("language"))
+	// FIR-1797: bias decoding toward this workspace's proper nouns and run the
+	// optional cleanup pass. The glossary is built automatically from the
+	// workspace's business objects (agents, squads, projects, teammates) and the
+	// user's manual terms are merged on top. Both glossary and cleanup are
+	// advisory — the inference service ignores an empty glossary and only cleans
+	// up when its own key is configured.
+	glossary := mergeGlossary(r.FormValue("glossary"), h.workspaceGlossary(r.Context(), workspaceID))
+	body, contentType, err := buildMultipart(file, filename, r.FormValue("language"), glossary, r.FormValue("cleanup"))
 	if err != nil {
 		slog.Warn("dictation transcribe request build failed", "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "Could not prepare the transcription request.")
@@ -119,7 +126,7 @@ func (h *Handler) Warmup(w http.ResponseWriter, r *http.Request) {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), warmupTimeout)
 			defer cancel()
-			body, contentType, err := buildMultipart(bytes.NewReader(silentWAV()), "warmup.wav", "")
+			body, contentType, err := buildMultipart(bytes.NewReader(silentWAV()), "warmup.wav", "", "", "")
 			if err != nil {
 				return
 			}
@@ -222,10 +229,11 @@ func (h *Handler) transcribeOnce(
 	return &parsed, nil
 }
 
-// buildMultipart wraps a clip as a multipart `file` field (plus an optional
-// language hint) and returns the encoded body and its content type, so the
-// retry layer can replay the exact bytes on every attempt.
-func buildMultipart(file io.Reader, filename, language string) ([]byte, string, error) {
+// buildMultipart wraps a clip as a multipart `file` field (plus optional
+// language hint, glossary bias, and cleanup flag) and returns the encoded body
+// and its content type, so the retry layer can replay the exact bytes on every
+// attempt.
+func buildMultipart(file io.Reader, filename, language, glossary, cleanup string) ([]byte, string, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	part, err := mw.CreateFormFile("file", filename)
@@ -237,6 +245,12 @@ func buildMultipart(file io.Reader, filename, language string) ([]byte, string, 
 	}
 	if language != "" {
 		_ = mw.WriteField("language", language)
+	}
+	if glossary != "" {
+		_ = mw.WriteField("glossary", glossary)
+	}
+	if cleanup != "" {
+		_ = mw.WriteField("cleanup", cleanup)
 	}
 	if err := mw.Close(); err != nil {
 		return nil, "", err

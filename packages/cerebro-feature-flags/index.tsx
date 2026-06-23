@@ -32,3 +32,12 @@ export {
   SECRETARY_CRITERIA_KEY,
 } from "./secretary-criteria";
 export type { SecretaryCriteria } from "./secretary-criteria";
+export {
+  useDictationSettings,
+  useSetDictationSettings,
+  readDictationSettings,
+  glossaryToHint,
+  DEFAULT_DICTATION_SETTINGS,
+  DICTATION_SETTINGS_KEY,
+} from "./dictation-settings";
+export type { DictationSettings } from "./dictation-settings";

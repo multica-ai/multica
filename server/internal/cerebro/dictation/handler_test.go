@@ -2,6 +2,7 @@ package dictation
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -249,6 +250,8 @@ func newMemberQueries(userID, workspaceID string) *db.Queries {
 	})
 }
 
+var errNoTestRows = errors.New("dictation test stub: no rows")
+
 type memberDB struct {
 	db.DBTX
 	userID      pgtype.UUID
@@ -257,6 +260,14 @@ type memberDB struct {
 
 func (m *memberDB) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
 	return &memberRow{ok: len(args) == 2 && args[0] == m.userID && args[1] == m.workspaceID}
+}
+
+// Query is exercised by the auto-glossary (list agents/squads/projects/members).
+// The stub has no rows to serve, so it errors — workspaceGlossary logs and skips
+// each failed source, which is exactly the "glossary never breaks a
+// transcription" path we want covered.
+func (m *memberDB) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	return nil, errNoTestRows
 }
 
 func (m *memberDB) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
