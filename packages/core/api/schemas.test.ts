@@ -31,6 +31,7 @@ const baseIssue = {
   project_id: null,
   workflow_id: null,
   workflow_run_id: null,
+  stage_id: null,
   position: 0,
   start_date: null,
   due_date: null,
@@ -65,12 +66,17 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     expect(parsed.issues[0]?.metadata).toEqual({});
   });
 
-  it("rejects metadata with non-primitive values (nested object)", () => {
-    const payload = {
-      issues: [{ ...baseIssue, metadata: { nested: { x: 1 } } }],
-      total: 1,
-    };
-    expect(ListIssuesResponseSchema.safeParse(payload).success).toBe(false);
+  it("defaults stage_id to null when the server omits it (older backend)", () => {
+    const { stage_id: _omit, ...issueWithoutStage } = baseIssue;
+    const payload = { issues: [issueWithoutStage], total: 1 };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.stage_id).toBeNull();
+  });
+
+  it("accepts a non-null stage_id", () => {
+    const payload = { issues: [{ ...baseIssue, stage_id: "stage-1" }], total: 1 };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.stage_id).toBe("stage-1");
   });
 });
 

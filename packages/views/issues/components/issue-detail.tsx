@@ -39,6 +39,7 @@ import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@multica/ui/components/ui/select";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
@@ -70,6 +71,7 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { workflowStagesOptions } from "@multica/core/workflows/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
@@ -631,6 +633,58 @@ interface IssueDetailProps {
   highlightCommentId?: string;
   /** In modal detail, related issue links replace the current modal instead of navigating. */
   openIssueLinksInModal?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// StagePicker
+// ---------------------------------------------------------------------------
+
+type StagePickerProps = {
+  workflowId: string | null;
+  stageId: string | null;
+  onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
+  disabled?: boolean;
+};
+
+function StagePicker({ workflowId, stageId, onUpdate, disabled }: StagePickerProps) {
+  const wsId = useWorkspaceId();
+  const { t } = useT("issues");
+  const { data: stages, isLoading } = useQuery({
+    ...workflowStagesOptions(wsId, workflowId ?? ""),
+    enabled: !!workflowId,
+  });
+
+  if (!workflowId) {
+    return (
+      <Select value="" disabled>
+        <SelectTrigger className="w-full" size="sm">
+          <SelectValue placeholder={t(($) => $.detail.stage_assign_workflow_first)} />
+        </SelectTrigger>
+      </Select>
+    );
+  }
+
+  return (
+    <Select
+      value={stageId ?? "none"}
+      onValueChange={(value) => {
+        onUpdate({ stage_id: value === "none" ? null : value });
+      }}
+      disabled={disabled || isLoading}
+    >
+      <SelectTrigger className="w-full" size="sm">
+        <SelectValue placeholder={t(($) => $.detail.stage_placeholder)} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none">{t(($) => $.detail.stage_no_stage)}</SelectItem>
+        {stages?.map((stage) => (
+          <SelectItem key={stage.id} value={stage.id}>
+            {stage.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1299,6 +1353,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} isWorkflowRunning={isWorkflowRunning} onUpdate={handleUpdateField} align="start" />
           </PropRow>
+          {issue.assignee_type === "workflow" && issue.assignee_id && (
+            <PropRow label={t(($) => $.detail.prop_stage)}>
+              <StagePicker workflowId={issue.workflow_id} stageId={issue.stage_id} onUpdate={handleUpdateField} disabled={isWorkflowRunning} />
+            </PropRow>
+          )}
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker
               projectId={issue.project_id}

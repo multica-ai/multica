@@ -338,6 +338,7 @@ const issueDefaults = {
   project_id: null,
   workflow_id: null,
   workflow_run_id: null,
+  stage_id: null,
   position: 0,
   metadata: {},
 };

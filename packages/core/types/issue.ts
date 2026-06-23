@@ -49,6 +49,7 @@ export interface Issue {
   project_id: string | null;
   workflow_id: string | null;
   workflow_run_id: string | null;
+  stage_id: string | null;
   origin_type?: string | null;
   origin_id?: string | null;
   position: number;

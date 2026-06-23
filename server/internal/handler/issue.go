@@ -49,6 +49,7 @@ type IssueResponse struct {
 	UpdatedAt     string  `json:"updated_at"`
 	WorkflowID    *string `json:"workflow_id"`
 	WorkflowRunID *string `json:"workflow_run_id"`
+	StageID       *string `json:"stage_id"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -90,6 +91,7 @@ func issueToResponse(i db.MulticaIssue, issuePrefix string) IssueResponse {
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		WorkflowID:    uuidToPtr(i.WorkflowID),
 		WorkflowRunID: uuidToPtr(i.WorkflowRunID),
+		StageID:       uuidToPtr(i.StageID),
 		Metadata:      parseIssueMetadata(i.Metadata),
 		OriginType:    textToPtr(i.OriginType),
 		OriginID:      uuidToPtr(i.OriginID),
@@ -117,6 +119,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		Position:      i.Position,
 		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
+		StageID:       uuidToPtr(i.StageID),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
@@ -174,6 +177,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		Position:      i.Position,
 		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
+		StageID:       uuidToPtr(i.StageID),
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
@@ -1694,6 +1698,7 @@ type CreateIssueRequest struct {
 	ProjectID     *string  `json:"project_id"`
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
+	StageID       *string  `json:"stage_id"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
@@ -1816,6 +1821,15 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		dueDate = pgtype.Timestamptz{Time: t, Valid: true}
 	}
 
+	var stageID pgtype.UUID
+	if req.StageID != nil && *req.StageID != "" {
+		id, ok := parseUUIDOrBadRequest(w, *req.StageID, "stage_id")
+		if !ok {
+			return
+		}
+		stageID = id
+	}
+
 	// Use a transaction to atomically guard against active duplicates,
 	// increment the workspace issue counter, and create the issue.
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -1884,6 +1898,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if assigneeType.Valid && assigneeType.String == "workflow" {
 		workflowID = assigneeID
 	}
+	if err := h.validateIssueStage(r.Context(), qtx, workflowID, stageID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if originType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(r.Context(), db.CreateIssueWithOriginParams{
 			WorkspaceID:   wsUUID,
@@ -1904,6 +1922,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			OriginType:    originType,
 			OriginID:      originID,
 			WorkflowID:    workflowID,
+			StageID:       stageID,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
@@ -1923,6 +1942,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			Number:        issueNumber,
 			ProjectID:     projectID,
 			WorkflowID:    workflowID,
+			StageID:       stageID,
 		})
 	}
 	if err != nil {
@@ -2079,6 +2099,7 @@ type UpdateIssueRequest struct {
 	// RuntimeID is set by the frontend runtime-select dialog when assigning
 	// a built-in agent (which has no bound runtime).
 	RuntimeID *string `json:"runtime_id"`
+	StageID   *string `json:"stage_id"`
 }
 
 // parseOptionalRuntimeID converts the optional runtime_id string from the
@@ -2089,6 +2110,31 @@ func parseOptionalRuntimeID(s *string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return parseUUID(*s)
+}
+
+// validateIssueStage ensures a stage_id belongs to the issue's workflow.
+// A nil/invalid stageID is always valid. A non-empty stageID requires a
+// workflowID and the stage must reference that workflow.
+func (h *Handler) validateIssueStage(
+	ctx context.Context,
+	qtx *db.Queries,
+	workflowID pgtype.UUID,
+	stageID pgtype.UUID,
+) error {
+	if !stageID.Valid {
+		return nil
+	}
+	if !workflowID.Valid {
+		return errors.New("stage_id requires workflow_id")
+	}
+	stage, err := qtx.GetWorkflowStage(ctx, stageID)
+	if err != nil {
+		return fmt.Errorf("stage not found: %w", err)
+	}
+	if stage.WorkflowID != workflowID {
+		return errors.New("stage does not belong to workflow")
+	}
+	return nil
 }
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -2236,6 +2282,48 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
 		}
+	}
+
+	// Compute the effective workflow ID after this update.
+	newWorkflowID := prevIssue.WorkflowID
+	_, touchedAssigneeType := rawFields["assignee_type"]
+	_, touchedAssigneeID := rawFields["assignee_id"]
+	if touchedAssigneeType || touchedAssigneeID {
+		if params.AssigneeType.Valid && params.AssigneeType.String == "workflow" && params.AssigneeID.Valid {
+			newWorkflowID = params.AssigneeID
+		} else {
+			newWorkflowID = pgtype.UUID{}
+		}
+	}
+	workflowChanged := newWorkflowID != prevIssue.WorkflowID
+
+	var stageID pgtype.UUID
+	var stageTouched bool
+	if _, ok := rawFields["stage_id"]; ok {
+		stageTouched = true
+		if req.StageID != nil && *req.StageID != "" {
+			id, ok := parseUUIDOrBadRequest(w, *req.StageID, "stage_id")
+			if !ok {
+				return
+			}
+			stageID = id
+		}
+	}
+
+	// Workflow change clears stage_id unless a new stage is explicitly provided;
+	// otherwise validate the requested stage against the effective workflow.
+	if workflowChanged && !stageTouched {
+		stageID = pgtype.UUID{}
+	}
+
+	if stageTouched || workflowChanged {
+		if stageID.Valid {
+			if err := h.validateIssueStage(r.Context(), h.Queries, newWorkflowID, stageID); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		params.StageID = stageID
 	}
 
 	// Validate the resulting (assignee_type, assignee_id) pair when the caller
@@ -2651,7 +2739,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		req.Updates.Priority != nil ||
 		req.Updates.Position != nil
 	if !hasMutation {
-		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id"} {
+		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id", "stage_id"} {
 			if _, ok := rawUpdates[k]; ok {
 				hasMutation = true
 				break
@@ -2799,10 +2887,46 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Validate the resulting assignee pair when this batch update touches
-		// either assignee field. Skip the issue silently on failure.
+		// Compute the effective workflow ID after this update.
+		newWorkflowID := prevIssue.WorkflowID
 		_, batchTouchedType := rawUpdates["assignee_type"]
 		_, batchTouchedID := rawUpdates["assignee_id"]
+		if batchTouchedType || batchTouchedID {
+			if params.AssigneeType.Valid && params.AssigneeType.String == "workflow" && params.AssigneeID.Valid {
+				newWorkflowID = params.AssigneeID
+			} else {
+				newWorkflowID = pgtype.UUID{}
+			}
+		}
+		workflowChanged := newWorkflowID != prevIssue.WorkflowID
+
+		_, stageTouched := rawUpdates["stage_id"]
+		var stageID pgtype.UUID
+		if stageTouched {
+			if req.Updates.StageID != nil && *req.Updates.StageID != "" {
+				sid, err := util.ParseUUID(*req.Updates.StageID)
+				if err != nil {
+					continue
+				}
+				stageID = sid
+			}
+		}
+
+		if workflowChanged && !stageTouched {
+			stageID = pgtype.UUID{}
+		}
+
+		if stageTouched || workflowChanged {
+			if stageID.Valid {
+				if err := h.validateIssueStage(r.Context(), h.Queries, newWorkflowID, stageID); err != nil {
+					continue
+				}
+			}
+			params.StageID = stageID
+		}
+
+		// Validate the resulting assignee pair when this batch update touches
+		// either assignee field. Skip the issue silently on failure.
 		if batchTouchedType || batchTouchedID {
 			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 				continue
@@ -2984,6 +3108,7 @@ func (h *Handler) createWorkflowSubIssue(
 		ProjectID:     parentIssue.ProjectID,
 		OriginType:    pgtype.Text{String: "workflow", Valid: true},
 		OriginID:      nodeRun.ID,
+		StageID:       node.StageID,
 	})
 }
 

@@ -35,6 +35,7 @@ function makeIssue(idx: number): Issue {
     project_id: PROJECT_ID,
     workflow_id: null,
     workflow_run_id: null,
+    stage_id: null,
     position: idx,
     start_date: "2026-05-01T00:00:00Z",
     due_date: null,

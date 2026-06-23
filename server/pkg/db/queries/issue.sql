@@ -7,7 +7,7 @@
 -- "Assigned to me"), and the two filters must produce disjoint result sets.
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.workflow_id, i.workflow_run_id, i.stage_id, i.metadata
 FROM multica_issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -74,10 +74,10 @@ INSERT INTO multica_issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    workflow_id, workflow_run_id
+    workflow_id, workflow_run_id, stage_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('workflow_id'), sqlc.narg('workflow_run_id')
+    sqlc.narg('workflow_id'), sqlc.narg('workflow_run_id'), sqlc.narg('stage_id')
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -99,6 +99,7 @@ UPDATE multica_issue SET
     project_id = sqlc.narg('project_id'),
     workflow_id = sqlc.narg('workflow_id'),
     workflow_run_id = sqlc.narg('workflow_run_id'),
+    stage_id = sqlc.narg('stage_id'),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -116,11 +117,11 @@ INSERT INTO multica_issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, workflow_id, workflow_run_id
+    origin_type, origin_id, workflow_id, workflow_run_id, stage_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('origin_type'), sqlc.narg('origin_id'),
-    sqlc.narg('workflow_id'), sqlc.narg('workflow_run_id')
+    sqlc.narg('workflow_id'), sqlc.narg('workflow_run_id'), sqlc.narg('stage_id')
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec
@@ -149,7 +150,7 @@ DELETE FROM multica_issue WHERE id = $1 AND workspace_id = $2;
 -- filter; multica_member-direct assignment is intentionally excluded).
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.workflow_id, i.workflow_run_id, i.stage_id, i.metadata
 FROM multica_issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
