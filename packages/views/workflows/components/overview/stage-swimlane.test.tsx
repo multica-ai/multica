@@ -13,7 +13,7 @@ const MOCK_STAGE: WorkflowStage = {
 };
 
 const MOCK_NODES: WorkflowNode[] = [
-  { id: "n1", workflow_id: "wf-1", title: "brainstorming", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent", worker_id: "agent-1", critic_type: "", critic_id: null, critic_api_url: null, sort_order: 0, stage_id: "stage-1", created_at: "", updated_at: "" },
+  { id: "n1", workflow_id: "wf-1", title: "brainstorming", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent", worker_id: "agent-1", critic_type: "human", critic_id: null, critic_api_url: null, sort_order: 0, stage_id: "stage-1", created_at: "", updated_at: "" },
   { id: "n2", workflow_id: "wf-1", title: "aireq-evaluator", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent", worker_id: "agent-critic", critic_type: "agent", critic_id: "agent-critic-2", critic_api_url: null, sort_order: 0, stage_id: "stage-1", created_at: "", updated_at: "" },
 ];
 
@@ -61,7 +61,7 @@ describe("StageSwimlane", () => {
     );
     // n1 = worker node → PluginCard
     expect(screen.getByTestId("plugin-card-n1")).toBeTruthy();
-    // n2 = critic_type non-empty → CriticBadge
+    // n2 = critic_id non-null → CriticBadge
     expect(screen.getByTestId("critic-badge-n2")).toBeTruthy();
   });
 

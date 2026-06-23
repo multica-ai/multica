@@ -15,8 +15,8 @@ vi.mock("../../../i18n", () => ({
           overview: {
             detail_panel: {
               title: "Node Details",
-              plugin_info: "Plugin Info",
-              agent_info: "Associated Agent",
+              plugins: "Plugin Info",
+              worker: "Associated Agent",
               critic: "Critic",
               skills: "Skills",
               open_in_editor: "Open in Editor",
@@ -40,7 +40,7 @@ const MOCK_NODE: WorkflowNode = {
   format_schema: null,
   worker_type: "agent",
   worker_id: "agent-1",
-  critic_type: "",
+  critic_type: "human",
   critic_id: null,
   critic_api_url: null,
   sort_order: 0,

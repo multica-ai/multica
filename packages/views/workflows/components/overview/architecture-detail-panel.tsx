@@ -56,7 +56,7 @@ export function ArchitectureDetailPanel({
           <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
             {criticAgent
               ? t(($) => $.overview.detail_panel.critic)
-              : t(($) => $.overview.detail_panel.plugin_info)}
+              : t(($) => $.overview.detail_panel.plugins)}
           </h3>
           <h4 className="font-medium text-sm">{displayName}</h4>
           {plugin?.slug && (
@@ -83,7 +83,7 @@ export function ArchitectureDetailPanel({
         {displayEntity && (
           <section>
             <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-              {t(($) => $.overview.detail_panel.agent_info)}
+              {t(($) => $.overview.detail_panel.worker)}
             </h3>
             <AgentInfoBlock agent={displayEntity} />
           </section>

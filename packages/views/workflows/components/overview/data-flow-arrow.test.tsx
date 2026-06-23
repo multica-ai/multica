@@ -10,8 +10,8 @@ const MOCK_STAGES: WorkflowStage[] = [
 ];
 
 const MOCK_NODES: WorkflowNode[] = [
-  { id: "n1", workflow_id: "wf-1", title: "Node 1", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent", worker_id: "a1", critic_type: "", critic_id: null, critic_api_url: null, sort_order: 0, stage_id: "stage-1", created_at: "", updated_at: "" },
-  { id: "n2", workflow_id: "wf-1", title: "Node 2", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent", worker_id: "a2", critic_type: "", critic_id: null, critic_api_url: null, sort_order: 0, stage_id: "stage-2", created_at: "", updated_at: "" },
+  { id: "n1", workflow_id: "wf-1", title: "Node 1", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent", worker_id: "a1", critic_type: "human", critic_id: null, critic_api_url: null, sort_order: 0, stage_id: "stage-1", created_at: "", updated_at: "" },
+  { id: "n2", workflow_id: "wf-1", title: "Node 2", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent", worker_id: "a2", critic_type: "human", critic_id: null, critic_api_url: null, sort_order: 0, stage_id: "stage-2", created_at: "", updated_at: "" },
 ];
 
 describe("DataFlowArrow", () => {

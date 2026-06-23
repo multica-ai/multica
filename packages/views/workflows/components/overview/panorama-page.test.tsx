@@ -41,10 +41,10 @@ const MOCK_PLUGINS = {
 // ── Hoisted mocks ──
 const mocks = vi.hoisted(() => ({
   workflowData: undefined as unknown,
-  stagesData: undefined as unknown[],
-  nodesData: undefined as unknown[],
-  edgesData: undefined as unknown[],
-  agentsData: undefined as unknown[],
+  stagesData: undefined as unknown as unknown[],
+  nodesData: undefined as unknown as unknown[],
+  edgesData: undefined as unknown as unknown[],
+  agentsData: undefined as unknown as unknown[],
   pluginsData: undefined as unknown,
   isLoading: false,
   isError: false,

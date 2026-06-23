@@ -26,12 +26,12 @@ export function StageSwimlane({
     [nodes, stage.id],
   );
 
-  // Separate worker nodes from critic nodes (critic_type non-empty → CriticBadge)
+  // Separate worker nodes from critic nodes (critic_id non-null → CriticBadge)
   const { workerNodes, criticNodes } = useMemo(() => {
     const workers: WorkflowNode[] = [];
     const critics: WorkflowNode[] = [];
     for (const n of stageNodes) {
-      if (n.critic_type) {
+      if (n.critic_id) {
         critics.push(n);
       } else {
         workers.push(n);
