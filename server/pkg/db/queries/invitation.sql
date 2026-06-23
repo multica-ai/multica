@@ -77,3 +77,25 @@ WHERE invitee_email = $1
   AND invitee_name <> ''
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
+
+-- name: AdminCreateInvitation :one
+-- Creates an invitation on behalf of a super-admin. The inviter_id is the
+-- super-admin performing the action, and invitee_user_id can be pre-filled
+-- if the target user already exists in the system.
+INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role, invitee_name)
+VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
+RETURNING *;
+
+-- name: ListAllPendingInvitations :many
+-- Lists all pending invitations across all workspaces (super-admin only).
+SELECT wi.*,
+       w.name AS workspace_name,
+       w.slug AS workspace_slug,
+       u.name  AS inviter_name,
+       u.email AS inviter_email
+FROM workspace_invitation wi
+JOIN workspace w ON w.id = wi.workspace_id
+JOIN "user" u ON u.id = wi.inviter_id
+WHERE wi.status = 'pending'
+  AND wi.expires_at > now()
+ORDER BY wi.created_at DESC;

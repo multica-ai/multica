@@ -37,6 +37,50 @@ func (q *Queries) AcceptInvitation(ctx context.Context, id pgtype.UUID) (Workspa
 	return i, err
 }
 
+const adminCreateInvitation = `-- name: AdminCreateInvitation :one
+INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role, invitee_name)
+VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
+RETURNING id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invitee_name
+`
+
+type AdminCreateInvitationParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	InviterID     pgtype.UUID `json:"inviter_id"`
+	InviteeEmail  string      `json:"invitee_email"`
+	InviteeUserID pgtype.UUID `json:"invitee_user_id"`
+	Role          string      `json:"role"`
+	Column6       interface{} `json:"column_6"`
+}
+
+// Creates an invitation on behalf of a super-admin. The inviter_id is the
+// super-admin performing the action, and invitee_user_id can be pre-filled
+// if the target user already exists in the system.
+func (q *Queries) AdminCreateInvitation(ctx context.Context, arg AdminCreateInvitationParams) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, adminCreateInvitation,
+		arg.WorkspaceID,
+		arg.InviterID,
+		arg.InviteeEmail,
+		arg.InviteeUserID,
+		arg.Role,
+		arg.Column6,
+	)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InviterID,
+		&i.InviteeEmail,
+		&i.InviteeUserID,
+		&i.Role,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.InviteeName,
+	)
+	return i, err
+}
+
 const createInvitation = `-- name: CreateInvitation :one
 INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role, invitee_name)
 VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
@@ -49,7 +93,7 @@ type CreateInvitationParams struct {
 	InviteeEmail  string      `json:"invitee_email"`
 	InviteeUserID pgtype.UUID `json:"invitee_user_id"`
 	Role          string      `json:"role"`
-	InviteeName   string      `json:"invitee_name"`
+	Column6       interface{} `json:"column_6"`
 }
 
 func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) (WorkspaceInvitation, error) {
@@ -59,7 +103,7 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 		arg.InviteeEmail,
 		arg.InviteeUserID,
 		arg.Role,
-		arg.InviteeName,
+		arg.Column6,
 	)
 	var i WorkspaceInvitation
 	err := row.Scan(
@@ -151,6 +195,31 @@ func (q *Queries) GetInvitation(ctx context.Context, id pgtype.UUID) (WorkspaceI
 	return i, err
 }
 
+const getLatestPendingInvitationNameByEmail = `-- name: GetLatestPendingInvitationNameByEmail :one
+SELECT invitee_name FROM workspace_invitation
+WHERE invitee_email = $1
+  AND status = 'pending'
+  AND expires_at > now()
+  AND invitee_name IS NOT NULL
+  AND invitee_name <> ''
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+// Returns the invitee_name from the most recent non-expired pending invitation
+// for this email address that has a non-empty invitee_name. Used at registration
+// time to set user.name from the invitation rather than the email prefix or OAuth name.
+// Uses the same expires_at > now() guard as every other live-invitation query in this
+// file (expiry is lazy — rows stay pending until CreateInvitation flips them).
+// The secondary id DESC sort makes the result deterministic when two invitations share
+// the same created_at timestamp.
+func (q *Queries) GetLatestPendingInvitationNameByEmail(ctx context.Context, inviteeEmail string) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, getLatestPendingInvitationNameByEmail, inviteeEmail)
+	var invitee_name pgtype.Text
+	err := row.Scan(&invitee_name)
+	return invitee_name, err
+}
+
 const getPendingInvitationByEmail = `-- name: GetPendingInvitationByEmail :one
 SELECT id, workspace_id, inviter_id, invitee_email, invitee_user_id, role, status, created_at, updated_at, expires_at, invitee_name FROM workspace_invitation
 WHERE workspace_id = $1 AND invitee_email = $2 AND status = 'pending' AND expires_at > now()
@@ -178,6 +247,75 @@ func (q *Queries) GetPendingInvitationByEmail(ctx context.Context, arg GetPendin
 		&i.InviteeName,
 	)
 	return i, err
+}
+
+const listAllPendingInvitations = `-- name: ListAllPendingInvitations :many
+SELECT wi.id, wi.workspace_id, wi.inviter_id, wi.invitee_email, wi.invitee_user_id, wi.role, wi.status, wi.created_at, wi.updated_at, wi.expires_at, wi.invitee_name,
+       w.name AS workspace_name,
+       w.slug AS workspace_slug,
+       u.name  AS inviter_name,
+       u.email AS inviter_email
+FROM workspace_invitation wi
+JOIN workspace w ON w.id = wi.workspace_id
+JOIN "user" u ON u.id = wi.inviter_id
+WHERE wi.status = 'pending'
+  AND wi.expires_at > now()
+ORDER BY wi.created_at DESC
+`
+
+type ListAllPendingInvitationsRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	InviterID     pgtype.UUID        `json:"inviter_id"`
+	InviteeEmail  string             `json:"invitee_email"`
+	InviteeUserID pgtype.UUID        `json:"invitee_user_id"`
+	Role          string             `json:"role"`
+	Status        string             `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	InviteeName   pgtype.Text        `json:"invitee_name"`
+	WorkspaceName string             `json:"workspace_name"`
+	WorkspaceSlug string             `json:"workspace_slug"`
+	InviterName   string             `json:"inviter_name"`
+	InviterEmail  string             `json:"inviter_email"`
+}
+
+// Lists all pending invitations across all workspaces (super-admin only).
+func (q *Queries) ListAllPendingInvitations(ctx context.Context) ([]ListAllPendingInvitationsRow, error) {
+	rows, err := q.db.Query(ctx, listAllPendingInvitations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllPendingInvitationsRow{}
+	for rows.Next() {
+		var i ListAllPendingInvitationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.InviterID,
+			&i.InviteeEmail,
+			&i.InviteeUserID,
+			&i.Role,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ExpiresAt,
+			&i.InviteeName,
+			&i.WorkspaceName,
+			&i.WorkspaceSlug,
+			&i.InviterName,
+			&i.InviterEmail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPendingInvitationsByWorkspace = `-- name: ListPendingInvitationsByWorkspace :many
@@ -319,26 +457,4 @@ WHERE id = $1 AND status = 'pending'
 func (q *Queries) RevokeInvitation(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, revokeInvitation, id)
 	return err
-}
-
-const getLatestPendingInvitationNameByEmail = `-- name: GetLatestPendingInvitationNameByEmail :one
-SELECT invitee_name FROM workspace_invitation
-WHERE invitee_email = $1
-  AND status = 'pending'
-  AND expires_at > now()
-  AND invitee_name IS NOT NULL
-  AND invitee_name <> ''
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-`
-
-// GetLatestPendingInvitationNameByEmail returns the invitee_name from the most
-// recent non-expired pending invitation for this email that has a non-empty
-// invitee_name. Used at registration time to set user.name from the invitation
-// rather than the email prefix or OAuth provider name.
-func (q *Queries) GetLatestPendingInvitationNameByEmail(ctx context.Context, inviteeEmail string) (pgtype.Text, error) {
-	row := q.db.QueryRow(ctx, getLatestPendingInvitationNameByEmail, inviteeEmail)
-	var invitee_name pgtype.Text
-	err := row.Scan(&invitee_name)
-	return invitee_name, err
 }

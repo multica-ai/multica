@@ -660,6 +660,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.With(adminRL).Route("/api/admin", func(r chi.Router) {
 			r.Get("/users", h.AdminListUsers)
 			r.Patch("/users/{id}", h.AdminUpdateUser)
+			r.Get("/workspaces", h.AdminListWorkspaces)
+			r.Get("/invitations", h.AdminListPendingInvitations)
+			r.Post("/invitations", h.AdminCreateInvitations)
+			r.Delete("/invitations/{id}", h.AdminRevokeInvitation)
+			r.Post("/users/{id}/workspaces", h.AdminAddUserToWorkspace)
+			r.Delete("/users/{id}/workspaces/{workspaceId}", h.AdminRemoveUserFromWorkspace)
+			r.Patch("/users/{id}/workspaces/{workspaceId}", h.AdminUpdateUserRole)
 		})
 
 		r.Route("/api/tokens", func(r chi.Router) {
