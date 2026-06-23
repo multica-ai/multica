@@ -17,6 +17,7 @@ export interface CreateIssueRequest {
   attachment_ids?: string[];
   workflow_id?: string;
   workflow_run_id?: string;
+  stage_id?: string;
 }
 
 export interface UpdateIssueRequest {
@@ -37,6 +38,7 @@ export interface UpdateIssueRequest {
   attachment_ids?: string[];
   workflow_id?: string | null;
   workflow_run_id?: string | null;
+  stage_id?: string | null;
   /** Runtime to use when assigning a built-in agent (no bound runtime). */
   runtime_id?: string | null;
 }
