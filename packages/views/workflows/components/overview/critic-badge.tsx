@@ -14,6 +14,7 @@ export function CriticBadge({ node, criticAgent, onClick }: CriticBadgeProps) {
 
   return (
     <button
+      type="button"
       data-testid={`critic-badge-${node.id}`}
       onClick={() => onClick(node.id)}
       className={cn(

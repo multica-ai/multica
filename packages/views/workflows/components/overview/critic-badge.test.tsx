@@ -46,26 +46,32 @@ describe("CriticBadge", () => {
   it("renders with dashed border style", () => {
     const onClick = vi.fn();
     render(<CriticBadge node={MOCK_CRITIC_NODE} criticAgent={MOCK_CRITIC_AGENT} onClick={onClick} />);
-    const btn = screen.getByRole("button");
+    const btn = screen.getByTestId("critic-badge-critic-1");
     expect(btn.className).toContain("border-dashed");
   });
 
   it("renders critic agent name", () => {
     const onClick = vi.fn();
     render(<CriticBadge node={MOCK_CRITIC_NODE} criticAgent={MOCK_CRITIC_AGENT} onClick={onClick} />);
-    expect(screen.getByText("审核师")).toBeTruthy();
+    expect(screen.getByText("审核师")).toBeInTheDocument();
   });
 
   it("falls back to node title when critic agent is null", () => {
     const onClick = vi.fn();
     render(<CriticBadge node={MOCK_CRITIC_NODE} criticAgent={null} onClick={onClick} />);
-    expect(screen.getByText("评估器")).toBeTruthy();
+    expect(screen.getByText("评估器")).toBeInTheDocument();
+  });
+
+  it("renders agent model when criticAgent is provided", () => {
+    const onClick = vi.fn();
+    render(<CriticBadge node={MOCK_CRITIC_NODE} criticAgent={MOCK_CRITIC_AGENT} onClick={onClick} />);
+    expect(screen.getByText("claude-sonnet-4-6")).toBeInTheDocument();
   });
 
   it("fires onClick when clicked", () => {
     const onClick = vi.fn();
     render(<CriticBadge node={MOCK_CRITIC_NODE} criticAgent={MOCK_CRITIC_AGENT} onClick={onClick} />);
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByTestId("critic-badge-critic-1"));
     expect(onClick).toHaveBeenCalledWith("critic-1");
   });
 });

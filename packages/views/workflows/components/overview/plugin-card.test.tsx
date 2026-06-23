@@ -62,39 +62,39 @@ describe("PluginCard", () => {
   it("renders plugin name from plugin lookup", () => {
     const onClick = vi.fn();
     render(<PluginCard node={MOCK_NODE} agent={MOCK_AGENT} plugin={MOCK_PLUGIN} onClick={onClick} />);
-    expect(screen.getByText("Cospowers Requirements")).toBeTruthy();
+    expect(screen.getByText("Cospowers Requirements")).toBeInTheDocument();
   });
 
   it("falls back to node title when plugin is null", () => {
     const onClick = vi.fn();
     render(<PluginCard node={MOCK_NODE} agent={MOCK_AGENT} plugin={null} onClick={onClick} />);
-    expect(screen.getByText("需求分析")).toBeTruthy();
+    expect(screen.getByText("需求分析")).toBeInTheDocument();
   });
 
   it("renders plugin description when available", () => {
     const onClick = vi.fn();
     render(<PluginCard node={MOCK_NODE} agent={MOCK_AGENT} plugin={MOCK_PLUGIN} onClick={onClick} />);
-    expect(screen.getByText("需求分析插件")).toBeTruthy();
+    expect(screen.getByText("需求分析插件")).toBeInTheDocument();
   });
 
   it("shows agent status dot and model", () => {
     const onClick = vi.fn();
     render(<PluginCard node={MOCK_NODE} agent={MOCK_AGENT} plugin={MOCK_PLUGIN} onClick={onClick} />);
-    expect(screen.getByText(/claude-sonnet-4-6/)).toBeTruthy();
-    expect(screen.getByText("需求分析 Agent")).toBeTruthy();
+    expect(screen.getByText(/claude-sonnet-4-6/)).toBeInTheDocument();
+    expect(screen.getByText("需求分析 Agent")).toBeInTheDocument();
   });
 
   it("fires onClick with node id when clicked", () => {
     const onClick = vi.fn();
     render(<PluginCard node={MOCK_NODE} agent={MOCK_AGENT} plugin={MOCK_PLUGIN} onClick={onClick} />);
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByTestId("plugin-card-node-1"));
     expect(onClick).toHaveBeenCalledWith("node-1");
   });
 
   it("renders without agent info when agent is null", () => {
     const onClick = vi.fn();
     render(<PluginCard node={MOCK_NODE} agent={null} plugin={null} onClick={onClick} />);
-    expect(screen.getByText("需求分析")).toBeTruthy();
-    expect(screen.getByRole("button")).toBeTruthy();
+    expect(screen.getByText("需求分析")).toBeInTheDocument();
+    expect(screen.getByTestId("plugin-card-node-1")).toBeInTheDocument();
   });
 });

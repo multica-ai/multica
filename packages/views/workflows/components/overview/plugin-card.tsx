@@ -25,6 +25,7 @@ export function PluginCard({ node, agent, plugin, onClick }: PluginCardProps) {
 
   return (
     <button
+      type="button"
       data-testid={`plugin-card-${node.id}`}
       onClick={() => onClick(node.id)}
       className={cn(
