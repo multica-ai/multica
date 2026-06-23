@@ -176,6 +176,10 @@ func (c *Client) ResolveSkillBundles(ctx context.Context, runtimeID, taskID stri
 	return resp.Bundles, nil
 }
 
+func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/prepare-lease", runtimeID, taskID), map[string]any{}, nil)
+}
+
 func (c *Client) StartTask(ctx context.Context, taskID string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil)
 }

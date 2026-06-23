@@ -190,6 +190,17 @@ func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID
 	return taskID
 }
 
+func setTaskPrepareLeaseForTest(t *testing.T, ctx context.Context, taskID, expiresIn string) {
+	t.Helper()
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET prepare_lease_expires_at = now() + ($2::interval)
+		WHERE id = $1
+	`, taskID, expiresIn); err != nil {
+		t.Fatalf("setup: set prepare lease: %v", err)
+	}
+}
+
 func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 	ID string `json:"id"`
 }, string) {
@@ -224,7 +235,7 @@ func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
 	ctx := context.Background()
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Stale dispatch reclaim runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Stale dispatch reclaim agent")
-	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "240 seconds", false)
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 
 	task, body := claimTaskByRuntimeForTest(t, runtimeID)
 	if task == nil {
@@ -255,7 +266,7 @@ func TestClaimTaskByRuntime_DoesNotReclaimFreshDispatchedTask(t *testing.T) {
 	ctx := context.Background()
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Fresh dispatch reclaim runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Fresh dispatch reclaim agent")
-	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "75 seconds", false)
 
 	task, body := claimTaskByRuntimeForTest(t, runtimeID)
 	if task != nil {
@@ -264,7 +275,7 @@ func TestClaimTaskByRuntime_DoesNotReclaimFreshDispatchedTask(t *testing.T) {
 
 	var stillFresh bool
 	if err := testPool.QueryRow(ctx, `
-		SELECT dispatched_at < now() - interval '110 seconds'
+		SELECT dispatched_at < now() - interval '70 seconds'
 		FROM agent_task_queue
 		WHERE id = $1
 	`, taskID).Scan(&stillFresh); err != nil {
@@ -272,6 +283,109 @@ func TestClaimTaskByRuntime_DoesNotReclaimFreshDispatchedTask(t *testing.T) {
 	}
 	if !stillFresh {
 		t.Fatal("expected fresh dispatched task to keep its original dispatched_at")
+	}
+}
+
+func TestClaimTaskByRuntime_DoesNotReclaimActivePrepareLease(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Active prepare lease runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Active prepare lease agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "240 seconds", false)
+	setTaskPrepareLeaseForTest(t, ctx, taskID, "30 seconds")
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task != nil {
+		t.Fatalf("expected actively leased dispatched task %s not to be reclaimed, got %s in %s", taskID, task.ID, body)
+	}
+
+	var leaseActive bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT prepare_lease_expires_at > now()
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&leaseActive); err != nil {
+		t.Fatalf("load active prepare lease: %v", err)
+	}
+	if !leaseActive {
+		t.Fatal("expected prepare lease to remain active")
+	}
+}
+
+func TestClaimTaskByRuntime_ReclaimsExpiredPrepareLease(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Expired prepare lease runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Expired prepare lease agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "240 seconds", false)
+	setTaskPrepareLeaseForTest(t, ctx, taskID, "-5 seconds")
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task == nil {
+		t.Fatalf("expected expired leased task %s to be reclaimed, got nil response: %s", taskID, body)
+	}
+	if task.ID != taskID {
+		t.Fatalf("reclaimed task id = %s, want %s", task.ID, taskID)
+	}
+
+	var leaseRefreshed bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT prepare_lease_expires_at > now()
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&leaseRefreshed); err != nil {
+		t.Fatalf("load refreshed prepare lease: %v", err)
+	}
+	if !leaseRefreshed {
+		t.Fatal("expected reclaimed task to refresh prepare lease")
+	}
+}
+
+func TestExtendTaskPrepareLease(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Extend prepare lease runtime")
+	otherRuntimeID := createClaimReclaimRuntime(t, ctx, "Other prepare lease runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Extend prepare lease agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+otherRuntimeID+"/tasks/"+taskID+"/prepare-lease", nil,
+		testWorkspaceID, "extend-prepare-lease")
+	req = withURLParams(req, "runtimeId", otherRuntimeID, "taskId", taskID)
+	testHandler.ExtendTaskPrepareLease(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("ExtendTaskPrepareLease wrong runtime: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/prepare-lease", nil,
+		testWorkspaceID, "extend-prepare-lease")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ExtendTaskPrepareLease(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ExtendTaskPrepareLease: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var leaseActive bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT prepare_lease_expires_at > now()
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&leaseActive); err != nil {
+		t.Fatalf("load extended prepare lease: %v", err)
+	}
+	if !leaseActive {
+		t.Fatal("expected prepare lease to be extended")
 	}
 }
 
@@ -283,7 +397,7 @@ func TestClaimTaskByRuntime_DoesNotReclaimAlreadyStartedTask(t *testing.T) {
 	ctx := context.Background()
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Started dispatch reclaim runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Started dispatch reclaim agent")
-	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "240 seconds", true)
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", true)
 
 	task, body := claimTaskByRuntimeForTest(t, runtimeID)
 	if task != nil {
@@ -312,7 +426,7 @@ func TestClaimTaskByRuntime_DoesNotReclaimDifferentRuntimeTask(t *testing.T) {
 	claimingRuntimeID := createClaimReclaimRuntime(t, ctx, "Claiming dispatch reclaim runtime")
 	owningRuntimeID := createClaimReclaimRuntime(t, ctx, "Owning dispatch reclaim runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, owningRuntimeID, "Different runtime reclaim agent")
-	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, owningRuntimeID, issueID, "240 seconds", false)
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, owningRuntimeID, issueID, "120 seconds", false)
 
 	task, body := claimTaskByRuntimeForTest(t, claimingRuntimeID)
 	if task != nil {
@@ -489,7 +603,7 @@ func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
 
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Workspace context claim runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Workspace context claim agent")
-	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "240 seconds", false)
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
@@ -548,7 +662,7 @@ func TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset(t *testing.T) {
 
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Workspace context empty claim runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Workspace context empty claim agent")
-	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "240 seconds", false)
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
@@ -596,7 +710,7 @@ func TestClaimTaskByRuntime_MissingRuntimeOwnerCancelsAndRejects(t *testing.T) {
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
 
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Missing owner claim agent")
-	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "240 seconds", false)
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,

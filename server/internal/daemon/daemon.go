@@ -47,6 +47,8 @@ var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered"
 const (
 	taskSlotWaitTimeout     = 2 * time.Second
 	taskSlotCapacityBackoff = 5 * time.Second
+	taskPrepareLeaseRefresh = 15 * time.Second
+	taskPrepareLeaseTimeout = 10 * time.Second
 )
 
 func taskScopedAuthToken(task Task) (string, error) {
@@ -2921,9 +2923,16 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		pollInterval = 5 * time.Second
 	}
 	var (
-		watcherOnce     sync.Once
-		cancelledByPoll <-chan struct{}
+		watcherOnce      sync.Once
+		prepareLeaseOnce sync.Once
+		cancelledByPoll  <-chan struct{}
+		stopPrepareLease func()
 	)
+	defer func() {
+		if stopPrepareLease != nil {
+			stopPrepareLease()
+		}
+	}()
 
 	onWait := func(holder string) {
 		reason := fmt.Sprintf("local_directory %s", assignment.AbsPath)
@@ -2937,6 +2946,9 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			// The UI just won't see the explicit "waiting" badge.
 			taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
 		}
+		prepareLeaseOnce.Do(func() {
+			stopPrepareLease = d.startTaskPrepareLeaseExtender(waitCtx, task, taskLog)
+		})
 		// Start polling once we actually park. shouldInterruptAgent inside
 		// watchTaskCancellation already handles both server-side terminal
 		// states (completed/failed/cancelled) and the row-deleted
@@ -3175,6 +3187,37 @@ func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 	return nil
 }
 
+func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, taskLog *slog.Logger) func() {
+	leaseCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(taskPrepareLeaseRefresh)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-leaseCtx.Done():
+				return
+			case <-ticker.C:
+				reqCtx, reqCancel := context.WithTimeout(leaseCtx, taskPrepareLeaseTimeout)
+				err := d.client.ExtendTaskPrepareLease(reqCtx, task.RuntimeID, task.ID)
+				reqCancel()
+				if err != nil {
+					taskLog.Warn("extend task prepare lease failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			<-done
+		})
+	}
+}
+
 func skillRefKey(source, id string) string {
 	return source + "\x00" + id
 }
@@ -3245,6 +3288,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
 	}
+
+	stopPrepareLease := d.startTaskPrepareLeaseExtender(ctx, task, taskLog)
+	defer stopPrepareLease()
 
 	if err := d.ensureTaskSkillBundles(ctx, &task); err != nil {
 		return TaskResult{}, err
@@ -3393,6 +3439,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// taskfailure.Classify path records the failure with the same
 	// "start task failed: <…>" string and the same failure_reason
 	// taxonomy as before — see MUL-2946 for the classifier contract.
+	stopPrepareLease()
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}
