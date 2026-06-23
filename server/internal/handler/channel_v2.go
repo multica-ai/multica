@@ -247,7 +247,7 @@ func (h *Handler) attachChannelAgentTasks(ctx context.Context, messages []Channe
 // message — the channel-side half of the OPE-1943 bidirectional display.
 // Single batched query regardless of message count (no N+1). Best-effort: a
 // query error leaves Issues empty rather than failing the whole list.
-func (h *Handler) attachChannelMessageIssues(ctx context.Context, messages []ChannelMessageV2Response) []ChannelMessageV2Response {
+func (h *Handler) attachChannelMessageIssues(ctx context.Context, wsUUID pgtype.UUID, messages []ChannelMessageV2Response) []ChannelMessageV2Response {
 	if len(messages) == 0 {
 		return messages
 	}
@@ -264,15 +264,17 @@ func (h *Handler) attachChannelMessageIssues(ctx context.Context, messages []Cha
 	if err != nil {
 		return messages
 	}
+	issuePrefix := h.getIssuePrefix(ctx, wsUUID)
 	byMessage := make(map[string][]threadIssueResponse)
 	for _, row := range rows {
 		rootID := uuidToString(row.RootMessageID)
 		byMessage[rootID] = append(byMessage[rootID], threadIssueResponse{
-			ID:       uuidToString(row.ID),
-			Number:   row.Number,
-			Title:    row.Title,
-			Status:   row.Status,
-			Priority: row.Priority,
+			ID:         uuidToString(row.ID),
+			Identifier: issuePrefix + "-" + strconv.Itoa(int(row.Number)),
+			Number:     row.Number,
+			Title:      row.Title,
+			Status:     row.Status,
+			Priority:   row.Priority,
 		})
 	}
 	for i := range messages {
@@ -475,7 +477,7 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 
 	resp = h.attachChannelAgentTasks(r.Context(), resp)
 	resp = h.attachChannelAuthorNames(r.Context(), resp)
-	resp = h.attachChannelMessageIssues(r.Context(), resp)
+	resp = h.attachChannelMessageIssues(r.Context(), wsUUID, resp)
 	response := map[string]any{"messages": resp, "total": len(resp), "has_more": hasMore}
 	if highlight != nil {
 		response["highlight"] = highlight
@@ -1162,7 +1164,7 @@ func (h *Handler) GetChannelThreadByID(w http.ResponseWriter, r *http.Request) {
 	issues, _ := h.Queries.ListThreadIssues(r.Context(), thread.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"thread": channelThreadToResponse(thread),
-		"issues": threadIssuesToResponse(issues),
+		"issues": threadIssuesToResponse(issues, h.getIssuePrefix(r.Context(), wsUUID)),
 	})
 }
 

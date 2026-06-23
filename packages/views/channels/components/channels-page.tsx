@@ -1418,11 +1418,15 @@ function ChannelLinkedIssuesStrip({ issues }: { issues: ChannelMessage["issues"]
       {issues.map((issue) => (
         <AppLink
           key={issue.id}
-          href={paths.issueDetail(issue.id)}
+          href={paths.issueDetail(issue.identifier ?? issue.id)}
+          // Stop propagation so the surrounding message ContextMenuTrigger
+          // doesn't capture the right-click — the native menu must surface for
+          // "Copy link" to work on the chip's href.
+          onContextMenu={(e) => e.stopPropagation()}
           className="inline-flex items-center gap-1 rounded-md border bg-muted/30 px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
         >
           <FileText className="h-3 w-3" />
-          <span className="font-medium text-foreground">#{issue.number}</span>
+          <span className="font-medium text-foreground">{issue.identifier ?? `#${issue.number}`}</span>
           <span className="max-w-[12rem] truncate">{issue.title}</span>
         </AppLink>
       ))}
