@@ -74,6 +74,19 @@ func resolveToken(cmd *cobra.Command) string {
 	if inAgentExecutionContext() {
 		return ""
 	}
+	// If the daemon injected its port but the subprocess lost
+	// MULTICA_AGENT_ID / MULTICA_TASK_ID, the CLI is still running
+	// inside a daemon-managed task. Falling back to a config-file
+	// mul_ PAT would cause silent identity misattribution — agent
+	// comments would appear under the workspace owner's name.
+	// Return "" to force a clear error instead (#4204).
+	//
+	// MULTICA_DAEMON_PORT is the specific signal: only the daemon sets
+	// it, and users never would. MULTICA_SERVER_URL is NOT used as a
+	// signal here because users may set it in their shell profile.
+	if os.Getenv("MULTICA_DAEMON_PORT") != "" {
+		return ""
+	}
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	return cfg.Token

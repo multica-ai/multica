@@ -119,6 +119,7 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "")
 		t.Setenv("MULTICA_TASK_ID", "")
 		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
 
 		if got := resolveToken(testCmd()); got != "mul_profile_token" {
 			t.Fatalf("resolveToken() = %q, want profile token", got)
@@ -142,6 +143,64 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 
 		if got := resolveToken(testCmd()); got != "mat_task_token" {
 			t.Fatalf("resolveToken() = %q, want MULTICA_TOKEN", got)
+		}
+	})
+}
+
+// TestResolveToken_DaemonConfigBlocksFallback is a regression test for #4204.
+// When a subprocess loses MULTICA_AGENT_ID / MULTICA_TASK_ID but still has
+// MULTICA_DAEMON_PORT (set by the daemon), the CLI must NOT silently fall
+// back to the config-file mul_ PAT — that would cause agent comments to be
+// misattributed to the workspace owner.
+func TestResolveToken_DaemonConfigBlocksFallback(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_profile_token"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	// Neither agent context marker is set (simulates subprocess that lost them).
+	baseEnv := func() {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_SERVER_URL", "")
+	}
+
+	t.Run("daemon port set blocks config fallback", func(t *testing.T) {
+		baseEnv()
+		t.Setenv("MULTICA_DAEMON_PORT", "9876")
+
+		if got := resolveToken(testCmd()); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty (daemon port set, must not fall back to config PAT)", got)
+		}
+	})
+
+	t.Run("server url alone does not block config fallback", func(t *testing.T) {
+		baseEnv()
+		t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+
+		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+			t.Fatalf("resolveToken() = %q, want profile token (server url alone is not a daemon signal; users may set it)", got)
+		}
+	})
+
+	t.Run("neither set still falls back to config", func(t *testing.T) {
+		baseEnv()
+
+		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+			t.Fatalf("resolveToken() = %q, want profile token (no daemon env set, config fallback is expected)", got)
+		}
+	})
+
+	t.Run("MULTICA_TOKEN takes priority over daemon guard", func(t *testing.T) {
+		baseEnv()
+		t.Setenv("MULTICA_DAEMON_PORT", "9876")
+		t.Setenv("MULTICA_TOKEN", "mat_task_token")
+
+		if got := resolveToken(testCmd()); got != "mat_task_token" {
+			t.Fatalf("resolveToken() = %q, want MULTICA_TOKEN value (should always win)", got)
 		}
 	})
 }
