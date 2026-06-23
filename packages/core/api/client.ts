@@ -710,15 +710,11 @@ export class ApiClient {
     });
   }
 
-  async listTimeline(issueId: string): Promise<TimelineEntry[]> {
-    const raw = await this.fetch<unknown>(
-      `/api/issues/${issueId}/timeline`,
-    );
-async listTimeline(issueId: string, params?: { summary?: boolean }): Promise<TimelineEntry[]> {
+  async listTimeline(issueId: string, params?: { summary?: boolean }): Promise<TimelineEntry[]> {
     let path = `/api/issues/${issueId}/timeline`;
     if (params?.summary) path += `?summary=true`;
     const raw = await this.fetch<unknown>(path);
-return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
+    return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
       endpoint: "GET /api/issues/:id/timeline",
     });
   }
