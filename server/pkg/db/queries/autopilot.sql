@@ -47,6 +47,28 @@ WHERE a.workspace_id = $1
           AND ag.owner_id = sqlc.narg('mine_user_id')::uuid
       )
     )
+    OR (
+      a.assignee_type = 'agent'
+      AND EXISTS (
+        SELECT 1
+        FROM agent ag
+        WHERE ag.id = a.assignee_id
+          AND ag.workspace_id = a.workspace_id
+          AND ag.owner_id = sqlc.narg('mine_user_id')::uuid
+      )
+    )
+    OR (
+      a.assignee_type = 'squad'
+      AND EXISTS (
+        SELECT 1
+        FROM squad s
+        JOIN agent ag ON ag.id = s.leader_id
+        WHERE s.id = a.assignee_id
+          AND s.workspace_id = a.workspace_id
+          AND ag.workspace_id = a.workspace_id
+          AND ag.owner_id = sqlc.narg('mine_user_id')::uuid
+      )
+    )
   )
 ORDER BY a.created_at DESC;
 

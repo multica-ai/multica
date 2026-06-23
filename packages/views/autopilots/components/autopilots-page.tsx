@@ -18,6 +18,10 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import {
+  filterMineAutopilots,
+  ownedAgentIdsForUser,
+} from "@multica/core/autopilots";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import {
   useAutopilotsViewStore,
@@ -27,9 +31,14 @@ import {
   type AutopilotScope,
   type AutopilotSortField,
 } from "@multica/core/autopilots/stores";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
+import {
+  agentListOptions,
+  squadListOptions,
+} from "@multica/core/workspace/queries";
 import type { Autopilot } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -616,6 +625,7 @@ export function AutopilotsPage() {
   const setScope = useAutopilotsViewStore((s) => s.setScope);
   const mineOnly = useAutopilotsViewStore((s) => s.mineOnly);
   const setMineOnly = useAutopilotsViewStore((s) => s.setMineOnly);
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
   const sortField = useAutopilotsViewStore((s) => s.sortField);
   const sortDirection = useAutopilotsViewStore((s) => s.sortDirection);
   const hiddenColumns = useAutopilotsViewStore((s) => s.hiddenColumns);
@@ -628,12 +638,39 @@ export function AutopilotsPage() {
   const clearFilters = useAutopilotsViewStore((s) => s.clearFilters);
   const {
     data: autopilots = [],
-    isLoading,
+    isLoading: autopilotsLoading,
     error: listError,
     refetch: refetchList,
   } = useQuery(
     autopilotListOptions(wsId, mineOnly ? { mine: true } : undefined),
   );
+  const shouldLoadMineContext = mineOnly && !!currentUserId;
+  const { data: ownedAgents = [], isLoading: ownedAgentsLoading } = useQuery({
+    ...agentListOptions(wsId, "me"),
+    enabled: shouldLoadMineContext,
+  });
+  const { data: squads = [], isLoading: squadsLoading } = useQuery({
+    ...squadListOptions(wsId),
+    enabled: shouldLoadMineContext,
+  });
+
+  const ownedAgentIds = useMemo(
+    () => ownedAgentIdsForUser(ownedAgents, currentUserId),
+    [ownedAgents, currentUserId],
+  );
+
+  const visibleAutopilots = useMemo<Autopilot[]>(() => {
+    if (!mineOnly) return autopilots;
+    return filterMineAutopilots(autopilots, {
+      currentUserId,
+      ownedAgentIds,
+      squads,
+    });
+  }, [autopilots, currentUserId, mineOnly, ownedAgentIds, squads]);
+
+  const isLoading =
+    autopilotsLoading ||
+    (shouldLoadMineContext && (ownedAgentsLoading || squadsLoading));
 
   const isColVisible = (key: AutopilotColumnKey) =>
     !hiddenColumns.includes(key);
@@ -653,22 +690,22 @@ export function AutopilotsPage() {
   const scopeCounts = useMemo<Record<AutopilotScope, number>>(() => {
     let active = 0;
     let paused = 0;
-    for (const a of autopilots) {
+    for (const a of visibleAutopilots) {
       if (a.status === "archived") continue;
       if (a.status === "paused") paused++;
       else active++;
     }
     return { all: active + paused, active, paused };
-  }, [autopilots]);
+  }, [visibleAutopilots]);
 
   // Rows within the current scope, unfiltered — toolbar option lists and
   // the "n / total" denominator derive from this.
   const scopeRows = useMemo<Autopilot[]>(() => {
     if (scope === "all") {
-      return autopilots.filter((a) => a.status !== "archived");
+      return visibleAutopilots.filter((a) => a.status !== "archived");
     }
-    return autopilots.filter((a) => a.status === scope);
-  }, [autopilots, scope]);
+    return visibleAutopilots.filter((a) => a.status === scope);
+  }, [visibleAutopilots, scope]);
 
   // Visible rows: filters, then sort.
   const rows = useMemo<Autopilot[]>(() => {
@@ -758,7 +795,7 @@ export function AutopilotsPage() {
       : 0,
   };
 
-  const totalCount = autopilots.length;
+  const totalCount = visibleAutopilots.length;
   const showEmpty = !isLoading && !listError && totalCount === 0 && !mineOnly;
 
   return (

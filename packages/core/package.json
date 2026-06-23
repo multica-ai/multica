@@ -86,6 +86,7 @@
     "./labels/queries": "./labels/queries.ts",
     "./labels/mutations": "./labels/mutations.ts",
     "./autopilots": "./autopilots/index.ts",
+    "./autopilots/ownership": "./autopilots/ownership.ts",
     "./autopilots/queries": "./autopilots/queries.ts",
     "./autopilots/mutations": "./autopilots/mutations.ts",
     "./pins": "./pins/index.ts",
