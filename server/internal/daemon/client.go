@@ -495,8 +495,6 @@ func (c *Client) GetChannelLaneGCCheck(ctx context.Context, workspaceID, channel
 	return &resp, nil
 }
 
-
-
 func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
 	return c.postJSON(ctx, "/api/daemon/deregister", map[string]any{
 		"runtime_ids": runtimeIDs,
