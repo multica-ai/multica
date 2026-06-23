@@ -42,7 +42,7 @@ import {
   type SystemNotificationPayload,
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
-import { chatKeys } from "../chat/queries";
+import { chatKeys, mergeTaskMessagesBySeq } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
@@ -828,11 +828,8 @@ export function useRealtimeSync(
     const unsubTaskMessage = ws.on("task:message", (p) => {
       const payload = p as TaskMessagePayload;
       qc.setQueryData<TaskMessagePayload[]>(
-        ["task-messages", payload.task_id],
-        (old = []) => {
-          if (old.some((m) => m.seq === payload.seq)) return old;
-          return [...old, payload].sort((a, b) => a.seq - b.seq);
-        },
+        chatKeys.taskMessages(payload.task_id),
+        (old = []) => mergeTaskMessagesBySeq(old, [payload]),
       );
       chatWsLogger.debug("task:message (global)", {
         task_id: payload.task_id,
