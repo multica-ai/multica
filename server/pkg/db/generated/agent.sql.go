@@ -14,7 +14,7 @@ import (
 const archiveAgent = `-- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 type ArchiveAgentParams struct {
@@ -50,6 +50,8 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }
@@ -58,7 +60,7 @@ const archiveAgentsByIDs = `-- name: ArchiveAgentsByIDs :many
 UPDATE agent
 SET archived_at = now(), archived_by = $1, updated_at = now()
 WHERE id = ANY($2::uuid[]) AND archived_at IS NULL
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 type ArchiveAgentsByIDsParams struct {
@@ -108,6 +110,8 @@ func (q *Queries) ArchiveAgentsByIDs(ctx context.Context, arg ArchiveAgentsByIDs
 			&i.CustomEnvCopiedPending,
 			&i.ThinkingLevel,
 			&i.ServiceTier,
+			&i.SystemTemplateID,
+			&i.PersonalTemplateID,
 		); err != nil {
 			return nil, err
 		}
@@ -123,7 +127,7 @@ const archiveAgentsByRuntime = `-- name: ArchiveAgentsByRuntime :many
 UPDATE agent
 SET archived_at = now(), archived_by = $1, updated_at = now()
 WHERE runtime_id = ANY($2::uuid[]) AND archived_at IS NULL
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 type ArchiveAgentsByRuntimeParams struct {
@@ -169,6 +173,8 @@ func (q *Queries) ArchiveAgentsByRuntime(ctx context.Context, arg ArchiveAgentsB
 			&i.CustomEnvCopiedPending,
 			&i.ThinkingLevel,
 			&i.ServiceTier,
+			&i.SystemTemplateID,
+			&i.PersonalTemplateID,
 		); err != nil {
 			return nil, err
 		}
@@ -637,7 +643,7 @@ func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (Agen
 const clearAgentMcpConfig = `-- name: ClearAgentMcpConfig :one
 UPDATE agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -668,6 +674,8 @@ func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agen
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }
@@ -675,7 +683,7 @@ func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agen
 const clearAgentServiceTier = `-- name: ClearAgentServiceTier :one
 UPDATE agent SET service_tier = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 // Explicit NULL-clear for service_tier. COALESCE-based UpdateAgent cannot
@@ -709,6 +717,8 @@ func (q *Queries) ClearAgentServiceTier(ctx context.Context, id pgtype.UUID) (Ag
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }
@@ -716,7 +726,7 @@ func (q *Queries) ClearAgentServiceTier(ctx context.Context, id pgtype.UUID) (Ag
 const clearAgentThinkingLevel = `-- name: ClearAgentThinkingLevel :one
 UPDATE agent SET thinking_level = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 // Explicit NULL-clear for thinking_level. COALESCE-based UpdateAgent cannot
@@ -750,6 +760,8 @@ func (q *Queries) ClearAgentThinkingLevel(ctx context.Context, id pgtype.UUID) (
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }
@@ -830,7 +842,7 @@ INSERT INTO agent (
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level, service_tier, custom_env_copied_pending
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 type CreateAgentParams struct {
@@ -901,6 +913,8 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }
@@ -1451,7 +1465,7 @@ func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) 
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id FROM agent
 WHERE id = $1
 `
 
@@ -1483,12 +1497,14 @@ func (q *Queries) GetAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }
 
 const getAgentInWorkspace = `-- name: GetAgentInWorkspace :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id FROM agent
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -1525,6 +1541,8 @@ func (q *Queries) GetAgentInWorkspace(ctx context.Context, arg GetAgentInWorkspa
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }
@@ -2095,7 +2113,7 @@ func (q *Queries) LinkTaskToIssue(ctx context.Context, arg LinkTaskToIssueParams
 }
 
 const listActiveAgentsByRuntime = `-- name: ListActiveAgentsByRuntime :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id FROM agent
 WHERE runtime_id = $1 AND archived_at IS NULL
 ORDER BY name ASC
 `
@@ -2140,6 +2158,8 @@ func (q *Queries) ListActiveAgentsByRuntime(ctx context.Context, runtimeID pgtyp
 			&i.CustomEnvCopiedPending,
 			&i.ThinkingLevel,
 			&i.ServiceTier,
+			&i.SystemTemplateID,
+			&i.PersonalTemplateID,
 		); err != nil {
 			return nil, err
 		}
@@ -2152,7 +2172,7 @@ func (q *Queries) ListActiveAgentsByRuntime(ctx context.Context, runtimeID pgtyp
 }
 
 const listActiveAgentsByRuntimeForUpdate = `-- name: ListActiveAgentsByRuntimeForUpdate :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id FROM agent
 WHERE runtime_id = $1 AND archived_at IS NULL
 ORDER BY name ASC
 FOR UPDATE
@@ -2200,6 +2220,8 @@ func (q *Queries) ListActiveAgentsByRuntimeForUpdate(ctx context.Context, runtim
 			&i.CustomEnvCopiedPending,
 			&i.ThinkingLevel,
 			&i.ServiceTier,
+			&i.SystemTemplateID,
+			&i.PersonalTemplateID,
 		); err != nil {
 			return nil, err
 		}
@@ -2333,7 +2355,7 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id FROM agent
 WHERE workspace_id = $1 AND archived_at IS NULL
 ORDER BY created_at ASC
 `
@@ -2372,6 +2394,8 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 			&i.CustomEnvCopiedPending,
 			&i.ThinkingLevel,
 			&i.ServiceTier,
+			&i.SystemTemplateID,
+			&i.PersonalTemplateID,
 		); err != nil {
 			return nil, err
 		}
@@ -2384,7 +2408,7 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 }
 
 const listAgentsByOwner = `-- name: ListAgentsByOwner :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id FROM agent
 WHERE workspace_id = $1
   AND owner_id = $2
   AND archived_at IS NULL
@@ -2430,6 +2454,8 @@ func (q *Queries) ListAgentsByOwner(ctx context.Context, arg ListAgentsByOwnerPa
 			&i.CustomEnvCopiedPending,
 			&i.ThinkingLevel,
 			&i.ServiceTier,
+			&i.SystemTemplateID,
+			&i.PersonalTemplateID,
 		); err != nil {
 			return nil, err
 		}
@@ -2442,7 +2468,7 @@ func (q *Queries) ListAgentsByOwner(ctx context.Context, arg ListAgentsByOwnerPa
 }
 
 const listAllAgents = `-- name: ListAllAgents :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id FROM agent
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -2481,6 +2507,8 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 			&i.CustomEnvCopiedPending,
 			&i.ThinkingLevel,
 			&i.ServiceTier,
+			&i.SystemTemplateID,
+			&i.PersonalTemplateID,
 		); err != nil {
 			return nil, err
 		}
@@ -2493,7 +2521,7 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 }
 
 const listAllAgentsByOwner = `-- name: ListAllAgentsByOwner :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id FROM agent
 WHERE workspace_id = $1
   AND owner_id = $2
 ORDER BY created_at ASC
@@ -2538,6 +2566,8 @@ func (q *Queries) ListAllAgentsByOwner(ctx context.Context, arg ListAllAgentsByO
 			&i.CustomEnvCopiedPending,
 			&i.ThinkingLevel,
 			&i.ServiceTier,
+			&i.SystemTemplateID,
+			&i.PersonalTemplateID,
 		); err != nil {
 			return nil, err
 		}
@@ -3148,7 +3178,7 @@ SET status = CASE WHEN EXISTS (
 ) THEN 'working' ELSE 'idle' END,
     updated_at = now()
 WHERE a.id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -3179,6 +3209,8 @@ func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUI
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }
@@ -3186,7 +3218,7 @@ func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUI
 const restoreAgent = `-- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -3217,6 +3249,8 @@ func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, erro
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }
@@ -3294,7 +3328,7 @@ UPDATE agent SET
     custom_env_copied_pending = COALESCE($18, custom_env_copied_pending),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 type UpdateAgentParams struct {
@@ -3365,6 +3399,8 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }
@@ -3373,7 +3409,7 @@ const updateAgentCustomEnv = `-- name: UpdateAgentCustomEnv :one
 UPDATE agent
 SET custom_env = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 type UpdateAgentCustomEnvParams struct {
@@ -3414,6 +3450,8 @@ func (q *Queries) UpdateAgentCustomEnv(ctx context.Context, arg UpdateAgentCusto
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }
@@ -3421,7 +3459,7 @@ func (q *Queries) UpdateAgentCustomEnv(ctx context.Context, arg UpdateAgentCusto
 const updateAgentStatus = `-- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
 `
 
 type UpdateAgentStatusParams struct {
@@ -3457,6 +3495,8 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 		&i.CustomEnvCopiedPending,
 		&i.ThinkingLevel,
 		&i.ServiceTier,
+		&i.SystemTemplateID,
+		&i.PersonalTemplateID,
 	)
 	return i, err
 }

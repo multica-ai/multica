@@ -47,6 +47,8 @@ type Agent struct {
 	CustomEnvCopiedPending bool        `json:"custom_env_copied_pending"`
 	ThinkingLevel          pgtype.Text `json:"thinking_level"`
 	ServiceTier            pgtype.Text `json:"service_tier"`
+	SystemTemplateID       pgtype.UUID `json:"system_template_id"`
+	PersonalTemplateID     pgtype.UUID `json:"personal_template_id"`
 }
 
 type AgentAllowedPrincipal struct {
@@ -57,6 +59,19 @@ type AgentAllowedPrincipal struct {
 	PrincipalID   pgtype.UUID        `json:"principal_id"`
 	CreatedBy     pgtype.UUID        `json:"created_by"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentConfigTemplate struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Scope       string             `json:"scope"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Config      []byte             `json:"config"`
+	IsDefault   bool               `json:"is_default"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AgentRuntime struct {
