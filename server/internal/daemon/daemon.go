@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -46,6 +47,11 @@ var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered"
 const (
 	taskSlotWaitTimeout     = 2 * time.Second
 	taskSlotCapacityBackoff = 5 * time.Second
+)
+
+var (
+	taskPrepareLeaseRefresh = 15 * time.Second
+	taskPrepareLeaseTimeout = 10 * time.Second
 )
 
 func taskScopedAuthToken(task Task) (string, error) {
@@ -141,10 +147,11 @@ type repoCacheBackend interface {
 
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
-	cfg       Config
-	client    *Client
-	repoCache repoCacheBackend
-	logger    *slog.Logger
+	cfg        Config
+	client     *Client
+	repoCache  repoCacheBackend
+	skillCache *SkillBundleCache
+	logger     *slog.Logger
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -230,6 +237,7 @@ type profileLaunchSpec struct {
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
+	skillCacheRoot := filepath.Join(cfg.WorkspacesRoot, ".skill-cache", "v1")
 	client := NewClient(cfg.ServerBaseURL)
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
@@ -238,6 +246,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		cfg:                       cfg,
 		client:                    client,
 		repoCache:                 repocache.New(cacheRoot, logger),
+		skillCache:                NewSkillBundleCache(skillCacheRoot),
 		logger:                    logger,
 		workspaces:                make(map[string]*workspaceState),
 		runtimeIndex:              make(map[string]Runtime),
@@ -2917,9 +2926,16 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		pollInterval = 5 * time.Second
 	}
 	var (
-		watcherOnce     sync.Once
-		cancelledByPoll <-chan struct{}
+		watcherOnce      sync.Once
+		prepareLeaseOnce sync.Once
+		cancelledByPoll  <-chan struct{}
+		stopPrepareLease func()
 	)
+	defer func() {
+		if stopPrepareLease != nil {
+			stopPrepareLease()
+		}
+	}()
 
 	onWait := func(holder string) {
 		reason := fmt.Sprintf("local_directory %s", assignment.AbsPath)
@@ -2933,6 +2949,9 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			// The UI just won't see the explicit "waiting" badge.
 			taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
 		}
+		prepareLeaseOnce.Do(func() {
+			stopPrepareLease = d.startTaskPrepareLeaseExtender(waitCtx, task, taskLog)
+		})
 		// Start polling once we actually park. shouldInterruptAgent inside
 		// watchTaskCancellation already handles both server-side terminal
 		// states (completed/failed/cancelled) and the row-deleted
@@ -3116,6 +3135,123 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 	return reused
 }
 
+func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
+	if task == nil || task.Agent == nil || len(task.Agent.SkillRefs) == 0 {
+		return nil
+	}
+	resolved := make(map[string]SkillData, len(task.Agent.SkillRefs))
+	misses := make([]SkillRefData, 0)
+	for _, ref := range task.Agent.SkillRefs {
+		ref := ref
+		var bundle SkillData
+		if err := d.skillCache.WithRefLock(task.WorkspaceID, ref, func() error {
+			if cached, ok := d.skillCache.Load(task.WorkspaceID, ref); ok {
+				bundle = cached
+				return nil
+			}
+			misses = append(misses, ref)
+			return nil
+		}); err != nil {
+			return fmt.Errorf("load skill bundle cache: %w", err)
+		}
+		if bundle.ID != "" {
+			resolved[skillRefKey(ref.Source, ref.ID)] = bundle
+		}
+	}
+
+	if len(misses) > 0 {
+		bundles, err := d.client.ResolveSkillBundles(ctx, task.RuntimeID, task.ID, misses)
+		if err != nil {
+			return fmt.Errorf("resolve skill bundles: %w", err)
+		}
+		for _, bundle := range bundles {
+			ref := skillRefFromBundle(bundle)
+			if !validateSkillBundle(ref, bundle) {
+				return fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
+			}
+			if err := d.skillCache.WithRefLock(task.WorkspaceID, ref, func() error {
+				return d.skillCache.Store(task.WorkspaceID, bundle)
+			}); err != nil {
+				return fmt.Errorf("store skill bundle cache: %w", err)
+			}
+			resolved[skillRefKey(bundle.Source, bundle.ID)] = bundle
+		}
+	}
+
+	skills := make([]SkillData, 0, len(task.Agent.SkillRefs))
+	for _, ref := range task.Agent.SkillRefs {
+		bundle, ok := resolved[skillRefKey(ref.Source, ref.ID)]
+		if !ok {
+			return fmt.Errorf("skill bundle missing after resolve: skill_id=%s source=%s hash=%s", ref.ID, ref.Source, ref.Hash)
+		}
+		skills = append(skills, bundle)
+	}
+	task.Agent.Skills = skills
+	return nil
+}
+
+func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, taskLog *slog.Logger) func() {
+	leaseCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(taskPrepareLeaseRefresh)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-leaseCtx.Done():
+				return
+			case <-ticker.C:
+				reqCtx, reqCancel := context.WithTimeout(leaseCtx, taskPrepareLeaseTimeout)
+				err := d.client.ExtendTaskPrepareLease(reqCtx, task.RuntimeID, task.ID)
+				reqCancel()
+				if err != nil {
+					taskLog.Warn("extend task prepare lease failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			<-done
+		})
+	}
+}
+
+func skillRefKey(source, id string) string {
+	return source + "\x00" + id
+}
+
+func skillRefFromBundle(bundle SkillData) SkillRefData {
+	files := make([]skillbundle.File, 0, len(bundle.Files))
+	for _, file := range bundle.Files {
+		files = append(files, skillbundle.File{Path: file.Path, Content: file.Content})
+	}
+	manifest := skillbundle.BuildManifest(skillbundle.Skill{
+		ID:          bundle.ID,
+		Source:      bundle.Source,
+		Name:        bundle.Name,
+		Description: bundle.Description,
+		Content:     bundle.Content,
+		Files:       files,
+	})
+	fileRefs := make([]SkillFileRefData, 0, len(manifest.Files))
+	for _, file := range manifest.Files {
+		fileRefs = append(fileRefs, SkillFileRefData{Path: file.Path, SHA256: file.SHA256, SizeBytes: file.SizeBytes})
+	}
+	return SkillRefData{
+		ID:        bundle.ID,
+		Source:    bundle.Source,
+		Hash:      manifest.Hash,
+		SizeBytes: manifest.SizeBytes,
+		FileCount: manifest.FileCount,
+		Files:     fileRefs,
+	}
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -3154,6 +3290,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
+	}
+
+	stopPrepareLease := d.startTaskPrepareLeaseExtender(ctx, task, taskLog)
+	defer stopPrepareLease()
+
+	if err := d.ensureTaskSkillBundles(ctx, &task); err != nil {
+		return TaskResult{}, err
 	}
 
 	agentName := "agent"
@@ -3300,8 +3443,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// "start task failed: <…>" string and the same failure_reason
 	// taxonomy as before — see MUL-2946 for the classifier contract.
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
+		stopPrepareLease()
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}
+	stopPrepareLease()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)

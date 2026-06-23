@@ -180,14 +180,8 @@ type ListWorkspacesWithReposRow struct {
 	Repos []byte      `json:"repos"`
 }
 
-// Workspaces that have at least one repository in their registry, returning
-// only the id and the repos JSONB. Used to route an inbound GitHub webhook to
-// the workspace that actually owns the event's repository (instead of the
-// single workspace the delivering App installation happens to be mapped to —
-// one GitHub account/installation can serve repos belonging to several
-// workspaces).
-// ORDER BY id so the multi-match tie-break in resolveWorkspaceForRepo is
-// stable across webhook replays.
+// Workspaces with a non-empty repo registry, to route a webhook to the repo's
+// owning workspace. ORDER BY id keeps the resolver's tie-break stable on replay.
 func (q *Queries) ListWorkspacesWithRepos(ctx context.Context) ([]ListWorkspacesWithReposRow, error) {
 	rows, err := q.db.Query(ctx, listWorkspacesWithRepos)
 	if err != nil {

@@ -141,6 +141,7 @@ func (c *Client) setIdentityHeaders(req *http.Request) {
 	if c.os != "" {
 		req.Header.Set("X-Client-OS", c.os)
 	}
+	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilitySkillBundlesV1)
 }
 
 // SetToken sets the auth token for authenticated requests.
@@ -161,6 +162,22 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 		return nil, err
 	}
 	return resp.Task, nil
+}
+
+func (c *Client) ResolveSkillBundles(ctx context.Context, runtimeID, taskID string, refs []SkillRefData) ([]SkillData, error) {
+	var resp struct {
+		Bundles []SkillData `json:"bundles"`
+	}
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/skill-bundles/resolve", runtimeID, taskID), map[string]any{
+		"skills": refs,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Bundles, nil
+}
+
+func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/prepare-lease", runtimeID, taskID), map[string]any{}, nil)
 }
 
 func (c *Client) StartTask(ctx context.Context, taskID string) error {

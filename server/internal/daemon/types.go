@@ -130,7 +130,8 @@ type AgentData struct {
 	ID            string            `json:"id"`
 	Name          string            `json:"name"`
 	Instructions  string            `json:"instructions"`
-	Skills        []SkillData       `json:"skills"`
+	Skills        []SkillData       `json:"skills,omitempty"`
+	SkillRefs     []SkillRefData    `json:"skill_refs,omitempty"`
 	CustomEnv     map[string]string `json:"custom_env,omitempty"`
 	CustomArgs    []string          `json:"custom_args,omitempty"`
 	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
@@ -146,16 +147,38 @@ type AgentData struct {
 // SkillData represents a structured skill for task execution.
 type SkillData struct {
 	ID          string          `json:"id"`
+	Source      string          `json:"source,omitempty"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
+	Hash        string          `json:"hash,omitempty"`
+	SizeBytes   int64           `json:"size_bytes,omitempty"`
 	Content     string          `json:"content"`
 	Files       []SkillFileData `json:"files,omitempty"`
 }
 
 // SkillFileData represents a supporting file within a skill.
 type SkillFileData struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+	SHA256    string `json:"sha256,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+}
+
+type SkillRefData struct {
+	ID          string             `json:"id"`
+	Source      string             `json:"source"`
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	Hash        string             `json:"hash"`
+	SizeBytes   int64              `json:"size_bytes"`
+	FileCount   int                `json:"file_count"`
+	Files       []SkillFileRefData `json:"files,omitempty"`
+}
+
+type SkillFileRefData struct {
+	Path      string `json:"path"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"size_bytes"`
 }
 
 // TaskUsageEntry represents token usage for a single model during a task execution.
