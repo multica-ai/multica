@@ -121,6 +121,30 @@ describe("deriveAgentAvailability", () => {
   it("returns offline when the runtime is null (deleted / never registered)", () => {
     expect(deriveAgentAvailability(null, NOW)).toBe("offline");
   });
+
+  it("returns online for built-in agents when an online runtime exists in the workspace", () => {
+    expect(
+      deriveAgentAvailability(null, NOW, true, [], [makeRuntime({ status: "online" })]),
+    ).toBe("online");
+  });
+
+  it("returns offline for built-in agents when no online runtime exists", () => {
+    expect(
+      deriveAgentAvailability(
+        null,
+        NOW,
+        true,
+        [],
+        [makeRuntime({ status: "offline", last_seen_at: "2026-04-27T11:50:00Z" })],
+      ),
+    ).toBe("offline");
+  });
+
+  it("returns online for built-in agents with active tasks even without online runtimes", () => {
+    expect(
+      deriveAgentAvailability(null, NOW, true, [makeTask({ status: "running" })], []),
+    ).toBe("online");
+  });
 });
 
 describe("deriveWorkload", () => {
@@ -334,6 +358,18 @@ describe("deriveAgentPresenceDetail", () => {
     });
     expect(detail.capacity).toBe(3);
   });
+
+  it("composes online + idle for a built-in agent with an online workspace runtime", () => {
+    const detail = deriveAgentPresenceDetail({
+      agent: makeAgent({ is_builtin: true, runtime_id: "" }),
+      runtime: null,
+      tasks: [],
+      runtimes: [makeRuntime({ status: "online" })],
+      now: NOW,
+    });
+    expect(detail.availability).toBe("online");
+    expect(detail.workload).toBe("idle");
+  });
 });
 
 describe("buildPresenceMap", () => {
@@ -417,5 +453,17 @@ describe("buildPresenceMap", () => {
       now: NOW,
     });
     expect(map.get("a")?.workload).toBe("idle");
+  });
+
+  it("reports built-in agents as online when the workspace has an online runtime", () => {
+    const builtin = makeAgent({ id: "builtin", is_builtin: true, runtime_id: "" });
+    const map = buildPresenceMap({
+      agents: [builtin],
+      runtimes: [makeRuntime({ status: "online" })],
+      snapshot: [],
+      now: NOW,
+    });
+    expect(map.get("builtin")?.availability).toBe("online");
+    expect(map.get("builtin")?.workload).toBe("idle");
   });
 });

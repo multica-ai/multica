@@ -28,15 +28,21 @@ export function deriveAgentAvailability(
   now: number,
   isBuiltin?: boolean,
   tasks?: readonly AgentTask[],
+  runtimes?: readonly AgentRuntime[],
 ): AgentAvailability {
   if (!runtime) {
-    // Built-in agents don't have a fixed runtime — derive availability from
-    // task status instead. Active tasks mean the agent IS running somewhere.
-    if (isBuiltin && tasks && tasks.length > 0) {
-      const hasActive = tasks.some(
+    // Built-in agents don't have a fixed runtime — the service layer picks one
+    // at enqueue time. Their availability follows the workspace: if any runtime
+    // is online they are executable, and if they currently have active work
+    // they are definitely online regardless of workspace state.
+    if (isBuiltin) {
+      const hasActive = tasks && tasks.length > 0 && tasks.some(
         (t) => t.status === "running" || t.status === "queued" || t.status === "dispatched",
       );
       if (hasActive) return "online";
+
+      const hasOnlineRuntime = runtimes && runtimes.some((r) => r.status === "online");
+      if (hasOnlineRuntime) return "online";
     }
     return "offline";
   }
@@ -93,6 +99,9 @@ interface DerivePresenceInput {
   // Tasks for THIS agent only. Callers (buildPresenceMap, hooks) pre-filter
   // by agent_id — we don't re-check here.
   tasks: readonly AgentTask[];
+  // Workspace runtimes, used by built-in agents to determine whether an
+  // online runtime is available for auto-selection.
+  runtimes?: readonly AgentRuntime[];
   // Wall-clock millis used by deriveAgentAvailability to bucket runtime
   // health. Threading it as a parameter keeps the function pure.
   now: number;
@@ -104,6 +113,7 @@ export function deriveAgentPresenceDetail(input: DerivePresenceInput): AgentPres
     input.now,
     input.agent.is_builtin,
     input.tasks,
+    input.runtimes,
   );
   const detail = deriveWorkloadDetail(input.tasks);
 
@@ -145,7 +155,7 @@ export function buildPresenceMap(args: {
   for (const agent of args.agents) {
     const runtime = runtimesById.get(agent.runtime_id) ?? null;
     const tasks = tasksByAgent.get(agent.id) ?? [];
-    out.set(agent.id, deriveAgentPresenceDetail({ agent, runtime, tasks, now: args.now }));
+    out.set(agent.id, deriveAgentPresenceDetail({ agent, runtime, tasks, runtimes: args.runtimes, now: args.now }));
   }
   return out;
 }

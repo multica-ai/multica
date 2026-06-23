@@ -130,6 +130,7 @@ export function AgentDetailInspector({
             members={members}
             currentUserId={currentUserId}
             canEdit={canEdit}
+            isBuiltin={agent.is_builtin}
             onChange={(id) => update({ runtime_id: id })}
           />
         </PropRow>

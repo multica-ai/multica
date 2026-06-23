@@ -77,22 +77,26 @@ const commentHardCap = 2000
 //     comment plus every descendant. The anchor may be a root or any reply;
 //     the server walks up to the root via a recursive CTE, so callers do not
 //     need to know whether the id they have is a root.
+//
 //   - tail=<N> — only valid with thread. Cap the reply count at the N most
 //     recent replies (per (created_at, id)). The thread root is always
 //     returned, even when N=0, so the reader keeps the "what is this thread
 //     about" context. Without tail, thread returns the entire thread (the
 //     pre-MUL-2421 behavior).
+//
 //   - recent=<N> — return the N most recently active threads (root + every
 //     descendant per thread). A thread's recency is MAX(created_at) across
 //     the whole subtree, so a stale-but-recently-replied thread ranks ahead
 //     of an active-but-quiet one. Row-based "newest N comments" is
 //     deliberately NOT exposed — it surfaces unrelated thread tails and
 //     hides relevant history (#2340).
+//
 //   - before=<RFC3339> + before-id=<uuid> — cursor. The pair's meaning is
 //     context-dependent so the flag surface stays small:
 //
 //   - with recent: a *thread* cursor — (last_activity_at, root_id) — and
 //     the next page returns threads strictly less recent.
+//
 //   - with thread + tail: a *reply* cursor — (created_at, id) — and the
 //     next page returns replies in the same thread strictly older than
 //     that reply.
@@ -725,25 +729,24 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), parentComment, uuidToString(issue.WorkspaceID), authorType, authorID)
 
-
-		// Workflow awaiting_input routing: if this comment is on a workflow
-		// sub-issue whose node run is in awaiting_input state, route it as a
-		// workflow resume task instead of the normal on_comment trigger.
-		if authorType == "member" &&
-			issue.OriginType.Valid && issue.OriginType.String == "workflow" &&
-			issue.OriginID.Valid {
-			nodeRun, nrErr := h.Queries.GetWorkflowNodeRun(r.Context(), issue.OriginID)
-			if nrErr == nil && nodeRun.Status == service.NodeRunStatusAwaitingInput {
-				// Route to workflow: resume the node run with the user reply.
-				if err := h.WorkflowService.ResumeNodeRunFromComment(r.Context(), nodeRun, comment); err != nil {
-					slog.Warn("resume workflow node from comment failed",
-						"node_run_id", nodeRun.ID.String(),
-						"error", err)
-				}
-				writeJSON(w, http.StatusCreated, resp)
-				return
+	// Workflow awaiting_input routing: if this comment is on a workflow
+	// sub-issue whose node run is in awaiting_input state, route it as a
+	// workflow resume task instead of the normal on_comment trigger.
+	if authorType == "member" &&
+		issue.OriginType.Valid && issue.OriginType.String == "workflow" &&
+		issue.OriginID.Valid {
+		nodeRun, nrErr := h.Queries.GetWorkflowNodeRun(r.Context(), issue.OriginID)
+		if nrErr == nil && nodeRun.Status == service.NodeRunStatusAwaitingInput {
+			// Route to workflow: resume the node run with the user reply.
+			if err := h.WorkflowService.ResumeNodeRunFromComment(r.Context(), nodeRun, comment); err != nil {
+				slog.Warn("resume workflow node from comment failed",
+					"node_run_id", nodeRun.ID.String(),
+					"error", err)
 			}
+			writeJSON(w, http.StatusCreated, resp)
+			return
 		}
+	}
 
 	// If the issue is assigned to an agent with on_comment trigger, enqueue a new task.
 	// Skip when the comment comes from the assigned agent itself to avoid loops.
@@ -945,7 +948,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Multi
 				ID:          leaderID,
 				WorkspaceID: issue.WorkspaceID,
 			})
-			if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+			if err != nil || (!agent.RuntimeID.Valid && !agent.IsBuiltin) || agent.ArchivedAt.Valid {
 				continue
 			}
 			// Private-agent gate: prevent triggering a private leader via squad mention.
@@ -979,7 +982,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Multi
 			ID:          agentUUID,
 			WorkspaceID: issue.WorkspaceID,
 		})
-		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		if err != nil || (!agent.RuntimeID.Valid && !agent.IsBuiltin) || agent.ArchivedAt.Valid {
 			continue
 		}
 		// Private-agent gate (member→private requires allowed_principals;

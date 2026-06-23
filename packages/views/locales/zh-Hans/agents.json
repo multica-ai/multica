@@ -162,6 +162,7 @@
     "concurrency_tooltip": "并发 · 最多 {{value}} 个并行 task",
     "concurrency_range": "最大并行 task 数（{{min}}–{{max}}）",
     "runtime_none": "无运行时",
+    "runtime_builtin_auto": "执行时自动选择运行时",
     "runtime_tooltip": "运行时 · {{name}} · {{status}}",
     "runtime_tooltip_none": "运行时 · 未选择",
     "runtime_online": "在线",

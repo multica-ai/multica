@@ -156,7 +156,7 @@ export function useAgentPresenceDetail(
     const runtime = safeRuntimes.find((r) => r.id === agent.runtime_id) ?? null;
 
     const tasks = safeSnapshot.filter((t) => t.agent_id === agentId);
-    return deriveAgentPresenceDetail({ agent, runtime, tasks, now: Date.now() });
+    return deriveAgentPresenceDetail({ agent, runtime, tasks, runtimes: safeRuntimes, now: Date.now() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId, agentId, agents, runtimes, snapshot, agentsErr, runtimesErr, snapshotErr, tick]);
 }

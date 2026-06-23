@@ -26,6 +26,7 @@ export function RuntimePicker({
   members,
   currentUserId,
   canEdit = true,
+  isBuiltin = false,
   onChange,
 }: {
   value: string;
@@ -34,6 +35,8 @@ export function RuntimePicker({
   currentUserId: string | null;
   /** When false, render a static read-only display and skip the popover. */
   canEdit?: boolean;
+  /** When true and no runtime is explicitly bound, show the built-in auto-select label. */
+  isBuiltin?: boolean;
   onChange: (runtimeId: string) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
@@ -71,6 +74,16 @@ export function RuntimePicker({
 
   if (!canEdit) {
     const isOnline = selected?.status === "online";
+    if (isBuiltin && !selected) {
+      return (
+        <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-0.5 text-xs text-muted-foreground">
+          <Icon className="h-3 w-3 shrink-0" />
+          <span className="min-w-0 truncate font-mono">
+            {t(($) => $.pickers.runtime_builtin_auto)}
+          </span>
+        </span>
+      );
+    }
     return (
       <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-0.5 text-xs text-muted-foreground">
         <Icon className="h-3 w-3 shrink-0" />
@@ -92,14 +105,16 @@ export function RuntimePicker({
   // deliberately do NOT append `device_info` to the tooltip — that string
   // also leads with the host and would just repeat what's already in name,
   // producing the "Claude (host) (host · 2.1.121 (Claude Code))" mess.
-  const triggerLabel = selected?.name ?? t(($) => $.pickers.runtime_none);
+  const triggerLabel = selected?.name ?? (isBuiltin ? t(($) => $.pickers.runtime_builtin_auto) : t(($) => $.pickers.runtime_none));
   const isOnline = selected?.status === "online";
   const triggerTitle = selected
     ? t(($) => $.pickers.runtime_tooltip, {
         name: selected.name,
         status: isOnline ? t(($) => $.pickers.runtime_online) : t(($) => $.pickers.runtime_offline),
       })
-    : t(($) => $.pickers.runtime_tooltip_none);
+    : isBuiltin
+      ? t(($) => $.pickers.runtime_builtin_auto)
+      : t(($) => $.pickers.runtime_tooltip_none);
 
   const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
 
