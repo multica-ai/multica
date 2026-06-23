@@ -308,8 +308,7 @@ function KnowledgeListItem({
   );
 }
 
-function makeDraft(detail: KnowledgeDetail | null): UpdateKnowledgeRequest {
-  const item = detail?.item;
+function makeDraftFromItem(item: KnowledgeItem | null | undefined): UpdateKnowledgeRequest {
   return {
     title: item?.title ?? "",
     type: item?.type ?? "lesson",
@@ -322,6 +321,26 @@ function makeDraft(detail: KnowledgeDetail | null): UpdateKnowledgeRequest {
     applicability: item?.applicability ?? "",
     confidence_status: item?.confidence_status ?? "medium",
   };
+}
+
+function makeDraft(detail: KnowledgeDetail | null): UpdateKnowledgeRequest {
+  return makeDraftFromItem(detail?.item);
+}
+
+function knowledgeDraftsEqual(a: UpdateKnowledgeRequest, b: UpdateKnowledgeRequest) {
+  return (
+    (a.title ?? "") === (b.title ?? "") &&
+    (a.type ?? "lesson") === (b.type ?? "lesson") &&
+    (a.confidence_status ?? "medium") === (b.confidence_status ?? "medium") &&
+    (a.problem_pattern ?? "") === (b.problem_pattern ?? "") &&
+    (a.trigger_conditions ?? "") === (b.trigger_conditions ?? "") &&
+    (a.diagnostic_steps ?? "") === (b.diagnostic_steps ?? "") &&
+    (a.recommended_practice ?? "") === (b.recommended_practice ?? "") &&
+    (a.anti_patterns ?? "") === (b.anti_patterns ?? "") &&
+    (a.applicability ?? "") === (b.applicability ?? "") &&
+    (a.domain_labels ?? []).length === (b.domain_labels ?? []).length &&
+    (a.domain_labels ?? []).every((label, index) => label === (b.domain_labels ?? [])[index])
+  );
 }
 
 function candidateMetadata(candidate: KnowledgeCandidate): CandidateMetadata {
@@ -344,7 +363,14 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
   const dismissGovernance = useDismissKnowledgeGovernance();
   const archiveKnowledge = useArchiveKnowledge();
   const restoreKnowledge = useRestoreKnowledge();
+  const detailItem = detail?.item ?? null;
   const [draft, setDraft] = useState<UpdateKnowledgeRequest>(() => makeDraft(detail));
+  const [baselineDraft, setBaselineDraft] = useState<UpdateKnowledgeRequest>(() => makeDraft(detail));
+  const detailDraft = useMemo(() => makeDraftFromItem(detailItem), [detailItem]);
+  const hasUnsavedChanges = useMemo(
+    () => !knowledgeDraftsEqual(draft, baselineDraft),
+    [baselineDraft, draft],
+  );
   const latestEmbedding = useMemo(
     () => (detail ? latestKnowledgeEmbedding(detail.embeddings) : null),
     [detail],
@@ -355,8 +381,9 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
   );
 
   useEffect(() => {
-    setDraft(makeDraft(detail));
-  }, [detail?.item.id]);
+    setBaselineDraft(detailDraft);
+    setDraft(detailDraft);
+  }, [detailDraft]);
 
   if (!detail) {
     return (
@@ -379,7 +406,10 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
   };
   const save = async () => {
     try {
-      await updateKnowledge.mutateAsync({ id: item.id, ...draft });
+      const savedItem = await updateKnowledge.mutateAsync({ id: item.id, ...draft });
+      const savedDraft = makeDraftFromItem(savedItem);
+      setBaselineDraft(savedDraft);
+      setDraft(savedDraft);
       toast.success(t(($) => $.toast.saved));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(($) => $.toast.save_failed));
@@ -512,7 +542,7 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
               <Button
                 size="sm"
                 onClick={save}
-                disabled={updateKnowledge.isPending}
+                disabled={updateKnowledge.isPending || !hasUnsavedChanges}
                 className="ml-auto"
               >
                 {t(($) => $.detail.save)}
