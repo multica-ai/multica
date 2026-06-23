@@ -31,10 +31,69 @@ export interface RenderItem {
 }
 
 /**
+ * Recursively render a single issue and, if it is an expanded parent,
+ * all of its same-status descendants.
+ */
+function renderSubtree(
+  issue: Issue,
+  indent: number,
+  childrenInStatus: Map<string, Issue[]>,
+  childrenMap: Map<string, readonly Issue[]>,
+  expandedParents: ReadonlySet<string>,
+  statusIssueIds: Set<string>,
+  parentInfoMap?: Map<string, ParentInfo>,
+): RenderItem[] {
+  const nestedChildren = childrenInStatus.get(issue.id);
+  const isParent = !!nestedChildren && nestedChildren.length > 0;
+  const expanded = expandedParents.has(issue.id);
+
+  const allChildren = childrenMap.get(issue.id) ?? [];
+  const sameStatusCount = nestedChildren?.length ?? 0;
+  const crossStatusCount = allChildren.length - sameStatusCount;
+
+  // Resolve parent info for top-level items whose parent is cross-status.
+  // Children rendered via recursion always have their parent in the same status,
+  // so parentInfo is only needed for top-level cross-status orphans.
+  let parentInfo: ParentInfo | undefined;
+  if (indent === 0 && issue.parent_issue_id && !statusIssueIds.has(issue.parent_issue_id)) {
+    parentInfo = parentInfoMap?.get(issue.parent_issue_id);
+  }
+
+  const result: RenderItem[] = [
+    {
+      issue,
+      indent,
+      isParent,
+      childCount: isParent ? sameStatusCount : 0,
+      crossStatusChildCount: isParent ? crossStatusCount : 0,
+      parentInfo,
+    },
+  ];
+
+  if (isParent && expanded) {
+    for (const child of nestedChildren!) {
+      result.push(
+        ...renderSubtree(
+          child,
+          indent + 1,
+          childrenInStatus,
+          childrenMap,
+          expandedParents,
+          statusIssueIds,
+          parentInfoMap,
+        ),
+      );
+    }
+  }
+
+  return result;
+}
+
+/**
  * Organise a status-group's flat issue list into a hierarchical order:
  * - Top-level issues first (no parent, or parent in a different status).
  * - Children whose parent IS in the same status group are nested right after
- *   the parent, with indent=1.
+ *   the parent with increasing indent, recursively for any depth.
  * - Children whose parent is in a different status group render at top level
  *   with a clickable `parentInfo` chip.
  *
@@ -74,57 +133,30 @@ export function buildHierarchy(
 
   // Separate top-level vs. child issues.
   const topLevel: Issue[] = [];
-  const childIds = new Set<string>();
 
   for (const issue of issues) {
     if (!issue.parent_issue_id || !statusIssueIds.has(issue.parent_issue_id)) {
       // No parent, or parent not in this status group.
       topLevel.push(issue);
-    } else {
-      // Parent is in this status group — this issue will be nested.
-      childIds.add(issue.id);
     }
   }
 
+  // Recursively render each top-level issue and its descendants.
   for (const issue of topLevel) {
-    const nestedChildren = childrenInStatus.get(issue.id);
-    const isParent = !!nestedChildren && nestedChildren.length > 0;
-    const expanded = expandedParents.has(issue.id);
-
-    // Compute cross-status child count for parent rows.
-    const allChildren = childrenMap.get(issue.id) ?? [];
-    const sameStatusCount = nestedChildren?.length ?? 0;
-    const crossStatusCount = allChildren.length - sameStatusCount;
-
-    // Resolve parent info for children whose parent is in another status group.
-    let parentInfo: ParentInfo | undefined;
-    if (issue.parent_issue_id && !statusIssueIds.has(issue.parent_issue_id)) {
-      parentInfo = parentInfoMap?.get(issue.parent_issue_id);
-    }
-
-    result.push({
-      issue,
-      indent: 0,
-      isParent,
-      childCount: isParent ? sameStatusCount : 0,
-      crossStatusChildCount: isParent ? crossStatusCount : 0,
-      parentInfo,
-    });
-
-    if (isParent && expanded) {
-      for (const child of nestedChildren!) {
-        result.push({
-          issue: child,
-          indent: 1,
-          isParent: false,
-          childCount: 0,
-          crossStatusChildCount: 0,
-        });
-      }
-    }
+    result.push(
+      ...renderSubtree(
+        issue,
+        0,
+        childrenInStatus,
+        childrenMap,
+        expandedParents,
+        statusIssueIds,
+        parentInfoMap,
+      ),
+    );
   }
 
-  // Append any children whose parent wasn't in the top-level (shouldn't happen,
+  // Append any issues that weren't rendered (shouldn't happen in normal use,
   // but guards against edge cases where parent was filtered or not loaded).
   for (const issue of issues) {
     if (!result.some((r) => r.issue.id === issue.id)) {
