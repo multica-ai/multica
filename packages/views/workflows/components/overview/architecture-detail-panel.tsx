@@ -44,6 +44,7 @@ export function ArchitectureDetailPanel({
           onClick={onClose}
           className="text-muted-foreground hover:text-foreground text-lg leading-none"
           data-testid="detail-panel-close"
+          aria-label="Close"
         >
           ×
         </button>
@@ -54,7 +55,7 @@ export function ArchitectureDetailPanel({
         <section>
           <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
             {criticAgent
-              ? "Critic"
+              ? t(($) => $.overview.detail_panel.critic)
               : t(($) => $.overview.detail_panel.plugin_info)}
           </h3>
           <h4 className="font-medium text-sm">{displayName}</h4>
@@ -104,20 +105,21 @@ export function ArchitectureDetailPanel({
 
 /** Renders the full agent info block. */
 function AgentInfoBlock({ agent }: { agent: Agent }) {
+  const { t } = useT("workflows");
   const fields: [string, string | number | boolean | null | undefined][] = [
     ["Name", agent.name],
     ["Description", agent.description],
     ["Runtime mode", agent.runtime_mode],
     ["Status", agent.status],
     ["Model", agent.model],
-    ["Thinking level", agent.thinking_level || "—"],
+    ["Thinking level", agent.thinking_level ?? "—"],
     ["Visibility", agent.visibility],
     ["Max concurrent", agent.max_concurrent_tasks],
     ["Built-in", agent.is_builtin ? "Yes" : "No"],
     ["Instructions", agent.instructions],
     ["Custom env keys", Object.keys(agent.custom_env).join(", ") || "—"],
     ["Custom args", agent.custom_args.join(", ") || "—"],
-    ["Skills", `${agent.skills.length}`],
+    [t(($) => $.overview.detail_panel.skills), `${agent.skills.length}`],
   ];
 
   return (

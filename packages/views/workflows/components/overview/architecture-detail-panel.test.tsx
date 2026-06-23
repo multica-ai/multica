@@ -7,15 +7,6 @@ import type { WorkflowNode, Agent } from "@multica/core/types";
 import type { BuiltinPlugin } from "@multica/core/api/schemas";
 
 // ── Hoisted mocks ──
-const mocks = vi.hoisted(() => ({
-  setViewMode: vi.fn(),
-}));
-
-vi.mock("@multica/core/workflows/stores/view-store", () => ({
-  useWorkflowViewStore: (selector: (s: unknown) => unknown) =>
-    selector({ viewMode: "panorama", setViewMode: mocks.setViewMode }),
-}));
-
 vi.mock("../../../i18n", () => ({
   useT: () => ({
     t: (key: unknown) => {
@@ -26,6 +17,8 @@ vi.mock("../../../i18n", () => ({
               title: "Node Details",
               plugin_info: "Plugin Info",
               agent_info: "Associated Agent",
+              critic: "Critic",
+              skills: "Skills",
               open_in_editor: "Open in Editor",
             },
           },
@@ -143,7 +136,20 @@ describe("ArchitectureDetailPanel", () => {
         onOpenInEditor={onOpenInEditor}
       />,
     );
-    expect(screen.getByText(/2/)).toBeTruthy();
+    expect(screen.getByText("2")).toBeTruthy();
+  });
+
+  it("renders the Skills label with i18n key", () => {
+    const onClose = vi.fn();
+    const onOpenInEditor = vi.fn();
+    render(
+      <ArchitectureDetailPanel
+        data={MOCK_DATA}
+        onClose={onClose}
+        onOpenInEditor={onOpenInEditor}
+      />,
+    );
+    expect(screen.getByText("Skills")).toBeTruthy();
   });
 
   it("calls onClose when close button clicked", () => {
