@@ -29,6 +29,7 @@ UPDATE "user" SET
     avatar_url = COALESCE($3, avatar_url),
     language = COALESCE($4, language),
     profile_description = COALESCE(sqlc.narg('profile_description'), profile_description),
+    motto = COALESCE(sqlc.narg('motto'), motto),
     timezone = CASE
         WHEN sqlc.narg('timezone')::text IS NULL THEN timezone
         WHEN sqlc.narg('timezone')::text = ''    THEN NULL

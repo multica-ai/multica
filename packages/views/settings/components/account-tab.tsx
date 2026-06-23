@@ -29,6 +29,7 @@ export function AccountTab() {
   const [profileDescription, setProfileDescription] = useState(
     user?.profile_description ?? "",
   );
+  const [motto, setMotto] = useState(user?.motto ?? "");
   const [profileSaving, setProfileSaving] = useState(false);
   const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -36,9 +37,11 @@ export function AccountTab() {
   useEffect(() => {
     setProfileName(user?.name ?? "");
     setProfileDescription(user?.profile_description ?? "");
+    setMotto(user?.motto ?? "");
   }, [user]);
 
   const descriptionTooLong = profileDescription.length > MAX_PROFILE_DESCRIPTION_LEN;
+  const mottoTooLong = motto.length > MAX_PROFILE_DESCRIPTION_LEN;
 
   const initials = (user?.name ?? "")
     .split(" ")
@@ -64,12 +67,13 @@ export function AccountTab() {
   };
 
   const handleProfileSave = async () => {
-    if (descriptionTooLong) return;
+    if (descriptionTooLong || mottoTooLong) return;
     setProfileSaving(true);
     try {
       const updated = await api.updateMe({
         name: profileName,
         profile_description: profileDescription,
+        motto,
       });
       setUser(updated);
       toast.success(t(($) => $.account.toast_profile_updated));
@@ -165,11 +169,40 @@ export function AccountTab() {
                 </p>
               ) : null}
             </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">
+                {t(($) => $.account.motto_label)}
+              </Label>
+              <Textarea
+                value={motto}
+                onChange={(e) => setMotto(e.target.value)}
+                placeholder={t(($) => $.account.motto_placeholder)}
+                rows={5}
+                className="mt-1 resize-y"
+              />
+              <div className="mt-1 flex items-start justify-between gap-3 text-xs text-muted-foreground">
+                <span>{t(($) => $.account.motto_hint)}</span>
+                <span
+                  className={mottoTooLong ? "text-destructive shrink-0" : "shrink-0"}
+                  aria-live="polite"
+                >
+                  {motto.length}/{MAX_PROFILE_DESCRIPTION_LEN}
+                </span>
+              </div>
+              {mottoTooLong ? (
+                <p className="mt-1 text-xs text-destructive">
+                  {t(($) => $.account.motto_too_long, {
+                    max: MAX_PROFILE_DESCRIPTION_LEN,
+                    count: motto.length,
+                  })}
+                </p>
+              ) : null}
+            </div>
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button
                 size="sm"
                 onClick={handleProfileSave}
-                disabled={profileSaving || !profileName.trim() || descriptionTooLong}
+                disabled={profileSaving || !profileName.trim() || descriptionTooLong || mottoTooLong}
               >
                 <Save className="h-3 w-3" />
                 {profileSaving ? t(($) => $.account.saving) : t(($) => $.account.save)}

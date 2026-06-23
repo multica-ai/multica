@@ -1,0 +1,2 @@
+ALTER TABLE "user"
+    ADD COLUMN motto TEXT NOT NULL DEFAULT '';
