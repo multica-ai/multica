@@ -33,6 +33,114 @@ func callContextUsage(h *Handler, issueID, workspaceID string) *httptest.Respons
 	return rec
 }
 
+// callContextUsageForSession is callContextUsage targeting a specific thread root
+// via the session_id query param (FIR-1874 the session_id is the thread root id).
+func callContextUsageForSession(h *Handler, issueID, workspaceID, sessionID string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/?session_id="+sessionID, nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("issueId", issueID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = middleware.SetMemberContext(ctx, workspaceID, db.Member{})
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.ContextUsage(rec, req)
+	return rec
+}
+
+// seedInitialRunWithUsage inserts a cold-start run (trigger_comment_id NULL, as
+// fired at issue creation before any comment exists) with recorded usage, and
+// returns the task id. Mirrors seedTaskWithUsage but anchors to no comment.
+func seedInitialRunWithUsage(t *testing.T, issueID, workspaceID, model string, cumInput int64) string {
+	t.Helper()
+	ctx := context.Background()
+	var runtimeID string
+	if err := sessTestPool.QueryRow(ctx,
+		`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider)
+		 VALUES ($1::uuid, 'ctx-test-runtime', 'local', 'codex') RETURNING id::text`,
+		workspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	var agentID string
+	if err := sessTestPool.QueryRow(ctx,
+		`INSERT INTO agent (workspace_id, name, runtime_mode)
+		 VALUES ($1::uuid, 'ctx-test-agent', 'local') RETURNING id::text`,
+		workspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	var taskID string
+	if err := sessTestPool.QueryRow(ctx,
+		`INSERT INTO agent_task_queue (issue_id, agent_id, runtime_id, trigger_comment_id)
+		 VALUES ($1::uuid, $2::uuid, $3::uuid, NULL) RETURNING id::text`,
+		issueID, agentID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("create initial task: %v", err)
+	}
+	if _, err := sessTestPool.Exec(ctx,
+		`INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+		 VALUES ($1::uuid, 'codex', $2, $3, 0, 0, 0)`,
+		taskID, model, cumInput); err != nil {
+		t.Fatalf("create task_usage: %v", err)
+	}
+	return taskID
+}
+
+// TestContextUsage_BindsInitialRunToFirstSession proves the FIR-1931 fix: the
+// cold-start run (no trigger comment) is adopted by the oldest session so its
+// context shows instead of session 1 reading 0.
+func TestContextUsage_BindsInitialRunToFirstSession(t *testing.T) {
+	if sessTestPool == nil {
+		t.Skip("no test DB")
+	}
+	issueID, workspaceID := seedIssue(t)
+	h := NewHandler(sessTestPool, db.New(sessTestPool))
+
+	seedRootComment(t, issueID, workspaceID) // session 1 root, the active+oldest session
+	seedInitialRunWithUsage(t, issueID, workspaceID, "claude-opus-4-8", 250_000)
+
+	var resp contextUsageResponse
+	if err := json.Unmarshal(callContextUsage(h, issueID, workspaceID).Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.HasData {
+		t.Fatalf("has_data = false: the cold-start run was not adopted by session 1 (the FIR-1931 bug)")
+	}
+	if resp.ContextTokens != 250_000 {
+		t.Errorf("context_tokens = %d, want 250000", resp.ContextTokens)
+	}
+	if resp.UsedPercent != 25 { // 250000 / 1000000 (opus-4-8 1M window)
+		t.Errorf("used_percent = %d, want 25", resp.UsedPercent)
+	}
+}
+
+// TestContextUsage_SecondSessionDoesNotAdoptInitialRun is the guard: a session
+// that is NOT the oldest must never inherit the orphan cold-start run.
+func TestContextUsage_SecondSessionDoesNotAdoptInitialRun(t *testing.T) {
+	if sessTestPool == nil {
+		t.Skip("no test DB")
+	}
+	issueID, workspaceID := seedIssue(t)
+	h := NewHandler(sessTestPool, db.New(sessTestPool))
+
+	first := seedRootComment(t, issueID, workspaceID)  // session 1 (oldest)
+	second := seedRootComment(t, issueID, workspaceID) // session 2 (newer)
+	// Backdate session 1 so it is unambiguously the oldest regardless of insert
+	// timing — keeps the "is this the first session?" check deterministic.
+	if _, err := sessTestPool.Exec(context.Background(),
+		`UPDATE comment SET created_at = now() - interval '1 hour' WHERE id = $1::uuid`, first); err != nil {
+		t.Fatalf("backdate first root: %v", err)
+	}
+	seedInitialRunWithUsage(t, issueID, workspaceID, "claude-opus-4-8", 250_000)
+
+	// Target session 2 explicitly; it is not the oldest, so it must NOT adopt the
+	// orphan initial run.
+	var resp contextUsageResponse
+	if err := json.Unmarshal(callContextUsageForSession(h, issueID, workspaceID, second).Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.HasData {
+		t.Fatalf("session 2 wrongly adopted the cold-start run (context_tokens=%d)", resp.ContextTokens)
+	}
+}
+
 // seedReplyComment inserts a reply comment under parentID and returns its id.
 // Used to build threads deeper than the root + direct-reply shape.
 func seedReplyComment(t *testing.T, issueID, workspaceID, parentID string) string {

@@ -16,6 +16,13 @@ package sessions
 // `input_tokens`. With prompt caching warm, almost the entire prompt is served
 // from cache, so counting `input_tokens` alone reported ~0% even when the window
 // was ~40% full (FIR-1839 1D). cache_share = cache_read / context.
+//
+// FIR-1931: the very first run on an issue is fired at issue creation and has NO
+// triggering comment (trigger_comment_id IS NULL), so it matches no thread and
+// its context is invisible — leaving session 1 stuck at 0 even though that
+// cold-start prompt is exactly the context session 1 inherits. The oldest
+// session (session 1) therefore ADOPTS runs with no trigger comment, carrying
+// that cold-start footprint into session 1 instead of losing it.
 
 import (
 	"context"
@@ -67,6 +74,20 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// FIR-1931: is the resolved session the OLDEST thread on the issue (session
+	// 1)? Only session 1 adopts the cold-start run that has no trigger comment.
+	var isFirst bool
+	err = h.pool.QueryRow(r.Context(), `
+		SELECT $2::uuid = (
+			SELECT id FROM comment
+			WHERE issue_id = $1 AND parent_id IS NULL AND type = 'comment'
+			ORDER BY created_at ASC, id ASC
+			LIMIT 1)`, issue.ID, rootID).Scan(&isFirst)
+	if err != nil && err != pgx.ErrNoRows {
+		writeError(w, http.StatusInternalServerError, "failed to resolve first session")
+		return
+	}
+
 	// Latest run TRIGGERED inside this thread (trigger comment is the root or a
 	// reply to it) that has recorded token usage. cf.* is the last-turn footprint
 	// (the size of the prompt the model last read); when present it is the
@@ -80,7 +101,10 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	// triggered by a depth-1 comment, so a follow-up triggered there fell out of
 	// the session. The recursive CTE walks the whole thread subtree so the
 	// "latest run in this session" is correct regardless of how deep the back-
-	// and-forth nested (FIR-1931).
+	// and-forth nested (FIR-1931). The $3 (isFirst) branch additionally lets the
+	// oldest session adopt a cold-start run with no trigger comment; since it is
+	// the oldest run, ORDER BY created_at DESC means any real session-1 run still
+	// wins — the orphan only surfaces when session 1 has no run of its own.
 	const q = `
 		WITH RECURSIVE thread(id) AS (
 			SELECT $2::uuid
@@ -98,7 +122,8 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 		JOIN task_usage tu ON tu.task_id = t.id
 		LEFT JOIN cerebro_task_context_footprint cf ON cf.task_id = t.id
 		WHERE t.issue_id = $1
-		  AND t.trigger_comment_id IN (SELECT id FROM thread)
+		  AND ( t.trigger_comment_id IN (SELECT id FROM thread)
+		        OR ($3::bool AND t.trigger_comment_id IS NULL) )
 		GROUP BY t.id, t.created_at
 		ORDER BY t.created_at DESC
 		LIMIT 1`
@@ -106,7 +131,7 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	var input, cacheRead, cacheWrite, output int64
 	var footprintInput, footprintCacheRead int64
 	var model pgtype.Text
-	err = h.pool.QueryRow(r.Context(), q, issue.ID, rootID).Scan(&input, &cacheRead, &cacheWrite, &output, &model, &footprintInput, &footprintCacheRead)
+	err = h.pool.QueryRow(r.Context(), q, issue.ID, rootID, isFirst).Scan(&input, &cacheRead, &cacheWrite, &output, &model, &footprintInput, &footprintCacheRead)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeJSON(w, http.StatusOK, resp) // no run with usage yet — has_data stays false
