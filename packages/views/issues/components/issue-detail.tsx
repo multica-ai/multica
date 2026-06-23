@@ -2690,15 +2690,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                         {showHandoff && handoffOpen ? (
                           <SessionHandoff session={sg.session} bare controlled open />
                         ) : null}
-                        {/* CEREBRO-PATCH(session-context-under-header): FIR-1870 — a thread IS a session, so each session shows its OWN context window directly under its own header (visible whether open or collapsed). No page-bottom line; the figure is never one number for the whole issue. */}
-                        {sessionContextHairlineEnabled ? (
-                          <div className="border-t px-3 py-2">
-                            <SessionContextBar issueId={id} sessionId={sg.session.id} groups={sg.groups} active={isActive} />
-                          </div>
-                        ) : null}
                         {open ? (
                           <div className="flex flex-col divide-y border-t">
                             {bodyGroups.map((g) => renderGroup(g, true))}
+                          </div>
+                        ) : null}
+                        {/* CEREBRO-PATCH(session-context-bottom): FIR-1870 — each session's OWN context line sits at the BOTTOM of its own box, under the conversation (Jesper: not at the top, and no single page-bottom figure). A collapsed session has no body, so the line sits right under its header, matching the mockup. */}
+                        {sessionContextHairlineEnabled ? (
+                          <div className="border-t px-3 py-2">
+                            <SessionContextBar issueId={id} sessionId={sg.session.id} groups={sg.groups} active={isActive} />
                           </div>
                         ) : null}
                       </div>
