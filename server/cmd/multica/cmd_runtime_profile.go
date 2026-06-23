@@ -100,11 +100,10 @@ func init() {
 	runtimeProfileUpdateCmd.Flags().String("display-name", "", "New display name")
 	runtimeProfileUpdateCmd.Flags().String("command-name", "", "New command name")
 	runtimeProfileUpdateCmd.Flags().String("description", "", "New description")
-	// NOTE: a --fixed-arg flag is intentionally NOT exposed in v1. The server
-	// carries the fixed_args column, but the daemon does not yet pass these
-	// args to the agent launch command, so a CLI flag would promise admins a
-	// no-op. Re-add once it's wired end-to-end (TODO(MUL-3284), see
-	// server/internal/daemon/daemon.go).
+	// NOTE: --fixed-arg remains out of the CLI create/update surface for now:
+	// the product path parses command + args in the UI and stores them as
+	// command_name + fixed_args. Keep this CLI shape narrow until we add an
+	// argv-aware command-line parser here too.
 	runtimeProfileUpdateCmd.Flags().Bool("enabled", true, "Enable or disable the profile")
 	runtimeProfileUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 

@@ -293,8 +293,8 @@ type (
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":             runtimeID,
-		"supports_batch_import":  true,
+		"runtime_id":            runtimeID,
+		"supports_batch_import": true,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -467,8 +467,7 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 // (MUL-3284). protocol_family is the provider used for task routing (it
 // selects the agent backend), while command_name is the actual executable
 // the daemon resolves on PATH and launches. fixed_args are launch arguments
-// every agent on this runtime inherits — wiring them into the spawned command
-// is best-effort and may not be plumbed yet (see the TODO in runTask).
+// every agent on this runtime inherits.
 type RuntimeProfile struct {
 	ID             string   `json:"id"`
 	WorkspaceID    string   `json:"workspace_id"`

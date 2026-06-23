@@ -42,6 +42,8 @@ import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import {
   PROTOCOL_FAMILIES,
   buildRuntimeCatalog,
+  formatCommandLine,
+  parseCommandLine,
   validateProfileForm,
   type ProfileFormErrorField,
   type ProfileFormValues,
@@ -471,6 +473,10 @@ function DetailPanel({
   }
 
   const profile = entry.profile;
+  const commandLine = formatCommandLine(
+    profile.command_name,
+    profile.fixed_args,
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -499,7 +505,7 @@ function DetailPanel({
             <span className="capitalize">{profile.protocol_family}</span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.command)}>
-            <span className="font-mono text-xs">{profile.command_name}</span>
+            <span className="font-mono text-xs">{commandLine}</span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.description)}>
             {profile.description ? (
@@ -673,7 +679,9 @@ function ProfileDetailsForm({
 
   const [values, setValues] = useState<ProfileFormValues>({
     displayName: profile?.display_name ?? "",
-    commandName: profile?.command_name ?? "",
+    commandLine: profile
+      ? formatCommandLine(profile.command_name, profile.fixed_args)
+      : "",
     description: profile?.description ?? "",
   });
   const [errors, setErrors] = useState<ProfileFormErrorField[]>([]);
@@ -687,22 +695,34 @@ function ProfileDetailsForm({
     setValues((prev) => ({ ...prev, [key]: value }));
   };
 
+  const parsedCommand = useMemo(
+    () => parseCommandLine(values.commandLine),
+    [values.commandLine],
+  );
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError(null);
     setDuplicateName(false);
     const validationErrors = validateProfileForm(values);
+    if (!validationErrors.includes("commandLine") && !parsedCommand.ok) {
+      validationErrors.push("commandLine");
+    }
     setErrors(validationErrors);
     if (validationErrors.length > 0) return;
+    if (!parsedCommand.ok) return;
 
     const description = values.description.trim();
+    const commandName = parsedCommand.commandName;
+    const fixedArgs = parsedCommand.fixedArgs;
 
     try {
       if (mode === "create") {
         const created = await createProfile.mutateAsync({
           display_name: values.displayName.trim(),
           protocol_family: family,
-          command_name: values.commandName.trim(),
+          command_name: commandName,
+          fixed_args: fixedArgs,
           ...(description ? { description } : {}),
         });
         toast.success(t(($) => $.profiles.form.toast_created));
@@ -712,7 +732,8 @@ function ProfileDetailsForm({
           profileId: profile.id,
           patch: {
             display_name: values.displayName.trim(),
-            command_name: values.commandName.trim(),
+            command_name: commandName,
+            fixed_args: fixedArgs,
             description: description ? description : null,
           },
         });
@@ -735,6 +756,22 @@ function ProfileDetailsForm({
 
   const formId = `${idPrefix}-form`;
   const hasError = (field: ProfileFormErrorField) => errors.includes(field);
+  const parseErrorMessage =
+    !parsedCommand.ok && parsedCommand.error === "unclosed_quote"
+      ? t(($) => $.profiles.form.error_command_unclosed_quote)
+      : !parsedCommand.ok && parsedCommand.error === "trailing_escape"
+        ? t(($) => $.profiles.form.error_command_trailing_escape)
+      : !parsedCommand.ok && parsedCommand.error === "shell_expansion"
+        ? t(($) => $.profiles.form.error_command_shell_expansion)
+        : !parsedCommand.ok && parsedCommand.error === "shell_syntax"
+          ? t(($) => $.profiles.form.error_command_shell_syntax)
+          : null;
+  const commandError =
+    hasError("commandLine") && !values.commandLine.trim()
+      ? t(($) => $.profiles.form.error_command_required)
+      : hasError("commandLine") && !parsedCommand.ok
+        ? (parseErrorMessage ?? t(($) => $.profiles.form.error_command_required))
+        : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -809,19 +846,42 @@ function ProfileDetailsForm({
           </Label>
           <Input
             id={`${idPrefix}-command`}
-            value={values.commandName}
-            onChange={(e) => setField("commandName", e.target.value)}
+            value={values.commandLine}
+            onChange={(e) => setField("commandLine", e.target.value)}
             placeholder={t(($) => $.profiles.form.command_name_placeholder)}
-            aria-invalid={hasError("commandName")}
+            aria-invalid={hasError("commandLine")}
             aria-describedby={
-              hasError("commandName") ? `${idPrefix}-command-error` : undefined
+              hasError("commandLine") ? `${idPrefix}-command-error` : undefined
             }
             className="h-9 font-mono text-sm"
           />
-          {hasError("commandName") && (
+          {commandError && (
             <p id={`${idPrefix}-command-error`} className="text-xs text-destructive">
-              {t(($) => $.profiles.form.error_command_required)}
+              {commandError}
             </p>
+          )}
+          {parsedCommand.ok && (
+            <div className="space-y-1 rounded-md border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+              <div className="flex min-w-0 gap-1">
+                <span>{t(($) => $.profiles.form.command_preview_executable)}</span>
+                <span className="truncate font-mono text-foreground">
+                  {parsedCommand.commandName}
+                </span>
+              </div>
+              {parsedCommand.fixedArgs.length > 0 && (
+                <div className="flex min-w-0 flex-wrap gap-1">
+                  <span>{t(($) => $.profiles.form.command_preview_args)}</span>
+                  {parsedCommand.fixedArgs.map((arg, index) => (
+                    <span
+                      key={`${arg}-${index}`}
+                      className="rounded bg-background px-1 font-mono text-foreground"
+                    >
+                      {arg}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -840,12 +900,6 @@ function ProfileDetailsForm({
             className="min-h-16 text-sm"
           />
         </div>
-
-        {/* NOTE: a `fixed_args` input is intentionally omitted in v1 — the
-            daemon does not yet pass these args to the agent launch command, so
-            exposing the field would promise admins a no-op. Re-add only once
-            it's wired end-to-end. See TODO(MUL-3284) in
-            server/internal/daemon/daemon.go. */}
 
         {/* NOTE: a visibility control is intentionally omitted in v1. The
             server forces every profile to 'workspace' because the read paths

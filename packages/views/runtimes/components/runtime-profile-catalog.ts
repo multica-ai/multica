@@ -63,20 +63,120 @@ export function buildRuntimeCatalog(
   return { customs, builtins };
 }
 
-// NOTE: `fixed_args` is intentionally NOT exposed in the v1 UI. The server
-// still carries the column, but the daemon does not yet splice these args into
-// the agent launch command, so surfacing an input/display here would promise
-// admins a behavior that does not exist. Re-introduce the parse/format helpers
-// and the form field only once the daemon actually passes them to the backend
-// (proven by a test). See TODO(MUL-3284) in server/internal/daemon/daemon.go.
-
 export interface ProfileFormValues {
   displayName: string;
-  commandName: string;
+  commandLine: string;
   description: string;
 }
 
-export type ProfileFormErrorField = "displayName" | "commandName";
+export type ProfileFormErrorField = "displayName" | "commandLine";
+
+export type CommandLineParseError =
+  | "empty"
+  | "unclosed_quote"
+  | "trailing_escape"
+  | "shell_syntax"
+  | "shell_expansion";
+
+export type ParsedCommandLine =
+  | { ok: true; commandName: string; fixedArgs: string[] }
+  | { ok: false; error: CommandLineParseError };
+
+const SHELL_CONTROL_CHARS = new Set(["|", ">", "<", ";", "&"]);
+
+export function parseCommandLine(input: string): ParsedCommandLine {
+  const line = input.trim();
+  if (!line) return { ok: false, error: "empty" };
+
+  const tokens: string[] = [];
+  let token = "";
+  let quote: "'" | '"' | null = null;
+  let tokenStarted = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i] ?? "";
+    const next = line[i + 1] ?? "";
+
+    if (quote == null && /\s/.test(ch)) {
+      if (tokenStarted) {
+        tokens.push(token);
+        token = "";
+        tokenStarted = false;
+      }
+      continue;
+    }
+
+    if (quote == null) {
+      if (ch === "`" || ch === "$") {
+        return {
+          ok: false,
+          error: ch === "$" ? "shell_expansion" : "shell_syntax",
+        };
+      }
+      if (SHELL_CONTROL_CHARS.has(ch)) {
+        return { ok: false, error: "shell_syntax" };
+      }
+      if (ch === "\\" && next) {
+        token += next;
+        tokenStarted = true;
+        i += 1;
+        continue;
+      }
+      if (ch === "\\") {
+        return { ok: false, error: "trailing_escape" };
+      }
+      if (ch === "'" || ch === '"') {
+        quote = ch;
+        tokenStarted = true;
+        continue;
+      }
+      token += ch;
+      tokenStarted = true;
+      continue;
+    }
+
+    if (ch === quote) {
+      quote = null;
+      tokenStarted = true;
+      continue;
+    }
+    if (quote === '"' && ch === "\\" && next) {
+      token += next;
+      tokenStarted = true;
+      i += 1;
+      continue;
+    }
+    if (quote === '"' && ch === "\\") {
+      return { ok: false, error: "trailing_escape" };
+    }
+    if (quote !== "'" && (ch === "`" || ch === "$")) {
+      return {
+        ok: false,
+        error: ch === "$" ? "shell_expansion" : "shell_syntax",
+      };
+    }
+    token += ch;
+    tokenStarted = true;
+  }
+
+  if (quote != null) return { ok: false, error: "unclosed_quote" };
+  if (tokenStarted) tokens.push(token);
+  if (tokens.length === 0 || !tokens[0]?.trim()) {
+    return { ok: false, error: "empty" };
+  }
+
+  return { ok: true, commandName: tokens[0], fixedArgs: tokens.slice(1) };
+}
+
+export function formatCommandLine(commandName: string, fixedArgs: string[]): string {
+  return [commandName, ...fixedArgs].filter(Boolean).map(quoteArg).join(" ");
+}
+
+function quoteArg(arg: string): string {
+  if (arg === "") return '""';
+  if (!/[\s"'\\|<>;&`$]/.test(arg)) return arg;
+  return `"${arg.replace(/(["\\$`])/g, "\\$1")}"`;
+}
 
 // Pure, synchronous validation for the create/edit form. Returns the set of
 // invalid fields (empty = valid). Display name and command name are the only
@@ -86,7 +186,7 @@ export function validateProfileForm(
 ): ProfileFormErrorField[] {
   const errors: ProfileFormErrorField[] = [];
   if (!values.displayName.trim()) errors.push("displayName");
-  if (!values.commandName.trim()) errors.push("commandName");
+  if (!values.commandLine.trim()) errors.push("commandLine");
   return errors;
 }
 

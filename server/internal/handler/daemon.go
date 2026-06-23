@@ -187,6 +187,11 @@ type DaemonRegisterRequest struct {
 		// so task routing (agent.New) is unchanged.
 		ProfileID string `json:"profile_id"`
 	} `json:"runtimes"`
+	FailedProfiles []struct {
+		ProfileID   string `json:"profile_id"`
+		CommandName string `json:"command_name"`
+		Reason      string `json:"reason"`
+	} `json:"failed_profiles"`
 }
 
 type daemonWorkspaceReposResponse struct {
@@ -281,8 +286,8 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
-	if len(req.Runtimes) == 0 {
-		writeError(w, http.StatusBadRequest, "at least one runtime is required")
+	if len(req.Runtimes) == 0 && len(req.FailedProfiles) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one runtime or failed profile is required")
 		return
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
@@ -501,6 +506,60 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		}
 
 		resp = append(resp, runtimeToResponse(registered))
+	}
+	for _, failed := range req.FailedProfiles {
+		profileID := strings.TrimSpace(failed.ProfileID)
+		if profileID == "" {
+			continue
+		}
+		profileUUID, pok := parseUUIDOrBadRequest(w, profileID, "profile_id")
+		if !pok {
+			return
+		}
+		profile, perr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
+			ID:          profileUUID,
+			WorkspaceID: wsUUID,
+		})
+		if perr != nil || !profile.Enabled {
+			continue
+		}
+		name := profile.DisplayName
+		if req.DeviceName != "" {
+			name = fmt.Sprintf("%s (%s)", name, req.DeviceName)
+		}
+		deviceInfo := strings.TrimSpace(req.DeviceName)
+		reason := strings.TrimSpace(failed.Reason)
+		if reason == "" {
+			reason = "custom runtime command could not be resolved"
+		}
+		commandName := strings.TrimSpace(failed.CommandName)
+		if commandName == "" {
+			commandName = profile.CommandName
+		}
+		metadata, _ := json.Marshal(map[string]any{
+			"version":                            "",
+			"cli_version":                        req.CLIVersion,
+			"launched_by":                        req.LaunchedBy,
+			"runtime_profile_registration_error": true,
+			"runtime_profile_failure_reason":     reason,
+			"command_name":                       commandName,
+		})
+		if _, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
+			WorkspaceID: wsUUID,
+			DaemonID:    strToText(req.DaemonID),
+			Name:        name,
+			RuntimeMode: "local",
+			Provider:    profile.ProtocolFamily,
+			Status:      "offline",
+			DeviceInfo:  deviceInfo,
+			Metadata:    metadata,
+			OwnerID:     ownerID,
+			ProfileID:   profileUUID,
+		}); err != nil {
+			slog.Warn("failed to record runtime profile registration failure",
+				"workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID,
+				"profile_id", profileID, "error", err)
+		}
 	}
 
 	slog.Info("daemon registered", "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID, "runtimes_count", len(resp))

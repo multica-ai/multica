@@ -59,6 +59,7 @@ import {
 } from "../utils";
 import { splitRuntimeName } from "./runtime-machines";
 import {
+  customRuntimeRegistrationFailure,
   isPendingCustomRuntime,
   isPendingCustomRuntimeWarning,
   pendingRuntimeCommandName,
@@ -269,6 +270,20 @@ function HealthCell({
   const { t } = useT("runtimes");
   const { t: tAgents } = useT("agents");
   const labelOf = useHealthLabel();
+  const registrationFailure = customRuntimeRegistrationFailure(runtime);
+  if (registrationFailure) {
+    return (
+      <ListGridCell className="gap-1.5">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+        <span
+          className="block min-w-0 truncate text-xs text-destructive"
+          title={registrationFailure}
+        >
+          {t(($) => $.list.pending_health_error)}
+        </span>
+      </ListGridCell>
+    );
+  }
   if (isPendingCustomRuntime(runtime)) {
     const warning = isPendingCustomRuntimeWarning(runtime, now);
     return (
@@ -370,6 +385,25 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
 
 export function CliCell({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
+  const failure = customRuntimeRegistrationFailure(runtime);
+  if (failure) {
+    const command = pendingRuntimeCommandName(runtime);
+    return (
+      <div className="flex min-w-0 flex-col text-xs">
+        {command && (
+          <span
+            className="truncate font-mono text-muted-foreground"
+            title={command}
+          >
+            {command}
+          </span>
+        )}
+        <span className="truncate text-destructive" title={failure}>
+          {failure}
+        </span>
+      </div>
+    );
+  }
   if (isPendingCustomRuntime(runtime)) {
     const command = pendingRuntimeCommandName(runtime);
     if (!command) {

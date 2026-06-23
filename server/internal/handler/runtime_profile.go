@@ -92,9 +92,25 @@ func marshalFixedArgs(args []string) ([]byte, error) {
 		if strings.TrimSpace(a) == "" {
 			return nil, errors.New("fixed_args entries must be non-empty")
 		}
+		if strings.ContainsRune(a, '\x00') {
+			return nil, errors.New("fixed_args entries cannot contain NUL bytes")
+		}
 		clean = append(clean, a)
 	}
 	return json.Marshal(clean)
+}
+
+func validateRuntimeProfileCommandName(commandName string) error {
+	if commandName == "" {
+		return errors.New("command_name is required")
+	}
+	if strings.ContainsAny(commandName, " \t\r\n") {
+		return errors.New("command_name must be a single executable token; put arguments in fixed_args")
+	}
+	if strings.ContainsRune(commandName, '\x00') {
+		return errors.New("command_name cannot contain NUL bytes")
+	}
+	return nil
 }
 
 type createRuntimeProfileRequest struct {
@@ -139,6 +155,10 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CommandName == "" {
 		writeError(w, http.StatusBadRequest, "command_name is required")
+		return
+	}
+	if err := validateRuntimeProfileCommandName(req.CommandName); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	fixedArgs, err := marshalFixedArgs(req.FixedArgs)
@@ -274,8 +294,8 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CommandName != nil {
 		cmd := strings.TrimSpace(*req.CommandName)
-		if cmd == "" {
-			writeError(w, http.StatusBadRequest, "command_name cannot be empty")
+		if err := validateRuntimeProfileCommandName(cmd); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		params.CommandName = strToText(cmd)
