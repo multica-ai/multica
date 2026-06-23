@@ -50,13 +50,20 @@ type CuratorProbeState =
   | { status: "warning"; result: ProbeKnowledgeCuratorResponse }
   | { status: "error"; message: string };
 
+type KnowledgeEmbeddingDimensions = 1536 | 3072 | 1024 | 768;
+
+interface CuratorEndpointSettings {
+  provider: string;
+  base_url: string;
+  model: string;
+}
+
 interface KnowledgeCuratorSettings {
   enabled: boolean;
-  provider: string;
-  model: string;
-  embedding_model: string;
-  base_url: string;
-  secret_ref?: string;
+  chat: CuratorEndpointSettings;
+  embedding: CuratorEndpointSettings & {
+    dimensions: KnowledgeEmbeddingDimensions;
+  };
 }
 
 interface KnowledgeRAGSettings {
@@ -69,10 +76,17 @@ interface KnowledgeRAGSettings {
 
 const DEFAULT_CURATOR_SETTINGS: KnowledgeCuratorSettings = {
   enabled: false,
-  provider: "",
-  model: "",
-  embedding_model: "",
-  base_url: "",
+  chat: {
+    provider: "",
+    base_url: "",
+    model: "",
+  },
+  embedding: {
+    provider: "",
+    base_url: "",
+    model: "",
+    dimensions: 1536,
+  },
 };
 
 const DEFAULT_RAG_SETTINGS: KnowledgeRAGSettings = {
@@ -89,14 +103,42 @@ function readCuratorSettings(settings: Record<string, unknown> | undefined): Kno
     return DEFAULT_CURATOR_SETTINGS;
   }
   const data = raw as Record<string, unknown>;
+  const chat = readEndpointSettings(data.chat, {
+    provider: typeof data.provider === "string" ? data.provider : "",
+    base_url: typeof data.base_url === "string" ? data.base_url : "",
+    model: typeof data.model === "string" ? data.model : "",
+  });
+  const embedding = readEndpointSettings(data.embedding, {
+    provider: chat.provider,
+    base_url: chat.base_url,
+    model: typeof data.embedding_model === "string" ? data.embedding_model : "",
+  });
   return {
     enabled: data.enabled === true,
-    provider: typeof data.provider === "string" ? data.provider : "",
-    model: typeof data.model === "string" ? data.model : "",
-    embedding_model: typeof data.embedding_model === "string" ? data.embedding_model : "",
-    base_url: typeof data.base_url === "string" ? data.base_url : "",
-    ...(typeof data.secret_ref === "string" ? { secret_ref: data.secret_ref } : {}),
+    chat,
+    embedding: {
+      ...embedding,
+      dimensions: readEmbeddingDimensions(
+        data.embedding && typeof data.embedding === "object" && !Array.isArray(data.embedding)
+          ? (data.embedding as Record<string, unknown>).dimensions
+          : undefined,
+      ),
+    },
   };
+}
+
+function readEndpointSettings(raw: unknown, fallback: CuratorEndpointSettings): CuratorEndpointSettings {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return fallback;
+  const data = raw as Record<string, unknown>;
+  return {
+    provider: typeof data.provider === "string" ? data.provider : fallback.provider,
+    base_url: typeof data.base_url === "string" ? data.base_url : fallback.base_url,
+    model: typeof data.model === "string" ? data.model : fallback.model,
+  };
+}
+
+function readEmbeddingDimensions(raw: unknown): KnowledgeEmbeddingDimensions {
+  return raw === 3072 || raw === 1024 || raw === 768 || raw === 1536 ? raw : 1536;
 }
 
 function readRAGSettings(settings: Record<string, unknown> | undefined): KnowledgeRAGSettings {
@@ -159,6 +201,8 @@ function CuratorProbeNotice({
     );
   }
   const warning = state.status === "warning";
+  const chat = state.result.chat_status;
+  const embedding = state.result.embedding_status;
   return (
     <div
       className={`space-y-2 rounded-md border p-3 text-sm ${
@@ -174,13 +218,23 @@ function CuratorProbeNotice({
             <p className="font-medium">
               {warning ? t(($) => $.curator.probe_warning) : t(($) => $.curator.probe_success)}
             </p>
-            <p>
-              {t(($) => $.curator.probe_recommendation, {
-                provider: state.result.provider,
-                model: state.result.model || "-",
-                embeddingModel: state.result.embedding_model || "-",
-              })}
-            </p>
+            <div className="space-y-1">
+              <p>
+                {t(($) => $.curator.probe_chat_status, {
+                  provider: chat.provider || "-",
+                  model: chat.model || "-",
+                  status: chat.error || t(($) => $.curator.probe_status_ok),
+                })}
+              </p>
+              <p>
+                {t(($) => $.curator.probe_embedding_status, {
+                  provider: embedding.provider || "-",
+                  model: embedding.model || "-",
+                  dimensions: embedding.dimensions || "-",
+                  status: embedding.error || t(($) => $.curator.probe_status_ok),
+                })}
+              </p>
+            </div>
           </div>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onUseRecommendation}>
@@ -188,13 +242,6 @@ function CuratorProbeNotice({
           {t(($) => $.curator.probe_use_recommendation)}
         </Button>
       </div>
-      {state.result.warnings.length > 0 && (
-        <ul className="space-y-1 pl-6 text-xs list-disc">
-          {state.result.warnings.map((warningText) => (
-            <li key={warningText}>{warningText}</li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
@@ -220,8 +267,9 @@ export function CuratorTab() {
   const [probeState, setProbeState] = useState<CuratorProbeState>({ status: "idle" });
   const [typeHelpOpen, setTypeHelpOpen] = useState(false);
   const [manualFields, setManualFields] = useState({
-    provider: false,
-    model: false,
+    chat_provider: false,
+    chat_model: false,
+    embedding_provider: false,
     embedding_model: false,
   });
 
@@ -229,38 +277,58 @@ export function CuratorTab() {
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
   const dirty = !sameSettings(settings, savedSettings) || !sameRAGSettings(ragSettings, savedRAGSettings);
   const modelChanged =
-    settings.model !== savedSettings.model ||
-    settings.embedding_model !== savedSettings.embedding_model;
+    settings.chat.model !== savedSettings.chat.model ||
+    settings.embedding.model !== savedSettings.embedding.model ||
+    settings.embedding.dimensions !== savedSettings.embedding.dimensions;
 
   useEffect(() => {
     setSettings(savedSettings);
     setRAGSettings(savedRAGSettings);
     setProbeState({ status: "idle" });
-    setManualFields({ provider: false, model: false, embedding_model: false });
+    setManualFields({ chat_provider: false, chat_model: false, embedding_provider: false, embedding_model: false });
   }, [savedSettings, savedRAGSettings]);
 
   function applyProbeResult(result: ProbeKnowledgeCuratorResponse, force: boolean) {
+    const chat = result.chat_status;
+    const embedding = result.embedding_status;
     setSettings((current) => ({
       ...current,
-      provider: (force || !manualFields.provider) && result.provider ? result.provider : current.provider,
-      model: (force || !manualFields.model) && result.model ? result.model : current.model,
-      embedding_model: (force || !manualFields.embedding_model) && result.embedding_model
-        ? result.embedding_model
-        : current.embedding_model,
+      chat: {
+        ...current.chat,
+        provider: (force || !manualFields.chat_provider) && chat.provider ? chat.provider : current.chat.provider,
+        model: (force || !manualFields.chat_model) && chat.model ? chat.model : current.chat.model,
+      },
+      embedding: {
+        ...current.embedding,
+        provider: (force || !manualFields.embedding_provider) && embedding.provider ? embedding.provider : current.embedding.provider,
+        model: (force || !manualFields.embedding_model) && embedding.model
+          ? embedding.model
+          : current.embedding.model,
+        dimensions: embedding.dimensions === 3072 || embedding.dimensions === 1024 || embedding.dimensions === 768 || embedding.dimensions === 1536
+          ? embedding.dimensions
+          : current.embedding.dimensions,
+      },
     }));
   }
 
   async function runProbe(forceApply = false) {
-    const baseURL = settings.base_url.trim();
-    if (!baseURL || probeState.status === "loading") return;
+    const chatBaseURL = settings.chat.base_url.trim();
+    const embeddingBaseURL = settings.embedding.base_url.trim();
+    if ((!chatBaseURL && !embeddingBaseURL) || probeState.status === "loading") return;
     setProbeState({ status: "loading" });
     try {
       const result = await api.probeKnowledgeCurator({
-        base_url: baseURL,
-        model: settings.model,
-        embedding_model: settings.embedding_model,
+        chat_base_url: chatBaseURL,
+        chat_model: settings.chat.model,
+        embedding_base_url: embeddingBaseURL,
+        embedding_model: settings.embedding.model,
+        embedding_dimensions: settings.embedding.dimensions,
       });
-      setProbeState(result.warnings.length > 0 ? { status: "warning", result } : { status: "success", result });
+      setProbeState(
+        result.chat_status.error || result.embedding_status.error
+          ? { status: "warning", result }
+          : { status: "success", result },
+      );
       applyProbeResult(result, forceApply);
     } catch (e) {
       setProbeState({ status: "error", message: e instanceof Error ? e.message : t(($) => $.curator.probe_failed) });
@@ -332,56 +400,115 @@ export function CuratorTab() {
               />
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium">{t(($) => $.curator.provider_label)}</span>
-                <Input
-                  value={settings.provider}
-                  onChange={(e) => {
-                    setManualFields((s) => ({ ...s, provider: true }));
-                    setSettings((s) => ({ ...s, provider: e.target.value }));
-                  }}
-                  disabled={!canManageWorkspace || saving}
-                  placeholder={t(($) => $.curator.provider_placeholder)}
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium">{t(($) => $.curator.model_label)}</span>
-                <Input
-                  value={settings.model}
-                  onChange={(e) => {
-                    setManualFields((s) => ({ ...s, model: true }));
-                    setSettings((s) => ({ ...s, model: e.target.value }));
-                  }}
-                  disabled={!canManageWorkspace || saving}
-                  placeholder={t(($) => $.curator.model_placeholder)}
-                />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium">{t(($) => $.curator.embedding_model_label)}</span>
-                <Input
-                  value={settings.embedding_model}
-                  onChange={(e) => {
-                    setManualFields((s) => ({ ...s, embedding_model: true }));
-                    setSettings((s) => ({ ...s, embedding_model: e.target.value }));
-                  }}
-                  disabled={!canManageWorkspace || saving}
-                  placeholder={t(($) => $.curator.embedding_model_placeholder)}
-                />
-              </label>
-              <label className="space-y-1.5 md:col-span-2">
-                <span className="text-xs font-medium">{t(($) => $.curator.base_url_label)}</span>
-                <Input
-                  value={settings.base_url}
-                  onChange={(e) => {
-                    setProbeState({ status: "idle" });
-                    setSettings((s) => ({ ...s, base_url: e.target.value }));
-                  }}
-                  onBlur={() => void runProbe(false)}
-                  disabled={!canManageWorkspace || saving || probeState.status === "loading"}
-                  placeholder={t(($) => $.curator.base_url_placeholder)}
-                />
-              </label>
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <h2 className="text-sm font-medium">{t(($) => $.curator.chat_section_title)}</h2>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium">{t(($) => $.curator.provider_label)}</span>
+                    <Input
+                      value={settings.chat.provider}
+                      onChange={(e) => {
+                        setManualFields((s) => ({ ...s, chat_provider: true }));
+                        setSettings((s) => ({ ...s, chat: { ...s.chat, provider: e.target.value } }));
+                      }}
+                      disabled={!canManageWorkspace || saving}
+                      placeholder={t(($) => $.curator.provider_placeholder)}
+                    />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium">{t(($) => $.curator.model_label)}</span>
+                    <Input
+                      value={settings.chat.model}
+                      onChange={(e) => {
+                        setManualFields((s) => ({ ...s, chat_model: true }));
+                        setSettings((s) => ({ ...s, chat: { ...s.chat, model: e.target.value } }));
+                      }}
+                      disabled={!canManageWorkspace || saving}
+                      placeholder={t(($) => $.curator.model_placeholder)}
+                    />
+                  </label>
+                  <label className="space-y-1.5 md:col-span-2">
+                    <span className="text-xs font-medium">{t(($) => $.curator.base_url_label)}</span>
+                    <Input
+                      value={settings.chat.base_url}
+                      onChange={(e) => {
+                        setProbeState({ status: "idle" });
+                        setSettings((s) => ({ ...s, chat: { ...s.chat, base_url: e.target.value } }));
+                      }}
+                      onBlur={() => void runProbe(false)}
+                      disabled={!canManageWorkspace || saving || probeState.status === "loading"}
+                      placeholder={t(($) => $.curator.base_url_placeholder)}
+                    />
+                  </label>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <h2 className="text-sm font-medium">{t(($) => $.curator.embedding_section_title)}</h2>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium">{t(($) => $.curator.provider_label)}</span>
+                    <Input
+                      value={settings.embedding.provider}
+                      onChange={(e) => {
+                        setManualFields((s) => ({ ...s, embedding_provider: true }));
+                        setSettings((s) => ({ ...s, embedding: { ...s.embedding, provider: e.target.value } }));
+                      }}
+                      disabled={!canManageWorkspace || saving}
+                      placeholder={t(($) => $.curator.provider_placeholder)}
+                    />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium">{t(($) => $.curator.embedding_model_label)}</span>
+                    <Input
+                      value={settings.embedding.model}
+                      onChange={(e) => {
+                        setManualFields((s) => ({ ...s, embedding_model: true }));
+                        setSettings((s) => ({ ...s, embedding: { ...s.embedding, model: e.target.value } }));
+                      }}
+                      disabled={!canManageWorkspace || saving}
+                      placeholder={t(($) => $.curator.embedding_model_placeholder)}
+                    />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium">{t(($) => $.curator.base_url_label)}</span>
+                    <Input
+                      value={settings.embedding.base_url}
+                      onChange={(e) => {
+                        setProbeState({ status: "idle" });
+                        setSettings((s) => ({ ...s, embedding: { ...s.embedding, base_url: e.target.value } }));
+                      }}
+                      onBlur={() => void runProbe(false)}
+                      disabled={!canManageWorkspace || saving || probeState.status === "loading"}
+                      placeholder={t(($) => $.curator.base_url_placeholder)}
+                    />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium">{t(($) => $.curator.embedding_dimensions_label)}</span>
+                    <Select
+                      value={String(settings.embedding.dimensions)}
+                      onValueChange={(value) =>
+                        setSettings((s) => ({
+                          ...s,
+                          embedding: { ...s.embedding, dimensions: Number(value) as KnowledgeEmbeddingDimensions },
+                        }))
+                      }
+                      disabled={!canManageWorkspace || saving}
+                    >
+                      <SelectTrigger size="sm">
+                        <SelectValue>{settings.embedding.dimensions}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[1536, 3072, 1024, 768].map((dimension) => (
+                          <SelectItem key={dimension} value={String(dimension)}>
+                            {dimension}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                </div>
+              </div>
             </div>
             {canManageWorkspace && (
               <CuratorProbeNotice

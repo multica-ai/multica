@@ -69,6 +69,24 @@ describe("knowledge response schemas", () => {
     expect(parsed).toEqual(EMPTY_KNOWLEDGE_DETAIL);
   });
 
+  it("parses embedding attempt status on knowledge detail", () => {
+    const parsed = KnowledgeDetailSchema.parse({
+      item: { id: "k1" },
+      embedding_status: {
+        status: "failed",
+        provider: "siliconflow",
+        model: "BAAI/bge-m3",
+        dimension: 1024,
+        error_message: "account balance is insufficient",
+        attempted_at: "2026-06-23T08:00:00Z",
+      },
+    });
+
+    expect(parsed.embedding_status?.status).toBe("failed");
+    expect(parsed.embedding_status?.error_message).toBe("account balance is insufficient");
+    expect(parsed.embedding_status?.dimension).toBe(1024);
+  });
+
   it("accepts dispatched response with task_id", () => {
     const parsed = parseWithFallback(
       { status: "queued", task_id: "task-1", message: "dispatched" },

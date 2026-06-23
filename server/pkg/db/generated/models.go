@@ -656,9 +656,29 @@ type KnowledgeEmbedding struct {
 	Provider        string             `json:"provider"`
 	Model           string             `json:"model"`
 	ContentHash     string             `json:"content_hash"`
-	Embedding       pgvector.Vector    `json:"embedding"`
+	Embedding1536   pgvector.Vector    `json:"embedding_1536"`
 	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	Dimension       int32              `json:"dimension"`
+	Embedding3072   pgvector.Vector    `json:"embedding_3072"`
+	Embedding1024   pgvector.Vector    `json:"embedding_1024"`
+	Embedding768    pgvector.Vector    `json:"embedding_768"`
+}
+
+type KnowledgeEmbeddingAttempt struct {
+	ID              pgtype.UUID        `json:"id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Status          string             `json:"status"`
+	Provider        pgtype.Text        `json:"provider"`
+	Model           pgtype.Text        `json:"model"`
+	Dimension       pgtype.Int4        `json:"dimension"`
+	ContentHash     pgtype.Text        `json:"content_hash"`
+	ErrorMessage    pgtype.Text        `json:"error_message"`
+	AttemptedAt     pgtype.Timestamptz `json:"attempted_at"`
+	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type KnowledgeFeedback struct {

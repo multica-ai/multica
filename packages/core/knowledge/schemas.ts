@@ -24,22 +24,47 @@ import type {
 
 const NullableString = z.string().nullable().default(null);
 
-export const ProbeKnowledgeCuratorResponseSchema = z.object({
+const ProbeKnowledgeCuratorModelStatusSchema = z.object({
   provider: z.string().default("custom"),
   model: z.string().default(""),
-  embedding_model: z.string().default(""),
-  chat_supported: z.boolean().default(false),
-  embedding_supported: z.boolean().default(false),
-  warnings: z.array(z.string()).default([]),
+  supported: z.boolean().default(false),
+  error: z.string().optional(),
+}).passthrough();
+
+const ProbeKnowledgeCuratorEmbeddingStatusSchema = z.object({
+  provider: z.string().default("custom"),
+  model: z.string().default(""),
+  dimensions: z.number().default(1536),
+  supported: z.boolean().default(false),
+  error: z.string().optional(),
+}).passthrough();
+
+export const ProbeKnowledgeCuratorResponseSchema = z.object({
+  chat_status: ProbeKnowledgeCuratorModelStatusSchema.default({
+    provider: "custom",
+    model: "",
+    supported: false,
+  }),
+  embedding_status: ProbeKnowledgeCuratorEmbeddingStatusSchema.default({
+    provider: "custom",
+    model: "",
+    dimensions: 1536,
+    supported: false,
+  }),
 }).passthrough();
 
 export const EMPTY_PROBE_KNOWLEDGE_CURATOR_RESPONSE: ProbeKnowledgeCuratorResponse = {
-  provider: "custom",
-  model: "",
-  embedding_model: "",
-  chat_supported: false,
-  embedding_supported: false,
-  warnings: [],
+  chat_status: {
+    provider: "custom",
+    model: "",
+    supported: false,
+  },
+  embedding_status: {
+    provider: "custom",
+    model: "",
+    dimensions: 1536,
+    supported: false,
+  },
 };
 
 export const KnowledgeItemSchema = z.object({
@@ -122,9 +147,21 @@ const KnowledgeEmbeddingMetadataSchema = z.object({
   workspace_id: z.string().default(""),
   provider: z.string().default(""),
   model: z.string().default(""),
+  dimension: z.number().default(1536),
   content_hash: z.string().default(""),
   embedded_at: z.string().default(""),
   created_at: z.string().default(""),
+}).passthrough();
+
+const KnowledgeEmbeddingStatusSchema = z.object({
+  status: z.string().default(""),
+  provider: NullableString,
+  model: NullableString,
+  dimension: z.number().nullable().default(null),
+  content_hash: NullableString,
+  error_message: NullableString,
+  attempted_at: z.string().default(""),
+  embedded_at: NullableString,
 }).passthrough();
 
 const KnowledgeFeedbackSummarySchema = z.object({
@@ -144,6 +181,7 @@ export const KnowledgeDetailSchema = z.object({
   }),
   publish_targets: z.array(KnowledgePublishTargetSchema).default([]),
   embeddings: z.array(KnowledgeEmbeddingMetadataSchema).default([]),
+  embedding_status: KnowledgeEmbeddingStatusSchema.nullable().default(null),
   feedback_summary: z.array(KnowledgeFeedbackSummarySchema).default([]),
 }).passthrough();
 
@@ -366,6 +404,7 @@ export const EMPTY_KNOWLEDGE_DETAIL: KnowledgeDetail = {
   },
   publish_targets: [],
   embeddings: [],
+  embedding_status: null,
   feedback_summary: [],
 };
 

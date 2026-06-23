@@ -198,7 +198,10 @@
     "probe_success": "端点兼容",
     "probe_warning": "端点部分兼容",
     "probe_failed": "探测端点失败",
-    "probe_recommendation": "推荐配置：{{provider}} / {{model}} / {{embeddingModel}}",
+    "probe_recommendation": "推荐配置：chat {{provider}} / {{model}}，embedding {{embeddingProvider}} / {{embeddingModel}} / {{embeddingDimensions}}",
+    "probe_status_ok": "正常",
+    "probe_chat_status": "Chat：{{provider}} / {{model}} - {{status}}",
+    "probe_embedding_status": "Embedding：{{provider}} / {{model}} / {{dimensions}} - {{status}}",
     "probe_use_recommendation": "使用推荐配置",
     "rag_auto_inject_label": "自动注入相关 Knowledge",
     "rag_auto_inject_description": "在工作区策略允许时，把少量排序后的 Knowledge 上下文注入到智能体任务 claim 中。",
@@ -229,7 +232,10 @@
     "saving": "保存中...",
     "manage_hint": "只有管理员和所有者可以更新 Curator 设置。",
     "toast_saved": "已保存 Curator 设置",
-    "toast_save_failed": "保存 Curator 设置失败"
+    "toast_save_failed": "保存 Curator 设置失败",
+    "chat_section_title": "Chat 模型",
+    "embedding_section_title": "Embedding 模型",
+    "embedding_dimensions_label": "Embedding 维度"
   },
   "github": {
     "page_description": "连接 GitHub App、控制 Pull Request 如何出现在 Multica 中，并决定智能体在 commit 记录里留下哪些痕迹。",

@@ -1613,16 +1613,6 @@ func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskI
 	return i, err
 }
 
-const getLastTaskOutcomeForIssueAndAgent = `-- name: GetLastTaskOutcomeForIssueAndAgent :one
-SELECT result, error, failure_reason, status FROM agent_task_queue
-WHERE agent_id = $1
-  AND issue_id = $2
-  AND id <> $3
-  AND status IN ('completed', 'failed')
-ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
-LIMIT 1
-`
-
 const getLastChannelTaskSession = `-- name: GetLastChannelTaskSession :one
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND channel_id = $2
@@ -1636,6 +1626,45 @@ WHERE agent_id = $1 AND channel_id = $2
     )
   )
   AND session_id IS NOT NULL
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1
+`
+
+type GetLastChannelTaskSessionParams struct {
+	AgentID         pgtype.UUID `json:"agent_id"`
+	ChannelID       pgtype.UUID `json:"channel_id"`
+	ChannelThreadID pgtype.UUID `json:"channel_thread_id"`
+}
+
+type GetLastChannelTaskSessionRow struct {
+	SessionID pgtype.Text `json:"session_id"`
+	WorkDir   pgtype.Text `json:"work_dir"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+// Resume channel-origin mentions scoped to a single context lane:
+// (agent_id, channel_id, channel_thread_id). The channel main timeline
+// (channel_thread_id IS NULL) is the parent lane; every thread is its own
+// child lane. Scoping the resume key this way keeps each thread's
+// conversation/workdir isolated, so two unrelated threads in the same
+// channel never inherit each other's session — the channel analog of
+// per-issue isolation. Cross-lane context stays reachable on demand via
+// `multica channel context`, so no session inheritance across lanes is
+// needed. Failures known to poison session history are excluded just like
+// issue/chat resume.
+func (q *Queries) GetLastChannelTaskSession(ctx context.Context, arg GetLastChannelTaskSessionParams) (GetLastChannelTaskSessionRow, error) {
+	row := q.db.QueryRow(ctx, getLastChannelTaskSession, arg.AgentID, arg.ChannelID, arg.ChannelThreadID)
+	var i GetLastChannelTaskSessionRow
+	err := row.Scan(&i.SessionID, &i.WorkDir, &i.RuntimeID)
+	return i, err
+}
+
+const getLastTaskOutcomeForIssueAndAgent = `-- name: GetLastTaskOutcomeForIssueAndAgent :one
+SELECT result, error, failure_reason, status FROM agent_task_queue
+WHERE agent_id = $1
+  AND issue_id = $2
+  AND id <> $3
+  AND status IN ('completed', 'failed')
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
 LIMIT 1
 `
@@ -1665,35 +1694,6 @@ func (q *Queries) GetLastTaskOutcomeForIssueAndAgent(ctx context.Context, arg Ge
 		&i.FailureReason,
 		&i.Status,
 	)
-	return i, err
-}
-
-type GetLastChannelTaskSessionParams struct {
-	AgentID         pgtype.UUID `json:"agent_id"`
-	ChannelID       pgtype.UUID `json:"channel_id"`
-	ChannelThreadID pgtype.UUID `json:"channel_thread_id"`
-}
-
-type GetLastChannelTaskSessionRow struct {
-	SessionID pgtype.Text `json:"session_id"`
-	WorkDir   pgtype.Text `json:"work_dir"`
-	RuntimeID pgtype.UUID `json:"runtime_id"`
-}
-
-// Resume channel-origin mentions scoped to a single context lane:
-// (agent_id, channel_id, channel_thread_id). The channel main timeline
-// (channel_thread_id IS NULL) is the parent lane; every thread is its own
-// child lane. Scoping the resume key this way keeps each thread's
-// conversation/workdir isolated, so two unrelated threads in the same
-// channel never inherit each other's session — the channel analog of
-// per-issue isolation. Cross-lane context stays reachable on demand via
-// `multica channel context`, so no session inheritance across lanes is
-// needed. Failures known to poison session history are excluded just like
-// issue/chat resume.
-func (q *Queries) GetLastChannelTaskSession(ctx context.Context, arg GetLastChannelTaskSessionParams) (GetLastChannelTaskSessionRow, error) {
-	row := q.db.QueryRow(ctx, getLastChannelTaskSession, arg.AgentID, arg.ChannelID, arg.ChannelThreadID)
-	var i GetLastChannelTaskSessionRow
-	err := row.Scan(&i.SessionID, &i.WorkDir, &i.RuntimeID)
 	return i, err
 }
 

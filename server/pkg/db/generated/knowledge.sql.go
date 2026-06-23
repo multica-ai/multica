@@ -631,6 +631,39 @@ func (q *Queries) GetKnowledgeEffectSummary(ctx context.Context, arg GetKnowledg
 	return i, err
 }
 
+const getKnowledgeEmbeddingAttempt = `-- name: GetKnowledgeEmbeddingAttempt :one
+SELECT id, knowledge_item_id, workspace_id, status, provider, model, dimension, content_hash, error_message, attempted_at, embedded_at, created_at, updated_at
+FROM knowledge_embedding_attempt
+WHERE knowledge_item_id = $1
+  AND workspace_id = $2
+`
+
+type GetKnowledgeEmbeddingAttemptParams struct {
+	KnowledgeItemID pgtype.UUID `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetKnowledgeEmbeddingAttempt(ctx context.Context, arg GetKnowledgeEmbeddingAttemptParams) (KnowledgeEmbeddingAttempt, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeEmbeddingAttempt, arg.KnowledgeItemID, arg.WorkspaceID)
+	var i KnowledgeEmbeddingAttempt
+	err := row.Scan(
+		&i.ID,
+		&i.KnowledgeItemID,
+		&i.WorkspaceID,
+		&i.Status,
+		&i.Provider,
+		&i.Model,
+		&i.Dimension,
+		&i.ContentHash,
+		&i.ErrorMessage,
+		&i.AttemptedAt,
+		&i.EmbeddedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getKnowledgeFeedbackSummary = `-- name: GetKnowledgeFeedbackSummary :many
 SELECT value, count(*)::bigint AS count
 FROM knowledge_feedback
@@ -1355,7 +1388,7 @@ func (q *Queries) ListKnowledgeEffectHourly(ctx context.Context, arg ListKnowled
 }
 
 const listKnowledgeEmbeddingMetadata = `-- name: ListKnowledgeEmbeddingMetadata :many
-SELECT id, knowledge_item_id, workspace_id, provider, model, content_hash, embedded_at, created_at
+SELECT id, knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedded_at, created_at
 FROM knowledge_embedding
 WHERE knowledge_item_id = $1
   AND workspace_id = $2
@@ -1373,6 +1406,7 @@ type ListKnowledgeEmbeddingMetadataRow struct {
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
 	Provider        string             `json:"provider"`
 	Model           string             `json:"model"`
+	Dimension       int32              `json:"dimension"`
 	ContentHash     string             `json:"content_hash"`
 	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
@@ -1393,6 +1427,7 @@ func (q *Queries) ListKnowledgeEmbeddingMetadata(ctx context.Context, arg ListKn
 			&i.WorkspaceID,
 			&i.Provider,
 			&i.Model,
+			&i.Dimension,
 			&i.ContentHash,
 			&i.EmbeddedAt,
 			&i.CreatedAt,
@@ -2316,10 +2351,12 @@ func (q *Queries) SearchKnowledgeText(ctx context.Context, arg SearchKnowledgeTe
 const searchKnowledgeVector = `-- name: SearchKnowledgeVector :many
 SELECT
     ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at, ki.stale_score, ki.effectiveness_score, ki.conflict_group, ki.review_reason, ki.update_suggestion, ki.review_needed_at, ki.governance_checked_at,
-    (1 - MIN(ke.embedding <=> $1::vector))::float8 AS vector_score
+    (1 - MIN(ke.embedding_1536 <=> $1::vector(1536)))::float8 AS vector_score
 FROM knowledge_item ki
 JOIN knowledge_embedding ke ON ke.knowledge_item_id = ki.id AND ke.workspace_id = ki.workspace_id
 WHERE ki.workspace_id = $2
+  AND ke.dimension = 1536
+  AND ke.embedding_1536 IS NOT NULL
   AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
   AND (
       COALESCE(cardinality($3::text[]), 0) > 0
@@ -2345,7 +2382,7 @@ WHERE ki.workspace_id = $2
   )
 GROUP BY ki.id
 ORDER BY
-    ((1 - MIN(ke.embedding <=> $1::vector)) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
+    ((1 - MIN(ke.embedding_1536 <=> $1::vector(1536))) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
         CASE
             WHEN ki.review_needed_at IS NULL THEN 1
             WHEN ki.conflict_group IS NOT NULL THEN 0.25
@@ -2421,6 +2458,468 @@ func (q *Queries) SearchKnowledgeVector(ctx context.Context, arg SearchKnowledge
 	items := []SearchKnowledgeVectorRow{}
 	for rows.Next() {
 		var i SearchKnowledgeVectorRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.AgentID,
+			&i.Title,
+			&i.Type,
+			&i.DomainLabels,
+			&i.ProblemPattern,
+			&i.TriggerConditions,
+			&i.DiagnosticSteps,
+			&i.RecommendedPractice,
+			&i.AntiPatterns,
+			&i.Applicability,
+			&i.ConfidenceStatus,
+			&i.LifecycleStatus,
+			&i.CreatedBy,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.PublishedAt,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedBy,
+			&i.DeprecatedAt,
+			&i.StaleScore,
+			&i.EffectivenessScore,
+			&i.ConflictGroup,
+			&i.ReviewReason,
+			&i.UpdateSuggestion,
+			&i.ReviewNeededAt,
+			&i.GovernanceCheckedAt,
+			&i.VectorScore,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchKnowledgeVector1024 = `-- name: SearchKnowledgeVector1024 :many
+SELECT
+    ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at, ki.stale_score, ki.effectiveness_score, ki.conflict_group, ki.review_reason, ki.update_suggestion, ki.review_needed_at, ki.governance_checked_at,
+    (1 - MIN(ke.embedding_1024 <=> $1::vector(1024)))::float8 AS vector_score
+FROM knowledge_item ki
+JOIN knowledge_embedding ke ON ke.knowledge_item_id = ki.id AND ke.workspace_id = ki.workspace_id
+WHERE ki.workspace_id = $2
+  AND ke.dimension = 1024
+  AND ke.embedding_1024 IS NOT NULL
+  AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
+  AND (
+      COALESCE(cardinality($3::text[]), 0) > 0
+      OR ki.lifecycle_status = 'published'
+  )
+  AND (
+      COALESCE(cardinality($3::text[]), 0) > 0
+      OR EXISTS (
+          SELECT 1
+          FROM knowledge_publish_target kpt
+          WHERE kpt.knowledge_item_id = ki.id
+            AND kpt.workspace_id = ki.workspace_id
+            AND kpt.target_type = 'rag'
+      )
+  )
+  AND (COALESCE(cardinality($4::text[]), 0) = 0 OR ki.type = ANY($4::text[]))
+  AND (COALESCE(cardinality($3::text[]), 0) = 0 OR ki.lifecycle_status = ANY($3::text[]))
+  AND ($5::uuid IS NULL OR ki.project_id = $5)
+  AND ($6::uuid IS NULL OR ki.agent_id = $6)
+  AND (
+      COALESCE(cardinality($7::text[]), 0) = 0
+      OR ki.domain_labels && $7::text[]
+  )
+GROUP BY ki.id
+ORDER BY
+    ((1 - MIN(ke.embedding_1024 <=> $1::vector(1024))) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
+        CASE
+            WHEN ki.review_needed_at IS NULL THEN 1
+            WHEN ki.conflict_group IS NOT NULL THEN 0.25
+            WHEN ki.stale_score >= 80 THEN 0.35
+            ELSE 0.6
+        END
+    ) DESC,
+    ki.updated_at DESC
+LIMIT $8
+`
+
+type SearchKnowledgeVector1024Params struct {
+	Embedding   pgvector.Vector `json:"embedding"`
+	WorkspaceID pgtype.UUID     `json:"workspace_id"`
+	Statuses    []string        `json:"statuses"`
+	Types       []string        `json:"types"`
+	ProjectID   pgtype.UUID     `json:"project_id"`
+	AgentID     pgtype.UUID     `json:"agent_id"`
+	Labels      []string        `json:"labels"`
+	Limit       int32           `json:"limit"`
+}
+
+type SearchKnowledgeVector1024Row struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	AgentID             pgtype.UUID        `json:"agent_id"`
+	Title               string             `json:"title"`
+	Type                string             `json:"type"`
+	DomainLabels        []string           `json:"domain_labels"`
+	ProblemPattern      string             `json:"problem_pattern"`
+	TriggerConditions   string             `json:"trigger_conditions"`
+	DiagnosticSteps     string             `json:"diagnostic_steps"`
+	RecommendedPractice string             `json:"recommended_practice"`
+	AntiPatterns        string             `json:"anti_patterns"`
+	Applicability       string             `json:"applicability"`
+	ConfidenceStatus    string             `json:"confidence_status"`
+	LifecycleStatus     string             `json:"lifecycle_status"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	ReviewedBy          pgtype.UUID        `json:"reviewed_by"`
+	ReviewedAt          pgtype.Timestamptz `json:"reviewed_at"`
+	PublishedAt         pgtype.Timestamptz `json:"published_at"`
+	ArchivedAt          pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy           pgtype.UUID        `json:"updated_by"`
+	DeprecatedAt        pgtype.Timestamptz `json:"deprecated_at"`
+	StaleScore          pgtype.Numeric     `json:"stale_score"`
+	EffectivenessScore  pgtype.Numeric     `json:"effectiveness_score"`
+	ConflictGroup       pgtype.Text        `json:"conflict_group"`
+	ReviewReason        pgtype.Text        `json:"review_reason"`
+	UpdateSuggestion    pgtype.Text        `json:"update_suggestion"`
+	ReviewNeededAt      pgtype.Timestamptz `json:"review_needed_at"`
+	GovernanceCheckedAt pgtype.Timestamptz `json:"governance_checked_at"`
+	VectorScore         float64            `json:"vector_score"`
+}
+
+func (q *Queries) SearchKnowledgeVector1024(ctx context.Context, arg SearchKnowledgeVector1024Params) ([]SearchKnowledgeVector1024Row, error) {
+	rows, err := q.db.Query(ctx, searchKnowledgeVector1024,
+		arg.Embedding,
+		arg.WorkspaceID,
+		arg.Statuses,
+		arg.Types,
+		arg.ProjectID,
+		arg.AgentID,
+		arg.Labels,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchKnowledgeVector1024Row{}
+	for rows.Next() {
+		var i SearchKnowledgeVector1024Row
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.AgentID,
+			&i.Title,
+			&i.Type,
+			&i.DomainLabels,
+			&i.ProblemPattern,
+			&i.TriggerConditions,
+			&i.DiagnosticSteps,
+			&i.RecommendedPractice,
+			&i.AntiPatterns,
+			&i.Applicability,
+			&i.ConfidenceStatus,
+			&i.LifecycleStatus,
+			&i.CreatedBy,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.PublishedAt,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedBy,
+			&i.DeprecatedAt,
+			&i.StaleScore,
+			&i.EffectivenessScore,
+			&i.ConflictGroup,
+			&i.ReviewReason,
+			&i.UpdateSuggestion,
+			&i.ReviewNeededAt,
+			&i.GovernanceCheckedAt,
+			&i.VectorScore,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchKnowledgeVector3072 = `-- name: SearchKnowledgeVector3072 :many
+SELECT
+    ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at, ki.stale_score, ki.effectiveness_score, ki.conflict_group, ki.review_reason, ki.update_suggestion, ki.review_needed_at, ki.governance_checked_at,
+    (1 - MIN(ke.embedding_3072 <=> $1::vector(3072)))::float8 AS vector_score
+FROM knowledge_item ki
+JOIN knowledge_embedding ke ON ke.knowledge_item_id = ki.id AND ke.workspace_id = ki.workspace_id
+WHERE ki.workspace_id = $2
+  AND ke.dimension = 3072
+  AND ke.embedding_3072 IS NOT NULL
+  AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
+  AND (
+      COALESCE(cardinality($3::text[]), 0) > 0
+      OR ki.lifecycle_status = 'published'
+  )
+  AND (
+      COALESCE(cardinality($3::text[]), 0) > 0
+      OR EXISTS (
+          SELECT 1
+          FROM knowledge_publish_target kpt
+          WHERE kpt.knowledge_item_id = ki.id
+            AND kpt.workspace_id = ki.workspace_id
+            AND kpt.target_type = 'rag'
+      )
+  )
+  AND (COALESCE(cardinality($4::text[]), 0) = 0 OR ki.type = ANY($4::text[]))
+  AND (COALESCE(cardinality($3::text[]), 0) = 0 OR ki.lifecycle_status = ANY($3::text[]))
+  AND ($5::uuid IS NULL OR ki.project_id = $5)
+  AND ($6::uuid IS NULL OR ki.agent_id = $6)
+  AND (
+      COALESCE(cardinality($7::text[]), 0) = 0
+      OR ki.domain_labels && $7::text[]
+  )
+GROUP BY ki.id
+ORDER BY
+    ((1 - MIN(ke.embedding_3072 <=> $1::vector(3072))) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
+        CASE
+            WHEN ki.review_needed_at IS NULL THEN 1
+            WHEN ki.conflict_group IS NOT NULL THEN 0.25
+            WHEN ki.stale_score >= 80 THEN 0.35
+            ELSE 0.6
+        END
+    ) DESC,
+    ki.updated_at DESC
+LIMIT $8
+`
+
+type SearchKnowledgeVector3072Params struct {
+	Embedding   pgvector.Vector `json:"embedding"`
+	WorkspaceID pgtype.UUID     `json:"workspace_id"`
+	Statuses    []string        `json:"statuses"`
+	Types       []string        `json:"types"`
+	ProjectID   pgtype.UUID     `json:"project_id"`
+	AgentID     pgtype.UUID     `json:"agent_id"`
+	Labels      []string        `json:"labels"`
+	Limit       int32           `json:"limit"`
+}
+
+type SearchKnowledgeVector3072Row struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	AgentID             pgtype.UUID        `json:"agent_id"`
+	Title               string             `json:"title"`
+	Type                string             `json:"type"`
+	DomainLabels        []string           `json:"domain_labels"`
+	ProblemPattern      string             `json:"problem_pattern"`
+	TriggerConditions   string             `json:"trigger_conditions"`
+	DiagnosticSteps     string             `json:"diagnostic_steps"`
+	RecommendedPractice string             `json:"recommended_practice"`
+	AntiPatterns        string             `json:"anti_patterns"`
+	Applicability       string             `json:"applicability"`
+	ConfidenceStatus    string             `json:"confidence_status"`
+	LifecycleStatus     string             `json:"lifecycle_status"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	ReviewedBy          pgtype.UUID        `json:"reviewed_by"`
+	ReviewedAt          pgtype.Timestamptz `json:"reviewed_at"`
+	PublishedAt         pgtype.Timestamptz `json:"published_at"`
+	ArchivedAt          pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy           pgtype.UUID        `json:"updated_by"`
+	DeprecatedAt        pgtype.Timestamptz `json:"deprecated_at"`
+	StaleScore          pgtype.Numeric     `json:"stale_score"`
+	EffectivenessScore  pgtype.Numeric     `json:"effectiveness_score"`
+	ConflictGroup       pgtype.Text        `json:"conflict_group"`
+	ReviewReason        pgtype.Text        `json:"review_reason"`
+	UpdateSuggestion    pgtype.Text        `json:"update_suggestion"`
+	ReviewNeededAt      pgtype.Timestamptz `json:"review_needed_at"`
+	GovernanceCheckedAt pgtype.Timestamptz `json:"governance_checked_at"`
+	VectorScore         float64            `json:"vector_score"`
+}
+
+func (q *Queries) SearchKnowledgeVector3072(ctx context.Context, arg SearchKnowledgeVector3072Params) ([]SearchKnowledgeVector3072Row, error) {
+	rows, err := q.db.Query(ctx, searchKnowledgeVector3072,
+		arg.Embedding,
+		arg.WorkspaceID,
+		arg.Statuses,
+		arg.Types,
+		arg.ProjectID,
+		arg.AgentID,
+		arg.Labels,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchKnowledgeVector3072Row{}
+	for rows.Next() {
+		var i SearchKnowledgeVector3072Row
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.AgentID,
+			&i.Title,
+			&i.Type,
+			&i.DomainLabels,
+			&i.ProblemPattern,
+			&i.TriggerConditions,
+			&i.DiagnosticSteps,
+			&i.RecommendedPractice,
+			&i.AntiPatterns,
+			&i.Applicability,
+			&i.ConfidenceStatus,
+			&i.LifecycleStatus,
+			&i.CreatedBy,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.PublishedAt,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedBy,
+			&i.DeprecatedAt,
+			&i.StaleScore,
+			&i.EffectivenessScore,
+			&i.ConflictGroup,
+			&i.ReviewReason,
+			&i.UpdateSuggestion,
+			&i.ReviewNeededAt,
+			&i.GovernanceCheckedAt,
+			&i.VectorScore,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchKnowledgeVector768 = `-- name: SearchKnowledgeVector768 :many
+SELECT
+    ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at, ki.stale_score, ki.effectiveness_score, ki.conflict_group, ki.review_reason, ki.update_suggestion, ki.review_needed_at, ki.governance_checked_at,
+    (1 - MIN(ke.embedding_768 <=> $1::vector(768)))::float8 AS vector_score
+FROM knowledge_item ki
+JOIN knowledge_embedding ke ON ke.knowledge_item_id = ki.id AND ke.workspace_id = ki.workspace_id
+WHERE ki.workspace_id = $2
+  AND ke.dimension = 768
+  AND ke.embedding_768 IS NOT NULL
+  AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
+  AND (
+      COALESCE(cardinality($3::text[]), 0) > 0
+      OR ki.lifecycle_status = 'published'
+  )
+  AND (
+      COALESCE(cardinality($3::text[]), 0) > 0
+      OR EXISTS (
+          SELECT 1
+          FROM knowledge_publish_target kpt
+          WHERE kpt.knowledge_item_id = ki.id
+            AND kpt.workspace_id = ki.workspace_id
+            AND kpt.target_type = 'rag'
+      )
+  )
+  AND (COALESCE(cardinality($4::text[]), 0) = 0 OR ki.type = ANY($4::text[]))
+  AND (COALESCE(cardinality($3::text[]), 0) = 0 OR ki.lifecycle_status = ANY($3::text[]))
+  AND ($5::uuid IS NULL OR ki.project_id = $5)
+  AND ($6::uuid IS NULL OR ki.agent_id = $6)
+  AND (
+      COALESCE(cardinality($7::text[]), 0) = 0
+      OR ki.domain_labels && $7::text[]
+  )
+GROUP BY ki.id
+ORDER BY
+    ((1 - MIN(ke.embedding_768 <=> $1::vector(768))) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
+        CASE
+            WHEN ki.review_needed_at IS NULL THEN 1
+            WHEN ki.conflict_group IS NOT NULL THEN 0.25
+            WHEN ki.stale_score >= 80 THEN 0.35
+            ELSE 0.6
+        END
+    ) DESC,
+    ki.updated_at DESC
+LIMIT $8
+`
+
+type SearchKnowledgeVector768Params struct {
+	Embedding   pgvector.Vector `json:"embedding"`
+	WorkspaceID pgtype.UUID     `json:"workspace_id"`
+	Statuses    []string        `json:"statuses"`
+	Types       []string        `json:"types"`
+	ProjectID   pgtype.UUID     `json:"project_id"`
+	AgentID     pgtype.UUID     `json:"agent_id"`
+	Labels      []string        `json:"labels"`
+	Limit       int32           `json:"limit"`
+}
+
+type SearchKnowledgeVector768Row struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	AgentID             pgtype.UUID        `json:"agent_id"`
+	Title               string             `json:"title"`
+	Type                string             `json:"type"`
+	DomainLabels        []string           `json:"domain_labels"`
+	ProblemPattern      string             `json:"problem_pattern"`
+	TriggerConditions   string             `json:"trigger_conditions"`
+	DiagnosticSteps     string             `json:"diagnostic_steps"`
+	RecommendedPractice string             `json:"recommended_practice"`
+	AntiPatterns        string             `json:"anti_patterns"`
+	Applicability       string             `json:"applicability"`
+	ConfidenceStatus    string             `json:"confidence_status"`
+	LifecycleStatus     string             `json:"lifecycle_status"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	ReviewedBy          pgtype.UUID        `json:"reviewed_by"`
+	ReviewedAt          pgtype.Timestamptz `json:"reviewed_at"`
+	PublishedAt         pgtype.Timestamptz `json:"published_at"`
+	ArchivedAt          pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy           pgtype.UUID        `json:"updated_by"`
+	DeprecatedAt        pgtype.Timestamptz `json:"deprecated_at"`
+	StaleScore          pgtype.Numeric     `json:"stale_score"`
+	EffectivenessScore  pgtype.Numeric     `json:"effectiveness_score"`
+	ConflictGroup       pgtype.Text        `json:"conflict_group"`
+	ReviewReason        pgtype.Text        `json:"review_reason"`
+	UpdateSuggestion    pgtype.Text        `json:"update_suggestion"`
+	ReviewNeededAt      pgtype.Timestamptz `json:"review_needed_at"`
+	GovernanceCheckedAt pgtype.Timestamptz `json:"governance_checked_at"`
+	VectorScore         float64            `json:"vector_score"`
+}
+
+func (q *Queries) SearchKnowledgeVector768(ctx context.Context, arg SearchKnowledgeVector768Params) ([]SearchKnowledgeVector768Row, error) {
+	rows, err := q.db.Query(ctx, searchKnowledgeVector768,
+		arg.Embedding,
+		arg.WorkspaceID,
+		arg.Statuses,
+		arg.Types,
+		arg.ProjectID,
+		arg.AgentID,
+		arg.Labels,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchKnowledgeVector768Row{}
+	for rows.Next() {
+		var i SearchKnowledgeVector768Row
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -2928,14 +3427,14 @@ func (q *Queries) UpsertKnowledgeCandidate(ctx context.Context, arg UpsertKnowle
 
 const upsertKnowledgeEmbedding = `-- name: UpsertKnowledgeEmbedding :one
 INSERT INTO knowledge_embedding (
-    knowledge_item_id, workspace_id, provider, model, content_hash, embedding, embedded_at
+    knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedding_1536, embedded_at
 ) VALUES (
     $1, $2, $3,
-    $4, $5, $6::vector, now()
+    $4, 1536, $5, $6::vector(1536), now()
 )
-ON CONFLICT (knowledge_item_id, provider, model, content_hash)
-DO UPDATE SET embedding = EXCLUDED.embedding, embedded_at = now()
-RETURNING id, knowledge_item_id, workspace_id, provider, model, content_hash, embedded_at, created_at
+ON CONFLICT (knowledge_item_id, provider, model, dimension, content_hash)
+DO UPDATE SET embedding_1536 = EXCLUDED.embedding_1536, embedded_at = now()
+RETURNING id, knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedded_at, created_at
 `
 
 type UpsertKnowledgeEmbeddingParams struct {
@@ -2953,6 +3452,7 @@ type UpsertKnowledgeEmbeddingRow struct {
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
 	Provider        string             `json:"provider"`
 	Model           string             `json:"model"`
+	Dimension       int32              `json:"dimension"`
 	ContentHash     string             `json:"content_hash"`
 	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
@@ -2974,9 +3474,252 @@ func (q *Queries) UpsertKnowledgeEmbedding(ctx context.Context, arg UpsertKnowle
 		&i.WorkspaceID,
 		&i.Provider,
 		&i.Model,
+		&i.Dimension,
 		&i.ContentHash,
 		&i.EmbeddedAt,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertKnowledgeEmbedding1024 = `-- name: UpsertKnowledgeEmbedding1024 :one
+INSERT INTO knowledge_embedding (
+    knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedding_1024, embedded_at
+) VALUES (
+    $1, $2, $3,
+    $4, 1024, $5, $6::vector(1024), now()
+)
+ON CONFLICT (knowledge_item_id, provider, model, dimension, content_hash)
+DO UPDATE SET embedding_1024 = EXCLUDED.embedding_1024, embedded_at = now()
+RETURNING id, knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedded_at, created_at
+`
+
+type UpsertKnowledgeEmbedding1024Params struct {
+	KnowledgeItemID pgtype.UUID     `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID     `json:"workspace_id"`
+	Provider        string          `json:"provider"`
+	Model           string          `json:"model"`
+	ContentHash     string          `json:"content_hash"`
+	Embedding       pgvector.Vector `json:"embedding"`
+}
+
+type UpsertKnowledgeEmbedding1024Row struct {
+	ID              pgtype.UUID        `json:"id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	Model           string             `json:"model"`
+	Dimension       int32              `json:"dimension"`
+	ContentHash     string             `json:"content_hash"`
+	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertKnowledgeEmbedding1024(ctx context.Context, arg UpsertKnowledgeEmbedding1024Params) (UpsertKnowledgeEmbedding1024Row, error) {
+	row := q.db.QueryRow(ctx, upsertKnowledgeEmbedding1024,
+		arg.KnowledgeItemID,
+		arg.WorkspaceID,
+		arg.Provider,
+		arg.Model,
+		arg.ContentHash,
+		arg.Embedding,
+	)
+	var i UpsertKnowledgeEmbedding1024Row
+	err := row.Scan(
+		&i.ID,
+		&i.KnowledgeItemID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.Model,
+		&i.Dimension,
+		&i.ContentHash,
+		&i.EmbeddedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertKnowledgeEmbedding3072 = `-- name: UpsertKnowledgeEmbedding3072 :one
+INSERT INTO knowledge_embedding (
+    knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedding_3072, embedded_at
+) VALUES (
+    $1, $2, $3,
+    $4, 3072, $5, $6::vector(3072), now()
+)
+ON CONFLICT (knowledge_item_id, provider, model, dimension, content_hash)
+DO UPDATE SET embedding_3072 = EXCLUDED.embedding_3072, embedded_at = now()
+RETURNING id, knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedded_at, created_at
+`
+
+type UpsertKnowledgeEmbedding3072Params struct {
+	KnowledgeItemID pgtype.UUID     `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID     `json:"workspace_id"`
+	Provider        string          `json:"provider"`
+	Model           string          `json:"model"`
+	ContentHash     string          `json:"content_hash"`
+	Embedding       pgvector.Vector `json:"embedding"`
+}
+
+type UpsertKnowledgeEmbedding3072Row struct {
+	ID              pgtype.UUID        `json:"id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	Model           string             `json:"model"`
+	Dimension       int32              `json:"dimension"`
+	ContentHash     string             `json:"content_hash"`
+	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertKnowledgeEmbedding3072(ctx context.Context, arg UpsertKnowledgeEmbedding3072Params) (UpsertKnowledgeEmbedding3072Row, error) {
+	row := q.db.QueryRow(ctx, upsertKnowledgeEmbedding3072,
+		arg.KnowledgeItemID,
+		arg.WorkspaceID,
+		arg.Provider,
+		arg.Model,
+		arg.ContentHash,
+		arg.Embedding,
+	)
+	var i UpsertKnowledgeEmbedding3072Row
+	err := row.Scan(
+		&i.ID,
+		&i.KnowledgeItemID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.Model,
+		&i.Dimension,
+		&i.ContentHash,
+		&i.EmbeddedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertKnowledgeEmbedding768 = `-- name: UpsertKnowledgeEmbedding768 :one
+INSERT INTO knowledge_embedding (
+    knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedding_768, embedded_at
+) VALUES (
+    $1, $2, $3,
+    $4, 768, $5, $6::vector(768), now()
+)
+ON CONFLICT (knowledge_item_id, provider, model, dimension, content_hash)
+DO UPDATE SET embedding_768 = EXCLUDED.embedding_768, embedded_at = now()
+RETURNING id, knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedded_at, created_at
+`
+
+type UpsertKnowledgeEmbedding768Params struct {
+	KnowledgeItemID pgtype.UUID     `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID     `json:"workspace_id"`
+	Provider        string          `json:"provider"`
+	Model           string          `json:"model"`
+	ContentHash     string          `json:"content_hash"`
+	Embedding       pgvector.Vector `json:"embedding"`
+}
+
+type UpsertKnowledgeEmbedding768Row struct {
+	ID              pgtype.UUID        `json:"id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	Model           string             `json:"model"`
+	Dimension       int32              `json:"dimension"`
+	ContentHash     string             `json:"content_hash"`
+	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertKnowledgeEmbedding768(ctx context.Context, arg UpsertKnowledgeEmbedding768Params) (UpsertKnowledgeEmbedding768Row, error) {
+	row := q.db.QueryRow(ctx, upsertKnowledgeEmbedding768,
+		arg.KnowledgeItemID,
+		arg.WorkspaceID,
+		arg.Provider,
+		arg.Model,
+		arg.ContentHash,
+		arg.Embedding,
+	)
+	var i UpsertKnowledgeEmbedding768Row
+	err := row.Scan(
+		&i.ID,
+		&i.KnowledgeItemID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.Model,
+		&i.Dimension,
+		&i.ContentHash,
+		&i.EmbeddedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertKnowledgeEmbeddingAttempt = `-- name: UpsertKnowledgeEmbeddingAttempt :one
+INSERT INTO knowledge_embedding_attempt (
+    knowledge_item_id, workspace_id, status, provider, model, dimension,
+    content_hash, error_message, attempted_at, embedded_at
+) VALUES (
+    $1, $2, $3,
+    NULLIF(btrim($4::text), ''),
+    NULLIF(btrim($5::text), ''),
+    $6::int,
+    NULLIF(btrim($7::text), ''),
+    NULLIF(btrim($8::text), ''),
+    now(),
+    $9::timestamptz
+)
+ON CONFLICT (knowledge_item_id, workspace_id)
+DO UPDATE SET
+    status = EXCLUDED.status,
+    provider = EXCLUDED.provider,
+    model = EXCLUDED.model,
+    dimension = EXCLUDED.dimension,
+    content_hash = EXCLUDED.content_hash,
+    error_message = EXCLUDED.error_message,
+    attempted_at = EXCLUDED.attempted_at,
+    embedded_at = EXCLUDED.embedded_at,
+    updated_at = now()
+RETURNING id, knowledge_item_id, workspace_id, status, provider, model, dimension, content_hash, error_message, attempted_at, embedded_at, created_at, updated_at
+`
+
+type UpsertKnowledgeEmbeddingAttemptParams struct {
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Status          string             `json:"status"`
+	Provider        string             `json:"provider"`
+	Model           string             `json:"model"`
+	Dimension       pgtype.Int4        `json:"dimension"`
+	ContentHash     string             `json:"content_hash"`
+	ErrorMessage    string             `json:"error_message"`
+	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
+}
+
+func (q *Queries) UpsertKnowledgeEmbeddingAttempt(ctx context.Context, arg UpsertKnowledgeEmbeddingAttemptParams) (KnowledgeEmbeddingAttempt, error) {
+	row := q.db.QueryRow(ctx, upsertKnowledgeEmbeddingAttempt,
+		arg.KnowledgeItemID,
+		arg.WorkspaceID,
+		arg.Status,
+		arg.Provider,
+		arg.Model,
+		arg.Dimension,
+		arg.ContentHash,
+		arg.ErrorMessage,
+		arg.EmbeddedAt,
+	)
+	var i KnowledgeEmbeddingAttempt
+	err := row.Scan(
+		&i.ID,
+		&i.KnowledgeItemID,
+		&i.WorkspaceID,
+		&i.Status,
+		&i.Provider,
+		&i.Model,
+		&i.Dimension,
+		&i.ContentHash,
+		&i.ErrorMessage,
+		&i.AttemptedAt,
+		&i.EmbeddedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

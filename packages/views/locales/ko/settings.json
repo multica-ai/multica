@@ -191,7 +191,10 @@
     "probe_success": "엔드포인트가 호환됩니다",
     "probe_warning": "엔드포인트가 부분적으로 호환됩니다",
     "probe_failed": "엔드포인트 확인에 실패했습니다",
-    "probe_recommendation": "권장: {{provider}} / {{model}} / {{embeddingModel}}",
+    "probe_recommendation": "권장: chat {{provider}} / {{model}}, embedding {{embeddingProvider}} / {{embeddingModel}} / {{embeddingDimensions}}",
+    "probe_status_ok": "정상",
+    "probe_chat_status": "Chat: {{provider}} / {{model}} - {{status}}",
+    "probe_embedding_status": "Embedding: {{provider}} / {{model}} / {{dimensions}} - {{status}}",
     "probe_use_recommendation": "권장 설정 사용",
     "rag_auto_inject_label": "관련 Knowledge 자동 주입",
     "rag_auto_inject_description": "워크스페이스 정책이 허용할 때 정렬된 소량의 Knowledge 컨텍스트를 에이전트 task claim에 주입합니다.",
@@ -223,7 +226,10 @@
     "saving": "저장하는 중...",
     "manage_hint": "관리자와 소유자만 Curator 설정을 업데이트할 수 있습니다.",
     "toast_saved": "Curator 설정을 저장했습니다",
-    "toast_save_failed": "Curator 설정을 저장하지 못했습니다"
+    "toast_save_failed": "Curator 설정을 저장하지 못했습니다",
+    "chat_section_title": "Chat 모델",
+    "embedding_section_title": "Embedding 모델",
+    "embedding_dimensions_label": "Embedding 차원"
   },
   "github": {
     "page_description": "GitHub App을 연결하고, Pull request가 Multica 안에서 표시되는 방식을 제어하며, 에이전트가 커밋 기록에 남기는 정보를 설정합니다.",

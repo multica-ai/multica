@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -98,9 +99,21 @@ type KnowledgeEmbeddingMetadataResponse struct {
 	WorkspaceID     string `json:"workspace_id"`
 	Provider        string `json:"provider"`
 	Model           string `json:"model"`
+	Dimension       int32  `json:"dimension"`
 	ContentHash     string `json:"content_hash"`
 	EmbeddedAt      string `json:"embedded_at"`
 	CreatedAt       string `json:"created_at"`
+}
+
+type KnowledgeEmbeddingStatusResponse struct {
+	Status       string  `json:"status"`
+	Provider     *string `json:"provider"`
+	Model        *string `json:"model"`
+	Dimension    *int32  `json:"dimension"`
+	ContentHash  *string `json:"content_hash"`
+	ErrorMessage *string `json:"error_message"`
+	AttemptedAt  string  `json:"attempted_at"`
+	EmbeddedAt   *string `json:"embedded_at"`
 }
 
 type KnowledgeFeedbackSummaryResponse struct {
@@ -214,6 +227,7 @@ type KnowledgeDetailResponse struct {
 	SourceSummary   KnowledgeSourceSummaryResponse       `json:"source_summary"`
 	PublishTargets  []KnowledgePublishTargetResponse     `json:"publish_targets"`
 	Embeddings      []KnowledgeEmbeddingMetadataResponse `json:"embeddings"`
+	EmbeddingStatus *KnowledgeEmbeddingStatusResponse    `json:"embedding_status"`
 	FeedbackSummary []KnowledgeFeedbackSummaryResponse   `json:"feedback_summary"`
 }
 
@@ -352,10 +366,16 @@ type createKnowledgeDraftFromGovernanceFindingRequest struct {
 }
 
 type probeKnowledgeCuratorRequest struct {
-	BaseURL        string  `json:"base_url"`
-	APIKey         *string `json:"api_key"`
-	Model          string  `json:"model"`
-	EmbeddingModel string  `json:"embedding_model"`
+	BaseURL             string  `json:"base_url"`
+	APIKey              *string `json:"api_key"`
+	Model               string  `json:"model"`
+	EmbeddingModel      string  `json:"embedding_model"`
+	ChatBaseURL         string  `json:"chat_base_url"`
+	ChatAPIKey          *string `json:"chat_api_key"`
+	ChatModel           string  `json:"chat_model"`
+	EmbeddingBaseURL    string  `json:"embedding_base_url"`
+	EmbeddingAPIKey     *string `json:"embedding_api_key"`
+	EmbeddingDimensions int     `json:"embedding_dimensions"`
 }
 
 func (h *Handler) ListKnowledge(w http.ResponseWriter, r *http.Request) {
@@ -1278,16 +1298,29 @@ func (h *Handler) ProbeKnowledgeCuratorEndpoint(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	apiKey := h.KnowledgeCuratorAPIKey
+	chatAPIKey := h.KnowledgeCuratorChatAPIKey
 	if req.APIKey != nil {
-		apiKey = *req.APIKey
+		chatAPIKey = *req.APIKey
+	}
+	if req.ChatAPIKey != nil {
+		chatAPIKey = *req.ChatAPIKey
+	}
+	embeddingAPIKey := h.KnowledgeCuratorEmbeddingAPIKey
+	if req.EmbeddingAPIKey != nil {
+		embeddingAPIKey = *req.EmbeddingAPIKey
 	}
 	result, err := service.ProbeCuratorEndpoint(r.Context(), service.CuratorEndpointProbeInput{
-		BaseURL:        req.BaseURL,
-		APIKey:         apiKey,
-		Model:          req.Model,
-		EmbeddingModel: req.EmbeddingModel,
-		Timeout:        h.KnowledgeCuratorTimeout,
+		BaseURL:             req.BaseURL,
+		APIKey:              chatAPIKey,
+		Model:               req.Model,
+		EmbeddingModel:      req.EmbeddingModel,
+		ChatBaseURL:         req.ChatBaseURL,
+		ChatAPIKey:          chatAPIKey,
+		ChatModel:           req.ChatModel,
+		EmbeddingBaseURL:    req.EmbeddingBaseURL,
+		EmbeddingAPIKey:     embeddingAPIKey,
+		EmbeddingDimensions: req.EmbeddingDimensions,
+		Timeout:             h.KnowledgeCuratorTimeout,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrKnowledgeValidation) {
@@ -1465,8 +1498,25 @@ func (h *Handler) maybeEnsureKnowledgeEmbedding(ctx context.Context, workspaceID
 		return
 	}
 	go func() {
-		if _, err := h.KnowledgeCurator.EnsureKnowledgeEmbedding(context.WithoutCancel(ctx), workspaceID, itemID); err != nil && !errors.Is(err, service.ErrCuratorEngineUnavailable) {
-			// Best-effort: search still works through text ranking if embeddings fail.
+		if _, err := h.KnowledgeCurator.EnsureKnowledgeEmbedding(context.WithoutCancel(ctx), workspaceID, itemID); err != nil {
+			attempt, attemptErr := h.Queries.GetKnowledgeEmbeddingAttempt(context.WithoutCancel(ctx), db.GetKnowledgeEmbeddingAttemptParams{KnowledgeItemID: itemID, WorkspaceID: workspaceID})
+			if attemptErr == nil {
+				slog.Warn("knowledge embedding attempt failed",
+					"workspace_id", uuidToString(workspaceID),
+					"knowledge_item_id", uuidToString(itemID),
+					"provider", attempt.Provider.String,
+					"model", attempt.Model.String,
+					"status", attempt.Status,
+					"error", err,
+				)
+			} else {
+				slog.Warn("knowledge embedding attempt failed",
+					"workspace_id", uuidToString(workspaceID),
+					"knowledge_item_id", uuidToString(itemID),
+					"status", "unknown",
+					"error", err,
+				)
+			}
 		}
 	}()
 }
@@ -1494,6 +1544,7 @@ func knowledgeDetailToResponse(detail service.KnowledgeDetail) KnowledgeDetailRe
 		SourceSummary:   knowledgeSourceSummaryToResponse(detail.SourceSummary),
 		PublishTargets:  targets,
 		Embeddings:      embeddings,
+		EmbeddingStatus: knowledgeEmbeddingStatusToResponse(detail.EmbeddingStatus),
 		FeedbackSummary: feedback,
 	}
 }
@@ -1596,9 +1647,26 @@ func knowledgeEmbeddingMetadataToResponse(embedding db.ListKnowledgeEmbeddingMet
 		WorkspaceID:     uuidToString(embedding.WorkspaceID),
 		Provider:        embedding.Provider,
 		Model:           embedding.Model,
+		Dimension:       embedding.Dimension,
 		ContentHash:     embedding.ContentHash,
 		EmbeddedAt:      timestampToString(embedding.EmbeddedAt),
 		CreatedAt:       timestampToString(embedding.CreatedAt),
+	}
+}
+
+func knowledgeEmbeddingStatusToResponse(attempt *db.KnowledgeEmbeddingAttempt) *KnowledgeEmbeddingStatusResponse {
+	if attempt == nil {
+		return nil
+	}
+	return &KnowledgeEmbeddingStatusResponse{
+		Status:       attempt.Status,
+		Provider:     textToPtr(attempt.Provider),
+		Model:        textToPtr(attempt.Model),
+		Dimension:    int4ToPtr(attempt.Dimension),
+		ContentHash:  textToPtr(attempt.ContentHash),
+		ErrorMessage: textToPtr(attempt.ErrorMessage),
+		AttemptedAt:  timestampToString(attempt.AttemptedAt),
+		EmbeddedAt:   timestampPtr(attempt.EmbeddedAt),
 	}
 }
 

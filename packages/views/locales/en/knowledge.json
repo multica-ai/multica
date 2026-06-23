@@ -101,7 +101,19 @@
     "effect": "Effect",
     "no_feedback": "No feedback yet.",
     "publish_targets": "Publish targets",
-    "embeddings": "Embeddings"
+    "embeddings": "Embeddings",
+    "embedding_generated": "Embedding generated",
+    "embedding_missing": "Embedding missing",
+    "embedding_missing_rag": "RAG retrieval has no vector embedding yet.",
+    "embedding_not_generated": "Not generated",
+    "embedding_not_generated_help": "No embedding metadata is available for this knowledge item.",
+    "embedding_status_generated": "Generated",
+    "embedding_status_failed": "Failed",
+    "embedding_status_pending": "Generating",
+    "embedding_status_unavailable": "Not configured",
+    "embedding_status_skipped": "Skipped",
+    "embedding_status_not_attempted": "Not attempted",
+    "embedding_status_not_attempted_help": "No embedding attempt has been recorded yet."
   },
   "issue": {
     "section": "Knowledge",

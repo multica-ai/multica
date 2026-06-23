@@ -191,7 +191,10 @@
     "probe_success": "エンドポイントは互換です",
     "probe_warning": "エンドポイントは一部互換です",
     "probe_failed": "エンドポイントの確認に失敗しました",
-    "probe_recommendation": "推奨: {{provider}} / {{model}} / {{embeddingModel}}",
+    "probe_recommendation": "推奨: chat {{provider}} / {{model}}, embedding {{embeddingProvider}} / {{embeddingModel}} / {{embeddingDimensions}}",
+    "probe_status_ok": "OK",
+    "probe_chat_status": "Chat: {{provider}} / {{model}} - {{status}}",
+    "probe_embedding_status": "Embedding: {{provider}} / {{model}} / {{dimensions}} - {{status}}",
     "probe_use_recommendation": "推奨設定を使用",
     "rag_auto_inject_label": "関連 Knowledge を自動注入",
     "rag_auto_inject_description": "ワークスペースポリシーが許可する場合、ランク付けされた少量の Knowledge コンテキストをエージェント task claim に注入します。",
@@ -223,7 +226,10 @@
     "saving": "保存中...",
     "manage_hint": "Curator 設定を更新できるのは admin と owner のみです。",
     "toast_saved": "Curator 設定を保存しました",
-    "toast_save_failed": "Curator 設定を保存できませんでした"
+    "toast_save_failed": "Curator 設定を保存できませんでした",
+    "chat_section_title": "Chat モデル",
+    "embedding_section_title": "Embedding モデル",
+    "embedding_dimensions_label": "Embedding 次元"
   },
   "github": {
     "page_description": "GitHub App を接続し、Pull request が Multica 内でどう表示されるかを制御し、エージェントがコミット履歴に残す情報を設定します。",

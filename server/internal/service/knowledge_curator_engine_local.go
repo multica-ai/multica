@@ -10,7 +10,7 @@ import (
 
 // LocalCuratorEngine implements CuratorEngine by dispatching draft generation
 // tasks to local daemon runtimes. The daemon uses its own configured API key
-// (MULTICA_CURATOR_API_KEY) for LLM calls; no credentials are stored in the
+// (MULTICA_CURATOR_CHAT_API_KEY) for LLM calls; no credentials are stored in the
 // task or transmitted in the claim response.
 type LocalCuratorEngine struct {
 	queries      *db.Queries
@@ -55,14 +55,15 @@ func (e *LocalCuratorEngine) GenerateDraft(ctx context.Context, input CuratorDra
 	}
 
 	taskInput := CuratorDraftTaskInput{
-		BaseURL:        e.base.cfg.BaseURL,
-		Model:          e.base.cfg.Model,
-		EmbeddingModel: e.base.cfg.EmbeddingModel,
-		Provider:       e.base.cfg.Provider,
-		DraftInput:     input,
-		CandidateID:    candidateID,
-		FindingID:      findingID,
-		Regenerate:     regenerate,
+		BaseURL:             e.base.cfg.Chat.BaseURL,
+		Model:               e.base.cfg.Chat.Model,
+		EmbeddingModel:      e.base.cfg.Embedding.Model,
+		EmbeddingDimensions: e.base.cfg.Embedding.Dimensions,
+		Provider:            e.base.cfg.Chat.Provider,
+		DraftInput:          input,
+		CandidateID:         candidateID,
+		FindingID:           findingID,
+		Regenerate:          regenerate,
 	}
 
 	createdBy := input.Issue.CreatorID
@@ -88,8 +89,10 @@ func (e *LocalCuratorEngine) BuildEmbedding(ctx context.Context, content string)
 
 func (e *LocalCuratorEngine) Info() CuratorEngineInfo {
 	return CuratorEngineInfo{
-		Provider:       e.base.cfg.Provider,
-		Model:          e.base.cfg.Model,
-		EmbeddingModel: e.base.cfg.EmbeddingModel,
+		Provider:           e.base.cfg.Chat.Provider,
+		Model:              e.base.cfg.Chat.Model,
+		EmbeddingProvider:  e.base.cfg.Embedding.Provider,
+		EmbeddingModel:     e.base.cfg.Embedding.Model,
+		EmbeddingDimension: e.base.cfg.Embedding.Dimensions,
 	}
 }

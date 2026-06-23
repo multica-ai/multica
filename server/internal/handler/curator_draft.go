@@ -19,7 +19,7 @@ import (
 // ClaimCuratorDraftTask lets a daemon runtime claim the next queued curator
 // draft task for its workspace. The response includes non-sensitive LLM config
 // (base_url, model, etc.). The daemon supplies its own API key via
-// MULTICA_CURATOR_API_KEY.
+// MULTICA_CURATOR_CHAT_API_KEY.
 func (h *Handler) ClaimCuratorDraftTask(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
@@ -189,10 +189,11 @@ func curatorDraftTaskToResponse(task db.CuratorDraftTask) map[string]any {
 		if err := json.Unmarshal(task.InputData, &input); err == nil {
 			resp["draft_input"] = input.DraftInput
 			resp["config"] = map[string]any{
-				"base_url":        input.BaseURL,
-				"model":           input.Model,
-				"embedding_model": input.EmbeddingModel,
-				"provider":        input.Provider,
+				"base_url":             input.BaseURL,
+				"model":                input.Model,
+				"embedding_model":      input.EmbeddingModel,
+				"embedding_dimensions": input.EmbeddingDimensions,
+				"provider":             input.Provider,
 			}
 		}
 	}

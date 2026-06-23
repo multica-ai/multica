@@ -46,6 +46,8 @@ import type {
   KnowledgeCandidate,
   KnowledgeAnalyticsRow,
   KnowledgeDetail,
+  KnowledgeEmbeddingMetadata,
+  KnowledgeEmbeddingStatus,
   KnowledgeEffectBucket,
   KnowledgeGovernanceFinding,
   KnowledgeItem,
@@ -151,6 +153,70 @@ function statusTimestamp(item: KnowledgeItem): string | null {
 
 function knowledgeStatusLabel(status: KnowledgeStatusView, t: ReturnType<typeof useT<"knowledge">>["t"]): string {
   return status === "all" ? t(($) => $.status.all) : t(($) => $.status[status]);
+}
+
+function latestKnowledgeEmbedding(embeddings: KnowledgeEmbeddingMetadata[]) {
+  return embeddings
+    .filter((embedding) => embedding.embedded_at)
+    .sort((a, b) => new Date(b.embedded_at).getTime() - new Date(a.embedded_at).getTime())[0] ?? null;
+}
+
+function embeddingStatusFromMetadata(embedding: KnowledgeEmbeddingMetadata): KnowledgeEmbeddingStatus {
+  return {
+    status: "generated",
+    provider: embedding.provider,
+    model: embedding.model,
+    dimension: embedding.dimension,
+    content_hash: embedding.content_hash,
+    error_message: null,
+    attempted_at: embedding.embedded_at,
+    embedded_at: embedding.embedded_at,
+  };
+}
+
+function embeddingStatusLabel(status: string, t: ReturnType<typeof useT<"knowledge">>["t"]): string {
+  switch (status) {
+    case "generated":
+      return t(($) => $.detail.embedding_status_generated);
+    case "failed":
+      return t(($) => $.detail.embedding_status_failed);
+    case "pending":
+      return t(($) => $.detail.embedding_status_pending);
+    case "unavailable":
+      return t(($) => $.detail.embedding_status_unavailable);
+    case "skipped":
+      return t(($) => $.detail.embedding_status_skipped);
+    default:
+      return t(($) => $.detail.embedding_status_not_attempted);
+  }
+}
+
+function embeddingStatusTone(status: string | null): "generated" | "failed" | "neutral" {
+  if (status === "generated") return "generated";
+  if (status === "failed") return "failed";
+  return "neutral";
+}
+
+function embeddingStatusDetail(
+  status: KnowledgeEmbeddingStatus | null,
+  t: ReturnType<typeof useT<"knowledge">>["t"],
+  locale: string,
+): string {
+  if (!status) return t(($) => $.detail.embedding_status_not_attempted_help);
+  if (status.status === "generated") {
+    const provider = status.provider || "-";
+    const model = status.model || "-";
+    const dimension = status.dimension ? `${status.dimension}d` : "-";
+    const embeddedAt = status.embedded_at ? new Date(status.embedded_at).toLocaleString(locale) : "";
+    return [provider + "/" + model, dimension, embeddedAt].filter(Boolean).join(" · ");
+  }
+  if (status.status === "failed" && status.error_message) {
+    return status.error_message;
+  }
+  if (status.attempted_at) {
+    return new Date(status.attempted_at).toLocaleString(locale);
+  }
+  return t(($) => $.detail.embedding_status_not_attempted_help);
 }
 
 function feedbackLabel(value: string, t: ReturnType<typeof useT<"knowledge">>["t"]): string {
@@ -276,6 +342,14 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
   const archiveKnowledge = useArchiveKnowledge();
   const restoreKnowledge = useRestoreKnowledge();
   const [draft, setDraft] = useState<UpdateKnowledgeRequest>(() => makeDraft(detail));
+  const latestEmbedding = useMemo(
+    () => (detail ? latestKnowledgeEmbedding(detail.embeddings) : null),
+    [detail],
+  );
+  const embeddingStatus = useMemo(
+    () => detail?.embedding_status ?? (latestEmbedding ? embeddingStatusFromMetadata(latestEmbedding) : null),
+    [detail?.embedding_status, latestEmbedding],
+  );
 
   useEffect(() => {
     setDraft(makeDraft(detail));
@@ -294,6 +368,9 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
   const item = detail.item;
   const isInactive = item.lifecycle_status === "archived" || item.lifecycle_status === "deprecated";
   const governance = governanceBadges(item, t);
+  const embeddingTone = embeddingStatusTone(embeddingStatus?.status ?? null);
+  const embeddingLabel = embeddingStatusLabel(embeddingStatus?.status ?? "", t);
+  const embeddingDescription = embeddingStatusDetail(embeddingStatus, t, i18n.language);
   const setField = <K extends keyof UpdateKnowledgeRequest>(key: K, value: UpdateKnowledgeRequest[K]) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
   };
@@ -572,18 +649,69 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
                     <div key={`${target.target_type}-${target.target_id ?? target.target_url ?? target.id}`} className="rounded-md bg-muted/40 px-2 py-1 text-xs">
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate font-medium text-foreground">{target.target_title ?? target.target_type}</span>
-                        <Badge variant="outline">{target.target_type}</Badge>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {target.target_type === "rag" && (
+                            <Badge
+                              variant={embeddingTone === "failed" ? "destructive" : "secondary"}
+                              className={cn(
+                                "gap-1",
+                                embeddingTone === "generated" &&
+                                  "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300",
+                              )}
+                            >
+                              {embeddingTone === "generated" ? (
+                                <CheckCircle2 className="h-3 w-3" />
+                              ) : embeddingTone === "failed" ? (
+                                <XCircle className="h-3 w-3" />
+                              ) : (
+                                <AlertTriangle className="h-3 w-3" />
+                              )}
+                              {embeddingLabel}
+                            </Badge>
+                          )}
+                          <Badge variant="outline">{target.target_type}</Badge>
+                        </div>
                       </div>
                       {(target.target_url || target.updated_at) && (
                         <div className="mt-1 truncate">
                           {target.target_url ?? new Date(target.updated_at).toLocaleString(i18n.language)}
                         </div>
                       )}
+                      {target.target_type === "rag" && (
+                        <div
+                          className={cn(
+                            "mt-1 flex items-center gap-1 truncate",
+                            embeddingTone === "failed" ? "text-destructive" : "text-muted-foreground",
+                          )}
+                        >
+                          {embeddingTone === "generated" ? (
+                            <CheckCircle2 className="h-3 w-3 shrink-0" />
+                          ) : embeddingTone === "failed" ? (
+                            <XCircle className="h-3 w-3 shrink-0" />
+                          ) : (
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                          )}
+                          <span className="truncate">{embeddingDescription}</span>
+                        </div>
+                      )}
                     </div>
                   ))}
-                  <div className="flex items-center justify-between">
-                    <span>{t(($) => $.detail.embeddings)}</span>
-                    <span>{detail.embeddings.length}</span>
+                  <div className="rounded-md border border-dashed px-2 py-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-foreground">{t(($) => $.detail.embeddings)}</span>
+                      <Badge
+                        variant={embeddingTone === "failed" ? "destructive" : "outline"}
+                        className={cn(
+                          embeddingTone === "generated" &&
+                            "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300",
+                        )}
+                      >
+                        {embeddingLabel}
+                      </Badge>
+                    </div>
+                    <div className="mt-1 truncate">
+                      {embeddingDescription}
+                    </div>
                   </div>
                 </div>
               </div>

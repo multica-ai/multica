@@ -85,7 +85,19 @@
     "effect": "效果",
     "no_feedback": "还没有反馈。",
     "publish_targets": "发布目标",
-    "embeddings": "Embeddings"
+    "embeddings": "Embeddings",
+    "embedding_generated": "Embedding 已生成",
+    "embedding_missing": "Embedding 未生成",
+    "embedding_missing_rag": "RAG 检索还没有可用的向量 embedding。",
+    "embedding_not_generated": "未生成",
+    "embedding_not_generated_help": "这个 Knowledge 还没有 embedding 元数据。",
+    "embedding_status_generated": "已生成",
+    "embedding_status_failed": "生成失败",
+    "embedding_status_pending": "生成中",
+    "embedding_status_unavailable": "未配置",
+    "embedding_status_skipped": "已跳过",
+    "embedding_status_not_attempted": "未尝试",
+    "embedding_status_not_attempted_help": "还没有记录过 embedding 生成尝试。"
   },
   "issue": {
     "section": "Knowledge",

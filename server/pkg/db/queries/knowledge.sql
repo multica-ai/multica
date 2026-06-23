@@ -171,11 +171,44 @@ DO UPDATE SET
 RETURNING *;
 
 -- name: ListKnowledgeEmbeddingMetadata :many
-SELECT id, knowledge_item_id, workspace_id, provider, model, content_hash, embedded_at, created_at
+SELECT id, knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedded_at, created_at
 FROM knowledge_embedding
 WHERE knowledge_item_id = sqlc.arg('knowledge_item_id')
   AND workspace_id = sqlc.arg('workspace_id')
 ORDER BY embedded_at DESC;
+
+-- name: GetKnowledgeEmbeddingAttempt :one
+SELECT *
+FROM knowledge_embedding_attempt
+WHERE knowledge_item_id = sqlc.arg('knowledge_item_id')
+  AND workspace_id = sqlc.arg('workspace_id');
+
+-- name: UpsertKnowledgeEmbeddingAttempt :one
+INSERT INTO knowledge_embedding_attempt (
+    knowledge_item_id, workspace_id, status, provider, model, dimension,
+    content_hash, error_message, attempted_at, embedded_at
+) VALUES (
+    sqlc.arg('knowledge_item_id'), sqlc.arg('workspace_id'), sqlc.arg('status'),
+    NULLIF(btrim(sqlc.arg('provider')::text), ''),
+    NULLIF(btrim(sqlc.arg('model')::text), ''),
+    sqlc.narg('dimension')::int,
+    NULLIF(btrim(sqlc.arg('content_hash')::text), ''),
+    NULLIF(btrim(sqlc.arg('error_message')::text), ''),
+    now(),
+    sqlc.narg('embedded_at')::timestamptz
+)
+ON CONFLICT (knowledge_item_id, workspace_id)
+DO UPDATE SET
+    status = EXCLUDED.status,
+    provider = EXCLUDED.provider,
+    model = EXCLUDED.model,
+    dimension = EXCLUDED.dimension,
+    content_hash = EXCLUDED.content_hash,
+    error_message = EXCLUDED.error_message,
+    attempted_at = EXCLUDED.attempted_at,
+    embedded_at = EXCLUDED.embedded_at,
+    updated_at = now()
+RETURNING *;
 
 -- name: ListKnowledgeItemsForEmbeddingRebuild :many
 SELECT *
@@ -187,14 +220,47 @@ LIMIT sqlc.arg('limit');
 
 -- name: UpsertKnowledgeEmbedding :one
 INSERT INTO knowledge_embedding (
-    knowledge_item_id, workspace_id, provider, model, content_hash, embedding, embedded_at
+    knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedding_1536, embedded_at
 ) VALUES (
     sqlc.arg('knowledge_item_id'), sqlc.arg('workspace_id'), sqlc.arg('provider'),
-    sqlc.arg('model'), sqlc.arg('content_hash'), sqlc.arg('embedding')::vector, now()
+    sqlc.arg('model'), 1536, sqlc.arg('content_hash'), sqlc.arg('embedding')::vector(1536), now()
 )
-ON CONFLICT (knowledge_item_id, provider, model, content_hash)
-DO UPDATE SET embedding = EXCLUDED.embedding, embedded_at = now()
-RETURNING id, knowledge_item_id, workspace_id, provider, model, content_hash, embedded_at, created_at;
+ON CONFLICT (knowledge_item_id, provider, model, dimension, content_hash)
+DO UPDATE SET embedding_1536 = EXCLUDED.embedding_1536, embedded_at = now()
+RETURNING id, knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedded_at, created_at;
+
+-- name: UpsertKnowledgeEmbedding3072 :one
+INSERT INTO knowledge_embedding (
+    knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedding_3072, embedded_at
+) VALUES (
+    sqlc.arg('knowledge_item_id'), sqlc.arg('workspace_id'), sqlc.arg('provider'),
+    sqlc.arg('model'), 3072, sqlc.arg('content_hash'), sqlc.arg('embedding')::vector(3072), now()
+)
+ON CONFLICT (knowledge_item_id, provider, model, dimension, content_hash)
+DO UPDATE SET embedding_3072 = EXCLUDED.embedding_3072, embedded_at = now()
+RETURNING id, knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedded_at, created_at;
+
+-- name: UpsertKnowledgeEmbedding1024 :one
+INSERT INTO knowledge_embedding (
+    knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedding_1024, embedded_at
+) VALUES (
+    sqlc.arg('knowledge_item_id'), sqlc.arg('workspace_id'), sqlc.arg('provider'),
+    sqlc.arg('model'), 1024, sqlc.arg('content_hash'), sqlc.arg('embedding')::vector(1024), now()
+)
+ON CONFLICT (knowledge_item_id, provider, model, dimension, content_hash)
+DO UPDATE SET embedding_1024 = EXCLUDED.embedding_1024, embedded_at = now()
+RETURNING id, knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedded_at, created_at;
+
+-- name: UpsertKnowledgeEmbedding768 :one
+INSERT INTO knowledge_embedding (
+    knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedding_768, embedded_at
+) VALUES (
+    sqlc.arg('knowledge_item_id'), sqlc.arg('workspace_id'), sqlc.arg('provider'),
+    sqlc.arg('model'), 768, sqlc.arg('content_hash'), sqlc.arg('embedding')::vector(768), now()
+)
+ON CONFLICT (knowledge_item_id, provider, model, dimension, content_hash)
+DO UPDATE SET embedding_768 = EXCLUDED.embedding_768, embedded_at = now()
+RETURNING id, knowledge_item_id, workspace_id, provider, model, dimension, content_hash, embedded_at, created_at;
 
 -- name: SearchKnowledgeText :many
 WITH query_terms AS (
@@ -279,10 +345,12 @@ LIMIT sqlc.arg('limit');
 -- name: SearchKnowledgeVector :many
 SELECT
     ki.*,
-    (1 - MIN(ke.embedding <=> sqlc.arg('embedding')::vector))::float8 AS vector_score
+    (1 - MIN(ke.embedding_1536 <=> sqlc.arg('embedding')::vector(1536)))::float8 AS vector_score
 FROM knowledge_item ki
 JOIN knowledge_embedding ke ON ke.knowledge_item_id = ki.id AND ke.workspace_id = ki.workspace_id
 WHERE ki.workspace_id = sqlc.arg('workspace_id')
+  AND ke.dimension = 1536
+  AND ke.embedding_1536 IS NOT NULL
   AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
   AND (
       COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) > 0
@@ -308,7 +376,142 @@ WHERE ki.workspace_id = sqlc.arg('workspace_id')
   )
 GROUP BY ki.id
 ORDER BY
-    ((1 - MIN(ke.embedding <=> sqlc.arg('embedding')::vector)) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
+    ((1 - MIN(ke.embedding_1536 <=> sqlc.arg('embedding')::vector(1536))) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
+        CASE
+            WHEN ki.review_needed_at IS NULL THEN 1
+            WHEN ki.conflict_group IS NOT NULL THEN 0.25
+            WHEN ki.stale_score >= 80 THEN 0.35
+            ELSE 0.6
+        END
+    ) DESC,
+    ki.updated_at DESC
+LIMIT sqlc.arg('limit');
+
+-- name: SearchKnowledgeVector3072 :many
+SELECT
+    ki.*,
+    (1 - MIN(ke.embedding_3072 <=> sqlc.arg('embedding')::vector(3072)))::float8 AS vector_score
+FROM knowledge_item ki
+JOIN knowledge_embedding ke ON ke.knowledge_item_id = ki.id AND ke.workspace_id = ki.workspace_id
+WHERE ki.workspace_id = sqlc.arg('workspace_id')
+  AND ke.dimension = 3072
+  AND ke.embedding_3072 IS NOT NULL
+  AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
+  AND (
+      COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) > 0
+      OR ki.lifecycle_status = 'published'
+  )
+  AND (
+      COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) > 0
+      OR EXISTS (
+          SELECT 1
+          FROM knowledge_publish_target kpt
+          WHERE kpt.knowledge_item_id = ki.id
+            AND kpt.workspace_id = ki.workspace_id
+            AND kpt.target_type = 'rag'
+      )
+  )
+  AND (COALESCE(cardinality(sqlc.narg('types')::text[]), 0) = 0 OR ki.type = ANY(sqlc.narg('types')::text[]))
+  AND (COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) = 0 OR ki.lifecycle_status = ANY(sqlc.narg('statuses')::text[]))
+  AND (sqlc.narg('project_id')::uuid IS NULL OR ki.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('agent_id')::uuid IS NULL OR ki.agent_id = sqlc.narg('agent_id'))
+  AND (
+      COALESCE(cardinality(sqlc.narg('labels')::text[]), 0) = 0
+      OR ki.domain_labels && sqlc.narg('labels')::text[]
+  )
+GROUP BY ki.id
+ORDER BY
+    ((1 - MIN(ke.embedding_3072 <=> sqlc.arg('embedding')::vector(3072))) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
+        CASE
+            WHEN ki.review_needed_at IS NULL THEN 1
+            WHEN ki.conflict_group IS NOT NULL THEN 0.25
+            WHEN ki.stale_score >= 80 THEN 0.35
+            ELSE 0.6
+        END
+    ) DESC,
+    ki.updated_at DESC
+LIMIT sqlc.arg('limit');
+
+-- name: SearchKnowledgeVector1024 :many
+SELECT
+    ki.*,
+    (1 - MIN(ke.embedding_1024 <=> sqlc.arg('embedding')::vector(1024)))::float8 AS vector_score
+FROM knowledge_item ki
+JOIN knowledge_embedding ke ON ke.knowledge_item_id = ki.id AND ke.workspace_id = ki.workspace_id
+WHERE ki.workspace_id = sqlc.arg('workspace_id')
+  AND ke.dimension = 1024
+  AND ke.embedding_1024 IS NOT NULL
+  AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
+  AND (
+      COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) > 0
+      OR ki.lifecycle_status = 'published'
+  )
+  AND (
+      COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) > 0
+      OR EXISTS (
+          SELECT 1
+          FROM knowledge_publish_target kpt
+          WHERE kpt.knowledge_item_id = ki.id
+            AND kpt.workspace_id = ki.workspace_id
+            AND kpt.target_type = 'rag'
+      )
+  )
+  AND (COALESCE(cardinality(sqlc.narg('types')::text[]), 0) = 0 OR ki.type = ANY(sqlc.narg('types')::text[]))
+  AND (COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) = 0 OR ki.lifecycle_status = ANY(sqlc.narg('statuses')::text[]))
+  AND (sqlc.narg('project_id')::uuid IS NULL OR ki.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('agent_id')::uuid IS NULL OR ki.agent_id = sqlc.narg('agent_id'))
+  AND (
+      COALESCE(cardinality(sqlc.narg('labels')::text[]), 0) = 0
+      OR ki.domain_labels && sqlc.narg('labels')::text[]
+  )
+GROUP BY ki.id
+ORDER BY
+    ((1 - MIN(ke.embedding_1024 <=> sqlc.arg('embedding')::vector(1024))) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
+        CASE
+            WHEN ki.review_needed_at IS NULL THEN 1
+            WHEN ki.conflict_group IS NOT NULL THEN 0.25
+            WHEN ki.stale_score >= 80 THEN 0.35
+            ELSE 0.6
+        END
+    ) DESC,
+    ki.updated_at DESC
+LIMIT sqlc.arg('limit');
+
+-- name: SearchKnowledgeVector768 :many
+SELECT
+    ki.*,
+    (1 - MIN(ke.embedding_768 <=> sqlc.arg('embedding')::vector(768)))::float8 AS vector_score
+FROM knowledge_item ki
+JOIN knowledge_embedding ke ON ke.knowledge_item_id = ki.id AND ke.workspace_id = ki.workspace_id
+WHERE ki.workspace_id = sqlc.arg('workspace_id')
+  AND ke.dimension = 768
+  AND ke.embedding_768 IS NOT NULL
+  AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
+  AND (
+      COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) > 0
+      OR ki.lifecycle_status = 'published'
+  )
+  AND (
+      COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) > 0
+      OR EXISTS (
+          SELECT 1
+          FROM knowledge_publish_target kpt
+          WHERE kpt.knowledge_item_id = ki.id
+            AND kpt.workspace_id = ki.workspace_id
+            AND kpt.target_type = 'rag'
+      )
+  )
+  AND (COALESCE(cardinality(sqlc.narg('types')::text[]), 0) = 0 OR ki.type = ANY(sqlc.narg('types')::text[]))
+  AND (COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) = 0 OR ki.lifecycle_status = ANY(sqlc.narg('statuses')::text[]))
+  AND (sqlc.narg('project_id')::uuid IS NULL OR ki.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('agent_id')::uuid IS NULL OR ki.agent_id = sqlc.narg('agent_id'))
+  AND (
+      COALESCE(cardinality(sqlc.narg('labels')::text[]), 0) = 0
+      OR ki.domain_labels && sqlc.narg('labels')::text[]
+  )
+GROUP BY ki.id
+ORDER BY
+    ((1 - MIN(ke.embedding_768 <=> sqlc.arg('embedding')::vector(768))) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
         CASE
             WHEN ki.review_needed_at IS NULL THEN 1
             WHEN ki.conflict_group IS NOT NULL THEN 0.25

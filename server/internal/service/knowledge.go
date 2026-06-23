@@ -22,7 +22,10 @@ import (
 	pgvector "github.com/pgvector/pgvector-go"
 )
 
-const KnowledgeEmbeddingDimensions = 1536
+const DefaultKnowledgeEmbeddingDimensions = 1536
+const KnowledgeEmbeddingDimensions = DefaultKnowledgeEmbeddingDimensions
+
+var SupportedKnowledgeEmbeddingDimensions = []int{1536, 3072, 1024, 768}
 
 var (
 	knowledgeSlugNonAlnum     = regexp.MustCompile(`[^a-z0-9]+`)
@@ -176,6 +179,7 @@ type KnowledgeDetail struct {
 	SourceSummary   KnowledgeSourceSummary
 	PublishTargets  []db.KnowledgePublishTarget
 	Embeddings      []db.ListKnowledgeEmbeddingMetadataRow
+	EmbeddingStatus *db.KnowledgeEmbeddingAttempt
 	FeedbackSummary []db.GetKnowledgeFeedbackSummaryRow
 }
 
@@ -415,6 +419,15 @@ func (s *KnowledgeService) GetDetail(ctx context.Context, workspaceID, itemID pg
 	if err != nil {
 		return KnowledgeDetail{}, err
 	}
+	var embeddingStatus *db.KnowledgeEmbeddingAttempt
+	attempt, err := s.Queries.GetKnowledgeEmbeddingAttempt(ctx, db.GetKnowledgeEmbeddingAttemptParams{KnowledgeItemID: itemID, WorkspaceID: workspaceID})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return KnowledgeDetail{}, err
+		}
+	} else {
+		embeddingStatus = &attempt
+	}
 	feedback, err := s.Queries.GetKnowledgeFeedbackSummary(ctx, db.GetKnowledgeFeedbackSummaryParams{KnowledgeItemID: itemID, WorkspaceID: workspaceID})
 	if err != nil {
 		return KnowledgeDetail{}, err
@@ -423,7 +436,7 @@ func (s *KnowledgeService) GetDetail(ctx context.Context, workspaceID, itemID pg
 	if err != nil {
 		return KnowledgeDetail{}, err
 	}
-	return KnowledgeDetail{Item: item, Sources: sources, SourceSummary: summarizeKnowledgeSources(sources), PublishTargets: targets, Embeddings: embeddings, FeedbackSummary: feedback}, nil
+	return KnowledgeDetail{Item: item, Sources: sources, SourceSummary: summarizeKnowledgeSources(sources), PublishTargets: targets, Embeddings: embeddings, EmbeddingStatus: embeddingStatus, FeedbackSummary: feedback}, nil
 }
 
 func (s *KnowledgeService) GetSourceDetails(ctx context.Context, workspaceID, itemID pgtype.UUID) ([]KnowledgeSourceDetail, error) {
@@ -899,8 +912,9 @@ func (s *KnowledgeService) PublishToSkill(ctx context.Context, p KnowledgePublis
 }
 
 func (s *KnowledgeService) UpsertEmbedding(ctx context.Context, itemID, workspaceID pgtype.UUID, provider, model, contentHash string, embedding []float32) (db.UpsertKnowledgeEmbeddingRow, error) {
-	if len(embedding) != KnowledgeEmbeddingDimensions {
-		return db.UpsertKnowledgeEmbeddingRow{}, validationError(fmt.Sprintf("embedding must have %d dimensions", KnowledgeEmbeddingDimensions))
+	dimension := len(embedding)
+	if !validKnowledgeEmbeddingDimension(dimension) {
+		return db.UpsertKnowledgeEmbeddingRow{}, validationError(fmt.Sprintf("embedding must have one of these dimensions: %v", SupportedKnowledgeEmbeddingDimensions))
 	}
 	if strings.TrimSpace(provider) == "" || strings.TrimSpace(model) == "" || strings.TrimSpace(contentHash) == "" {
 		return db.UpsertKnowledgeEmbeddingRow{}, validationError("provider, model, and content_hash are required")
@@ -911,14 +925,29 @@ func (s *KnowledgeService) UpsertEmbedding(ctx context.Context, itemID, workspac
 		}
 		return db.UpsertKnowledgeEmbeddingRow{}, err
 	}
-	return s.Queries.UpsertKnowledgeEmbedding(ctx, db.UpsertKnowledgeEmbeddingParams{
+	params := db.UpsertKnowledgeEmbeddingParams{
 		KnowledgeItemID: itemID,
 		WorkspaceID:     workspaceID,
 		Provider:        strings.TrimSpace(provider),
 		Model:           strings.TrimSpace(model),
 		ContentHash:     strings.TrimSpace(contentHash),
 		Embedding:       pgvector.NewVector(embedding),
-	})
+	}
+	switch dimension {
+	case 1536:
+		return s.Queries.UpsertKnowledgeEmbedding(ctx, params)
+	case 3072:
+		row, err := s.Queries.UpsertKnowledgeEmbedding3072(ctx, db.UpsertKnowledgeEmbedding3072Params(params))
+		return upsertKnowledgeEmbeddingRowFrom3072(row), err
+	case 1024:
+		row, err := s.Queries.UpsertKnowledgeEmbedding1024(ctx, db.UpsertKnowledgeEmbedding1024Params(params))
+		return upsertKnowledgeEmbeddingRowFrom1024(row), err
+	case 768:
+		row, err := s.Queries.UpsertKnowledgeEmbedding768(ctx, db.UpsertKnowledgeEmbedding768Params(params))
+		return upsertKnowledgeEmbeddingRowFrom768(row), err
+	default:
+		return db.UpsertKnowledgeEmbeddingRow{}, validationError(fmt.Sprintf("embedding must have one of these dimensions: %v", SupportedKnowledgeEmbeddingDimensions))
+	}
 }
 
 func (s *KnowledgeService) Search(ctx context.Context, p KnowledgeSearchParams) ([]KnowledgeSearchResult, error) {
@@ -996,8 +1025,8 @@ func (s *KnowledgeService) searchWithRetrieval(ctx context.Context, p KnowledgeS
 	if query == "" && len(p.Embedding) == 0 {
 		return nil, db.KnowledgeRetrievalEvent{}, validationError("query or embedding is required")
 	}
-	if len(p.Embedding) > 0 && len(p.Embedding) != KnowledgeEmbeddingDimensions {
-		return nil, db.KnowledgeRetrievalEvent{}, validationError(fmt.Sprintf("embedding must have %d dimensions", KnowledgeEmbeddingDimensions))
+	if len(p.Embedding) > 0 && !validKnowledgeEmbeddingDimension(len(p.Embedding)) {
+		return nil, db.KnowledgeRetrievalEvent{}, validationError(fmt.Sprintf("embedding must have one of these dimensions: %v", SupportedKnowledgeEmbeddingDimensions))
 	}
 	if err := validateSearchFilters(ctx, s.Queries, p.WorkspaceID, p.Filters); err != nil {
 		return nil, db.KnowledgeRetrievalEvent{}, err
@@ -1033,25 +1062,15 @@ func (s *KnowledgeService) searchWithRetrieval(ctx context.Context, p KnowledgeS
 		}
 	}
 	if len(p.Embedding) > 0 {
-		rows, err := s.Queries.SearchKnowledgeVector(ctx, db.SearchKnowledgeVectorParams{
-			Embedding:   pgvector.NewVector(p.Embedding),
-			WorkspaceID: p.WorkspaceID,
-			Types:       p.Filters.Types,
-			Statuses:    p.Filters.Statuses,
-			ProjectID:   p.Filters.ProjectID,
-			AgentID:     p.Filters.AgentID,
-			Labels:      normalizeLabels(p.Filters.Labels),
-			Limit:       p.Limit,
-		})
+		rows, err := s.searchKnowledgeVector(ctx, p)
 		if err != nil {
 			return nil, db.KnowledgeRetrievalEvent{}, err
 		}
 		for _, row := range rows {
-			key := util.UUIDToString(row.ID)
+			key := util.UUIDToString(row.Item.ID)
 			result, ok := resultMap[key]
 			if !ok {
-				item := knowledgeItemFromVectorRow(row)
-				result = &KnowledgeSearchResult{Item: item, MatchReason: "vector"}
+				result = &KnowledgeSearchResult{Item: row.Item, MatchReason: "vector"}
 				resultMap[key] = result
 			} else {
 				result.MatchReason = "hybrid"
@@ -1111,6 +1130,40 @@ func (s *KnowledgeService) searchWithRetrieval(ctx context.Context, p KnowledgeS
 		}
 	}
 	return results, retrieval, nil
+}
+
+type knowledgeVectorSearchRow struct {
+	Item        db.KnowledgeItem
+	VectorScore float64
+}
+
+func (s *KnowledgeService) searchKnowledgeVector(ctx context.Context, p KnowledgeSearchParams) ([]knowledgeVectorSearchRow, error) {
+	params := db.SearchKnowledgeVectorParams{
+		Embedding:   pgvector.NewVector(p.Embedding),
+		WorkspaceID: p.WorkspaceID,
+		Types:       p.Filters.Types,
+		Statuses:    p.Filters.Statuses,
+		ProjectID:   p.Filters.ProjectID,
+		AgentID:     p.Filters.AgentID,
+		Labels:      normalizeLabels(p.Filters.Labels),
+		Limit:       p.Limit,
+	}
+	switch len(p.Embedding) {
+	case 1536:
+		rows, err := s.Queries.SearchKnowledgeVector(ctx, params)
+		return knowledgeVectorRowsFrom1536(rows), err
+	case 3072:
+		rows, err := s.Queries.SearchKnowledgeVector3072(ctx, db.SearchKnowledgeVector3072Params(params))
+		return knowledgeVectorRowsFrom3072(rows), err
+	case 1024:
+		rows, err := s.Queries.SearchKnowledgeVector1024(ctx, db.SearchKnowledgeVector1024Params(params))
+		return knowledgeVectorRowsFrom1024(rows), err
+	case 768:
+		rows, err := s.Queries.SearchKnowledgeVector768(ctx, db.SearchKnowledgeVector768Params(params))
+		return knowledgeVectorRowsFrom768(rows), err
+	default:
+		return nil, validationError(fmt.Sprintf("embedding must have one of these dimensions: %v", SupportedKnowledgeEmbeddingDimensions))
+	}
 }
 
 func (s *KnowledgeService) AddFeedback(ctx context.Context, p KnowledgeFeedbackParams) (db.KnowledgeFeedback, error) {
@@ -1730,9 +1783,9 @@ func (s *KnowledgeService) scoreSimilarity(ctx context.Context, workspaceID pgty
 		slog.Warn("similarity embedding failed", "error", err)
 		return "", 0, nil
 	}
-	rows, err := s.Queries.SearchKnowledgeVector(ctx, db.SearchKnowledgeVectorParams{
+	rows, err := s.searchKnowledgeVector(ctx, KnowledgeSearchParams{
 		WorkspaceID: workspaceID,
-		Embedding:   pgvector.NewVector(embedding),
+		Embedding:   embedding,
 		Limit:       5,
 	})
 	if err != nil {
@@ -1747,8 +1800,8 @@ func (s *KnowledgeService) scoreSimilarity(ctx context.Context, workspaceID pgty
 			maxSim = row.VectorScore
 		}
 		matches = append(matches, similarityMatch{
-			KnowledgeItemID: util.UUIDToString(row.ID),
-			Title:           row.Title,
+			KnowledgeItemID: util.UUIDToString(row.Item.ID),
+			Title:           row.Item.Title,
 			VectorScore:     row.VectorScore,
 		})
 	}
@@ -2814,6 +2867,15 @@ func validKnowledgeCandidateStatus(v string) bool {
 	}
 }
 
+func validKnowledgeEmbeddingDimension(v int) bool {
+	for _, supported := range SupportedKnowledgeEmbeddingDimensions {
+		if v == supported {
+			return true
+		}
+	}
+	return false
+}
+
 func validKnowledgeGovernanceFindingType(v string) bool {
 	switch v {
 	case "stale", "conflict", "low_effectiveness", "misleading", "outdated":
@@ -2975,6 +3037,65 @@ func knowledgeItemFromVectorRow(row db.SearchKnowledgeVectorRow) db.KnowledgeIte
 		ReviewNeededAt:      row.ReviewNeededAt,
 		GovernanceCheckedAt: row.GovernanceCheckedAt,
 	}
+}
+
+func knowledgeVectorRowsFrom1536(rows []db.SearchKnowledgeVectorRow) []knowledgeVectorSearchRow {
+	out := make([]knowledgeVectorSearchRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, knowledgeVectorSearchRow{
+			Item:        knowledgeItemFromVectorRow(row),
+			VectorScore: row.VectorScore,
+		})
+	}
+	return out
+}
+
+func knowledgeVectorRowsFrom3072(rows []db.SearchKnowledgeVector3072Row) []knowledgeVectorSearchRow {
+	out := make([]knowledgeVectorSearchRow, 0, len(rows))
+	for _, row := range rows {
+		base := db.SearchKnowledgeVectorRow(row)
+		out = append(out, knowledgeVectorSearchRow{
+			Item:        knowledgeItemFromVectorRow(base),
+			VectorScore: base.VectorScore,
+		})
+	}
+	return out
+}
+
+func knowledgeVectorRowsFrom1024(rows []db.SearchKnowledgeVector1024Row) []knowledgeVectorSearchRow {
+	out := make([]knowledgeVectorSearchRow, 0, len(rows))
+	for _, row := range rows {
+		base := db.SearchKnowledgeVectorRow(row)
+		out = append(out, knowledgeVectorSearchRow{
+			Item:        knowledgeItemFromVectorRow(base),
+			VectorScore: base.VectorScore,
+		})
+	}
+	return out
+}
+
+func knowledgeVectorRowsFrom768(rows []db.SearchKnowledgeVector768Row) []knowledgeVectorSearchRow {
+	out := make([]knowledgeVectorSearchRow, 0, len(rows))
+	for _, row := range rows {
+		base := db.SearchKnowledgeVectorRow(row)
+		out = append(out, knowledgeVectorSearchRow{
+			Item:        knowledgeItemFromVectorRow(base),
+			VectorScore: base.VectorScore,
+		})
+	}
+	return out
+}
+
+func upsertKnowledgeEmbeddingRowFrom3072(row db.UpsertKnowledgeEmbedding3072Row) db.UpsertKnowledgeEmbeddingRow {
+	return db.UpsertKnowledgeEmbeddingRow(row)
+}
+
+func upsertKnowledgeEmbeddingRowFrom1024(row db.UpsertKnowledgeEmbedding1024Row) db.UpsertKnowledgeEmbeddingRow {
+	return db.UpsertKnowledgeEmbeddingRow(row)
+}
+
+func upsertKnowledgeEmbeddingRowFrom768(row db.UpsertKnowledgeEmbedding768Row) db.UpsertKnowledgeEmbeddingRow {
+	return db.UpsertKnowledgeEmbeddingRow(row)
 }
 
 func (s *KnowledgeService) setLifecycleStatus(ctx context.Context, q *db.Queries, workspaceID, itemID, actorID pgtype.UUID, next string) (db.KnowledgeItem, error) {

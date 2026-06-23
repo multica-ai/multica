@@ -18,12 +18,17 @@ const workspaceRef = vi.hoisted(() => ({
       github_enabled: true,
       knowledge_curator: {
         enabled: false,
-        provider: "openai",
-        model: "gpt-test",
-        embedding_model: "embed-test",
-        runtime_mode: "external",
-        base_url: "https://api.example.com/v1",
-        secret_ref: "secret://workspace/curator",
+        chat: {
+          provider: "openai",
+          model: "gpt-test",
+          base_url: "https://chat.example.com/v1",
+        },
+        embedding: {
+          provider: "openai",
+          model: "embed-test",
+          base_url: "https://embedding.example.com/v1",
+          dimensions: 1536,
+        },
       },
       knowledge_rag: {
         auto_inject: true,
@@ -105,12 +110,17 @@ function resetFixtures() {
       github_enabled: true,
       knowledge_curator: {
         enabled: false,
-        provider: "openai",
-        model: "gpt-test",
-        embedding_model: "embed-test",
-        runtime_mode: "external",
-        base_url: "https://api.example.com/v1",
-        secret_ref: "secret://workspace/curator",
+        chat: {
+          provider: "openai",
+          model: "gpt-test",
+          base_url: "https://chat.example.com/v1",
+        },
+        embedding: {
+          provider: "openai",
+          model: "embed-test",
+          base_url: "https://embedding.example.com/v1",
+          dimensions: 1536,
+        },
       },
       knowledge_rag: {
         auto_inject: true,
@@ -129,12 +139,17 @@ function resetFixtures() {
     settings: payload.settings,
   }));
   mockProbeKnowledgeCurator.mockResolvedValue({
-    provider: "openai",
-    model: "gpt-4.1-mini",
-    embedding_model: "text-embedding-3-small",
-    chat_supported: true,
-    embedding_supported: true,
-    warnings: [],
+    chat_status: {
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      supported: true,
+    },
+    embedding_status: {
+      provider: "openai",
+      model: "text-embedding-3-small",
+      dimensions: 1536,
+      supported: true,
+    },
   });
 }
 
@@ -146,7 +161,7 @@ describe("CuratorTab", () => {
     render(<CuratorTab />, { wrapper: I18nWrapper });
 
     await user.click(screen.getByRole("switch", { name: /enable knowledge curator/i }));
-    const provider = screen.getByPlaceholderText("openai, deepseek, ollama, custom");
+    const provider = screen.getAllByPlaceholderText("openai, deepseek, ollama, custom")[0]!;
     await user.clear(provider);
     await user.type(provider, "custom");
     await user.click(screen.getByRole("button", { name: /^Save$/ }));
@@ -156,18 +171,21 @@ describe("CuratorTab", () => {
     if (!call) throw new Error("expected updateWorkspace call");
     const payload = call[1] as { settings: Record<string, unknown> };
     const curator = payload.settings.knowledge_curator as Record<string, unknown>;
+    const chat = curator.chat as Record<string, unknown>;
     const rag = payload.settings.knowledge_rag as Record<string, unknown>;
     expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
       settings: expect.objectContaining({
         github_enabled: true,
         knowledge_curator: expect.objectContaining({
           enabled: true,
-          provider: "custom",
-          model: "gpt-test",
-          secret_ref: "secret://workspace/curator",
+          chat: expect.objectContaining({
+            provider: "custom",
+            model: "gpt-test",
+          }),
         }),
       }),
     });
+    expect(chat.secret_ref).toBeUndefined();
     expect(curator.runtime_mode).toBeUndefined();
     expect(rag.curator_runtime_policy).toBeUndefined();
   });
@@ -206,7 +224,7 @@ describe("CuratorTab", () => {
     const user = userEvent.setup();
     render(<CuratorTab />, { wrapper: I18nWrapper });
 
-    const providerInput = screen.getByPlaceholderText("openai, deepseek, ollama, custom");
+    const providerInput = screen.getAllByPlaceholderText("openai, deepseek, ollama, custom")[0]!;
     await user.clear(providerInput);
     await user.type(providerInput, "custom-v2");
 
@@ -221,15 +239,17 @@ describe("CuratorTab", () => {
     await user.clear(modelInput);
     await user.type(modelInput, "manual-model");
 
-    const baseURL = screen.getByPlaceholderText("https://api.example.com/v1");
+    const baseURL = screen.getAllByPlaceholderText("https://api.example.com/v1")[0]!;
     await user.clear(baseURL);
     await user.type(baseURL, "https://api.openai.com/v1");
     await user.tab();
 
     await waitFor(() => expect(mockProbeKnowledgeCurator).toHaveBeenCalledWith({
-      base_url: "https://api.openai.com/v1",
-      model: "manual-model",
+      chat_base_url: "https://api.openai.com/v1",
+      chat_model: "manual-model",
+      embedding_base_url: "https://embedding.example.com/v1",
       embedding_model: "embed-test",
+      embedding_dimensions: 1536,
     }));
     expect(screen.getByDisplayValue("manual-model")).toBeTruthy();
     expect(screen.getByDisplayValue("text-embedding-3-small")).toBeTruthy();
@@ -238,23 +258,29 @@ describe("CuratorTab", () => {
 
   it("shows probe warnings when embeddings are unavailable", async () => {
     mockProbeKnowledgeCurator.mockResolvedValueOnce({
-      provider: "ollama",
-      model: "llama3.1",
-      embedding_model: "",
-      chat_supported: true,
-      embedding_supported: false,
-      warnings: ["Draft generation can work, but vectorization/RAG will be unavailable."],
+      chat_status: {
+        provider: "ollama",
+        model: "llama3.1",
+        supported: true,
+      },
+      embedding_status: {
+        provider: "ollama",
+        model: "",
+        dimensions: 1536,
+        supported: false,
+        error: "embedding base_url is unreachable",
+      },
     });
     const user = userEvent.setup();
     render(<CuratorTab />, { wrapper: I18nWrapper });
 
-    const baseURL = screen.getByPlaceholderText("https://api.example.com/v1");
+    const baseURL = screen.getAllByPlaceholderText("https://api.example.com/v1")[0]!;
     await user.clear(baseURL);
     await user.type(baseURL, "http://localhost:11434/v1");
     await user.tab();
 
     await waitFor(() => expect(screen.getByText(/Endpoint is partially compatible/)).toBeTruthy());
-    expect(screen.getByText(/vectorization\/RAG will be unavailable/)).toBeTruthy();
+    expect(screen.getByText(/embedding base_url is unreachable/)).toBeTruthy();
   });
 
   it("opens the knowledge type help dialog", async () => {

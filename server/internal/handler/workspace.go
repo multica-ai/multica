@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -140,7 +141,48 @@ func validateKnowledgeCuratorSettings(settings any) error {
 	if v, ok := curator["provider"].(string); ok && strings.TrimSpace(v) == "" {
 		return fmt.Errorf("knowledge_curator.provider cannot be empty")
 	}
+	for _, section := range []string{"chat", "embedding"} {
+		raw, ok := curator[section]
+		if !ok || raw == nil {
+			continue
+		}
+		values, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("knowledge_curator.%s must be an object", section)
+		}
+		for _, field := range []string{"provider", "model", "base_url"} {
+			if v, ok := values[field]; ok && v != nil {
+				value, ok := v.(string)
+				if !ok {
+					return fmt.Errorf("knowledge_curator.%s.%s must be a string", section, field)
+				}
+				if len(value) > 500 {
+					return fmt.Errorf("knowledge_curator.%s.%s is too long", section, field)
+				}
+			}
+		}
+		if v, ok := values["provider"].(string); ok && strings.TrimSpace(v) == "" {
+			return fmt.Errorf("knowledge_curator.%s.provider cannot be empty", section)
+		}
+		if section == "embedding" {
+			if v, ok := values["dimensions"]; ok && v != nil {
+				dimensions, ok := jsonNumberToFloat(v)
+				if !ok || dimensions != float64(int(dimensions)) || !validKnowledgeEmbeddingDimension(int(dimensions)) {
+					return fmt.Errorf("knowledge_curator.embedding.dimensions must be one of 1536, 3072, 1024, 768")
+				}
+			}
+		}
+	}
 	return nil
+}
+
+func validKnowledgeEmbeddingDimension(v int) bool {
+	for _, supported := range service.SupportedKnowledgeEmbeddingDimensions {
+		if v == supported {
+			return true
+		}
+	}
+	return false
 }
 
 func validateKnowledgeRAGSettings(settings any) error {

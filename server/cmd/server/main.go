@@ -102,6 +102,26 @@ func envPositiveInt(name string, def int) int {
 	return v
 }
 
+func envKnowledgeEmbeddingDimensions(name string) int {
+	v := envPositiveInt(name, service.DefaultKnowledgeEmbeddingDimensions)
+	for _, supported := range service.SupportedKnowledgeEmbeddingDimensions {
+		if v == supported {
+			return v
+		}
+	}
+	slog.Warn("unsupported knowledge embedding dimension, using default", "name", name, "value", v, "default", service.DefaultKnowledgeEmbeddingDimensions)
+	return service.DefaultKnowledgeEmbeddingDimensions
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func envPositiveInt64(name string, def int64) int64 {
 	raw := os.Getenv(name)
 	if raw == "" {
@@ -395,12 +415,22 @@ func main() {
 	// cycle, so a temporary outage does not crash the server.
 	schedulerMgr := scheduler.NewManager(pool, scheduler.Options{})
 	knowledgeSchedulerEngine := service.NewWorkspaceConfiguredCuratorEngine(queries, service.OpenAICompatibleCuratorConfig{
-		Provider:       os.Getenv("KNOWLEDGE_CURATOR_PROVIDER"),
-		BaseURL:        os.Getenv("KNOWLEDGE_CURATOR_BASE_URL"),
-		APIKey:         os.Getenv("KNOWLEDGE_CURATOR_API_KEY"),
-		Model:          os.Getenv("KNOWLEDGE_CURATOR_MODEL"),
-		EmbeddingModel: os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_MODEL"),
-		Timeout:        envDuration("KNOWLEDGE_CURATOR_TIMEOUT", 60*time.Second),
+		Chat: service.CuratorModelEndpointConfig{
+			Provider: os.Getenv("KNOWLEDGE_CURATOR_PROVIDER"),
+			BaseURL:  os.Getenv("KNOWLEDGE_CURATOR_CHAT_BASE_URL"),
+			APIKey:   os.Getenv("KNOWLEDGE_CURATOR_CHAT_API_KEY"),
+			Model:    os.Getenv("KNOWLEDGE_CURATOR_CHAT_MODEL"),
+		},
+		Embedding: service.CuratorEmbeddingEndpointConfig{
+			CuratorModelEndpointConfig: service.CuratorModelEndpointConfig{
+				Provider: firstNonEmpty(os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_PROVIDER"), os.Getenv("KNOWLEDGE_CURATOR_PROVIDER")),
+				BaseURL:  os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_BASE_URL"),
+				APIKey:   os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_API_KEY"),
+				Model:    os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_MODEL"),
+			},
+			Dimensions: envKnowledgeEmbeddingDimensions("KNOWLEDGE_CURATOR_EMBEDDING_DIMENSIONS"),
+		},
+		Timeout: envDuration("KNOWLEDGE_CURATOR_TIMEOUT", 60*time.Second),
 	}, nil)
 	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
 		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)

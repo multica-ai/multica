@@ -9,19 +9,36 @@ export type KnowledgeConfidenceStatus = "low" | "medium" | "high";
 export type KnowledgeFeedbackValue = "helpful" | "not_helpful" | "misleading" | "outdated";
 
 export interface ProbeKnowledgeCuratorRequest {
-  base_url: string;
+  base_url?: string;
   api_key?: string;
   model?: string;
+  chat_base_url?: string;
+  chat_api_key?: string;
+  chat_model?: string;
+  embedding_base_url?: string;
+  embedding_api_key?: string;
   embedding_model?: string;
+  embedding_dimensions?: number;
+}
+
+export interface ProbeKnowledgeCuratorModelStatus {
+  provider: string;
+  model: string;
+  supported: boolean;
+  error?: string;
+}
+
+export interface ProbeKnowledgeCuratorEmbeddingStatus {
+  provider: string;
+  model: string;
+  dimensions: number;
+  supported: boolean;
+  error?: string;
 }
 
 export interface ProbeKnowledgeCuratorResponse {
-  provider: string;
-  model: string;
-  embedding_model: string;
-  chat_supported: boolean;
-  embedding_supported: boolean;
-  warnings: string[];
+  chat_status: ProbeKnowledgeCuratorModelStatus;
+  embedding_status: ProbeKnowledgeCuratorEmbeddingStatus;
 }
 
 export interface KnowledgeItem {
@@ -104,9 +121,21 @@ export interface KnowledgeEmbeddingMetadata {
   workspace_id: string;
   provider: string;
   model: string;
+  dimension: number;
   content_hash: string;
   embedded_at: string;
   created_at: string;
+}
+
+export interface KnowledgeEmbeddingStatus {
+  status: string;
+  provider: string | null;
+  model: string | null;
+  dimension: number | null;
+  content_hash: string | null;
+  error_message: string | null;
+  attempted_at: string;
+  embedded_at: string | null;
 }
 
 export interface KnowledgeFeedbackSummary {
@@ -130,6 +159,7 @@ export interface KnowledgeDetail {
   source_summary: KnowledgeSourceSummary;
   publish_targets: KnowledgePublishTarget[];
   embeddings: KnowledgeEmbeddingMetadata[];
+  embedding_status: KnowledgeEmbeddingStatus | null;
   feedback_summary: KnowledgeFeedbackSummary[];
 }
 

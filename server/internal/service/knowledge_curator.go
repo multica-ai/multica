@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -21,10 +22,17 @@ var ErrCuratorEngineUnavailable = errors.New("knowledge curator engine is not co
 var ErrCuratorProvider = errors.New("knowledge curator provider error")
 var ErrCuratorInvalidResponse = errors.New("knowledge curator returned invalid response")
 
+var (
+	curatorSecretFieldRe = regexp.MustCompile(`(?i)(api[_-]?key|authorization|bearer|token|secret)\s*[:=]\s*[^,\s]+`)
+	curatorAPIKeyRe      = regexp.MustCompile(`(?i)\bsk-[a-z0-9_-]{12,}\b`)
+)
+
 type CuratorEngineInfo struct {
-	Provider       string `json:"provider"`
-	Model          string `json:"model"`
-	EmbeddingModel string `json:"embedding_model,omitempty"`
+	Provider           string `json:"provider"`
+	Model              string `json:"model"`
+	EmbeddingProvider  string `json:"embedding_provider,omitempty"`
+	EmbeddingModel     string `json:"embedding_model,omitempty"`
+	EmbeddingDimension int    `json:"embedding_dimension,omitempty"`
 }
 
 type CuratorEngine interface {
@@ -430,37 +438,106 @@ func (s *KnowledgeCuratorService) EnsureKnowledgeEmbedding(ctx context.Context, 
 	if err != nil {
 		return false, knowledgeItemLookupErr(err)
 	}
+	content := canonicalKnowledgeEmbeddingContent(item)
+	sum := sha256.Sum256([]byte(content))
+	contentHash := hex.EncodeToString(sum[:])
 	if item.LifecycleStatus != "reviewed" && item.LifecycleStatus != "published" {
+		if err := s.recordKnowledgeEmbeddingAttempt(ctx, itemID, workspaceID, "skipped", CuratorEngineInfo{}, contentHash, fmt.Errorf("knowledge lifecycle is %s", item.LifecycleStatus), pgtype.Timestamptz{}); err != nil {
+			return false, err
+		}
 		return false, nil
 	}
 	engine := s.engineForWorkspace(ctx, workspaceID)
 	if engine == nil {
+		if recordErr := s.recordKnowledgeEmbeddingAttempt(ctx, itemID, workspaceID, "unavailable", CuratorEngineInfo{}, contentHash, ErrCuratorEngineUnavailable, pgtype.Timestamptz{}); recordErr != nil {
+			return false, errors.Join(ErrCuratorEngineUnavailable, recordErr)
+		}
 		return false, ErrCuratorEngineUnavailable
 	}
-	content := canonicalKnowledgeEmbeddingContent(item)
 	info := engine.Info()
-	if strings.TrimSpace(info.Provider) == "" || strings.TrimSpace(info.EmbeddingModel) == "" {
+	if strings.TrimSpace(info.EmbeddingProvider) == "" || strings.TrimSpace(info.EmbeddingModel) == "" {
+		if recordErr := s.recordKnowledgeEmbeddingAttempt(ctx, itemID, workspaceID, "unavailable", info, contentHash, ErrCuratorEngineUnavailable, pgtype.Timestamptz{}); recordErr != nil {
+			return false, errors.Join(ErrCuratorEngineUnavailable, recordErr)
+		}
 		return false, ErrCuratorEngineUnavailable
 	}
 	embeddings, err := s.Queries.ListKnowledgeEmbeddingMetadata(ctx, db.ListKnowledgeEmbeddingMetadataParams{KnowledgeItemID: itemID, WorkspaceID: workspaceID})
 	if err != nil {
 		return false, err
 	}
-	sum := sha256.Sum256([]byte(content))
-	contentHash := hex.EncodeToString(sum[:])
 	for _, existing := range embeddings {
-		if existing.Provider == info.Provider && existing.Model == info.EmbeddingModel && existing.ContentHash == contentHash {
+		if existing.Provider == info.EmbeddingProvider && existing.Model == info.EmbeddingModel && int(existing.Dimension) == info.EmbeddingDimension && existing.ContentHash == contentHash {
+			if err := s.recordKnowledgeEmbeddingAttempt(ctx, itemID, workspaceID, "generated", info, contentHash, nil, existing.EmbeddedAt); err != nil {
+				return false, err
+			}
 			return false, nil
 		}
 	}
-	embedding, hash, err := s.buildEmbeddingWithEngine(ctx, engine, content)
-	if err != nil {
+	if err := s.recordKnowledgeEmbeddingAttempt(ctx, itemID, workspaceID, "pending", info, contentHash, nil, pgtype.Timestamptz{}); err != nil {
 		return false, err
 	}
-	if _, err := s.Knowledge.UpsertEmbedding(ctx, itemID, workspaceID, info.Provider, info.EmbeddingModel, hash, embedding); err != nil {
+	embedding, hash, err := s.buildEmbeddingWithEngine(ctx, engine, content)
+	if err != nil {
+		if recordErr := s.recordKnowledgeEmbeddingAttempt(ctx, itemID, workspaceID, "failed", info, contentHash, err, pgtype.Timestamptz{}); recordErr != nil {
+			return false, errors.Join(err, recordErr)
+		}
+		return false, err
+	}
+	row, err := s.Knowledge.UpsertEmbedding(ctx, itemID, workspaceID, info.EmbeddingProvider, info.EmbeddingModel, hash, embedding)
+	if err != nil {
+		if recordErr := s.recordKnowledgeEmbeddingAttempt(ctx, itemID, workspaceID, "failed", info, hash, err, pgtype.Timestamptz{}); recordErr != nil {
+			return false, errors.Join(err, recordErr)
+		}
+		return false, err
+	}
+	if err := s.recordKnowledgeEmbeddingAttempt(ctx, itemID, workspaceID, "generated", info, hash, nil, row.EmbeddedAt); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *KnowledgeCuratorService) recordKnowledgeEmbeddingAttempt(ctx context.Context, itemID, workspaceID pgtype.UUID, status string, info CuratorEngineInfo, contentHash string, attemptErr error, embeddedAt pgtype.Timestamptz) error {
+	dimension := pgtype.Int4{}
+	if info.EmbeddingDimension > 0 {
+		dimension = pgtype.Int4{Int32: int32(info.EmbeddingDimension), Valid: true}
+	}
+	_, err := s.Queries.UpsertKnowledgeEmbeddingAttempt(ctx, db.UpsertKnowledgeEmbeddingAttemptParams{
+		KnowledgeItemID: itemID,
+		WorkspaceID:     workspaceID,
+		Status:          status,
+		Provider:        info.EmbeddingProvider,
+		Model:           info.EmbeddingModel,
+		Dimension:       dimension,
+		ContentHash:     contentHash,
+		ErrorMessage:    sanitizeKnowledgeEmbeddingError(attemptErr),
+		EmbeddedAt:      embeddedAt,
+	})
+	return err
+}
+
+func sanitizeKnowledgeEmbeddingError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(err.Error())
+	msg = strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t':
+			return ' '
+		default:
+			if r < 0x20 {
+				return -1
+			}
+			return r
+		}
+	}, msg)
+	msg = strings.Join(strings.Fields(msg), " ")
+	msg = curatorSecretFieldRe.ReplaceAllString(msg, "$1=[redacted]")
+	msg = curatorAPIKeyRe.ReplaceAllString(msg, "[redacted]")
+	if len(msg) > 500 {
+		return strings.TrimSpace(msg[:500])
+	}
+	return msg
 }
 
 func (s *KnowledgeCuratorService) RebuildKnowledgeEmbeddings(ctx context.Context, p KnowledgeEmbeddingRebuildParams) (KnowledgeEmbeddingRebuildResult, error) {

@@ -198,7 +198,10 @@
     "probe_success": "Endpoint is compatible",
     "probe_warning": "Endpoint is partially compatible",
     "probe_failed": "Failed to probe endpoint",
-    "probe_recommendation": "Recommended: {{provider}} / {{model}} / {{embeddingModel}}",
+    "probe_recommendation": "Recommended: chat {{provider}} / {{model}}, embedding {{embeddingProvider}} / {{embeddingModel}} / {{embeddingDimensions}}",
+    "probe_status_ok": "OK",
+    "probe_chat_status": "Chat: {{provider}} / {{model}} - {{status}}",
+    "probe_embedding_status": "Embedding: {{provider}} / {{model}} / {{dimensions}} - {{status}}",
     "probe_use_recommendation": "Use recommended",
     "rag_auto_inject_label": "Auto-inject relevant knowledge",
     "rag_auto_inject_description": "Inject a small ranked knowledge context into agent task claims when the workspace policy allows it.",
@@ -230,7 +233,10 @@
     "saving": "Saving...",
     "manage_hint": "Only admins and owners can update Curator settings.",
     "toast_saved": "Curator settings saved",
-    "toast_save_failed": "Failed to save Curator settings"
+    "toast_save_failed": "Failed to save Curator settings",
+    "chat_section_title": "Chat model",
+    "embedding_section_title": "Embedding model",
+    "embedding_dimensions_label": "Embedding dimensions"
   },
   "github": {
     "page_description": "Connect a GitHub App, control how Pull Requests show up inside Multica, and decide what your agents leave behind in commit history.",

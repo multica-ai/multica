@@ -28,6 +28,32 @@ func testIssue(title, description string) db.Issue {
 	}
 }
 
+func testCuratorConfig(baseURL, model string) OpenAICompatibleCuratorConfig {
+	return OpenAICompatibleCuratorConfig{
+		Chat: CuratorModelEndpointConfig{
+			Provider: "test",
+			BaseURL:  baseURL,
+			Model:    model,
+		},
+		Timeout: time.Second,
+	}
+}
+
+func testCuratorConfigWithEmbedding(baseURL, model, embeddingModel string) OpenAICompatibleCuratorConfig {
+	cfg := testCuratorConfig(baseURL, model)
+	cfg.Chat.APIKey = "key"
+	cfg.Embedding = CuratorEmbeddingEndpointConfig{
+		CuratorModelEndpointConfig: CuratorModelEndpointConfig{
+			Provider: "test",
+			BaseURL:  baseURL,
+			APIKey:   "key",
+			Model:    embeddingModel,
+		},
+		Dimensions: KnowledgeEmbeddingDimensions,
+	}
+	return cfg
+}
+
 func TestOpenAICompatibleCuratorEngineRejectsWrongEmbeddingDimensions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/embeddings" {
@@ -38,14 +64,7 @@ func TestOpenAICompatibleCuratorEngineRejectsWrongEmbeddingDimensions(t *testing
 	}))
 	t.Cleanup(server.Close)
 
-	engine := NewOpenAICompatibleCuratorEngine(OpenAICompatibleCuratorConfig{
-		Provider:       "test",
-		BaseURL:        server.URL,
-		APIKey:         "key",
-		Model:          "chat-model",
-		EmbeddingModel: "embedding-model",
-		Timeout:        time.Second,
-	})
+	engine := NewOpenAICompatibleCuratorEngine(testCuratorConfigWithEmbedding(server.URL, "chat-model", "embedding-model"))
 	if _, err := engine.BuildEmbedding(context.Background(), "content"); !errors.Is(err, ErrKnowledgeValidation) {
 		t.Fatalf("BuildEmbedding error = %v, want ErrKnowledgeValidation", err)
 	}
@@ -82,12 +101,7 @@ func TestOpenAICompatibleCuratorEngineGeneratesDraftWithoutEmbeddingModel(t *tes
 	}))
 	t.Cleanup(server.Close)
 
-	engine := NewOpenAICompatibleCuratorEngine(OpenAICompatibleCuratorConfig{
-		Provider: "test",
-		BaseURL:  server.URL,
-		Model:    "chat-model",
-		Timeout:  time.Second,
-	})
+	engine := NewOpenAICompatibleCuratorEngine(testCuratorConfig(server.URL, "chat-model"))
 	draft, err := engine.GenerateDraft(context.Background(), CuratorDraftInput{OutputLanguage: curatorOutputLanguageChinese})
 	if err != nil {
 		t.Fatalf("GenerateDraft error: %v", err)
@@ -121,12 +135,7 @@ func TestOpenAICompatibleCuratorEngineSummarizeSourceIncludesLanguageInstruction
 	}))
 	t.Cleanup(server.Close)
 
-	engine := NewOpenAICompatibleCuratorEngine(OpenAICompatibleCuratorConfig{
-		Provider: "test",
-		BaseURL:  server.URL,
-		Model:    "chat-model",
-		Timeout:  time.Second,
-	})
+	engine := NewOpenAICompatibleCuratorEngine(testCuratorConfig(server.URL, "chat-model"))
 	summary, err := engine.SummarizeSource(context.Background(), CuratorSourceBundle{
 		Issue: testIssue("本地运行失败", "Error: context deadline exceeded"),
 	})
@@ -151,12 +160,7 @@ func TestOpenAICompatibleCuratorEngineExtractsDraftJSONFromText(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	engine := NewOpenAICompatibleCuratorEngine(OpenAICompatibleCuratorConfig{
-		Provider: "test",
-		BaseURL:  server.URL,
-		Model:    "chat-model",
-		Timeout:  time.Second,
-	})
+	engine := NewOpenAICompatibleCuratorEngine(testCuratorConfig(server.URL, "chat-model"))
 	draft, err := engine.GenerateDraft(context.Background(), CuratorDraftInput{})
 	if err != nil {
 		t.Fatalf("GenerateDraft error: %v", err)
@@ -190,12 +194,7 @@ func TestOpenAICompatibleCuratorEngineNormalizesDraftArrayTextFields(t *testing.
 	}))
 	t.Cleanup(server.Close)
 
-	engine := NewOpenAICompatibleCuratorEngine(OpenAICompatibleCuratorConfig{
-		Provider: "test",
-		BaseURL:  server.URL,
-		Model:    "chat-model",
-		Timeout:  time.Second,
-	})
+	engine := NewOpenAICompatibleCuratorEngine(testCuratorConfig(server.URL, "chat-model"))
 	draft, err := engine.GenerateDraft(context.Background(), CuratorDraftInput{})
 	if err != nil {
 		t.Fatalf("GenerateDraft error: %v", err)
@@ -217,12 +216,7 @@ func TestOpenAICompatibleCuratorEngineWrapsProviderErrors(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	engine := NewOpenAICompatibleCuratorEngine(OpenAICompatibleCuratorConfig{
-		Provider: "test",
-		BaseURL:  server.URL,
-		Model:    "missing-model",
-		Timeout:  time.Second,
-	})
+	engine := NewOpenAICompatibleCuratorEngine(testCuratorConfig(server.URL, "missing-model"))
 	_, err := engine.GenerateDraft(context.Background(), CuratorDraftInput{})
 	if !errors.Is(err, ErrCuratorProvider) {
 		t.Fatalf("GenerateDraft error = %v, want ErrCuratorProvider", err)
@@ -244,18 +238,28 @@ func TestApplyWorkspaceCuratorSettingsOverridesBaseConfig(t *testing.T) {
 		t.Fatalf("marshal settings: %v", err)
 	}
 	got := applyWorkspaceCuratorSettings(OpenAICompatibleCuratorConfig{
-		Provider:       "base-provider",
-		BaseURL:        "https://base.example/v1",
-		APIKey:         "base-key",
-		Model:          "base-chat",
-		EmbeddingModel: "base-embedding",
+		Chat: CuratorModelEndpointConfig{
+			Provider: "base-provider",
+			BaseURL:  "https://base.example/v1",
+			APIKey:   "base-key",
+			Model:    "base-chat",
+		},
+		Embedding: CuratorEmbeddingEndpointConfig{
+			CuratorModelEndpointConfig: CuratorModelEndpointConfig{
+				Provider: "base-provider",
+				BaseURL:  "https://base.example/v1",
+				APIKey:   "base-key",
+				Model:    "base-embedding",
+			},
+			Dimensions: KnowledgeEmbeddingDimensions,
+		},
 	}, settings)
 
-	if got.Provider != "workspace-provider" || got.BaseURL != "https://provider.example/v1" || got.Model != "workspace-chat" || got.EmbeddingModel != "workspace-embedding" {
+	if got.Chat.Provider != "workspace-provider" || got.Chat.BaseURL != "https://provider.example/v1" || got.Chat.Model != "workspace-chat" || got.Embedding.Model != "workspace-embedding" {
 		t.Fatalf("workspace settings were not applied: %#v", got)
 	}
-	if got.APIKey != "base-key" {
-		t.Fatalf("APIKey = %q, want base key preserved", got.APIKey)
+	if got.Chat.APIKey != "base-key" {
+		t.Fatalf("Chat APIKey = %q, want base key preserved", got.Chat.APIKey)
 	}
 }
 
@@ -267,13 +271,23 @@ func TestApplyWorkspaceCuratorSettingsDisabledReturnsUnavailableConfig(t *testin
 		t.Fatalf("marshal settings: %v", err)
 	}
 	got := applyWorkspaceCuratorSettings(OpenAICompatibleCuratorConfig{
-		Provider:       "base-provider",
-		BaseURL:        "https://base.example/v1",
-		APIKey:         "base-key",
-		Model:          "base-chat",
-		EmbeddingModel: "base-embedding",
+		Chat: CuratorModelEndpointConfig{
+			Provider: "base-provider",
+			BaseURL:  "https://base.example/v1",
+			APIKey:   "base-key",
+			Model:    "base-chat",
+		},
+		Embedding: CuratorEmbeddingEndpointConfig{
+			CuratorModelEndpointConfig: CuratorModelEndpointConfig{
+				Provider: "base-provider",
+				BaseURL:  "https://base.example/v1",
+				APIKey:   "base-key",
+				Model:    "base-embedding",
+			},
+			Dimensions: KnowledgeEmbeddingDimensions,
+		},
 	}, settings)
-	if got.Provider != "" || got.Model != "" || got.EmbeddingModel != "" {
+	if got.Chat.Provider != "" || got.Chat.Model != "" || got.Embedding.Model != "" {
 		t.Fatalf("disabled workspace config should clear provider/model fields: %#v", got)
 	}
 }
@@ -310,11 +324,11 @@ func TestProbeCuratorEndpointOpenAICompatible(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProbeCuratorEndpoint error: %v", err)
 	}
-	if got.Provider != "custom" || got.Model != "gpt-4.1-mini" || got.EmbeddingModel != "text-embedding-3-small" {
+	if got.ChatStatus.Provider != "custom" || got.ChatStatus.Model != "gpt-4.1-mini" || got.EmbeddingStatus.Model != "text-embedding-3-small" {
 		t.Fatalf("unexpected recommendation: %#v", got)
 	}
-	if !got.ChatSupported || !got.EmbeddingSupported || len(got.Warnings) != 0 {
-		t.Fatalf("unexpected support flags/warnings: %#v", got)
+	if !got.ChatStatus.Supported || !got.EmbeddingStatus.Supported || got.ChatStatus.Error != "" || got.EmbeddingStatus.Error != "" {
+		t.Fatalf("unexpected support flags/errors: %#v", got)
 	}
 }
 
@@ -339,11 +353,49 @@ func TestProbeCuratorEndpointEmbeddingWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProbeCuratorEndpoint error: %v", err)
 	}
-	if got.EmbeddingSupported {
-		t.Fatalf("EmbeddingSupported = true, want false")
+	if got.ChatStatus.Error != "" || !got.ChatStatus.Supported {
+		t.Fatalf("chat status = %#v, want supported without error", got.ChatStatus)
 	}
-	if len(got.Warnings) == 0 {
-		t.Fatalf("expected embedding warning")
+	if got.EmbeddingStatus.Supported {
+		t.Fatalf("embedding supported = true, want false")
+	}
+	if got.EmbeddingStatus.Error == "" {
+		t.Fatalf("expected embedding error")
+	}
+}
+
+func TestProbeCuratorEndpointChatFailureDoesNotBlockEmbedding(t *testing.T) {
+	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "chat down", http.StatusBadGateway)
+	}))
+	t.Cleanup(chat.Close)
+	embedding := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"text-embedding-3-small"}]}`))
+		case "/embeddings":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": make([]float32, KnowledgeEmbeddingDimensions)}}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(embedding.Close)
+
+	got, err := ProbeCuratorEndpoint(context.Background(), CuratorEndpointProbeInput{
+		ChatBaseURL:      chat.URL,
+		EmbeddingBaseURL: embedding.URL,
+		Timeout:          time.Second,
+	})
+	if err != nil {
+		t.Fatalf("ProbeCuratorEndpoint error: %v", err)
+	}
+	if got.ChatStatus.Error == "" {
+		t.Fatalf("expected chat error, got %#v", got.ChatStatus)
+	}
+	if !got.EmbeddingStatus.Supported || got.EmbeddingStatus.Error != "" {
+		t.Fatalf("embedding status = %#v, want supported without error", got.EmbeddingStatus)
 	}
 }
 
@@ -354,12 +406,15 @@ func TestProbeCuratorEndpointAuthAndMalformedModelsFail(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		_, err := ProbeCuratorEndpoint(context.Background(), CuratorEndpointProbeInput{
+		got, err := ProbeCuratorEndpoint(context.Background(), CuratorEndpointProbeInput{
 			BaseURL: server.URL,
 			Timeout: time.Second,
 		})
-		if err == nil || !strings.Contains(err.Error(), "/models returned 403") {
-			t.Fatalf("error = %v, want auth failure", err)
+		if err != nil {
+			t.Fatalf("ProbeCuratorEndpoint error: %v", err)
+		}
+		if !strings.Contains(got.ChatStatus.Error, "/models returned 403") || !strings.Contains(got.EmbeddingStatus.Error, "/models returned 403") {
+			t.Fatalf("status = %#v, want auth failures", got)
 		}
 	})
 
@@ -369,12 +424,15 @@ func TestProbeCuratorEndpointAuthAndMalformedModelsFail(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		_, err := ProbeCuratorEndpoint(context.Background(), CuratorEndpointProbeInput{
+		got, err := ProbeCuratorEndpoint(context.Background(), CuratorEndpointProbeInput{
 			BaseURL: server.URL,
 			Timeout: time.Second,
 		})
-		if err == nil || !strings.Contains(err.Error(), "OpenAI-compatible") {
-			t.Fatalf("error = %v, want malformed response failure", err)
+		if err != nil {
+			t.Fatalf("ProbeCuratorEndpoint error: %v", err)
+		}
+		if !strings.Contains(got.ChatStatus.Error, "OpenAI-compatible") || !strings.Contains(got.EmbeddingStatus.Error, "OpenAI-compatible") {
+			t.Fatalf("status = %#v, want malformed response failures", got)
 		}
 	})
 }

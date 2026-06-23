@@ -4175,9 +4175,9 @@ func (d *Daemon) handleCuratorDraft(ctx context.Context, task CuratorDraftTask, 
 	}
 
 	// Use the daemon's own API key for the LLM call.
-	apiKey := d.cfg.CuratorAPIKey
+	apiKey := d.cfg.CuratorChatAPIKey
 	if apiKey == "" {
-		d.logger.Error("curator draft task claimed but MULTICA_CURATOR_API_KEY is not set", "task", task.ID)
+		d.logger.Error("curator draft task claimed but MULTICA_CURATOR_CHAT_API_KEY is not set", "task", task.ID)
 		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, "daemon curator API key is not configured")
 		return
 	}

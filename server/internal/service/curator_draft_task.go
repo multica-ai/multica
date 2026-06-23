@@ -24,7 +24,9 @@ type CuratorDraftDispatchedError struct {
 
 func (e *CuratorDraftDispatchedError) Error() string { return ErrCuratorDraftDispatched.Error() }
 
-func (e *CuratorDraftDispatchedError) Is(target error) bool { return target == ErrCuratorDraftDispatched }
+func (e *CuratorDraftDispatchedError) Is(target error) bool {
+	return target == ErrCuratorDraftDispatched
+}
 
 // CuratorDraftTaskService manages the lifecycle of curator draft tasks
 // dispatched to local daemon runtimes.
@@ -39,18 +41,19 @@ func NewCuratorDraftTaskService(q *db.Queries, curator *KnowledgeCuratorService)
 
 // CuratorDraftTaskInput is the JSON-serialized payload stored in input_data.
 type CuratorDraftTaskInput struct {
-	BaseURL        string `json:"base_url"`
-	Model          string `json:"model"`
-	EmbeddingModel string `json:"embedding_model"`
-	Provider       string `json:"provider"`
+	BaseURL             string `json:"base_url"`
+	Model               string `json:"model"`
+	EmbeddingModel      string `json:"embedding_model"`
+	EmbeddingDimensions int    `json:"embedding_dimensions"`
+	Provider            string `json:"provider"`
 
 	// Serialized CuratorDraftInput
 	DraftInput CuratorDraftInput `json:"draft_input"`
 
 	// For candidate and governance drafts
-	CandidateID  pgtype.UUID `json:"candidate_id,omitempty"`
-	FindingID    pgtype.UUID `json:"finding_id,omitempty"`
-	Regenerate   bool        `json:"regenerate,omitempty"`
+	CandidateID pgtype.UUID `json:"candidate_id,omitempty"`
+	FindingID   pgtype.UUID `json:"finding_id,omitempty"`
+	Regenerate  bool        `json:"regenerate,omitempty"`
 }
 
 // EnqueueDraftTask creates a curator draft task and returns the task ID.
