@@ -8,7 +8,8 @@
     "show_archived": "显示已归档",
     "hide_archived": "隐藏已归档",
     "top_level_only": "仅一级 Issue",
-    "show_all_issues": "显示全部 Issue"
+    "show_all_issues": "显示全部 Issue",
+    "top_level_only_disabled_by_parent": "按父级分组时不可用"
   },
   "status": {
     "backlog": "待规划",

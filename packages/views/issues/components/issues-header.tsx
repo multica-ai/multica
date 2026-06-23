@@ -1338,7 +1338,13 @@ export function IssueDisplayControls({
           size="sm"
           className={topLevelOnly ? "gap-1 bg-brand text-white hover:bg-brand/90" : "gap-1 text-muted-foreground"}
           onClick={toggleTopLevelOnly}
-          title={topLevelOnly ? t(($) => $.page.show_all_issues) : t(($) => $.page.top_level_only)}
+          title={
+            swimlaneGrouping === "parent"
+              ? t(($) => $.page.top_level_only_disabled_by_parent)
+              : topLevelOnly
+                ? t(($) => $.page.show_all_issues)
+                : t(($) => $.page.top_level_only)
+          }
           disabled={swimlaneGrouping === "parent"}
         >
           <Layers className="size-3.5" />
