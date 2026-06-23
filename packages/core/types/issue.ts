@@ -62,4 +62,8 @@ export interface Issue {
   archived_by: string | null;
   source_channel_id?: string | null;
   source_thread_id?: string | null;
+  /** Display name of the source channel; detail-endpoint only. */
+  source_channel_name?: string | null;
+  /** Root message of the source thread — the deep-link target back into the channel; detail-endpoint only. */
+  source_message_id?: string | null;
 }

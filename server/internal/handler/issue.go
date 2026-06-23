@@ -68,6 +68,12 @@ type IssueResponse struct {
 	// was produced from (OPE-1943). nil when the issue was created directly.
 	SourceChannelID *string `json:"source_channel_id,omitempty"`
 	SourceThreadID  *string `json:"source_thread_id,omitempty"`
+	// SourceChannelName / SourceMessageID enrich the detail response so the
+	// "from channel discussion" badge can show the channel's display name and
+	// deep-link back to the originating message (the thread root). Populated
+	// only by GetIssue; nil (omitted) on list/update/WS-broadcast paths.
+	SourceChannelName *string `json:"source_channel_name,omitempty"`
+	SourceMessageID   *string `json:"source_message_id,omitempty"`
 }
 
 // validIssueStatuses / validIssuePriorities mirror the CHECK constraints on
@@ -1799,6 +1805,26 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		resp.Attachments = make([]AttachmentResponse, len(attachments))
 		for i, a := range attachments {
 			resp.Attachments[i] = h.attachmentToResponse(a)
+		}
+	}
+
+	// Enrich the "from channel discussion" badge: resolve the source thread's
+	// root message (deep-link target) and the channel's display name. Each
+	// lookup is independent + best-effort so a missing name still deep-links
+	// and a missing message still names the channel.
+	if issue.SourceThreadID.Valid {
+		if thread, err := h.Queries.GetChannelThread(r.Context(), issue.SourceThreadID); err == nil && thread.RootMessageID.Valid {
+			msgID := uuidToString(thread.RootMessageID)
+			resp.SourceMessageID = &msgID
+		}
+	}
+	if issue.SourceChannelID.Valid {
+		if ch, err := h.Queries.GetChannel(r.Context(), db.GetChannelParams{
+			ID:          issue.SourceChannelID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			name := ch.Name
+			resp.SourceChannelName = &name
 		}
 	}
 

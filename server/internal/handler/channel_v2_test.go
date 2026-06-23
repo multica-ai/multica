@@ -347,6 +347,24 @@ func TestV2ConvertMessageToIssueNoThread(t *testing.T) {
 	if !foundSystem {
 		t.Fatal("expected system 'created from thread' message in thread after convert")
 	}
+
+	// GetIssue should enrich the "from channel discussion" badge with the
+	// source channel's display name and the originating message id (the thread
+	// root) so the UI can name the channel and deep-link back to the message.
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodGet, "/", nil), "id", issueResp.IssueID)
+	testHandler.GetIssue(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GetIssue after convert: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var detail IssueResponse
+	decodeJSON(t, rr, &detail)
+	if detail.SourceChannelName == nil || *detail.SourceChannelName != channel.Name {
+		t.Fatalf("expected source_channel_name %q, got %v", channel.Name, detail.SourceChannelName)
+	}
+	if detail.SourceMessageID == nil || *detail.SourceMessageID != msg.ID {
+		t.Fatalf("expected source_message_id %q, got %v", msg.ID, detail.SourceMessageID)
+	}
 }
 
 // TestV2IssueReflowToChannelTimeline verifies that issue status changes

@@ -2754,11 +2754,15 @@ export function IssueDetail({
 
           {issue.source_channel_id && (
             <AppLink
-              href={paths.channelDetail(issue.source_channel_id)}
+              href={paths.channelDetail(
+                issue.source_channel_id,
+                issue.source_message_id ? { messageId: issue.source_message_id } : undefined,
+              )}
+              title="来自频道讨论"
               className="mt-2 inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
             >
               <MessagesSquare className="h-3.5 w-3.5" />
-              <span>来自频道讨论</span>
+              <span>来自 {issue.source_channel_name ?? "频道讨论"}</span>
             </AppLink>
           )}
 
