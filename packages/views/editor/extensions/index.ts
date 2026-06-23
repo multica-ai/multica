@@ -43,6 +43,7 @@ import { SlashCommandExtension } from "./slash-command-extension";
 import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
 import { CodeBlockView } from "./code-block-view";
 import { PatchedListItem, PatchedTaskItem } from "./list-item";
+import { PatchedCode } from "./code";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
 import { createSubmitExtension } from "./submit-shortcut";
@@ -162,8 +163,14 @@ export function createEditorExtensions(
       // list item (see list-item.ts). PatchedListItem below restores the
       // standard split → lift fallback chain.
       listItem: false,
+      // Disable StarterKit's stock inline Code mark — its input/paste rule
+      // swallows the character right before `` `code` `` when there is no
+      // separating space (see code.ts). PatchedCode below uses a lookbehind
+      // guard that doesn't consume that character.
+      code: false,
     }),
     PatchedListItem,
+    PatchedCode,
     // Checkbox task lists: `- [ ]` / `- [x]`. TaskList + TaskItem ship their own
     // markdown tokenizer / renderMarkdown, an input rule (typing `[] ` / `[x] `),
     // and a checkbox NodeView. The taskList tokenizer is consulted before

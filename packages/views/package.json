@@ -64,6 +64,7 @@
     "@multica/ui": "workspace:*",
     "@tanstack/react-virtual": "catalog:",
     "@tiptap/core": "^3.22.1",
+    "@tiptap/extension-code": "^3.22.1",
     "@tiptap/extension-code-block-lowlight": "^3.22.1",
     "@tiptap/extension-document": "^3.22.1",
     "@tiptap/extension-highlight": "3.22.1",
