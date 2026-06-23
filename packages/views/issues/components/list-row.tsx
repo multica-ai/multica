@@ -228,6 +228,7 @@ function ListRowContent({
                   }}
                   className="text-[11px] text-muted-foreground/50 tabular-nums hover:text-muted-foreground cursor-pointer transition-colors"
                 >
+                  {/* eslint-disable-next-line i18next/no-literal-string */}
                   ↓ {crossStatusChildCount} 跨状态
                 </button>
                 {crossDropdownOpen && crossStatusChildren.length > 0 && (
