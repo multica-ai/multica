@@ -269,6 +269,18 @@ func LoadConfig(overrides Overrides) (Config, error) {
 				}
 			}
 		}
+		if cmd == "wujieclaw" {
+			// WujieAI Desktop bundles wujieclaw inside the macOS app bundle
+			// instead of installing it onto PATH — same pattern as Codex.
+			for _, p := range wujieClawDesktopAppBundlePaths() {
+				if _, err := os.Stat(p); err == nil {
+					return AgentEntry{
+						Path:  p,
+						Model: strings.TrimSpace(os.Getenv(modelEnv)),
+					}, true
+				}
+			}
+		}
 		return AgentEntry{}, false
 	}
 	probe := func(envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
@@ -760,6 +772,16 @@ var codexDesktopAppBundlePaths = func() []string {
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		paths = append(paths, filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex"))
+	}
+	return paths
+}
+
+var wujieClawDesktopAppBundlePaths = func() []string {
+	paths := []string{
+		"/Applications/无界AI.app/Contents/Resources/runtime/bin/wujieclaw",
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, "Applications", "无界AI.app", "Contents", "Resources", "runtime", "bin", "wujieclaw"))
 	}
 	return paths
 }
