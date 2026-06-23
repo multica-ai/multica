@@ -2,7 +2,7 @@
 
 import { useWorkflowViewStore } from "@multica/core/workflows/stores/view-store";
 import { WorkflowDetailPage } from "./workflow-detail-page";
-import { WorkflowOverviewPage } from "./overview";
+import { WorkflowOverviewPage, WorkflowPanoramaPage } from "./overview";
 
 import { useT } from "../../i18n";
 import { Button } from "@multica/ui/components/ui/button";
@@ -14,13 +14,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Layers, Pen } from "lucide-react";
+import { GitFork, Layers, Pen } from "lucide-react";
 
 export interface WorkflowDetailShellProps {
   workflowId: string;
 }
 
-/** Renders either the overview or editor view with a shared view-toggle dropdown. */
+/** Renders the panorama (default), overview, or editor view with a shared view-toggle dropdown. */
 export function WorkflowDetailShell({ workflowId }: WorkflowDetailShellProps) {
   const { t } = useT("workflows");
   const viewMode = useWorkflowViewStore((s) => s.viewMode);
@@ -32,13 +32,19 @@ export function WorkflowDetailShell({ workflowId }: WorkflowDetailShellProps) {
       <DropdownMenuTrigger
         render={
           <Button variant="outline" size="icon-sm" className="text-muted-foreground" title={t(($) => $.view.section)}>
-            {viewMode === "overview" ? <Pen className="size-4" /> : <Layers className="size-4" />}
+            {viewMode === "panorama" ? <GitFork className="size-4" /> :
+             viewMode === "overview" ? <Layers className="size-4" /> :
+             <Pen className="size-4" />}
           </Button>
         }
       />
       <DropdownMenuContent align="end">
         <DropdownMenuGroup>
           <DropdownMenuLabel>{t(($) => $.view.section)}</DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => setViewMode("panorama")}>
+            <GitFork className="size-4 mr-2" />
+            {"全景图"}
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setViewMode("overview")}>
             <Layers className="size-4 mr-2" />
             {t(($) => $.view.overview)}
@@ -56,5 +62,9 @@ export function WorkflowDetailShell({ workflowId }: WorkflowDetailShellProps) {
     return <WorkflowDetailPage workflowId={workflowId} viewToggle={viewToggle} />;
   }
 
-  return <WorkflowOverviewPage workflowId={workflowId} viewToggle={viewToggle} />;
+  if (viewMode === "overview") {
+    return <WorkflowOverviewPage workflowId={workflowId} viewToggle={viewToggle} />;
+  }
+
+  return <WorkflowPanoramaPage workflowId={workflowId} viewToggle={viewToggle} />;
 }
