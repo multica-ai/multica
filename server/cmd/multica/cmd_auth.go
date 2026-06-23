@@ -77,6 +77,15 @@ func resolveToken(cmd *cobra.Command) string {
 	if inAgentExecutionContext() {
 		return ""
 	}
+	// Daemon-managed processes carry MULTICA_DAEMON_PORT. Even if the
+	// agent identity env vars (MULTICA_AGENT_ID / MULTICA_TASK_ID) were
+	// stripped by a deeply nested subprocess, the daemon port signals we
+	// are still inside a daemon context. Falling through to the user PAT
+	// in ~/.multica/config.json would misattribute agent actions to the
+	// human user. Fail closed instead.
+	if os.Getenv("MULTICA_DAEMON_PORT") != "" {
+		return ""
+	}
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	return cfg.Token

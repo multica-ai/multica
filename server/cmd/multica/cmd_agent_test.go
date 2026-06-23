@@ -144,6 +144,17 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 			t.Fatalf("resolveToken() = %q, want MULTICA_TOKEN", got)
 		}
 	})
+
+	t.Run("daemon context without agent env never reads config", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "19001")
+
+		if got := resolveToken(testCmd()); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty in daemon context without MULTICA_TOKEN", got)
+		}
+	})
 }
 
 func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
