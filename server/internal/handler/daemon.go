@@ -1588,6 +1588,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Handoff note (MUL-3375): a first-class instruction set when the issue was
+	// assigned/promoted. Surfaced to the daemon so its prompt + issue_context.md
+	// can render the assignment-handoff branch. Empty for all other task kinds.
+	if task.HandoffNote.Valid {
+		resp.HandoffNote = task.HandoffNote.String
+	}
+
 	// Quick-create task: no issue / chat / autopilot link — workspace and
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.

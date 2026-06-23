@@ -489,9 +489,6 @@
     "row_backlog_label": "백로그",
     "row_backlog_hint": "에이전트를 대기 상태로 유지",
     "row_todo_label": "할 일",
-    "row_todo_hint": "에이전트 시작",
-    "dont_show_again": "다시 보지 않기",
-    "keep_in_backlog": "백로그에 두기",
-    "move_to_todo": "할 일로 이동"
+    "row_todo_hint": "에이전트 시작"
   }
 }

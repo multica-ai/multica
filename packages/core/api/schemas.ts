@@ -220,6 +220,18 @@ export const CommentTriggerPreviewSchema = z.object({
   agents: z.array(CommentTriggerPreviewAgentSchema).default([]),
 }).loose();
 
+const IssueTriggerPreviewItemSchema = z.object({
+  issue_id: z.string(),
+  agent_id: z.string().default(""),
+  source: z.string().default(""),
+  handoff_supported: z.boolean().default(false),
+}).loose();
+
+export const IssueTriggerPreviewSchema = z.object({
+  triggers: z.array(IssueTriggerPreviewItemSchema).default([]),
+  total_count: z.number().default(0),
+}).loose();
+
 // Metadata is primitive-only by API/DB contract. Stay lenient on shape:
 // unknown keys land as `unknown` to a caller, but the field itself defaults
 // to {} so consumers never need to nil-guard `issue.metadata`.

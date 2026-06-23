@@ -490,9 +490,6 @@
     "row_backlog_label": "Backlog",
     "row_backlog_hint": "keeps the agent paused",
     "row_todo_label": "Todo",
-    "row_todo_hint": "starts the agent",
-    "dont_show_again": "Don't show this again",
-    "keep_in_backlog": "Keep in Backlog",
-    "move_to_todo": "Move to Todo"
+    "row_todo_hint": "starts the agent"
   }
 }

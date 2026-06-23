@@ -476,9 +476,6 @@
     "row_backlog_label": "Backlog",
     "row_backlog_hint": "智能体保持暂停",
     "row_todo_label": "Todo",
-    "row_todo_hint": "启动智能体",
-    "dont_show_again": "不再提示",
-    "keep_in_backlog": "保持在 Backlog",
-    "move_to_todo": "移到 Todo"
+    "row_todo_hint": "启动智能体"
   }
 }

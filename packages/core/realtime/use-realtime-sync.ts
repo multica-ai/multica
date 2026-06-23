@@ -517,6 +517,11 @@ export function useRealtimeSync(
         // open composer's chips (e.g. an agent finishing its run becomes
         // triggerable again mid-typing).
         qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreviewAll() });
+        // Issue-trigger previews (assign/status/create/batch) are queue-
+        // dependent the same way — the status source's pending dedup means a
+        // task finishing changes "will this start a run", so refresh any open
+        // picker/modal preview (MUL-3375).
+        qc.invalidateQueries({ queryKey: issueKeys.issueTriggerPreviewAll() });
       },
     };
 

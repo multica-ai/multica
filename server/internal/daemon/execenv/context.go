@@ -503,6 +503,14 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("**Trigger:** New Assignment\n\n")
 	}
 
+	// Assignment handoff note (MUL-3375): the assigner's scoping instruction for
+	// this run. Distinct from a comment — there is no thread to reply to.
+	if ctx.HandoffNote != "" {
+		b.WriteString("## Handoff Note\n\n")
+		b.WriteString("The person who assigned this issue left this instruction for the run. Treat it as scope guidance and follow it before doing anything broader:\n\n")
+		fmt.Fprintf(&b, "> %s\n\n", ctx.HandoffNote)
+	}
+
 	b.WriteString("## Quick Start\n\n")
 	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
 

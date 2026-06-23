@@ -230,6 +230,11 @@ export function useUpdateIssue() {
     mutationFn: ({ id, ...data }: { id: string } & UpdateIssueRequest) =>
       api.updateIssue(id, data),
     onMutate: ({ id, ...data }) => {
+      // suppress_run / handoff_note are write-time control fields, not Issue
+      // columns — they steer enqueue/injection on the server and must never be
+      // written into the query cache (MUL-3375). Strip them from the patch; the
+      // mutationFn above still sends the full payload to the API.
+      const { suppress_run: _suppressRun, handoff_note: _handoffNote, ...patch } = data;
       // Fire-and-forget cancelQueries — keeps onMutate synchronous so the
       // cache update happens in the same tick as mutate(). Awaiting would
       // yield to the event loop, letting @dnd-kit reset its visual state
@@ -267,16 +272,16 @@ export function useUpdateIssue() {
         : undefined;
 
       for (const [key, cached] of prevLists) {
-        if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, data));
+        if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, patch));
       }
       qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
-        old ? { ...old, ...data } : old,
+        old ? { ...old, ...patch } : old,
       );
       if (parentId) {
         qc.setQueryData<Issue[]>(
           issueKeys.children(wsId, parentId),
           (old) =>
-            old?.map((c) => (c.id === id ? { ...c, ...data } : c)),
+            old?.map((c) => (c.id === id ? { ...c, ...patch } : c)),
         );
       }
       return { prevLists, prevDetail, prevChildren, parentId, id };
@@ -450,6 +455,10 @@ export function useBatchUpdateIssues() {
       // batch edit on a My-Issues board had no optimistic effect and relied
       // entirely on the settle refetch. Filter to bucketed (byStatus) caches so
       // grouped/flat caches under the same prefix are skipped.
+      //
+      // Control fields steer the server; they are not Issue columns and must
+      // not enter the cache (MUL-3375). mutationFn still sends them.
+      const { suppress_run: _suppressRun, handoff_note: _handoffNote, ...patch } = updates;
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
       const prevLists = [
@@ -460,7 +469,7 @@ export function useBatchUpdateIssues() {
       );
       for (const [key, cached] of prevLists) {
         let next = cached;
-        for (const id of ids) next = patchIssueInBuckets(next, id, updates);
+        for (const id of ids) next = patchIssueInBuckets(next, id, patch);
         qc.setQueryData<ListIssuesCache>(key, next);
       }
 
@@ -479,7 +488,7 @@ export function useBatchUpdateIssues() {
         affectedParentIds.add(parentId);
         prevChildren.set(parentId, data);
         qc.setQueryData<Issue[]>(issueKeys.children(wsId, parentId), (old) =>
-          old?.map((c) => (idSet.has(c.id) ? { ...c, ...updates } : c)),
+          old?.map((c) => (idSet.has(c.id) ? { ...c, ...patch } : c)),
         );
       }
 

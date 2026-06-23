@@ -37,6 +37,40 @@ export interface UpdateIssueRequest {
    *  Used by the description editor to register newly uploaded files so they
    *  surface in `issueAttachments` and keep their preview Eye on refresh. */
   attachment_ids?: string[];
+  /** Skip starting the agent run this write would trigger ("暂时不启动",
+   *  MUL-3375). The assignee/status change still applies. Control field —
+   *  strip from optimistic cache patches; never written onto the Issue. */
+  suppress_run?: boolean;
+  /** Free-text handoff instruction injected into the started run's opening
+   *  context (MUL-3375). Only consumed when a run actually starts. Control
+   *  field — strip from optimistic cache patches. */
+  handoff_note?: string;
+}
+
+/** Inputs to `POST /api/issues/preview-trigger`. A nil prospective field means
+ *  "leave unchanged"; `isCreate` previews a not-yet-persisted issue. */
+export interface IssueTriggerPreviewParams {
+  issueIds?: string[];
+  isCreate?: boolean;
+  assigneeType?: IssueAssigneeType | null;
+  assigneeId?: string | null;
+  status?: IssueStatus;
+}
+
+/** One issue that WILL start a run under the prospective write. `agent_id` is
+ *  the runnable agent (squad leader for squads). `handoff_supported` is the
+ *  soft-gate signal: false when the target runtime is too old to render a
+ *  handoff note (gray the note box; the assignment still works). */
+export interface IssueTriggerPreviewItem {
+  issue_id: string;
+  agent_id: string;
+  source: string;
+  handoff_supported: boolean;
+}
+
+export interface IssueTriggerPreview {
+  triggers: IssueTriggerPreviewItem[];
+  total_count: number;
 }
 
 export interface ListIssuesParams {
