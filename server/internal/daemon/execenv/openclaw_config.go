@@ -630,6 +630,9 @@ func snapshotEnv(keys ...string) func() {
 func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = os.Environ()
+	if dir, err := os.UserHomeDir(); err == nil {
+		cmd.Dir = dir
+	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	raw, err := cmd.Output()
