@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, type Ref } from "react";
+import { memo, useCallback, useState, useEffect, useRef, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
@@ -22,7 +22,7 @@ import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
-import type { ParentInfo } from "../utils/hierarchy";
+import type { ParentInfo, CrossStatusChild } from "../utils/hierarchy";
 
 export interface ChildProgress {
   done: number;
@@ -64,6 +64,7 @@ function ListRowContent({
   isExpanded = false,
   childCount = 0,
   crossStatusChildCount = 0,
+  crossStatusChildren = [],
   onToggleChildren,
   parentInfo,
   onHoverParent,
@@ -81,6 +82,7 @@ function ListRowContent({
   isExpanded?: boolean;
   childCount?: number;
   crossStatusChildCount?: number;
+  crossStatusChildren?: CrossStatusChild[];
   onToggleChildren?: () => void;
   parentInfo?: ParentInfo;
   onHoverParent?: (parentStatus: string | null) => void;
@@ -97,6 +99,22 @@ function ListRowContent({
   });
   const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
   const labels = issue.labels ?? [];
+
+  // Dropdown state for cross-status badge.
+  const [crossDropdownOpen, setCrossDropdownOpen] = useState(false);
+  const crossDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click.
+  useEffect(() => {
+    if (!crossDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (crossDropdownRef.current && !crossDropdownRef.current.contains(e.target as Node)) {
+        setCrossDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [crossDropdownOpen]);
 
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
@@ -200,9 +218,45 @@ function ListRowContent({
               </span>
             )}
             {isParent && crossStatusChildCount > 0 && (
-              <span className="shrink-0 text-[11px] text-muted-foreground/50 tabular-nums">
-                ↓ {crossStatusChildCount} cross-status
-              </span>
+              <div className="relative shrink-0" ref={crossDropdownRef}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    setCrossDropdownOpen((v) => !v);
+                  }}
+                  className="text-[11px] text-muted-foreground/50 tabular-nums hover:text-muted-foreground cursor-pointer transition-colors"
+                >
+                  ↓ {crossStatusChildCount} 跨状态
+                </button>
+                {crossDropdownOpen && crossStatusChildren.length > 0 && (
+                  <div className="absolute top-full left-0 z-50 mt-1 bg-popover border border-border rounded-md shadow-md p-1 min-w-[200px] max-h-[240px] overflow-y-auto">
+                    {crossStatusChildren.map((child) => (
+                      <button
+                        key={child.id}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setCrossDropdownOpen(false);
+                          onScrollToParent?.(child.id, child.status);
+                        }}
+                        onMouseEnter={() => onHoverParent?.(child.status)}
+                        onMouseLeave={() => onHoverParent?.(null)}
+                        className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11px] rounded-sm hover:bg-accent cursor-pointer transition-colors"
+                      >
+                        <span className="text-muted-foreground/70 truncate flex-1">
+                          {child.identifier}
+                        </span>
+                        <span className={`shrink-0 ${getStatusColor(child.status)}`}>
+                          [{formatStatusLabel(child.status)}]
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
             {parentInfo && (
               <button
@@ -280,6 +334,7 @@ export const ListRow = memo(function ListRow({
   isExpanded,
   childCount,
   crossStatusChildCount,
+  crossStatusChildren,
   onToggleChildren,
   parentInfo,
   onHoverParent,
@@ -292,6 +347,7 @@ export const ListRow = memo(function ListRow({
   isExpanded?: boolean;
   childCount?: number;
   crossStatusChildCount?: number;
+  crossStatusChildren?: CrossStatusChild[];
   onToggleChildren?: () => void;
   parentInfo?: ParentInfo;
   onHoverParent?: (parentStatus: string | null) => void;
@@ -306,6 +362,7 @@ export const ListRow = memo(function ListRow({
       isExpanded={isExpanded}
       childCount={childCount}
       crossStatusChildCount={crossStatusChildCount}
+      crossStatusChildren={crossStatusChildren}
       onToggleChildren={onToggleChildren}
       parentInfo={parentInfo}
       onHoverParent={onHoverParent}
@@ -333,6 +390,7 @@ export const DraggableListRow = memo(function DraggableListRow({
   isExpanded,
   childCount,
   crossStatusChildCount,
+  crossStatusChildren,
   onToggleChildren,
   parentInfo,
   onHoverParent,
@@ -346,6 +404,7 @@ export const DraggableListRow = memo(function DraggableListRow({
   isExpanded?: boolean;
   childCount?: number;
   crossStatusChildCount?: number;
+  crossStatusChildren?: CrossStatusChild[];
   onToggleChildren?: () => void;
   parentInfo?: ParentInfo;
   onHoverParent?: (parentStatus: string | null) => void;
@@ -384,6 +443,7 @@ export const DraggableListRow = memo(function DraggableListRow({
       isExpanded={isExpanded}
       childCount={childCount}
       crossStatusChildCount={crossStatusChildCount}
+      crossStatusChildren={crossStatusChildren}
       onToggleChildren={onToggleChildren}
       parentInfo={parentInfo}
       onHoverParent={onHoverParent}

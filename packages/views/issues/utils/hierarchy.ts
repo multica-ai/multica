@@ -11,6 +11,16 @@ export interface ParentInfo {
 }
 
 /**
+ * Lightweight reference to a cross-status child, used in the
+ * expandable dropdown on the parent row.
+ */
+export interface CrossStatusChild {
+  identifier: string;
+  status: string;
+  id: string;
+}
+
+/**
  * A single item in the render tree for a status group.
  * Produced by {@link buildHierarchy} and consumed by {@link ListView}.
  */
@@ -24,6 +34,8 @@ export interface RenderItem {
   childCount: number;
   /** Number of children in other status groups (for cross-status badge on parent row). */
   crossStatusChildCount: number;
+  /** Cross-status children for the expandable dropdown on the parent row. */
+  crossStatusChildren: CrossStatusChild[];
   /** When a child's parent is NOT in the same status group, info about that parent. */
   parentInfo?: ParentInfo;
   /** When a child's parent is in the same status group but hidden (e.g., filtered out). */
@@ -51,6 +63,20 @@ function renderSubtree(
   const sameStatusCount = nestedChildren?.length ?? 0;
   const crossStatusCount = allChildren.length - sameStatusCount;
 
+  // Build the list of cross-status children for the dropdown.
+  const crossStatusChildren: CrossStatusChild[] = [];
+  if (isParent && crossStatusCount > 0) {
+    for (const child of allChildren) {
+      if (!statusIssueIds.has(child.id)) {
+        crossStatusChildren.push({
+          identifier: child.identifier,
+          status: child.status,
+          id: child.id,
+        });
+      }
+    }
+  }
+
   // Resolve parent info for top-level items whose parent is cross-status.
   // Children rendered via recursion always have their parent in the same status,
   // so parentInfo is only needed for top-level cross-status orphans.
@@ -66,6 +92,7 @@ function renderSubtree(
       isParent,
       childCount: isParent ? sameStatusCount : 0,
       crossStatusChildCount: isParent ? crossStatusCount : 0,
+      crossStatusChildren,
       parentInfo,
     },
   ];
@@ -166,6 +193,7 @@ export function buildHierarchy(
         isParent: false,
         childCount: 0,
         crossStatusChildCount: 0,
+        crossStatusChildren: [],
         orphaned: !!issue.parent_issue_id,
       });
     }

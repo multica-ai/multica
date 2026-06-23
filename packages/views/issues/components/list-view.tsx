@@ -122,17 +122,21 @@ export function ListView({
       // Wait two frames for the accordion expansion to render, then scroll.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          const el = document.querySelector(`[data-issue-id="${parentId}"]`);
+          const el = document.querySelector(`[data-issue-id="${parentId}"]`) as HTMLElement | null;
           if (el) {
-            el.scrollIntoView({ behavior: "smooth", block: "center" });
-            // Flash highlight the target row: brief bg-brand/20 → transparent.
-            el.classList.add("bg-brand/20", "transition-colors", "duration-500");
+            el.scrollIntoView({ behavior: "auto", block: "center" });
+            // Flash highlight via inline style (classList would be purged by Tailwind JIT).
+            // The row already has transition-colors in its className, so backgroundColor
+            // changes animate smoothly.
+            el.style.backgroundColor = "color-mix(in srgb, var(--color-brand, #a78bfa) 20%, transparent)";
+            // Force style recalculation so the browser picks up the background change
+            // before clearing it, which triggers the transition.
+            void el.offsetHeight;
+            el.style.backgroundColor = "";
+            // Clean up the inline style property after the transition completes.
             setTimeout(() => {
-              el.classList.remove("bg-brand/20");
-              setTimeout(() => {
-                el.classList.remove("transition-colors", "duration-500");
-              }, 500);
-            }, 100);
+              el.style.removeProperty("background-color");
+            }, 600);
           }
         });
       });
@@ -585,6 +589,7 @@ function StatusAccordionItem({
                   isExpanded={expandedParents.has(item.issue.id)}
                   childCount={item.childCount}
                   crossStatusChildCount={item.crossStatusChildCount}
+                  crossStatusChildren={item.crossStatusChildren}
                   onToggleChildren={item.isParent ? () => onToggleExpand(item.issue.id) : undefined}
                   parentInfo={item.parentInfo}
                   onHoverParent={onHoverParent}
@@ -607,6 +612,7 @@ function StatusAccordionItem({
                   isExpanded={expandedParents.has(item.issue.id)}
                   childCount={item.childCount}
                   crossStatusChildCount={item.crossStatusChildCount}
+                  crossStatusChildren={item.crossStatusChildren}
                   onToggleChildren={item.isParent ? () => onToggleExpand(item.issue.id) : undefined}
                   parentInfo={item.parentInfo}
                   onHoverParent={onHoverParent}
