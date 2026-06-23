@@ -1,5 +1,6 @@
 {
   "page_title": "사용자 관리",
+  "back_to_app": "Multica로 돌아가기",
   "search_placeholder": "이름 또는 이메일로 검색",
   "table_header_name": "표시 이름",
   "table_header_email": "이메일",

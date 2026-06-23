@@ -1,5 +1,6 @@
 {
   "page_title": "ユーザー管理",
+  "back_to_app": "Multica に戻る",
   "search_placeholder": "名前またはメールで検索",
   "table_header_name": "表示名",
   "table_header_email": "メール",

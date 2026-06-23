@@ -1,5 +1,6 @@
 {
   "page_title": "User Management",
+  "back_to_app": "Back to Multica",
   "search_placeholder": "Search by name or email",
   "table_header_name": "Name",
   "table_header_email": "Email",

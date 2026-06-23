@@ -1,5 +1,6 @@
 {
   "page_title": "用户管理",
+  "back_to_app": "返回 Multica",
   "search_placeholder": "按姓名或邮箱搜索",
   "table_header_name": "显示名",
   "table_header_email": "邮箱",

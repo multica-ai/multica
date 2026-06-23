@@ -3,13 +3,15 @@
 import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Pencil, Check, X, Search } from "lucide-react";
+import { Pencil, Check, X, Search, ArrowLeft } from "lucide-react";
 import { useT } from "../i18n";
 import { userListOptions } from "@multica/core/admin";
 import { useUpdateUserName } from "@multica/core/admin";
 import type { AdminUser } from "@multica/core/types";
 import { Input } from "@multica/ui/input";
 import { Button } from "@multica/ui/button";
+import { AppLink } from "../navigation";
+import { useCurrentWorkspace, paths } from "@multica/core/paths";
 
 function UserRow({
   user,
@@ -116,6 +118,7 @@ function UserRow({
 
 export function UserManagementPage() {
   const { t } = useT("admin");
+  const workspace = useCurrentWorkspace();
   const [search, setSearch] = useState("");
   const { data: users = [], isLoading } = useQuery(userListOptions({ search }));
   const updateName = useUpdateUserName();
@@ -125,9 +128,19 @@ export function UserManagementPage() {
     toast.success(t(($) => $.rename_success));
   };
 
+  const backHref = workspace ? paths.workspace(workspace.slug).root() : "/";
+
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-6">
-      <h1 className="text-xl font-semibold">{t(($) => $.page_title)}</h1>
+      <div className="flex items-center gap-2">
+        <AppLink
+          href={backHref}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </AppLink>
+        <h1 className="text-xl font-semibold">{t(($) => $.page_title)}</h1>
+      </div>
       <div className="relative">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
