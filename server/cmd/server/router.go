@@ -895,6 +895,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/archive", h.ArchiveKnowledge)
 					r.Post("/deprecate", h.DeprecateKnowledge)
 					r.Post("/restore", h.RestoreKnowledge)
+					r.Post("/embedding/regenerate", h.RegenerateKnowledgeEmbedding)
 					r.Post("/governance/dismiss", h.DismissKnowledgeGovernance)
 					r.Post("/publish/wiki", h.PublishKnowledgeToWiki)
 					r.Post("/publish/skill", h.PublishKnowledgeToSkill)

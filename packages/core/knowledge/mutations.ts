@@ -51,6 +51,18 @@ export function usePublishKnowledge() {
   });
 }
 
+export function useRegenerateKnowledgeEmbedding() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.regenerateKnowledgeEmbedding(id),
+    onSettled: (_data, _err, id) => {
+      qc.invalidateQueries({ queryKey: knowledgeKeys.detail(wsId, id) });
+      qc.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
+    },
+  });
+}
+
 export function useDismissKnowledgeGovernance() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

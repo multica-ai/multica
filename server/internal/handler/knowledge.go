@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -607,6 +608,50 @@ func (h *Handler) PublishKnowledge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.maybeEnsureKnowledgeEmbedding(r.Context(), wsUUID, itemID)
+	writeJSON(w, http.StatusOK, knowledgeDetailToResponse(detail))
+}
+
+func (h *Handler) RegenerateKnowledgeEmbedding(w http.ResponseWriter, r *http.Request) {
+	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
+	if !ok {
+		return
+	}
+	if _, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r)); !ok {
+		return
+	}
+	if h.KnowledgeCurator == nil {
+		writeError(w, http.StatusServiceUnavailable, service.ErrCuratorEngineUnavailable.Error())
+		return
+	}
+	if _, err := h.KnowledgeService.GetDetail(r.Context(), wsUUID, itemID); err != nil {
+		h.writeKnowledgeError(w, err, "failed to get knowledge")
+		return
+	}
+	attempt, err := h.Queries.GetKnowledgeEmbeddingAttempt(r.Context(), db.GetKnowledgeEmbeddingAttemptParams{
+		KnowledgeItemID: itemID,
+		WorkspaceID:     wsUUID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusConflict, "knowledge embedding is not failed")
+			return
+		}
+		h.writeKnowledgeError(w, err, "failed to get knowledge embedding status")
+		return
+	}
+	if attempt.Status != "failed" {
+		writeError(w, http.StatusConflict, "knowledge embedding is not failed")
+		return
+	}
+	if _, err := h.KnowledgeCurator.EnsureKnowledgeEmbedding(r.Context(), wsUUID, itemID); err != nil {
+		h.writeKnowledgeError(w, err, "failed to regenerate knowledge embedding")
+		return
+	}
+	detail, err := h.KnowledgeService.GetDetail(r.Context(), wsUUID, itemID)
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to get knowledge")
+		return
+	}
 	writeJSON(w, http.StatusOK, knowledgeDetailToResponse(detail))
 }
 

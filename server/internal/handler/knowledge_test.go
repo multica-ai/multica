@@ -747,7 +747,7 @@ func TestKnowledgeEmbeddingStatusIsReturnedInDetail(t *testing.T) {
 				EmbeddingDimension: service.KnowledgeEmbeddingDimensions,
 			},
 		}
-		reviewKnowledge(t, created.Item.ID)
+		reviewKnowledgeWithoutEmbedding(t, created.Item.ID)
 		if _, err := testHandler.KnowledgeCurator.EnsureKnowledgeEmbedding(context.Background(), parseUUID(testWorkspaceID), parseUUID(created.Item.ID)); err != nil {
 			t.Fatalf("EnsureKnowledgeEmbedding generated: %v", err)
 		}
@@ -787,7 +787,7 @@ func TestKnowledgeEmbeddingStatusIsReturnedInDetail(t *testing.T) {
 				EmbeddingDimension: service.KnowledgeEmbeddingDimensions,
 			},
 		}
-		reviewKnowledge(t, created.Item.ID)
+		reviewKnowledgeWithoutEmbedding(t, created.Item.ID)
 		if _, err := testHandler.KnowledgeCurator.EnsureKnowledgeEmbedding(context.Background(), parseUUID(testWorkspaceID), parseUUID(created.Item.ID)); err == nil {
 			t.Fatalf("EnsureKnowledgeEmbedding failed: expected error")
 		}
@@ -812,7 +812,7 @@ func TestKnowledgeEmbeddingStatusIsReturnedInDetail(t *testing.T) {
 			}},
 		})
 		testHandler.KnowledgeCurator.Engine = service.MissingCuratorEngine{}
-		reviewKnowledge(t, created.Item.ID)
+		reviewKnowledgeWithoutEmbedding(t, created.Item.ID)
 		if _, err := testHandler.KnowledgeCurator.EnsureKnowledgeEmbedding(context.Background(), parseUUID(testWorkspaceID), parseUUID(created.Item.ID)); err == nil {
 			t.Fatalf("EnsureKnowledgeEmbedding unavailable: expected error")
 		}
@@ -821,6 +821,121 @@ func TestKnowledgeEmbeddingStatusIsReturnedInDetail(t *testing.T) {
 			t.Fatalf("embedding status = %#v, want unavailable", detail.EmbeddingStatus)
 		}
 	})
+}
+
+func TestKnowledgeEmbeddingRegenerate(t *testing.T) {
+	previous := testHandler.KnowledgeCurator.Engine
+	t.Cleanup(func() {
+		testHandler.KnowledgeCurator.Engine = previous
+	})
+
+	created := createKnowledgeFixture(t, map[string]any{
+		"title":                "Embedding regenerate status",
+		"type":                 "lesson",
+		"problem_pattern":      "Embedding initially fails.",
+		"recommended_practice": "Allow a failed embedding to be generated again.",
+		"sources": []map[string]any{{
+			"source_type": "commit",
+			"source_url":  "https://example.com/commit/embedding-regenerate",
+		}},
+	})
+	if _, err := testHandler.KnowledgeService.Review(context.Background(), parseUUID(testWorkspaceID), parseUUID(created.Item.ID), handlerTestMemberID(t)); err != nil {
+		t.Fatalf("review knowledge: %v", err)
+	}
+	testHandler.KnowledgeCurator.Engine = service.StaticCuratorEngine{
+		Err: fmt.Errorf("embedding quota exceeded"),
+		Engine: service.CuratorEngineInfo{
+			Provider:           "test",
+			Model:              "chat",
+			EmbeddingProvider:  "siliconflow",
+			EmbeddingModel:     "BAAI/bge-m3",
+			EmbeddingDimension: service.KnowledgeEmbeddingDimensions,
+		},
+	}
+	if _, err := testHandler.KnowledgeCurator.EnsureKnowledgeEmbedding(context.Background(), parseUUID(testWorkspaceID), parseUUID(created.Item.ID)); err == nil {
+		t.Fatalf("EnsureKnowledgeEmbedding failed: expected error")
+	}
+	detail := getKnowledgeDetail(t, created.Item.ID)
+	if detail.EmbeddingStatus == nil || detail.EmbeddingStatus.Status != "failed" {
+		t.Fatalf("embedding status = %#v, want failed", detail.EmbeddingStatus)
+	}
+
+	embedding := make([]float32, service.KnowledgeEmbeddingDimensions)
+	embedding[0] = 1
+	testHandler.KnowledgeCurator.Engine = service.StaticCuratorEngine{
+		Embedding: embedding,
+		Engine: service.CuratorEngineInfo{
+			Provider:           "test",
+			Model:              "chat",
+			EmbeddingProvider:  "siliconflow",
+			EmbeddingModel:     "BAAI/bge-m3",
+			EmbeddingDimension: service.KnowledgeEmbeddingDimensions,
+		},
+	}
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/"+created.Item.ID+"/embedding/regenerate", nil)
+	req = withURLParam(req, "id", created.Item.ID)
+	testHandler.RegenerateKnowledgeEmbedding(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("RegenerateKnowledgeEmbedding: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp KnowledgeDetailResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode regenerate response: %v", err)
+	}
+	if resp.EmbeddingStatus == nil || resp.EmbeddingStatus.Status != "generated" {
+		t.Fatalf("embedding status = %#v, want generated", resp.EmbeddingStatus)
+	}
+	if len(resp.Embeddings) == 0 {
+		t.Fatalf("embeddings metadata missing")
+	}
+	if resp.EmbeddingStatus.Model == nil || *resp.EmbeddingStatus.Model != "BAAI/bge-m3" {
+		t.Fatalf("embedding model = %#v", resp.EmbeddingStatus)
+	}
+}
+
+func TestKnowledgeEmbeddingRegenerateRequiresFailedStatus(t *testing.T) {
+	previous := testHandler.KnowledgeCurator.Engine
+	t.Cleanup(func() {
+		testHandler.KnowledgeCurator.Engine = previous
+	})
+
+	created := createKnowledgeFixture(t, map[string]any{
+		"title":                "Embedding regenerate conflict",
+		"type":                 "lesson",
+		"problem_pattern":      "Embedding already succeeds.",
+		"recommended_practice": "Do not expose regenerate as a general rebuild.",
+		"sources": []map[string]any{{
+			"source_type": "commit",
+			"source_url":  "https://example.com/commit/embedding-regenerate-conflict",
+		}},
+	})
+	if _, err := testHandler.KnowledgeService.Review(context.Background(), parseUUID(testWorkspaceID), parseUUID(created.Item.ID), handlerTestMemberID(t)); err != nil {
+		t.Fatalf("review knowledge: %v", err)
+	}
+	embedding := make([]float32, service.KnowledgeEmbeddingDimensions)
+	embedding[0] = 1
+	testHandler.KnowledgeCurator.Engine = service.StaticCuratorEngine{
+		Embedding: embedding,
+		Engine: service.CuratorEngineInfo{
+			Provider:           "test",
+			Model:              "chat",
+			EmbeddingProvider:  "siliconflow",
+			EmbeddingModel:     "BAAI/bge-m3",
+			EmbeddingDimension: service.KnowledgeEmbeddingDimensions,
+		},
+	}
+	if _, err := testHandler.KnowledgeCurator.EnsureKnowledgeEmbedding(context.Background(), parseUUID(testWorkspaceID), parseUUID(created.Item.ID)); err != nil {
+		t.Fatalf("EnsureKnowledgeEmbedding generated: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/"+created.Item.ID+"/embedding/regenerate", nil)
+	req = withURLParam(req, "id", created.Item.ID)
+	testHandler.RegenerateKnowledgeEmbedding(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("RegenerateKnowledgeEmbedding generated: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 func hasPublishTarget(targets []KnowledgePublishTargetResponse, targetType string) bool {
@@ -1219,6 +1334,13 @@ func getKnowledgeDetail(t *testing.T, itemID string) KnowledgeDetailResponse {
 		t.Fatalf("decode GetKnowledge: %v", err)
 	}
 	return resp
+}
+
+func reviewKnowledgeWithoutEmbedding(t *testing.T, itemID string) {
+	t.Helper()
+	if _, err := testHandler.KnowledgeService.Review(context.Background(), parseUUID(testWorkspaceID), parseUUID(itemID), handlerTestMemberID(t)); err != nil {
+		t.Fatalf("review knowledge: %v", err)
+	}
 }
 
 func withStaticCuratorEngine(t *testing.T, draft service.CuratorDraft) {

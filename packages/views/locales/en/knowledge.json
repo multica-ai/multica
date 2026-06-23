@@ -113,7 +113,8 @@
     "embedding_status_unavailable": "Not configured",
     "embedding_status_skipped": "Skipped",
     "embedding_status_not_attempted": "Not attempted",
-    "embedding_status_not_attempted_help": "No embedding attempt has been recorded yet."
+    "embedding_status_not_attempted_help": "No embedding attempt has been recorded yet.",
+    "regenerate_embedding": "Regenerate"
   },
   "issue": {
     "section": "Knowledge",
@@ -177,6 +178,8 @@
     "action_failed": "Action failed",
     "feedback_sent": "Feedback sent",
     "draft_created": "Knowledge draft created",
+    "embedding_regenerated": "Embedding regenerated",
+    "embedding_regenerate_failed": "Failed to regenerate embedding",
     "publish_wiki": "Knowledge published to Wiki",
     "publish_skill": "Knowledge published to Skill"
   },

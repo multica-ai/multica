@@ -2307,6 +2307,15 @@ export class ApiClient {
     });
   }
 
+  async regenerateKnowledgeEmbedding(id: string): Promise<KnowledgeDetail> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}/embedding/regenerate`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
+      endpoint: "POST /api/knowledge/:id/embedding/regenerate",
+    });
+  }
+
   async dismissKnowledgeGovernance(id: string): Promise<KnowledgeItem> {
     const raw = await this.fetch<unknown>(`/api/knowledge/${id}/governance/dismiss`, {
       method: "POST",

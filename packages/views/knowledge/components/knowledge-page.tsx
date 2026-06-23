@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FileText,
   History,
+  RefreshCw,
   Search,
   Sparkles,
   XCircle,
@@ -36,6 +37,7 @@ import {
   useCreateKnowledgeDraftFromGovernanceFinding,
   useDismissKnowledgeGovernance,
   usePublishKnowledge,
+  useRegenerateKnowledgeEmbedding,
   useResolveKnowledgeGovernanceFinding,
   useRestoreKnowledge,
   useReviewKnowledge,
@@ -338,6 +340,7 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
   const updateKnowledge = useUpdateKnowledge();
   const reviewKnowledge = useReviewKnowledge();
   const publishKnowledge = usePublishKnowledge();
+  const regenerateEmbedding = useRegenerateKnowledgeEmbedding();
   const dismissGovernance = useDismissKnowledgeGovernance();
   const archiveKnowledge = useArchiveKnowledge();
   const restoreKnowledge = useRestoreKnowledge();
@@ -391,6 +394,14 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
       toast.success(t(($) => $.toast[action]));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(($) => $.toast.action_failed));
+    }
+  };
+  const runRegenerateEmbedding = async () => {
+    try {
+      await regenerateEmbedding.mutateAsync(item.id);
+      toast.success(t(($) => $.toast.embedding_regenerated));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.toast.embedding_regenerate_failed));
     }
   };
   const hasGovernanceFinding = !!(item.review_needed_at || item.review_reason || item.update_suggestion || item.conflict_group);
@@ -699,19 +710,36 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
                   <div className="rounded-md border border-dashed px-2 py-1.5 text-xs">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium text-foreground">{t(($) => $.detail.embeddings)}</span>
-                      <Badge
-                        variant={embeddingTone === "failed" ? "destructive" : "outline"}
-                        className={cn(
-                          embeddingTone === "generated" &&
-                            "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300",
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Badge
+                          variant={embeddingTone === "failed" ? "destructive" : "outline"}
+                          className={cn(
+                            embeddingTone === "generated" &&
+                              "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300",
+                          )}
+                        >
+                          {embeddingLabel}
+                        </Badge>
+                        {embeddingStatus?.status === "failed" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 gap-1 px-2 text-xs"
+                            disabled={regenerateEmbedding.isPending}
+                            onClick={runRegenerateEmbedding}
+                          >
+                            <RefreshCw
+                              className={cn(
+                                "h-3.5 w-3.5",
+                                regenerateEmbedding.isPending && "animate-spin",
+                              )}
+                            />
+                            {t(($) => $.detail.regenerate_embedding)}
+                          </Button>
                         )}
-                      >
-                        {embeddingLabel}
-                      </Badge>
+                      </div>
                     </div>
-                    <div className="mt-1 truncate">
-                      {embeddingDescription}
-                    </div>
+                    <div className="mt-1 truncate">{embeddingDescription}</div>
                   </div>
                 </div>
               </div>
