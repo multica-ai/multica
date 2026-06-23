@@ -185,6 +185,17 @@ function scrollToElement(container: HTMLElement | null, target: HTMLElement) {
   });
 }
 
+// Scroll the message list to its very bottom by setting scrollTop directly.
+// Replaces bottomRef.scrollIntoView for the follow-new-messages path: that API
+// can mis-fire inside the nested scrollable layout (the page layout also scrolls),
+// and a smooth animation it starts gets cancelled by the WS-driven message
+// refetch that follows a send. Setting scrollTop synchronously on commit is
+// reliable and immediate.
+function scrollListToBottom(container: HTMLElement | null) {
+  if (!container) return;
+  container.scrollTop = container.scrollHeight;
+}
+
 function formatTime(ts?: string): string {
   if (!ts) return "";
   const d = new Date(ts);
@@ -1065,7 +1076,6 @@ function MessageList({
 }) {
   const { t } = useT("channels");
   const editorRef = useRef<ContentEditorRef>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const { isDragOver, dropZoneProps } = useFileDropZone({
@@ -1082,17 +1092,13 @@ function MessageList({
     if (messages.length > prevMsgCount.current) {
       const isNewMessage = messages.length - prevMsgCount.current <= 2;
       if (isNewMessage && !linkedMessageId) {
-        requestAnimationFrame(() => {
-          bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-        });
+        scrollListToBottom(scrollRef.current);
       }
     } else if (prevMsgCount.current === 0 && messages.length > 0 && !linkedMessageId) {
-      // Use rAF to ensure the browser has painted the message elements
-      // before we attempt to scroll — without this, scrollIntoView may
-      // fire on an empty or partially-laid-out container.
-      requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ block: "end" });
-      });
+      // Defer one frame so the browser has painted the message elements before
+      // we read scrollHeight — on an initial load layout isn't settled on the
+      // commit.
+      requestAnimationFrame(() => scrollListToBottom(scrollRef.current));
     }
     prevMsgCount.current = messages.length;
   }, [messages.length, linkedMessageId]);
@@ -1102,9 +1108,7 @@ function MessageList({
   // empty container; the effect above handles the initial-load case.
   useEffect(() => {
     if (messages.length > 0 && !linkedMessageId) {
-      requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ block: "end" });
-      });
+      requestAnimationFrame(() => scrollListToBottom(scrollRef.current));
     }
   }, [channelId]);
 
@@ -1224,7 +1228,6 @@ function MessageList({
                 }
               />
             ))}
-            <div ref={bottomRef} />
           </ul>
         )}
       </div>
