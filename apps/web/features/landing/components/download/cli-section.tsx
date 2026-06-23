@@ -23,7 +23,8 @@ export function CliSection() {
   const { t } = useLocale();
   const d = t.download.cli;
   const serverUrl = useConfigStore((s) => s.serverUrl);
-  const tokenCmd = makeTokenCmd(serverUrl);
+  const cliServerUrl = useConfigStore((s) => s.cliServerUrl);
+  const tokenCmd = makeTokenCmd(cliServerUrl || serverUrl);
 
   return (
     <section id="cli" className="bg-[#f7f7f5] py-20 text-[#0a0d12] sm:py-24">
