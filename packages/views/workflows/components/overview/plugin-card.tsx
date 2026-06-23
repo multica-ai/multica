@@ -12,9 +12,9 @@ export interface PluginCardProps {
 }
 
 const statusDotColors: Record<string, string> = {
-  working: "bg-green-500",
-  idle: "bg-blue-400",
-  blocked: "bg-yellow-500",
+  working: "bg-[var(--success)]",
+  idle: "bg-[var(--info)]",
+  blocked: "bg-[var(--warning)]",
   error: "bg-destructive",
   offline: "bg-muted-foreground/40",
 };
