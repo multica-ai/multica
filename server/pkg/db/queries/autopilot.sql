@@ -214,6 +214,24 @@ WHERE trigger_id = $1
   AND planned_at = $2
 LIMIT 1;
 
+-- name: RecoverPartialAutopilotRun :exec
+-- Recovers a partial-state autopilot_run from a crashed first attempt
+-- (the runner wrote the run row but died before creating the downstream
+-- issue/task) so that a subsequent DispatchAutopilotForPlan call can
+-- create a fresh run at the same (trigger_id, planned_at).
+--
+-- Setting planned_at = NULL clears the partial-unique slot held by
+-- uq_autopilot_run_trigger_planned, letting the new INSERT proceed.
+-- The row stays in autopilot_run as a FAILED record (with a recovery
+-- reason) so ops still see the abandoned attempt in the run history —
+-- it is not silently deleted.
+UPDATE autopilot_run
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'recovered partial dispatch (crashed before downstream creation)',
+    planned_at = NULL
+WHERE id = $1;
+
 -- name: GetAutopilotRun :one
 SELECT * FROM autopilot_run
 WHERE id = $1;

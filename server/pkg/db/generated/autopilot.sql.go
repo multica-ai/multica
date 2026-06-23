@@ -950,6 +950,30 @@ func (q *Queries) RecoverLostTriggers(ctx context.Context) ([]RecoverLostTrigger
 	return items, nil
 }
 
+const recoverPartialAutopilotRun = `-- name: RecoverPartialAutopilotRun :exec
+UPDATE autopilot_run
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'recovered partial dispatch (crashed before downstream creation)',
+    planned_at = NULL
+WHERE id = $1
+`
+
+// Recovers a partial-state autopilot_run from a crashed first attempt
+// (the runner wrote the run row but died before creating the downstream
+// issue/task) so that a subsequent DispatchAutopilotForPlan call can
+// create a fresh run at the same (trigger_id, planned_at).
+//
+// Setting planned_at = NULL clears the partial-unique slot held by
+// uq_autopilot_run_trigger_planned, letting the new INSERT proceed.
+// The row stays in autopilot_run as a FAILED record (with a recovery
+// reason) so ops still see the abandoned attempt in the run history —
+// it is not silently deleted.
+func (q *Queries) RecoverPartialAutopilotRun(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, recoverPartialAutopilotRun, id)
+	return err
+}
+
 const rotateAutopilotTriggerWebhookToken = `-- name: RotateAutopilotTriggerWebhookToken :one
 UPDATE autopilot_trigger
 SET webhook_token = $2,
