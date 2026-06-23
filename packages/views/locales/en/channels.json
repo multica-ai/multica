@@ -1,0 +1,87 @@
+{
+  "header": "Channels",
+  "empty_prompt": "Select a channel to start chatting",
+  "input_placeholder": "Type a message, supports Markdown, images and @mentions",
+  "send_tooltip": "Send · {{shortcut}}",
+  "invite_only_notice": "Only invited members can send messages in this channel",
+  "no_messages": "No messages yet, send the first one",
+  "no_replies": "No replies yet",
+  "reply_placeholder": "Reply…",
+  "link_copied": "Link copied",
+  "copy_failed": "Copy failed",
+  "send_failed": "Failed to send",
+  "reply_failed": "Failed to reply",
+  "create_failed": "Failed to create",
+  "add_failed": "Failed to add",
+  "remove_failed": "Failed to remove",
+  "update_failed": "Failed to update",
+  "channel_created": "Channel created",
+  "member_added": "Member added",
+  "member_removed": "Member removed",
+  "settings_updated": "Channel settings updated",
+  "replies_count_one": "{{count}} reply",
+  "replies_count_other": "{{count}} replies",
+  "new_group": "New group",
+  "new_channel": "New channel",
+  "group_dialog": {
+    "title": "New group",
+    "description": "Create a new group for channels",
+    "name_placeholder": "Group name",
+    "cancel": "Cancel",
+    "create": "Create"
+  },
+  "create_channel_dialog": {
+    "title": "Create channel",
+    "description": "Create a new channel to discuss topics",
+    "name_placeholder": "Channel name",
+    "desc_placeholder": "Description (optional)",
+    "open": "Open",
+    "invite": "Invite-only",
+    "cancel": "Cancel",
+    "create": "Create"
+  },
+  "context_menu": {
+    "rename": "Rename",
+    "delete_group": "Delete group",
+    "copy_link": "Copy link",
+    "reply": "Reply",
+    "convert_issue": "Convert to Issue",
+    "convert_agent": "Convert to Issue by Agent"
+  },
+  "panel_header": {
+    "replies": "Replies",
+    "members_settings": "Members & Settings",
+    "participants": "Participants"
+  },
+  "members": {
+    "channel_nature": "Channel type",
+    "nature_description": "Controls whether members need to be added before they can join.",
+    "current_members": "Current members",
+    "remove": "Remove",
+    "add_member": "Add member",
+    "search_placeholder": "Search members",
+    "search_description": "Search workspace members by name, email or pinyin.",
+    "already_added": "Added",
+    "add": "Add",
+    "no_match": "No matching members",
+    "cannot_remove_admin": "Only admins or channel owners can remove members",
+    "cannot_remove_only_owner": "Cannot remove the only owner"
+  },
+  "task_status": {
+    "queued": "Queued",
+    "dispatched": "Dispatched",
+    "waiting_directory": "Waiting for directory",
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled"
+  },
+  "task_strip": {
+    "view_history": "View execution history",
+    "stop": "Stop"
+  },
+  "resize_aria": {
+    "channel_list": "Adjust channel list width",
+    "side_panel": "Adjust side panel width"
+  }
+}

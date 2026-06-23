@@ -1163,7 +1163,6 @@ LEFT JOIN channel_member cm ON cm.channel_id = c.id AND cm.user_id = $2
 LEFT JOIN channel_group cg ON cg.id = c.group_id
 WHERE c.workspace_id = $1
   AND c.is_archived = false
-  AND (c.access_mode = 'open' OR cm.user_id IS NOT NULL)
 ORDER BY group_position ASC, c.position ASC, last_activity_at DESC, c.created_at DESC
 `
 
@@ -1196,7 +1195,9 @@ type ListChannelsRow struct {
 }
 
 // ============ Channels ============
-// Lists channels visible to a user: open channels + channels the user is a member of.
+// Lists all non-archived channels in the workspace. Invite-only channels are
+// visible to non-members (channel + messages readable), but posting is gated by
+// the handler layer (canPost requires channel membership).
 // Includes the user's membership row (if any) and an unread flag computed from
 // the latest message activity vs the member's last_read_at.
 func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]ListChannelsRow, error) {
