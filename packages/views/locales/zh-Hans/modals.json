@@ -50,8 +50,26 @@
     "toast_failed": "添加子 issue 失败",
     "toast_success": "已添加 {{identifier}} 为子 issue"
   },
-  "backlog_hint": {
-    "toast_status_failed": "更新状态失败"
+  "run_confirm": {
+    "title_assign": "指派并开始处理？",
+    "title_status": "现在开始处理？",
+    "checking": "检查中…",
+    "will_start_named": "指派后，{{name}} 会立即开始工作。",
+    "will_start_named_squad": "指派后，{{name}} 的队长会评估并开始安排任务。",
+    "will_start": "将立即开始处理 {{count}} 个 issue。",
+    "will_start_squad": "将把 {{count}} 个 issue 交给队长评估并安排。",
+    "nothing_assign": "已指派 —— 在 backlog 中不会开始处理。",
+    "nothing_status": "不会开始处理。",
+    "note_label": "交接说明（可选）",
+    "note_placeholder": "交代一句 —— 范围、重点、或别碰什么……",
+    "note_unsupported": "对方的运行环境版本较旧，这条交接说明可能读不到。",
+    "start": "开始",
+    "dont_start": "暂不开始",
+    "apply": "确定",
+    "toast_failed": "操作失败",
+    "create_will_start": "创建后 {{name}} 会立即开始工作。",
+    "create_will_start_squad": "创建后 {{name}} 的队长会评估并开始安排任务。",
+    "create_parked": "已指派 —— 在 backlog 中不会开始工作。"
   },
   "create_squad": {
     "title": "创建 Squad",
@@ -90,6 +108,7 @@
     "icon_tooltip": "选择图标",
     "title_placeholder": "项目标题",
     "description_placeholder": "添加描述...",
+    "description_hint": "会作为项目上下文提供给智能体，应用于该项目下的每个任务。",
     "lead": "负责人",
     "no_lead": "无负责人",
     "lead_placeholder": "指派负责人...",

@@ -69,6 +69,7 @@
     "section_progress": "進捗",
     "section_description": "説明",
     "description_placeholder": "説明を追加...",
+    "description_hint": "このプロジェクトのすべてのタスクで、コンテキストとしてエージェントに共有されます。",
     "empty_issues_title": "リンクされたイシューはありません",
     "empty_issues_hint": "新しいイシューを作成するか、既存のイシューをこのプロジェクトに割り当ててください。",
     "empty_issues_new_button": "新規イシュー",

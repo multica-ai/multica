@@ -118,6 +118,8 @@ Each tool uses **its own** skill discovery path. Before a task runs, the Multica
 
 Whether a fallback-path tool actually reads this directory depends on the tool's own documentation — no guarantees. If your skills aren't taking effect for Gemini / Hermes / OpenClaw, check this first.
 
+For native project-level paths, repo-scoped discovery is expected: if the checked-out repository already contains a matching directory, the underlying tool can discover those committed skills on its own. You do not need to import those repo skills into Multica just to use them in that repo. Multica keeps the repo files intact. If a workspace skill has the same natural directory name, the daemon writes the workspace copy to a collision-free sibling such as `review-helper-multica`.
+
 For creating and using skills, see [Skills](/skills).
 
 ## Next

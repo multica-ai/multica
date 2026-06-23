@@ -44,10 +44,14 @@ type IssueResponse struct {
 	ParentIssueID *string `json:"parent_issue_id"`
 	ProjectID     *string `json:"project_id"`
 	Position      float64 `json:"position"`
-	StartDate     *string `json:"start_date"`
-	DueDate       *string `json:"due_date"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
+	// Stage groups sub-issues under the same parent into ordered barrier
+	// groups (null = unstaged). See issue_child_done.go for how a closed
+	// stage gates the child-done -> parent wake.
+	Stage     *int32  `json:"stage"`
+	StartDate *string `json:"start_date"`
+	DueDate   *string `json:"due_date"`
+	CreatedAt string  `json:"created_at"`
+	UpdatedAt string  `json:"updated_at"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -98,6 +102,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		Stage:         int4ToPtr(i.Stage),
 		StartDate:     dateToPtr(i.StartDate),
 		DueDate:       dateToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
@@ -125,6 +130,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		Stage:         int4ToPtr(i.Stage),
 		StartDate:     dateToPtr(i.StartDate),
 		DueDate:       dateToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
@@ -182,6 +188,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
+		Stage:         int4ToPtr(i.Stage),
 		StartDate:     dateToPtr(i.StartDate),
 		DueDate:       dateToPtr(i.DueDate),
 		CreatedAt:     timestampToString(i.CreatedAt),
@@ -2049,6 +2056,7 @@ type CreateIssueRequest struct {
 	AssigneeID    *string  `json:"assignee_id"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	ProjectID     *string  `json:"project_id"`
+	Stage         *int32   `json:"stage,omitempty"`
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
@@ -2103,6 +2111,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validateIssueEnum(w, "priority", priority, validIssuePriorities) {
+		return
+	}
+	if req.Stage != nil && *req.Stage < 1 {
+		writeError(w, http.StatusBadRequest, "stage must be >= 1")
 		return
 	}
 
@@ -2241,6 +2253,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		DueDate:        dueDate,
 		OriginType:     originType,
 		OriginID:       originID,
+		Stage:          ptrToInt4(req.Stage),
 		AttachmentIDs:  attachmentIDs,
 		AllowDuplicate: req.AllowDuplicate,
 	}, service.IssueCreateOpts{
@@ -2298,11 +2311,23 @@ type UpdateIssueRequest struct {
 	DueDate       *string  `json:"due_date"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	ProjectID     *string  `json:"project_id"`
+	Stage         *int32   `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
 	// are idempotent — re-sending the same id is a no-op.
 	AttachmentIDs []string `json:"attachment_ids"`
+	// SuppressRun, when true, applies the assignee/status change as usual but
+	// skips starting the agent run this write would otherwise trigger
+	// ("暂时不启动" — MUL-3375). It is not an undo: the change takes effect and
+	// the issue can be run later via manual run/rerun. Optional; omitted or
+	// false keeps today's behavior. Mirrors comment suppress_agent_ids.
+	SuppressRun bool `json:"suppress_run,omitempty"`
+	// HandoffNote is an optional free-text instruction injected into the run's
+	// opening context when this write starts an agent/squad run ("交接说明" —
+	// MUL-3375). Only consumed when a run actually starts: SuppressRun=true or
+	// a parked/non-triggering write drops it. Never fabricates a comment.
+	HandoffNote string `json:"handoff_note,omitempty"`
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -2340,6 +2365,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		DueDate:       prevIssue.DueDate,
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
+		Stage:         prevIssue.Stage,
 	}
 
 	// COALESCE fields — only set when explicitly provided
@@ -2457,6 +2483,17 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ProjectID = pgtype.UUID{Valid: false}
 		}
 	}
+	if _, ok := rawFields["stage"]; ok {
+		if req.Stage != nil {
+			if *req.Stage < 1 {
+				writeError(w, http.StatusBadRequest, "stage must be >= 1")
+				return
+			}
+			params.Stage = pgtype.Int4{Int32: *req.Stage, Valid: true}
+		} else {
+			params.Stage = pgtype.Int4{Valid: false} // explicit null = unstage
+		}
+	}
 
 	// Validate the resulting (assignee_type, assignee_id) pair when the caller
 	// touches either field. Existing data on the issue is left alone if the
@@ -2527,40 +2564,24 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"creator_id":          uuidToString(prevIssue.CreatorID),
 	})
 
-	// Reconcile task queue when assignee changes.
+	// Reconcile the task queue. Whether this write starts an agent run — and
+	// for whom (agent assignee or squad leader) — is decided by the single
+	// WillEnqueueRun predicate, shared verbatim with the preview endpoint so
+	// the two never drift (MUL-3375). Cancellation on reassignment is a
+	// separate side effect and always runs, independent of the run decision.
 	if assigneeChanged {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-
-		if h.shouldEnqueueAgentTask(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
-		}
-
-		// Squad assign: trigger the squad leader, respecting the backlog
-		// parking-lot rule used by agent assignment.
-		if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
-			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
-		}
 	}
-
-	// Trigger the assigned agent when an issue moves out of backlog. Backlog
-	// acts as a parking lot — moving to an active status signals the issue is
-	// ready for work. Agent actors are allowed here so the documented
-	// serial sub-task workflow works (parent agent finishes Step 1, then
-	// promotes Step 2 from backlog→todo, regardless of who Step 2 is
-	// assigned to). The only excluded case is the real self-loop: an agent
-	// promoting the same issue its current task is running on. Same-agent,
-	// cross-issue handoff (Agent A finishing one task and promoting another
-	// issue assigned to A) must still fire — that is the documented serial
-	// chain.
-	if statusChanged && !assigneeChanged &&
-		prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" &&
-		!h.isAgentRunningOnIssue(r, actorType, issue) {
-		if h.isAgentAssigneeReady(r.Context(), issue) {
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
-		}
-		if h.isSquadLeaderReady(r.Context(), issue) {
-			h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
-		}
+	if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
+		service.IssueTriggerInput{
+			Issue:           issue,
+			PrevStatus:      prevIssue.Status,
+			AssigneeChanged: assigneeChanged,
+			StatusChanged:   statusChanged,
+		},
+		h.issueTriggerWriteProbe(r, actorType, issue),
+	); ok && !req.SuppressRun {
+		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
 	}
 
 	// Cancel active tasks when the issue is cancelled by a user.
@@ -2839,7 +2860,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		req.Updates.Priority != nil ||
 		req.Updates.Position != nil
 	if !hasMutation {
-		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id"} {
+		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id", "stage"} {
 			if _, ok := rawUpdates[k]; ok {
 				hasMutation = true
 				break
@@ -2888,6 +2909,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			DueDate:       prevIssue.DueDate,
 			ParentIssueID: prevIssue.ParentIssueID,
 			ProjectID:     prevIssue.ProjectID,
+			Stage:         prevIssue.Stage,
 		}
 
 		if req.Updates.Title != nil {
@@ -2996,6 +3018,16 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				params.ProjectID = pgtype.UUID{Valid: false}
 			}
 		}
+		if _, ok := rawUpdates["stage"]; ok {
+			if req.Updates.Stage != nil {
+				if *req.Updates.Stage < 1 {
+					continue
+				}
+				params.Stage = pgtype.Int4{Int32: *req.Updates.Stage, Valid: true}
+			} else {
+				params.Stage = pgtype.Int4{Valid: false} // explicit null = unstage
+			}
+		}
 
 		// Validate the resulting assignee pair when this batch update touches
 		// either assignee field. Skip the issue silently on failure.
@@ -3031,27 +3063,20 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		if assigneeChanged {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-			if h.shouldEnqueueAgentTask(r.Context(), issue) {
-				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
-			}
-			if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
-				h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
-			}
 		}
-
-		// Trigger agent when moving out of backlog (batch). Mirrors the
-		// single-update path above — agent actors are allowed so serial
-		// sub-task chains work, and the same task-issue self-loop guard
-		// prevents an agent from re-triggering itself on the same issue.
-		if statusChanged && !assigneeChanged &&
-			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" &&
-			!h.isAgentRunningOnIssue(r, actorType, issue) {
-			if h.isAgentAssigneeReady(r.Context(), issue) {
-				h.TaskService.EnqueueTaskForIssue(r.Context(), issue)
-			}
-			if h.isSquadLeaderReady(r.Context(), issue) {
-				h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
-			}
+		// Same single predicate as UpdateIssue — batch must not grow its own
+		// copy of the enqueue rule (the historical source of four-entry-point
+		// drift, MUL-3375). suppress_run applies batch-wide.
+		if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
+			service.IssueTriggerInput{
+				Issue:           issue,
+				PrevStatus:      prevIssue.Status,
+				AssigneeChanged: assigneeChanged,
+				StatusChanged:   statusChanged,
+			},
+			h.issueTriggerWriteProbe(r, actorType, issue),
+		); ok && !req.Updates.SuppressRun {
+			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.Updates.HandoffNote)
 		}
 
 		// Cancel active tasks when the issue is cancelled by a user.

@@ -224,6 +224,12 @@ function useTriggerText(task: AgentTask): string {
   }
   if (task.autopilot_run_id) return t(($) => $.execution_log.trigger_autopilot);
   if (task.trigger_comment_id) return t(($) => $.execution_log.trigger_comment);
+  // Assignment-triggered run that carried a handoff note: show the note inline
+  // (truncated by TriggerText) the way comment triggers show their text, so the
+  // row reads as the handoff instead of the generic "initial run".
+  if (task.handoff_note) {
+    return retryPrefix + t(($) => $.execution_log.trigger_handoff_prefix) + stripMentionMarkdown(task.handoff_note);
+  }
   return t(($) => $.execution_log.trigger_initial);
 }
 

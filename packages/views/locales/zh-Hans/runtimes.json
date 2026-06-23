@@ -107,6 +107,7 @@
     "visibility_toast_failed": "更新可见性失败",
     "delete_dialog": {
       "self_heal_notice": "该运行时由正在运行的本地守护进程托管。删除会成功，但守护进程会在数秒内重新注册一个新的运行时——若想彻底移除，请先停止守护进程。",
+      "profile_backed_notice": "该运行时来自自定义运行时配置。删除它只会移除当前运行时实例；只要配置仍存在，运行中的守护进程就可以再次注册它。若要彻底移除，请在“自定义运行时”中删除对应配置。",
       "light": {
         "title": "删除运行时？",
         "description": "确定要删除「{{name}}」吗？此操作无法撤销。",
@@ -258,6 +259,7 @@
     "badge_registering": "注册中",
     "pending_health": "正在向守护进程注册",
     "pending_health_warning": "等待守护进程同步",
+    "pending_health_error": "注册错误",
     "pending_cli_unknown": "等待中"
   },
   "profiles": {
@@ -304,11 +306,17 @@
       "display_name_label": "显示名称",
       "display_name_placeholder": "我的自定义 Claude",
       "command_name_label": "命令",
-      "command_name_placeholder": "claude",
+      "command_name_placeholder": "agent --model composer-2.5",
       "description_label": "描述",
       "description_placeholder": "可选 — 此运行时的用途",
       "error_display_name_required": "显示名称为必填项。",
       "error_command_required": "命令为必填项。",
+      "error_command_unclosed_quote": "保存前请先闭合引号。",
+      "error_command_trailing_escape": "保存前请补全或移除末尾的反斜杠。",
+      "error_command_shell_syntax": "不支持 shell 管道、重定向和控制操作符。需要这些能力时请使用 wrapper 脚本。",
+      "error_command_shell_expansion": "不支持 shell 变量或命令展开。请使用绝对路径或 wrapper 脚本。",
+      "command_preview_executable": "可执行文件：",
+      "command_preview_args": "参数：",
       "back": "返回",
       "cancel": "取消",
       "next": "下一步",

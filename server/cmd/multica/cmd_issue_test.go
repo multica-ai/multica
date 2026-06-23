@@ -435,6 +435,68 @@ func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
 	}
 }
 
+func newIssueUsageTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "usage"}
+	cmd.Flags().String("output", "table", "")
+	return cmd
+}
+
+func TestRunIssueUsageReturnsTokenSummaryAsJSON(t *testing.T) {
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/issues/MUL-2818":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-2818",
+				"title":      "CLI usage lookup",
+			})
+		case "/api/issues/issue-uuid/usage":
+			json.NewEncoder(w).Encode(map[string]any{
+				"total_input_tokens":       float64(3800),
+				"total_output_tokens":      float64(11700),
+				"total_cache_read_tokens":  float64(537800),
+				"total_cache_write_tokens": float64(42400),
+				"task_count":               float64(1),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUsageTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssueUsage(cmd, []string{"MUL-2818"})
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssueUsage: %v", err)
+	}
+
+	if want := []string{"/api/issues/MUL-2818", "/api/issues/issue-uuid/usage"}; fmt.Sprint(gotPaths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, string(out))
+	}
+	if payload["total_input_tokens"] != float64(3800) || payload["total_output_tokens"] != float64(11700) ||
+		payload["total_cache_read_tokens"] != float64(537800) || payload["total_cache_write_tokens"] != float64(42400) ||
+		payload["task_count"] != float64(1) {
+		t.Fatalf("unexpected usage payload: %#v", payload)
+	}
+}
+
 func TestRunIssuePullRequestsTableIncludesCoreFields(t *testing.T) {
 	prs := []map[string]any{{
 		"url":    "https://github.com/multica-ai/multica/pull/42",
@@ -1700,6 +1762,83 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	cmd.Flags().String("before", "", "")
 	cmd.Flags().String("before-id", "", "")
 	return cmd
+}
+
+func newIssueCommentResolutionTestCmd(use string) *cobra.Command {
+	cmd := &cobra.Command{Use: use}
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueCommentResolution(t *testing.T) {
+	commentID := "comment-123"
+	tests := []struct {
+		name       string
+		run        func(*cobra.Command, []string) error
+		cmdUse     string
+		wantMethod string
+	}{
+		{
+			name:       "resolve posts to resolve endpoint",
+			run:        runIssueCommentResolve,
+			cmdUse:     "resolve",
+			wantMethod: http.MethodPost,
+		},
+		{
+			name:       "unresolve deletes resolve endpoint",
+			run:        runIssueCommentUnresolve,
+			cmdUse:     "unresolve",
+			wantMethod: http.MethodDelete,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMethod = r.Method
+				gotPath = r.URL.Path
+				if gotMethod != tt.wantMethod {
+					t.Errorf("method = %s, want %s", gotMethod, tt.wantMethod)
+				}
+				if gotPath != "/api/comments/"+commentID+"/resolve" {
+					t.Errorf("path = %q, want /api/comments/%s/resolve", gotPath, commentID)
+				}
+				if ws := r.Header.Get("X-Workspace-ID"); ws != "ws-1" {
+					t.Errorf("X-Workspace-ID = %q, want ws-1", ws)
+				}
+				json.NewEncoder(w).Encode(map[string]any{
+					"id":          commentID,
+					"content":     "done",
+					"resolved_at": "2026-06-22T08:00:00Z",
+				})
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueCommentResolutionTestCmd(tt.cmdUse)
+			out, err := captureStdout(t, func() error {
+				return tt.run(cmd, []string{commentID})
+			})
+			if err != nil {
+				t.Fatalf("run command: %v", err)
+			}
+			if gotMethod == "" || gotPath == "" {
+				t.Fatal("server did not receive request")
+			}
+
+			var got map[string]any
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("decode stdout JSON: %v\nstdout: %s", err, out)
+			}
+			if got["id"] != commentID {
+				t.Fatalf("stdout id = %v, want %s", got["id"], commentID)
+			}
+		})
+	}
 }
 
 // TestRunIssueCommentListFlagGuards locks the CLI-side flag combination

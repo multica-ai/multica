@@ -50,6 +50,12 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				"`multica issue status <child-id> todo`",
 				"all `--status todo`",
 				"`--status backlog` from the start",
+				// Stage guidance must reach the always-on brief so agents
+				// reach for stages instead of only the manual backlog chain
+				// (MUL-3508 follow-up).
+				"**Ordering with stages.**",
+				"`--stage <N>`",
+				"`multica issue children <id>`",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
@@ -334,6 +340,32 @@ func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestChatOutputDoesNotRequireIssueComment(t *testing.T) {
+	t.Parallel()
+
+	out := buildMetaSkillContent("claude", TaskContextForEnv{ChatSessionID: "chat-1"})
+
+	for _, want := range []string{
+		"This is a chat session",
+		"Your reply is delivered directly to the chat window the user is reading",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("chat brief missing chat output guidance %q\n---\n%s", want, out)
+		}
+	}
+
+	for _, banned := range []string{
+		"Final results MUST be delivered via `multica issue comment add`",
+		"The user does NOT see your terminal output",
+		"do not call `multica issue comment add`",
+		"unless the user explicitly asks",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("chat brief must not inherit issue-comment output warning %q\n---\n%s", banned, out)
+		}
 	}
 }
 

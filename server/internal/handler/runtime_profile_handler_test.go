@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -137,7 +138,6 @@ func TestDeleteRuntimeProfile_ActiveAgentBlocks(t *testing.T) {
 	}
 }
 
-
 // TestCreateRuntimeProfile_ForcesWorkspaceVisibility is the regression guard
 // for the visibility leak: visibility=private is not user-settable in v1
 // because the read paths don't enforce it. A client that POSTs
@@ -181,5 +181,63 @@ func TestCreateRuntimeProfile_ForcesWorkspaceVisibility(t *testing.T) {
 	}
 	if dbVis != "workspace" {
 		t.Fatalf("stored visibility = %q, want workspace", dbVis)
+	}
+}
+
+func TestCreateRuntimeProfile_ValidatesCommandAndFixedArgs(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cases := []struct {
+		name        string
+		commandName string
+		fixedArgs   []string
+		wantStatus  int
+	}{
+		{
+			name:        "split command and args accepted",
+			commandName: "agent",
+			fixedArgs:   []string{"--model", "composer-2.5"},
+			wantStatus:  http.StatusCreated,
+		},
+		{
+			name:        "command line rejected",
+			commandName: "agent --model composer-2.5",
+			wantStatus:  http.StatusBadRequest,
+		},
+		{
+			name:        "nul arg rejected",
+			commandName: "agent",
+			fixedArgs:   []string{"bad\x00arg"},
+			wantStatus:  http.StatusBadRequest,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles", map[string]any{
+				"display_name":    "Validation " + tc.name,
+				"protocol_family": "codex",
+				"command_name":    tc.commandName,
+				"fixed_args":      tc.fixedArgs,
+			})
+			req = withURLParam(req, "id", testWorkspaceID)
+			testHandler.CreateRuntimeProfile(w, req)
+			if w.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", w.Code, tc.wantStatus, w.Body.String())
+			}
+			if w.Code == http.StatusCreated {
+				var resp RuntimeProfileResponse
+				if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+					t.Fatalf("decode response: %v", err)
+				}
+				t.Cleanup(func() {
+					testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, resp.ID)
+				})
+				if got := strings.Join(resp.FixedArgs, " "); got != strings.Join(tc.fixedArgs, " ") {
+					t.Fatalf("fixed_args = %v, want %v", resp.FixedArgs, tc.fixedArgs)
+				}
+			}
+		})
 	}
 }

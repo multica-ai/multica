@@ -6,6 +6,7 @@ import {
   DashboardUsageDailyListSchema,
   DuplicateIssueErrorBodySchema,
   EMPTY_USER,
+  IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -34,6 +35,7 @@ const baseIssue = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  stage: null,
   start_date: null,
   due_date: null,
   metadata: {},
@@ -73,6 +75,93 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
       total: 1,
     };
     expect(ListIssuesResponseSchema.safeParse(payload).success).toBe(false);
+  });
+
+  it("accepts a numeric stage", () => {
+    const payload = { issues: [{ ...baseIssue, stage: 2 }], total: 1 };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.stage).toBe(2);
+  });
+
+  it("defaults stage to null when the server omits it (older backend)", () => {
+    const { stage: _omit, ...issueWithoutStage } = baseIssue;
+    const payload = { issues: [issueWithoutStage], total: 1 };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.stage).toBeNull();
+  });
+});
+
+// POST /api/issues/preview-trigger feeds this schema through parseWithFallback
+// in client.previewIssueTrigger with fallback { triggers: [], total_count: 0 }
+// (MUL-3375). The four entry points read it to decide "will this start a run",
+// so malformed / missing / null drift must degrade to "nothing will start"
+// rather than throw into the picker/modal.
+const PREVIEW_FALLBACK = { triggers: [], total_count: 0 };
+const PREVIEW_ENDPOINT = { endpoint: "POST /api/issues/preview-trigger" };
+
+describe("IssueTriggerPreviewSchema", () => {
+  it("parses a well-formed response", () => {
+    const parsed = IssueTriggerPreviewSchema.parse({
+      triggers: [
+        { issue_id: "i1", agent_id: "a1", source: "assign", handoff_supported: true },
+        { issue_id: "i2", agent_id: "a2", source: "status", handoff_supported: false },
+      ],
+      total_count: 2,
+    });
+    expect(parsed.total_count).toBe(2);
+    expect(parsed.triggers).toHaveLength(2);
+    expect(parsed.triggers[0]).toMatchObject({ issue_id: "i1", agent_id: "a1", source: "assign", handoff_supported: true });
+  });
+
+  it("defaults missing top-level fields (empty / older backend)", () => {
+    const parsed = IssueTriggerPreviewSchema.parse({});
+    expect(parsed.triggers).toEqual([]);
+    expect(parsed.total_count).toBe(0);
+  });
+
+  it("defaults missing optional item fields, keeping required issue_id", () => {
+    const parsed = IssueTriggerPreviewSchema.parse({ triggers: [{ issue_id: "i1" }], total_count: 1 });
+    expect(parsed.triggers[0]).toEqual({
+      issue_id: "i1",
+      agent_id: "",
+      source: "",
+      handoff_supported: false,
+    });
+  });
+
+  it("parseWithFallback returns the fallback for a malformed shape (triggers not an array)", () => {
+    const parsed = parseWithFallback(
+      { triggers: "nope", total_count: 1 },
+      IssueTriggerPreviewSchema,
+      PREVIEW_FALLBACK,
+      PREVIEW_ENDPOINT,
+    );
+    expect(parsed).toEqual(PREVIEW_FALLBACK);
+  });
+
+  it("parseWithFallback returns the fallback when an item drops the required issue_id", () => {
+    const parsed = parseWithFallback(
+      { triggers: [{ agent_id: "a1", source: "assign" }], total_count: 1 },
+      IssueTriggerPreviewSchema,
+      PREVIEW_FALLBACK,
+      PREVIEW_ENDPOINT,
+    );
+    expect(parsed).toEqual(PREVIEW_FALLBACK);
+  });
+
+  it("parseWithFallback returns the fallback for a wrong-typed total_count", () => {
+    const parsed = parseWithFallback(
+      { triggers: [], total_count: "5" },
+      IssueTriggerPreviewSchema,
+      PREVIEW_FALLBACK,
+      PREVIEW_ENDPOINT,
+    );
+    expect(parsed).toEqual(PREVIEW_FALLBACK);
+  });
+
+  it("parseWithFallback returns the fallback for null / non-object bodies", () => {
+    expect(parseWithFallback(null, IssueTriggerPreviewSchema, PREVIEW_FALLBACK, PREVIEW_ENDPOINT)).toEqual(PREVIEW_FALLBACK);
+    expect(parseWithFallback("oops", IssueTriggerPreviewSchema, PREVIEW_FALLBACK, PREVIEW_ENDPOINT)).toEqual(PREVIEW_FALLBACK);
   });
 });
 

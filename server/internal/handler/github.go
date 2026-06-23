@@ -819,10 +819,14 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		return
 	}
 
+	// Route to the workspace that owns this repo, not the installation's single
+	// workspace — one installation can serve repos across several workspaces.
+	wsID := h.resolveWorkspaceForRepo(ctx, inst.WorkspaceID, inst.AccountLogin, p.Repository.Owner.Login, p.Repository.Name)
+
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
 	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
 	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
-		WorkspaceID:         inst.WorkspaceID,
+		WorkspaceID:         wsID,
 		InstallationID:      inst.InstallationID,
 		RepoOwner:           p.Repository.Owner.Login,
 		RepoName:            p.Repository.Name,
@@ -854,9 +858,9 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	// replayed through the same upsert path used by live check_suite
 	// events; the DrainPending… query removes them atomically so a
 	// concurrent PR upsert can't double-apply.
-	h.replayPendingCheckSuitesForPR(ctx, pr, inst.WorkspaceID)
+	h.replayPendingCheckSuitesForPR(ctx, pr, wsID)
 
-	workspaceID := uuidToString(inst.WorkspaceID)
+	workspaceID := uuidToString(wsID)
 	resp := githubPullRequestToResponse(pr)
 
 	// Auto-link: scan title/body/branch for issue identifiers, look them
@@ -870,7 +874,7 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	// flag (which itself short-circuits when the master `github_enabled`
 	// switch is off).
 	linkedIssueIDs := make([]string, 0)
-	if h.workspaceAutoLinkPRsEnabled(ctx, inst.WorkspaceID) {
+	if h.workspaceAutoLinkPRsEnabled(ctx, wsID) {
 		idents := extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
 		// closingIdents is the subset of identifiers that this PR explicitly
 		// declared via a closing keyword ("Closes/Fixes/Resolves MUL-X").
@@ -888,7 +892,7 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		// a terminal event, later edit/synchronize webhooks must not rewrite
 		// the merge-time close decision.
 		preserveCloseIntent := p.Action != "closed" && (state == "merged" || state == "closed")
-		prefix := h.getIssuePrefix(ctx, inst.WorkspaceID)
+		prefix := h.getIssuePrefix(ctx, wsID)
 		// reevalIssues collects each issue whose link row we just touched so
 		// we can re-run the auto-advance gate against the persisted aggregate
 		// after every link upsert in this event. Driving the gate off
@@ -900,7 +904,7 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		// MUL-1 still advances.
 		reevalIssues := make([]db.Issue, 0, len(idents))
 		for _, id := range idents {
-			issue, ok := h.lookupIssueByIdentifier(ctx, inst.WorkspaceID, prefix, id)
+			issue, ok := h.lookupIssueByIdentifier(ctx, wsID, prefix, id)
 			if !ok {
 				continue
 			}
@@ -1025,18 +1029,21 @@ func (h *Handler) handleCheckSuiteEvent(ctx context.Context, body []byte) {
 	}
 	updatedAt := parseGHTimeRequired(p.CheckSuite.UpdatedAt)
 
+	// Route to the workspace that owns this repository (see
+	// handlePullRequestEvent) so the suite lands on the same PR row the
+	// pull_request webhook mirrored, rather than the installation's workspace.
+	wsID := h.resolveWorkspaceForRepo(ctx, inst.WorkspaceID, inst.AccountLogin, p.Repository.Owner.Login, p.Repository.Name)
+
 	affectedWorkspaces := map[string]struct{}{}
 	affectedIssues := map[string]struct{}{}
 	for _, prRef := range p.CheckSuite.PullRequests {
-		// Scope the lookup to the installation's workspace. The
-		// (workspace_id, repo_owner, repo_name, pr_number) tuple is the
-		// real uniqueness key: if the same repo lived under a different
-		// workspace historically, a bare (owner, repo, number) lookup
-		// could return either row arbitrarily and land this suite on
-		// the wrong PR (or skip the right one because the installation
-		// ids no longer match).
+		// Scope the lookup to the repo's workspace. The (workspace_id,
+		// repo_owner, repo_name, pr_number) tuple is the real uniqueness key:
+		// a bare (owner, repo, number) lookup could return a row from a
+		// different workspace that also tracks this repo and land the suite
+		// on the wrong PR.
 		pr, err := h.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-			WorkspaceID: inst.WorkspaceID,
+			WorkspaceID: wsID,
 			RepoOwner:   p.Repository.Owner.Login,
 			RepoName:    p.Repository.Name,
 			PrNumber:    prRef.Number,
@@ -1051,7 +1058,7 @@ func (h *Handler) handleCheckSuiteEvent(ctx context.Context, body []byte) {
 			// event keyed by (workspace, repo, pr_number, suite_id); the
 			// PR upsert path will drain and replay it.
 			if err := h.Queries.UpsertPendingCheckSuite(ctx, db.UpsertPendingCheckSuiteParams{
-				WorkspaceID:    inst.WorkspaceID,
+				WorkspaceID:    wsID,
 				InstallationID: p.Installation.ID,
 				RepoOwner:      p.Repository.Owner.Login,
 				RepoName:       p.Repository.Name,
@@ -1216,6 +1223,92 @@ func parseGHTimeRequired(s string) pgtype.Timestamptz {
 		return pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 	}
 	return t
+}
+
+const githubWebhookHost = "github.com"
+
+// resolveWorkspaceForRepo routes a delivery to the workspace whose repos
+// registry owns github.com/owner/name, so one installation can serve repos in
+// several workspaces; falls back to the installation workspace when unmatched.
+// The registry is admin-editable, so it overrides the verified installation
+// binding only when owner == the delivering account (accountLogin) and the host
+// matches — no cross-account capture. On ties the installation's own workspace
+// wins, else the lowest id (query is ORDER BY id).
+func (h *Handler) resolveWorkspaceForRepo(ctx context.Context, fallback pgtype.UUID, accountLogin, owner, name string) pgtype.UUID {
+	owner = strings.TrimSpace(owner)
+	name = strings.TrimSpace(name)
+	if owner == "" || name == "" {
+		return fallback
+	}
+	// Only the delivering account's repos may be re-routed by the registry.
+	if !strings.EqualFold(strings.TrimSpace(accountLogin), owner) {
+		return fallback
+	}
+	target := githubWebhookHost + "/" + strings.ToLower(owner) + "/" + strings.ToLower(name)
+	rows, err := h.Queries.ListWorkspacesWithRepos(ctx)
+	if err != nil {
+		slog.Warn("github: list workspaces with repos failed", "err", err)
+		return fallback
+	}
+	matches := make([]pgtype.UUID, 0, 1)
+	for _, row := range rows {
+		var repos []struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(row.Repos, &repos); err != nil {
+			continue
+		}
+		for _, rp := range repos {
+			if repoIdentityFromURL(rp.URL) == target {
+				matches = append(matches, row.ID)
+				break
+			}
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return fallback
+	case 1:
+		return matches[0]
+	default:
+		for _, m := range matches {
+			if m == fallback {
+				return m
+			}
+		}
+		return matches[0]
+	}
+}
+
+// repoIdentityFromURL returns lowercased "host/owner/name" from an https, scp
+// ssh (git@host:owner/name) or ssh:// git URL, or "" if it can't.
+func repoIdentityFromURL(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if s == "" {
+		return ""
+	}
+	// Trim trailing slashes before ".git" so "…/foo.git/" resolves.
+	s = strings.TrimRight(s, "/")
+	s = strings.TrimSuffix(s, ".git")
+	s = strings.TrimRight(s, "/")
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.Index(s, "@"); i >= 0 {
+		s = s[i+1:]
+	}
+	// Fold scp-like "host:owner/name" into a path so one split handles all forms.
+	s = strings.ReplaceAll(s, ":", "/")
+	segments := make([]string, 0, 4)
+	for _, seg := range strings.Split(s, "/") {
+		if seg != "" {
+			segments = append(segments, seg)
+		}
+	}
+	if len(segments) < 3 {
+		return ""
+	}
+	return segments[0] + "/" + segments[len(segments)-2] + "/" + segments[len(segments)-1]
 }
 
 // extractIdentifiers pulls every "PREFIX-NUMBER" match across the supplied

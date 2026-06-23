@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -189,6 +190,17 @@ func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID
 	return taskID
 }
 
+func setTaskPrepareLeaseForTest(t *testing.T, ctx context.Context, taskID, expiresIn string) {
+	t.Helper()
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET prepare_lease_expires_at = now() + ($2::interval)
+		WHERE id = $1
+	`, taskID, expiresIn); err != nil {
+		t.Fatalf("setup: set prepare lease: %v", err)
+	}
+}
+
 func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 	ID string `json:"id"`
 }, string) {
@@ -274,6 +286,109 @@ func TestClaimTaskByRuntime_DoesNotReclaimFreshDispatchedTask(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntime_DoesNotReclaimActivePrepareLease(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Active prepare lease runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Active prepare lease agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "240 seconds", false)
+	setTaskPrepareLeaseForTest(t, ctx, taskID, "30 seconds")
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task != nil {
+		t.Fatalf("expected actively leased dispatched task %s not to be reclaimed, got %s in %s", taskID, task.ID, body)
+	}
+
+	var leaseActive bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT prepare_lease_expires_at > now()
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&leaseActive); err != nil {
+		t.Fatalf("load active prepare lease: %v", err)
+	}
+	if !leaseActive {
+		t.Fatal("expected prepare lease to remain active")
+	}
+}
+
+func TestClaimTaskByRuntime_ReclaimsExpiredPrepareLease(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Expired prepare lease runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Expired prepare lease agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "240 seconds", false)
+	setTaskPrepareLeaseForTest(t, ctx, taskID, "-5 seconds")
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task == nil {
+		t.Fatalf("expected expired leased task %s to be reclaimed, got nil response: %s", taskID, body)
+	}
+	if task.ID != taskID {
+		t.Fatalf("reclaimed task id = %s, want %s", task.ID, taskID)
+	}
+
+	var leaseRefreshed bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT prepare_lease_expires_at > now()
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&leaseRefreshed); err != nil {
+		t.Fatalf("load refreshed prepare lease: %v", err)
+	}
+	if !leaseRefreshed {
+		t.Fatal("expected reclaimed task to refresh prepare lease")
+	}
+}
+
+func TestExtendTaskPrepareLease(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Extend prepare lease runtime")
+	otherRuntimeID := createClaimReclaimRuntime(t, ctx, "Other prepare lease runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Extend prepare lease agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+otherRuntimeID+"/tasks/"+taskID+"/prepare-lease", nil,
+		testWorkspaceID, "extend-prepare-lease")
+	req = withURLParams(req, "runtimeId", otherRuntimeID, "taskId", taskID)
+	testHandler.ExtendTaskPrepareLease(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("ExtendTaskPrepareLease wrong runtime: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/prepare-lease", nil,
+		testWorkspaceID, "extend-prepare-lease")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ExtendTaskPrepareLease(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ExtendTaskPrepareLease: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var leaseActive bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT prepare_lease_expires_at > now()
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&leaseActive); err != nil {
+		t.Fatalf("load extended prepare lease: %v", err)
+	}
+	if !leaseActive {
+		t.Fatal("expected prepare lease to be extended")
+	}
+}
+
 func TestClaimTaskByRuntime_DoesNotReclaimAlreadyStartedTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -328,6 +443,134 @@ func TestClaimTaskByRuntime_DoesNotReclaimDifferentRuntimeTask(t *testing.T) {
 	}
 	if runtimeID != owningRuntimeID {
 		t.Fatalf("task runtime_id = %s, want %s", runtimeID, owningRuntimeID)
+	}
+}
+
+func TestClaimTaskByRuntime_SkillBundleRefsAndResolve(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Skill refs runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Skill refs agent")
+
+	var skillID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+		VALUES ($1, 'deploy-skill-ref-test', 'Deploy safely', 'main skill content', '{}'::jsonb, $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&skillID); err != nil {
+		t.Fatalf("setup: create skill: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_skill WHERE skill_id = $1`, skillID)
+		testPool.Exec(ctx, `DELETE FROM skill_file WHERE skill_id = $1`, skillID)
+		testPool.Exec(ctx, `DELETE FROM skill WHERE id = $1`, skillID)
+	})
+	if _, err := testPool.Exec(ctx, `INSERT INTO skill_file (skill_id, path, content) VALUES ($1, 'rules.md', 'rules content')`, skillID); err != nil {
+		t.Fatalf("setup: create skill file: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`, agentID, skillID); err != nil {
+		t.Fatalf("setup: bind skill: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "skill-refs-daemon")
+	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilitySkillBundlesV1)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var claimResp struct {
+		Task *AgentTaskResponse `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &claimResp); err != nil {
+		t.Fatalf("decode claim: %v", err)
+	}
+	if claimResp.Task == nil || claimResp.Task.Agent == nil {
+		t.Fatalf("missing task agent in response: %s", w.Body.String())
+	}
+	if len(claimResp.Task.Agent.Skills) != 0 {
+		t.Fatalf("slim claim returned full skills: %+v", claimResp.Task.Agent.Skills)
+	}
+	var ref service.AgentSkillRefData
+	for _, candidate := range claimResp.Task.Agent.SkillRefs {
+		if candidate.ID == skillID {
+			ref = candidate
+			break
+		}
+	}
+	if ref.ID == "" || ref.Hash == "" || ref.FileCount != 1 || len(ref.Files) != 1 || ref.Files[0].SHA256 == "" {
+		t.Fatalf("workspace skill ref missing manifest: %+v", ref)
+	}
+
+	staleHashBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source, Hash: "sha256:stale"}}}
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", staleHashBody, testWorkspaceID, "skill-refs-daemon")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ResolveTaskSkillBundles(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ResolveTaskSkillBundles with stale hash: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var staleHashResp struct {
+		Bundles []service.AgentSkillData `json:"bundles"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &staleHashResp); err != nil {
+		t.Fatalf("decode stale hash resolve: %v", err)
+	}
+	if len(staleHashResp.Bundles) != 1 || staleHashResp.Bundles[0].Hash != ref.Hash {
+		t.Fatalf("stale hash resolve did not return current bundle: %+v", staleHashResp.Bundles)
+	}
+
+	invalidRefBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source}}}
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", invalidRefBody, testWorkspaceID, "skill-refs-daemon")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ResolveTaskSkillBundles(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("ResolveTaskSkillBundles with invalid ref: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	resolveBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source, Hash: ref.Hash}}}
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody, testWorkspaceID, "skill-refs-daemon")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ResolveTaskSkillBundles(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ResolveTaskSkillBundles: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resolveResp struct {
+		Bundles []service.AgentSkillData `json:"bundles"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resolveResp); err != nil {
+		t.Fatalf("decode resolve: %v", err)
+	}
+	if len(resolveResp.Bundles) != 1 || resolveResp.Bundles[0].Content != "main skill content" || len(resolveResp.Bundles[0].Files) != 1 || resolveResp.Bundles[0].Files[0].Content != "rules content" {
+		t.Fatalf("unexpected resolved bundles: %+v", resolveResp.Bundles)
+	}
+
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskID); err != nil {
+		t.Fatalf("setup: mark task running: %v", err)
+	}
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody, testWorkspaceID, "skill-refs-daemon")
+	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
+	testHandler.ResolveTaskSkillBundles(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("ResolveTaskSkillBundles for running task: expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -524,6 +767,58 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	rt := runtimes[0].(map[string]any)
 	runtimeID := rt["id"].(string)
 	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+}
+
+func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	profileID := insertRuntimeProfileFixture(t, ctx, "Missing Custom Codex", "codex", "missing-codex")
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "test-daemon-profile-failure",
+		"device_name":  "test-device",
+		"failed_profiles": []map[string]any{
+			{
+				"profile_id":   profileID,
+				"command_name": "missing-codex",
+				"reason":       "command not found on PATH: missing-codex",
+			},
+		},
+	}, testWorkspaceID, "test-daemon-profile-failure")
+
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE profile_id = $1`, profileID)
+	})
+
+	var status string
+	var metadata []byte
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, metadata FROM agent_runtime
+		WHERE workspace_id = $1 AND daemon_id = $2 AND profile_id = $3
+	`, testWorkspaceID, "test-daemon-profile-failure", profileID).Scan(&status, &metadata); err != nil {
+		t.Fatalf("read failed profile runtime row: %v", err)
+	}
+	if status != "offline" {
+		t.Fatalf("status = %q, want offline", status)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(metadata, &meta); err != nil {
+		t.Fatalf("unmarshal metadata: %v", err)
+	}
+	if meta["runtime_profile_registration_error"] != true {
+		t.Fatalf("registration error metadata missing: %#v", meta)
+	}
+	if meta["runtime_profile_failure_reason"] != "command not found on PATH: missing-codex" {
+		t.Fatalf("failure reason metadata = %#v", meta["runtime_profile_failure_reason"])
+	}
 }
 
 func TestDaemonRegister_WithDaemonToken_WorkspaceMismatch(t *testing.T) {
@@ -1930,6 +2225,128 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	}
 }
 
+// When an issue belongs to a project that has a description, the claim handler
+// must surface that description as project_description so the daemon can inject
+// it into the brief. This is the handler-side boundary the execenv tests can't
+// cover: if this assignment regresses, the description silently stops reaching
+// the agent while the execenv rendering tests still pass.
+func TestClaimTask_ProjectDescriptionInjected(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	const projectDescription = "Always write copy in British English. Ship behind a feature flag."
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, description) VALUES ($1, $2, $3) RETURNING id
+	`, testWorkspaceID, "Claim project description", projectDescription).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, project_id, title, status, priority, creator_id, creator_type, number, position
+		) VALUES ($1, $2, 'project description', 'todo', 'medium', $3, 'member', 88002, 0)
+		RETURNING id
+	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority
+		) VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-project-desc")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ProjectID          string `json:"project_id"`
+			ProjectDescription string `json:"project_description"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected task in response")
+	}
+	if resp.Task.ProjectID != projectID {
+		t.Errorf("project_id = %q, want %q", resp.Task.ProjectID, projectID)
+	}
+	if resp.Task.ProjectDescription != projectDescription {
+		t.Errorf("project_description = %q, want %q", resp.Task.ProjectDescription, projectDescription)
+	}
+}
+
+// The quick-create path resolves its project from the task context JSONB
+// (not an issue row), so its project_description wiring is a separate branch
+// in the claim handler and needs its own boundary assertion.
+func TestClaimTask_QuickCreateInjectsProjectDescription(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	const projectDescription = "Use the design system tokens; never hardcode colors."
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, description) VALUES ($1, $2, $3) RETURNING id
+	`, testWorkspaceID, "Quick-create project description", projectDescription).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+
+	quickContext, _ := json.Marshal(map[string]any{
+		"type":         "quick_create",
+		"prompt":       "create a follow-up issue",
+		"requester_id": testUserID,
+		"workspace_id": testWorkspaceID,
+		"project_id":   projectID,
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
+		VALUES ($1, $2, 'queued', 2, $3)
+	`, agentID, runtimeID, quickContext); err != nil {
+		t.Fatalf("setup: create quick-create task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.ProjectID != projectID {
+		t.Errorf("quick-create project_id = %q, want %q", task.ProjectID, projectID)
+	}
+	if task.ProjectDescription != projectDescription {
+		t.Errorf("quick-create project_description = %q, want %q", task.ProjectDescription, projectDescription)
+	}
+}
+
 // When the issue's project has no github_repo resources, the claim handler
 // must fall back to workspace repos (the pre-override behavior).
 func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
@@ -2510,6 +2927,8 @@ type claimRuntimeGuardTask struct {
 	ChatMessage              string   `json:"chat_message"`
 	ThreadName               string   `json:"thread_name"`
 	QuickCreateAttachmentIDs []string `json:"quick_create_attachment_ids"`
+	ProjectID                string   `json:"project_id"`
+	ProjectDescription       string   `json:"project_description"`
 }
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {

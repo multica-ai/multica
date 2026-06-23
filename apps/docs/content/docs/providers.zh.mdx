@@ -118,6 +118,8 @@ Inflection AI 出品，极简主义。**会话恢复机制特殊**——session 
 
 fallback 路径对应的工具是否真的读取这个目录，取决于工具本身的文档——没保证。如果你的 skill 对 Gemini / Hermes / OpenClaw 没起效，先查这个问题。
 
+对原生项目级路径来说，repo-scoped discovery 是预期行为：如果检出的仓库已经包含对应目录，底层工具可以自己发现这些提交在仓库里的 Skill。你不需要为了在这个仓库里使用这些 repo skills 而先把它们导入 Multica。Multica 会保持这些仓库文件不变。如果某个工作区 Skill 的自然目录名相同，守护进程会把工作区副本写到类似 `review-helper-multica` 的无冲突 sibling 目录。
+
 skill 的创建和使用详见 [技能](/skills)。
 
 ## 下一步

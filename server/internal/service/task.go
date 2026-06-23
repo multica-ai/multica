@@ -21,6 +21,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -82,9 +83,11 @@ func truncateForSummary(s string, maxRunes int) string {
 const (
 	taskAnalyticsContextCacheMax = 4096
 	// claimResponseRecoveryWindow must exceed daemon client.Timeout for
-	// /tasks/claim (30s) plus /tasks/{id}/start (30s) plus scheduling slack, so
-	// an in-flight StartTask cannot be reclaimed and double-dispatched.
+	// /tasks/claim (30s) plus /tasks/{id}/start (30s) plus scheduling slack.
+	// Longer pre-start work is protected by prepareLeaseDuration instead of
+	// stretching this global crash-recovery window.
 	claimResponseRecoveryWindow = 90 * time.Second
+	prepareLeaseDuration        = 45 * time.Second
 )
 
 // buildCommentTriggerSummary fetches the comment content and truncates
@@ -434,7 +437,15 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false)
+	return s.enqueueIssueTask(ctx, issue, commentID, false, "")
+}
+
+// EnqueueTaskForIssueWithHandoff is the assign/promote variant that carries a
+// handoff note into the run's opening context (MUL-3375). The note rides a
+// dedicated task column; the daemon renders it via the assignment-handoff
+// branch. Empty note behaves exactly like EnqueueTaskForIssue.
+func (s *TaskService) EnqueueTaskForIssueWithHandoff(ctx context.Context, issue db.Issue, handoffNote string) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, handoffNote)
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
@@ -442,7 +453,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // daemon claim handler skips the (agent_id, issue_id) resume lookup — the
 // user already judged the prior output bad, a fresh agent session is the
 // expected behavior.
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -470,6 +481,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		TriggerCommentID:  triggerCommentID,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		HandoffNote:       pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -497,7 +509,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false, "")
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -507,10 +519,17 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 // as a worker (do not skip). This matters for agents that are simultaneously
 // the leader and a worker of the same squad — see migration 090.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false)
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false, "")
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, forceFreshSession bool) (db.AgentTaskQueue, error) {
+// EnqueueTaskForSquadLeaderWithHandoff is the assign/promote variant carrying a
+// handoff note into the leader run's opening context (MUL-3375). Empty note
+// behaves exactly like EnqueueTaskForSquadLeader.
+func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, handoffNote string) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, false, handoffNote)
+}
+
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, forceFreshSession bool, handoffNote string) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -534,6 +553,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		IsLeaderTask:      pgtype.Bool{Bool: isLeader, Valid: isLeader},
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		HandoffNote:       pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -966,7 +986,10 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	}
 
 	t0 = time.Now()
-	task, err := s.Queries.ClaimAgentTask(ctx, agentID)
+	task, err := s.Queries.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
+		AgentID:          agentID,
+		PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
+	})
 	claimAgentMs = time.Since(t0).Milliseconds()
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1037,6 +1060,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
 		RuntimeID:         runtimeID,
 		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
+		PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
 	})
 	if err == nil {
 		outcome = "reclaimed_dispatched"
@@ -1154,6 +1178,20 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	return &task, nil
 }
 
+// ExtendTaskPrepareLease keeps a claimed-but-not-started task protected while
+// the daemon resolves cached inputs and prepares the execution environment.
+func (s *TaskService) ExtendTaskPrepareLease(ctx context.Context, taskID, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	task, err := s.Queries.ExtendAgentTaskPrepareLease(ctx, db.ExtendAgentTaskPrepareLeaseParams{
+		ID:        taskID,
+		RuntimeID: runtimeID,
+		LeaseSecs: prepareLeaseDuration.Seconds(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("extend task prepare lease: %w", err)
+	}
+	return &task, nil
+}
+
 // MarkTaskWaitingLocalDirectory parks a dispatched task in the
 // waiting_local_directory state while the daemon waits for another in-flight
 // task to release the project_resource path lock. reason carries a short
@@ -1163,8 +1201,9 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID pgtype.UUID, reason string) (*db.AgentTaskQueue, error) {
 	reason = strings.TrimSpace(reason)
 	task, err := s.Queries.MarkAgentTaskWaitingLocalDirectory(ctx, db.MarkAgentTaskWaitingLocalDirectoryParams{
-		ID:         taskID,
-		WaitReason: pgtype.Text{String: reason, Valid: reason != ""},
+		ID:               taskID,
+		WaitReason:       pgtype.Text{String: reason, Valid: reason != ""},
+		PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("mark task waiting_local_directory: %w", err)
@@ -1702,9 +1741,9 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true)
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, "")
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, true)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, true, "")
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of
@@ -1890,19 +1929,116 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 	return result
 }
 
+// LoadAgentSkillBundles returns every skill visible to an agent, including
+// built-ins, with stable bundle hashes and lightweight refs for slim claims.
+func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData) {
+	skills := s.LoadAgentSkills(ctx, agentID)
+	skills = append(skills, s.BuiltinSkills()...)
+	return BuildAgentSkillBundles(skills)
+}
+
+func BuildAgentSkillBundles(skills []AgentSkillData) ([]AgentSkillData, []AgentSkillRefData) {
+	bundles := make([]AgentSkillData, 0, len(skills))
+	refs := make([]AgentSkillRefData, 0, len(skills))
+	for _, skill := range skills {
+		source := skill.Source
+		id := skill.ID
+		if source == "" {
+			if id == "" {
+				source = skillbundle.SourceBuiltin
+			} else {
+				source = skillbundle.SourceWorkspace
+			}
+		}
+		if id == "" && source == skillbundle.SourceBuiltin {
+			id = "builtin:" + skill.Name
+		}
+		skill.Source = source
+		skill.ID = id
+
+		files := make([]skillbundle.File, 0, len(skill.Files))
+		for _, file := range skill.Files {
+			files = append(files, skillbundle.File{Path: file.Path, Content: file.Content})
+		}
+		manifest := skillbundle.BuildManifest(skillbundle.Skill{
+			ID:          skill.ID,
+			Source:      skill.Source,
+			Name:        skill.Name,
+			Description: skill.Description,
+			Content:     skill.Content,
+			Files:       files,
+		})
+		skill.Hash = manifest.Hash
+		skill.SizeBytes = manifest.SizeBytes
+		fileRefsByPath := make(map[string]skillbundle.FileRef, len(manifest.Files))
+		for _, file := range manifest.Files {
+			fileRefsByPath[file.Path] = file
+		}
+		for i := range skill.Files {
+			if ref, ok := fileRefsByPath[skill.Files[i].Path]; ok {
+				skill.Files[i].SHA256 = ref.SHA256
+				skill.Files[i].SizeBytes = ref.SizeBytes
+			}
+		}
+		bundles = append(bundles, skill)
+
+		refFiles := make([]AgentSkillFileRefData, 0, len(manifest.Files))
+		for _, file := range manifest.Files {
+			refFiles = append(refFiles, AgentSkillFileRefData{
+				Path:      file.Path,
+				SHA256:    file.SHA256,
+				SizeBytes: file.SizeBytes,
+			})
+		}
+		refs = append(refs, AgentSkillRefData{
+			ID:          skill.ID,
+			Source:      skill.Source,
+			Name:        skill.Name,
+			Description: skill.Description,
+			Hash:        manifest.Hash,
+			SizeBytes:   manifest.SizeBytes,
+			FileCount:   manifest.FileCount,
+			Files:       refFiles,
+		})
+	}
+	return bundles, refs
+}
+
 // AgentSkillData represents a skill for task execution responses.
 type AgentSkillData struct {
 	ID          string               `json:"id"`
+	Source      string               `json:"source,omitempty"`
 	Name        string               `json:"name"`
 	Description string               `json:"description,omitempty"`
+	Hash        string               `json:"hash,omitempty"`
+	SizeBytes   int64                `json:"size_bytes,omitempty"`
 	Content     string               `json:"content"`
 	Files       []AgentSkillFileData `json:"files,omitempty"`
 }
 
 // AgentSkillFileData represents a supporting file within a skill.
 type AgentSkillFileData struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+	SHA256    string `json:"sha256,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+}
+
+type AgentSkillRefData struct {
+	ID          string                  `json:"id"`
+	Source      string                  `json:"source"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description,omitempty"`
+	Hash        string                  `json:"hash"`
+	SizeBytes   int64                   `json:"size_bytes"`
+	FileCount   int                     `json:"file_count"`
+	Files       []AgentSkillFileRefData `json:"files,omitempty"`
+}
+
+type AgentSkillFileRefData struct {
+	Path      string `json:"path"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"size_bytes"`
 }
 
 // computeChatElapsedMs returns the wall-clock duration from task creation
