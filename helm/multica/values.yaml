@@ -2,14 +2,15 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+# Namespace all chart resources are deployed into.
+# Defaults to costrict-web. Set to "" to fall back to the release namespace
+# (the `helm -n <ns>` flag), e.g. `--set namespace=""` with `-n my-ns`.
+namespace: costrict-web
+
 nameOverride: ""
 fullnameOverride: ""
 
 imagePullSecrets: []
-serviceAccount:
-  create: true
-  annotations: {}
-  name: ""
 
 backend:
   replicaCount: 1
