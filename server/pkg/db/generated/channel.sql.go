@@ -405,12 +405,20 @@ func (q *Queries) GetChannelChatSessionBinding(ctx context.Context, arg GetChann
 const getChannelChatSessionBindingBySession = `-- name: GetChannelChatSessionBindingBySession :one
 SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at FROM channel_chat_session_binding
 WHERE chat_session_id = $1
+  AND channel_type = $2
 `
+
+type GetChannelChatSessionBindingBySessionParams struct {
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	ChannelType   string      `json:"channel_type"`
+}
 
 // Reverse lookup for the outbound patcher: given a chat_session_id, find
 // its channel binding to know which (installation, chat_id) to send to.
-func (q *Queries) GetChannelChatSessionBindingBySession(ctx context.Context, chatSessionID pgtype.UUID) (ChannelChatSessionBinding, error) {
-	row := q.db.QueryRow(ctx, getChannelChatSessionBindingBySession, chatSessionID)
+// Scoped by channel_type so a future non-Feishu binding on the same
+// chat_session is never treated as a Feishu reply target.
+func (q *Queries) GetChannelChatSessionBindingBySession(ctx context.Context, arg GetChannelChatSessionBindingBySessionParams) (ChannelChatSessionBinding, error) {
+	row := q.db.QueryRow(ctx, getChannelChatSessionBindingBySession, arg.ChatSessionID, arg.ChannelType)
 	var i ChannelChatSessionBinding
 	err := row.Scan(
 		&i.ID,
@@ -428,11 +436,19 @@ func (q *Queries) GetChannelChatSessionBindingBySession(ctx context.Context, cha
 }
 
 const getChannelInstallation = `-- name: GetChannelInstallation :one
-SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM channel_installation WHERE id = $1
+SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM channel_installation
+WHERE id = $1 AND channel_type = $2
 `
 
-func (q *Queries) GetChannelInstallation(ctx context.Context, id pgtype.UUID) (ChannelInstallation, error) {
-	row := q.db.QueryRow(ctx, getChannelInstallation, id)
+type GetChannelInstallationParams struct {
+	ID          pgtype.UUID `json:"id"`
+	ChannelType string      `json:"channel_type"`
+}
+
+// Scoped by channel_type: a per-channel caller (e.g. the Feishu store)
+// must never resolve another channel's installation by guessing its UUID.
+func (q *Queries) GetChannelInstallation(ctx context.Context, arg GetChannelInstallationParams) (ChannelInstallation, error) {
+	row := q.db.QueryRow(ctx, getChannelInstallation, arg.ID, arg.ChannelType)
 	var i ChannelInstallation
 	err := row.Scan(
 		&i.ID,
@@ -492,16 +508,19 @@ func (q *Queries) GetChannelInstallationByAppID(ctx context.Context, arg GetChan
 
 const getChannelInstallationInWorkspace = `-- name: GetChannelInstallationInWorkspace :one
 SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM channel_installation
-WHERE id = $1 AND workspace_id = $2
+WHERE id = $1
+  AND workspace_id = $2
+  AND channel_type = $3
 `
 
 type GetChannelInstallationInWorkspaceParams struct {
 	ID          pgtype.UUID `json:"id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ChannelType string      `json:"channel_type"`
 }
 
 func (q *Queries) GetChannelInstallationInWorkspace(ctx context.Context, arg GetChannelInstallationInWorkspaceParams) (ChannelInstallation, error) {
-	row := q.db.QueryRow(ctx, getChannelInstallationInWorkspace, arg.ID, arg.WorkspaceID)
+	row := q.db.QueryRow(ctx, getChannelInstallationInWorkspace, arg.ID, arg.WorkspaceID, arg.ChannelType)
 	var i ChannelInstallation
 	err := row.Scan(
 		&i.ID,
@@ -523,12 +542,19 @@ func (q *Queries) GetChannelInstallationInWorkspace(ctx context.Context, arg Get
 const getChannelOutboundCardByTask = `-- name: GetChannelOutboundCardByTask :one
 SELECT id, chat_session_id, task_id, channel_type, channel_chat_id, channel_card_message_id, status, last_patched_at, created_at FROM channel_outbound_card_message
 WHERE task_id = $1
+  AND channel_type = $2
 `
 
+type GetChannelOutboundCardByTaskParams struct {
+	TaskID      pgtype.UUID `json:"task_id"`
+	ChannelType string      `json:"channel_type"`
+}
+
 // The partial unique index on (task_id) WHERE task_id IS NOT NULL
-// guarantees at most one row.
-func (q *Queries) GetChannelOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (ChannelOutboundCardMessage, error) {
-	row := q.db.QueryRow(ctx, getChannelOutboundCardByTask, taskID)
+// guarantees at most one row. Scoped by channel_type so a future non-Feishu
+// card for the same task is not patched as a Feishu card.
+func (q *Queries) GetChannelOutboundCardByTask(ctx context.Context, arg GetChannelOutboundCardByTaskParams) (ChannelOutboundCardMessage, error) {
+	row := q.db.QueryRow(ctx, getChannelOutboundCardByTask, arg.TaskID, arg.ChannelType)
 	var i ChannelOutboundCardMessage
 	err := row.Scan(
 		&i.ID,
@@ -577,13 +603,15 @@ func (q *Queries) GetChannelUserBindingByUserID(ctx context.Context, arg GetChan
 const listActiveChannelInstallations = `-- name: ListActiveChannelInstallations :many
 SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM channel_installation
 WHERE status = 'active'
+  AND channel_type = $1
 ORDER BY created_at ASC
 `
 
-// Boot path for the inbound hub: every active installation, any channel
-// type, so the hub can claim leases and open connections.
-func (q *Queries) ListActiveChannelInstallations(ctx context.Context) ([]ChannelInstallation, error) {
-	rows, err := q.db.Query(ctx, listActiveChannelInstallations)
+// Boot path for a per-channel-type inbound hub: every active installation of
+// the given channel_type, so a hub claims leases and opens connections only
+// for its own platform and never supervises another channel's installation.
+func (q *Queries) ListActiveChannelInstallations(ctx context.Context, channelType string) ([]ChannelInstallation, error) {
+	rows, err := q.db.Query(ctx, listActiveChannelInstallations, channelType)
 	if err != nil {
 		return nil, err
 	}
@@ -661,11 +689,19 @@ func (q *Queries) ListChannelInboundAuditByInstallation(ctx context.Context, arg
 const listChannelInstallationsByWorkspace = `-- name: ListChannelInstallationsByWorkspace :many
 SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM channel_installation
 WHERE workspace_id = $1
+  AND channel_type = $2
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListChannelInstallationsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ChannelInstallation, error) {
-	rows, err := q.db.Query(ctx, listChannelInstallationsByWorkspace, workspaceID)
+type ListChannelInstallationsByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ChannelType string      `json:"channel_type"`
+}
+
+// Scoped by channel_type so a per-channel management surface (e.g. the Lark
+// installation list) only ever sees its own platform's installations.
+func (q *Queries) ListChannelInstallationsByWorkspace(ctx context.Context, arg ListChannelInstallationsByWorkspaceParams) ([]ChannelInstallation, error) {
+	rows, err := q.db.Query(ctx, listChannelInstallationsByWorkspace, arg.WorkspaceID, arg.ChannelType)
 	if err != nil {
 		return nil, err
 	}

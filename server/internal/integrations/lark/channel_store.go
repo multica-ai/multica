@@ -83,7 +83,10 @@ func (s *ChannelStore) GetLarkInstallationByAppID(ctx context.Context, appID str
 }
 
 func (s *ChannelStore) GetLarkInstallation(ctx context.Context, id pgtype.UUID) (db.LarkInstallation, error) {
-	row, err := s.Queries.GetChannelInstallation(ctx, id)
+	row, err := s.Queries.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
+		ID:          id,
+		ChannelType: channelTypeFeishu,
+	})
 	if err != nil {
 		return db.LarkInstallation{}, err
 	}
@@ -94,6 +97,7 @@ func (s *ChannelStore) GetLarkInstallationInWorkspace(ctx context.Context, arg d
 	row, err := s.Queries.GetChannelInstallationInWorkspace(ctx, db.GetChannelInstallationInWorkspaceParams{
 		ID:          arg.ID,
 		WorkspaceID: arg.WorkspaceID,
+		ChannelType: channelTypeFeishu,
 	})
 	if err != nil {
 		return db.LarkInstallation{}, err
@@ -102,7 +106,10 @@ func (s *ChannelStore) GetLarkInstallationInWorkspace(ctx context.Context, arg d
 }
 
 func (s *ChannelStore) ListLarkInstallationsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.LarkInstallation, error) {
-	rows, err := s.Queries.ListChannelInstallationsByWorkspace(ctx, workspaceID)
+	rows, err := s.Queries.ListChannelInstallationsByWorkspace(ctx, db.ListChannelInstallationsByWorkspaceParams{
+		WorkspaceID: workspaceID,
+		ChannelType: channelTypeFeishu,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +117,7 @@ func (s *ChannelStore) ListLarkInstallationsByWorkspace(ctx context.Context, wor
 }
 
 func (s *ChannelStore) ListActiveLarkInstallations(ctx context.Context) ([]db.LarkInstallation, error) {
-	rows, err := s.Queries.ListActiveChannelInstallations(ctx)
+	rows, err := s.Queries.ListActiveChannelInstallations(ctx, channelTypeFeishu)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +162,10 @@ func (s *ChannelStore) SetLarkInstallationStatus(ctx context.Context, arg db.Set
 // keyed by id and effectively single-writer, so the non-atomic RMW is safe —
 // the same shape the channel.sql comment documents for this query.
 func (s *ChannelStore) SetLarkInstallationBotUnionID(ctx context.Context, arg db.SetLarkInstallationBotUnionIDParams) error {
-	row, err := s.Queries.GetChannelInstallation(ctx, arg.ID)
+	row, err := s.Queries.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
+		ID:          arg.ID,
+		ChannelType: channelTypeFeishu,
+	})
 	if err != nil {
 		return err
 	}
@@ -245,7 +255,10 @@ func (s *ChannelStore) GetLarkChatSessionBinding(ctx context.Context, arg db.Get
 }
 
 func (s *ChannelStore) GetLarkChatSessionBindingBySession(ctx context.Context, chatSessionID pgtype.UUID) (db.LarkChatSessionBinding, error) {
-	row, err := s.Queries.GetChannelChatSessionBindingBySession(ctx, chatSessionID)
+	row, err := s.Queries.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
+		ChatSessionID: chatSessionID,
+		ChannelType:   channelTypeFeishu,
+	})
 	if err != nil {
 		return db.LarkChatSessionBinding{}, err
 	}
@@ -345,7 +358,10 @@ func (s *ChannelStore) ConsumeLarkBindingToken(ctx context.Context, tokenHash st
 // ---- outbound card ----
 
 func (s *ChannelStore) GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (db.LarkOutboundCardMessage, error) {
-	row, err := s.Queries.GetChannelOutboundCardByTask(ctx, taskID)
+	row, err := s.Queries.GetChannelOutboundCardByTask(ctx, db.GetChannelOutboundCardByTaskParams{
+		TaskID:      taskID,
+		ChannelType: channelTypeFeishu,
+	})
 	if err != nil {
 		return db.LarkOutboundCardMessage{}, err
 	}

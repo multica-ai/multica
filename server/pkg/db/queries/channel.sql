@@ -39,11 +39,16 @@ ON CONFLICT (workspace_id, agent_id, channel_type) DO UPDATE SET
 RETURNING *;
 
 -- name: GetChannelInstallation :one
-SELECT * FROM channel_installation WHERE id = $1;
+-- Scoped by channel_type: a per-channel caller (e.g. the Feishu store)
+-- must never resolve another channel's installation by guessing its UUID.
+SELECT * FROM channel_installation
+WHERE id = sqlc.arg('id') AND channel_type = sqlc.arg('channel_type');
 
 -- name: GetChannelInstallationInWorkspace :one
 SELECT * FROM channel_installation
-WHERE id = $1 AND workspace_id = $2;
+WHERE id = sqlc.arg('id')
+  AND workspace_id = sqlc.arg('workspace_id')
+  AND channel_type = sqlc.arg('channel_type');
 
 -- name: GetChannelInstallationByAppID :one
 -- Inbound routing. The platform event carries only the channel's app
@@ -59,15 +64,20 @@ WHERE channel_type = sqlc.arg('channel_type')
   AND config ->> 'app_id' = sqlc.arg('app_id')::text;
 
 -- name: ListChannelInstallationsByWorkspace :many
+-- Scoped by channel_type so a per-channel management surface (e.g. the Lark
+-- installation list) only ever sees its own platform's installations.
 SELECT * FROM channel_installation
-WHERE workspace_id = $1
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND channel_type = sqlc.arg('channel_type')
 ORDER BY created_at ASC;
 
 -- name: ListActiveChannelInstallations :many
--- Boot path for the inbound hub: every active installation, any channel
--- type, so the hub can claim leases and open connections.
+-- Boot path for a per-channel-type inbound hub: every active installation of
+-- the given channel_type, so a hub claims leases and opens connections only
+-- for its own platform and never supervises another channel's installation.
 SELECT * FROM channel_installation
 WHERE status = 'active'
+  AND channel_type = sqlc.arg('channel_type')
 ORDER BY created_at ASC;
 
 -- name: SetChannelInstallationStatus :exec
@@ -183,8 +193,11 @@ WHERE installation_id = $1 AND channel_chat_id = $2;
 -- name: GetChannelChatSessionBindingBySession :one
 -- Reverse lookup for the outbound patcher: given a chat_session_id, find
 -- its channel binding to know which (installation, chat_id) to send to.
+-- Scoped by channel_type so a future non-Feishu binding on the same
+-- chat_session is never treated as a Feishu reply target.
 SELECT * FROM channel_chat_session_binding
-WHERE chat_session_id = $1;
+WHERE chat_session_id = sqlc.arg('chat_session_id')
+  AND channel_type = sqlc.arg('channel_type');
 
 -- name: UpdateChannelChatSessionBindingReplyTarget :exec
 -- Records the most recent inbound trigger message + thread so the decoupled
@@ -288,9 +301,11 @@ RETURNING *;
 
 -- name: GetChannelOutboundCardByTask :one
 -- The partial unique index on (task_id) WHERE task_id IS NOT NULL
--- guarantees at most one row.
+-- guarantees at most one row. Scoped by channel_type so a future non-Feishu
+-- card for the same task is not patched as a Feishu card.
 SELECT * FROM channel_outbound_card_message
-WHERE task_id = $1;
+WHERE task_id = sqlc.arg('task_id')
+  AND channel_type = sqlc.arg('channel_type');
 
 -- name: UpdateChannelOutboundCardStatus :exec
 UPDATE channel_outbound_card_message
