@@ -68,15 +68,37 @@ func (h *Handler) ListAgentConfigTemplates(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var scopeText pgtype.Text
-	if scope != "" {
-		scopeText = pgtype.Text{String: scope, Valid: true}
+	var templates []db.AgentConfigTemplate
+	var err error
+
+	// Personal templates: only return the current user's own templates.
+	if scope == "personal" {
+		userID := requestUserID(r)
+		if userID == "" {
+			writeJSON(w, http.StatusOK, []AgentConfigTemplateResponse{})
+			return
+		}
+		member, merr := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+		if merr != nil {
+			writeJSON(w, http.StatusOK, []AgentConfigTemplateResponse{})
+			return
+		}
+		templates, err = h.Queries.ListAgentConfigTemplatesByCreator(r.Context(), db.ListAgentConfigTemplatesByCreatorParams{
+			WorkspaceID: wsUUID,
+			CreatedBy:   member.ID,
+		})
+	} else {
+		// System templates (or all): use the general query.
+		var scopeText pgtype.Text
+		if scope != "" {
+			scopeText = pgtype.Text{String: scope, Valid: true}
+		}
+		templates, err = h.Queries.ListAgentConfigTemplates(r.Context(), db.ListAgentConfigTemplatesParams{
+			WorkspaceID: wsUUID,
+			Scope:       scopeText,
+		})
 	}
 
-	templates, err := h.Queries.ListAgentConfigTemplates(r.Context(), db.ListAgentConfigTemplatesParams{
-		WorkspaceID: wsUUID,
-		Scope:       scopeText,
-	})
 	if err != nil {
 		slog.Error("list agent config templates failed", "workspace_id", workspaceID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list templates")
