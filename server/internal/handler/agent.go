@@ -377,27 +377,32 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.WorkDir.Valid {
 		workDir = t.WorkDir.String
 	}
+	handoffNote := ""
+	if t.HandoffNote.Valid {
+		handoffNote = t.HandoffNote.String
+	}
 	return AgentTaskResponse{
-		ID:                uuidToString(t.ID),
-		AgentID:           uuidToString(t.AgentID),
-		RuntimeID:         uuidToString(t.RuntimeID),
-		IssueID:           uuidToString(t.IssueID),
-		WorkspaceID:       workspaceID,
-		Status:            t.Status,
-		Priority:          t.Priority,
-		DispatchedAt:      timestampToPtr(t.DispatchedAt),
-		StartedAt:         timestampToPtr(t.StartedAt),
-		CompletedAt:       timestampToPtr(t.CompletedAt),
-		Result:            result,
-		Error:             textToPtr(t.Error),
-		FailureReason:     failureReason,
-		Attempt:           t.Attempt,
-		MaxAttempts:       t.MaxAttempts,
-		ParentTaskID:      uuidToPtr(t.ParentTaskID),
-		CreatedAt:         timestampToString(t.CreatedAt),
-		TriggerCommentID:  uuidToPtr(t.TriggerCommentID),
-		TriggerSummary:    textToPtr(t.TriggerSummary),
-		WakeupPrompt:      wakeupCtx.Prompt,
+		ID:               uuidToString(t.ID),
+		AgentID:          uuidToString(t.AgentID),
+		RuntimeID:        uuidToString(t.RuntimeID),
+		IssueID:          uuidToString(t.IssueID),
+		WorkspaceID:      workspaceID,
+		Status:           t.Status,
+		Priority:         t.Priority,
+		DispatchedAt:     timestampToPtr(t.DispatchedAt),
+		StartedAt:        timestampToPtr(t.StartedAt),
+		CompletedAt:      timestampToPtr(t.CompletedAt),
+		Result:           result,
+		Error:            textToPtr(t.Error),
+		FailureReason:    failureReason,
+		Attempt:          t.Attempt,
+		MaxAttempts:      t.MaxAttempts,
+		ParentTaskID:     uuidToPtr(t.ParentTaskID),
+		CreatedAt:        timestampToString(t.CreatedAt),
+		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
+		TriggerSummary:   textToPtr(t.TriggerSummary),
+		HandoffNote:      handoffNote,
+		WakeupPrompt:     wakeupCtx.Prompt,
 		WakeupTriggerType: wakeupCtx.TriggerType,
 		// CEREBRO-PATCH(task-title-builder): surface generated title to clients.
 		Title: textToPtr(t.Title),

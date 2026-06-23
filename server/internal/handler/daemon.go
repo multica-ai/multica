@@ -1,8 +1,7 @@
 package handler
 
-// CEREBRO-PATCH(daemon-handler): cerebro modification of upstream file
-
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,91 +16,18 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"          // CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108 merge workspace connections into RuntimeToolsConfig
-	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"    // CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 staged local-runtime enforcement mode at claim
-	cerebrospawn "github.com/multica-ai/multica/server/internal/cerebro/spawn" // CEREBRO-PATCH(daemon-spawn-subject): JEH-1080 resolve spawning user+groups at claim
-	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"         // CEREBRO-PATCH(daemon-repo-toolpolicy): FIR-2505 repo-capability resolved via tool-policy chain
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/profile"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/pricing"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
-
-// taskTokenTTL bounds the blast radius of an exfiltrated per-task token.
-// Upstream (MUL-2600) sets 24h so the token survives long-running agent
-// tasks without expiring mid-run; the identity binding (actor=agent, no
-// owner-only endpoints) is what limits the blast radius, not the TTL.
-const taskTokenTTL = 24 * time.Hour
-
-// workspaceIDForTask returns the workspace UUID that owns this task,
-// resolved via issue_id, chat_session_id, or autopilot_run_id —
-// matching the resolution priority in ClaimTaskByRuntime.
-func (h *Handler) workspaceIDForTask(ctx context.Context, task db.AgentTaskQueue) (pgtype.UUID, error) {
-	if task.IssueID.Valid {
-		issue, err := h.Queries.GetIssue(ctx, task.IssueID)
-		if err != nil {
-			return pgtype.UUID{}, err
-		}
-		return issue.WorkspaceID, nil
-	}
-	if task.ChatSessionID.Valid {
-		cs, err := h.Queries.GetChatSession(ctx, task.ChatSessionID)
-		if err != nil {
-			return pgtype.UUID{}, err
-		}
-		return cs.WorkspaceID, nil
-	}
-	if task.AutopilotRunID.Valid {
-		run, err := h.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
-		if err != nil {
-			return pgtype.UUID{}, err
-		}
-		ap, err := h.Queries.GetAutopilot(ctx, run.AutopilotID)
-		if err != nil {
-			return pgtype.UUID{}, err
-		}
-		return ap.WorkspaceID, nil
-	}
-	return pgtype.UUID{}, nil
-}
-
-// mintTaskToken generates and stores a task-scoped `mat_` token bound to
-// (agent, task, workspace, owner). Returns the plain-text token to hand to the
-// daemon — only the hash is persisted. Adopts upstream's MUL-2600 model
-// (replacing the fork's mtt_ / BYTEA scheme from JEH-324): the bound user_id is
-// the runtime owner so member-shaped reads still resolve, while actor identity
-// stays agent-only server-side.
-func (h *Handler) mintTaskToken(ctx context.Context, task db.AgentTaskQueue, workspaceID string, ownerID pgtype.UUID) (string, error) {
-	raw, err := auth.GenerateAgentTaskToken()
-	if err != nil {
-		return "", fmt.Errorf("generate task token: %w", err)
-	}
-
-	wsUUID := pgtype.UUID{}
-	_ = wsUUID.Scan(workspaceID)
-
-	if _, err := h.Queries.CreateTaskToken(ctx, db.CreateTaskTokenParams{
-		TokenHash:   auth.HashToken(raw),
-		TaskID:      task.ID,
-		AgentID:     task.AgentID,
-		WorkspaceID: wsUUID,
-		UserID:      ownerID,
-		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(taskTokenTTL), Valid: true},
-	}); err != nil {
-		return "", fmt.Errorf("persist task token: %w", err)
-	}
-	return raw, nil
-}
 
 // ---------------------------------------------------------------------------
 // Daemon workspace ownership helpers
@@ -141,6 +67,11 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 }
 
 // requireDaemonRuntimeAccess looks up a runtime and verifies the caller owns its workspace.
+//
+// Only pgx.ErrNoRows is treated as a real "runtime gone" 404 — the daemon uses
+// that response to drop the stale runtime from its in-memory map and re-register,
+// so collapsing transient DB errors into the same 404 would force the daemon to
+// self-cleanup on a hiccup. Other DB errors become 500.
 func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (db.AgentRuntime, bool) {
 	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
 	if !ok {
@@ -148,7 +79,12 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 	}
 	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "runtime not found")
+			return db.AgentRuntime{}, false
+		}
+		slog.Warn("get agent runtime failed", "runtime_id", runtimeID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load runtime")
 		return db.AgentRuntime{}, false
 	}
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(rt.WorkspaceID)) {
@@ -245,16 +181,17 @@ type DaemonRegisterRequest struct {
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
-		// Capabilities is a daemon-reported snapshot of what this runtime
-		// CEREBRO-PATCH(daemon): persona integration additions.
-		// can actually do — tools the provider exposes, configured MCP
-		// servers, supported providers. Loose JSON so different providers
-		// report what fits without a schema migration. Persona's UI uses
-		// this to show "what your runtime can actually do" alongside the
-		// abstract sandbox. Optional; absent means "report nothing", which
-		// the server stores as an empty object.
-		Capabilities json.RawMessage `json:"capabilities,omitempty"`
+		// ProfileID, when non-empty, marks this as an instance of a custom
+		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
+		// Type carries the protocol family for both built-in and custom rows
+		// so task routing (agent.New) is unchanged.
+		ProfileID string `json:"profile_id"`
 	} `json:"runtimes"`
+	FailedProfiles []struct {
+		ProfileID   string `json:"profile_id"`
+		CommandName string `json:"command_name"`
+		Reason      string `json:"reason"`
+	} `json:"failed_profiles"`
 }
 
 type daemonWorkspaceReposResponse struct {
@@ -323,6 +260,13 @@ func workspaceReposResponse(workspaceID string, raw []byte, settingsRaw []byte) 
 	return resp
 }
 
+// normalizeProvider canonicalizes a provider string for storage: trimmed and
+// lowercased so client-side pricing lookups tolerate case drift. Returns "" for
+// a blank input.
+func normalizeProvider(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	var req DaemonRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -342,8 +286,8 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
-	if len(req.Runtimes) == 0 {
-		writeError(w, http.StatusBadRequest, "at least one runtime is required")
+	if len(req.Runtimes) == 0 && len(req.FailedProfiles) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one runtime or failed profile is required")
 		return
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
@@ -379,7 +323,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]AgentRuntimeResponse, 0, len(req.Runtimes))
 	for _, runtime := range req.Runtimes {
-		provider := strings.TrimSpace(runtime.Type)
+		provider := normalizeProvider(runtime.Type)
 		if provider == "" {
 			provider = "unknown"
 		}
@@ -406,53 +350,125 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			"launched_by": req.LaunchedBy,
 		})
 
-		row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
-			WorkspaceID: wsUUID,
-			DaemonID:    strToText(req.DaemonID),
-			Name:        name,
-			RuntimeMode: "local",
-			Provider:    provider,
-			Status:      status,
-			DeviceInfo:  deviceInfo,
-			Metadata:    metadata,
-			OwnerID:     ownerID,
-		})
-		if err != nil {
-			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
-				uuidToString(ownerID),
-				req.WorkspaceID,
-				req.DaemonID,
-				provider,
-				"registration_failed",
-				"db_error",
-				true,
-			))
-			writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
-			return
-		}
+		var registered db.AgentRuntime
+		var inserted bool
+		isCustom := strings.TrimSpace(runtime.ProfileID) != ""
 
-		registered := db.AgentRuntime{
-			ID:             row.ID,
-			WorkspaceID:    row.WorkspaceID,
-			DaemonID:       row.DaemonID,
-			Name:           row.Name,
-			RuntimeMode:    row.RuntimeMode,
-			Provider:       row.Provider,
-			Status:         row.Status,
-			DeviceInfo:     row.DeviceInfo,
-			Metadata:       row.Metadata,
-			LastSeenAt:     row.LastSeenAt,
-			CreatedAt:      row.CreatedAt,
-			UpdatedAt:      row.UpdatedAt,
-			OwnerID:        row.OwnerID,
-			LegacyDaemonID: row.LegacyDaemonID,
+		if isCustom {
+			profileUUID, pok := parseUUIDOrBadRequest(w, strings.TrimSpace(runtime.ProfileID), "profile_id")
+			if !pok {
+				return
+			}
+			// The profile must exist in this workspace and be enabled. Trust
+			// the profile's stored protocol_family over the daemon-sent type so
+			// the provider used for task routing cannot drift from the profile.
+			profile, perr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
+				ID:          profileUUID,
+				WorkspaceID: wsUUID,
+			})
+			if perr != nil {
+				writeError(w, http.StatusBadRequest, "unknown runtime profile: "+runtime.ProfileID)
+				return
+			}
+			if !profile.Enabled {
+				writeError(w, http.StatusConflict, "runtime profile is disabled: "+runtime.ProfileID)
+				return
+			}
+			provider = profile.ProtocolFamily
+
+			prow, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
+				WorkspaceID: wsUUID,
+				DaemonID:    strToText(req.DaemonID),
+				Name:        name,
+				RuntimeMode: "local",
+				Provider:    provider,
+				Status:      status,
+				DeviceInfo:  deviceInfo,
+				Metadata:    metadata,
+				OwnerID:     ownerID,
+				ProfileID:   profileUUID,
+			})
+			if err != nil {
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
+					uuidToString(ownerID),
+					req.WorkspaceID,
+					req.DaemonID,
+					provider,
+					"registration_failed",
+					"db_error",
+					true,
+				))
+				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
+				return
+			}
+			inserted = prow.Inserted
+			registered = db.AgentRuntime{
+				ID:             prow.ID,
+				WorkspaceID:    prow.WorkspaceID,
+				DaemonID:       prow.DaemonID,
+				Name:           prow.Name,
+				RuntimeMode:    prow.RuntimeMode,
+				Provider:       prow.Provider,
+				Status:         prow.Status,
+				DeviceInfo:     prow.DeviceInfo,
+				Metadata:       prow.Metadata,
+				LastSeenAt:     prow.LastSeenAt,
+				CreatedAt:      prow.CreatedAt,
+				UpdatedAt:      prow.UpdatedAt,
+				OwnerID:        prow.OwnerID,
+				LegacyDaemonID: prow.LegacyDaemonID,
+				Visibility:     prow.Visibility,
+				ProfileID:      prow.ProfileID,
+			}
+		} else {
+			row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
+				WorkspaceID: wsUUID,
+				DaemonID:    strToText(req.DaemonID),
+				Name:        name,
+				RuntimeMode: "local",
+				Provider:    provider,
+				Status:      status,
+				DeviceInfo:  deviceInfo,
+				Metadata:    metadata,
+				OwnerID:     ownerID,
+			})
+			if err != nil {
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
+					uuidToString(ownerID),
+					req.WorkspaceID,
+					req.DaemonID,
+					provider,
+					"registration_failed",
+					"db_error",
+					true,
+				))
+				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
+				return
+			}
+			inserted = row.Inserted
+			registered = db.AgentRuntime{
+				ID:             row.ID,
+				WorkspaceID:    row.WorkspaceID,
+				DaemonID:       row.DaemonID,
+				Name:           row.Name,
+				RuntimeMode:    row.RuntimeMode,
+				Provider:       row.Provider,
+				Status:         row.Status,
+				DeviceInfo:     row.DeviceInfo,
+				Metadata:       row.Metadata,
+				LastSeenAt:     row.LastSeenAt,
+				CreatedAt:      row.CreatedAt,
+				UpdatedAt:      row.UpdatedAt,
+				OwnerID:        row.OwnerID,
+				LegacyDaemonID: row.LegacyDaemonID,
+				Visibility:     row.Visibility,
+				ProfileID:      row.ProfileID,
+			}
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so
 		// runtime_ready is a first-ready-per-runtime-row signal.
-		if row.Inserted {
-			// CEREBRO-PATCH(runtime-default-interactive): new daemon runtimes default the live terminal ON; cloud providers can't stream so they stay headless.
-			_, _ = h.DB.Exec(r.Context(), `UPDATE agent_runtime SET presentation_mode = 'interactive', updated_at = now() WHERE id = $1 AND presentation_mode = 'headless' AND provider <> 'firtal-gateway'`, registered.ID)
+		if inserted {
 			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeRegistered(
 				uuidToString(ownerID),
 				req.WorkspaceID,
@@ -479,27 +495,71 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// (e.g. "host.local", "host", "host-staging"); for each match we
 		// reassign agents + tasks onto the new UUID-keyed row, then delete
 		// the stale row so there's only ever one runtime per machine.
-		h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
-
-		// E3.1: persist the daemon's capability snapshot. UpsertAgentRuntime
-		// can't carry capabilities (the upsert preserves admin-set fields on
-		// re-register and capabilities don't fit that semantics — daemons own
-		// this field). A failure here doesn't abort registration: the runtime
-		// is still usable, capabilities just stay empty until the next
-		// register cycle.
-		if len(runtime.Capabilities) > 0 {
-			if err := h.Queries.UpdateAgentRuntimeCapabilities(r.Context(), db.UpdateAgentRuntimeCapabilitiesParams{
-				ID:           registered.ID,
-				Capabilities: runtime.Capabilities,
-			}); err != nil {
-				slog.Warn("failed to write runtime capabilities", "runtime_id", uuidToString(registered.ID), "error", err)
-			} else {
-				registered.Capabilities = runtime.Capabilities
-				h.persistRuntimeCapabilitySnapshot(r, registered.ID, registered.WorkspaceID, runtime.Capabilities) // CEREBRO-PATCH(capability-register-register): FIR-2129 mirror initial daemon snapshot into normalized registry on register.
-			}
+		//
+		// Only built-in runtimes participate: legacy rows predate custom
+		// profiles, so a profile-keyed instance never has a hostname-derived
+		// ancestor to merge, and mergeLegacyRuntimes scopes by provider alone
+		// (no profile_id), which could otherwise fold a built-in row into a
+		// custom one of the same provider.
+		if !isCustom {
+			h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
 		}
 
 		resp = append(resp, runtimeToResponse(registered))
+	}
+	for _, failed := range req.FailedProfiles {
+		profileID := strings.TrimSpace(failed.ProfileID)
+		if profileID == "" {
+			continue
+		}
+		profileUUID, pok := parseUUIDOrBadRequest(w, profileID, "profile_id")
+		if !pok {
+			return
+		}
+		profile, perr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
+			ID:          profileUUID,
+			WorkspaceID: wsUUID,
+		})
+		if perr != nil || !profile.Enabled {
+			continue
+		}
+		name := profile.DisplayName
+		if req.DeviceName != "" {
+			name = fmt.Sprintf("%s (%s)", name, req.DeviceName)
+		}
+		deviceInfo := strings.TrimSpace(req.DeviceName)
+		reason := strings.TrimSpace(failed.Reason)
+		if reason == "" {
+			reason = "custom runtime command could not be resolved"
+		}
+		commandName := strings.TrimSpace(failed.CommandName)
+		if commandName == "" {
+			commandName = profile.CommandName
+		}
+		metadata, _ := json.Marshal(map[string]any{
+			"version":                            "",
+			"cli_version":                        req.CLIVersion,
+			"launched_by":                        req.LaunchedBy,
+			"runtime_profile_registration_error": true,
+			"runtime_profile_failure_reason":     reason,
+			"command_name":                       commandName,
+		})
+		if _, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
+			WorkspaceID: wsUUID,
+			DaemonID:    strToText(req.DaemonID),
+			Name:        name,
+			RuntimeMode: "local",
+			Provider:    profile.ProtocolFamily,
+			Status:      "offline",
+			DeviceInfo:  deviceInfo,
+			Metadata:    metadata,
+			OwnerID:     ownerID,
+			ProfileID:   profileUUID,
+		}); err != nil {
+			slog.Warn("failed to record runtime profile registration failure",
+				"workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID,
+				"profile_id", profileID, "error", err)
+		}
 	}
 
 	slog.Info("daemon registered", "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID, "runtimes_count", len(resp))
@@ -677,68 +737,9 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// RefreshRuntimeCapabilitiesRequest is the operator-triggered manual
-// refresh path. The daemon-side helper rebuilds the capabilities JSON
-// from the live CLI binary and POSTs the result here. Operators can
-// invoke this from the UI when they suspect the runtime view is stale
-// without waiting for the next heartbeat.
-type RefreshRuntimeCapabilitiesRequest struct {
-	CLIVersion   string          `json:"cli_version,omitempty"`
-	Capabilities json.RawMessage `json:"capabilities"`
-}
-
-// RefreshRuntimeCapabilities accepts a fresh capabilities payload from
-// the daemon and persists it on the runtime row. Auth uses the daemon
-// token (same as register/heartbeat); operators trigger it through the
-// UI which proxies through their cerebro session.
-func (h *Handler) RefreshRuntimeCapabilities(w http.ResponseWriter, r *http.Request) {
-	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
-	if !ok {
-		return
-	}
-
-	var req RefreshRuntimeCapabilitiesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if len(req.Capabilities) == 0 {
-		writeError(w, http.StatusBadRequest, "capabilities is required")
-		return
-	}
-
-	if err := h.Queries.UpdateAgentRuntimeCapabilities(r.Context(), db.UpdateAgentRuntimeCapabilitiesParams{
-		ID:           parseUUID(runtimeID),
-		Capabilities: req.Capabilities,
-	}); err != nil {
-		slog.Warn("manual refresh capabilities failed", "runtime_id", runtimeID, "error", err)
-		writeError(w, http.StatusInternalServerError, "refresh failed")
-		return
-	}
-
-	if req.CLIVersion != "" {
-		if err := h.Queries.UpdateAgentRuntimeCliVersion(r.Context(), db.UpdateAgentRuntimeCliVersionParams{
-			ID:         parseUUID(runtimeID),
-			CliVersion: pgtype.Text{String: req.CLIVersion, Valid: true},
-		}); err != nil {
-			slog.Warn("manual refresh cli_version failed", "runtime_id", runtimeID, "error", err)
-		}
-	}
-	h.persistRuntimeCapabilitySnapshot(r, rt.ID, rt.WorkspaceID, req.Capabilities) // CEREBRO-PATCH(capability-register): sync daemon reports into normalized registry.
-
-	slog.Info("runtime capabilities manually refreshed", "runtime_id", runtimeID, "cli_version", req.CLIVersion)
-	w.WriteHeader(http.StatusNoContent)
-}
-
 type DaemonHeartbeatRequest struct {
 	RuntimeID           string `json:"runtime_id"`
 	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
-	// CEREBRO-PATCH(heartbeat-account-request): JEH-997 mirrors the
-	Account *protocol.DaemonHeartbeatAccount `json:"account,omitempty"`
-	// CEREBRO-PATCH(heartbeat-cli-version-request): W4.2 CLI version + capabilities fields on heartbeat payload.
-	CLIVersion   string          `json:"cli_version,omitempty"`
-	Capabilities json.RawMessage `json:"capabilities,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -846,8 +847,18 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	rt, lookupErr := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	runtimeLookupMs = time.Since(lookupStart).Milliseconds()
 	if lookupErr != nil {
-		outcome = "runtime_not_found"
-		writeError(w, http.StatusNotFound, "runtime not found")
+		// Only pgx.ErrNoRows means the runtime row is gone. Daemon reads this
+		// 404 as a signal to drop the stale runtime locally; treating a
+		// transient DB error the same way would force daemons to self-cleanup
+		// on a hiccup.
+		if isNotFound(lookupErr) {
+			outcome = "runtime_not_found"
+			writeError(w, http.StatusNotFound, "runtime not found")
+			return
+		}
+		outcome = "runtime_lookup_error"
+		slog.Warn("get agent runtime failed", "runtime_id", req.RuntimeID, "error", lookupErr)
+		writeError(w, http.StatusInternalServerError, "failed to load runtime")
 		return
 	}
 	wsCheckStart := time.Now()
@@ -877,66 +888,12 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	outcome = "ok"
-	// CEREBRO-PATCH(heartbeat-account-http): JEH-997 daemon piggybacks the
-	// runtime's detected login identity on the heartbeat; recordHeartbeatAccount
-	// upserts cerebro_account + links agent_runtime.current_account_id. Best-
-	// effort; failures are logged but never block the heartbeat ack.
-	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 capture account_id for ack.
-	cerebroAccountID := h.recordHeartbeatAccount(r.Context(), rt, req.Account)
-	// W4.2: detect CLI-version drift. When the daemon's reported CLI version
-	// differs from the row, the runtime's tool surface may have changed and
-	// persona's scanner-discovery view is now stale. Persist any capabilities
-	// the daemon included on this heartbeat.
-	if req.CLIVersion != "" && rt.CliVersion.String != req.CLIVersion {
-		if err := h.Queries.UpdateAgentRuntimeCliVersion(r.Context(), db.UpdateAgentRuntimeCliVersionParams{
-			ID:         parseUUID(req.RuntimeID),
-			CliVersion: pgtype.Text{String: req.CLIVersion, Valid: true},
-		}); err != nil {
-			slog.Warn("update runtime cli_version failed", "runtime_id", req.RuntimeID, "error", err)
-		}
-		if len(req.Capabilities) > 0 {
-			if err := h.Queries.UpdateAgentRuntimeCapabilities(r.Context(), db.UpdateAgentRuntimeCapabilitiesParams{
-				ID:           parseUUID(req.RuntimeID),
-				Capabilities: req.Capabilities,
-			}); err != nil {
-				slog.Warn("update runtime capabilities on cli upgrade failed", "runtime_id", req.RuntimeID, "error", err)
-			}
-			h.persistRuntimeCapabilitySnapshot(r, rt.ID, rt.WorkspaceID, req.Capabilities) // CEREBRO-PATCH(capability-register): keep normalized registry in step with heartbeat drift reports.
-		}
-		slog.Info("runtime cli upgrade detected",
-			"runtime_id", req.RuntimeID,
-			"old_version", rt.CliVersion.String,
-			"new_version", req.CLIVersion,
-			"capabilities_refreshed", len(req.Capabilities) > 0,
-		)
-	}
 	// Preserve the existing HTTP response shape: the runtime_id field is new
 	// in the WS path and would be redundant noise on the HTTP path where the
 	// caller already knows which runtime it asked about.
 	resp := map[string]any{"status": ack.Status}
-	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 return account_id so daemon can cache it.
-	if cerebroAccountID != "" {
-		resp["cerebro_account_id"] = cerebroAccountID
-	}
 	if ack.PendingUpdate != nil {
 		resp["pending_update"] = ack.PendingUpdate
-	}
-	// CEREBRO-PATCH(daemon-heartbeat-ping): cerebro daemon ping store
-	// (per-runtime keepalive). PingStore lives in handler.go's Handler struct.
-	// Includes the runtime's per-runtime sandbox override (JEH-418) so the
-	// daemon's ping-side buildSandboxConfig honours the same setting as the
-	// task-side path.
-	if h.PingStore != nil {
-		if pending := h.PingStore.PopPending(req.RuntimeID); pending != nil {
-			pingPayload := map[string]any{"id": pending.ID}
-			if override := boolToPtr(rt.SandboxEnabled); override != nil {
-				pingPayload["sandbox_enabled"] = *override
-			}
-			if len(rt.SandboxPolicy) > 0 {
-				pingPayload["runtime_sandbox_policy"] = json.RawMessage(rt.SandboxPolicy)
-			}
-			resp["pending_ping"] = pingPayload
-		}
 	}
 	if ack.PendingModelList != nil {
 		resp["pending_model_list"] = ack.PendingModelList
@@ -974,21 +931,19 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	}
 	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeUUID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if isNotFound(err) {
 			return &protocol.DaemonHeartbeatAckPayload{
 				RuntimeID:   runtimeID,
 				Status:      protocol.HeartbeatStatusRuntimeGone,
 				RuntimeGone: true,
 			}, nil
 		}
-		return nil, fmt.Errorf("runtime not found: %w", err)
+		return nil, fmt.Errorf("get agent runtime: %w", err)
 	}
-	if identity.WorkspaceID != "" && identity.WorkspaceID != uuidToString(rt.WorkspaceID) {
+	if !identity.AllowsWorkspace(uuidToString(rt.WorkspaceID)) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
 	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport)
-	// CEREBRO-PATCH(heartbeat-account-ws): JEH-997 mirror the HTTP-side
-	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 forward registered account_id in WS ack.
 	return ack, err
 }
 
@@ -1059,11 +1014,6 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 		return nil, m, err
 	}
 	m.UpdateMs = time.Since(updateStart).Milliseconds()
-
-	// CEREBRO-PATCH(capability-register-heartbeat-mirror): FIR-2284 keep the
-	// runtime's tool inventory loaded continuously in the capability register the
-	// unified tool table reads. Throttled + detached, so it adds no heartbeat latency.
-	h.maybeMirrorRuntimeCapabilitySnapshot(rt.ID, rt.WorkspaceID, rt.Capabilities)
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
 
@@ -1244,7 +1194,7 @@ func logHeartbeatEndpointSlow(runtimeID, outcome, authPath string, start time.Ti
 // logClaimEndpointSlow emits one structured log when the /tasks/claim endpoint
 // exceeds 500ms, splitting auth / claim / response-build phases so the prod
 // tail can be diagnosed without flooding logs at normal poll rates.
-func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, claimMs, buildMs int64) {
+func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, claimMs, buildMs int64, payloadBytes, agentSkillCount, builtinSkillCount, skillPayloadBytes int) {
 	totalMs := time.Since(start).Milliseconds()
 	if totalMs < 500 {
 		return
@@ -1256,53 +1206,11 @@ func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, cl
 		"auth_ms", authMs,
 		"claim_ms", claimMs,
 		"build_ms", buildMs,
+		"payload_bytes", payloadBytes,
+		"agent_skill_count", agentSkillCount,
+		"builtin_skill_count", builtinSkillCount,
+		"skill_payload_bytes", skillPayloadBytes,
 	)
-}
-
-// compileProfileForUser loads the user's saved communication profile (if any)
-// and returns the compiled prompt string ready for injection. Returns "" if
-// the user has no saved profile or the lookup fails — the runtime then skips
-// the User Communication Profile section in CLAUDE.md and the agent uses
-// only its baseline behaviour.
-//
-// All reads of the user_profile table go through this single function — see
-// the migration comment in 055_user_profile.up.sql for the rationale.
-func (h *Handler) compileProfileForUser(ctx context.Context, userID pgtype.UUID) string {
-	if !userID.Valid {
-		return ""
-	}
-	row, err := h.Queries.GetUserProfile(ctx, userID)
-	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("load user profile failed", "user_id", uuidToString(userID), "error", err)
-		}
-		return ""
-	}
-	displayName := ""
-	if user, err := h.Queries.GetUser(ctx, userID); err == nil {
-		displayName = user.Name
-	}
-	// CEREBRO-PATCH(user-profile-v2-compile): JEH-1031 — pass the 4 scope
-	// ratings + custom prompt + mode into the compiler.
-	prompt, err := profile.CompileFromRow(
-		row.Persona,
-		row.Language,
-		displayName,
-		int(row.LengthPref),
-		int(row.AutonomyPref),
-		int(row.GitPref),
-		int(row.CodePref),
-		int(row.ComputerPref),
-		int(row.ProcessPref),
-		row.AntiPatterns,
-		row.CustomPrompt,
-		row.PromptMode,
-	)
-	if err != nil {
-		slog.Warn("compile user profile failed", "user_id", uuidToString(userID), "error", err)
-		return ""
-	}
-	return prompt
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
@@ -1314,6 +1222,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	var (
 		outcome                  = "unauth"
 		authMs, claimMs, buildMs int64
+		payloadBytes             int
+		agentSkillCount          int
+		builtinSkillCount        int
+		skillPayloadBytes        int
 		buildStart               time.Time
 	)
 	defer func() {
@@ -1323,7 +1235,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if !buildStart.IsZero() {
 			buildMs = time.Since(buildStart).Milliseconds()
 		}
-		logClaimEndpointSlow(runtimeID, outcome, start, authMs, claimMs, buildMs)
+		logClaimEndpointSlow(runtimeID, outcome, start, authMs, claimMs, buildMs, payloadBytes, agentSkillCount, builtinSkillCount, skillPayloadBytes)
 	}()
 
 	// Verify the caller owns this runtime's workspace. The runtime's
@@ -1338,38 +1250,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
 	authMs = time.Since(start).Milliseconds()
 
-	// CEREBRO-PATCH(daemon-pause-claim-gate): paused runtimes return no claimable
-	// task without touching Postgres. Pause is purely an orchestration concept —
-	// the daemon is unchanged and just sees an empty queue until the auto-unpause
-	// sweeper or a manual unpause clears the flag.
-	if runtime.PausedAt.Valid {
-		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
-		outcome = "paused"
-		return
-	}
-
-	// CEREBRO-PATCH(budget-preclaim): peek at queued tasks for this runtime
-	// and cancel any that exceed the workspace or agent budget cap. The
-	// actual claim below then picks the next still-allowed task. The
-	// peek->check->mark pattern races with concurrent claims, but
-	// that's fine: another runtime that picks the same task would run the
-	// same check.
-	if h.BudgetService != nil {
-		if pending, err := h.Queries.ListPendingTasksByRuntime(r.Context(), parseUUID(runtimeID)); err == nil {
-			for _, candidate := range pending {
-				wsID, _ := h.workspaceIDForTask(r.Context(), candidate)
-				decision := h.BudgetService.CheckPreClaim(r.Context(), wsID, candidate.AgentID)
-				if !decision.Allowed {
-					slog.Info("task claim blocked by budget", "task_id", uuidToString(candidate.ID), "reason", decision.Reason)
-					_ = h.Queries.MarkTaskBlockedByBudget(r.Context(), db.MarkTaskBlockedByBudgetParams{
-						ID:    candidate.ID,
-						Error: pgtype.Text{String: decision.Reason, Valid: true},
-					})
-				}
-			}
-		}
-	}
-
 	claimStart := time.Now()
 	task, err := h.TaskService.ClaimTaskForRuntime(r.Context(), parseUUID(runtimeID))
 	claimMs = time.Since(claimStart).Milliseconds()
@@ -1381,7 +1261,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	if task == nil {
 		slog.Debug("no task to claim", "runtime_id", runtimeID)
-		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
 		outcome = "no_task"
 		return
 	}
@@ -1391,96 +1271,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task, runtimeWorkspaceID)
-
-	// CEREBRO-PATCH(agent-browser-sandbox-gate): FIR-1428 — resolve the agent's
-	// agent-browser tool policy and, if it allows/asks, merge the unix-socket
-	// opener into the sandbox policy the daemon receives (set below, after the
-	// agent row is loaded for its owner/workspace). Default stays Deny: sealed.
-	agentBrowserAllowed := false
-
-	// CEREBRO-PATCH(runtime-sandbox-override-claim): JEH-418 — surface the runtime's
-	// per-runtime sandbox override so the daemon can honour it on the next
-	// buildSandboxConfig without needing a restart. nil here is meaningful: it
-	// tells the daemon to fall back to its env-var default. We keep going even
-	// if the lookup fails — losing the override defaults to safe-by-default sandboxing.
-	if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
-		resp.SandboxEnabled = boolToPtr(rt.SandboxEnabled)
-		if len(rt.SandboxPolicy) > 0 {
-			resp.RuntimeSandboxPolicy = json.RawMessage(rt.SandboxPolicy)
-		}
-		resp.RuntimePersonaSandbox = rt.PersonaSandbox.String
-		// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — resolve the staged
-		// local-runtime enforcement mode from workspace settings so the daemon
-		// wires the Claude PreToolUse hook only when the workspace opted in.
-		// Off (default) leaves the field empty and the daemon wires nothing.
-		if stage := h.localToolPolicyMode(r.Context(), rt.WorkspaceID); stage != localtoolpolicy.ModeOff {
-			resp.LocalToolPolicyStage = string(stage)
-		}
-		// CEREBRO-PATCH(runtime-tools-config-claim-populate): surface runtime tools_config to daemon (9031).
-		if len(rt.ToolsConfig) > 0 {
-			resp.RuntimeToolsConfig = json.RawMessage(rt.ToolsConfig)
-		}
-		// CEREBRO-PATCH(cerebro-connections-mcp-merge): TECH-3108/TECH-3156 — resolve
-		// per-tool connection denies FIRST and FAIL CLOSED: if the policy can't be
-		// evaluated, withhold all workspace connections this claim rather than inject
-		// them unenforced. On success, inject and pass the denies as --disallowedTools.
-		if h.ConnectionsInjector != nil {
-			var denies []string
-			var denyErr error
-			if h.ConnectionToolDeny != nil {
-				denies, denyErr = h.ConnectionToolDeny.DisallowedMCPTools(r.Context(), rt.WorkspaceID, task.RuntimeID, task.AgentID)
-			}
-			if denyErr != nil {
-				slog.Warn("connection tool deny resolution failed; withholding connections (fail-closed)",
-					"runtime_id", runtimeID, "error", denyErr)
-			} else {
-				connMCP := h.ConnectionsInjector.BuildMCPConfig(r.Context(), rt.WorkspaceID)
-				if len(connMCP) > 0 {
-					resp.RuntimeToolsConfig = daemonmcp.Merge(resp.RuntimeToolsConfig, connMCP)
-				}
-				resp.DisallowedMCPTools = denies
-			}
-		}
-		resp.PresentationMode = rt.PresentationMode // CEREBRO-PATCH(daemon-claim-presentation-mode): forward presentation_mode to daemon
-		auditDetails, _ := json.Marshal(map[string]any{
-			"task_id":                uuidToString(task.ID),
-			"runtime_id":             uuidToString(task.RuntimeID),
-			"agent_id":               uuidToString(task.AgentID),
-			"sandbox_enabled":        boolToPtr(rt.SandboxEnabled),
-			"runtime_sandbox_policy": json.RawMessage(rt.SandboxPolicy),
-		})
-		_, _ = h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
-			WorkspaceID: rt.WorkspaceID,
-			IssueID:     pgtype.UUID{},
-			ActorType:   pgtype.Text{String: "agent", Valid: true},
-			ActorID:     task.AgentID,
-			Action:      "runtime_sandbox_enforcement_decision",
-			Details:     auditDetails,
-		})
-	} else {
-		slog.Warn("failed to load runtime for sandbox override", "runtime_id", uuidToString(task.RuntimeID), "error", err)
-	}
-
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
-		// CEREBRO-PATCH(agent-browser-sandbox-gate): FIR-1428 — resolve here, where
-		// the agent's owner (user-ceiling layer) and workspace are known, so the
-		// full chain (workspace→runtime→agent→group→user) decides the verdict.
-		agentBrowserAllowed = h.resolveAgentBrowserAllowed(r.Context(), agent.WorkspaceID, task.RuntimeID, task.AgentID, agent.OwnerID)
 		// Workspace-bound skills first, then platform built-in skills. Built-in
 		// names carry a "multica-" prefix so their on-disk slugs never collide
 		// with a user-authored workspace skill (see writeSkillFiles).
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
-		skills = append(skills, h.TaskService.BuiltinSkills()...)
+		agentSkillCount = len(skills)
+		builtinSkills := h.TaskService.BuiltinSkills()
+		builtinSkillCount = len(builtinSkills)
+		skills = append(skills, builtinSkills...)
 		var customEnv map[string]string
 		if agent.CustomEnv != nil {
 			if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
 				slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(agent.ID), "error", err)
 			}
 		}
-		// CEREBRO-PATCH(daemon-agentvault-claim-env): TECH-3196 merge per-agent Agent Vault proxy env (flag-gated, fail-open).
-		customEnv = h.mergeAgentVaultEnvForClaim(r, agent.ID, agent.WorkspaceID, agent.Name, customEnv)
-		// CEREBRO-PATCH(personal-browser-gate): FIR-2037 inject MULTICA_PERSONAL_BROWSER when the personal-browser feature flag is on; per-host authorization is per-action.
-		customEnv = h.withPersonalBrowserEnv(r.Context(), customEnv, agent.WorkspaceID)
 		var customArgs []string
 		if agent.CustomArgs != nil {
 			if err := json.Unmarshal(agent.CustomArgs, &customArgs); err != nil {
@@ -1491,31 +1296,26 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
-		// CEREBRO-PATCH(user-infisical-folders): resolve folder grants, filter
-		// to the owner's allow-list, then fetch the secrets via the per-user
-		// scoped Infisical identity so the daemon never holds an Infisical
-		// credential and never talks to Infisical directly.
-		infisicalSecrets := h.resolveInfisicalSecretsForClaim(r, agent.ID, agent.WorkspaceID, agent.OwnerID)
-		resp.Agent = &TaskAgentData{
-			ID:               uuidToString(agent.ID),
-			Name:             agent.Name,
-			Instructions:     agent.Instructions,
-			Skills:           skills,
-			CustomEnv:        customEnv,
-			CustomArgs:       customArgs,
-			McpConfig:        mcpConfig,
-			InfisicalSecrets: infisicalSecrets,
-			Model:            agent.Model.String,
-			ThinkingLevel:    agent.ThinkingLevel.String,
+		// runtime_config is stored as JSONB and may legitimately be the
+		// empty object `{}` for agents that haven't opted into any
+		// provider-specific tuning. Forward only non-empty payloads so the
+		// daemon's per-provider decoders treat absent-or-empty identically.
+		var runtimeConfig json.RawMessage
+		if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
+			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 		}
-	}
-
-	// CEREBRO-PATCH(agent-browser-sandbox-gate): FIR-1428 — fold the resolved
-	// agent-browser verdict into the sandbox policy the daemon receives. Only an
-	// allow/ask grant opens the Unix-socket bind + ~/.agent-browser write rule;
-	// deny / no-grant leaves the policy untouched and the socket sealed.
-	if agentBrowserAllowed {
-		resp.RuntimeSandboxPolicy = withAgentBrowserSandbox(resp.RuntimeSandboxPolicy)
+		resp.Agent = &TaskAgentData{
+			ID:            uuidToString(agent.ID),
+			Name:          agent.Name,
+			Instructions:  agent.Instructions,
+			Skills:        skills,
+			CustomEnv:     customEnv,
+			CustomArgs:    customArgs,
+			McpConfig:     mcpConfig,
+			Model:         agent.Model.String,
+			ThinkingLevel: agent.ThinkingLevel.String,
+			RuntimeConfig: runtimeConfig,
+		}
 	}
 
 	// Resolve the runtime owner's profile description so the daemon can
@@ -1563,21 +1363,33 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
-			resp.IssueKind = issue.Kind // CEREBRO-PATCH(agent-task-issue-kind): surface issue.kind so trace upload labels channel/dm runs (FIR-2438)
-			// CEREBRO-PATCH(agent-task-issue-title): FIR-2763 M1 — stamp display
-			// titles so trace upload can write human-readable names instead of
-			// bare UUIDs. Parent lookup is best-effort: a missing parent leaves
-			// ParentIssueTitle empty (registry stores null, UI falls back to ID).
-			resp.IssueTitle = issue.Title
-			if issue.ParentIssueID.Valid {
-				if parent, perr := h.Queries.GetIssue(r.Context(), issue.ParentIssueID); perr == nil {
-					resp.ParentIssueTitle = parent.Title
+			resp.ThreadName = issue.Title
+
+			// Squad-leader briefing injection: when the issue is assigned
+			// to a squad and the claiming agent is that squad's current
+			// leader, append a full briefing (Operating Protocol + Roster
+			// + user Instructions) to the agent's own Instructions. We
+			// append (not replace) so per-agent instructions remain
+			// authoritative for general behavior; the squad briefing
+			// stacks on top as task-specific squad context.
+			if resp.Agent != nil && issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+					ID:          issue.AssigneeID,
+					WorkspaceID: issue.WorkspaceID,
+				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+					if strings.TrimSpace(resp.Agent.Instructions) == "" {
+						resp.Agent.Instructions = briefing
+					} else {
+						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
+					}
+					slog.Debug("injected squad leader briefing",
+						"squad_id", uuidToString(squad.ID),
+						"squad_name", squad.Name,
+						"leader_agent_id", resp.Agent.ID,
+					)
 				}
 			}
-			// CEREBRO-PATCH(daemon-spawn-subject): JEH-1080 — resolve the spawning user + groups for the spawn-context facts.
-			sub := cerebrospawn.ResolveSpawnSubject(r.Context(), h.GroupPermissions, issue)
-			resp.PersonaSpawnUserID = sub.UserID
-			resp.PersonaSpawnGroupIDs = sub.GroupIDs
 
 			var projectRepos []RepoData
 			if issue.ProjectID.Valid {
@@ -1621,41 +1433,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 			if len(projectRepos) > 0 {
 				resp.Repos = projectRepos
-				// CEREBRO-PATCH(agent-capabilities-claim): settings still apply when project repos override workspace repos.
-				if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
-					applyCapabilityPolicyToClaim(&resp, ws.Settings, runtimeID)
-				}
-			} else if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
-				// CEREBRO-PATCH(agent-capabilities-claim): local fallback capability policy.
-				applyCapabilityPolicyToClaim(&resp, ws.Settings, runtimeID)
-				if ws.Repos != nil {
-					var repos []RepoData
-					if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-						resp.Repos = repos
-					}
+			} else if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
+				var repos []RepoData
+				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+					resp.Repos = repos
 				}
 			}
-
-			if resp.Agent != nil && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
-				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-					ID:          issue.AssigneeID,
-					WorkspaceID: issue.WorkspaceID,
-				}); err == nil && squad.LeaderID == task.AgentID {
-					briefing := strings.TrimSpace(buildSquadLeaderBriefing(r.Context(), h.Queries, squad))
-					if briefing != "" {
-						resp.Agent.Instructions = strings.TrimSpace(resp.Agent.Instructions + "\n\n" + briefing)
-					}
-				}
-			}
-
-			// CEREBRO-PATCH(daemon-snapshot-saving): inline issue+thread + measure when the snapshot_prompt cost saving is on (FIR-2384)
-			h.applySnapshotSaving(r.Context(), &resp, issue, task.TriggerCommentID, task.ID)
-			// CEREBRO-PATCH(daemon-bundled-saving): point prompt at `issue context` (on) or record would-save (shadow) for bundled_read; defers to snapshot (FIR-2384)
-			h.applyBundledReadSaving(r.Context(), &resp, issue, task.ID)
-			// CEREBRO-PATCH(daemon-context-duplication): score meta-skill duplication (FIR-2765)
-			h.applyContextDuplicationSaving(r.Context(), &resp, issue, task.ID)
-			// CEREBRO-PATCH(daemon-graphify-nudge): nudge agents to use the graphify code graph when the saving is on (FIR-1311)
-			h.applyGraphifyNudge(r.Context(), &resp, issue)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -1667,15 +1450,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if task.TriggerCommentID.Valid {
 			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
 				resp.TriggerCommentContent = comment.Content
-				if comment.CreatedAt.Valid {
-					resp.TriggerCommentCreatedAt = comment.CreatedAt.Time.UTC().Format(time.RFC3339)
-				}
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
 					resp.TriggerThreadID = uuidToString(comment.ParentID)
 				}
 				resp.TriggerAuthorType = comment.AuthorType
-				resp.TriggerUserID = uuidToString(comment.AuthorID) // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggerer for the trace user-label (FIR-2438)
 				// The triggering comment's author is the task initiator — the
 				// real requester behind this run. Surface it (type + id + name,
 				// plus email for members) so a workspace-visible agent can
@@ -1704,12 +1483,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							resp.InitiatorEmail = u.Email
 						}
 					}
-					// CEREBRO-PATCH(user-profile-prompt): apply the comment
-					// author's communication profile when the author is a
-					// member. Agents don't have profiles.
-					if comment.AuthorID.Valid {
-						resp.UserProfilePrompt = h.compileProfileForUser(r.Context(), comment.AuthorID)
-					}
 				}
 				// Count comments that arrived issue-wide since this agent's last
 				// run, so the daemon can tell it the full catch-up volume up front
@@ -1735,20 +1508,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						resp.NewCommentsSince = startedAt.Time.UTC().Format(time.RFC3339)
 					}
 				}
-			}
-		}
-
-		// CEREBRO-PATCH(agent-task-trigger-human-origin): TECH-3295 R3 — the runtime
-		// trace's "user" must be the human who originated the chain, not the agent
-		// that handed off on an agent→agent comment. task.OriginalUserID is the
-		// delegation chain's human principal (same signal the mention/handoff guard
-		// uses); mirror the gateway executor and attribute to that human. The
-		// immediate author still lives in TriggerAuthorType/Name for the mention-loop
-		// harness signal, so this only changes who the spend is counted against.
-		if task.OriginalUserID.Valid {
-			resp.TriggerUserID = uuidToString(task.OriginalUserID)
-			if u, err := h.Queries.GetUser(r.Context(), task.OriginalUserID); err == nil {
-				resp.TriggerUserName = u.Name
 			}
 		}
 
@@ -1785,8 +1544,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
-			// Apply the chat session creator's communication profile.
-			resp.UserProfilePrompt = h.compileProfileForUser(r.Context(), cs.CreatorID)
+			resp.ThreadName = cs.Title
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
@@ -1817,37 +1575,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-
-			// CEREBRO-PATCH(daemon-handler-chat-history-cap): cap chat history at the SQL layer so long-lived
-			// sessions don't pull megabytes per claim. Query orders newest-first; we reverse to keep the
-			// downstream loop's chronological order intact.
-			const chatHistoryLimit = 30
-			if history, err := h.Queries.ListRecentChatMessages(r.Context(), db.ListRecentChatMessagesParams{
-				ChatSessionID: cs.ID,
-				Limit:         chatHistoryLimit,
-			}); err == nil {
-				for i, j := 0, len(history)-1; i < j; i, j = i+1, j-1 {
-					history[i], history[j] = history[j], history[i]
-				}
-				for _, m := range history {
-					role := strings.TrimSpace(m.Role)
-					content := strings.TrimSpace(m.Content)
-					if role == "" || content == "" {
-						continue
-
-					}
-					resp.ChatHistory = append(resp.ChatHistory, ChatHistoryMessage{
-						Role:    role,
-						Content: content,
-					})
-				}
-			}
-			// Load every user message that hasn't yet been answered by an
-			// assistant turn. Coalescing on enqueue means a single queued task
-			// may need to absorb multiple user messages that arrived while the
-			// prior turn was running — delivering all of them joined with \n\n
-			// ensures the agent addresses each one (e.g. "看上海天气" then
-			// "还有青岛" → both answered, not just Qingdao).
+			// Build the chat prompt from EVERY user message that has arrived
+			// since the agent's last reply — not just the most recent one. A
+			// short-window debounce (MUL-2968) can land several user messages
+			// before a single run fires; the agent resumes its prior session
+			// and only learns of new input through resp.ChatMessage, so
+			// delivering just the latest message would silently drop the
+			// earlier ones (e.g. "看上海天气" then "还有青岛" → only Qingdao
+			// answered). The unanswered set is the trailing run of user
+			// messages after the last assistant message (every completed or
+			// failed run writes an assistant row, so that anchor advances each
+			// turn). Attachments are collected from each included message so
+			// the agent can `multica attachment download <id>` — the markdown
+			// URL alone is signed and 30-min expiring on the private CDN.
 			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
 				unanswered := trailingUserMessages(msgs)
 				parts := make([]string, 0, len(unanswered))
@@ -1869,16 +1609,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				resp.ChatMessage = strings.Join(parts, "\n\n")
-				// Also populate ChatMessages list for daemons that read it directly.
-				resp.ChatMessages = parts
+				if strings.TrimSpace(resp.ThreadName) == "" {
+					resp.ThreadName = resp.ChatMessage
+				}
 			}
-			// CEREBRO-PATCH(chat-message-id-claim): JEH-1083 — pre-create the
-			// assistant chat_message row up-front so the agent can attach files
-			// to it mid-turn (the MCP add_attachment tool reads its UUID from
-			// MULTICA_CHAT_MESSAGE_ID). The complete/cancel/fail paths update
-			// this row in place instead of inserting a new one, so we still end
-			// up with exactly one assistant row per task.
-			resp.ChatMessageID = h.ensureAssistantChatMessageForTask(r.Context(), task.ID, cs.ID)
 		}
 	}
 
@@ -1894,6 +1628,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
 				resp.AutopilotTitle = ap.Title
+				resp.ThreadName = ap.Title
 				if ap.Description.Valid {
 					resp.AutopilotDescription = ap.Description.String
 				}
@@ -1912,6 +1647,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Handoff note (MUL-3375) is populated by taskToResponse (the shared mapper
+	// resp came from above), so the daemon's prompt + issue_context.md render the
+	// assignment-handoff branch. Empty for all other task kinds.
+
 	// Quick-create task: no issue / chat / autopilot link — workspace and
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.
@@ -1921,6 +1660,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
 			hasQuickCreate = true
 			resp.QuickCreatePrompt = qc.Prompt
+			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
+			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
 
 			// When the user picked a project in the modal, surface its title
@@ -2039,38 +1780,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// CEREBRO-PATCH(orphan-task-fail): if none of the issue/chat/autopilot/
-	// quick-create parents are present, the task is orphaned. Mark it failed
-	// inline instead of dispatching it tokenless so the operator can see why,
-	// and return null so the daemon polls for the next valid task. Predates
-	// upstream's workspace isolation check below. Detection keys on parent FK
-	// validity directly because upstream's taskToResponse eagerly stamps the
-	// runtime workspace_id onto resp regardless of parent presence (ON DELETE
-	// SET NULL leaves the task row valid with every parent FK NULL).
-	if !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid && !hasQuickCreate {
-		slog.Warn("task orphaned: no resolvable workspace, failing instead of dispatching tokenless",
-			"task_id", uuidToString(task.ID),
-			"runtime_id", runtimeID,
-			"agent_id", uuidToString(task.AgentID),
-			"issue_id_valid", task.IssueID.Valid,
-			"chat_session_id_valid", task.ChatSessionID.Valid,
-			"autopilot_run_id_valid", task.AutopilotRunID.Valid,
-			"has_quick_create", hasQuickCreate,
-		)
-		if _, err := h.TaskService.FailTask(r.Context(), task.ID, "task orphaned: parent issue, chat session, or autopilot was deleted before claim", "", "", "orphaned"); err != nil {
-			slog.Warn("failed to mark orphan task as failed", "task_id", uuidToString(task.ID), "error", err)
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
-		return
-	}
-
 	// Workspace isolation check: the daemon uses this response's workspace_id
-	// as the only authority for MULTICA_WORKSPACE_ID in the agent env. A
-	// value that doesn't match the runtime's workspace means upstream routed
-	// a foreign-workspace task here. Hard-fail AND cancel the just-dispatched
-	// task so the queue / agent status don't sit stuck until the stale-task
-	// sweeper fires minutes later.
-	if resp.WorkspaceID != runtimeWorkspaceID {
+	// as the only authority for MULTICA_WORKSPACE_ID in the agent env. An
+	// empty value would make the CLI silently fall back to the user-global
+	// config and talk to whatever workspace the user happened to last
+	// configure; a value that doesn't match the runtime's workspace means
+	// upstream routed a foreign-workspace task here. Both cases must hard-
+	// fail AND cancel the just-dispatched task so the queue / agent status
+	// don't sit stuck until the stale-task sweeper fires minutes later.
+	if resp.WorkspaceID == "" || resp.WorkspaceID != runtimeWorkspaceID {
 		outcome = "error_workspace"
 		slog.Error("task claim: workspace isolation check failed, cancelling task",
 			"task_id", uuidToString(task.ID),
@@ -2088,23 +1806,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
 		return
-	}
-
-	// Mint a task-scoped `mat_` token bound to (agent, task, workspace, owner)
-	// the daemon injects as MULTICA_TOKEN for the spawned agent process. The
-	// server treats it as actor=agent regardless of headers, so owner-only
-	// endpoints (e.g. /api/agents/{id}/env) reject agent traffic (MUL-2600).
-	// Skip silently when the runtime has no owning user (cloud / system
-	// runtimes) — the daemon then falls back to its own credential.
-	if runtime.OwnerID.Valid {
-		token, err := h.mintTaskToken(r.Context(), *task, resp.WorkspaceID, runtime.OwnerID)
-		if err != nil {
-			outcome = "error_token"
-			slog.Error("mint task token failed", "task_id", uuidToString(task.ID), "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to mint task token")
-			return
-		}
-		resp.AuthToken = token
 	}
 
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
@@ -2125,8 +1826,62 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
+	// Mint a task-scoped `mat_` token bound to (agent, task, workspace,
+	// owner). The daemon will inject this as MULTICA_TOKEN into the agent
+	// process instead of its own credential, so any API call the agent
+	// makes — even one that strips X-Agent-ID / X-Task-ID headers — is
+	// recognized server-side as actor=agent, closing the lateral-movement
+	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). Runtime
+	// owner is required because task tokens are still bound to an owning user;
+	// without one, fail the claim explicitly instead of letting the daemon
+	// fall back to a member/owner credential. MUL-3292.
+	// Token expires after the queue/runtime upper bound (24h) so it survives
+	// long-running tasks but cannot outlive a forgotten one.
+	if !runtime.OwnerID.Valid {
+		outcome = "error_token"
+		slog.Error("task claim: runtime owner missing; cancelling task to avoid unscoped agent credentials",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", runtimeID,
+			"workspace_id", runtimeWorkspaceID,
+		)
+		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+			slog.Error("task claim: cancel after missing runtime owner failed",
+				"task_id", uuidToString(task.ID), "error", cerr)
+		}
+		writeError(w, http.StatusInternalServerError, "runtime owner required to mint task token")
+		return
+	}
+	tokenStr, terr := auth.GenerateAgentTaskToken()
+	if terr != nil {
+		outcome = "error_token"
+		slog.Error("task claim: failed to generate agent task token",
+			"task_id", uuidToString(task.ID), "error", terr)
+		writeError(w, http.StatusInternalServerError, "failed to mint task token")
+		return
+	}
+	if _, terr := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
+		TokenHash:   auth.HashToken(tokenStr),
+		TaskID:      task.ID,
+		AgentID:     task.AgentID,
+		WorkspaceID: parseUUID(resp.WorkspaceID),
+		UserID:      runtime.OwnerID,
+		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+	}); terr != nil {
+		outcome = "error_token"
+		slog.Error("task claim: failed to persist agent task token",
+			"task_id", uuidToString(task.ID), "error", terr)
+		writeError(w, http.StatusInternalServerError, "failed to persist task token")
+		return
+	}
+	resp.AuthToken = tokenStr
+
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
-	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+	if resp.Agent != nil && len(resp.Agent.Skills) > 0 {
+		if skillPayload, err := json.Marshal(resp.Agent.Skills); err == nil {
+			skillPayloadBytes = len(skillPayload)
+		}
+	}
+	payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": resp})
 }
 
 // trailingUserMessages returns the run of user messages after the last
@@ -2369,11 +2124,6 @@ type TaskUsagePayload struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	// CEREBRO-PATCH(handler-daemon-firtal-gateway-usage-cost): accept exact spend from managed gateway runtimes.
-	CostCents int64 `json:"cost_cents"`
-	// CEREBRO-PATCH(handler-daemon-context-footprint): FIR-1856 accept the last-turn footprint for the context-window indicator.
-	ContextInputTokens     int64 `json:"context_input_tokens"`
-	ContextCacheReadTokens int64 `json:"context_cache_read_tokens"`
 }
 
 func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
@@ -2393,110 +2143,47 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workspaceID := h.TaskService.ResolveTaskWorkspaceID(r.Context(), task)
-
-	var accountTokens int64 // CEREBRO-PATCH(handler-daemon-account-token-usage): derive account load from authoritative task usage reports.
+	// Provider is lowercased on write so client-side pricing lookups tolerate
+	// case drift. An empty provider (an older daemon that omits the field) is
+	// stamped from the task's runtime, so generic model ids like `auto` still
+	// resolve to a provider instead of landing as '' and pricing $0.
+	var runtimeProvider string
+	runtimeProviderLoaded := false
 	for _, u := range req.Usage {
+		provider := normalizeProvider(u.Provider)
+		if provider == "" {
+			if !runtimeProviderLoaded {
+				if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
+					runtimeProvider = normalizeProvider(rt.Provider)
+				} else {
+					slog.Warn("load runtime provider for usage backfill failed",
+						"task_id", taskID, "runtime_id", uuidToString(task.RuntimeID), "error", err)
+				}
+				runtimeProviderLoaded = true
+			}
+			provider = runtimeProvider
+		}
 		if err := h.Queries.UpsertTaskUsage(r.Context(), db.UpsertTaskUsageParams{
 			TaskID:           parseUUID(taskID),
-			Provider:         u.Provider,
+			Provider:         provider,
 			Model:            u.Model,
 			InputTokens:      u.InputTokens,
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
-			// CEREBRO-PATCH(task-usage-gateway-cost): persist gateway-reported spend.
-			CostCents: u.CostCents,
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
 		}
-
-		accountTokens += u.InputTokens + u.OutputTokens
-
-		// Per-(agent, workspace) live spend rollup. User scope is not yet
-		// wired — task initiator attribution is a separate change. Failures
-		// here are warnings, not 4xx, so the raw token usage above still
-		// lands even if the rollup hits a constraint or DB hiccup.
-		h.recordBudgetSpend(r.Context(), workspaceID, task, u)
-
-		h.TaskService.CaptureTaskUsage(r.Context(), task, u.Provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
-
-		h.recordCerebroTaskContextFootprint(r.Context(), taskID, u) // CEREBRO-PATCH(handler-daemon-context-footprint): FIR-1856 persist last-turn footprint for the window indicator.
+		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
 	}
-	h.recordCerebroAccountTokenUsage(r.Context(), task, accountTokens) // CEREBRO-PATCH(handler-daemon-account-token-usage): keep account rolling windows in lockstep with task usage.
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (h *Handler) recordCerebroAccountTokenUsage(ctx context.Context, task db.AgentTaskQueue, tokens int64) { // CEREBRO-PATCH(handler-daemon-account-token-usage): server-side account token events for JEH-1365.
-	if tokens <= 0 || h.DB == nil {
-		return
-	}
-	if _, err := h.DB.Exec(ctx, `
-		INSERT INTO cerebro_account_token_usage (account_id, workspace_id, tokens)
-		SELECT ar.current_account_id, ar.workspace_id, $2
-		FROM agent_runtime ar
-		WHERE ar.id = $1
-		  AND ar.current_account_id IS NOT NULL
-	`, task.RuntimeID, tokens); err != nil {
-		slog.Warn("record cerebro account token usage failed",
-			"runtime_id", uuidToString(task.RuntimeID),
-			"tokens", tokens,
-			"error", err)
-	}
-}
-
-// recordBudgetSpend converts a single (model, usage) report into cents and
-// increments the (agent day, agent month, workspace day, workspace month)
-// budget_state rows. Returns nothing — errors are logged but do not fail the
-// request because token tracking and budget tracking should be independent.
-func (h *Handler) recordBudgetSpend(ctx context.Context, workspaceID string, task db.AgentTaskQueue, u TaskUsagePayload) {
-	if workspaceID == "" {
-		return
-	}
-	cents := u.CostCents
-	if cents <= 0 {
-		cents = pricing.ComputeCents(u.Model, pricing.Usage{
-			InputTokens:      u.InputTokens,
-			OutputTokens:     u.OutputTokens,
-			CacheReadTokens:  u.CacheReadTokens,
-			CacheWriteTokens: u.CacheWriteTokens,
-		})
-	}
-	if cents <= 0 {
-		return
-	}
-
-	wsUUID := parseUUID(workspaceID)
-	now := time.Now().UTC()
-	dayStart := pgtype.Date{Time: time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC), Valid: true}
-	monthStart := pgtype.Date{Time: time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC), Valid: true}
-
-	// Each scope has its own (day, month) row. Six writes total per usage
-	// report (agent×2 + workspace×2 = 4 today; user×2 lands when initiator
-	// attribution is plumbed). They can race with concurrent tasks, but
-	// IncrementBudgetState's ON CONFLICT serializes per primary key.
-	rollups := []db.IncrementBudgetStateParams{
-		{WorkspaceID: wsUUID, ScopeType: "agent", ScopeID: task.AgentID, WindowType: "day", WindowStart: dayStart, CentsSpent: cents},
-		{WorkspaceID: wsUUID, ScopeType: "agent", ScopeID: task.AgentID, WindowType: "month", WindowStart: monthStart, CentsSpent: cents},
-		{WorkspaceID: wsUUID, ScopeType: "workspace", ScopeID: wsUUID, WindowType: "day", WindowStart: dayStart, CentsSpent: cents},
-		{WorkspaceID: wsUUID, ScopeType: "workspace", ScopeID: wsUUID, WindowType: "month", WindowStart: monthStart, CentsSpent: cents},
-	}
-	for _, p := range rollups {
-		if err := h.Queries.IncrementBudgetState(ctx, p); err != nil {
-			slog.Warn("budget rollup failed",
-				"workspace_id", workspaceID,
-				"scope_type", p.ScopeType,
-				"window_type", p.WindowType,
-				"cents", cents,
-				"error", err)
-		}
-	}
-}
-
 // GetTaskStatus returns the current status of a task.
-// Used by the daemon to check whether a task was cancelled mid-execution.
+// Used by the daemon to detect terminal/interruption signals (cancelled,
+// failed, completed) while a task is executing mid-flight.
 func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
@@ -2609,7 +2296,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if msg.Input != nil {
 			inputJSON, _ = json.Marshal(msg.Input)
 		}
-		h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
+		created, createErr := h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
 			TaskID:  parseUUID(taskID),
 			Seq:     int32(msg.Seq),
 			Type:    msg.Type,
@@ -2618,22 +2305,41 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			Input:   inputJSON,
 			Output:  pgtype.Text{String: msg.Output, Valid: msg.Output != ""},
 		})
+		if createErr != nil {
+			slog.Error("failed to create task message", "task_id", taskID, "seq", msg.Seq, "error", createErr)
+			writeError(w, http.StatusInternalServerError, "failed to persist task message")
+			return
+		}
 
 		if workspaceID != "" {
-			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID, protocol.TaskMessagePayload{
-				TaskID:  taskID,
-				IssueID: uuidToString(task.IssueID),
-				Seq:     msg.Seq,
-				Type:    msg.Type,
-				Tool:    msg.Tool,
-				Content: msg.Content,
-				Input:   msg.Input,
-				Output:  msg.Output,
-			})
+			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID,
+				taskMessageToPayload(created, taskID, uuidToString(task.IssueID)))
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.TaskMessagePayload {
+	var input map[string]any
+	if m.Input != nil {
+		json.Unmarshal(m.Input, &input)
+	}
+	createdAt := ""
+	if m.CreatedAt.Valid {
+		createdAt = m.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+	}
+	return protocol.TaskMessagePayload{
+		TaskID:    taskID,
+		IssueID:   issueID,
+		Seq:       int(m.Seq),
+		Type:      m.Type,
+		Tool:      m.Tool.String,
+		Content:   m.Content.String,
+		Input:     input,
+		Output:    m.Output.String,
+		CreatedAt: createdAt,
+	}
 }
 
 // ListTaskMessages returns the persisted messages for a task (for catch-up after reconnect).
@@ -2672,20 +2378,7 @@ func (h *Handler) ListTaskMessages(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]protocol.TaskMessagePayload, len(messages))
 	for i, m := range messages {
-		var input map[string]any
-		if m.Input != nil {
-			json.Unmarshal(m.Input, &input)
-		}
-		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
-		}
+		resp[i] = taskMessageToPayload(m, taskID, issueID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2815,32 +2508,13 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 
 	resp := make([]protocol.TaskMessagePayload, len(messages))
 	for i, m := range messages {
-		var input map[string]any
-		if m.Input != nil {
-			json.Unmarshal(m.Input, &input)
-		}
-		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
-		}
+		resp[i] = taskMessageToPayload(m, taskID, issueID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// GetIssueUsage returns aggregated token usage and cost for all tasks
-// belonging to an issue, plus the same totals for the full sub-issue
-// subtree. Cost is computed against pkg/pricing (the same authoritative
-// table used for budget enforcement). Both cost numbers are always
-// returned, even when the issue has no children — the sidebar then
-// renders "Cost (this issue)" and "Cost (incl. sub-issues)" with the
-// same value.
+// GetIssueUsage returns aggregated token usage for all tasks belonging to an issue.
 func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -2848,46 +2522,18 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	selfRows, err := h.Queries.GetIssueUsageByModel(r.Context(), issue.ID)
+	row, err := h.Queries.GetIssueUsageSummary(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get issue usage")
 		return
 	}
-	subtreeRows, err := h.Queries.GetIssueSubtreeUsageByModel(r.Context(), issue.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to get issue subtree usage")
-		return
-	}
-
-	var (
-		selfInput, selfOutput, selfCacheRead, selfCacheWrite int64
-		selfTaskCount                                        int32
-		selfCostCents                                        int64
-	)
-	for _, row := range selfRows {
-		selfInput += row.TotalInputTokens
-		selfOutput += row.TotalOutputTokens
-		selfCacheRead += row.TotalCacheReadTokens
-		selfCacheWrite += row.TotalCacheWriteTokens
-		selfTaskCount += row.TaskCount
-		// CEREBRO-PATCH(task-usage-gateway-cost): prefer the exact spend the
-		// gateway reported (stored per model) over the pricing-table estimate.
-		selfCostCents += preferGatewayCost(row.TotalCostCents, row.Model, row.TotalInputTokens, row.TotalOutputTokens, row.TotalCacheReadTokens, row.TotalCacheWriteTokens)
-	}
-
-	var subtreeCostCents int64
-	for _, row := range subtreeRows {
-		subtreeCostCents += preferGatewayCost(row.TotalCostCents, row.Model, row.TotalInputTokens, row.TotalOutputTokens, row.TotalCacheReadTokens, row.TotalCacheWriteTokens)
-	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total_input_tokens":       selfInput,
-		"total_output_tokens":      selfOutput,
-		"total_cache_read_tokens":  selfCacheRead,
-		"total_cache_write_tokens": selfCacheWrite,
-		"task_count":               selfTaskCount,
-		"cost_cents":               selfCostCents,
-		"subtree_cost_cents":       subtreeCostCents,
+		"total_input_tokens":       row.TotalInputTokens,
+		"total_output_tokens":      row.TotalOutputTokens,
+		"total_cache_read_tokens":  row.TotalCacheReadTokens,
+		"total_cache_write_tokens": row.TotalCacheWriteTokens,
+		"task_count":               row.TaskCount,
 	})
 }
 
@@ -2943,9 +2589,10 @@ func (h *Handler) GetChatSessionGCCheck(w http.ResponseWriter, r *http.Request) 
 }
 
 // GetAutopilotRunGCCheck returns the status and completed_at of an autopilot
-// run for the daemon GC loop. autopilot_run has no updated_at column; the
-// daemon uses completed_at as the TTL anchor for terminal runs, and treats
-// non-terminal status as a skip signal regardless of timestamp.
+// run for the daemon GC loop. The daemon decides purely on terminal status:
+// an autopilot run's workdir is never reused, so a terminal run is reclaimed on
+// sight while non-terminal status is a skip signal — completed_at is returned
+// for the API contract and diagnostics, not as a TTL anchor.
 //
 // Workspace ownership is resolved via the parent autopilot row.
 func (h *Handler) GetAutopilotRunGCCheck(w http.ResponseWriter, r *http.Request) {
@@ -2988,120 +2635,5 @@ func (h *Handler) GetTaskGCCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":       task.Status,
 		"completed_at": task.CompletedAt.Time,
-	})
-}
-
-// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 — repo capability check for grants-based access control.
-
-// daemonRepoCheckRequest is the body of POST /api/daemon/workspaces/{id}/repo/check.
-type daemonRepoCheckRequest struct {
-	URL        string `json:"url"`
-	Capability string `json:"capability"`
-	AgentID    string `json:"agent_id,omitempty"`
-	ProjectID  string `json:"project_id,omitempty"`
-	// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — set by the real daemon
-	// checkout so an "Ask" verdict raises one shared-inbox approval; left false by
-	// the read-only `repo check` pre-flight, which only reports the decision.
-	RaiseApproval bool `json:"raise_approval,omitempty"`
-}
-
-// CheckDaemonRepoCapability evaluates whether a repo capability is allowed for an
-// agent by resolving it through the tool-policy chain — the single permission
-// surface repo access lives in (FIR-2505). Called by the daemon before allowing
-// multica repo checkout/push/read when the repo_grants_enabled workspace setting
-// is on.
-//
-// POST /api/daemon/workspaces/{workspaceId}/repo/check
-func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Request) {
-	workspaceID := strings.TrimSpace(chi.URLParam(r, "workspaceId"))
-	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
-		return
-	}
-
-	var req daemonRepoCheckRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.URL == "" {
-		writeError(w, http.StatusBadRequest, "url is required")
-		return
-	}
-	if req.Capability == "" {
-		writeError(w, http.StatusBadRequest, "capability is required")
-		return
-	}
-
-	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
-	if !ok {
-		return
-	}
-
-	// Resolve through the tool-policy chain. This is an autonomous daemon
-	// checkout — no human in the loop — so only the Workspace-root and Agent
-	// layers carry signal; Runtime, User and Group are absent (Inherit). Project
-	// is deliberately NOT a layer: per the FIR-2505 decision a project is context
-	// (which repos belong to it, resolved at claim time), not a permission level,
-	// so req.ProjectID is not part of this verdict. Base is Allow — a repo with no
-	// explicit policy is reachable, and the admin tightens specific repos in the
-	// tool-policy screen. "Ask" needs a human to approve, which a daemon checkout
-	// has not, so only an explicit Allow passes.
-	agentID := pgtype.UUID{}
-	if req.AgentID != "" {
-		parsed, parseErr := util.ParseUUID(req.AgentID)
-		if parseErr != nil {
-			writeError(w, http.StatusBadRequest, "invalid agent_id")
-			return
-		}
-		agentID = parsed
-	}
-
-	eff, err := toolpolicy.NewStoreFromQueries(h.CerebroQueries).Resolve(r.Context(), toolpolicy.Query{
-		WorkspaceID:     wsUUID,
-		ToolKey:         req.Capability,
-		ResourcePattern: req.URL,
-		AgentID:         agentID,
-		Base:            toolpolicy.SettingAllow,
-		// CEREBRO-PATCH(repo-action-condition): FIR-1609 — derive the action verb
-		// (repo.checkout→"checkout"…) so an action-scoped Condition bites here.
-		// Without it ctx.Action is "" and an action-scoped Deny silently fails OPEN.
-		RequestContext: toolpolicy.RequestContext{Action: toolpolicy.ActionOf(req.Capability)},
-		// CEREBRO-PATCH(repo-policy-cel): FIR-1609 — inject the flag-gated CEL evaluator so an Expr condition on a repo rule evaluates (twin of the daemon/registry gates); nil (flag off) keeps the prior fail-closed behaviour.
-		Eval: h.daemonPolicyCELEvaluator(r.Context(), wsUUID),
-	})
-	if err != nil {
-		slog.Error("repo capability check failed", "workspace_id", workspaceID, "url", req.URL, "error", err)
-		writeError(w, http.StatusInternalServerError, "permission check failed")
-		return
-	}
-
-	// CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 — on a real checkout an
-	// "Ask" verdict no longer silently blocks: it rejoins or creates one
-	// shared-inbox approval and returns its decision (pending/allow/deny) + id so
-	// the daemon can long-poll or proceed. Rejoining a still-open ask (and
-	// honouring one approved after the daemon's earlier poll budget) is what keeps
-	// a retried checkout from piling up duplicate requests. Gate off
-	// (h.ApprovalGate==nil) or the pre-flight path (raise_approval false) keep the
-	// prior report-only behaviour, so production is unchanged.
-	if req.RaiseApproval && h.ApprovalGate != nil && eff.Setting == toolpolicy.SettingAsk {
-		allowed, decision, approvalID, askErr := h.repoCheckoutAsk(r.Context(), wsUUID, agentID, req.URL, req.Capability, eff.Reason)
-		if askErr != nil {
-			slog.Error("repo approval ask failed", "workspace_id", workspaceID, "url", req.URL, "error", askErr)
-			writeError(w, http.StatusInternalServerError, "could not create approval request")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"allowed":     allowed,
-			"decision":    decision,
-			"approval_id": util.UUIDToString(approvalID),
-			"reason":      eff.Reason,
-		})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"allowed":  eff.Setting == toolpolicy.SettingAllow,
-		"decision": string(eff.Setting),
-		"reason":   eff.Reason,
 	})
 }
