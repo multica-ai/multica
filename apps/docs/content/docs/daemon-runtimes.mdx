@@ -89,11 +89,12 @@ multica runtime profile unset-path <profile-id>
 ```
 
 Profile command or argument edits apply to newly claimed tasks after the daemon
-re-registers. Running tasks keep the launch arguments they started with. Custom
-runtime arguments and registration-error reporting require server and daemon
-versions that both understand `fixed_args` launch specs and `failed_profiles`
-registration reports, so upgrade the server before rolling out newer daemons in
-mixed deployments.
+re-registers. Running tasks keep the launch arguments they started with. For
+mixed deployments, upgrade the server before rolling out newer daemons: the
+server-side Runtimes UI stores `fixed_args`, and the server is what surfaces
+`failed_profiles` registration reports. Older components may ignore fields they
+do not understand instead of failing loudly, so treating the server upgrade as
+the first step keeps the rollout observable.
 
 <Callout type="info">
 **Cloud runtimes are coming**, currently in a waitlist phase. Once available, you'll be able to execute agent tasks directly on Multica Cloud without running a local daemon. Sign up with your email on the [download page](https://multica.ai/download) to get notified.

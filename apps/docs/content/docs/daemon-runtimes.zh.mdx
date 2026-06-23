@@ -79,7 +79,7 @@ multica runtime profile set-path <profile-id> --path /abs/path/to/agent
 multica runtime profile unset-path <profile-id>
 ```
 
-修改 profile 的命令或参数后，已开始的任务仍使用启动时的参数；守护进程重新注册后，新领取的任务才会使用新配置。自定义运行时参数和注册错误展示要求 server 与 daemon 都支持 `fixed_args` launch spec 和 `failed_profiles` 注册报告；混合版本部署时，先升级 server，再逐步升级 daemon。
+修改 profile 的命令或参数后，已开始的任务仍使用启动时的参数；守护进程重新注册后，新领取的任务才会使用新配置。混合版本部署时，建议先升级 server，再逐步升级 daemon：`fixed_args` 的录入在 server 侧 Runtimes UI，`failed_profiles` 注册报告也由 server 展示。旧组件可能会忽略自己不认识的字段，而不是明确报错；先升 server 能让 rollout 更可观察。
 
 <Callout type="info">
 **云端运行时即将开放**，目前处于等待名单阶段。上线后，你无需在本地运行守护进程，即可在 Multica Cloud 上直接执行智能体任务。在 [下载页面](https://multica.ai/download) 登记邮箱以获取通知。

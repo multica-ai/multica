@@ -54,7 +54,7 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | `multica issue get <id>` | 查看单条 issue（接受 issue key 或 UUID） |
 | `multica issue create --title "..."` | 创建新 issue |
 | `multica issue update <id> ...` | 修改 issue（状态、优先级、分配人等） |
-| `multica issue assign <id> --to <name>` | 分配给成员、智能体或小队 |
+| `multica issue assign <id> --to <name>` | 分配给成员、智能体或小队（分配给智能体会触发一次运行） |
 | `multica issue status <id> <status>` | 快捷改状态 |
 | `multica issue search <query>` | 关键字搜索 |
 | `multica issue children <id>` | 按 stage 分组查看子 issue |
