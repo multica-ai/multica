@@ -66,7 +66,7 @@ Everything below in section 4 is **not** on this list — it is a separate model
 
 ---
 
-## 2a. The canonical inventory — the 55 platform capabilities
+## 2a. The canonical inventory — the 57 platform capabilities
 
 There is already an authoritative, code-owned inventory of platform actions:
 `server/internal/cerebro/platformcatalog/catalog.go` (`var catalog`, exposed via `All()`).
@@ -77,7 +77,7 @@ buried code gates become settable instead of invisible**. Each entry carries: `K
 it is not a single route). A capability MUST have at least one of `Ops` or `Evidence` — that
 is the traceability tripwire.
 
-**This catalog is the canonical scope of platform actions.** It is **55 capabilities** in 17
+**This catalog is the canonical scope of platform actions.** It is **57 capabilities** in 17
 categories. It is surfaced in the tool-policy table **only when the `cerebro_platform_capabilities`
 feature flag is on (default OFF)** and the server gate `toolpolicy.PlatformCapabilitiesEnabled`
 passes — so today it is an **inventory, not an enforcement point**. Wiring it on is part of FIR-1496.
@@ -91,7 +91,7 @@ passes — so today it is an **inventory, not an enforcement point**. Wiring it 
 | Agents | `create_agent`, `update_agent`, `trigger_other_agent`, `schedule_agent_wakeup`, `manage_agent_passes`, `manage_work_sessions` |
 | Runtimes | `manage_runtime`, `manage_runtime_tool_access`, `manage_runtime_accounts`, `manage_cloud_runtime`, `create_runtime`, `create_local_runtime`, `use_other_runtime`, `daemon_runtime_callback` ⚠ |
 | Groups | `manage_group`, `manage_group_members` |
-| Permissions | `manage_grants`, `manage_roles`, `manage_tool_policy`, `manage_agent_vault_access`, `decide_approval` |
+| Permissions | `manage_roles`, `manage_tool_policy`, `manage_agent_vault_access`, `decide_approval` |
 | Projects | `manage_project`, `manage_project_access` ⚠, `manage_status_models`, `manage_project_sprints` |
 | Workspace | `manage_entity_folders`, `manage_workspace_members`, `manage_workspace_settings`, `delete_workspace`, `manage_integrations` |
 | Skills | `manage_skills` |
@@ -268,11 +268,21 @@ resolver + permgate are wired into the live credential / approval / repo paths, 
 1. Credential keystone on the chain — **done** (flag-gated, §5.2).
 2. Migrate any real grants → tool-policy Allow rows (fail-closed if not 1:1), then flip the
    credential flag on and retire the deny-by-default floor.
-3. Repoint repo + workspace-copy (`workspacecopy/copy_roles.go`) off the table; remove the
-   operator grants UI + `cerebro/grants` server handler (`router.go` `/grants`) + the audit FK.
+3. Repoint repo + workspace-copy off the table; remove the operator grants surfaces.
+   - Repo capability — **done** (FIR-2505): `CheckDaemonRepoCapability` resolves through the
+     tool-policy chain, not the grant table.
+   - Operator grants UI (web/desktop) — **done** (FIR-2284): no remaining frontend caller.
+   - workspace-copy (`workspacecopy/copy_roles.go`) — **done** (FIR-1777): the foundation +
+     relink passes no longer copy `cerebro_workspace_grant`; roles/groups/capabilities still copy.
+   - `cerebro/grants` server handler + `router.go` `/grants` routes + the `cerebro_grants` /
+     `cerebro_persona_permissions` settings flags — **done** (FIR-1777): the operator grant
+     control plane is fully removed (handler package deleted, routes unmounted, `manage_grants`
+     dropped from the platform catalog + permguard inventory).
+   - Remaining: the `cerebro_grant_audit` FK. The only live reader of `cerebro_workspace_grant`
+     is now the credentials resolver (§5.2), owner-scoped and empty in practice.
 4. **Then** drop `cerebro_workspace_grant` (+ `_audit`) and reduce the resolver. `approval_required`
    / `time_window_*` / `classification_ceiling` carry no live enforcement — drop them in the
-   consolidation unless a concrete need surfaces.
+   consolidation unless a concrete need surfaces. This step is irreversible (prod DB) and gated.
 
 ---
 

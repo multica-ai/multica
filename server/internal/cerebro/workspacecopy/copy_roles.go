@@ -1,24 +1,26 @@
 // CEREBRO-PATCH(workspace-copy): TECH-3742 — role / group / permission graph.
 //
-// Workspace roles, groups and the workspace-grant control plane are all
-// workspace-scoped, so a merge has to rebuild them in the target. Members and
-// users are shared across workspaces (a person has one user row and one member
-// row per workspace they belong to), so member-scoped subjects are remapped by
-// resolving the source member's user_id to the target workspace's member row.
+// Workspace roles and groups are workspace-scoped, so a merge has to rebuild
+// them in the target. Members and users are shared across workspaces (a person
+// has one user row and one member row per workspace they belong to), so
+// member-scoped subjects are remapped by resolving the source member's user_id
+// to the target workspace's member row.
 //
 // Copied here (foundation pass, resolvable immediately):
 //   - cerebro_role (role definitions, dedup by workspace+name)
 //   - cerebro_role_assignment for member subjects (by user→member)
 //   - cerebro_group + cerebro_group_member (by user) + cerebro_group_capability
-//   - cerebro_workspace_grant for member / role / group / workspace_default
-//     subjects (member subjects by user→member; role/group subjects remapped
-//     through the copy map)
 //
-// Agent-scoped subjects (role assignments, grants, group→agent access) and
-// group→project access reference entities copied later (agents, projects), so
-// they are healed by RelinkGroupAccess after those passes run. Group→runtime
-// access is intentionally parked — copied agents land unpaired and the owner
-// re-pairs runtimes in the target. Idempotent and non-destructive throughout.
+// The cerebro_workspace_grant control plane is NOT copied: repo + workspace-copy
+// no longer read it (FIR-1777 §5.3 step 3) — repo access resolves through the
+// tool-policy chain and the only remaining reader is the credentials resolver,
+// which is owner-scoped and migrates onto the chain via the engine-flip.
+//
+// Agent-scoped subjects (role assignments, group→agent access) and group→project
+// access reference entities copied later (agents, projects), so they are healed
+// by RelinkGroupAccess after those passes run. Group→runtime access is
+// intentionally parked — copied agents land unpaired and the owner re-pairs
+// runtimes in the target. Idempotent and non-destructive throughout.
 package workspacecopy
 
 import (
@@ -29,14 +31,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// copyRolesGroupsPermissionsTx rebuilds the role/group/grant graph in the
-// target. Returns (roles, groups, roleAssignments, grants) copied.
-func copyRolesGroupsPermissionsTx(ctx context.Context, tx pgx.Tx, runID, sourceWorkspace, targetWorkspace pgtype.UUID) (int64, int64, int64, int64, error) {
+// copyRolesGroupsPermissionsTx rebuilds the role/group graph in the target.
+// Returns (roles, groups, roleAssignments) copied.
+func copyRolesGroupsPermissionsTx(ctx context.Context, tx pgx.Tx, runID, sourceWorkspace, targetWorkspace pgtype.UUID) (int64, int64, int64, error) {
 	// --- roles (cerebro_role; a same-name role already in the target is reused
 	// rather than duplicated, since (workspace_id, name) is unique). ---
 	roleRows, err := tx.Query(ctx, `SELECT id, name FROM cerebro_role WHERE workspace_id = $1`, sourceWorkspace)
 	if err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("list roles: %w", err)
+		return 0, 0, 0, fmt.Errorf("list roles: %w", err)
 	}
 	type named struct {
 		id   pgtype.UUID
@@ -47,19 +49,19 @@ func copyRolesGroupsPermissionsTx(ctx context.Context, tx pgx.Tx, runID, sourceW
 		var rl named
 		if err := roleRows.Scan(&rl.id, &rl.name); err != nil {
 			roleRows.Close()
-			return 0, 0, 0, 0, fmt.Errorf("scan role: %w", err)
+			return 0, 0, 0, fmt.Errorf("scan role: %w", err)
 		}
 		roles = append(roles, rl)
 	}
 	roleRows.Close()
 	if err := roleRows.Err(); err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("iterate roles: %w", err)
+		return 0, 0, 0, fmt.Errorf("iterate roles: %w", err)
 	}
 
 	var rolesCopied int64
 	for _, rl := range roles {
 		if _, done, err := lookupMapping(ctx, tx, targetWorkspace, "role", rl.id); err != nil {
-			return rolesCopied, 0, 0, 0, err
+			return rolesCopied, 0, 0, err
 		} else if done {
 			continue
 		}
@@ -72,14 +74,14 @@ func copyRolesGroupsPermissionsTx(ctx context.Context, tx pgx.Tx, runID, sourceW
 				FROM cerebro_role r WHERE r.id = $2
 				RETURNING id`,
 				targetWorkspace, rl.id).Scan(&targetID); err != nil {
-				return rolesCopied, 0, 0, 0, fmt.Errorf("copy role: %w", err)
+				return rolesCopied, 0, 0, fmt.Errorf("copy role: %w", err)
 			}
 			rolesCopied++
 		} else if err != nil {
-			return rolesCopied, 0, 0, 0, fmt.Errorf("find role: %w", err)
+			return rolesCopied, 0, 0, fmt.Errorf("find role: %w", err)
 		}
 		if err := recordMapping(ctx, tx, runID, sourceWorkspace, targetWorkspace, "role", rl.id, targetID, nil, nil); err != nil {
-			return rolesCopied, 0, 0, 0, err
+			return rolesCopied, 0, 0, err
 		}
 	}
 
@@ -98,97 +100,16 @@ func copyRolesGroupsPermissionsTx(ctx context.Context, tx pgx.Tx, runID, sourceW
 		ON CONFLICT (role_id, subject_type, subject_id) DO NOTHING`,
 		sourceWorkspace, targetWorkspace)
 	if err != nil {
-		return rolesCopied, 0, 0, 0, fmt.Errorf("copy role assignments: %w", err)
+		return rolesCopied, 0, 0, fmt.Errorf("copy role assignments: %w", err)
 	}
 
 	// --- groups + their members and capabilities ---
 	groupsCopied, err := copyGroupsTx(ctx, tx, runID, sourceWorkspace, targetWorkspace)
 	if err != nil {
-		return rolesCopied, 0, raTag.RowsAffected(), 0, err
+		return rolesCopied, 0, raTag.RowsAffected(), err
 	}
 
-	// --- workspace grants (member / role / group / workspace_default subjects).
-	// Agent subjects are healed by RelinkGroupAccess after the agents copy. ---
-	grants, err := copyWorkspaceGrantsTx(ctx, tx, sourceWorkspace, targetWorkspace)
-	if err != nil {
-		return rolesCopied, groupsCopied, raTag.RowsAffected(), 0, err
-	}
-
-	return rolesCopied, groupsCopied, raTag.RowsAffected(), grants, nil
-}
-
-// copyWorkspaceGrantsTx copies cerebro_workspace_grant policy rows for the
-// subject types resolvable in the foundation pass: member (by user→member),
-// role and group (remapped through the copy map), and workspace_default (no
-// subject). Agent-scoped grants are healed later by RelinkGroupAccess. Each
-// insert is guarded by NOT EXISTS on the natural key so a re-run is a no-op.
-func copyWorkspaceGrantsTx(ctx context.Context, tx pgx.Tx, sourceWorkspace, targetWorkspace pgtype.UUID) (int64, error) {
-	const cols = `id, workspace_id, subject_type, subject_id, resource_pattern, capability,
-		classification_ceiling, time_window_start, time_window_end, approval_required, status,
-		granted_by_type, granted_by_id, granted_at, updated_at`
-	const srcCols = `g.resource_pattern, g.capability,
-		g.classification_ceiling, g.time_window_start, g.time_window_end, g.approval_required, g.status,
-		g.granted_by_type, g.granted_by_id, g.granted_at, now()`
-	var total int64
-
-	// member subjects → resolve by user_id
-	memberTag, err := tx.Exec(ctx, `
-		INSERT INTO cerebro_workspace_grant (`+cols+`)
-		SELECT gen_random_uuid(), $2, 'member', tm.id, `+srcCols+`
-		FROM cerebro_workspace_grant g
-		JOIN member sm ON sm.id = g.subject_id AND sm.workspace_id = $1
-		JOIN member tm ON tm.user_id = sm.user_id AND tm.workspace_id = $2
-		WHERE g.workspace_id = $1 AND g.subject_type = 'member'
-		  AND NOT EXISTS (
-			SELECT 1 FROM cerebro_workspace_grant e
-			WHERE e.workspace_id = $2 AND e.subject_type = 'member' AND e.subject_id = tm.id
-			  AND e.resource_pattern = g.resource_pattern AND e.capability = g.capability AND e.status = g.status
-		  )`,
-		sourceWorkspace, targetWorkspace)
-	if err != nil {
-		return total, fmt.Errorf("copy member grants: %w", err)
-	}
-	total += memberTag.RowsAffected()
-
-	// role + group subjects → remap subject_id through the copy map
-	for _, entity := range []string{"role", "group"} {
-		tag, err := tx.Exec(ctx, `
-			INSERT INTO cerebro_workspace_grant (`+cols+`)
-			SELECT gen_random_uuid(), $2, $3, m.target_id, `+srcCols+`
-			FROM cerebro_workspace_grant g
-			JOIN cerebro_workspace_copy_map m
-			  ON m.target_workspace_id = $2 AND m.entity_type = $3 AND m.source_id = g.subject_id
-			WHERE g.workspace_id = $1 AND g.subject_type = $3
-			  AND NOT EXISTS (
-				SELECT 1 FROM cerebro_workspace_grant e
-				WHERE e.workspace_id = $2 AND e.subject_type = $3 AND e.subject_id = m.target_id
-				  AND e.resource_pattern = g.resource_pattern AND e.capability = g.capability AND e.status = g.status
-			  )`,
-			sourceWorkspace, targetWorkspace, entity)
-		if err != nil {
-			return total, fmt.Errorf("copy %s grants: %w", entity, err)
-		}
-		total += tag.RowsAffected()
-	}
-
-	// workspace_default subjects → no subject_id to remap
-	defTag, err := tx.Exec(ctx, `
-		INSERT INTO cerebro_workspace_grant (`+cols+`)
-		SELECT gen_random_uuid(), $2, 'workspace_default', NULL, `+srcCols+`
-		FROM cerebro_workspace_grant g
-		WHERE g.workspace_id = $1 AND g.subject_type = 'workspace_default'
-		  AND NOT EXISTS (
-			SELECT 1 FROM cerebro_workspace_grant e
-			WHERE e.workspace_id = $2 AND e.subject_type = 'workspace_default'
-			  AND e.resource_pattern = g.resource_pattern AND e.capability = g.capability AND e.status = g.status
-		  )`,
-		sourceWorkspace, targetWorkspace)
-	if err != nil {
-		return total, fmt.Errorf("copy workspace_default grants: %w", err)
-	}
-	total += defTag.RowsAffected()
-
-	return total, nil
+	return rolesCopied, groupsCopied, raTag.RowsAffected(), nil
 }
 
 // copyGroupsTx copies cerebro_group rows (reuse same-name target group) plus
@@ -270,7 +191,6 @@ func copyGroupsTx(ctx context.Context, tx pgx.Tx, runID, sourceWorkspace, target
 // the per-item agent/project copies have completed. It heals, in the target:
 //   - cerebro_group_agent_access (group + agent both mapped)
 //   - cerebro_role_assignment for agent subjects (role + agent both mapped)
-//   - cerebro_workspace_grant for agent subjects (agent mapped)
 //   - cerebro_project_group_member (project + group both mapped)
 //
 // Group→runtime access is intentionally NOT carried — copied agents are parked
@@ -315,28 +235,6 @@ func (s *Store) RelinkGroupAccess(ctx context.Context, targetWorkspace pgtype.UU
 		return 0, fmt.Errorf("relink agent role assignments: %w", err)
 	}
 	total += raTag.RowsAffected()
-
-	grantTag, err := tx.Exec(ctx, `
-		INSERT INTO cerebro_workspace_grant (id, workspace_id, subject_type, subject_id, resource_pattern, capability,
-			classification_ceiling, time_window_start, time_window_end, approval_required, status,
-			granted_by_type, granted_by_id, granted_at, updated_at)
-		SELECT gen_random_uuid(), $1, 'agent', amap.target_id, g.resource_pattern, g.capability,
-			g.classification_ceiling, g.time_window_start, g.time_window_end, g.approval_required, g.status,
-			g.granted_by_type, g.granted_by_id, g.granted_at, now()
-		FROM cerebro_workspace_grant g
-		JOIN cerebro_workspace_copy_map amap
-		  ON amap.target_workspace_id = $1 AND amap.entity_type = 'agent' AND amap.source_id = g.subject_id
-		WHERE g.subject_type = 'agent'
-		  AND NOT EXISTS (
-			SELECT 1 FROM cerebro_workspace_grant e
-			WHERE e.workspace_id = $1 AND e.subject_type = 'agent' AND e.subject_id = amap.target_id
-			  AND e.resource_pattern = g.resource_pattern AND e.capability = g.capability AND e.status = g.status
-		  )`,
-		targetWorkspace)
-	if err != nil {
-		return 0, fmt.Errorf("relink agent grants: %w", err)
-	}
-	total += grantTag.RowsAffected()
 
 	pgmTag, err := tx.Exec(ctx, `
 		INSERT INTO cerebro_project_group_member (project_id, group_id, added_by, added_at)

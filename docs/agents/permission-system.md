@@ -102,11 +102,13 @@ MCP surface adds an endpoint that should be callable by gateway agents, add the
 matching proxy entry in `server/internal/cerebro/runtime/customer_service_mcp_tools.go`
 and cover the name in `TestCustomerServiceMCPToolsAreRegisteredAndInMetadata`.
 
-Relevant files: `runtime/approval_gate.go` (`approvalGateEnvEnabled`, `BuildApprovalGate`, `toolCapabilityKey`), `permissions/resolver.go`, `grants/grants.go`, `permgate/permgate.go`, `packages/cerebro-feature-flags/registry.ts`.
+Relevant files: `runtime/approval_gate.go` (`approvalGateEnvEnabled`, `BuildApprovalGate`, `toolCapabilityKey`), `permissions/resolver.go`, `permgate/permgate.go`, `packages/cerebro-feature-flags/registry.ts`.
 
-Note: the old resolver is also consulted live by the **credentials** policy
-(row 1 above) and by a read-only **grant-preview** endpoint — those paths do not
-depend on the approval-gate flag.
+Note: the resolver is also consulted live by the **credentials** policy (row 1
+above) — that path does not depend on the approval-gate flag. The operator grant
+control plane (`cerebro/grants` handler + `/grants` routes + grant-preview
+endpoint) was removed (FIR-1777); the resolver's grant read survives only for the
+credentials path, which migrates onto the tool-policy chain via FIR-1512.
 
 ---
 

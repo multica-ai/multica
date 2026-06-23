@@ -83,17 +83,12 @@ func TestCopyFoundation_LabelsSkillsRolesGroupsSettings(t *testing.T) {
 		newID(), srcSkill); err != nil {
 		t.Fatalf("seed skill file: %v", err)
 	}
-	// role (cerebro_role) + a role-scoped workspace grant + a member role
-	// assignment (cerebro_role_assignment, subject_type='member').
+	// role (cerebro_role) + a member role assignment
+	// (cerebro_role_assignment, subject_type='member').
 	srcRole := newID()
 	if _, err := testPool.Exec(ctx, `INSERT INTO cerebro_role (id, workspace_id, name, description) VALUES ($1,$2,'reviewer','can review')`,
 		srcRole, srcWS); err != nil {
 		t.Fatalf("seed role: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO cerebro_workspace_grant (id, workspace_id, subject_type, subject_id, resource_pattern, capability)
-		VALUES ($1,$2,'role',$3,'issue/*','issue.review')`, newID(), srcWS, srcRole); err != nil {
-		t.Fatalf("seed role grant: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_at) VALUES ($1,'member',$2,now())`, srcRole, srcMember); err != nil {
 		t.Fatalf("seed role assignment: %v", err)
@@ -136,15 +131,10 @@ func TestCopyFoundation_LabelsSkillsRolesGroupsSettings(t *testing.T) {
 		t.Fatalf("target skill children: versions=%d files=%d, want 1/1", vCount, fCount)
 	}
 
-	// target role carries its grant; role assignment remapped to target member
-	var grantCount int
+	// target role's member assignment is remapped to the target member
 	var tgtRole pgtype.UUID
 	if err := testPool.QueryRow(ctx, `SELECT id FROM cerebro_role WHERE workspace_id = $1 AND name = 'reviewer'`, tgtWS).Scan(&tgtRole); err != nil {
 		t.Fatalf("load target role: %v", err)
-	}
-	testPool.QueryRow(ctx, `SELECT count(*) FROM cerebro_workspace_grant WHERE workspace_id = $1 AND subject_type = 'role' AND subject_id = $2 AND capability = 'issue.review'`, tgtWS, tgtRole).Scan(&grantCount)
-	if grantCount != 1 {
-		t.Fatalf("target role grants = %d, want 1", grantCount)
 	}
 	var raCount int
 	testPool.QueryRow(ctx, `

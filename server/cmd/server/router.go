@@ -51,8 +51,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
 	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 group handler import
 	cerebrogroups "github.com/multica-ai/multica/server/internal/cerebro/groups"
-	// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant control plane handler import
-	cerebrogrants "github.com/multica-ai/multica/server/internal/cerebro/grants"
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy handler import
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	// CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 read-only effective runtime tool access preview.
@@ -563,9 +561,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroGroupsHandler := cerebrogroups.New(cerebroQueries, queries, bus)
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 group permission model handler
 	cerebroGroupPermissionsHandler := cerebrogrouppermissions.New(cerebroQueries, queries, bus)
-	// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant control plane handler + JEH-1212 upstream queries for subject validation
-	cerebroGrantsHandler := cerebrogrants.NewHandler(cerebrogrants.New(cerebroQueries, queries, pool, bus)) // CEREBRO-PATCH(cerebro-grants-routes): JEH-1213
-	cerebroRolesHandler := cerebroroles.New(cerebroQueries, queries, bus)                                   // CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject handler
+	cerebroRolesHandler := cerebroroles.New(cerebroQueries, queries, bus) // CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject handler
 	// CEREBRO-PATCH(cerebro-identity-handler): FIR-2523 Google Workspace identity-source handler + provisioner seam.
 	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-identity-login-sync-rollback): FIR-2724 keep BigQuery group sync out of login.
 	cerebroIdentityHandler := cerebroidentity.NewHandler(cerebroIdentityService)
@@ -1096,11 +1092,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/groups", cerebroGroupsHandler.List)
 					// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 workspace role list (member-level).
 					r.Get("/roles", cerebroRolesHandler.List)
-					// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant reads (any member).
-					r.Get("/grants", cerebroGrantsHandler.List)
-					r.Get("/grants/audit", cerebroGrantsHandler.Audit) // CEREBRO-PATCH(persona-permissions-audit): expose grant audit before {grantId}.
-					r.Post("/grants/evaluate", cerebroGrantsHandler.Evaluate)
-					r.Get("/grants/{grantId}", cerebroGrantsHandler.Get)
 					// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 per-tool policy table read (any member).
 					r.Get("/tool-policy", cerebroToolPolicyHandler.Table)
 					// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog (any member).
@@ -1164,10 +1155,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/groups", cerebroGroupsHandler.Create)
 					// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role create requires admin/owner.
 					r.Post("/roles", cerebroRolesHandler.Create)
-					// CEREBRO-PATCH(cerebro-grants-routes): JEH-1179 grant writes (admin/owner only).
-					r.Post("/grants", cerebroGrantsHandler.Create)
-					r.Patch("/grants/{grantId}", cerebroGrantsHandler.Update)
-					r.Delete("/grants/{grantId}", cerebroGrantsHandler.Delete)
 					// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 per-tool policy writes (admin/owner only).
 					r.Put("/tool-policy", cerebroToolPolicyHandler.Set)
 					r.Delete("/tool-policy", cerebroToolPolicyHandler.Clear)

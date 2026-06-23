@@ -35,16 +35,14 @@ type FoundationResult struct {
 	Roles           int64 `json:"roles_copied"`
 	Groups          int64 `json:"groups_copied"`
 	RoleAssignments int64 `json:"role_assignments_copied"`
-	Grants          int64 `json:"grants_copied"`
 	GitHub          int64 `json:"github_installations_copied"`
 	Settings        int64 `json:"settings_rows_copied"`
 }
 
 // CopyFoundation runs every foundation bulk copier in one transaction, in the
-// order their cross-references require (roles and groups before the workspace
-// grants that remap onto them; everything before agents and projects are copied
-// in a later per-item pass, with agent/project-scoped access healed afterward by
-// RelinkGroupAccess). Idempotent and non-destructive.
+// order their cross-references require (everything before agents and projects are
+// copied in a later per-item pass, with agent/project-scoped access healed
+// afterward by RelinkGroupAccess). Idempotent and non-destructive.
 func (s *Store) CopyFoundation(ctx context.Context, runID, sourceWorkspace, targetWorkspace pgtype.UUID) (FoundationResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -64,7 +62,7 @@ func (s *Store) CopyFoundation(ctx context.Context, runID, sourceWorkspace, targ
 	if res.Connections, res.Credentials, err = copyConnectionsAndCredentialsTx(ctx, tx, runID, sourceWorkspace, targetWorkspace); err != nil {
 		return FoundationResult{}, err
 	}
-	if res.Roles, res.Groups, res.RoleAssignments, res.Grants, err = copyRolesGroupsPermissionsTx(ctx, tx, runID, sourceWorkspace, targetWorkspace); err != nil {
+	if res.Roles, res.Groups, res.RoleAssignments, err = copyRolesGroupsPermissionsTx(ctx, tx, runID, sourceWorkspace, targetWorkspace); err != nil {
 		return FoundationResult{}, err
 	}
 	if res.GitHub, err = copyGitHubTx(ctx, tx, runID, sourceWorkspace, targetWorkspace); err != nil {

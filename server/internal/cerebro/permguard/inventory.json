@@ -341,10 +341,6 @@
       "gate": "workspace_admin"
     },
     {
-      "id": "DELETE /api/workspaces/{id}/grants/{grantId}",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "DELETE /api/workspaces/{id}/invitations/{invitationId}",
       "gate": "workspace_admin"
     },
@@ -443,10 +439,6 @@
     {
       "id": "PATCH /api/workspaces/{id}/credentials/{credId}",
       "gate": "workspace_member"
-    },
-    {
-      "id": "PATCH /api/workspaces/{id}/grants/{grantId}",
-      "gate": "workspace_admin"
     },
     {
       "id": "PATCH /api/workspaces/{id}/members/{memberId}/",
@@ -1287,14 +1279,6 @@
     {
       "id": "POST /api/workspaces/{id}/generate-logo",
       "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/grants",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/workspaces/{id}/grants/evaluate",
-      "gate": "workspace_member"
     },
     {
       "id": "POST /api/workspaces/{id}/groups",

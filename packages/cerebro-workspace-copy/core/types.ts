@@ -96,7 +96,6 @@ export const FoundationResultSchema = z.object({
   roles_copied: z.number().optional(),
   groups_copied: z.number().optional(),
   role_assignments_copied: z.number().optional(),
-  grants_copied: z.number().optional(),
   github_installations_copied: z.number().optional(),
   settings_rows_copied: z.number().optional(),
 });

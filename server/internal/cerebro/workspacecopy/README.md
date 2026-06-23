@@ -73,10 +73,9 @@ One-time bulk (Settings — `CopyFoundation`, `copy_foundation.go` + `copy_roles
       per-item `CopySkill` + bulk), connections + credentials (+ bindings; the
       credential cipher uses an instance-wide master key, so ciphertext copies
       unchanged), roles/groups/permissions (`cerebro_role` +
-      `cerebro_role_assignment` (member subjects) + `cerebro_workspace_grant`
-      (member/role/group/workspace_default subjects) + `cerebro_group` +
+      `cerebro_role_assignment` (member subjects) + `cerebro_group` +
       members (by user)/capabilities; agent/project-scoped access — group→agent,
-      agent role assignments, agent grants, project→group — healed post-agent/
+      agent role assignments, project→group — healed post-agent/
       project by `RelinkGroupAccess`), workspace settings
       (`cerebro_workspace_settings` + auth settings).
 - [x] Documents/folders/notes: `CopyWorkspaceArtifacts` (earlier increment).

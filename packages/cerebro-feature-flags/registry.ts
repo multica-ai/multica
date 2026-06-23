@@ -99,9 +99,7 @@ export type CerebroFlagKey =
   | "cerebro_tasks"
   | "cerebro_pin_input"
   | "cerebro_workflows"
-  | "cerebro_persona_permissions"
   | "cerebro_skill_mention"
-  | "cerebro_grants"
   | "cerebro_tool_policy"
   // FIR-1496: surface the group/person → tool grant editor alongside the unified
   // tool-policy table on the runtime page (the grant layer that silently denied
@@ -374,9 +372,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_tasks: false,
   cerebro_pin_input: true,
   cerebro_workflows: false,
-  cerebro_persona_permissions: true,
   cerebro_skill_mention: true,
-  cerebro_grants: false,
   cerebro_tool_policy: true,
   // FIR-1496: grant editor (group/person → tool) on the runtime page. Default OFF
   // — nothing changes until an admin turns it on.
@@ -993,25 +989,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Enable the cerebro workflow engine and the /:workspace/workflows page (data-driven status/trigger rules, builder UI, run log). Server-side execution is additionally gated by the CEREBRO_WORKFLOWS_ENABLED env var.",
   },
   {
-    key: "cerebro_persona_permissions",
-    label: "Persona permissions",
-    group: "permissions",
-    description:
-      "Enable the workspace permissions admin page at /:workspace/permissions — list, create, edit, and audit Persona grants (subject × resource × capability).",
-  },
-  {
     key: "cerebro_skill_mention",
     label: "Skill mentions",
     group: "issues",
     description:
       "Enable the /skill trigger in editor inputs. Selecting a skill from the popover inserts a reference link to the skill detail page — no side effect, no skill execution.",
-  },
-  {
-    key: "cerebro_grants",
-    label: "Grant control plane",
-    group: "permissions",
-    description:
-      "Enable the Persona grant control plane API and CLI (POST/PATCH/DELETE /api/workspaces/{id}/grants and `multica grant` commands).",
   },
   {
     key: "cerebro_tool_policy",

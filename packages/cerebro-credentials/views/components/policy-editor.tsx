@@ -70,11 +70,10 @@ export function PolicyEditor({
     );
   }
 
-  // STUB: persistence depends on JEH-1179 (Persona grants admin API at
-  // `/api/workspaces/{id}/grants`). Per JEH-1197 (policy-enforcement), the
-  // credential policy checker reads Persona grants — so "set a credential
-  // policy" in this UI is, at the data layer, "create/update a Persona
-  // grant against the credential". Until JEH-1179 lands, the save button
+  // STUB: persistence depends on the credential keystone flip onto the unified
+  // tool-policy chain (FIR-1512). The credential policy checker is owner-scoped
+  // today; once credential grants are authored as tool-policy Allow rows, "set a
+  // credential policy" in this UI writes a chain rule. Until then the save button
   // stays disabled with the tooltip below.
   const saveBlocked = true;
   async function handleSave() {
@@ -160,9 +159,9 @@ export function PolicyEditor({
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            Saving is disabled until the Persona grants admin API
-            (JEH-1179) is wired. Use `multica autopilot` or the persona-mcp
-            tools for now.
+            Saving is disabled until credential policy writes are wired onto
+            the tool-policy chain (FIR-1512). Credentials are owner-scoped for
+            now.
           </TooltipContent>
         </Tooltip>
       </div>

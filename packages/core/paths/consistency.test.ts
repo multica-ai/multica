@@ -36,8 +36,6 @@ describe("paths.workspace() shape", () => {
         "skills",
         "squads",
         "settings",
-        // CEREBRO-PATCH(cerebro-paths-permissions): JEH-1180
-        "permissions",
         // CEREBRO-PATCH(firtal-welcome-path): FIR-2490
         "welcome",
         // CEREBRO-PATCH(cerebro-connections-routes): TECH-3108
@@ -71,8 +69,6 @@ describe("paths.workspace() shape", () => {
       ["skills", "skills"],
       ["squads", "squads"],
       ["settings", "settings"],
-      // CEREBRO-PATCH(cerebro-paths-permissions): JEH-1180
-      ["permissions", "permissions"],
       // CEREBRO-PATCH(firtal-welcome-path): FIR-2490
       ["welcome", "welcome"],
       // CEREBRO-PATCH(cerebro-connections-routes): TECH-3108
