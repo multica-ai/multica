@@ -7,18 +7,19 @@ Expand the name of the chart.
 
 {{/*
 Create a default fully qualified app name.
+Defaults to the release name so the deployed name matches the Helm release.
 */}}
 {{- define "multica.fullname" -}}
-{{- if .Values.fullnameOverride }}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
-{{- if contains $name .Release.Name }}
-{{- .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- default .Release.Name .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
-{{- end }}
+
+{{/*
+Namespace all resources are deployed into.
+Defaults to .Values.namespace (costrict-web); falls back to the release
+namespace (the -n flag) when that value is explicitly cleared.
+*/}}
+{{- define "multica.namespace" -}}
+{{- default .Release.Namespace .Values.namespace }}
 {{- end }}
 
 {{/*
@@ -64,15 +65,4 @@ Web selector labels
 app.kubernetes.io/name: {{ include "multica.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: web
-{{- end }}
-
-{{/*
-Create the name of the service account to use
-*/}}
-{{- define "multica.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "multica.fullname" .) .Values.serviceAccount.name }}
-{{- else }}
-{{- default "default" .Values.serviceAccount.name }}
-{{- end }}
 {{- end }}
