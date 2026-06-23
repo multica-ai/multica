@@ -20,6 +20,7 @@ function issue(id: string, parentIssueId: string | null = null): Issue {
     project_id: null,
     workflow_id: null,
     workflow_run_id: null,
+  stage_id: null,
     position: 0,
     start_date: null,
     due_date: null,

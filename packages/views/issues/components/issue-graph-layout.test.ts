@@ -27,6 +27,7 @@ function issue(
     project_id: null,
     workflow_id: null,
     workflow_run_id: null,
+  stage_id: null,
     position: number,
     start_date: null,
     due_date: null,
