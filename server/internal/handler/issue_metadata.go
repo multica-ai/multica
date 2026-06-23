@@ -172,6 +172,14 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Active-dependency invariant (UMC-288): a parent must not record a
+	// dependency (e.g. linked_child) on a ghost/inert child. Reject before the
+	// write so prior metadata is preserved.
+	if msg := h.activeDependencyMetadataError(r.Context(), issue, key, []byte(req.Value)); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+
 	updated, err := h.Queries.SetIssueMetadataKey(r.Context(), db.SetIssueMetadataKeyParams{
 		ID:          issue.ID,
 		WorkspaceID: issue.WorkspaceID,

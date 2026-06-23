@@ -2044,6 +2044,19 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		if req.ProjectID == nil {
 			projectID = parent.ProjectID
 		}
+		// Squad-parent ownership invariant (UMC-288): a child of a squad-owned
+		// parent stays owned by the same squad. An omitted assignee inherits the
+		// parent squad; an explicit agent/member/other-squad owner is rejected so
+		// a role-owned child cannot be used as a handoff bypass.
+		if parent.AssigneeType.Valid && parent.AssigneeType.String == "squad" {
+			if !assigneeType.Valid && !assigneeID.Valid {
+				assigneeType = parent.AssigneeType
+				assigneeID = parent.AssigneeID
+			} else if msg := squadParentChildOwnershipError(parent.AssigneeType, parent.AssigneeID, assigneeType, assigneeID); msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+		}
 	}
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
@@ -2448,6 +2461,23 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Squad-parent ownership invariant (UMC-288). Enforce only when this update
+	// could change the (parent, assignee) pairing, so unrelated edits on a
+	// pre-existing issue are not retroactively rejected. A squad-owned parent
+	// requires a same-squad child; an explicit agent/member/other-squad owner
+	// is rejected.
+	if _, touchedParent := rawFields["parent_issue_id"]; (touchedType || touchedID || touchedParent) && params.ParentIssueID.Valid {
+		if parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          params.ParentIssueID,
+			WorkspaceID: prevIssue.WorkspaceID,
+		}); err == nil {
+			if msg := squadParentChildOwnershipError(parent.AssigneeType, parent.AssigneeID, params.AssigneeType, params.AssigneeID); msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+		}
+	}
+
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
 		return
@@ -2833,6 +2863,71 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	// Squad-parent ownership invariant (UMC-288), pre-pass. Unlike the other
+	// per-issue validations in the loop below, which skip an offending issue
+	// silently, an ownership violation fails the whole batch with an explicit
+	// 400 — a silently lower `updated` count would hide that a role-owned child
+	// slipped past the guard. Validate every target up front so nothing is
+	// applied when any one violates.
+	_, bTouchedType := rawUpdates["assignee_type"]
+	_, bTouchedID := rawUpdates["assignee_id"]
+	_, bTouchedParent := rawUpdates["parent_issue_id"]
+	if bTouchedType || bTouchedID || bTouchedParent {
+		for _, issueID := range req.IssueIDs {
+			issueUUID, err := util.ParseUUID(issueID)
+			if err != nil {
+				continue
+			}
+			prev, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: issueUUID, WorkspaceID: wsUUID})
+			if err != nil {
+				continue
+			}
+			childType, childID := prev.AssigneeType, prev.AssigneeID
+			if bTouchedType {
+				if req.Updates.AssigneeType != nil {
+					childType = pgtype.Text{String: *req.Updates.AssigneeType, Valid: true}
+				} else {
+					childType = pgtype.Text{}
+				}
+			}
+			if bTouchedID {
+				if req.Updates.AssigneeID != nil {
+					if u, err := util.ParseUUID(*req.Updates.AssigneeID); err == nil {
+						childID = u
+					} else {
+						childID = pgtype.UUID{}
+					}
+				} else {
+					childID = pgtype.UUID{}
+				}
+			}
+			parentID := prev.ParentIssueID
+			if bTouchedParent {
+				if req.Updates.ParentIssueID != nil {
+					if u, err := util.ParseUUID(*req.Updates.ParentIssueID); err == nil {
+						parentID = u
+					} else {
+						parentID = pgtype.UUID{}
+					}
+				} else {
+					parentID = pgtype.UUID{}
+				}
+			}
+			if !parentID.Valid {
+				continue
+			}
+			parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: parentID, WorkspaceID: wsUUID})
+			if err != nil {
+				continue
+			}
+			if msg := squadParentChildOwnershipError(parent.AssigneeType, parent.AssigneeID, childType, childID); msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+		}
+	}
+
 	updated := 0
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)

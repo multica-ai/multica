@@ -1757,11 +1757,19 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 }
 
 // CompleteTask marks a running task as completed.
+//
+// BranchName is the structured artifact the daemon actually reports on
+// completion (daemon/client.go CompleteTask). It was previously dropped because
+// the struct only carried pr_url, so readback could not deterministically tell
+// what a finished run produced (UMC-288). Capturing it here is additive and
+// backward-compatible: the whole request is marshalled into the stored result,
+// and both pr_url and branch_name now survive for artifact readback.
 type TaskCompleteRequest struct {
-	PRURL     string `json:"pr_url"`
-	Output    string `json:"output"`
-	SessionID string `json:"session_id"` // Claude session ID for future resumption
-	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	PRURL      string `json:"pr_url"`
+	BranchName string `json:"branch_name"`
+	Output     string `json:"output"`
+	SessionID  string `json:"session_id"` // Claude session ID for future resumption
+	WorkDir    string `json:"work_dir"`   // working directory used during execution
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
