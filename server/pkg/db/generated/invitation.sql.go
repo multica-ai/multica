@@ -93,7 +93,7 @@ type CreateInvitationParams struct {
 	InviteeEmail  string      `json:"invitee_email"`
 	InviteeUserID pgtype.UUID `json:"invitee_user_id"`
 	Role          string      `json:"role"`
-	Column6       interface{} `json:"column_6"`
+	InviteeName   interface{} `json:"invitee_name"`
 }
 
 func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) (WorkspaceInvitation, error) {
@@ -103,7 +103,7 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 		arg.InviteeEmail,
 		arg.InviteeUserID,
 		arg.Role,
-		arg.Column6,
+		arg.InviteeName,
 	)
 	var i WorkspaceInvitation
 	err := row.Scan(
