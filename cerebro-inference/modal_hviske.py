@@ -65,6 +65,11 @@ model_cache = modal.Volume.from_name("cerebro-hviske-cache", create_if_missing=T
 
 # Secrets owned by the Multica Modal workspace (INFERENCE_API_KEY + HF_TOKEN).
 secrets = modal.Secret.from_name("cerebro-hviske-secrets")
+# FIR-1797 transcript cleanup: FIRTAL_AI_GATEWAY_URL + FIRTAL_AI_GATEWAY_KEY for
+# the OpenAI-compatible proxy. Kept as a separate secret so the inference key
+# secret above stays untouched. Cleanup is best-effort: if this is absent the
+# raw transcript is returned unchanged.
+gateway_secret = modal.Secret.from_name("cerebro-hviske-gateway")
 
 app = modal.App("cerebro-hviske")
 
@@ -74,7 +79,7 @@ app = modal.App("cerebro-hviske")
     gpu="L4",
     region="eu",  # Frankfurt. GDPR-safe audio path.
     volumes={"/cache/hf": model_cache},
-    secrets=[secrets],
+    secrets=[secrets, gateway_secret],
     scaledown_window=300,
     max_containers=4,
 )

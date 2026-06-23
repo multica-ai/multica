@@ -47,7 +47,11 @@ class Settings(BaseSettings):
     firtal_ai_gateway_key: str = Field(
         default="", description="Firtal AI gateway API key (Bearer)."
     )
-    hviske_cleanup_model: str = "claude-haiku-4-5-20251001"
+    # Must be a model the Firtal AI gateway has registered + active. The EU
+    # variant keeps the cleanup text path in-region (GDPR), matching the
+    # Frankfurt audio path. `claude-haiku-4-5-20251001` (no eu. prefix) is NOT
+    # registered in the gateway and returns 403.
+    hviske_cleanup_model: str = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
 
     log_level: str = "INFO"
 
