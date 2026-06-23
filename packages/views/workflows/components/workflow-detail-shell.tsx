@@ -43,7 +43,7 @@ export function WorkflowDetailShell({ workflowId }: WorkflowDetailShellProps) {
           <DropdownMenuLabel>{t(($) => $.view.section)}</DropdownMenuLabel>
           <DropdownMenuItem onClick={() => setViewMode("panorama")}>
             <GitFork className="size-4 mr-2" />
-            {"全景图"}
+            {t(($) => $.view.panorama)}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setViewMode("overview")}>
             <Layers className="size-4 mr-2" />

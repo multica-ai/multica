@@ -252,6 +252,7 @@
   },
   "view": {
     "section": "视图",
+    "panorama": "全景图",
     "overview": "概览",
     "editor": "编辑器"
   },

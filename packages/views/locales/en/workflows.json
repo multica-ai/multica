@@ -253,6 +253,7 @@
   },
   "view": {
     "section": "View",
+    "panorama": "Panorama",
     "overview": "Overview",
     "editor": "Editor"
   },
