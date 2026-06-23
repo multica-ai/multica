@@ -1,6 +1,6 @@
 -- name: CreateInvitation :one
 INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role, invitee_name)
-VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
+VALUES (@workspace_id, @inviter_id, @invitee_email, @invitee_user_id, @role, NULLIF(@invitee_name, ''))
 RETURNING *;
 
 -- name: GetInvitation :one
