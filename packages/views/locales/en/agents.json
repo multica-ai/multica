@@ -166,6 +166,7 @@
     "concurrency_tooltip": "Concurrency · {{value}} max concurrent tasks",
     "concurrency_range": "Max concurrent tasks ({{min}}–{{max}})",
     "runtime_none": "No runtime",
+    "runtime_builtin_auto": "Auto-selected at runtime",
     "runtime_tooltip": "Runtime · {{name}} · {{status}}",
     "runtime_tooltip_none": "Runtime · none selected",
     "runtime_online": "online",
