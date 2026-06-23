@@ -314,6 +314,8 @@
       "step_details_label": "Configure the runtime",
       "family_label": "Base protocol family",
       "family_locked_hint": "The base protocol family can't be changed after creation.",
+      "family_compatibility_hint": "The base protocol family is the launch arguments and output protocol the daemon will speak. It is not a generic adapter for arbitrary CLIs — pick the family the underlying command already implements. Pointing this at a non-compatible CLI (e.g. grok, droid) will register a runtime that comes online but fails every task with empty output.",
+      "command_compatibility_hint": "Must accept {{family}}'s launch arguments and produce {{family}}-compatible output. Wrappers and same-protocol replacements work; tools like grok or droid don't and need a first-class provider instead.",
       "display_name_label": "Display name",
       "display_name_placeholder": "My custom Claude",
       "command_name_label": "Command",

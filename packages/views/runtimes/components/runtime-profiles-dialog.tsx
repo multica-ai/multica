@@ -622,6 +622,18 @@ function ProfileFormView({
               </button>
             ))}
           </div>
+          {/* Compatibility callout: a base protocol family is the launch /
+              output protocol the daemon will speak. It is not a generic
+              adapter — picking `claude` and pointing the command at e.g.
+              `grok` or `droid` will produce a runtime that comes online but
+              fails every task with empty / unparseable output. See
+              MUL-3414. */}
+          <div
+            role="note"
+            className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200"
+          >
+            {t(($) => $.profiles.form.family_compatibility_hint)}
+          </div>
         </div>
         <div className="flex shrink-0 justify-between gap-2 border-t bg-muted/30 px-6 py-3">
           <Button type="button" variant="ghost" size="sm" onClick={onBack}>
@@ -823,6 +835,16 @@ function ProfileDetailsForm({
               {t(($) => $.profiles.form.error_command_required)}
             </p>
           )}
+          {/* Per-command compatibility reminder pinned next to the input.
+              The daemon launches whatever this command resolves to with the
+              fixed launch arguments and output protocol of the chosen
+              base family — non-compatible CLIs (e.g. grok, droid) will
+              start, register, and then fail every task. Surface this here so
+              admins don't discover it via "runtime is online but my task is
+              empty". MUL-3414. */}
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            {t(($) => $.profiles.form.command_compatibility_hint, { family })}
+          </p>
         </div>
 
         <div className="space-y-1.5">

@@ -302,6 +302,8 @@
       "step_details_label": "ランタイムを設定",
       "family_label": "ベースプロトコルファミリー",
       "family_locked_hint": "作成後はベースプロトコルファミリーを変更できません。",
+      "family_compatibility_hint": "ベースプロトコルファミリーは、デーモンが使用する起動引数と出力プロトコルです。汎用的な CLI アダプターではないため、対象のコマンドが既に実装しているファミリーを選んでください。grok や droid のように非互換な CLI を指定すると、ランタイムは登録されてオンラインになっても、すべてのタスクが空の出力で失敗します。",
+      "command_compatibility_hint": "コマンドは {{family}} の起動引数を受け付け、{{family}} 互換の出力を生成する必要があります。同一プロトコルのラッパーや代替実装は利用できますが、grok や droid のようなツールは利用できず、専用の first-class プロバイダーとして実装する必要があります。",
       "display_name_label": "表示名",
       "display_name_placeholder": "マイカスタム Claude",
       "command_name_label": "コマンド",

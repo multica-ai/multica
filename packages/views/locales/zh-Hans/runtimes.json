@@ -302,6 +302,8 @@
       "step_details_label": "配置运行时",
       "family_label": "基础协议类型",
       "family_locked_hint": "创建后无法更改基础协议类型。",
+      "family_compatibility_hint": "基础协议类型决定了守护进程使用的启动参数与输出协议，并不是通用 CLI 适配器。请选择目标命令本身已经兼容的协议族。如果用 grok、droid 等不兼容的 CLI，运行时虽然能上线，但每个任务都会以无输出的方式失败。",
+      "command_compatibility_hint": "命令必须接受 {{family}} 的启动参数并输出 {{family}} 协议格式。同协议的 wrapper 或替代实现可以使用，但 grok、droid 这类工具不兼容，需要单独的 first-class 接入，不能复用此项。",
       "display_name_label": "显示名称",
       "display_name_placeholder": "我的自定义 Claude",
       "command_name_label": "命令",

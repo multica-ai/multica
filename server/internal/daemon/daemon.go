@@ -85,6 +85,17 @@ var (
 	detectAgentVersion   = agent.DetectVersion
 	checkAgentMinVersion = agent.CheckMinVersion
 
+	// agentNew is an indirection over agent.New so tests can drive runTask
+	// end-to-end with a stub backend without spawning real CLI processes.
+	// Production code stays exactly as before; tests swap it via t.Cleanup
+	// to install a fakeBackend whose Execute returns canned agent.Result
+	// values (e.g. timeout, idle_watchdog, auth-error). Mirrors the
+	// detectAgentVersion / lookPath pattern above. Required so MUL-3414's
+	// per-result-status branches (timeout / idle_watchdog hint, auth-error
+	// passthrough) can be regression-tested without a brittle real-process
+	// fixture.
+	agentNew = agent.New
+
 	// lookPath is an indirection over exec.LookPath so registration tests can
 	// resolve custom runtime-profile commands without manipulating the
 	// process PATH. Mirrors the detectAgentVersion hook above.
@@ -885,6 +896,134 @@ func (d *Daemon) customCommandPathForRuntime(runtimeID string) (string, bool) {
 		return "", false
 	}
 	return path, true
+}
+
+// safeProfileCommandLabel returns a user-safe identifier for a custom runtime
+// profile's resolved command. It deliberately strips the absolute path
+// because that path is local-machine state — `multica runtime profile
+// set-path` ([cmd_runtime_profile.go](../../cmd/multica/cmd_runtime_profile.go))
+// documents the per-machine override as state that "never leaves the
+// machine", and the user-visible failure comments here are sent back to
+// the server and rendered in the issue / chat timeline. Falling back to
+// `filepath.Base` keeps the binary name (which is what UX needs in order
+// to tell `claude` apart from a renamed wrapper) while dropping the
+// host's directory layout / username / homedir prefix. The full path
+// stays in the structured daemon log via taskLog.Warn fields.
+func safeProfileCommandLabel(commandPath string) string {
+	cmd := strings.TrimSpace(commandPath)
+	if cmd == "" {
+		return "the configured command"
+	}
+	base := filepath.Base(cmd)
+	if base == "" || base == "." || base == "/" {
+		return "the configured command"
+	}
+	return base
+}
+
+// shouldRewriteAsCustomProfileIncompatible reports whether a classifier
+// reason is consistent with "the custom command isn't speaking the chosen
+// protocol family's launch / output protocol". MUL-3414 originally rewrote
+// every custom-profile failure (except poisoned API 400) into
+// runtime_version_unsupported, but that swallowed real auth / quota /
+// network / context / model errors that same-protocol wrappers can hit just
+// like the upstream CLI does — leaving users to chase a phantom protocol
+// issue and skewing failure analytics in the process. Narrow the rewrite
+// to the failure shapes that genuinely point at protocol mismatch:
+//
+//   - ReasonAgentProcessFailure: the grok-under-cursor case — the CLI
+//     rejects an unknown/typoed flag and exits non-zero before producing
+//     any protocol output.
+//   - ReasonAgentEmptyOrUnparseableOutput: the droid-under-claude shape
+//     where the CLI runs but its stdout doesn't match the family's wire
+//     format, so the wrapper sees no parseable events.
+//   - ReasonAgentUnknown: classifier couldn't match any rule. Custom
+//     profile + unclassified failure most likely means a protocol mismatch
+//     we don't have a regex for yet — folding it in here is safer than
+//     leaving it as a generic "unknown" bucket. If a real upstream issue
+//     starts landing here it will show up as a sudden change in the
+//     runtime_version_unsupported share for custom profiles only.
+//
+// Auth, quota, capacity, server, network, context overflow, missing config,
+// missing executable, model not found, and the runtime version checks
+// upstream go through unchanged — those are real conditions the user must
+// fix and must not be repackaged as "incompatible with the protocol family".
+func shouldRewriteAsCustomProfileIncompatible(reason taskfailure.Reason) bool {
+	switch reason {
+	case taskfailure.ReasonAgentProcessFailure,
+		taskfailure.ReasonAgentEmptyOrUnparseableOutput,
+		taskfailure.ReasonAgentUnknown:
+		return true
+	}
+	return false
+}
+
+// wrapCustomProfileExecError rewrites a raw backend.Execute error or a failed
+// agent.Result.Error string into a user-facing comment that names the actual
+// failure mode for custom runtime profiles (MUL-3414): the user pointed an
+// incompatible CLI at a built-in protocol family, so the runtime came online
+// but cannot speak the family's launch arguments / output protocol. The
+// runTask error path uses this together with
+// taskfailure.ReasonAgentRuntimeVersionUnsupported so the run leaves a
+// blocked task whose failure_reason and comment together tell the user
+// exactly what is wrong, instead of a generic "agent backend failed".
+//
+// The wording deliberately calls out the boundary that the UI/CLI hints
+// already document — same-protocol wrappers work, arbitrary CLIs (grok,
+// droid, …) do not — so a single read of the failed task in the issue
+// timeline matches what the dialog warned about at create time.
+//
+// The user-visible text intentionally uses only the binary basename via
+// safeProfileCommandLabel; the absolute resolved path is local-machine
+// state and stays in the daemon log, never the issue/chat comment.
+func wrapCustomProfileExecError(provider, commandPath, rawError string) string {
+	raw := strings.TrimSpace(rawError)
+	if raw == "" {
+		raw = "no error detail captured"
+	}
+	cmd := safeProfileCommandLabel(commandPath)
+	return fmt.Sprintf(
+		"Custom runtime profile is incompatible with the selected %s protocol family. "+
+			"Custom profiles require a command that accepts %s-compatible launch arguments "+
+			"and produces %s-compatible output; %s does not. "+
+			"Use a same-protocol wrapper or open a first-class provider request to add "+
+			"genuinely new CLIs (e.g. grok, droid). Original error: %s",
+		provider, provider, provider, cmd, raw,
+	)
+}
+
+// appendCustomProfileSilenceHint augments a timeout / idle-watchdog comment
+// with a profile-compatibility pointer when no session was ever established.
+// MUL-3414's original concrete case for this path is droid-under-claude:
+// claude.go launches the binary, which then sits silent because it doesn't
+// understand the claude protocol — the run wedges and is killed by the
+// idle watchdog or hits the wall-clock timeout, with `result.SessionID`
+// still empty because no session_started event was ever emitted.
+//
+// We deliberately do NOT touch failure_reason here. timeout / idle_watchdog
+// are platform-side reasons used by the runtime sweepers and the operator
+// dashboards; rewriting them as runtime_version_unsupported would mask
+// genuine resource hangs (e.g. claude legitimately stuck on a long tool
+// call) just because the user happens to be on a custom profile. The
+// user-visible comment is the right place for the hint, the analytics
+// taxonomy is not.
+func appendCustomProfileSilenceHint(provider, commandPath, baseComment string) string {
+	cmd := safeProfileCommandLabel(commandPath)
+	hint := fmt.Sprintf(
+		"This runtime is launched from a custom runtime profile (%s). "+
+			"Because no protocol output was received before the watchdog fired, the "+
+			"most likely cause is that the command isn't speaking the selected %s "+
+			"protocol family — same-protocol wrappers are supported, but arbitrary "+
+			"CLIs (e.g. grok, droid) must be added as a first-class provider. "+
+			"Verify the command accepts %s's launch arguments and produces "+
+			"%s-compatible output before treating this as a Multica runtime issue.",
+		cmd, provider, provider, provider,
+	)
+	base := strings.TrimSpace(baseComment)
+	if base == "" {
+		return hint
+	}
+	return base + "\n\n" + hint
 }
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
@@ -3127,12 +3266,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Critically, a custom runtime can live on a host that has NO built-in
 	// agent of the same provider installed, so when the runtime is custom we
 	// synthesize an AgentEntry instead of hard-failing on the !ok lookup.
-	if customPath, isCustom := d.customCommandPathForRuntime(task.RuntimeID); isCustom {
-		entry.Path = customPath
+	customCommandPath, isCustomProfile := d.customCommandPathForRuntime(task.RuntimeID)
+	if isCustomProfile {
+		entry.Path = customCommandPath
 		ok = true
 		d.logger.Info("task uses custom runtime profile command",
 			"task_id", task.ID, "runtime_id", task.RuntimeID,
-			"provider", provider, "command_path", customPath)
+			"provider", provider, "command_path", customCommandPath)
 	}
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
@@ -3419,7 +3559,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
-	backend, err := agent.New(provider, agent.Config{
+	backend, err := agentNew(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
@@ -3547,6 +3687,49 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
 	if err != nil {
+		// MUL-3414: when a custom runtime profile is in use AND the
+		// failure shape genuinely points at protocol mismatch (the CLI
+		// rejects launch flags, exits non-zero before producing any
+		// protocol output, or returns nothing parseable), surface the
+		// real failure mode instead of letting handleTask's generic
+		// FailTask classify it as a runner crash. Returning a
+		// TaskResult with status=blocked + failure_reason set directly
+		// preserves the SessionID/WorkDir that the error path otherwise
+		// drops AND lets us pin failure_reason without going through
+		// Classify's string heuristics a second time.
+		//
+		// Auth, quota, network, context_overflow, missing_config /
+		// missing_executable, model-not-found and the runtime-version
+		// rules all fall through unchanged — those are real conditions
+		// the user must fix and must NOT be repackaged as
+		// "incompatible with the protocol family" just because the run
+		// happened to be on a custom profile (review feedback from
+		// GPT-Boy on PR #4301).
+		if isCustomProfile {
+			rawErr := err.Error()
+			classifierReason := taskfailure.Classify(rawErr)
+			if shouldRewriteAsCustomProfileIncompatible(classifierReason) {
+				taskLog.Warn("custom runtime profile execute failed; classifying as runtime_version_unsupported",
+					"provider", provider,
+					"command_path", customCommandPath, // structured field — log only, never user-visible.
+					"original_classifier_reason", classifierReason,
+					"raw_error", rawErr,
+				)
+				return TaskResult{
+					Status:        "blocked",
+					Comment:       wrapCustomProfileExecError(provider, customCommandPath, rawErr),
+					WorkDir:       env.WorkDir,
+					EnvRoot:       env.RootDir,
+					FailureReason: taskfailure.ReasonAgentRuntimeVersionUnsupported.String(),
+				}, nil
+			}
+			taskLog.Warn("custom runtime profile execute failed with non-protocol-shape reason; preserving classifier reason",
+				"provider", provider,
+				"command_path", customCommandPath,
+				"failure_reason", classifierReason,
+				"raw_error", rawErr,
+			)
+		}
 		return TaskResult{}, err
 	}
 
@@ -3659,6 +3842,24 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			)
 			failureReason = reason
 		}
+		// MUL-3414: a custom-profile runtime that wedges before
+		// emitting any session_started event is the droid-under-claude
+		// shape from the original bug — the binary launches, sits
+		// silent because it doesn't speak the family's protocol, and
+		// gets killed by the wall-clock timeout. Append a profile-
+		// compatibility hint to the user-visible comment so the user
+		// doesn't read "claude timed out" and assume it's a Multica
+		// or upstream-CLI bug. failure_reason stays "timeout" — that's
+		// what the runtime sweepers and operator dashboards key off,
+		// and a real resource hang on a same-protocol wrapper still
+		// belongs in the timeout bucket.
+		if isCustomProfile && result.SessionID == "" {
+			taskLog.Warn("custom runtime profile timed out without establishing a session; appending compatibility hint",
+				"provider", provider, "command_path", customCommandPath,
+				"failure_reason", failureReason,
+			)
+			comment = appendCustomProfileSilenceHint(provider, customCommandPath, comment)
+		}
 		return TaskResult{
 			Status:        "blocked",
 			Comment:       comment,
@@ -3677,6 +3878,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		comment := result.Error
 		if comment == "" {
 			comment = idleWatchdogReason(d.cfg.AgentIdleWatchdog)
+		}
+		// MUL-3414: same logic as the timeout branch above. A custom
+		// profile that goes idle without ever producing protocol output
+		// is far more likely to be incompatible than to be legitimately
+		// stuck on a long-running tool call.
+		if isCustomProfile && result.SessionID == "" {
+			taskLog.Warn("custom runtime profile hit idle watchdog without establishing a session; appending compatibility hint",
+				"provider", provider, "command_path", customCommandPath,
+			)
+			comment = appendCustomProfileSilenceHint(provider, customCommandPath, comment)
 		}
 		return TaskResult{
 			Status:        "blocked",
@@ -3735,6 +3946,40 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// MUL-1949 offline backfill to re-classify after the
 			// fact.
 			failureReason = taskfailure.Classify(errMsg).String()
+		}
+		// MUL-3414: for custom runtime profiles, replace the generic
+		// classifier output with a refined "runtime_version_unsupported"
+		// reason and rewrite the comment so users see "incompatible with
+		// the selected protocol family" instead of a raw "exit status 2"
+		// or "returned no parseable output". Done after the poisoned-API
+		// classifier so a genuine upstream 400 is still classified
+		// correctly even when triggered through a custom profile.
+		//
+		// Narrowed (PR #4301 review): only rewrite when the classifier
+		// reason genuinely points at protocol mismatch
+		// (process_failure, empty_or_unparseable_output, unknown).
+		// Same-protocol wrappers can hit auth / quota / network / model /
+		// context_overflow / missing_config errors just like the upstream
+		// CLI does — repackaging those as "incompatible" sends users on
+		// a wild goose chase and skews failure analytics. See
+		// shouldRewriteAsCustomProfileIncompatible for the predicate
+		// rationale.
+		if isCustomProfile && shouldRewriteAsCustomProfileIncompatible(taskfailure.Reason(failureReason)) {
+			taskLog.Warn("custom runtime profile execution failed; rewriting failure_reason",
+				"provider", provider,
+				"command_path", customCommandPath, // structured field — log only, never user-visible.
+				"original_failure_reason", failureReason,
+				"raw_error", errMsg,
+			)
+			errMsg = wrapCustomProfileExecError(provider, customCommandPath, errMsg)
+			failureReason = taskfailure.ReasonAgentRuntimeVersionUnsupported.String()
+		} else if isCustomProfile {
+			taskLog.Warn("custom runtime profile execution failed with non-protocol-shape reason; preserving classifier reason",
+				"provider", provider,
+				"command_path", customCommandPath,
+				"failure_reason", failureReason,
+				"raw_error", errMsg,
+			)
 		}
 		return TaskResult{
 			Status:        "blocked",

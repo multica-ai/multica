@@ -26,6 +26,28 @@ vi.mock("@tanstack/react-query", async () => {
   };
 });
 
+vi.mock("@multica/core/runtimes", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    );
+  return {
+    ...actual,
+    // The form hooks normally pull `useQueryClient`, which the test
+    // harness deliberately does NOT install (we want unit-level isolation
+    // from the real React Query cache). Stub the mutation interface to
+    // its smallest usable shape so the form component renders.
+    useCreateRuntimeProfile: () => ({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    }),
+    useUpdateRuntimeProfile: () => ({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    }),
+  };
+});
+
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
@@ -141,5 +163,57 @@ describe("RuntimeProfilesDialog", () => {
     expect(
       screen.queryByText(/claude is a built-in protocol family/),
     ).not.toBeInTheDocument();
+  });
+
+  // MUL-3414: the dialog must surface the protocol-family compatibility
+  // boundary at exactly the two moments the user is choosing it: at the
+  // family-pick step (so they don't pick "claude" intending to launch grok)
+  // and at the command field (so they don't type a non-compatible CLI name).
+  // The original bug was a runtime that registered, came online, and then
+  // failed every task — these hints make the boundary visible before the
+  // user gets to that failure mode.
+  it("renders the family-compatibility callout on the create-step family picker", () => {
+    renderDialog();
+
+    const newButton = screen.getAllByRole("button", {
+      name: "New custom runtime",
+    })[0];
+    if (!newButton) throw new Error("expected a 'New custom runtime' button");
+    fireEvent.click(newButton);
+
+    // The callout names the failure mode (`fails every task with empty
+    // output`) so the boundary is concrete, not abstract.
+    expect(
+      screen.getByText(
+        /not a generic adapter for arbitrary CLIs/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/fails every task with empty output/i),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the command-compatibility hint after picking a family", () => {
+    renderDialog();
+
+    const newButton = screen.getAllByRole("button", {
+      name: "New custom runtime",
+    })[0];
+    if (!newButton) throw new Error("expected a 'New custom runtime' button");
+    fireEvent.click(newButton);
+    // Pick the cursor family — that's the original bug's protocol_family.
+    fireEvent.click(screen.getByRole("radio", { name: /cursor/i }));
+
+    // The hint interpolates the chosen family so the user reads
+    // "Must accept cursor's launch arguments…" and immediately knows the
+    // boundary applies to the family they just picked.
+    expect(
+      screen.getByText(/Must accept cursor's launch arguments/i),
+    ).toBeInTheDocument();
+    // grok / droid are named explicitly because those are the exact CLIs
+    // the original GitHub bug report tried to drop in.
+    expect(
+      screen.getByText(/grok or droid don't and need a first-class provider/i),
+    ).toBeInTheDocument();
   });
 });
