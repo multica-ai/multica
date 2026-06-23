@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // TestRelativeWorkDir covers the privacy-safe display derivation that
@@ -207,5 +210,76 @@ func TestShortTaskIDMatchesDaemon(t *testing.T) {
 	expected := workspacesRoot + "/" + workspaceID + "/" + shortTaskID(taskID)
 	if daemonRoot != expected {
 		t.Fatalf("daemon PredictRootDir = %q, handler-side reconstruction = %q — shortTaskID is out of sync with execenv.shortID", daemonRoot, expected)
+	}
+}
+
+// TestLocalCLIRunToResponseRelativeWorkDir pins localCLIRunToResponse to
+// deriving relative_work_dir the same way the agent / channel task response
+// builders do. The transcript dialog renders its Workdir copy button off
+// relative_work_dir; local_cli runs carry a work_dir and appear in the issue
+// actions menu's "Copy workdir path" submenu (keyed off work_dir), so a
+// missing relative_work_dir here left their transcript without the button —
+// the "some run records lack the Workdir button" inconsistency. Mirroring the
+// other builders keeps the two render sites in agreement across every run
+// kind and stops the username from leaking into the derived field.
+func TestLocalCLIRunToResponseRelativeWorkDir(t *testing.T) {
+	const (
+		wsID   = "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+		taskID = "5c57b65b-ee7a-4603-a72d-a548b2390cb2"
+	)
+
+	tests := []struct {
+		name    string
+		workDir string
+		// wantRelative is the expected relative_work_dir; "" when work_dir is
+		// empty (the builder still emits the key, just empty — matching the
+		// other response shapes that omit empty via encoding, so the dialog's
+		// truthy guard hides the button exactly when there is no workdir).
+		wantRelative string
+	}{
+		{
+			name:         "local_cli run under home strips username to ~/",
+			workDir:      "/Users/alice/repos/foo",
+			wantRelative: "~/repos/foo",
+		},
+		{
+			name:         "local_cli run under managed workspaces root strips home",
+			workDir:      "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			wantRelative: "~/multica_workspaces/" + wsID + "/5c57b65b/workdir",
+		},
+		{
+			name:         "empty work_dir yields empty relative_work_dir (button stays hidden)",
+			workDir:      "",
+			wantRelative: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			run := localCLIRun{
+				ID:          util.MustParseUUID(taskID),
+				WorkspaceID: util.MustParseUUID(wsID),
+				WorkDir:     pgtype.Text{String: tc.workDir, Valid: tc.workDir != ""},
+			}
+			resp := localCLIRunToResponse(run)
+
+			got, ok := resp["relative_work_dir"]
+			if !ok {
+				t.Fatalf("relative_work_dir missing from localCLIRunToResponse — the transcript dialog cannot render the Workdir button for local_cli runs")
+			}
+			gotStr, _ := got.(string)
+			if gotStr != tc.wantRelative {
+				t.Fatalf("relative_work_dir = %q, want %q", gotStr, tc.wantRelative)
+			}
+			// Must equal what the shared helper produces — keeps local_cli in
+			// lock-step with the agent / channel builders.
+			if want := relativeWorkDir(tc.workDir, wsID, taskID); gotStr != want {
+				t.Fatalf("relative_work_dir %q != relativeWorkDir() %q — local_cli builder diverged from the shared derivation", gotStr, want)
+			}
+			// Privacy: the raw username must never reach the derived field.
+			if tc.workDir != "" && strings.Contains(gotStr, "alice") {
+				t.Fatalf("relative_work_dir %q leaks the username — home prefix not stripped", gotStr)
+			}
+		})
 	}
 }

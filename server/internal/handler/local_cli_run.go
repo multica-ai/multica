@@ -665,7 +665,17 @@ func localCLIRunToResponse(run localCLIRun) map[string]any {
 		"trigger_summary": fmt.Sprintf("Local %s", run.CLIName),
 		"comments_mode":   run.CommentsMode,
 		"work_dir":        run.WorkDir.String,
-		"context_dir":     run.ContextDir.String,
+		// Privacy-safe display form of work_dir, derived with the same helper
+		// every other task response builder uses (taskToResponse,
+		// taskToSlimResponse, channelAgentTaskToResponse). The transcript
+		// dialog renders the Workdir copy button off relative_work_dir, so
+		// omitting it here left local_cli runs — which DO carry a work_dir and
+		// so DO appear in the issue actions menu's "Copy workdir path" submenu
+		// (keyed off work_dir) — without the button when their transcript
+		// was opened. Mirroring the other builders keeps the two render sites
+		// in agreement across every run kind.
+		"relative_work_dir": relativeWorkDir(run.WorkDir.String, uuidToString(run.WorkspaceID), uuidToString(run.ID)),
+		"context_dir":       run.ContextDir.String,
 	}
 	if run.ExitCode.Valid {
 		resp["exit_code"] = run.ExitCode.Int32
