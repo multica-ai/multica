@@ -289,7 +289,9 @@ export function IssueActionsMenuItems({
               >
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate text-sm">
-                    {getAgentName(task.agent_id)}
+                    {task.kind === "local_cli"
+                      ? task.cli_name || task.trigger_summary || "Local CLI"
+                      : getAgentName(task.agent_id)}
                   </span>
                   {task.relative_work_dir && (
                     <span className="truncate text-xs text-muted-foreground">
