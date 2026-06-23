@@ -19,7 +19,6 @@
   "member_added": "멤버가 추가되었습니다",
   "member_removed": "멤버가 제거되었습니다",
   "settings_updated": "채널 설정이 업데이트되었습니다",
-  "replies_count_one": "답글 {{count}}개",
   "replies_count_other": "답글 {{count}}개",
   "new_group": "새 그룹",
   "new_channel": "새 채널",

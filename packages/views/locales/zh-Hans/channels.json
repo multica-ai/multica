@@ -19,7 +19,6 @@
   "member_added": "成员已添加",
   "member_removed": "成员已移除",
   "settings_updated": "频道设置已更新",
-  "replies_count_one": "{{count}} 条回复",
   "replies_count_other": "{{count}} 条回复",
   "new_group": "新建分组",
   "new_channel": "新建频道",

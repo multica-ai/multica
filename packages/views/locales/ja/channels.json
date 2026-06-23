@@ -19,7 +19,6 @@
   "member_added": "メンバーを追加しました",
   "member_removed": "メンバーを削除しました",
   "settings_updated": "チャンネル設定を更新しました",
-  "replies_count_one": "返信 {{count}}件",
   "replies_count_other": "返信 {{count}}件",
   "new_group": "新しいグループ",
   "new_channel": "新しいチャンネル",
