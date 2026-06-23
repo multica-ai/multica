@@ -15,6 +15,7 @@ import type {
   AgentRuntime,
   AgentTask,
   MemberWithUser,
+  RuntimeProfile,
 } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -25,6 +26,7 @@ import {
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import {
   deriveRuntimeHealth,
+  runtimeProfileListOptions,
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -52,6 +54,7 @@ import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
+import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import {
   computeCostInWindow,
   formatLastSeen,
@@ -134,6 +137,7 @@ const EMPTY_WORKLOAD: RuntimeWorkload = {
 
 export interface RuntimeRow {
   runtime: AgentRuntime;
+  profile: RuntimeProfile | null;
   ownerMember: MemberWithUser | null;
   workload: RuntimeWorkload;
   canDelete: boolean;
@@ -487,15 +491,18 @@ function AgentStack({ agentIds }: { agentIds: string[] }) {
 
 export function RuntimeRowMenu({
   runtime,
+  profile,
   wsId,
   canDelete,
 }: {
   runtime: AgentRuntime;
+  profile: RuntimeProfile | null;
   wsId: string;
   canDelete: boolean;
 }) {
   const { t } = useT("runtimes");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const isCustomRuntime = !!runtime.profile_id;
   // Delete is currently the only row action; if the row can't run it, drop
   // the kebab entirely so the column doesn't render an empty popover. We
   // used to also hide it for self-healing runtimes (live local daemon
@@ -533,16 +540,26 @@ export function RuntimeRowMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <DeleteRuntimeDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        runtime={runtime}
-        wsId={wsId}
-        onDeleted={() => {
-          setDeleteOpen(false);
-          toast.success(t(($) => $.detail.toast_deleted));
-        }}
-      />
+      {isCustomRuntime && profile ? (
+        <DeleteRuntimeProfileDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          profile={profile}
+          wsId={wsId}
+          onDeleted={() => setDeleteOpen(false)}
+        />
+      ) : (
+        <DeleteRuntimeDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          runtime={runtime}
+          wsId={wsId}
+          onDeleted={() => {
+            setDeleteOpen(false);
+            toast.success(t(($) => $.detail.toast_deleted));
+          }}
+        />
+      )}
     </>
   );
 }
@@ -576,6 +593,7 @@ export function RuntimeList({
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const { data: profiles = [] } = useQuery(runtimeProfileListOptions(wsId));
 
   const currentMember = user
     ? members.find((m) => m.user_id === user.id)
@@ -595,6 +613,12 @@ export function RuntimeList({
     return map;
   }, [members]);
 
+  const profileById = useMemo(() => {
+    const map = new Map<string, RuntimeProfile>();
+    for (const p of profiles) map.set(p.id, p);
+    return map;
+  }, [profiles]);
+
   // Owner column only earns its space when the page actually has multiple
   // distinct owners — otherwise it would just be a column of identical
   // avatars.
@@ -607,17 +631,26 @@ export function RuntimeList({
   }, [runtimes]);
 
   const rows = useMemo<RuntimeRow[]>(() => {
-    return runtimes.map((runtime) => ({
-      runtime,
-      ownerMember: runtime.owner_id
-        ? memberById.get(runtime.owner_id) ?? null
-        : null,
-      workload: workloadIndex.get(runtime.id) ?? EMPTY_WORKLOAD,
-      canDelete:
-        !isPendingCustomRuntime(runtime) &&
-        (isAdmin || (!!user && runtime.owner_id === user.id)),
-    }));
-  }, [runtimes, memberById, workloadIndex, isAdmin, user]);
+    return runtimes.map((runtime) => {
+      const profile = runtime.profile_id
+        ? profileById.get(runtime.profile_id) ?? null
+        : null;
+      const isCustomRuntime = !!runtime.profile_id;
+      return {
+        runtime,
+        profile,
+        ownerMember: runtime.owner_id
+          ? memberById.get(runtime.owner_id) ?? null
+          : null,
+        workload: workloadIndex.get(runtime.id) ?? EMPTY_WORKLOAD,
+        canDelete:
+          !isPendingCustomRuntime(runtime) &&
+          (isCustomRuntime
+            ? isAdmin && !!profile
+            : isAdmin || (!!user && runtime.owner_id === user.id)),
+      };
+    });
+  }, [runtimes, profileById, memberById, workloadIndex, isAdmin, user]);
 
   // Mirrors RuntimeRowMenu's render guard: the kebab track only earns its
   // width when at least one row will actually show the menu.
@@ -710,6 +743,7 @@ export function RuntimeList({
                 >
                   <RuntimeRowMenu
                     runtime={row.runtime}
+                    profile={row.profile}
                     wsId={wsId}
                     canDelete={row.canDelete}
                   />
