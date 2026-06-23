@@ -2149,11 +2149,12 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
 
 	const projectRepoURL = "https://github.com/example/project-only-repo"
+	const projectRepoRef = "release/v2"
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO project_resource (
 			project_id, workspace_id, resource_type, resource_ref, position
 		) VALUES ($1, $2, 'github_repo', $3::jsonb, 0)
-	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`"}`); err != nil {
+	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`","ref":"`+projectRepoRef+`"}`); err != nil {
 		t.Fatalf("create project_resource: %v", err)
 	}
 
@@ -2214,6 +2215,9 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	}
 	if len(resp.Task.Repos) != 1 || resp.Task.Repos[0].URL != projectRepoURL {
 		t.Fatalf("expected resp.Repos to contain only the project repo URL, got %+v", resp.Task.Repos)
+	}
+	if resp.Task.Repos[0].Ref != projectRepoRef {
+		t.Fatalf("project repo ref = %q, want %q", resp.Task.Repos[0].Ref, projectRepoRef)
 	}
 	for _, r := range resp.Task.Repos {
 		if strings.HasSuffix(r.URL, "workspace-repo-a") || strings.HasSuffix(r.URL, "workspace-repo-b") {

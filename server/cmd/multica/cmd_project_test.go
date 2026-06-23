@@ -113,6 +113,53 @@ func TestBuildResourceRefFromFlagsGithubMergesHint(t *testing.T) {
 		}
 	})
 
+	t.Run("checkout ref edit preserves existing url and hint", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("ref", "release/v2")
+		existing := map[string]any{
+			"url":                 "https://github.com/multica-ai/multica",
+			"default_branch_hint": "main",
+		}
+		ref, has, err := buildResourceRefFromFlags(cmd, "github_repo", existing)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !has {
+			t.Fatalf("expected has=true")
+		}
+		if ref["url"] != "https://github.com/multica-ai/multica" {
+			t.Errorf("expected merged url, got %v", ref["url"])
+		}
+		if ref["default_branch_hint"] != "main" {
+			t.Errorf("expected merged hint to persist, got %v", ref["default_branch_hint"])
+		}
+		if ref["ref"] != "release/v2" {
+			t.Errorf("expected checkout ref release/v2, got %v", ref["ref"])
+		}
+	})
+
+	t.Run("empty checkout ref clears existing ref", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("ref", "")
+		existing := map[string]any{
+			"url": "https://github.com/multica-ai/multica",
+			"ref": "stale",
+		}
+		ref, has, err := buildResourceRefFromFlags(cmd, "github_repo", existing)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !has {
+			t.Fatalf("expected has=true")
+		}
+		if _, ok := ref["ref"]; ok {
+			t.Errorf("expected checkout ref to be cleared, got %v", ref["ref"])
+		}
+		if ref["url"] != "https://github.com/multica-ai/multica" {
+			t.Errorf("expected merged url, got %v", ref["url"])
+		}
+	})
+
 	t.Run("hint-only with no existing url fails fast", func(t *testing.T) {
 		cmd := newProjectResourceUpdateTestCmd()
 		_ = cmd.Flags().Set("default-branch-hint", "main")
@@ -130,6 +177,46 @@ func TestBuildResourceRefFromFlagsGithubMergesHint(t *testing.T) {
 		}
 		if has {
 			t.Errorf("expected has=false when no shortcut flag is set, got ref=%v", ref)
+		}
+	})
+}
+
+func TestBuildResourceRefFromRefFlagKeepsJSONEscapeHatch(t *testing.T) {
+	t.Run("json payload wins over github shortcuts", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("url", "https://github.com/multica-ai/ignored")
+		_ = cmd.Flags().Set("ref", `{"url":"https://github.com/multica-ai/multica","ref":"release/v2"}`)
+
+		ref, has, err := buildResourceRefFromRefFlag(cmd, "github_repo", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !has {
+			t.Fatalf("expected has=true")
+		}
+		payload, ok := ref.(map[string]any)
+		if !ok {
+			t.Fatalf("expected JSON object payload, got %T", ref)
+		}
+		if payload["url"] != "https://github.com/multica-ai/multica" {
+			t.Errorf("json payload url = %v", payload["url"])
+		}
+		if payload["ref"] != "release/v2" {
+			t.Errorf("json payload ref = %v", payload["ref"])
+		}
+	})
+
+	t.Run("broken json is still rejected", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("url", "https://github.com/multica-ai/multica")
+		_ = cmd.Flags().Set("ref", `{"url":`)
+
+		_, _, err := buildResourceRefFromRefFlag(cmd, "github_repo", nil)
+		if err == nil {
+			t.Fatalf("expected invalid JSON error")
+		}
+		if !strings.Contains(err.Error(), "not valid JSON") {
+			t.Fatalf("error = %q, want JSON guidance", err)
 		}
 	})
 }
