@@ -63,8 +63,82 @@ func (s *AutopilotService) DispatchAutopilot(
 	source string,
 	payload []byte,
 ) (*db.AutopilotRun, error) {
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{})
+}
+
+// DispatchAutopilotForPlan is the entry point for scheduled triggers that
+// already know the canonical UTC plan_time of the occurrence they are
+// firing. The plan_time is persisted on autopilot_run.planned_at, and the
+// (trigger_id, planned_at) partial unique index — combined with this
+// method's idempotent lookup — guarantees that the SAME planned occurrence
+// cannot produce two runs even if a stale-steal in sys_cron_executions
+// re-enters this method after the first attempt already wrote a row.
+//
+// Semantics:
+//
+//   - If a run already exists for (triggerID, plannedAt), return it
+//     unchanged. The caller (the scheduler handler) treats this as
+//     "this plan_time was already dispatched in a prior attempt that
+//     crashed before writing terminal SUCCESS"; no second issue / task
+//     is created, no failure is recorded against the autopilot.
+//   - Otherwise fall through to the normal dispatch path, with planned_at
+//     stamped on the new autopilot_run row.
+//
+// triggerID and plannedAt MUST both be valid; passing zero values would
+// silently disable the idempotency guard. Manual / webhook / api callers
+// should use DispatchAutopilot instead.
+func (s *AutopilotService) DispatchAutopilotForPlan(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	plannedAt time.Time,
+) (*db.AutopilotRun, error) {
+	if !triggerID.Valid {
+		return nil, fmt.Errorf("dispatch for plan: trigger_id is required")
+	}
+	if plannedAt.IsZero() {
+		return nil, fmt.Errorf("dispatch for plan: planned_at is required")
+	}
+	plannedTS := pgtype.Timestamptz{Time: plannedAt.UTC(), Valid: true}
+
+	// Fast path: prior attempt already created a run for this exact
+	// occurrence. The partial unique index uq_autopilot_run_trigger_planned
+	// would also reject a duplicate INSERT, but doing the lookup up front
+	// lets us return the existing run without burning a sequence number
+	// or producing a noisy INSERT error in the logs.
+	existing, err := s.Queries.GetAutopilotRunByTriggerAndPlanned(ctx, db.GetAutopilotRunByTriggerAndPlannedParams{
+		TriggerID: triggerID,
+		PlannedAt: plannedTS,
+	})
+	if err == nil {
+		// A prior attempt already produced this run. Hand it back so
+		// the handler can record SUCCESS in sys_cron_executions
+		// without creating a duplicate downstream.
+		return &existing, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("dispatch for plan: lookup existing run: %w", err)
+	}
+
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS)
+}
+
+// dispatchAutopilot is the shared core of the two public Dispatch entry
+// points. plannedAt is the canonical UTC plan_time for scheduled triggers;
+// for manual / webhook / api dispatch it is the zero pgtype.Timestamptz and
+// the resulting autopilot_run row has planned_at IS NULL.
+func (s *AutopilotService) dispatchAutopilot(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	plannedAt pgtype.Timestamptz,
+) (*db.AutopilotRun, error) {
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
-		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
+		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, reason)
 	}
 
 	// Determine initial status based on execution mode.
@@ -80,6 +154,7 @@ func (s *AutopilotService) DispatchAutopilot(
 		Status:         initialStatus,
 		TriggerPayload: payload,
 		SquadID:        autopilotSquadAttribution(autopilot),
+		PlannedAt:      plannedAt,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
@@ -858,6 +933,7 @@ func (s *AutopilotService) recordSkippedRun(
 	triggerID pgtype.UUID,
 	source string,
 	payload []byte,
+	plannedAt pgtype.Timestamptz,
 	reason string,
 ) (*db.AutopilotRun, error) {
 	run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
@@ -867,6 +943,7 @@ func (s *AutopilotService) recordSkippedRun(
 		Status:         "skipped",
 		TriggerPayload: payload,
 		SquadID:        autopilotSquadAttribution(autopilot),
+		PlannedAt:      plannedAt,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create skipped run: %w", err)
