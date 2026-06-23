@@ -616,11 +616,34 @@ describe("SwimLaneView", () => {
       });
     });
 
-    expect(mockOnMoveIssue).toHaveBeenCalledWith("orphan-1", {
-      parent_issue_id: null,
-      status: "in_progress",
-      position: 300,
+    expect(mockOnMoveIssue).toHaveBeenCalledWith(
+      "orphan-1",
+      { parent_issue_id: null, status: "in_progress", position: 300 },
+      expect.any(Function),
+    );
+  });
+
+  it("passes a settle callback that releases the lock without error", () => {
+    const mockOnMoveIssue = vi.fn();
+    renderWithI18n(
+      <SwimLaneView issues={mockIssues} onMoveIssue={mockOnMoveIssue} />,
+    );
+
+    const targetCellId = "swim:parent:none:in_progress";
+    act(() => {
+      lastOnDragOver({ active: { id: "orphan-1" }, over: { id: targetCellId } });
     });
+    act(() => {
+      lastOnDragEnd({ active: { id: "orphan-1" }, over: { id: targetCellId } });
+    });
+
+    // The move carries a settle callback (held from drop until the mutation
+    // settles); invoking it releases the lock and re-syncs from the cache.
+    const onSettled = mockOnMoveIssue.mock.calls[0]?.[2] as
+      | (() => void)
+      | undefined;
+    expect(typeof onSettled).toBe("function");
+    expect(() => act(() => onSettled?.())).not.toThrow();
   });
 
   it("does not call onMoveIssue when drop target equals source cell (no-op)", () => {
@@ -665,6 +688,7 @@ describe("SwimLaneView", () => {
         parent_issue_id: "parent-1",
         status: "todo",
       }),
+      expect.any(Function),
     );
   });
 
@@ -1068,6 +1092,7 @@ describe("SwimLaneView", () => {
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "issue-c",
       expect.objectContaining({ project_id: "proj-1", status: "todo" }),
+      expect.any(Function),
     );
   });
 
@@ -1090,6 +1115,7 @@ describe("SwimLaneView", () => {
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "issue-a",
       expect.objectContaining({ project_id: null, status: "in_review" }),
+      expect.any(Function),
     );
   });
 
@@ -1172,6 +1198,7 @@ describe("SwimLaneView", () => {
         assignee_id: "user-1",
         status: "in_review",
       }),
+      expect.any(Function),
     );
   });
 
@@ -1198,6 +1225,7 @@ describe("SwimLaneView", () => {
         assignee_id: null,
         status: "done",
       }),
+      expect.any(Function),
     );
   });
 

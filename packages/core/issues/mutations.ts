@@ -211,6 +211,21 @@ export function useCreateIssue() {
 export function useUpdateIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  // Every bucketed board cache an optimistic move must keep in sync: the
+  // workspace board (issueKeys.list*) AND the My-Issues / Project board
+  // (issueKeys.myList* under `my`), which share the ListIssuesCache shape.
+  // Filtering by `byStatus` skips the grouped (assignee) and flat
+  // (gantt/detail/children) caches that also live under those prefixes. The
+  // board reconciles local columns from its own feeding cache on settle, so a
+  // move that only patched the workspace cache would snap back on My-Issues /
+  // Project boards.
+  const readBucketedLists = () =>
+    [
+      ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) }),
+      ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.myAll(wsId) }),
+    ].filter(
+      (entry): entry is [QueryKey, ListIssuesCache] => !!entry[1]?.byStatus,
+    );
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string } & UpdateIssueRequest) =>
       api.updateIssue(id, data),
@@ -220,7 +235,8 @@ export function useUpdateIssue() {
       // yield to the event loop, letting @dnd-kit reset its visual state
       // before the optimistic update lands.
       qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
-      const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+      qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
+      const prevLists = readBucketedLists();
       const firstListData = prevLists[0]?.[1];
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
 
@@ -280,9 +296,29 @@ export function useUpdateIssue() {
         );
       }
     },
+    onSuccess: (serverIssue) => {
+      // Reconcile with the authoritative server entity by patching the one card
+      // in place — NOT by invalidating + refetching the list. The list refetch
+      // is what made a successful move flicker: the optimistic card was already
+      // in the right place, then the refetch replaced the whole column and the
+      // card re-landed. updateIssue returns the full issue and a position update
+      // touches only that row, so a surgical patch is the authoritative
+      // reconcile and is a visual no-op when the optimistic value matched.
+      for (const [key, cached] of readBucketedLists()) {
+        qc.setQueryData<ListIssuesCache>(
+          key,
+          patchIssueInBuckets(cached, serverIssue.id, serverIssue),
+        );
+      }
+      qc.setQueryData<Issue>(issueKeys.detail(wsId, serverIssue.id), (old) =>
+        old ? { ...old, ...serverIssue } : old,
+      );
+    },
     onSettled: (_data, _err, vars, ctx) => {
-      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      // The issue's own list + detail caches are reconciled surgically in
+      // onSuccess / onError, so they are deliberately NOT invalidated here — a
+      // full-list refetch on settle is what made drags flicker. Only aggregate
+      // caches that cannot be patched from a single issue are refreshed below.
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -408,10 +444,21 @@ export function useBatchUpdateIssues() {
       updates: UpdateIssueRequest;
     }) => api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
+      // Patch BOTH the workspace board (issueKeys.list) and the filtered
+      // My-Issues / Project / actor lists (issueKeys.myAll). The single-issue
+      // update already patches both; batch only touched issueKeys.list, so a
+      // batch edit on a My-Issues board had no optimistic effect and relied
+      // entirely on the settle refetch. Filter to bucketed (byStatus) caches so
+      // grouped/flat caches under the same prefix are skipped.
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
-      const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+      await qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
+      const prevLists = [
+        ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) }),
+        ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.myAll(wsId) }),
+      ].filter(
+        (entry): entry is [QueryKey, ListIssuesCache] => !!entry[1]?.byStatus,
+      );
       for (const [key, cached] of prevLists) {
-        if (!cached) continue;
         let next = cached;
         for (const id of ids) next = patchIssueInBuckets(next, id, updates);
         qc.setQueryData<ListIssuesCache>(key, next);
@@ -451,7 +498,13 @@ export function useBatchUpdateIssues() {
       }
     },
     onSettled: (_data, _err, _vars, ctx) => {
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      // Deliberately NOT invalidating issueKeys.list / myAll here: the onMutate
+      // patch above is a complete surgical reconcile for these bucketed boards
+      // (batch changes status / priority / project — never a server-computed
+      // value), so a full-board refetch on settle would only re-introduce the
+      // flicker the single-issue update already removed. Aggregate / grouped
+      // caches that cannot be recomputed from a single-issue patch are still
+      // refreshed below.
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
