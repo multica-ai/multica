@@ -502,9 +502,9 @@ function CommentRow({
 
   // "展开全文" — when the timeline endpoint clips comment bodies under
   // summary=true, show a button to fetch the full (unsummarized) body.
-  const isTruncated = entry.content_truncated === true;
+  const isTruncated = entry.content_truncated === true && entry.type === "comment";
   const [shouldFetchFull, setShouldFetchFull] = useState(false);
-  const { data: fullComment, isFetching: loadingFullContent } = useQuery({
+  const { data: fullComment, isFetching: loadingFullContent, isError: loadError } = useQuery({
     ...commentDetailOptions(entry.id),
     enabled: shouldFetchFull,
   });
@@ -682,11 +682,11 @@ function CommentRow({
                   {t(($) => $.comment.loading_full_text)}
                 </span>
               ) : (
-                t(($) => $.comment.expand_full_text)
+                loadError ? t(($) => $.comment.retry_load_full_text) : t(($) => $.comment.expand_full_text)
               )}
             </button>
           )}
-          <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
+          <AttachmentList attachments={entry.attachments} content={effectiveContent} className="mt-1.5 pl-12 pr-4" />
           {retryableAgentFailureComment(entry) && (
             <TaskCommentRetryButton
               issueId={issueId}
@@ -743,9 +743,9 @@ function CommentCardImpl({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   // "展开全文" for the root comment body (replies use CommentRow, which has its own).
-  const isTruncated = entry.content_truncated === true;
+  const isTruncated = entry.content_truncated === true && entry.type === "comment";
   const [shouldFetchFull, setShouldFetchFull] = useState(false);
-  const { data: fullComment, isFetching: loadingFullContent } = useQuery({
+  const { data: fullComment, isFetching: loadingFullContent, isError: loadError } = useQuery({
     ...commentDetailOptions(entry.id),
     enabled: shouldFetchFull,
   });
@@ -996,11 +996,11 @@ function CommentCardImpl({
                         {t(($) => $.comment.loading_full_text)}
                       </span>
                     ) : (
-                      t(($) => $.comment.expand_full_text)
+                      loadError ? t(($) => $.comment.retry_load_full_text) : t(($) => $.comment.expand_full_text)
                     )}
                   </button>
                 )}
-                <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
+                <AttachmentList attachments={entry.attachments} content={effectiveContent} className="mt-1.5 pl-10" />
                 {retryableAgentFailureComment(entry) && (
                   <TaskCommentRetryButton
                     issueId={issueId}

@@ -321,6 +321,7 @@
     },
     "expand_full_text": "전체 텍스트 펼치기",
     "loading_full_text": "불러오는 중..."
+    "retry_load_full_text": "재시도",
   },
   "reply": {
     "placeholder": "답글 남기기..."
