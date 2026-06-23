@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Markdown } from "./markdown";
+
+const { pushSpy } = vi.hoisted(() => ({ pushSpy: vi.fn() }));
 
 vi.mock("@multica/core/config", () => ({
   useConfigStore: (selector: (state: { cdnDomain: string }) => unknown) =>
@@ -41,6 +43,10 @@ vi.mock("../navigation", () => ({
       {children}
     </a>
   ),
+  useNavigation: () => ({
+    push: pushSpy,
+    openInNewTab: vi.fn(),
+  }),
 }));
 
 vi.mock("../projects/components/project-chip", () => ({
@@ -86,7 +92,11 @@ describe("Markdown", () => {
   it("renders project mention links as project chips", () => {
     render(<Markdown>{"[Roadmap](mention://project/project-123)"}</Markdown>);
 
-    expect(screen.getByTestId("project-chip")).toHaveTextContent("project-123");
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/projects/project-123");
+    const chip = screen.getByTestId("project-chip");
+    expect(chip).toHaveTextContent("project-123");
+    // ProjectMentionLink renders a clickable <span> that calls push() — not
+    // an <a href> — so verify navigation wiring by clicking, not by role.
+    fireEvent.click(chip);
+    expect(pushSpy).toHaveBeenCalledWith("/projects/project-123");
   });
 });

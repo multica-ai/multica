@@ -79,6 +79,13 @@ func agyLocalRunSystemPrompt(issueID string) string {
 // searches) enough time to complete without triggering a premature flush.
 const agyTurnIdleFlush = 8 * time.Second
 
+// agyRediscoverInterval is how often the tracker re-scans the brain directory
+// for a newer transcript file. This handles the case where agy creates a new
+// session AFTER the tracker's initial discovery — without periodic re-scan the
+// tracker stays locked to the old transcript and never sees the new session's
+// entries.
+const agyRediscoverInterval = 5 * time.Second
+
 type agyTranscriptTracker struct {
 	reporter      *localRunReporter
 	usageReporter *localRunUsageReporter
@@ -88,6 +95,7 @@ type agyTranscriptTracker struct {
 	transcript    string    // discovered transcript path
 	lastModTime   time.Time // ModTime of transcript at last sync
 	lastActivity  time.Time // last time new entries were read
+	lastDiscovery time.Time // last time we scanned for transcript files
 	seen          map[int]bool
 	totalActiveMs int64
 	// Turn tracking: buffer the last model response per turn and only post
@@ -153,16 +161,32 @@ func (t *agyTranscriptTracker) sync() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.transcript == "" {
+	// Periodically re-discover to catch a new agy session whose transcript
+	// didn't exist (or wasn't the newest) at initial discovery time.
+	if t.transcript == "" || time.Since(t.lastDiscovery) > agyRediscoverInterval {
+		oldTranscript := t.transcript
 		t.discoverTranscriptLocked()
+		t.lastDiscovery = time.Now()
 		if t.transcript == "" {
 			return
+		}
+		// Switched to a different transcript file (new agy session).
+		// Flush any buffered final from the old session, clear the seen
+		// map so the new file's entries are processed, and reset lastModTime
+		// so the full file is read on this sync.
+		if oldTranscript != "" && t.transcript != oldTranscript {
+			t.flushPendingFinalLocked()
+			t.seen = make(map[int]bool)
+			t.lastModTime = time.Time{}
+			t.lastActivity = time.Time{}
 		}
 	}
 
 	// Only re-read if the file has been modified since last sync.
 	info, err := os.Stat(t.transcript)
 	if err != nil {
+		// File gone — force re-discovery on next sync.
+		t.transcript = ""
 		return
 	}
 	if !info.ModTime().After(t.lastModTime) {
@@ -181,6 +205,11 @@ func (t *agyTranscriptTracker) sync() {
 // discoverTranscriptLocked finds the most recently modified transcript.jsonl
 // across all brain directories. No startedAt filter — the conversation may
 // pre-date this run if agy resumed an existing session.
+//
+// Unlike earlier versions, this does NOT pre-populate the seen map. The
+// startedAt filter in mapEntry already skips historical entries, and leaving
+// the seen map empty allows re-discovery to work correctly when agy creates a
+// new session after the initial discovery.
 func (t *agyTranscriptTracker) discoverTranscriptLocked() {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -211,18 +240,6 @@ func (t *agyTranscriptTracker) discoverTranscriptLocked() {
 	if newestPath != "" {
 		t.transcript = newestPath
 		t.lastModTime = newestMod
-
-		// Populate seen map with already existing lines to prevent re-parsing
-		// historical lines when the file first undergoes modifications.
-		if file, err := os.Open(newestPath); err == nil {
-			scanner := bufio.NewScanner(file)
-			lineNo := 0
-			for scanner.Scan() {
-				lineNo++
-				t.seen[lineNo] = true
-			}
-			file.Close()
-		}
 	}
 }
 

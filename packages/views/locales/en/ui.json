@@ -4,5 +4,7 @@
   "pagination_previous": "Go to previous page",
   "pagination_next": "Go to next page",
   "copy_code": "Copy code",
+  "copied": "Copied",
+  "delete_block": "Delete block",
   "plain_text": "plain text"
 }

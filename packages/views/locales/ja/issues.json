@@ -8,7 +8,8 @@
     "show_archived": "アーカイブを表示",
     "hide_archived": "アーカイブを非表示",
     "top_level_only": "トップレベルのみ",
-    "show_all_issues": "すべてのイシューを表示"
+    "show_all_issues": "すべてのイシューを表示",
+    "top_level_only_disabled_by_parent": "親イシューでグループ化されている場合は使用できません"
   },
   "status": {
     "backlog": "バックログ",

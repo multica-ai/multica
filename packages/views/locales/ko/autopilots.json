@@ -371,6 +371,7 @@
   "toolbar": {
     "result_count_title": "일치하는 자동화 / 전체 자동화",
     "filter_label": "필터",
+    "mine_filter": "내 것",
     "filter_active_count_one": "필터 {{count}}개",
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 지우기",

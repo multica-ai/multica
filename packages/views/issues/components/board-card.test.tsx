@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { Issue } from "@multica/core/types";
+import { BoardCardContent } from "./board-card";
 
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
@@ -22,21 +23,23 @@ vi.mock("@multica/core/issues/mutations", () => ({
   useUpdateIssue: () => ({ mutate: vi.fn() }),
 }));
 
+const mockViewState = {
+  cardProperties: {
+    priority: false,
+    description: false,
+    assignee: false,
+    startDate: false,
+    dueDate: false,
+    project: false,
+    labels: true,
+    childProgress: false,
+  },
+  swimlaneGrouping: "assignee",
+};
+
 vi.mock("@multica/core/issues/stores/view-store-context", () => ({
   useViewStore: (selector?: any) => {
-    const state = {
-      cardProperties: {
-        priority: false,
-        description: false,
-        assignee: false,
-        startDate: false,
-        dueDate: false,
-        project: false,
-        labels: true,
-        childProgress: false,
-      },
-    };
-    return selector ? selector(state) : state;
+    return selector ? selector(mockViewState) : mockViewState;
   },
 }));
 
@@ -58,7 +61,10 @@ vi.mock("../../i18n", () => ({
       selector({
         card: { update_failed: "Update failed" },
         priority: { high: "High" },
-        pickers: { label: { trigger_label: "Add label" } },
+        pickers: {
+          label: { trigger_label: "Add label" },
+          assignee: { trigger_unassigned: "Unassigned" },
+        },
       }),
   }),
 }));
@@ -176,4 +182,19 @@ describe("BoardCardContent labels", () => {
   });
 });
 
-import { BoardCardContent } from "./board-card";
+describe("BoardCardContent sub-issue indicator", () => {
+  it("renders CornerDownRight icon when parent_issue_id is present and grouping is not parent", () => {
+    mockViewState.swimlaneGrouping = "assignee";
+    const { container } = render(<BoardCardContent issue={makeIssue({ parent_issue_id: "parent-1" })} />);
+    const icon = container.querySelector(".lucide-corner-down-right");
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("does not render CornerDownRight icon when parent_issue_id is present but grouping is parent", () => {
+    mockViewState.swimlaneGrouping = "parent";
+    const { container } = render(<BoardCardContent issue={makeIssue({ parent_issue_id: "parent-1" })} />);
+    const icon = container.querySelector(".lucide-corner-down-right");
+    expect(icon).toBeNull();
+  });
+});

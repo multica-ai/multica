@@ -33,6 +33,7 @@ type localCLIRun struct {
 	Error        pgtype.Text
 	Source       pgtype.Text
 	SourceKey    pgtype.Text
+	ActiveMs     pgtype.Int8
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
 }
@@ -52,6 +53,7 @@ type updateLocalCLIRunRequest struct {
 	ExitCode   *int32 `json:"exit_code"`
 	Error      string `json:"error"`
 	ContextDir string `json:"context_dir"`
+	ActiveMs   *int64 `json:"active_ms"`
 }
 
 type createLocalCLIMessageRequest struct {
@@ -182,7 +184,7 @@ func (h *Handler) CreateLocalCLIRun(w http.ResponseWriter, r *http.Request) {
 			DO NOTHING
 		RETURNING id, workspace_id, issue_id, owner_id, cli_name, status,
 			started_at, completed_at, exit_code, work_dir, context_dir,
-			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
+			comments_mode, top_comment_id, error, source, source_key, active_ms, created_at, updated_at
 	`, issue.WorkspaceID, issue.ID, userID, req.CLIName, textOrNil(req.WorkDir), textOrNil(req.ContextDir), req.CommentsMode, uuidOrNil(topCommentID), req.Source, req.SourceKey)
 	run, err := scanLocalCLIRun(row)
 	if err != nil {
@@ -238,6 +240,10 @@ func (h *Handler) UpdateLocalCLIRun(w http.ResponseWriter, r *http.Request) {
 	if req.ExitCode != nil {
 		exitCode = *req.ExitCode
 	}
+	var activeMs any
+	if req.ActiveMs != nil && *req.ActiveMs > 0 {
+		activeMs = *req.ActiveMs
+	}
 	row := h.DB.QueryRow(r.Context(), fmt.Sprintf(`
 		UPDATE local_cli_run
 		SET status = $2,
@@ -245,12 +251,13 @@ func (h *Handler) UpdateLocalCLIRun(w http.ResponseWriter, r *http.Request) {
 		    exit_code = COALESCE($3, exit_code),
 		    error = NULLIF($4, ''),
 		    context_dir = COALESCE(NULLIF($5, ''), context_dir),
+		    active_ms = COALESCE($7, active_ms),
 		    updated_at = now()
 		WHERE id = $1 AND workspace_id = $6
 		RETURNING id, workspace_id, issue_id, owner_id, cli_name, status,
 			started_at, completed_at, exit_code, work_dir, context_dir,
-			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
-	`, completedExpr), run.ID, req.Status, exitCode, req.Error, req.ContextDir, run.WorkspaceID)
+			comments_mode, top_comment_id, error, source, source_key, active_ms, created_at, updated_at
+	`, completedExpr), run.ID, req.Status, exitCode, req.Error, req.ContextDir, run.WorkspaceID, activeMs)
 	updated, err := scanLocalCLIRun(row)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update local run")
@@ -464,7 +471,7 @@ func (h *Handler) loadLocalCLIRunForUser(w http.ResponseWriter, r *http.Request,
 	row := h.DB.QueryRow(r.Context(), `
 		SELECT id, workspace_id, issue_id, owner_id, cli_name, status,
 			started_at, completed_at, exit_code, work_dir, context_dir,
-			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
+			comments_mode, top_comment_id, error, source, source_key, active_ms, created_at, updated_at
 		FROM local_cli_run
 		WHERE id = $1 AND workspace_id = $2
 	`, runUUID, wsUUID)
@@ -480,7 +487,7 @@ func (h *Handler) loadLocalCLIRunBySource(ctx context.Context, workspaceID pgtyp
 	row := h.DB.QueryRow(ctx, `
 		SELECT id, workspace_id, issue_id, owner_id, cli_name, status,
 			started_at, completed_at, exit_code, work_dir, context_dir,
-			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
+			comments_mode, top_comment_id, error, source, source_key, active_ms, created_at, updated_at
 		FROM local_cli_run
 		WHERE workspace_id = $1 AND source = $2 AND source_key = $3
 	`, workspaceID, source, sourceKey)
@@ -498,7 +505,7 @@ func (h *Handler) listLocalCLIRunsByIssue(r *http.Request, issue db.Issue) ([]lo
 	rows, err := h.DB.Query(r.Context(), `
 		SELECT id, workspace_id, issue_id, owner_id, cli_name, status,
 			started_at, completed_at, exit_code, work_dir, context_dir,
-			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
+			comments_mode, top_comment_id, error, source, source_key, active_ms, created_at, updated_at
 		FROM local_cli_run
 		WHERE issue_id = $1 AND workspace_id = $2
 		ORDER BY created_at DESC
@@ -523,7 +530,7 @@ func (h *Handler) listLocalCLIRunsByIssueForOwner(r *http.Request, issue db.Issu
 	rows, err := h.DB.Query(r.Context(), `
 		SELECT id, workspace_id, issue_id, owner_id, cli_name, status,
 			started_at, completed_at, exit_code, work_dir, context_dir,
-			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
+			comments_mode, top_comment_id, error, source, source_key, active_ms, created_at, updated_at
 		FROM local_cli_run
 		WHERE issue_id = $1 AND workspace_id = $2 AND owner_id = $3
 		ORDER BY created_at DESC
@@ -596,7 +603,7 @@ func scanLocalCLIRun(row localCLIRunScanner) (localCLIRun, error) {
 		&run.ID, &run.WorkspaceID, &run.IssueID, &run.OwnerID,
 		&run.CLIName, &run.Status, &run.StartedAt, &run.CompletedAt,
 		&run.ExitCode, &run.WorkDir, &run.ContextDir, &run.CommentsMode,
-		&run.TopCommentID, &run.Error, &run.Source, &run.SourceKey, &run.CreatedAt, &run.UpdatedAt,
+		&run.TopCommentID, &run.Error, &run.Source, &run.SourceKey, &run.ActiveMs, &run.CreatedAt, &run.UpdatedAt,
 	)
 	return run, err
 }
@@ -671,6 +678,9 @@ func localCLIRunToResponse(run localCLIRun) map[string]any {
 	}
 	if run.SourceKey.Valid {
 		resp["source_key"] = run.SourceKey.String
+	}
+	if run.ActiveMs.Valid {
+		resp["active_ms"] = run.ActiveMs.Int64
 	}
 	return resp
 }
