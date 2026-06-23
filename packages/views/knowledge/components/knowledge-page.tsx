@@ -448,7 +448,7 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-6 py-6">
           <div className="space-y-3">
             <Input
@@ -509,7 +509,7 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4">
             {EDIT_FIELDS.map((field) => (
               <label key={field.key} className="space-y-1.5">
                 <span className="text-xs font-medium text-muted-foreground">
@@ -579,15 +579,15 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
             )}
           </section>
 
-          <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-            <div>
+          <section className="grid min-w-0 gap-4">
+            <div className="min-w-0">
               <h3 className="text-sm font-semibold">{t(($) => $.detail.sources)}</h3>
               <div className="mt-3 space-y-2">
                 {detail.sources.length === 0 ? (
                   <p className="text-sm text-muted-foreground">{t(($) => $.detail.no_sources)}</p>
                 ) : (
                   detail.sources.map((source) => (
-                    <div key={source.id} className="rounded-lg border px-3 py-2 text-sm">
+                    <div key={source.id} className="min-w-0 rounded-lg border px-3 py-2 text-sm">
                       <div className="flex min-w-0 items-center gap-2">
                         <Badge variant="outline">{source.source_type}</Badge>
                         <span className="min-w-0 flex-1 truncate">
@@ -624,9 +624,9 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
                 )}
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <h3 className="text-sm font-semibold">{t(($) => $.detail.effect)}</h3>
-              <div className="mt-3 rounded-lg border p-3">
+              <div className="mt-3 min-w-0 rounded-lg border p-3">
                 {detail.feedback_summary.length === 0 ? (
                   <p className="text-sm text-muted-foreground">{t(($) => $.detail.no_feedback)}</p>
                 ) : (
@@ -646,9 +646,9 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
                     <span>{detail.publish_targets.length}</span>
                   </div>
                   {detail.publish_targets.map((target) => (
-                    <div key={`${target.target_type}-${target.target_id ?? target.target_url ?? target.id}`} className="rounded-md bg-muted/40 px-2 py-1 text-xs">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate font-medium text-foreground">{target.target_title ?? target.target_type}</span>
+                    <div key={`${target.target_type}-${target.target_id ?? target.target_url ?? target.id}`} className="min-w-0 rounded-md bg-muted/40 px-2 py-1 text-xs">
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <span className="min-w-0 flex-1 truncate font-medium text-foreground">{target.target_title ?? target.target_type}</span>
                         <div className="flex shrink-0 items-center gap-1">
                           {target.target_type === "rag" && (
                             <Badge
