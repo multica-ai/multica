@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type Ref } from "react";
+import { memo, useCallback, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
@@ -8,6 +8,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { ChevronRight, CornerDownRight } from "lucide-react";
 import { AppLink } from "../../navigation";
 import type { Issue } from "@multica/core/types";
+import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -21,6 +22,7 @@ import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import type { ParentInfo } from "../utils/hierarchy";
 
 export interface ChildProgress {
   done: number;
@@ -29,6 +31,10 @@ export interface ChildProgress {
 
 function formatDate(date: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
+}
+
+function getStatusColor(status: string): string {
+  return STATUS_CONFIG[status as keyof typeof STATUS_CONFIG]?.iconColor ?? "text-muted-foreground";
 }
 
 function ListRowContent({
@@ -43,8 +49,11 @@ function ListRowContent({
   isParent = false,
   isExpanded = false,
   childCount = 0,
+  crossStatusChildCount = 0,
   onToggleChildren,
-  parentIdentifier,
+  parentInfo,
+  onHoverParent,
+  onScrollToParent,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
@@ -57,8 +66,11 @@ function ListRowContent({
   isParent?: boolean;
   isExpanded?: boolean;
   childCount?: number;
+  crossStatusChildCount?: number;
   onToggleChildren?: () => void;
-  parentIdentifier?: string;
+  parentInfo?: ParentInfo;
+  onHoverParent?: (parentStatus: string | null) => void;
+  onScrollToParent?: (parentId: string, parentStatus: string) => void;
 }) {
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
@@ -79,12 +91,36 @@ function ListRowContent({
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showLabels = storeProperties.labels && labels.length > 0;
 
+  const handleChipClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!parentInfo) return;
+
+      if (e.metaKey || e.ctrlKey) {
+        window.open(p.issueDetail(parentInfo.parentId), "_blank");
+      } else {
+        onScrollToParent?.(parentInfo.parentId, parentInfo.status);
+      }
+    },
+    [parentInfo, p, onScrollToParent],
+  );
+
+  const handleChipMouseEnter = useCallback(() => {
+    if (parentInfo) onHoverParent?.(parentInfo.status);
+  }, [parentInfo, onHoverParent]);
+
+  const handleChipMouseLeave = useCallback(() => {
+    onHoverParent?.(null);
+  }, [onHoverParent]);
+
   return (
     <IssueActionsContextMenu issue={issue}>
       <div
         ref={containerRef}
         style={containerStyle}
         {...containerProps}
+        data-issue-id={issue.id}
         className={`group/row flex h-9 items-center gap-2 pr-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
           selected ? "bg-accent/30" : ""
         } ${isDragging ? "opacity-30" : ""}`}
@@ -149,10 +185,27 @@ function ListRowContent({
                 ({childCount})
               </span>
             )}
-            {parentIdentifier && (
-              <span className="shrink-0 text-[11px] text-muted-foreground/70 truncate max-w-[120px]">
-                &larr; {parentIdentifier}
+            {isParent && crossStatusChildCount > 0 && (
+              <span className="shrink-0 text-[11px] text-muted-foreground/50 tabular-nums">
+                ↓ {crossStatusChildCount} cross-status
               </span>
+            )}
+            {parentInfo && (
+              <button
+                type="button"
+                onClick={handleChipClick}
+                onMouseEnter={handleChipMouseEnter}
+                onMouseLeave={handleChipMouseLeave}
+                className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-muted/60 hover:bg-muted cursor-pointer transition-colors max-w-[200px]"
+                title={`← ${parentInfo.identifier} — Click to scroll, Cmd+Click to open`}
+              >
+                <span className="text-[11px] text-muted-foreground/70 truncate">
+                  ← {parentInfo.identifier}
+                </span>
+                <span className={`text-[10px] truncate ${getStatusColor(parentInfo.status)}`}>
+                  [{parentInfo.status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}]
+                </span>
+              </button>
             )}
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
@@ -212,8 +265,11 @@ export const ListRow = memo(function ListRow({
   isParent,
   isExpanded,
   childCount,
+  crossStatusChildCount,
   onToggleChildren,
-  parentIdentifier,
+  parentInfo,
+  onHoverParent,
+  onScrollToParent,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
@@ -221,8 +277,11 @@ export const ListRow = memo(function ListRow({
   isParent?: boolean;
   isExpanded?: boolean;
   childCount?: number;
+  crossStatusChildCount?: number;
   onToggleChildren?: () => void;
-  parentIdentifier?: string;
+  parentInfo?: ParentInfo;
+  onHoverParent?: (parentStatus: string | null) => void;
+  onScrollToParent?: (parentId: string, parentStatus: string) => void;
 }) {
   return (
     <ListRowContent
@@ -232,8 +291,11 @@ export const ListRow = memo(function ListRow({
       isParent={isParent}
       isExpanded={isExpanded}
       childCount={childCount}
+      crossStatusChildCount={crossStatusChildCount}
       onToggleChildren={onToggleChildren}
-      parentIdentifier={parentIdentifier}
+      parentInfo={parentInfo}
+      onHoverParent={onHoverParent}
+      onScrollToParent={onScrollToParent}
     />
   );
 });
@@ -256,8 +318,11 @@ export const DraggableListRow = memo(function DraggableListRow({
   isParent,
   isExpanded,
   childCount,
+  crossStatusChildCount,
   onToggleChildren,
-  parentIdentifier,
+  parentInfo,
+  onHoverParent,
+  onScrollToParent,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
@@ -266,8 +331,11 @@ export const DraggableListRow = memo(function DraggableListRow({
   isParent?: boolean;
   isExpanded?: boolean;
   childCount?: number;
+  crossStatusChildCount?: number;
   onToggleChildren?: () => void;
-  parentIdentifier?: string;
+  parentInfo?: ParentInfo;
+  onHoverParent?: (parentStatus: string | null) => void;
+  onScrollToParent?: (parentId: string, parentStatus: string) => void;
 }) {
   const {
     attributes,
@@ -301,8 +369,11 @@ export const DraggableListRow = memo(function DraggableListRow({
       isParent={isParent}
       isExpanded={isExpanded}
       childCount={childCount}
+      crossStatusChildCount={crossStatusChildCount}
       onToggleChildren={onToggleChildren}
-      parentIdentifier={parentIdentifier}
+      parentInfo={parentInfo}
+      onHoverParent={onHoverParent}
+      onScrollToParent={onScrollToParent}
     />
   );
 });

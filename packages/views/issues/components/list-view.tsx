@@ -38,7 +38,7 @@ import {
   getMoveUpdates,
 } from "../utils/drag-utils";
 import type { BoardColumnGroup } from "./board-column";
-import { buildHierarchy, type RenderItem } from "../utils/hierarchy";
+import { buildHierarchy, type ParentInfo } from "../utils/hierarchy";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_CHILDREN_MAP = new Map<string, Issue[]>();
@@ -103,6 +103,35 @@ export function ListView({
     });
   }, []);
 
+  // Track which parent status column is hovered via a cross-status chip.
+  const [hoveredParentStatus, setHoveredParentStatus] = useState<string | null>(null);
+
+  const handleHoverParent = useCallback((parentStatus: string | null) => {
+    setHoveredParentStatus(parentStatus);
+  }, []);
+
+  // Scroll to a parent issue — expand the target column first if collapsed,
+  // then scroll the row into view.
+  const handleScrollToParent = useCallback(
+    (parentId: string, parentStatus: string) => {
+      const statusKey = parentStatus as IssueStatus;
+      // Expand the target column if it's collapsed.
+      if (listCollapsedStatuses.includes(statusKey)) {
+        toggleListCollapsed(statusKey);
+      }
+      // Wait two frames for the accordion expansion to render, then scroll.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const el = document.querySelector(`[data-issue-id="${parentId}"]`);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        });
+      });
+    },
+    [listCollapsedStatuses, toggleListCollapsed],
+  );
+
   const expandedStatuses = useMemo(
     () =>
       visibleStatuses.filter(
@@ -166,6 +195,22 @@ export function ListView({
   if (!isDraggingRef.current && !isSettlingRef.current) {
     issueMapRef.current = issueMap;
   }
+
+  // Build a global parent-info map: parentId → { identifier, status }
+  // for all issues that have child progress (i.e., are known parents).
+  const parentInfoMap = useMemo(() => {
+    const map = new Map<string, ParentInfo>();
+    for (const issue of issues) {
+      if (childProgressMap.has(issue.id)) {
+        map.set(issue.id, {
+          identifier: issue.identifier,
+          status: issue.status,
+          parentId: issue.id,
+        });
+      }
+    }
+    return map;
+  }, [issues, childProgressMap]);
 
   const collisionDetection = useMemo(
     () => makeKanbanCollision(groupIds),
@@ -328,6 +373,10 @@ export function ListView({
             childrenMap={childrenMap}
             expandedParents={expandedParents}
             onToggleExpand={toggleExpandParent}
+            parentInfoMap={parentInfoMap}
+            highlightedStatus={hoveredParentStatus}
+            onHoverParent={handleHoverParent}
+            onScrollToParent={handleScrollToParent}
             myIssuesOpts={myIssuesOpts}
             projectId={projectId}
             dragEnabled={dragEnabled}
@@ -380,6 +429,10 @@ function StatusAccordionItem({
   childrenMap,
   expandedParents,
   onToggleExpand,
+  parentInfoMap,
+  highlightedStatus,
+  onHoverParent,
+  onScrollToParent,
   myIssuesOpts,
   projectId,
   dragEnabled,
@@ -394,6 +447,10 @@ function StatusAccordionItem({
   childrenMap: Map<string, Issue[]>;
   expandedParents: ReadonlySet<string>;
   onToggleExpand: (parentId: string) => void;
+  parentInfoMap: Map<string, ParentInfo>;
+  highlightedStatus: string | null;
+  onHoverParent: (parentStatus: string | null) => void;
+  onScrollToParent: (parentId: string, parentStatus: string) => void;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   projectId?: string;
   dragEnabled: boolean;
@@ -425,21 +482,10 @@ function StatusAccordionItem({
     [issueIds],
   );
 
-  // Build a parent-id → identifier map for resolving cross-status parent references.
-  const parentIdentifierMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const issue of issues) {
-      if (childProgressMap.has(issue.id)) {
-        map.set(issue.id, issue.identifier);
-      }
-    }
-    return map;
-  }, [issues, childProgressMap]);
-
   // Build hierarchical render items for this status group.
   const renderItems = useMemo(
-    () => buildHierarchy(issues, childrenMap, statusIssueIds, expandedParents, parentIdentifierMap),
-    [issues, childrenMap, statusIssueIds, expandedParents, parentIdentifierMap],
+    () => buildHierarchy(issues, childrenMap, statusIssueIds, expandedParents, parentInfoMap),
+    [issues, childrenMap, statusIssueIds, expandedParents, parentInfoMap],
   );
 
   const allRenderIds = useMemo(
@@ -458,12 +504,18 @@ function StatusAccordionItem({
 
   const disableSorting = !!sortLabel;
 
+  const isHighlighted = highlightedStatus === status;
+
   return (
     <Accordion.Item value={status} ref={dragEnabled ? setDroppableRef : undefined}>
       <Accordion.Header
         className={`group/header sticky top-0 z-10 flex h-10 items-center rounded-lg bg-muted transition-colors hover:bg-accent ${
           isOver && !isExpanded
             ? "ring-2 ring-brand/25 bg-accent/15"
+            : ""
+        } ${
+          isHighlighted
+            ? "ring-1 ring-brand/20 bg-accent/10"
             : ""
         }`}
       >
@@ -524,8 +576,11 @@ function StatusAccordionItem({
                   isParent={item.isParent}
                   isExpanded={expandedParents.has(item.issue.id)}
                   childCount={item.childCount}
+                  crossStatusChildCount={item.crossStatusChildCount}
                   onToggleChildren={item.isParent ? () => onToggleExpand(item.issue.id) : undefined}
-                  parentIdentifier={item.parentIdentifier}
+                  parentInfo={item.parentInfo}
+                  onHoverParent={onHoverParent}
+                  onScrollToParent={onScrollToParent}
                 />
               ))}
               {hasMore && (
@@ -543,8 +598,11 @@ function StatusAccordionItem({
                   isParent={item.isParent}
                   isExpanded={expandedParents.has(item.issue.id)}
                   childCount={item.childCount}
+                  crossStatusChildCount={item.crossStatusChildCount}
                   onToggleChildren={item.isParent ? () => onToggleExpand(item.issue.id) : undefined}
-                  parentIdentifier={item.parentIdentifier}
+                  parentInfo={item.parentInfo}
+                  onHoverParent={onHoverParent}
+                  onScrollToParent={onScrollToParent}
                 />
               ))}
               {hasMore && (

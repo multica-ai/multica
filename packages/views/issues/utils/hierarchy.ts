@@ -1,6 +1,16 @@
 import type { Issue } from "@multica/core/types";
 
 /**
+ * Info about a cross-status parent, used to render a clickable chip
+ * on child rows whose parent lives in a different status column.
+ */
+export interface ParentInfo {
+  identifier: string;
+  status: string;
+  parentId: string;
+}
+
+/**
  * A single item in the render tree for a status group.
  * Produced by {@link buildHierarchy} and consumed by {@link ListView}.
  */
@@ -12,8 +22,10 @@ export interface RenderItem {
   isParent: boolean;
   /** Number of children nested under this parent in the same status group. */
   childCount: number;
-  /** When a child's parent is NOT in the same status group, show the parent's identifier. */
-  parentIdentifier?: string;
+  /** Number of children in other status groups (for cross-status badge on parent row). */
+  crossStatusChildCount: number;
+  /** When a child's parent is NOT in the same status group, info about that parent. */
+  parentInfo?: ParentInfo;
   /** When a child's parent is in the same status group but hidden (e.g., filtered out). */
   orphaned?: boolean;
 }
@@ -24,20 +36,20 @@ export interface RenderItem {
  * - Children whose parent IS in the same status group are nested right after
  *   the parent, with indent=1.
  * - Children whose parent is in a different status group render at top level
- *   with a subtle `parentIdentifier` label.
+ *   with a clickable `parentInfo` chip.
  *
  * @param issues - a single status-group's issues (already filtered by status).
  * @param childrenMap - parent_issue_id → its direct children (all statuses).
  * @param statusIssueIds - the set of all issue ids that belong to this status group.
  * @param expandedParents - the set of parent issue ids whose children are expanded.
- * @param parentIdentifierMap - parent issue id → its identifier string (e.g., "MUL-123").
+ * @param parentInfoMap - parent issue id → { identifier, status } for all known parents.
  */
 export function buildHierarchy(
   issues: Issue[],
   childrenMap: Map<string, readonly Issue[]>,
   statusIssueIds: Set<string>,
   expandedParents: ReadonlySet<string>,
-  parentIdentifierMap?: Map<string, string>,
+  parentInfoMap?: Map<string, ParentInfo>,
 ): RenderItem[] {
   const result: RenderItem[] = [];
 
@@ -79,18 +91,24 @@ export function buildHierarchy(
     const isParent = !!nestedChildren && nestedChildren.length > 0;
     const expanded = expandedParents.has(issue.id);
 
-    // Resolve parent identifier for children whose parent is in another status group.
-    let parentIdentifier: string | undefined;
+    // Compute cross-status child count for parent rows.
+    const allChildren = childrenMap.get(issue.id) ?? [];
+    const sameStatusCount = nestedChildren?.length ?? 0;
+    const crossStatusCount = allChildren.length - sameStatusCount;
+
+    // Resolve parent info for children whose parent is in another status group.
+    let parentInfo: ParentInfo | undefined;
     if (issue.parent_issue_id && !statusIssueIds.has(issue.parent_issue_id)) {
-      parentIdentifier = parentIdentifierMap?.get(issue.parent_issue_id);
+      parentInfo = parentInfoMap?.get(issue.parent_issue_id);
     }
 
     result.push({
       issue,
       indent: 0,
       isParent,
-      childCount: isParent ? nestedChildren!.length : 0,
-      parentIdentifier,
+      childCount: isParent ? sameStatusCount : 0,
+      crossStatusChildCount: isParent ? crossStatusCount : 0,
+      parentInfo,
     });
 
     if (isParent && expanded) {
@@ -100,6 +118,7 @@ export function buildHierarchy(
           indent: 1,
           isParent: false,
           childCount: 0,
+          crossStatusChildCount: 0,
         });
       }
     }
@@ -114,6 +133,7 @@ export function buildHierarchy(
         indent: 0,
         isParent: false,
         childCount: 0,
+        crossStatusChildCount: 0,
         orphaned: !!issue.parent_issue_id,
       });
     }
