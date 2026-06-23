@@ -1142,7 +1142,7 @@ func TestDispatcher_DebounceCoalescesRunTrigger(t *testing.T) {
 }
 
 func TestDispatcher_DebouncePreservesFreshAcrossWindow(t *testing.T) {
-	// If any message in the coalesced window is /fresh, the single
+	// If any message in the coalesced window is /new, the single
 	// resulting run must be fresh even though the latest sender/message
 	// still supplies the reply target and initiator.
 	sessionID := validUUID(0x66)

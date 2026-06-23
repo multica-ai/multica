@@ -3,8 +3,7 @@ package lark
 import "strings"
 
 const (
-	freshCommandPrefix = "/fresh"
-	newCommandPrefix   = "/new"
+	newCommandPrefix = "/new"
 )
 
 // FreshSessionCommand is the normalized fresh-start directive extracted from a
@@ -13,9 +12,10 @@ type FreshSessionCommand struct {
 	Body string
 }
 
-// parseFreshSessionCommand extracts a first-line /fresh or /new command from a
-// message body. Matching follows the /issue command rules: case-sensitive,
-// token-bounded, and only the first non-empty line can be a command.
+// parseFreshSessionCommand extracts a first-line /new command from a message
+// body. Matching follows the /issue command rules: case-sensitive,
+// token-bounded, and only the first non-empty line can be a command. That
+// means /new and /issue are mutually exclusive on the same first line.
 func parseFreshSessionCommand(body string) (*FreshSessionCommand, bool) {
 	lines := strings.Split(body, "\n")
 
@@ -58,8 +58,6 @@ func parseFreshSessionCommand(body string) (*FreshSessionCommand, bool) {
 
 func matchedFreshPrefix(line string) (string, bool) {
 	switch {
-	case strings.HasPrefix(line, freshCommandPrefix):
-		return freshCommandPrefix, true
 	case strings.HasPrefix(line, newCommandPrefix):
 		return newCommandPrefix, true
 	default:

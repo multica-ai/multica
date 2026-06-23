@@ -10,12 +10,6 @@ func TestParseFreshSessionCommand(t *testing.T) {
 		wantBody  string
 	}{
 		{
-			name:      "fresh with same-line body",
-			body:      "/fresh help me debug this",
-			wantMatch: true,
-			wantBody:  "help me debug this",
-		},
-		{
 			name:      "new with same-line body",
 			body:      "/new start from scratch",
 			wantMatch: true,
@@ -23,35 +17,35 @@ func TestParseFreshSessionCommand(t *testing.T) {
 		},
 		{
 			name:      "leading blank lines tolerated",
-			body:      "\n\n/fresh re-check the deploy",
+			body:      "\n\n/new re-check the deploy",
 			wantMatch: true,
 			wantBody:  "re-check the deploy",
 		},
 		{
 			name:      "multi-line body preserved",
-			body:      "/fresh title\nline one\nline two",
+			body:      "/new title\nline one\nline two",
 			wantMatch: true,
 			wantBody:  "title\nline one\nline two",
 		},
 		{
 			name:      "command alone produces empty body",
-			body:      "/fresh",
+			body:      "/new",
 			wantMatch: true,
 			wantBody:  "",
 		},
 		{
 			name:      "prefix of token rejected",
-			body:      "/freshness is not a command",
+			body:      "/newness is not a command",
 			wantMatch: false,
 		},
 		{
 			name:      "mid-sentence command rejected",
-			body:      "please /fresh this run",
+			body:      "please /new this run",
 			wantMatch: false,
 		},
 		{
 			name:      "wrong case rejected",
-			body:      "/Fresh help",
+			body:      "/New help",
 			wantMatch: false,
 		},
 		{

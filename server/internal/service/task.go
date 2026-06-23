@@ -752,7 +752,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		InitiatorUserID: initiatorUserID,
 		ForceFreshSession: pgtype.Bool{
 			Bool:  forceFreshSession,
-			Valid: forceFreshSession,
+			Valid: true,
 		},
 	})
 	if err != nil {

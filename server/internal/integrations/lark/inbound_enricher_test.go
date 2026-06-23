@@ -171,19 +171,19 @@ func TestEnrichFreshSessionStripsCommandAndSetsFlag(t *testing.T) {
 	fake := newEnricherFake()
 	in := InboundMessage{
 		MessageType: "text",
-		Body:        "/fresh rebuild the plan",
-		CommandBody: "/fresh rebuild the plan",
+		Body:        "/new rebuild the plan",
+		CommandBody: "/new rebuild the plan",
 	}
 
 	out := enrich(t, fake, in, InboundEnricherConfig{})
 
 	if !out.ForceFreshSession {
-		t.Fatalf("ForceFreshSession should be true for /fresh")
+		t.Fatalf("ForceFreshSession should be true for /new")
 	}
 	if out.Body != "rebuild the plan" {
 		t.Fatalf("Body should have directive stripped; got %q", out.Body)
 	}
-	if out.CommandBody != "/fresh rebuild the plan" {
+	if out.CommandBody != "/new rebuild the plan" {
 		t.Fatalf("CommandBody should remain the original command source; got %q", out.CommandBody)
 	}
 }
