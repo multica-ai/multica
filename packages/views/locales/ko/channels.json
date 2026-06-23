@@ -1,0 +1,87 @@
+{
+  "header": "채널",
+  "empty_prompt": "채팅을 시작할 채널을 선택하세요",
+  "input_placeholder": "메시지를 입력하세요. Markdown, 이미지, @mentions 지원",
+  "send_tooltip": "보내기 · {{shortcut}}",
+  "invite_only_notice": "초대된 멤버만 이 채널에서 메시지를 보낼 수 있습니다",
+  "no_messages": "아직 메시지가 없습니다. 첫 메시지를 보내보세요",
+  "no_replies": "아직 답글이 없습니다",
+  "reply_placeholder": "답글…",
+  "link_copied": "링크가 복사되었습니다",
+  "copy_failed": "복사 실패",
+  "send_failed": "전송 실패",
+  "reply_failed": "답글 실패",
+  "create_failed": "생성 실패",
+  "add_failed": "추가 실패",
+  "remove_failed": "제거 실패",
+  "update_failed": "업데이트 실패",
+  "channel_created": "채널이 생성되었습니다",
+  "member_added": "멤버가 추가되었습니다",
+  "member_removed": "멤버가 제거되었습니다",
+  "settings_updated": "채널 설정이 업데이트되었습니다",
+  "replies_count_one": "답글 {{count}}개",
+  "replies_count_other": "답글 {{count}}개",
+  "new_group": "새 그룹",
+  "new_channel": "새 채널",
+  "group_dialog": {
+    "title": "새 그룹",
+    "description": "채널을 위한 새 그룹을 만듭니다",
+    "name_placeholder": "그룹 이름",
+    "cancel": "취소",
+    "create": "만들기"
+  },
+  "create_channel_dialog": {
+    "title": "채널 만들기",
+    "description": "토론할 새 채널을 만듭니다",
+    "name_placeholder": "채널 이름",
+    "desc_placeholder": "설명 (선택사항)",
+    "open": "공개",
+    "invite": "초대 전용",
+    "cancel": "취소",
+    "create": "만들기"
+  },
+  "context_menu": {
+    "rename": "이름 변경",
+    "delete_group": "그룹 삭제",
+    "copy_link": "링크 복사",
+    "reply": "답글",
+    "convert_issue": "이슈로 변환",
+    "convert_agent": "Agent가 이슈로 변환"
+  },
+  "panel_header": {
+    "replies": "답글",
+    "members_settings": "멤버 & 설정",
+    "participants": "참여자"
+  },
+  "members": {
+    "channel_nature": "채널 유형",
+    "nature_description": "멤버가 참여하기 전에 추가되어야 하는지 여부를 제어합니다.",
+    "current_members": "현재 멤버",
+    "remove": "제거",
+    "add_member": "멤버 추가",
+    "search_placeholder": "멤버 검색",
+    "search_description": "이름, 이메일 또는 병음으로 워크스페이스 멤버를 검색합니다.",
+    "already_added": "추가됨",
+    "add": "추가",
+    "no_match": "일치하는 멤버가 없습니다",
+    "cannot_remove_admin": "관리자 또는 채널 소유자만 멤버를 제거할 수 있습니다",
+    "cannot_remove_only_owner": "유일한 소유자는 제거할 수 없습니다"
+  },
+  "task_status": {
+    "queued": "대기 중",
+    "dispatched": "배포됨",
+    "waiting_directory": "디렉토리 대기 중",
+    "running": "실행 중",
+    "completed": "완료",
+    "failed": "실패",
+    "cancelled": "취소됨"
+  },
+  "task_strip": {
+    "view_history": "실행 기록 보기",
+    "stop": "중지"
+  },
+  "resize_aria": {
+    "channel_list": "채널 목록 너비 조정",
+    "side_panel": "사이드 패널 너비 조정"
+  }
+}

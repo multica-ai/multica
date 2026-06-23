@@ -1,0 +1,87 @@
+{
+  "header": "チャンネル",
+  "empty_prompt": "チャットを開始するチャンネルを選択してください",
+  "input_placeholder": "メッセージを入力。Markdown、画像、@メンションに対応",
+  "send_tooltip": "送信 · {{shortcut}}",
+  "invite_only_notice": "招待されたメンバーのみがこのチャンネルでメッセージを送信できます",
+  "no_messages": "まだメッセージがありません。最初のメッセージを送信しましょう",
+  "no_replies": "まだ返信がありません",
+  "reply_placeholder": "返信…",
+  "link_copied": "リンクをコピーしました",
+  "copy_failed": "コピーに失敗しました",
+  "send_failed": "送信に失敗しました",
+  "reply_failed": "返信に失敗しました",
+  "create_failed": "作成に失敗しました",
+  "add_failed": "追加に失敗しました",
+  "remove_failed": "削除に失敗しました",
+  "update_failed": "更新に失敗しました",
+  "channel_created": "チャンネルを作成しました",
+  "member_added": "メンバーを追加しました",
+  "member_removed": "メンバーを削除しました",
+  "settings_updated": "チャンネル設定を更新しました",
+  "replies_count_one": "返信 {{count}}件",
+  "replies_count_other": "返信 {{count}}件",
+  "new_group": "新しいグループ",
+  "new_channel": "新しいチャンネル",
+  "group_dialog": {
+    "title": "新しいグループ",
+    "description": "チャンネルの新しいグループを作成します",
+    "name_placeholder": "グループ名",
+    "cancel": "キャンセル",
+    "create": "作成"
+  },
+  "create_channel_dialog": {
+    "title": "チャンネルを作成",
+    "description": "話題を議論する新しいチャンネルを作成します",
+    "name_placeholder": "チャンネル名",
+    "desc_placeholder": "説明（任意）",
+    "open": "公開",
+    "invite": "招待のみ",
+    "cancel": "キャンセル",
+    "create": "作成"
+  },
+  "context_menu": {
+    "rename": "名前を変更",
+    "delete_group": "グループを削除",
+    "copy_link": "リンクをコピー",
+    "reply": "返信",
+    "convert_issue": "Issueに変換",
+    "convert_agent": "AgentがIssueに変換"
+  },
+  "panel_header": {
+    "replies": "返信",
+    "members_settings": "メンバーと設定",
+    "participants": "参加者"
+  },
+  "members": {
+    "channel_nature": "チャンネルタイプ",
+    "nature_description": "メンバーが参加する前に追加が必要かどうかを制御します。",
+    "current_members": "現在のメンバー",
+    "remove": "削除",
+    "add_member": "メンバーを追加",
+    "search_placeholder": "メンバーを検索",
+    "search_description": "名前、メール、またはピンインでワークスペースメンバーを検索します。",
+    "already_added": "追加済み",
+    "add": "追加",
+    "no_match": "一致するメンバーがいません",
+    "cannot_remove_admin": "管理者またはチャンネルオーナーのみがメンバーを削除できます",
+    "cannot_remove_only_owner": "唯一のオーナーは削除できません"
+  },
+  "task_status": {
+    "queued": "待機中",
+    "dispatched": "ディスパッチ済み",
+    "waiting_directory": "ディレクトリ待機中",
+    "running": "実行中",
+    "completed": "完了",
+    "failed": "失敗",
+    "cancelled": "キャンセル済み"
+  },
+  "task_strip": {
+    "view_history": "実行履歴を表示",
+    "stop": "停止"
+  },
+  "resize_aria": {
+    "channel_list": "チャンネルリストの幅を調整",
+    "side_panel": "サイドパネルの幅を調整"
+  }
+}
