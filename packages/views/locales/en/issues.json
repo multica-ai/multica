@@ -326,7 +326,7 @@
       "unresolve_failed": "Failed to unresolve thread"
     },
     "expand_full_text": "Expand full text",
-    "loading_full_text": "Loading..."
+    "loading_full_text": "Loading...",
     "retry_load_full_text": "Retry",
   },
   "reply": {
