@@ -371,6 +371,7 @@
     "trigger_autopilot": "Autopilot run",
     "trigger_comment": "Comment trigger",
     "trigger_initial": "Initial run",
+    "trigger_handoff_prefix": "Handoff: ",
     "status_queued": "Queued",
     "status_dispatched": "Starting",
     "status_waiting_local_directory": "Waiting for local directory",

@@ -12,6 +12,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import { Spinner } from "@multica/ui/components/ui/spinner";
 import type { IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import { useUpdateIssue, useBatchUpdateIssues } from "@multica/core/issues/mutations";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -69,7 +70,11 @@ export function RunConfirmModal({
   const mode = d.mode ?? "assign";
 
   const [note, setNote] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  // Which footer action is in flight, so only the clicked button shows a
+  // spinner (the request runs an agent on the server for note assigns, so it is
+  // not instant — the disabled-only state read as frozen).
+  const [pendingAction, setPendingAction] = useState<"go" | "suppress" | null>(null);
+  const submitting = pendingAction !== null;
 
   const updateIssue = useUpdateIssue();
   const batchUpdate = useBatchUpdateIssues();
@@ -82,6 +87,7 @@ export function RunConfirmModal({
     enabled: issueIds.length > 0,
   });
 
+  const loading = preview.isLoading;
   const willStart = preview.totalCount > 0;
   const canNote = mode === "assign" && willStart;
   // Soft gate: an old runtime can't render the note. Disable the box but let
@@ -98,7 +104,7 @@ export function RunConfirmModal({
 
   const submit = async (suppressRun: boolean) => {
     if (issueIds.length === 0 || submitting) return;
-    setSubmitting(true);
+    setPendingAction(suppressRun ? "suppress" : "go");
     const payload = applyTo({
       ...(suppressRun ? { suppress_run: true } : {}),
       ...(!suppressRun && canNote && !noteDisabled && note.trim()
@@ -114,7 +120,7 @@ export function RunConfirmModal({
       onClose();
     } catch (err) {
       toast.error(err instanceof Error && err.message ? err.message : t(($) => $.run_confirm.toast_failed));
-      setSubmitting(false);
+      setPendingAction(null);
     }
   };
 
@@ -152,10 +158,24 @@ export function RunConfirmModal({
           <DialogTitle>
             {mode === "assign" ? t(($) => $.run_confirm.title_assign) : t(($) => $.run_confirm.title_status)}
           </DialogTitle>
-          <DialogDescription>{headline}</DialogDescription>
+          <DialogDescription>
+            {loading ? (
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <Spinner className="size-3.5" />
+                {t(($) => $.run_confirm.checking)}
+              </span>
+            ) : (
+              headline
+            )}
+          </DialogDescription>
         </DialogHeader>
 
-        {canNote ? (
+        {/* Assign mode keeps the note box mounted while the preview is in flight
+            (disabled), so the dialog opens at its resolved height instead of
+            growing when the predicate lands. Parked (no run) is the only case
+            without a note, and it can't be a Backlog assign (those skip this
+            modal), so it is rare. */}
+        {mode === "assign" && (loading || canNote) ? (
           <div className="grid gap-1.5">
             <label className="text-sm font-medium" htmlFor="handoff-note">
               {t(($) => $.run_confirm.note_label)}
@@ -164,30 +184,34 @@ export function RunConfirmModal({
               id="handoff-note"
               value={note}
               maxLength={MAX_HANDOFF_NOTE}
-              disabled={noteDisabled || submitting}
+              disabled={loading || noteDisabled || submitting}
               placeholder={t(($) => $.run_confirm.note_placeholder)}
               onChange={(e) => setNote(e.target.value)}
               rows={3}
             />
-            {noteDisabled ? (
+            {!loading && noteDisabled ? (
               <p className="text-xs text-muted-foreground">{t(($) => $.run_confirm.note_unsupported)}</p>
             ) : null}
           </div>
         ) : null}
 
         <DialogFooter>
-          {willStart ? (
+          {loading ? (
+            <Button type="button" disabled>
+              <Spinner className="size-4" />
+            </Button>
+          ) : willStart ? (
             <>
               <Button type="button" variant="outline" disabled={submitting} onClick={() => submit(true)}>
-                {t(($) => $.run_confirm.dont_start)}
+                {pendingAction === "suppress" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.dont_start)}
               </Button>
               <Button type="button" disabled={submitting} onClick={() => submit(false)}>
-                {t(($) => $.run_confirm.start)}
+                {pendingAction === "go" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.start)}
               </Button>
             </>
           ) : (
             <Button type="button" disabled={submitting} onClick={() => submit(false)}>
-              {t(($) => $.run_confirm.apply)}
+              {pendingAction === "go" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.apply)}
             </Button>
           )}
         </DialogFooter>

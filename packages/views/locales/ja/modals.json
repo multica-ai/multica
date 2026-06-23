@@ -53,6 +53,7 @@
   "run_confirm": {
     "title_assign": "割り当てて開始しますか？",
     "title_status": "今すぐ作業を開始しますか？",
+    "checking": "確認中…",
     "will_start_named": "割り当てると、{{name}} がすぐにこのイシューの作業を開始します。",
     "will_start_named_squad": "割り当てると、{{name}} のリーダーが内容を評価し、タスクの割り振りを開始します。",
     "will_start": "{{count}} 件のイシューの作業をすぐに開始します。",

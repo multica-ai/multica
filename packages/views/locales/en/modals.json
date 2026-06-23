@@ -53,6 +53,7 @@
   "run_confirm": {
     "title_assign": "Assign and start?",
     "title_status": "Start working now?",
+    "checking": "Checking…",
     "will_start_named": "Once assigned, {{name}} will start working on this issue right away.",
     "will_start_named_squad": "Once assigned, {{name}}'s leader will review it and start assigning the work.",
     "will_start": "This will start work on {{count}} issues right away.",

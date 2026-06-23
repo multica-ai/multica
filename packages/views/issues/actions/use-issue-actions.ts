@@ -57,6 +57,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const issueId = issue?.id ?? null;
   const issueIdentifier = issue?.identifier ?? null;
   const issueProjectId = issue?.project_id ?? null;
+  const issueStatus = issue?.status ?? null;
 
   const updateField = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
@@ -66,9 +67,15 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       // which applies the change itself — the four entry points share this one
       // backend-driven flow instead of guessing (MUL-3375). Every other field
       // change (status, priority, member assign, unassign) applies directly.
+      //
+      // Backlog is the parking lot: assigning a backlog issue never starts a run
+      // (server/internal/service/issue_trigger.go), so the modal would only show
+      // an empty "won't start" box with a single Apply button. Apply directly,
+      // matching the batch backlog short-circuit in BatchActionToolbar.
       if (
         (updates.assignee_type === "agent" || updates.assignee_type === "squad") &&
-        updates.assignee_id
+        updates.assignee_id &&
+        issueStatus !== "backlog"
       ) {
         openModal("issue-run-confirm", {
           issueIds: [issueId],
@@ -90,7 +97,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         },
       );
     },
-    [issueId, updateIssue, openModal, t],
+    [issueId, issueStatus, updateIssue, openModal, t],
   );
 
   const togglePin = useCallback(() => {

@@ -361,6 +361,7 @@
     "trigger_autopilot": "自动化运行",
     "trigger_comment": "评论触发",
     "trigger_initial": "首次运行",
+    "trigger_handoff_prefix": "交接：",
     "status_queued": "排队中",
     "status_dispatched": "启动中",
     "status_waiting_local_directory": "等待本地目录释放",

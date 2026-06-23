@@ -150,6 +150,24 @@ describe("useIssueActions", () => {
     expect(mockUpdateMutate).not.toHaveBeenCalled();
   });
 
+  it("assigning an agent to a backlog issue applies directly — backlog never starts a run", () => {
+    const backlogIssue = { ...mockIssue, status: "backlog" } as Issue;
+    const { result } = renderHook(() => useIssueActions(backlogIssue), { wrapper });
+
+    act(() => {
+      result.current.updateField({
+        assignee_type: "agent",
+        assignee_id: "agent-1",
+      });
+    });
+
+    expect(mockUpdateMutate).toHaveBeenCalledWith(
+      { id: "issue-1", assignee_type: "agent", assignee_id: "agent-1" },
+      expect.any(Object),
+    );
+    expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
   it("assigning a member applies directly without the run-confirm modal", () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
 

@@ -53,6 +53,7 @@
   "run_confirm": {
     "title_assign": "指派并开始处理？",
     "title_status": "现在开始处理？",
+    "checking": "检查中…",
     "will_start_named": "指派后，{{name}} 会立即开始工作。",
     "will_start_named_squad": "指派后，{{name}} 的队长会评估并开始安排任务。",
     "will_start": "将立即开始处理 {{count}} 个 issue。",

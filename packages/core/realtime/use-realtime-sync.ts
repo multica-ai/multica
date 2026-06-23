@@ -517,11 +517,15 @@ export function useRealtimeSync(
         // open composer's chips (e.g. an agent finishing its run becomes
         // triggerable again mid-typing).
         qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreviewAll() });
-        // Issue-trigger previews (assign/status/create/batch) are queue-
-        // dependent the same way — the status source's pending dedup means a
-        // task finishing changes "will this start a run", so refresh any open
-        // picker/modal preview (MUL-3375).
-        qc.invalidateQueries({ queryKey: issueKeys.issueTriggerPreviewAll() });
+        // Issue-trigger previews (assign/status/create/batch) are deliberately
+        // NOT invalidated here. Unlike comment triggers, the assign source
+        // (create / assignee change) cancels existing tasks before enqueuing, so
+        // a task event can never change its verdict; only the status source's
+        // pending dedup could, and that preview is advisory — the write path
+        // re-evaluates authoritatively, so a rare stale label is harmless.
+        // Refetching every mounted preview on every workspace task event caused
+        // visible flicker, so the preview now refetches only on input change
+        // (signature), mirroring its query design (MUL-3375).
       },
     };
 

@@ -53,6 +53,7 @@
   "run_confirm": {
     "title_assign": "할당하고 시작할까요?",
     "title_status": "지금 작업을 시작할까요?",
+    "checking": "확인 중…",
     "will_start_named": "할당하면 {{name}}이(가) 이 이슈 작업을 바로 시작합니다.",
     "will_start_named_squad": "할당하면 {{name}}의 리더가 내용을 평가한 뒤 작업 배분을 시작합니다.",
     "will_start": "{{count}}개 이슈의 작업을 바로 시작합니다.",
