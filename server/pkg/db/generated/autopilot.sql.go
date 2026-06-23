@@ -48,16 +48,25 @@ func (q *Queries) AdvanceTriggerNextRun(ctx context.Context, arg AdvanceTriggerN
 
 const claimDueScheduleTriggers = `-- name: ClaimDueScheduleTriggers :many
 
+WITH due AS (
+  SELECT t.id, t.next_run_at AS fired_at
+  FROM autopilot_trigger t
+  JOIN autopilot a ON t.autopilot_id = a.id
+  WHERE t.kind = 'schedule'
+    AND t.enabled = true
+    AND t.next_run_at IS NOT NULL
+    AND t.next_run_at <= now()
+    AND a.status = 'active'
+)
 UPDATE autopilot_trigger t
 SET next_run_at = NULL
-FROM autopilot a
-WHERE t.autopilot_id = a.id
-  AND t.kind = 'schedule'
-  AND t.enabled = true
+FROM due, autopilot a
+WHERE t.id = due.id
+  AND t.autopilot_id = a.id
   AND t.next_run_at IS NOT NULL
   AND t.next_run_at <= now()
   AND a.status = 'active'
-RETURNING t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, a.workspace_id AS autopilot_workspace_id
+RETURNING t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, due.fired_at, a.workspace_id AS autopilot_workspace_id
 `
 
 type ClaimDueScheduleTriggersRow struct {
@@ -76,6 +85,7 @@ type ClaimDueScheduleTriggersRow struct {
 	Provider             string             `json:"provider"`
 	SigningSecret        pgtype.Text        `json:"signing_secret"`
 	EventFilters         []byte             `json:"event_filters"`
+	FiredAt              pgtype.Timestamptz `json:"fired_at"`
 	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
 }
 
@@ -84,6 +94,12 @@ type ClaimDueScheduleTriggersRow struct {
 // =====================
 // Atomically claim all due schedule triggers to prevent concurrent execution.
 // Joins the autopilot table to ensure only active autopilots are fired.
+// The CTE snapshots next_run_at as fired_at (the UPDATE clears it to NULL, so
+// RETURNING would otherwise lose it) so the scheduler can advance the schedule
+// strictly past the occurrence it just fired, even when the claiming node's
+// local clock lags behind the database clock. The due conditions are repeated
+// in the UPDATE so a concurrent claim that already nulled next_run_at fails the
+// recheck and the row is claimed exactly once.
 func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueScheduleTriggersRow, error) {
 	rows, err := q.db.Query(ctx, claimDueScheduleTriggers)
 	if err != nil {
@@ -109,6 +125,7 @@ func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueSched
 			&i.Provider,
 			&i.SigningSecret,
 			&i.EventFilters,
+			&i.FiredAt,
 			&i.AutopilotWorkspaceID,
 		); err != nil {
 			return nil, err

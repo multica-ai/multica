@@ -255,16 +255,31 @@ RETURNING *;
 -- name: ClaimDueScheduleTriggers :many
 -- Atomically claim all due schedule triggers to prevent concurrent execution.
 -- Joins the autopilot table to ensure only active autopilots are fired.
+-- The CTE snapshots next_run_at as fired_at (the UPDATE clears it to NULL, so
+-- RETURNING would otherwise lose it) so the scheduler can advance the schedule
+-- strictly past the occurrence it just fired, even when the claiming node's
+-- local clock lags behind the database clock. The due conditions are repeated
+-- in the UPDATE so a concurrent claim that already nulled next_run_at fails the
+-- recheck and the row is claimed exactly once.
+WITH due AS (
+  SELECT t.id, t.next_run_at AS fired_at
+  FROM autopilot_trigger t
+  JOIN autopilot a ON t.autopilot_id = a.id
+  WHERE t.kind = 'schedule'
+    AND t.enabled = true
+    AND t.next_run_at IS NOT NULL
+    AND t.next_run_at <= now()
+    AND a.status = 'active'
+)
 UPDATE autopilot_trigger t
 SET next_run_at = NULL
-FROM autopilot a
-WHERE t.autopilot_id = a.id
-  AND t.kind = 'schedule'
-  AND t.enabled = true
+FROM due, autopilot a
+WHERE t.id = due.id
+  AND t.autopilot_id = a.id
   AND t.next_run_at IS NOT NULL
   AND t.next_run_at <= now()
   AND a.status = 'active'
-RETURNING t.*, a.workspace_id AS autopilot_workspace_id;
+RETURNING t.*, due.fired_at, a.workspace_id AS autopilot_workspace_id;
 
 -- =====================
 -- Task Queue (run_only mode)

@@ -117,7 +117,15 @@ func advanceNextRun(ctx context.Context, queries *db.Queries, t db.ClaimDueSched
 		tz = t.Timezone.String
 	}
 
-	next, err := service.ComputeNextRun(t.CronExpression.String, tz)
+	// Anchor the next run to the occurrence we just fired so a node whose clock
+	// lags the database clock cannot recompute — and re-fire — the same one.
+	firedAt := time.Time{}
+	if t.FiredAt.Valid {
+		firedAt = t.FiredAt.Time
+	}
+	ref := service.NextScheduleReference(time.Now(), firedAt)
+
+	next, err := service.ComputeNextRunAfter(t.CronExpression.String, tz, ref)
 	if err != nil {
 		slog.Warn("autopilot scheduler: failed to compute next run",
 			"trigger_id", util.UUIDToString(t.ID),
