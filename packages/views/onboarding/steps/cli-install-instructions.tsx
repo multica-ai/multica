@@ -61,7 +61,8 @@ function Step({ n, label, cmd }: { n: number; label: string; cmd: string }) {
 export function CliInstallInstructions() {
   const { t } = useT("onboarding");
   const serverUrl = useConfigStore((s) => s.serverUrl);
-  const tokenCmd = makeTokenCmd(serverUrl);
+  const cliServerUrl = useConfigStore((s) => s.cliServerUrl);
+  const tokenCmd = makeTokenCmd(cliServerUrl || serverUrl);
   return (
     <Card className="w-full">
       <CardContent className="space-y-4 pt-4">

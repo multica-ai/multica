@@ -1229,6 +1229,7 @@ export class ApiClient {
     server_url?: string;
     posthog_key?: string;
     posthog_host?: string;
+    cli_server_url?: string;
     analytics_environment?: string;
   }> {
     return this.fetch("/api/config");
