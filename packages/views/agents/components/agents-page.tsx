@@ -91,6 +91,7 @@ import {
   PersonalDefaultsDetail,
   SystemDefaultsDetail,
 } from "./defaults-detail";
+import { ConfigTemplateManager } from "./config-template-manager";
 import { useT } from "../../i18n";
 
 // Column template — single source of truth for header, rows, and skeletons.
@@ -1406,9 +1407,31 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         <SheetContent side="right" className="w-full overflow-y-auto p-0 sm:max-w-3xl">
           <SheetTitle className="sr-only">{t(($) => $.defaults.sheet_title)}</SheetTitle>
           <SheetDescription className="sr-only">{t(($) => $.defaults.sheet_desc)}</SheetDescription>
-          {defaultsSheet === "personal" && <PersonalDefaultsDetail />}
+          {defaultsSheet === "personal" && (
+            <>
+              <PersonalDefaultsDetail />
+              <div className="border-t px-5 py-4">
+                <ConfigTemplateManager
+                  scope="personal"
+                  title="个人配置模板"
+                  description="创建和管理个人配置模板，可快速应用到新 Agent"
+                />
+              </div>
+            </>
+          )}
           {defaultsSheet === "system" && (
-            <SystemDefaultsDetail readOnly={!isWorkspaceAdmin} />
+            <>
+              <SystemDefaultsDetail readOnly={!isWorkspaceAdmin} />
+              {isWorkspaceAdmin && (
+                <div className="border-t px-5 py-4">
+                  <ConfigTemplateManager
+                    scope="system"
+                    title="系统配置模板"
+                    description="创建和管理系统配置模板，团队成员可选择使用"
+                  />
+                </div>
+              )}
+            </>
           )}
           {defaultsSheet !== null && typeof defaultsSheet === "object" && (
             <OtherDefaultsDetail
