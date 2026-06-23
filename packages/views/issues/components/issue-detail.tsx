@@ -776,12 +776,12 @@ function ActivityBlock({
                     {"mentioned in channel "}
                     <AppLink
                       href={paths.channelDetail(
-                        (details.channel_id as string) ?? "",
-                        details.message_id ? { messageId: details.message_id as string } : undefined,
+                        (details.source_channel_id as string) ?? "",
+                        details.source_id ? { messageId: details.source_id as string } : undefined,
                       )}
                       className="font-medium text-foreground hover:underline"
                     >
-                      {(details.channel_name as string) || "channel"}
+                      {(details.source_channel_name as string) || "channel"}
                     </AppLink>
                   </span>
                 ) : (
