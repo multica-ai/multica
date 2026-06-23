@@ -197,7 +197,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
-	return &Handler{
+	h := &Handler{
 		Queries:               queries,
 		DB:                    executor,
 		TxStarter:             txStarter,
@@ -227,6 +227,14 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		}),
 		cfg: cfg,
 	}
+	// Wire the handler as the quick-create source linker so agent-converted
+	// issues get linked back to their source channel thread on completion
+	// (mirroring the manual ConvertMessageToIssue path). Set after the
+	// Handler is constructed to avoid the circular Handler↔TaskService init
+	// order — both already reference each other by the time the constructor
+	// returns.
+	taskSvc.SourceLinker = h
+	return h
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

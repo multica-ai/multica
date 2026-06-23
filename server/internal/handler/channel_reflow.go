@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -48,6 +49,17 @@ func (h *Handler) linkIssueToThread(ctx context.Context, issue *db.Issue, thread
 	if uuidToString(thread.WorkspaceID) != uuidToString(issue.WorkspaceID) {
 		return // cross-workspace linkage is not allowed
 	}
+	h.linkIssueToExistingThread(ctx, issue, thread)
+}
+
+// linkIssueToExistingThread is the inner half of linkIssueToThread once the
+// thread row is in hand. Shared with the agent-convert completion path, which
+// resolves the thread via ensureThreadForMessage and then reuses this so both
+// conversion routes (manual vs agent) produce structurally identical issues.
+func (h *Handler) linkIssueToExistingThread(ctx context.Context, issue *db.Issue, thread db.ChannelThread) {
+	if uuidToString(thread.WorkspaceID) != uuidToString(issue.WorkspaceID) {
+		return // cross-workspace linkage is not allowed
+	}
 	if err := h.Queries.LinkIssueSource(ctx, db.LinkIssueSourceParams{
 		ID:              issue.ID,
 		SourceChannelID: thread.ChannelID,
@@ -60,6 +72,59 @@ func (h *Handler) linkIssueToThread(ctx context.Context, issue *db.Issue, thread
 	issue.SourceThreadID = thread.ID
 	h.linkIssueToThreadActivity(ctx, issue, thread)
 }
+
+// ensureThreadForMessage returns the thread anchored at the given message,
+// creating one implicitly when the message has no thread yet — the same
+// invariant ConvertMessageToIssue upholds so every issue-producing message
+// has a thread to link against. createdBy is the user/system to attribute the
+// implicit thread to. ok=false on any lookup/creation failure (best-effort).
+func (h *Handler) ensureThreadForMessage(ctx context.Context, channelID, messageID, workspaceID, createdBy pgtype.UUID) (db.ChannelThread, bool) {
+	msg, err := h.Queries.GetChannelMessage(ctx, messageID)
+	if err != nil || uuidToString(msg.ChannelID) != uuidToString(channelID) {
+		return db.ChannelThread{}, false
+	}
+	if thread, err := h.Queries.GetThreadByRootMessage(ctx, messageID); err == nil {
+		return thread, true
+	}
+	title := msg.Content
+	if len(title) > 50 {
+		title = title[:50]
+	}
+	thread, err := h.Queries.CreateChannelThread(ctx, db.CreateChannelThreadParams{
+		ChannelID:     channelID,
+		WorkspaceID:   workspaceID,
+		Title:         title,
+		CreatedBy:     createdBy,
+		RootMessageID: messageID,
+	})
+	if err != nil {
+		return db.ChannelThread{}, false
+	}
+	return thread, true
+}
+
+// LinkQuickCreateIssueToSource implements service.QuickCreateSourceLinker. It
+// is the completion-callback counterpart of ConvertMessageToIssue: the
+// agent-created issue is attached to the source channel thread so the two
+// conversion routes (manual vs agent) produce structurally identical issues
+// and both enjoy the bidirectional display + status reflow. Best-effort and
+// idempotent — skips when the issue is already source-linked.
+func (h *Handler) LinkQuickCreateIssueToSource(ctx context.Context, issue db.Issue, sourceChannelID, sourceMessageID, requesterID pgtype.UUID) {
+	if issue.SourceThreadID.Valid {
+		return
+	}
+	thread, ok := h.ensureThreadForMessage(ctx, sourceChannelID, sourceMessageID, issue.WorkspaceID, requesterID)
+	if !ok {
+		slog.Warn("quick-create source linkage: ensure thread failed",
+			"issue_id", uuidToString(issue.ID),
+			"source_channel_id", uuidToString(sourceChannelID),
+			"source_message_id", uuidToString(sourceMessageID),
+		)
+		return
+	}
+	h.linkIssueToExistingThread(ctx, &issue, thread)
+}
+
 
 // linkIssueToThreadActivity posts a "created from thread" system message into
 // the thread and a top-level channel activity. Called after the issue-thread

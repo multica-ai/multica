@@ -94,12 +94,21 @@ export interface ChannelMessage {
   created_at: string;
   updated_at: string;
   agent_tasks?: ChannelAgentTask[];
+  issues?: ThreadLinkedIssue[];
 }
 
 export interface ListChannelMessagesResponse {
   messages: ChannelMessage[];
   total: number;
   has_more?: boolean;
+  // Present only when ?around targeted a reply: the window is centered on
+  // root_message_id (a top-level message), and the client should auto-expand
+  // thread_id and scroll-highlight message_id (the original reply).
+  highlight?: {
+    root_message_id: string;
+    thread_id: string;
+    message_id: string;
+  };
 }
 
 export interface MessageThreadResponse {

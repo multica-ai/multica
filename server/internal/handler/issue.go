@@ -1956,6 +1956,13 @@ type QuickCreateIssueRequest struct {
 	ProjectID     string   `json:"project_id,omitempty"`
 	ParentIssueID string   `json:"parent_issue_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	// SourceChannelID / SourceMessageID are set when the quick-create is
+	// triggered from a channel message ("由 Agent 转为 Issue"). The
+	// completion callback links the produced issue back to the message's
+	// thread so the agent route mirrors the manual ConvertMessageToIssue
+	// route (OPE-1943). Both must be provided together.
+	SourceChannelID string `json:"source_channel_id,omitempty"`
+	SourceMessageID string `json:"source_message_id,omitempty"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -2129,7 +2136,46 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		parentIssueUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, attachmentIDs)
+	// Optional source_channel_id / source_message_id — set when the modal
+	// was opened from a channel message ("由 Agent 转为 Issue"). Re-validate
+	// the message belongs to this channel + workspace so a forged request
+	// can't smuggle a foreign message id through (the handler is the trust
+	// boundary). Both must be provided together; the completion callback
+	// uses them to link the produced issue back to the message's thread.
+	var sourceChannelUUID pgtype.UUID
+	var sourceMessageUUID pgtype.UUID
+	hasSource := strings.TrimSpace(req.SourceChannelID) != "" || strings.TrimSpace(req.SourceMessageID) != ""
+	if hasSource {
+		if strings.TrimSpace(req.SourceChannelID) == "" || strings.TrimSpace(req.SourceMessageID) == "" {
+			writeError(w, http.StatusBadRequest, "source_channel_id and source_message_id must be provided together")
+			return
+		}
+		chUUID, ok := parseUUIDOrBadRequest(w, req.SourceChannelID, "source_channel_id")
+		if !ok {
+			return
+		}
+		msgUUID, ok := parseUUIDOrBadRequest(w, req.SourceMessageID, "source_message_id")
+		if !ok {
+			return
+		}
+		channel, err := h.Queries.GetChannel(r.Context(), db.GetChannelParams{
+			ID:          chUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "source channel not found in this workspace")
+			return
+		}
+		msg, err := h.Queries.GetChannelMessage(r.Context(), msgUUID)
+		if err != nil || uuidToString(msg.ChannelID) != uuidToString(channel.ID) {
+			writeError(w, http.StatusBadRequest, "source message not found in this channel")
+			return
+		}
+		sourceChannelUUID = chUUID
+		sourceMessageUUID = msgUUID
+	}
+
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, attachmentIDs, sourceChannelUUID, sourceMessageUUID)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")

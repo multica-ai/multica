@@ -62,7 +62,7 @@ import { useT } from "../../i18n";
 
 export function InboxPage() {
   const { t } = useT("inbox");
-  const { searchParams, replace } = useNavigation();
+  const { searchParams, replace, push } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
   const wsPaths = useWorkspacePaths();
 
@@ -99,9 +99,13 @@ export function InboxPage() {
     const channelPath = buildChannelInboxPath(item, wsPaths);
     if (!channelPath) return false;
     setSelectedKeyState(getInboxItemSelectionKey(item));
-    replace(channelPath);
+    // push (not replace) so the inbox entry stays in history and the user
+    // can browser-back to it from the channel — the inbox's ?issue= select
+    // state is preserved by the back navigation. replace here used to wipe
+    // the inbox from the stack, leaving no way back.
+    push(channelPath);
     return true;
-  }, [replace, wsPaths]);
+  }, [push, wsPaths]);
 
   // Shared inbox links (?issue=<id>) may point to notifications not in this
   // user's inbox (archived, or never received). Fall back to the issue page

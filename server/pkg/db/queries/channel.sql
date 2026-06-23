@@ -283,6 +283,17 @@ FROM issue
 WHERE source_thread_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListIssuesByChannelMessages :many
+-- Issues produced from threads whose root is one of the given channel
+-- messages, with the root message id echoed back so callers can group issues
+-- by source message. Powers the top-level message → linked issue card on the
+-- channel timeline (OPE-1943 bidirectional display).
+SELECT i.id, i.number, i.title, i.status, i.priority, i.source_thread_id, t.root_message_id
+FROM issue i
+JOIN channel_thread t ON i.source_thread_id = t.id
+WHERE t.root_message_id = ANY($1::uuid[])
+ORDER BY i.created_at ASC;
+
 -- ============ Channel Groups ============
 
 -- name: ListChannelGroups :many

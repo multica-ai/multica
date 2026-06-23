@@ -1240,6 +1240,56 @@ func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]L
 	return items, nil
 }
 
+const listIssuesByChannelMessages = `-- name: ListIssuesByChannelMessages :many
+SELECT i.id, i.number, i.title, i.status, i.priority, i.source_thread_id, t.root_message_id
+FROM issue i
+JOIN channel_thread t ON i.source_thread_id = t.id
+WHERE t.root_message_id = ANY($1::uuid[])
+ORDER BY i.created_at ASC
+`
+
+type ListIssuesByChannelMessagesRow struct {
+	ID             pgtype.UUID `json:"id"`
+	Number         int32       `json:"number"`
+	Title          string      `json:"title"`
+	Status         string      `json:"status"`
+	Priority       string      `json:"priority"`
+	SourceThreadID pgtype.UUID `json:"source_thread_id"`
+	RootMessageID  pgtype.UUID `json:"root_message_id"`
+}
+
+// Issues produced from threads whose root is one of the given channel
+// messages, with the root message id echoed back so callers can group issues
+// by source message. Powers the top-level message → linked issue card on the
+// channel timeline (OPE-1943 bidirectional display).
+func (q *Queries) ListIssuesByChannelMessages(ctx context.Context, dollar_1 []pgtype.UUID) ([]ListIssuesByChannelMessagesRow, error) {
+	rows, err := q.db.Query(ctx, listIssuesByChannelMessages, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssuesByChannelMessagesRow{}
+	for rows.Next() {
+		var i ListIssuesByChannelMessagesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Number,
+			&i.Title,
+			&i.Status,
+			&i.Priority,
+			&i.SourceThreadID,
+			&i.RootMessageID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessageReplies = `-- name: ListMessageReplies :many
 SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id FROM channel_message m
 JOIN channel_thread t ON t.id = m.thread_id

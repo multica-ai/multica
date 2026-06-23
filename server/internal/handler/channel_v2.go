@@ -30,6 +30,7 @@ type ChannelMessageV2Response struct {
 	CreatedAt   string                     `json:"created_at"`
 	UpdatedAt   string                     `json:"updated_at"`
 	AgentTasks  []ChannelAgentTaskResponse `json:"agent_tasks,omitempty"`
+	Issues      []threadIssueResponse      `json:"issues,omitempty"`
 }
 
 type ChannelAgentTaskResponse struct {
@@ -240,6 +241,46 @@ func (h *Handler) attachChannelAgentTasks(ctx context.Context, messages []Channe
 	return messages
 }
 
+// attachChannelMessageIssues links each top-level message to the issues that
+// were produced from its thread (source_thread.root_message_id = message.id),
+// so the channel timeline can render a linked-issue card directly on the
+// message — the channel-side half of the OPE-1943 bidirectional display.
+// Single batched query regardless of message count (no N+1). Best-effort: a
+// query error leaves Issues empty rather than failing the whole list.
+func (h *Handler) attachChannelMessageIssues(ctx context.Context, messages []ChannelMessageV2Response) []ChannelMessageV2Response {
+	if len(messages) == 0 {
+		return messages
+	}
+	messageIDs := make([]pgtype.UUID, 0, len(messages))
+	for _, msg := range messages {
+		if id, err := parseUUIDErr(msg.ID); err == nil {
+			messageIDs = append(messageIDs, id)
+		}
+	}
+	if len(messageIDs) == 0 {
+		return messages
+	}
+	rows, err := h.Queries.ListIssuesByChannelMessages(ctx, messageIDs)
+	if err != nil {
+		return messages
+	}
+	byMessage := make(map[string][]threadIssueResponse)
+	for _, row := range rows {
+		rootID := uuidToString(row.RootMessageID)
+		byMessage[rootID] = append(byMessage[rootID], threadIssueResponse{
+			ID:       uuidToString(row.ID),
+			Number:   row.Number,
+			Title:    row.Title,
+			Status:   row.Status,
+			Priority: row.Priority,
+		})
+	}
+	for i := range messages {
+		messages[i].Issues = byMessage[messages[i].ID]
+	}
+	return messages
+}
+
 // attachChannelAuthorNames resolves the display name for each message author
 // so the UI can render a real Member/Agent name instead of the bare
 // author_type ("member"/"agent"). Lookups are deduplicated per distinct author
@@ -336,25 +377,52 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 	var resp []ChannelMessageV2Response
 	var hasMore bool
 	loaded := false
+	// highlight is set when ?around targets a reply: the window is centered on
+	// the reply's thread root (so the root lands in the top-level list), and
+	// these fields tell the client which thread to auto-expand and which reply
+	// to scroll-highlight. Empty for top-level targets (the client highlights
+	// the ?message id directly).
+	var highlight *channelMessageHighlight
 
 	// ?around=<id> deep-links to a window centered on the target message. A
-	// malformed id is a 400; a well-formed id that no longer exists, belongs to
-	// another channel, or is a reply (not top-level) silently falls back to the
-	// latest page — a stale shared link should still open the channel, not
-	// white-screen it.
+	// malformed id is a 400; a well-formed id that no longer exists or belongs
+	// to another channel silently falls back to the latest page — a stale
+	// shared link should still open the channel, not white-screen it. A reply
+	// target is resolved to its thread root so the root message is the window
+	// center (replies never appear in the top-level list); the original reply
+	// id is echoed back via `highlight` so the client can expand the thread and
+	// scroll to it.
 	if aroundStr != "" {
 		targetID, parseOK := parseUUIDOrBadRequest(w, aroundStr, "around message id")
 		if !parseOK {
 			return
 		}
 		if target, err := h.Queries.GetChannelMessage(r.Context(), targetID); err == nil &&
-			target.ChannelID == cctx.channel.ID && !target.ThreadID.Valid {
-			window, more, err := h.loadAroundWindow(r.Context(), cctx, target, limit)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to list messages")
-				return
+			target.ChannelID == cctx.channel.ID {
+			center := target
+			if target.ThreadID.Valid {
+				// Reply target — re-anchor on its thread root message.
+				thread, terr := h.Queries.GetChannelThread(r.Context(), target.ThreadID)
+				if terr == nil && thread.RootMessageID.Valid {
+					if root, rerr := h.Queries.GetChannelMessage(r.Context(), thread.RootMessageID); rerr == nil &&
+						root.ChannelID == cctx.channel.ID {
+						center = root
+						highlight = &channelMessageHighlight{
+							RootMessageID: uuidToString(root.ID),
+							ThreadID:      uuidToString(thread.ID),
+							MessageID:     uuidToString(target.ID),
+						}
+					}
+				}
 			}
-			resp, hasMore, loaded = window, more, true
+			if !center.ThreadID.Valid {
+				window, more, err := h.loadAroundWindow(r.Context(), cctx, center, limit)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed to list messages")
+					return
+				}
+				resp, hasMore, loaded = window, more, true
+			}
 		}
 	}
 
@@ -407,7 +475,22 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 
 	resp = h.attachChannelAgentTasks(r.Context(), resp)
 	resp = h.attachChannelAuthorNames(r.Context(), resp)
-	writeJSON(w, http.StatusOK, map[string]any{"messages": resp, "total": len(resp), "has_more": hasMore})
+	resp = h.attachChannelMessageIssues(r.Context(), resp)
+	response := map[string]any{"messages": resp, "total": len(resp), "has_more": hasMore}
+	if highlight != nil {
+		response["highlight"] = highlight
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// channelMessageHighlight is returned by ListChannelMessages when ?around
+// targets a reply: the client centers the window on root_message_id (which
+// lives in the top-level list), auto-expands thread_id, and scroll-highlights
+// message_id (the original reply).
+type channelMessageHighlight struct {
+	RootMessageID string `json:"root_message_id"`
+	ThreadID      string `json:"thread_id"`
+	MessageID     string `json:"message_id"`
 }
 
 // loadAroundWindow loads a deep-link window centered on a target message: up

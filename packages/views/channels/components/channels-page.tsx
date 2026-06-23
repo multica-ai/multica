@@ -68,6 +68,7 @@ import type {
   ChannelMessage,
   ChannelMember,
   ChannelSummary,
+  ListChannelMessagesResponse,
   MemberWithUser,
   MessageThreadResponse,
 } from "@multica/core/types";
@@ -113,7 +114,7 @@ import {
   type ContentEditorRef,
   useFileDropZone,
 } from "../../editor";
-import { useNavigation } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { TranscriptButton } from "../../common/task-transcript";
 import { TerminateTaskConfirmDialog } from "../../issues/components/terminate-task-confirm-dialog";
@@ -211,7 +212,9 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
   // the first page loads a window centered on it (the target may be older than
   // the latest page), and also drives the scroll-to-and-highlight on render.
   const linkedMessageId = nav.searchParams.get("message")?.trim() || null;
-  const { data: messages, isLoading: loadingMessages, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery(channelMessagesOptions(wsId, channelId ?? null, linkedMessageId));
+  const { data: msgData, isLoading: loadingMessages, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery(channelMessagesOptions(wsId, channelId ?? null, linkedMessageId));
+  const messages = msgData?.messages ?? [];
+  const highlight = msgData?.highlight ?? null;
   const { data: members = [] } = useQuery(channelMembersOptions(wsId, channelId ?? null));
   const { data: workspaceMembers = [] } = useQuery(memberListOptions(wsId));
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
@@ -224,6 +227,16 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
     () => workspaceMembers.find((m) => m.user_id === currentUserId) ?? null,
     [currentUserId, workspaceMembers],
   );
+  // @-mention candidate ids. Open channels let you @ any workspace member
+  // (the backend already notifies workspace-wide for open channels); invite
+  // channels restrict candidates to channel members only. invite-only is the
+  // regression guard — narrowing the candidate set there must not change.
+  const mentionMemberIds = useMemo(() => {
+    if (activeChannel?.access_mode === "open") {
+      return workspaceMembers.map((m) => m.user_id);
+    }
+    return members.map((m) => m.user_id);
+  }, [activeChannel?.access_mode, workspaceMembers, members]);
 
   const canManageChannel =
     activeChannel?.member_role === "owner" ||
@@ -393,13 +406,14 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
               loading={loadingMessages}
               channelId={channelId}
               wsId={wsId}
-              memberIds={members.map((m) => m.user_id)}
+              memberIds={mentionMemberIds}
               onOpenReplies={openReplies}
               qc={qc}
               hasMore={hasNextPage}
               loadMore={fetchNextPage}
               loadingMore={isFetchingNextPage}
               canPost={activeChannel.access_mode === "open" || activeChannel.is_member}
+              highlight={highlight}
             />
           </div>
         ) : (
@@ -436,9 +450,10 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
                 data={threadQuery.data}
                 loading={threadQuery.isLoading}
                 wsId={wsId}
-                memberIds={members.map((m) => m.user_id)}
+                memberIds={mentionMemberIds}
                 qc={qc}
                 onClose={closeSidePanel}
+                highlightMessageId={highlight?.message_id ?? null}
               />
             ) : (
               <ChannelMembersPanel
@@ -553,22 +568,44 @@ function ChannelList({
 
   // Resolve which group a drag would land in, plus the target position.
   // `groupId === null` means the ungrouped zone. Returns null when the
-  // pointer is over nothing droppable.
+  // pointer is over nothing droppable. Position is computed as a midpoint
+  // between neighbours (position is a DOUBLE PRECISION) so dragging onto a
+  // channel reorders it rather than colliding with the target's own position
+  // — the previous impl returned overChannel.position directly, so any drop
+  // onto a channel produced two channels sharing one position and the
+  // within-group sort order became nondeterministic.
   const resolveDropTarget = useCallback(
     (overId: string): { groupId: string | null; position: number } | null => {
+      // Channels in display (position-ASC) order for a given group, or the
+      // ungrouped zone. `groupId === null` selects the ungrouped zone.
+      const orderedChannels = (groupId: string | null): ChannelSummary[] => {
+        if (groupId === null) return ungrouped;
+        return groupMap.get(groupId)?.channels ?? [];
+      };
       if (overId === UNGROUPED_DROP_ID) {
         const last = ungrouped[ungrouped.length - 1];
         return { groupId: null, position: last ? last.position + 1 : 1 };
       }
       if (overId.startsWith("group:")) {
         const gId = overId.slice(6);
-        const gChannels = groupMap.get(gId)?.channels ?? [];
+        const gChannels = orderedChannels(gId);
         const last = gChannels[gChannels.length - 1];
         return { groupId: gId, position: last ? last.position + 1 : 1 };
       }
       const overChannel = channels.find((c) => c.id === overId);
       if (overChannel) {
-        return { groupId: overChannel.group_id ?? null, position: overChannel.position };
+        const groupId = overChannel.group_id ?? null;
+        const siblings = orderedChannels(groupId);
+        const idx = siblings.findIndex((c) => c.id === overChannel.id);
+        // Drop *before* the hovered channel → midpoint with the previous
+        // sibling; at the head of the list → half of the first position.
+        if (idx <= 0) {
+          const first = siblings[0];
+          return { groupId, position: first ? first.position / 2 : 1 };
+        }
+        const prev = siblings[idx - 1]!;
+        const cur = siblings[idx]!;
+        return { groupId, position: (prev.position + cur.position) / 2 };
       }
       return null;
     },
@@ -608,8 +645,11 @@ function ChannelList({
       if (!target) return;
 
       const currentGroup = dragged.group_id ?? null;
-      // No-op when dropped back onto itself or its current position.
-      if (target.groupId === currentGroup && target.position === dragged.position) {
+      // No-op when dropped back onto itself. Position is a midpoint now, so
+      // a same-position equality check no longer applies — dragging onto
+      // oneself resolves to a drop-before-self, which still moves the channel
+      // in front of its current slot only when there's a preceding sibling.
+      if (target.groupId === currentGroup && String(over.id) === draggedId) {
         return;
       }
 
@@ -986,6 +1026,7 @@ function MessageList({
   loadMore,
   loadingMore,
   canPost = true,
+  highlight = null,
 }: {
   messages: ChannelMessage[];
   loading: boolean;
@@ -998,6 +1039,7 @@ function MessageList({
   loadMore?: () => void;
   loadingMore?: boolean;
   canPost?: boolean;
+  highlight?: ListChannelMessagesResponse["highlight"] | null;
 }) {
   const editorRef = useRef<ContentEditorRef>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -1030,7 +1072,22 @@ function MessageList({
   }, [channelId]);
 
   useEffect(() => {
-    if (!linkedMessageId || messages.length === 0) return;
+    if (messages.length === 0) return;
+    // Reply deep-link (?around targeted a reply): center the window on the
+    // thread root message, then auto-open its reply panel so the reply —
+    // which lives inside the panel, not the top-level list — is reachable.
+    // The RepliesPanel handles scrolling to / highlighting the reply itself.
+    if (highlight?.root_message_id) {
+      if (didScrollToLinked.current === highlight.message_id) return;
+      const el = document.getElementById(`channel-msg-${highlight.root_message_id}`);
+      if (!el) return;
+      didScrollToLinked.current = highlight.message_id;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      onOpenReplies(highlight.root_message_id);
+      return;
+    }
+    // Top-level deep-link: scroll to + briefly highlight the message.
+    if (!linkedMessageId) return;
     if (didScrollToLinked.current === linkedMessageId) return;
     const el = document.getElementById(`channel-msg-${linkedMessageId}`);
     if (!el) return;
@@ -1038,7 +1095,7 @@ function MessageList({
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.classList.add("ring-2", "ring-brand/50", "rounded-md");
     setTimeout(() => el.classList.remove("ring-2", "ring-brand/50", "rounded-md"), 3000);
-  }, [linkedMessageId, messages.length]);
+  }, [linkedMessageId, messages.length, highlight, onOpenReplies]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -1105,7 +1162,13 @@ function MessageList({
                 onOpenReplies={onOpenReplies}
                 onCopyLink={handleCopyLink}
                 onConvertManual={(m) => openModal("create-issue", { description: m.content })}
-                onConvertAgent={(m) => openModal("quick-create-issue", { description: m.content })}
+                onConvertAgent={(m) =>
+                  openModal("quick-create-issue", {
+                    prompt: m.content,
+                    source_channel_id: channelId,
+                    source_message_id: m.id,
+                  })
+                }
               />
             ))}
             <div ref={bottomRef} />
@@ -1232,6 +1295,7 @@ function MessageRow({
               </button>
             )}
             <ChannelAgentTaskStrip tasks={message.agent_tasks ?? []} />
+            <ChannelLinkedIssuesStrip issues={message.issues ?? []} />
           </div>
         </li>
       </ContextMenuTrigger>
@@ -1337,6 +1401,29 @@ function ChannelAgentTaskStrip({ tasks }: { tasks: ChannelMessage["agent_tasks"]
   );
 }
 
+// ChannelLinkedIssuesStrip renders the issues produced from this message's
+// thread as clickable chips — the channel-side half of the OPE-1943
+// bidirectional display. Each chip links to the issue detail page.
+function ChannelLinkedIssuesStrip({ issues }: { issues: ChannelMessage["issues"] }) {
+  const paths = useWorkspacePaths();
+  if (!issues || issues.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {issues.map((issue) => (
+        <AppLink
+          key={issue.id}
+          href={paths.issueDetail(issue.id)}
+          className="inline-flex items-center gap-1 rounded-md border bg-muted/30 px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+        >
+          <FileText className="h-3 w-3" />
+          <span className="font-medium text-foreground">#{issue.number}</span>
+          <span className="max-w-[12rem] truncate">{issue.title}</span>
+        </AppLink>
+      ))}
+    </div>
+  );
+}
+
 function channelTaskStatusLabel(status: string): string {
   switch (status) {
     case "queued":
@@ -1367,6 +1454,7 @@ function RepliesPanel({
   memberIds,
   qc,
   onClose,
+  highlightMessageId = null,
 }: {
   channelId: string;
   messageId: string;
@@ -1376,6 +1464,7 @@ function RepliesPanel({
   memberIds: string[];
   qc: ReturnType<typeof useQueryClient>;
   onClose: () => void;
+  highlightMessageId?: string | null;
 }) {
   const editorRef = useRef<ContentEditorRef>(null);
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
@@ -1401,8 +1490,12 @@ function RepliesPanel({
   }, [openModal]);
 
   const handleConvertAgent = useCallback((msg: ChannelMessage) => {
-    openModal("quick-create-issue", { description: msg.content });
-  }, [openModal]);
+    openModal("quick-create-issue", {
+      prompt: msg.content,
+      source_channel_id: channelId,
+      source_message_id: msg.id,
+    });
+  }, [channelId, openModal]);
 
   const replyMutation = useMutation({
     mutationFn: (content: string) => api.replyToMessage(channelId, messageId, { content }),
@@ -1421,6 +1514,20 @@ function RepliesPanel({
     if (!content || editorRef.current?.hasActiveUploads()) return;
     replyMutation.mutate(content);
   }, [replyMutation]);
+
+  const didHighlightReply = useRef<string | null>(null);
+  // Scroll to + briefly highlight the deep-linked reply once the thread data
+  // has loaded. Only fires when this panel was opened via a reply deep-link
+  // (highlightMessageId set by the ?around reply-resolution path).
+  useEffect(() => {
+    if (!highlightMessageId || !data || didHighlightReply.current === highlightMessageId) return;
+    const el = document.getElementById(`channel-reply-${highlightMessageId}`);
+    if (!el) return;
+    didHighlightReply.current = highlightMessageId;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-brand/50", "rounded-md");
+    setTimeout(() => el.classList.remove("ring-2", "ring-brand/50", "rounded-md"), 3000);
+  }, [highlightMessageId, data]);
 
   return (
     <div className="flex h-full min-w-0 flex-col border-l bg-background shadow-sm">
@@ -1530,7 +1637,7 @@ function PanelMessage({
   const authorId = message.author_id ?? "";
 
   const content = (
-    <div className={cn("flex items-start gap-2", framed && "rounded-md border bg-muted/30 p-2")}>
+    <div id={`channel-reply-${message.id}`} className={cn("flex items-start gap-2", framed && "rounded-md border bg-muted/30 p-2")}>
       {isSystem ? (
         <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
           <Settings className="h-3.5 w-3.5" />
@@ -1552,6 +1659,7 @@ function PanelMessage({
         </div>
         <ReadonlyContent content={message.content} className="mt-1 select-text break-words text-sm" />
         <ChannelAgentTaskStrip tasks={message.agent_tasks ?? []} />
+        <ChannelLinkedIssuesStrip issues={message.issues ?? []} />
       </div>
     </div>
   );
