@@ -125,17 +125,21 @@ export function ListView({
           const el = document.querySelector(`[data-issue-id="${parentId}"]`) as HTMLElement | null;
           if (el) {
             el.scrollIntoView({ behavior: "auto", block: "center" });
-            // Flash highlight via inline style (classList would be purged by Tailwind JIT).
-            // The row already has transition-colors in its className, so backgroundColor
-            // changes animate smoothly.
-            el.style.backgroundColor = "color-mix(in srgb, var(--color-brand, #a78bfa) 20%, transparent)";
-            // Force style recalculation so the browser picks up the background change
-            // before clearing it, which triggers the transition.
+            // Flash highlight: inset ring + deeper background via inline style
+            // (classList is purged by Tailwind JIT so we avoid it entirely).
+            el.style.transition = "background-color 500ms ease-out, box-shadow 500ms ease-out";
+            el.style.backgroundColor = "color-mix(in srgb, var(--color-brand, #a78bfa) 30%, transparent)";
+            el.style.boxShadow = "inset 0 0 0 2px var(--color-brand, #a78bfa)";
+            // Force reflow so the browser registers the initial state, then clear
+            // to trigger the transition back to normal.
             void el.offsetHeight;
             el.style.backgroundColor = "";
-            // Clean up the inline style property after the transition completes.
+            el.style.boxShadow = "";
+            // Clean up inline properties after the transition completes.
             setTimeout(() => {
+              el.style.removeProperty("transition");
               el.style.removeProperty("background-color");
+              el.style.removeProperty("box-shadow");
             }, 600);
           }
         });
