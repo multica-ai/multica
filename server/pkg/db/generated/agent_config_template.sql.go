@@ -14,7 +14,7 @@ import (
 const clearAgentPersonalTemplate = `-- name: ClearAgentPersonalTemplate :one
 UPDATE agent SET personal_template_id = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id, skip_system_template, skip_personal_template
 `
 
 func (q *Queries) ClearAgentPersonalTemplate(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -47,6 +47,8 @@ func (q *Queries) ClearAgentPersonalTemplate(ctx context.Context, id pgtype.UUID
 		&i.ServiceTier,
 		&i.SystemTemplateID,
 		&i.PersonalTemplateID,
+		&i.SkipSystemTemplate,
+		&i.SkipPersonalTemplate,
 	)
 	return i, err
 }
@@ -54,7 +56,7 @@ func (q *Queries) ClearAgentPersonalTemplate(ctx context.Context, id pgtype.UUID
 const clearAgentSystemTemplate = `-- name: ClearAgentSystemTemplate :one
 UPDATE agent SET system_template_id = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id, skip_system_template, skip_personal_template
 `
 
 func (q *Queries) ClearAgentSystemTemplate(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -87,6 +89,8 @@ func (q *Queries) ClearAgentSystemTemplate(ctx context.Context, id pgtype.UUID) 
 		&i.ServiceTier,
 		&i.SystemTemplateID,
 		&i.PersonalTemplateID,
+		&i.SkipSystemTemplate,
+		&i.SkipPersonalTemplate,
 	)
 	return i, err
 }
@@ -395,7 +399,7 @@ UPDATE agent SET
     personal_template_id = COALESCE($3, personal_template_id),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, custom_env_copied_pending, thinking_level, service_tier, system_template_id, personal_template_id, skip_system_template, skip_personal_template
 `
 
 type UpdateAgentTemplateBindingParams struct {
@@ -434,6 +438,8 @@ func (q *Queries) UpdateAgentTemplateBinding(ctx context.Context, arg UpdateAgen
 		&i.ServiceTier,
 		&i.SystemTemplateID,
 		&i.PersonalTemplateID,
+		&i.SkipSystemTemplate,
+		&i.SkipPersonalTemplate,
 	)
 	return i, err
 }

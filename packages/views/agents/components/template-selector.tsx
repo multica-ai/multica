@@ -43,18 +43,33 @@ export function TemplateSelector({
     queryFn: () => api.listAgentConfigTemplates(workspaceId, "personal"),
   });
 
+  // Determine current system value
+  const systemValue = binding?.skip_system_template
+    ? "__skip__"
+    : binding?.system_template_id || "__default__";
+
+  // Determine current personal value
+  const personalValue = binding?.skip_personal_template
+    ? "__skip__"
+    : binding?.personal_template_id || "__default__";
+
   const handleSystemChange = useCallback(
     (value: string | null) => {
       if (value === null) return;
+
+      const isSkip = value === "__skip__";
+      const isDefault = value === "__default__";
+
       api.updateAgentTemplateBinding(workspaceId, agentId, {
-        system_template_id: value === "__default__" ? null : value,
+        system_template_id: isDefault ? null : isSkip ? null : value,
         personal_template_id: undefined, // no change
+        skip_system_template: isSkip ? true : isDefault ? false : false,
       }).then((newBinding) => {
         onBindingChange(newBinding);
         queryClient.invalidateQueries({
           queryKey: configTemplateKeys.all(workspaceId),
         });
-        toast.success("系统模板已更新");
+        toast.success(isSkip ? "已跳过系统模板" : "系统模板已更新");
       }).catch((err) => {
         toast.error("更新失败", {
           description: err instanceof Error ? err.message : "未知错误",
@@ -67,15 +82,20 @@ export function TemplateSelector({
   const handlePersonalChange = useCallback(
     (value: string | null) => {
       if (value === null) return;
+
+      const isSkip = value === "__skip__";
+      const isDefault = value === "__default__";
+
       api.updateAgentTemplateBinding(workspaceId, agentId, {
         system_template_id: undefined, // no change
-        personal_template_id: value === "__default__" ? null : value,
+        personal_template_id: isDefault ? null : isSkip ? null : value,
+        skip_personal_template: isSkip ? true : isDefault ? false : false,
       }).then((newBinding) => {
         onBindingChange(newBinding);
         queryClient.invalidateQueries({
           queryKey: configTemplateKeys.all(workspaceId),
         });
-        toast.success("个人模板已更新");
+        toast.success(isSkip ? "已跳过个人模板" : "个人模板已更新");
       }).catch((err) => {
         toast.error("更新失败", {
           description: err instanceof Error ? err.message : "未知错误",
@@ -108,7 +128,7 @@ export function TemplateSelector({
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">系统模板</Label>
           <Select
-            value={binding?.system_template_id || "__default__"}
+            value={systemValue}
             onValueChange={handleSystemChange}
           >
             <SelectTrigger className="h-8 text-xs">
@@ -116,6 +136,7 @@ export function TemplateSelector({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__default__">跟随默认</SelectItem>
+              <SelectItem value="__skip__">不使用模板</SelectItem>
               {systemTemplates?.map((tpl) => (
                 <SelectItem key={tpl.id} value={tpl.id}>
                   {tpl.name}
@@ -130,7 +151,7 @@ export function TemplateSelector({
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">个人模板</Label>
           <Select
-            value={binding?.personal_template_id || "__default__"}
+            value={personalValue}
             onValueChange={handlePersonalChange}
           >
             <SelectTrigger className="h-8 text-xs">
@@ -138,6 +159,7 @@ export function TemplateSelector({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__default__">跟随默认</SelectItem>
+              <SelectItem value="__skip__">不使用模板</SelectItem>
               {personalTemplates?.map((tpl) => (
                 <SelectItem key={tpl.id} value={tpl.id}>
                   {tpl.name}

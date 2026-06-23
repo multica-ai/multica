@@ -49,6 +49,8 @@ type Agent struct {
 	ServiceTier            pgtype.Text `json:"service_tier"`
 	SystemTemplateID       pgtype.UUID `json:"system_template_id"`
 	PersonalTemplateID     pgtype.UUID `json:"personal_template_id"`
+	SkipSystemTemplate     bool        `json:"skip_system_template"`
+	SkipPersonalTemplate   bool        `json:"skip_personal_template"`
 }
 
 type AgentAllowedPrincipal struct {

@@ -406,8 +406,10 @@ func (h *Handler) DeleteAgentConfigTemplate(w http.ResponseWriter, r *http.Reque
 // --- Agent template binding ---
 
 type AgentTemplateBindingResponse struct {
-	SystemTemplateID   string `json:"system_template_id,omitempty"`
-	PersonalTemplateID string `json:"personal_template_id,omitempty"`
+	SystemTemplateID    string `json:"system_template_id,omitempty"`
+	PersonalTemplateID  string `json:"personal_template_id,omitempty"`
+	SkipSystemTemplate  bool   `json:"skip_system_template"`
+	SkipPersonalTemplate bool  `json:"skip_personal_template"`
 }
 
 func (h *Handler) GetAgentTemplateBinding(w http.ResponseWriter, r *http.Request) {
@@ -428,7 +430,10 @@ func (h *Handler) GetAgentTemplateBinding(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	resp := AgentTemplateBindingResponse{}
+	resp := AgentTemplateBindingResponse{
+		SkipSystemTemplate:   agent.SkipSystemTemplate,
+		SkipPersonalTemplate: agent.SkipPersonalTemplate,
+	}
 	if agent.SystemTemplateID.Valid {
 		resp.SystemTemplateID = uuidToString(agent.SystemTemplateID)
 	}
@@ -439,8 +444,10 @@ func (h *Handler) GetAgentTemplateBinding(w http.ResponseWriter, r *http.Request
 }
 
 type UpdateAgentTemplateBindingRequest struct {
-	SystemTemplateID   *string `json:"system_template_id"`
-	PersonalTemplateID *string `json:"personal_template_id"`
+	SystemTemplateID    *string `json:"system_template_id"`
+	PersonalTemplateID  *string `json:"personal_template_id"`
+	SkipSystemTemplate  *bool   `json:"skip_system_template"`
+	SkipPersonalTemplate *bool  `json:"skip_personal_template"`
 }
 
 func (h *Handler) UpdateAgentTemplateBinding(w http.ResponseWriter, r *http.Request) {
@@ -506,7 +513,36 @@ func (h *Handler) UpdateAgentTemplateBinding(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Apply binding changes
+	// Apply skip flag changes
+	if req.SkipSystemTemplate != nil {
+		if _, err := h.Queries.UpdateAgent(r.Context(), db.UpdateAgentParams{
+			ID:                 agentUUID,
+			SkipSystemTemplate: pgtype.Bool{Bool: *req.SkipSystemTemplate, Valid: true},
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update skip_system_template")
+			return
+		}
+		// If skipping, also clear any specific template
+		if *req.SkipSystemTemplate {
+			h.Queries.ClearAgentSystemTemplate(r.Context(), agentUUID)
+		}
+	}
+
+	if req.SkipPersonalTemplate != nil {
+		if _, err := h.Queries.UpdateAgent(r.Context(), db.UpdateAgentParams{
+			ID:                   agentUUID,
+			SkipPersonalTemplate: pgtype.Bool{Bool: *req.SkipPersonalTemplate, Valid: true},
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update skip_personal_template")
+			return
+		}
+		// If skipping, also clear any specific template
+		if *req.SkipPersonalTemplate {
+			h.Queries.ClearAgentPersonalTemplate(r.Context(), agentUUID)
+		}
+	}
+
+	// Apply template ID changes
 	if req.SystemTemplateID != nil {
 		if *req.SystemTemplateID == "" {
 			if _, err := h.Queries.ClearAgentSystemTemplate(r.Context(), agentUUID); err != nil {
@@ -516,13 +552,18 @@ func (h *Handler) UpdateAgentTemplateBinding(w http.ResponseWriter, r *http.Requ
 		} else {
 			tplUUID := parseUUID(*req.SystemTemplateID)
 			if _, err := h.Queries.UpdateAgentTemplateBinding(r.Context(), db.UpdateAgentTemplateBindingParams{
-				ID:                agentUUID,
-				SystemTemplateID:  pgtype.UUID{Bytes: tplUUID.Bytes, Valid: true},
+				ID:                 agentUUID,
+				SystemTemplateID:   pgtype.UUID{Bytes: tplUUID.Bytes, Valid: true},
 				PersonalTemplateID: pgtype.UUID{}, // no change
 			}); err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to update system template binding")
 				return
 			}
+			// Setting a specific template clears skip flag
+			h.Queries.UpdateAgent(r.Context(), db.UpdateAgentParams{
+				ID:                 agentUUID,
+				SkipSystemTemplate: pgtype.Bool{Bool: false, Valid: true},
+			})
 		}
 	}
 
@@ -535,19 +576,27 @@ func (h *Handler) UpdateAgentTemplateBinding(w http.ResponseWriter, r *http.Requ
 		} else {
 			tplUUID := parseUUID(*req.PersonalTemplateID)
 			if _, err := h.Queries.UpdateAgentTemplateBinding(r.Context(), db.UpdateAgentTemplateBindingParams{
-				ID:                agentUUID,
-				SystemTemplateID:  pgtype.UUID{}, // no change
+				ID:                 agentUUID,
+				SystemTemplateID:   pgtype.UUID{}, // no change
 				PersonalTemplateID: pgtype.UUID{Bytes: tplUUID.Bytes, Valid: true},
 			}); err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to update personal template binding")
 				return
 			}
+			// Setting a specific template clears skip flag
+			h.Queries.UpdateAgent(r.Context(), db.UpdateAgentParams{
+				ID:                   agentUUID,
+				SkipPersonalTemplate: pgtype.Bool{Bool: false, Valid: true},
+			})
 		}
 	}
 
 	// Return updated binding
 	agent, _ = h.Queries.GetAgent(r.Context(), agentUUID)
-	resp := AgentTemplateBindingResponse{}
+	resp := AgentTemplateBindingResponse{
+		SkipSystemTemplate:   agent.SkipSystemTemplate,
+		SkipPersonalTemplate: agent.SkipPersonalTemplate,
+	}
 	if agent.SystemTemplateID.Valid {
 		resp.SystemTemplateID = uuidToString(agent.SystemTemplateID)
 	}
@@ -562,45 +611,49 @@ func (h *Handler) UpdateAgentTemplateBinding(w http.ResponseWriter, r *http.Requ
 // This is the template-aware replacement for the old inline merge in
 // ClaimTaskByRuntime.
 func (h *Handler) resolveAgentConfig(ctx context.Context, agent db.Agent) (MergedAgentConfig, []byte) {
-	// 1. Resolve system layer
+	// 1. Resolve system layer (skip if skip_system_template is true)
 	var systemLayer AgentConfigLayer
-	if agent.SystemTemplateID.Valid {
-		if tpl, err := h.Queries.GetAgentConfigTemplate(ctx, agent.SystemTemplateID); err == nil {
-			systemLayer = parseAgentConfigLayer(tpl.Config, "")
-		}
-	} else {
-		// Fall back to workspace default system template
-		if tpl, err := h.Queries.GetDefaultSystemTemplate(ctx, agent.WorkspaceID); err == nil {
-			systemLayer = parseAgentConfigLayer(tpl.Config, "")
+	if !agent.SkipSystemTemplate {
+		if agent.SystemTemplateID.Valid {
+			if tpl, err := h.Queries.GetAgentConfigTemplate(ctx, agent.SystemTemplateID); err == nil {
+				systemLayer = parseAgentConfigLayer(tpl.Config, "")
+			}
 		} else {
-			// Legacy fallback: workspace.settings.agent_defaults
-			if ws, err := h.Queries.GetWorkspace(ctx, agent.WorkspaceID); err == nil {
-				systemLayer = parseAgentConfigLayer(ws.Settings, "agent_defaults")
+			// Fall back to workspace default system template
+			if tpl, err := h.Queries.GetDefaultSystemTemplate(ctx, agent.WorkspaceID); err == nil {
+				systemLayer = parseAgentConfigLayer(tpl.Config, "")
+			} else {
+				// Legacy fallback: workspace.settings.agent_defaults
+				if ws, err := h.Queries.GetWorkspace(ctx, agent.WorkspaceID); err == nil {
+					systemLayer = parseAgentConfigLayer(ws.Settings, "agent_defaults")
+				}
 			}
 		}
 	}
 
-	// 2. Resolve personal layer
+	// 2. Resolve personal layer (skip if skip_personal_template is true)
 	var personalLayer AgentConfigLayer
-	if agent.PersonalTemplateID.Valid {
-		if tpl, err := h.Queries.GetAgentConfigTemplate(ctx, agent.PersonalTemplateID); err == nil {
-			personalLayer = parseAgentConfigLayer(tpl.Config, "")
-		}
-	} else if agent.OwnerID.Valid {
-		// Fall back to user's default personal template
-		if member, merr := h.getWorkspaceMember(ctx, uuidToString(agent.OwnerID), uuidToString(agent.WorkspaceID)); merr == nil {
-			if tpl, err := h.Queries.GetDefaultPersonalTemplate(ctx, db.GetDefaultPersonalTemplateParams{
-				WorkspaceID: agent.WorkspaceID,
-				CreatedBy:   member.ID,
-			}); err == nil {
+	if !agent.SkipPersonalTemplate {
+		if agent.PersonalTemplateID.Valid {
+			if tpl, err := h.Queries.GetAgentConfigTemplate(ctx, agent.PersonalTemplateID); err == nil {
 				personalLayer = parseAgentConfigLayer(tpl.Config, "")
-			} else {
-				// Legacy fallback: member_agent_config
-				if cfg, err := h.Queries.GetMemberAgentConfigByOwner(ctx, db.GetMemberAgentConfigByOwnerParams{
-					UserID:      agent.OwnerID,
+			}
+		} else if agent.OwnerID.Valid {
+			// Fall back to user's default personal template
+			if member, merr := h.getWorkspaceMember(ctx, uuidToString(agent.OwnerID), uuidToString(agent.WorkspaceID)); merr == nil {
+				if tpl, err := h.Queries.GetDefaultPersonalTemplate(ctx, db.GetDefaultPersonalTemplateParams{
 					WorkspaceID: agent.WorkspaceID,
+					CreatedBy:   member.ID,
 				}); err == nil {
-					personalLayer = parseAgentConfigLayer(cfg.Config, "")
+					personalLayer = parseAgentConfigLayer(tpl.Config, "")
+				} else {
+					// Legacy fallback: member_agent_config
+					if cfg, err := h.Queries.GetMemberAgentConfigByOwner(ctx, db.GetMemberAgentConfigByOwnerParams{
+						UserID:      agent.OwnerID,
+						WorkspaceID: agent.WorkspaceID,
+					}); err == nil {
+						personalLayer = parseAgentConfigLayer(cfg.Config, "")
+					}
 				}
 			}
 		}

@@ -33,10 +33,14 @@ export interface UpdateAgentConfigTemplateRequest {
 export interface AgentTemplateBinding {
   system_template_id?: string;
   personal_template_id?: string;
+  skip_system_template: boolean;
+  skip_personal_template: boolean;
 }
 
 /** Request body for updating an agent's template binding. */
 export interface UpdateAgentTemplateBindingRequest {
   system_template_id?: string | null;
   personal_template_id?: string | null;
+  skip_system_template?: boolean;
+  skip_personal_template?: boolean;
 }

@@ -56,6 +56,8 @@ UPDATE agent SET
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     custom_env_copied_pending = COALESCE(sqlc.narg('custom_env_copied_pending'), custom_env_copied_pending),
+    skip_system_template = COALESCE(sqlc.narg('skip_system_template'), skip_system_template),
+    skip_personal_template = COALESCE(sqlc.narg('skip_personal_template'), skip_personal_template),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
