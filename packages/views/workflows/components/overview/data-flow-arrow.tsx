@@ -1,12 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import type { WorkflowEdge, WorkflowNode, WorkflowStage } from "@multica/core/types";
+import type { WorkflowEdge, WorkflowNode } from "@multica/core/types";
 
 export interface DataFlowArrowProps {
   edges: WorkflowEdge[];
   nodes: WorkflowNode[];
-  stages: WorkflowStage[];
 }
 
 /**

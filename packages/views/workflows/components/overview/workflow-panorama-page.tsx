@@ -104,7 +104,7 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
     const node = nodes.find((n) => n.id === selectedNodeId);
     if (!node) return null;
 
-    const isCriticNode = !!node.critic_type;
+    const isCriticNode = !!node.critic_id;
 
     if (isCriticNode) {
       // Critic node: worker_id is the critic's agent
@@ -210,7 +210,7 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
               onCardClick={handleCardClick}
             />
             {idx < sortedStages.length - 1 && (
-              <DataFlowArrow edges={edges} nodes={nodes} stages={stages} />
+              <DataFlowArrow edges={edges} nodes={nodes} />
             )}
           </div>
         ))}

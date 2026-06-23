@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { WorkflowStage, WorkflowNode, Agent } from "@multica/core/types";
 import type { BuiltinPlugin } from "@multica/core/api/schemas";
+import { useT } from "../../../i18n";
 import { PluginCard } from "./plugin-card";
 import { CriticBadge } from "./critic-badge";
 
@@ -21,6 +22,7 @@ export function StageSwimlane({
   pluginLookup,
   onCardClick,
 }: StageSwimlaneProps) {
+  const { t } = useT("workflows");
   const stageNodes = useMemo(
     () => nodes.filter((n) => n.stage_id === stage.id),
     [nodes, stage.id],
@@ -59,7 +61,7 @@ export function StageSwimlane({
             data-testid="stage-swimlane-empty"
             className="flex items-center justify-center h-16 text-xs text-muted-foreground"
           >
-            No nodes in this stage
+            {t(($) => $.overview.node_dag.empty_title)}
           </div>
         ) : (
           <div className="flex flex-wrap gap-2">
