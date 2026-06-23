@@ -12,7 +12,10 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { browserName: "chromium" },
+      use: {
+        browserName: "chromium",
+        channel: "chrome",
+      },
     },
   ],
   // Don't auto-start servers — they must be running already

@@ -29,14 +29,41 @@ export class TestApiClient {
   private createdAgentIds: string[] = [];
 
   async login(email: string, name: string) {
+    const devCode = process.env.MULTICA_DEV_VERIFICATION_CODE;
+
+    // When MULTICA_DEV_VERIFICATION_CODE is set, the backend uses a fixed
+    // verification code and does not write to the verification_code table.
+    if (devCode) {
+      // With a fixed dev code, we can skip send-code entirely and
+      // verify directly — avoids rate limiting on /auth/send-code.
+      const verifyRes = await fetch(`${API_BASE}/auth/verify-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code: devCode }),
+      });
+      if (!verifyRes.ok) {
+        throw new Error(`verify-code failed: ${verifyRes.status}`);
+      }
+      const data = await verifyRes.json();
+
+      this.token = data.token;
+
+      if (name && data.user?.name !== name) {
+        await this.authedFetch("/api/me", {
+          method: "PATCH",
+          body: JSON.stringify({ name }),
+        });
+      }
+
+      return data;
+    }
+
+    // Production path: use database-backed verification_code table
     const client = new pg.Client(DATABASE_URL);
     await client.connect();
     try {
-      // Keep each E2E login isolated so previous test runs do not trip the
-      // per-email send-code rate limit.
       await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
 
-      // Step 1: Send verification code
       const sendRes = await fetch(`${API_BASE}/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -46,7 +73,6 @@ export class TestApiClient {
         throw new Error(`send-code failed: ${sendRes.status}`);
       }
 
-      // Step 2: Read code from database
       const result = await client.query(
         "SELECT code FROM verification_code WHERE email = $1 AND used = FALSE AND expires_at > now() ORDER BY created_at DESC LIMIT 1",
         [email],
@@ -55,7 +81,6 @@ export class TestApiClient {
         throw new Error(`No verification code found for ${email}`);
       }
 
-      // Step 3: Verify code to get JWT
       const verifyRes = await fetch(`${API_BASE}/auth/verify-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -68,7 +93,6 @@ export class TestApiClient {
 
       this.token = data.token;
 
-      // Update user name if needed
       if (name && data.user?.name !== name) {
         await this.authedFetch("/api/me", {
           method: "PATCH",
@@ -286,9 +310,11 @@ export class TestApiClient {
     return res.json();
   }
 
-  // ── Cleanup helpers ──
+  async deleteIssue(id: string) {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
+
+  // ── Cleanup helpers ──
 
   async deleteWorkflow(id: string) {
     await this.authedFetch(`/api/workflows/${id}`, { method: "DELETE" });

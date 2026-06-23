@@ -74,7 +74,7 @@
  * - [x] Full 6-stage workflow with agents and cross-stage edges renders correctly
  */
 
-import { test, expect } from "./seed-panorama";
+import { test, expect, BASE_PATH } from "./seed-panorama";
 import { seedFullPanoramaWorkflow, FULL_PANORAMA_STATS } from "./seed-full-panorama";
 
 // ─────────────────────────────────────────────────────────────
@@ -244,8 +244,8 @@ test.describe("Workflow Panorama — Page Shell", () => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
     // Navigate to workflow detail (no /overview or /editor suffix)
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
-    await page.waitForURL(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
+    await page.waitForURL(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // The panorama view should be visible by default
     // Look for the swimlane container (the main panorama structure)
@@ -264,8 +264,8 @@ test.describe("Workflow Panorama — Page Shell", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
-    await page.waitForURL(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
+    await page.waitForURL(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Workflow title should be visible in the header
     const heading = page.getByRole("heading").or(page.locator("h1"));
@@ -287,8 +287,8 @@ test.describe("Workflow Panorama — Page Shell", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
-    await page.waitForURL(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
+    await page.waitForURL(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Find and click the view toggle dropdown
     const viewToggleBtn = page
@@ -339,7 +339,7 @@ test.describe("Workflow Panorama — Stage Swimlanes", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Each stage should render as a swimlane row
     const swimlanes = page
@@ -359,7 +359,7 @@ test.describe("Workflow Panorama — Stage Swimlanes", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Each swimlane should show its stage name
     await expect(page.getByText("需求接入")).toBeVisible({ timeout: 5000 });
@@ -375,7 +375,7 @@ test.describe("Workflow Panorama — Stage Swimlanes", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Collect all stage swimlane names in DOM order
     const swimlanes = page
@@ -413,7 +413,7 @@ test.describe("Workflow Panorama — Stage Swimlanes", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     const swimlanes = page
       .getByTestId(/stage-swimlane/)
@@ -454,7 +454,7 @@ test.describe("Workflow Panorama — Plugin Cards", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Plugin cards should exist
     const pluginCards = page
@@ -477,7 +477,7 @@ test.describe("Workflow Panorama — Plugin Cards", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Verify specific plugin names are visible
     await expect(page.getByText("brainstorming")).toBeVisible({ timeout: 5000 });
@@ -492,7 +492,7 @@ test.describe("Workflow Panorama — Plugin Cards", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     const pluginCards = page
       .getByTestId(/plugin-card/)
@@ -530,7 +530,7 @@ test.describe("Workflow Panorama — Critic Badges", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Critic badges should exist (2 critic nodes in stage 2)
     const criticBadges = page
@@ -556,7 +556,7 @@ test.describe("Workflow Panorama — Critic Badges", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     const criticBadges = page
       .getByTestId(/critic-badge/)
@@ -586,7 +586,7 @@ test.describe("Workflow Panorama — Critic Badges", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Evaluator names should be visible
     await expect(
@@ -608,7 +608,7 @@ test.describe("Workflow Panorama — Data Flow Arrows", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Data flow arrows might be rendered as SVG or CSS elements
     const arrows = page
@@ -644,7 +644,7 @@ test.describe("Workflow Panorama — Architecture Detail Panel", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Click the first plugin card
     const pluginCards = page
@@ -675,7 +675,7 @@ test.describe("Workflow Panorama — Architecture Detail Panel", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Click a plugin card
     const pluginCards = page
@@ -732,7 +732,7 @@ test.describe("Workflow Panorama — Architecture Detail Panel", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Click a plugin card
     const pluginCards = page
@@ -788,7 +788,7 @@ test.describe("Workflow Panorama — Architecture Detail Panel", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Open panel
     const pluginCards = page
@@ -829,7 +829,7 @@ test.describe("Workflow Panorama — Architecture Detail Panel", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Click first plugin
     await page
@@ -869,7 +869,7 @@ test.describe("Workflow Panorama — Architecture Detail Panel", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Open panel
     const pluginCards = page
@@ -915,7 +915,7 @@ test.describe("Workflow Panorama — Critic Detail Panel", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Find and click a critic badge
     const criticBadge = page
@@ -962,7 +962,7 @@ test.describe("Workflow Panorama — Edge Cases", () => {
       "Empty Panorama Workflow " + Date.now(),
     );
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Should show empty state instead of crashing
     const emptyState = page
@@ -994,7 +994,7 @@ test.describe("Workflow Panorama — Edge Cases", () => {
 
     // Slow down network to observe loading state
     // Note: this is best-effort — cache may prevent seeing skeleton
-    await page.goto(`/${slug}/workflows/${workflow.id}`, {
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`, {
       waitUntil: "domcontentloaded",
     });
 
@@ -1020,7 +1020,7 @@ test.describe("Workflow Panorama — Edge Cases", () => {
   }) => {
     // Navigate to a workflow ID that doesn't exist
     const fakeId = "00000000-0000-0000-0000-000000000000";
-    await page.goto(`/${slug}/workflows/${fakeId}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${fakeId}`);
 
     // Should show error/not-found state
     const errorState = page
@@ -1041,7 +1041,7 @@ test.describe("Workflow Panorama — Edge Cases", () => {
     // Set narrow viewport (mobile-like)
     await page.setViewportSize({ width: 480, height: 900 });
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Panorama should still render
     const panoramaContainer = page
@@ -1073,7 +1073,7 @@ test.describe("Workflow Panorama — Edge Cases", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     const pluginCards = page
       .getByTestId(/plugin-card/)
@@ -1118,8 +1118,8 @@ test.describe("Workflow Panorama — View Mode Persistence", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
-    await page.waitForURL(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
+    await page.waitForURL(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Switch to editor view first
     const viewToggleBtn = page
@@ -1137,7 +1137,7 @@ test.describe("Workflow Panorama — View Mode Persistence", () => {
 
     // Reload the page
     await page.reload();
-    await page.waitForURL(`/${slug}/workflows/${workflow.id}`);
+    await page.waitForURL(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // The view mode should be persisted (editor should still be visible)
     const editorCanvas = page
@@ -1169,12 +1169,12 @@ test.describe("Workflow Panorama — View Mode Persistence", () => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
     // Navigate to the legacy /overview sub-route
-    await page.goto(`/${slug}/workflows/${workflow.id}/overview`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}/overview`);
 
     // Should redirect to the main workflow detail page
     await page.waitForURL(
       (url) =>
-        url.pathname === `/${slug}/workflows/${workflow.id}` ||
+        url.pathname === `${BASE_PATH}/${slug}/workflows/${workflow.id}` ||
         !url.pathname.includes("/overview"),
       { timeout: 8000 },
     );
@@ -1200,7 +1200,7 @@ test.describe("Workflow Panorama — Keyboard & Accessibility", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     const pluginCards = page
       .getByTestId(/plugin-card/)
@@ -1241,7 +1241,7 @@ test.describe("Workflow Panorama — Keyboard & Accessibility", () => {
   }) => {
     const { workflow } = await seedPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
     // Open panel by clicking a card
     const pluginCards = page
@@ -1287,8 +1287,8 @@ test.describe("Workflow Panorama — Full Seed Data", () => {
   }) => {
     const seed = await seedFullPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${seed.workflow.id}`);
-    await page.waitForURL(`/${slug}/workflows/${seed.workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${seed.workflow.id}`);
+    await page.waitForURL(`${BASE_PATH}/${slug}/workflows/${seed.workflow.id}`);
 
     // ── Verify all 6 stage names are visible ──
     for (const stage of seed.stages) {
@@ -1362,8 +1362,8 @@ test.describe("Workflow Panorama — Full Seed Data", () => {
   }) => {
     const seed = await seedFullPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${seed.workflow.id}`);
-    await page.waitForURL(`/${slug}/workflows/${seed.workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${seed.workflow.id}`);
+    await page.waitForURL(`${BASE_PATH}/${slug}/workflows/${seed.workflow.id}`);
 
     // Verify agents with worker_id linkage appear on plugin cards
     // The PluginCard component shows agent name + status dot when agent is linked
@@ -1405,7 +1405,7 @@ test.describe("Workflow Panorama — Full Seed Data", () => {
   }) => {
     const seed = await seedFullPanoramaWorkflow(seededApi);
 
-    await page.goto(`/${slug}/workflows/${seed.workflow.id}`);
+    await page.goto(`${BASE_PATH}/${slug}/workflows/${seed.workflow.id}`);
 
     // Find the frontend-dev node (linked to code-dev agent)
     const feNode = seed.nodes.find((n) => n.ref === "frontend-dev")!;

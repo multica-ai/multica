@@ -19,22 +19,42 @@ const DEMO_EMAIL = "kdemo648@gmail.com";
 const DEMO_NAME = "KDemo";
 const DEMO_WORKSPACE = "demo111";
 
+/** Next.js base path prefix (e.g. "/tasks") — read from the same env var the app uses. */
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
 /**
- * Log in as the demo user (kdemo648) and ensure the demo111 workspace exists.
+ * Log in as the demo user (kdemo648) via UI flow.
+ * The web app uses HttpOnly cookies for auth, so we must go through
+ * the actual login form rather than setting localStorage tokens.
  */
 export async function loginAsDemo(page: Page): Promise<string> {
-  const api = new TestApiClient();
-  await api.login(DEMO_EMAIL, DEMO_NAME);
-  const workspace = await api.ensureWorkspace("Demo Workspace", DEMO_WORKSPACE);
+  // Navigate to login page
+  await page.goto(`${BASE_PATH}/login`);
+  await page.waitForURL(`**/login`, { timeout: 10000 });
 
-  const token = api.getToken();
-  await page.goto("/login");
-  await page.evaluate((t) => {
-    localStorage.setItem("multica_token", t);
-  }, token);
-  await page.goto(`/${workspace.slug}/issues`);
-  await page.waitForURL("**/issues", { timeout: 10000 });
-  return workspace.slug;
+  // Step 1: Enter email
+  const emailInput = page.getByPlaceholder("you@example.com");
+  await emailInput.fill(DEMO_EMAIL);
+  await page.waitForTimeout(300);
+
+  // Step 2: Click Continue
+  const continueBtn = page.getByRole("button", { name: /continue|继续/i });
+  await continueBtn.click();
+  await page.waitForTimeout(500);
+
+  // Step 3: Enter verification code (fixed dev code 123456).
+  // The code input is a plain textbox without a placeholder — use role lookup.
+  const codeInput = page.getByRole("textbox").last();
+  await codeInput.fill("123456");
+
+  // The form auto-submits when a valid 6-digit code is entered.
+  // After login, force-navigate to the correct workspace (demo111).
+  // The default redirect may land on a different workspace.
+  await page.waitForURL(`**/issues`, { timeout: 15000 });
+  await page.goto(`${BASE_PATH}/${DEMO_WORKSPACE}/issues`);
+  await page.waitForURL(`**/${DEMO_WORKSPACE}/issues`, { timeout: 10000 });
+
+  return DEMO_WORKSPACE;
 }
 
 /**
@@ -67,6 +87,6 @@ const test = baseTest.extend<PanoramaFixtures>({
   },
 });
 
-export { test, expect, DEMO_EMAIL, DEMO_NAME, DEMO_WORKSPACE };
+export { test, expect, DEMO_EMAIL, DEMO_NAME, DEMO_WORKSPACE, BASE_PATH };
 export { seedFullPanoramaWorkflow, FULL_PANORAMA_STATS } from "./seed-full-panorama";
 export type { FullPanoramaSeed, PanoramaSeedAgent, PanoramaSeedStage, PanoramaSeedNode, PanoramaSeedEdge } from "./seed-full-panorama";
