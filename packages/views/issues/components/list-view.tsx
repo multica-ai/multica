@@ -125,6 +125,14 @@ export function ListView({
           const el = document.querySelector(`[data-issue-id="${parentId}"]`);
           if (el) {
             el.scrollIntoView({ behavior: "smooth", block: "center" });
+            // Flash highlight the target row: brief bg-brand/20 → transparent.
+            el.classList.add("bg-brand/20", "transition-colors", "duration-500");
+            setTimeout(() => {
+              el.classList.remove("bg-brand/20");
+              setTimeout(() => {
+                el.classList.remove("transition-colors", "duration-500");
+              }, 500);
+            }, 100);
           }
         });
       });

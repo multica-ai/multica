@@ -33,8 +33,22 @@ function formatDate(date: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
+const STATUS_CN: Record<string, string> = {
+  todo: "待办",
+  in_progress: "进行中",
+  in_review: "审核中",
+  done: "已完成",
+  backlog: "待规划",
+  cancelled: "已取消",
+  blocked: "阻塞中",
+};
+
 function getStatusColor(status: string): string {
   return STATUS_CONFIG[status as keyof typeof STATUS_CONFIG]?.iconColor ?? "text-muted-foreground";
+}
+
+function formatStatusLabel(status: string): string {
+  return STATUS_CN[status] ?? status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function ListRowContent({
@@ -203,7 +217,7 @@ function ListRowContent({
                   ← {parentInfo.identifier}
                 </span>
                 <span className={`text-[10px] truncate ${getStatusColor(parentInfo.status)}`}>
-                  [{parentInfo.status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}]
+                  [{formatStatusLabel(parentInfo.status)}]
                 </span>
               </button>
             )}
