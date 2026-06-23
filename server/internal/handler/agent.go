@@ -179,6 +179,7 @@ type AgentTaskResponse struct {
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
 	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `cs-workflow attachment download <id>` per entry
+	UpstreamStageContext    []UpstreamStageNode   `json:"upstream_stage_context,omitempty"`    // completed upstream-stage node runs the agent should read
 	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
 	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
 	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
@@ -209,6 +210,16 @@ type ChatAttachmentMeta struct {
 	ID          string `json:"id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type,omitempty"`
+}
+
+// UpstreamStageNode is a compact summary of one completed upstream-stage
+// node run. It is surfaced in workflow agent prompts so the downstream agent
+// knows which prior sub-issues to read and which attachments to download.
+type UpstreamStageNode struct {
+	NodeTitle     string               `json:"node_title"`
+	IssueID       string               `json:"issue_id"`
+	LatestComment string               `json:"latest_comment,omitempty"`
+	Attachments   []ChatAttachmentMeta `json:"attachments,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -1268,6 +1279,7 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 
 	writeJSON(w, http.StatusOK, resp)
 }
+
 // PromoteAgentToBuiltin promotes a workspace agent to a global built-in agent.
 // Only users with the can_manage_workflows permission can promote agents.
 // The agent must not already be built-in and must not be archived.
@@ -1363,4 +1375,3 @@ func (h *Handler) DemoteAgentFromBuiltin(w http.ResponseWriter, r *http.Request)
 	h.publish(protocol.EventAgentStatus, uuidToString(demoted.WorkspaceID), actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
-

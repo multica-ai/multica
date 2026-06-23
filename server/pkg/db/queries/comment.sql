@@ -197,6 +197,17 @@ JOIN membership m ON m.root_id = p.root_id
 JOIN multica_comment c ON c.id = m.id
 ORDER BY p.last_activity_at ASC, p.root_id ASC, c.created_at ASC, c.id ASC;
 
+-- name: ListLatestCommentsByIssues :many
+-- Returns the most recent comment per issue for a batch of issue IDs.
+-- Used to build upstream context for workflow agent prompts.
+SELECT DISTINCT ON (issue_id)
+    id, issue_id, author_type, author_id, content, type,
+    created_at, updated_at, parent_id, workspace_id,
+    resolved_at, resolved_by_type, resolved_by_id
+FROM multica_comment
+WHERE issue_id = ANY($1::uuid[]) AND workspace_id = $2
+ORDER BY issue_id, created_at DESC, id DESC;
+
 -- name: CountComments :one
 SELECT count(*) FROM multica_comment
 WHERE issue_id = $1 AND workspace_id = $2;

@@ -293,6 +293,57 @@ func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListComment
 	return items, nil
 }
 
+const listLatestCommentsByIssues = `-- name: ListLatestCommentsByIssues :many
+SELECT DISTINCT ON (issue_id)
+    id, issue_id, author_type, author_id, content, type,
+    created_at, updated_at, parent_id, workspace_id,
+    resolved_at, resolved_by_type, resolved_by_id
+FROM multica_comment
+WHERE issue_id = ANY($1::uuid[]) AND workspace_id = $2
+ORDER BY issue_id, created_at DESC, id DESC
+`
+
+type ListLatestCommentsByIssuesParams struct {
+	Column1     []pgtype.UUID `json:"column_1"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+// Returns the most recent comment per issue for a batch of issue IDs.
+// Used to build upstream context for workflow agent prompts.
+func (q *Queries) ListLatestCommentsByIssues(ctx context.Context, arg ListLatestCommentsByIssuesParams) ([]MulticaComment, error) {
+	rows, err := q.db.Query(ctx, listLatestCommentsByIssues, arg.Column1, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MulticaComment{}
+	for rows.Next() {
+		var i MulticaComment
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.WorkspaceID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentThreadCommentsForIssue = `-- name: ListRecentThreadCommentsForIssue :many
 WITH RECURSIVE membership(id, root_id, comment_created_at) AS (
     -- Each root maps to itself.

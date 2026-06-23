@@ -30,6 +30,34 @@ func BuildPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+
+	// Inject upstream-stage context so the agent reads prior-stage sub-issues
+	// and downloads their attachments before proceeding.
+	if len(task.UpstreamStageContext) > 0 {
+		b.WriteString("## Upstream Stage Context\n\n")
+		b.WriteString("The following upstream workflow stages have already completed. Read their sub-issues and attachments to understand the full context before starting your own task.\n\n")
+		for _, up := range task.UpstreamStageContext {
+			fmt.Fprintf(&b, "- **%s** (sub-issue: %s)\n", up.NodeTitle, up.IssueID)
+			if up.LatestComment != "" {
+				fmt.Fprintf(&b, "  Latest output: %s\n", up.LatestComment)
+			}
+			if len(up.Attachments) > 0 {
+				b.WriteString("  Attachments:\n")
+				for _, a := range up.Attachments {
+					if a.ContentType != "" {
+						fmt.Fprintf(&b, "    - id=%s filename=%q content_type=%s\n", a.ID, a.Filename, a.ContentType)
+					} else {
+						fmt.Fprintf(&b, "    - id=%s filename=%q\n", a.ID, a.Filename)
+					}
+				}
+				b.WriteString("  Use `cs-workflow attachment download <id>` to fetch each file locally before referring to it.\n")
+			}
+			fmt.Fprintf(&b, "  Read the full sub-issue: `cs-workflow issue get %s --output json`\n", up.IssueID)
+			fmt.Fprintf(&b, "  Read comments: `cs-workflow issue comment list %s --output json`\n\n", up.IssueID)
+		}
+		b.WriteString("---\n\n")
+	}
+
 	fmt.Fprintf(&b, "Start by running `cs-workflow issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `cs-workflow issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
 	return b.String()
