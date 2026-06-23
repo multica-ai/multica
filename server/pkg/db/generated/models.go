@@ -395,6 +395,7 @@ type MulticaIssue struct {
 	Metadata           []byte             `json:"metadata"`
 	WorkflowID         pgtype.UUID        `json:"workflow_id"`
 	WorkflowRunID      pgtype.UUID        `json:"workflow_run_id"`
+	StageID            pgtype.UUID        `json:"stage_id"`
 }
 
 type MulticaIssueDependency struct {
