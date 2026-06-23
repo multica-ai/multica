@@ -94,6 +94,12 @@ export interface IssueCreatedPayload {
 
 export interface IssueUpdatedPayload {
   issue: Issue;
+  // The server stamps issue:updated with which fields actually changed
+  // (server/internal/handler/issue.go publish). Only assignee_changed is read
+  // today: it lets the realtime layer keep filtered myList caches in place on a
+  // non-membership change instead of refetching. Other change flags are present
+  // on the wire too and can be surfaced here when needed.
+  assignee_changed?: boolean;
 }
 
 export interface IssueDeletedPayload {

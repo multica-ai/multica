@@ -40,6 +40,10 @@ export function onIssueUpdated(
   qc: QueryClient,
   wsId: string,
   issue: Partial<Issue> & { id: string },
+  // assigneeChanged comes from the server's issue:updated flags. It gates the
+  // filtered-list (myAll) invalidate so a non-membership change keeps those
+  // lists in place instead of refetching.
+  meta: { assigneeChanged?: boolean } = {},
 ) {
   // Look up the OLD parent before mutating list state, so we can keep
   // the parent's children cache in sync (powers the sub-issues list
@@ -56,13 +60,45 @@ export function onIssueUpdated(
   const parentChanged =
     issue.parent_issue_id !== undefined && newParentId !== oldParentId;
 
+  // Project-board membership keys on project_id. There is no project_changed
+  // flag on the wire, so diff the incoming project_id against the cached one.
+  const oldProjectId =
+    detailData?.project_id ??
+    (firstListData ? findIssueLocation(firstListData, issue.id)?.issue.project_id : null) ??
+    null;
+  const projectChanged =
+    issue.project_id !== undefined && (issue.project_id ?? null) !== oldProjectId;
+
   for (const [key, data] of listQueries) {
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issue.id, issue));
   }
-  if (issue.position !== undefined) {
-    qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+  // The workspace board (issueKeys.list) is NOT filtered: an issue is always a
+  // member, so patchIssueInBuckets above is a complete surgical reconcile —
+  // cross-status move, same-column reorder, and field updates all land in the
+  // right bucket/slot. The old `if (position) invalidateQueries(list)` re-pulled
+  // the entire board on top of that, which is the full-list refetch that made a
+  // drag (local or echoed back over WS) flicker. It is pure redundancy here.
+  //
+  // myAll (My Issues / Project / actor lists) IS filtered. Surgically patch the
+  // cards that already live in those caches too, so a non-membership change
+  // (pure status / position / priority / label) reconciles in place — no
+  // refetch, no flicker — exactly like the workspace board above.
+  const myListQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.myAll(wsId) });
+  for (const [key, data] of myListQueries) {
+    if (data?.byStatus) {
+      qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issue.id, issue));
+    }
   }
-  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  // Only refetch the filtered lists when the change can actually move an issue
+  // in/out of one. My-Issues / actor-panel membership keys on the assignee (the
+  // "involves" leg — my agents / my squads — is assignee-based too), so the
+  // server's assignee_changed flag covers it; the Project board keys on
+  // project_id. A pure status / position / priority / label change cannot change
+  // membership, so the surgical patch above is the complete reconcile and we
+  // skip the invalidate that used to make a My-Issues drag refetch + flicker.
+  if (meta.assigneeChanged || projectChanged) {
+    qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  }
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   if (issue.status !== undefined || issue.project_id !== undefined) {
