@@ -125,22 +125,22 @@ export function ListView({
           const el = document.querySelector(`[data-issue-id="${parentId}"]`) as HTMLElement | null;
           if (el) {
             el.scrollIntoView({ behavior: "auto", block: "center" });
-            // Flash highlight: inset ring + deeper background via inline style
-            // (classList is purged by Tailwind JIT so we avoid it entirely).
-            el.style.transition = "background-color 500ms ease-out, box-shadow 500ms ease-out";
-            el.style.backgroundColor = "color-mix(in srgb, var(--color-brand, #a78bfa) 30%, transparent)";
-            el.style.boxShadow = "inset 0 0 0 2px var(--color-brand, #a78bfa)";
-            // Force reflow so the browser registers the initial state, then clear
-            // to trigger the transition back to normal.
-            void el.offsetHeight;
-            el.style.backgroundColor = "";
-            el.style.boxShadow = "";
+            // Flash highlight: outline ring + background using rgba()
+            // (color-mix() + requestAnimationFrame reflow is invisible on Edge/macOS).
+            el.style.transition = "background-color 500ms ease-out, outline-color 500ms ease-out";
+            el.style.backgroundColor = "rgba(167, 139, 250, 0.3)";
+            el.style.outline = "4px solid #a78bfa";
+            // Let the highlight render for at least one frame, then clear.
+            setTimeout(() => {
+              el.style.backgroundColor = "";
+              el.style.outline = "";
+            }, 100);
             // Clean up inline properties after the transition completes.
             setTimeout(() => {
               el.style.removeProperty("transition");
               el.style.removeProperty("background-color");
-              el.style.removeProperty("box-shadow");
-            }, 600);
+              el.style.removeProperty("outline");
+            }, 700);
           }
         });
       });
