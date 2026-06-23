@@ -72,7 +72,21 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	// (the size of the prompt the model last read); when present it is the
 	// authoritative numerator. The task_usage SUMs are the fallback for runtimes
 	// that report no footprint yet.
+	// Thread membership is depth-independent: a session is the root thread and
+	// EVERY comment beneath it, at any nesting. The earlier check only matched
+	// the root + its DIRECT replies (`parent_id = $2`), which silently dropped a
+	// run whose trigger sat at depth ≥2 — and the parent-must-equal-trigger rule
+	// (handler/comment.go) lands an agent's reply at depth 2 the moment it is
+	// triggered by a depth-1 comment, so a follow-up triggered there fell out of
+	// the session. The recursive CTE walks the whole thread subtree so the
+	// "latest run in this session" is correct regardless of how deep the back-
+	// and-forth nested (FIR-1931).
 	const q = `
+		WITH RECURSIVE thread(id) AS (
+			SELECT $2::uuid
+			UNION ALL
+			SELECT c.id FROM comment c JOIN thread ON c.parent_id = thread.id
+		)
 		SELECT COALESCE(SUM(tu.input_tokens), 0),
 		       COALESCE(SUM(tu.cache_read_tokens), 0),
 		       COALESCE(SUM(tu.cache_write_tokens), 0),
@@ -84,9 +98,7 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 		JOIN task_usage tu ON tu.task_id = t.id
 		LEFT JOIN cerebro_task_context_footprint cf ON cf.task_id = t.id
 		WHERE t.issue_id = $1
-		  AND t.trigger_comment_id IS NOT NULL
-		  AND (t.trigger_comment_id = $2
-		       OR t.trigger_comment_id IN (SELECT id FROM comment WHERE parent_id = $2))
+		  AND t.trigger_comment_id IN (SELECT id FROM thread)
 		GROUP BY t.id, t.created_at
 		ORDER BY t.created_at DESC
 		LIMIT 1`

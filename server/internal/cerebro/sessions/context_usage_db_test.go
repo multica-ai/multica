@@ -33,6 +33,62 @@ func callContextUsage(h *Handler, issueID, workspaceID string) *httptest.Respons
 	return rec
 }
 
+// seedReplyComment inserts a reply comment under parentID and returns its id.
+// Used to build threads deeper than the root + direct-reply shape.
+func seedReplyComment(t *testing.T, issueID, workspaceID, parentID string) string {
+	t.Helper()
+	var id string
+	if err := sessTestPool.QueryRow(context.Background(),
+		`INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
+		 VALUES ($1::uuid, $2::uuid, 'agent', gen_random_uuid(), 'reply in this thread', 'comment', $3::uuid)
+		 RETURNING id::text`, issueID, workspaceID, parentID).Scan(&id); err != nil {
+		t.Fatalf("create reply comment: %v", err)
+	}
+	return id
+}
+
+// TestContextUsage_BindsRunsAtAnyThreadDepth proves the FIR-1931 fix: a run
+// triggered by a comment nested DEEPER than a direct reply (depth ≥2) still
+// counts toward its session. The old membership check (root + direct replies
+// only) dropped it, leaving the gauge blank for a session that had real usage.
+func TestContextUsage_BindsRunsAtAnyThreadDepth(t *testing.T) {
+	if sessTestPool == nil {
+		t.Skip("no test DB")
+	}
+	issueID, workspaceID := seedIssue(t)
+	h := NewHandler(sessTestPool, db.New(sessTestPool))
+
+	// root → depth-1 reply → depth-2 reply. The run fires inside the depth-2
+	// comment (the shape produced when an agent, forced to reply at parent =
+	// its depth-1 trigger, lands at depth 2 and a follow-up triggers there).
+	rootID := seedRootComment(t, issueID, workspaceID)
+	depth1 := seedReplyComment(t, issueID, workspaceID, rootID)
+	depth2 := seedReplyComment(t, issueID, workspaceID, depth1)
+
+	// 300k whole-prompt read against the 1M claude-opus-4-7 window = 30%.
+	seedTaskWithUsage(t, issueID, workspaceID, depth2, "claude-opus-4-7", 300_000, 0)
+
+	var resp contextUsageResponse
+	if err := json.Unmarshal(callContextUsage(h, issueID, workspaceID).Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.HasData {
+		t.Fatalf("has_data = false: a depth-2-triggered run was dropped from its session (the FIR-1931 bug)")
+	}
+	if resp.Model != "claude-opus-4-7" {
+		t.Errorf("model = %q, want claude-opus-4-7", resp.Model)
+	}
+	if resp.ContextTokens != 300_000 {
+		t.Errorf("context_tokens = %d, want 300000", resp.ContextTokens)
+	}
+	if resp.MaxContextTokens != 1_000_000 {
+		t.Errorf("max_context_tokens = %d, want 1000000", resp.MaxContextTokens)
+	}
+	if resp.UsedPercent != 30 {
+		t.Errorf("used_percent = %d, want 30", resp.UsedPercent)
+	}
+}
+
 // seedTaskWithUsage inserts a runtime + task + task_usage row for the issue and
 // returns the task id. The task_usage figures are the cumulative lifetime sum.
 // FIR-1874 (thread = session): membership is now by trigger_comment_id, so the
