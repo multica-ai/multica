@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -93,6 +94,9 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	}
 
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	if tlsConfig := util.TLSConfig(); tlsConfig != nil {
+		dialer.TLSClientConfig = tlsConfig
+	}
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
 	if err != nil {
 		return err

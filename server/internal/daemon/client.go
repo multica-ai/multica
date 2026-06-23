@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -103,7 +104,7 @@ type Client struct {
 func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL:  baseURL,
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   util.NewHTTPClient(30 * time.Second),
 		platform: "daemon",
 		os:       normalizeGOOS(runtime.GOOS),
 	}
