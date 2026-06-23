@@ -3,13 +3,23 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // insertListTestAutopilot creates a bare autopilot row and registers cleanup.
 // Triggers/runs cascade on delete.
 func insertListTestAutopilot(t *testing.T, agentID, title string) string {
+	return insertListTestAutopilotWithCreator(t, agentID, title, "member", testUserID)
+}
+
+func insertListTestAutopilotWithCreator(t *testing.T, agentID, title, creatorType, creatorID string) string {
+	return insertListTestAutopilotWithActors(t, "agent", agentID, title, creatorType, creatorID)
+}
+
+func insertListTestAutopilotWithActors(t *testing.T, assigneeType, assigneeID, title, creatorType, creatorID string) string {
 	t.Helper()
 	var id string
 	if err := testPool.QueryRow(context.Background(), `
@@ -17,13 +27,29 @@ func insertListTestAutopilot(t *testing.T, agentID, title string) string {
 			workspace_id, title, assignee_type, assignee_id,
 			status, execution_mode, created_by_type, created_by_id
 		)
-		VALUES ($1, $2, 'agent', $3, 'active', 'run_only', 'member', $4)
+		VALUES ($1, $2, $3, $4, 'active', 'run_only', $5, $6)
 		RETURNING id
-	`, testWorkspaceID, title, agentID, testUserID).Scan(&id); err != nil {
+	`, testWorkspaceID, title, assigneeType, assigneeID, creatorType, creatorID).Scan(&id); err != nil {
 		t.Fatalf("failed to insert test autopilot: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, id)
+	})
+	return id
+}
+
+func insertListTestSquad(t *testing.T, name, leaderID, creatorID string) string {
+	t.Helper()
+	var id string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO squad (workspace_id, name, leader_id, creator_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, testWorkspaceID, name, leaderID, creatorID).Scan(&id); err != nil {
+		t.Fatalf("failed to insert test squad: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, id)
 	})
 	return id
 }
@@ -112,5 +138,127 @@ func TestListAutopilots_DerivedFields(t *testing.T) {
 		if _, present := plain[key]; present {
 			t.Errorf("%s: expected field omitted for autopilot with no triggers/runs, got %v", key, plain[key])
 		}
+	}
+}
+
+func TestListAutopilots_MineIncludesCurrentUserOwnedAgentCreatorsAndOwnedAssignees(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	ownedAgentID := createHandlerTestAgent(t, "autopilot-list-mine-owned-agent", []byte(`[]`))
+	otherUserID := createWorkspaceMemberUser(
+		t,
+		"Autopilot Mine Other",
+		fmt.Sprintf("autopilot-mine-other-%d@test.multica.ai", time.Now().UnixNano()),
+	)
+	otherAgentID := createHandlerTestAgent(t, "autopilot-list-mine-other-agent", []byte(`[]`))
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET owner_id = $1 WHERE id = $2`, otherUserID, otherAgentID); err != nil {
+		t.Fatalf("failed to transfer other agent owner: %v", err)
+	}
+	now := time.Now().UnixNano()
+	ownedLeaderSquadID := insertListTestSquad(
+		t,
+		fmt.Sprintf("autopilot-list-mine-owned-leader-%d", now),
+		ownedAgentID,
+		testUserID,
+	)
+	otherLeaderSquadID := insertListTestSquad(
+		t,
+		fmt.Sprintf("autopilot-list-mine-other-leader-%d", now),
+		otherAgentID,
+		otherUserID,
+	)
+
+	currentMember := insertListTestAutopilotWithCreator(
+		t,
+		otherAgentID,
+		"mine-current-member",
+		"member",
+		testUserID,
+	)
+	ownedAgent := insertListTestAutopilotWithCreator(
+		t,
+		otherAgentID,
+		"mine-owned-agent",
+		"agent",
+		ownedAgentID,
+	)
+	ownedAssignee := insertListTestAutopilotWithCreator(
+		t,
+		ownedAgentID,
+		"mine-owned-agent-assignee",
+		"member",
+		otherUserID,
+	)
+	ownedSquadAssignee := insertListTestAutopilotWithActors(
+		t,
+		"squad",
+		ownedLeaderSquadID,
+		"mine-owned-squad-leader-assignee",
+		"member",
+		otherUserID,
+	)
+	otherMember := insertListTestAutopilotWithCreator(
+		t,
+		otherAgentID,
+		"mine-other-member",
+		"member",
+		otherUserID,
+	)
+	otherAgent := insertListTestAutopilotWithCreator(
+		t,
+		otherAgentID,
+		"mine-other-agent",
+		"agent",
+		otherAgentID,
+	)
+	otherSquadAssignee := insertListTestAutopilotWithActors(
+		t,
+		"squad",
+		otherLeaderSquadID,
+		"mine-other-squad-leader-assignee",
+		"member",
+		otherUserID,
+	)
+
+	w := httptest.NewRecorder()
+	testHandler.ListAutopilots(w, newRequest("GET", "/api/autopilots?mine=true", nil))
+	if w.Code != 200 {
+		t.Fatalf("ListAutopilots mine: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var body struct {
+		Autopilots []map[string]any `json:"autopilots"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode body: %v", err)
+	}
+	rows := make(map[string]bool, len(body.Autopilots))
+	for _, row := range body.Autopilots {
+		rows[row["id"].(string)] = true
+	}
+
+	if !rows[currentMember] {
+		t.Fatalf("mine=true did not include autopilot created by current member")
+	}
+	if !rows[ownedAgent] {
+		t.Fatalf("mine=true did not include autopilot created by current user's agent")
+	}
+	if !rows[ownedAssignee] {
+		t.Fatalf("mine=true did not include autopilot assigned to current user's agent")
+	}
+	if !rows[ownedSquadAssignee] {
+		t.Fatalf("mine=true did not include autopilot assigned to squad led by current user's agent")
+	}
+	if rows[otherMember] {
+		t.Fatalf("mine=true included autopilot created by another member")
+	}
+	if rows[otherAgent] {
+		t.Fatalf("mine=true included autopilot created by another user's agent")
+	}
+	if rows[otherSquadAssignee] {
+		t.Fatalf("mine=true included autopilot assigned to squad led by another user's agent")
 	}
 }

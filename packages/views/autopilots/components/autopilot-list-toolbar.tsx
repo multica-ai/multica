@@ -5,6 +5,7 @@ import {
   ArrowUp,
   ChevronDown,
   Filter,
+  UserRound,
   X,
 } from "lucide-react";
 import type { Autopilot } from "@multica/core/types";
@@ -84,6 +85,8 @@ export function countActiveFilterDimensions(
 export function AutopilotListToolbar({
   scope,
   onScopeChange,
+  mineOnly,
+  onMineOnlyChange,
   scopeCounts,
   filters,
   onToggleFilter,
@@ -99,6 +102,8 @@ export function AutopilotListToolbar({
 }: {
   scope: AutopilotScope;
   onScopeChange: (scope: AutopilotScope) => void;
+  mineOnly: boolean;
+  onMineOnlyChange: (mineOnly: boolean) => void;
   /** Per-scope totals from the FULL set — scope counts ignore filters. */
   scopeCounts: Record<AutopilotScope, number>;
   filters: AutopilotListFilters;
@@ -260,6 +265,20 @@ export function AutopilotListToolbar({
             {visibleCount} / {allRows.length}
           </span>
         )}
+
+        <Button
+          variant={mineOnly ? "default" : "outline"}
+          size="sm"
+          className={
+            mineOnly
+              ? "h-8 shrink-0 gap-1.5 bg-brand text-white hover:bg-brand/90"
+              : "h-8 shrink-0 gap-1.5 text-muted-foreground"
+          }
+          onClick={() => onMineOnlyChange(!mineOnly)}
+        >
+          <UserRound className="size-3.5" />
+          {t(($) => $.toolbar.mine_filter)}
+        </Button>
       </div>
 
       <div className="flex shrink-0 items-center gap-1">

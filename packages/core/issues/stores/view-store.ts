@@ -231,7 +231,9 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   toggleShowArchived: () =>
     set((state) => ({ showArchived: !state.showArchived })),
   toggleTopLevelOnly: () =>
-    set((state) => ({ topLevelOnly: !state.topLevelOnly })),
+    set((state) => ({
+      topLevelOnly: state.swimlaneGrouping === "parent" ? false : !state.topLevelOnly,
+    })),
   hideStatus: (status) =>
     set((state) => {
       // If no filter active, activate filter with all EXCEPT this one
@@ -356,7 +358,7 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   // persisted value isn't a plain object.
   const isRecord = (v: unknown): v is Record<string, unknown> =>
     v !== null && typeof v === "object" && !Array.isArray(v);
-  return {
+  const merged = {
     ...current,
     ...p,
     cardProperties: {
@@ -370,6 +372,13 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
       ? { ...current.collapsedSwimlanes, ...p.collapsedSwimlanes }
       : current.collapsedSwimlanes,
   };
+
+  // Reconcile conflicting state: topLevelOnly must be false when swimlaneGrouping is parent.
+  if (merged.swimlaneGrouping === "parent" && merged.topLevelOnly) {
+    merged.topLevelOnly = false;
+  }
+
+  return merged;
 }
 
 /** Factory: creates a vanilla StoreApi for use with React Context. */

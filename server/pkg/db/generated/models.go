@@ -721,6 +721,7 @@ type LocalCliRun struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	Source       pgtype.Text        `json:"source"`
 	SourceKey    pgtype.Text        `json:"source_key"`
+	ActiveMs     pgtype.Int8        `json:"active_ms"`
 }
 
 type LocalCliUsage struct {

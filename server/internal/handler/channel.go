@@ -134,9 +134,11 @@ type channelContext struct {
 	channelOwn  bool              // channel-level owner
 }
 
-// loadChannelContext resolves the channel and the requesting user's access. It
-// writes a 4xx and returns ok=false when the channel is missing or the user may
-// not even see it.
+// loadChannelContext resolves the channel and the requesting user's access.
+// It writes a 4xx and returns ok=false only when the channel is missing.
+// Visibility is NOT gated here — invite-only channels are visible to all
+// workspace members (channel + messages); posting/management is gated
+// per-handler via canPost() / canManage().
 func (h *Handler) loadChannelContext(w http.ResponseWriter, r *http.Request, wsUUID pgtype.UUID, channelID string) (channelContext, bool) {
 	cUUID, ok := parseUUIDOrBadRequest(w, channelID, "channel id")
 	if !ok {
@@ -161,11 +163,6 @@ func (h *Handler) loadChannelContext(w http.ResponseWriter, r *http.Request, wsU
 		}
 	}
 
-	// Visibility: open channels are visible to all members; invite channels only to members/admins.
-	if channel.AccessMode != "open" && ctx.member == nil && !ctx.wsAdmin {
-		writeError(w, http.StatusForbidden, "this channel is invite-only")
-		return channelContext{}, false
-	}
 	return ctx, true
 }
 

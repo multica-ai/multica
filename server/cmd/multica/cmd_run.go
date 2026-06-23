@@ -181,11 +181,15 @@ func runLocalCLI(cmd *cobra.Command, args []string) error {
 
 	reportCtx, reportCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer reportCancel()
-	if err := client.PatchJSON(reportCtx, "/api/local-runs/"+url.PathEscape(run.ID), map[string]any{
+	patchBody := map[string]any{
 		"status":    status,
 		"exit_code": exitCode,
 		"error":     errText,
-	}, nil); err != nil {
+	}
+	if activeMs > 0 {
+		patchBody["active_ms"] = activeMs
+	}
+	if err := client.PatchJSON(reportCtx, "/api/local-runs/"+url.PathEscape(run.ID), patchBody, nil); err != nil {
 		return fmt.Errorf("report local run result: %w", err)
 	}
 

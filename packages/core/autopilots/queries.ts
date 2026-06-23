@@ -1,9 +1,16 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 
+export interface AutopilotListParams {
+  mine?: boolean;
+}
+
 export const autopilotKeys = {
   all: (wsId: string) => ["autopilots", wsId] as const,
-  list: (wsId: string) => [...autopilotKeys.all(wsId), "list"] as const,
+  list: (wsId: string, params?: AutopilotListParams) =>
+    params
+      ? ([...autopilotKeys.all(wsId), "list", params] as const)
+      : ([...autopilotKeys.all(wsId), "list"] as const),
   detail: (wsId: string, id: string) =>
     [...autopilotKeys.all(wsId), "detail", id] as const,
   runs: (wsId: string, id: string) =>
@@ -16,10 +23,13 @@ export const autopilotKeys = {
     [...autopilotKeys.all(wsId), "deliveries", autopilotId, deliveryId] as const,
 };
 
-export function autopilotListOptions(wsId: string) {
+export function autopilotListOptions(
+  wsId: string,
+  params?: AutopilotListParams,
+) {
   return queryOptions({
-    queryKey: autopilotKeys.list(wsId),
-    queryFn: () => api.listAutopilots(),
+    queryKey: autopilotKeys.list(wsId, params),
+    queryFn: () => api.listAutopilots(params),
     select: (data) => data.autopilots,
   });
 }

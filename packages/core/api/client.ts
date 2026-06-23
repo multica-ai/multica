@@ -3115,9 +3115,13 @@ export class ApiClient {
   }
 
   // Autopilots
-  async listAutopilots(params?: { status?: string }): Promise<ListAutopilotsResponse> {
+  async listAutopilots(params?: {
+    status?: string;
+    mine?: boolean;
+  }): Promise<ListAutopilotsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.mine) search.set("mine", "true");
     const raw = await this.fetch<unknown>(`/api/autopilots?${search}`);
     return parseWithFallback(raw, ListAutopilotsResponseSchema, EMPTY_LIST_AUTOPILOTS_RESPONSE, {
       endpoint: "GET /api/autopilots",

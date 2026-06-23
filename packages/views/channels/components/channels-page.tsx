@@ -120,6 +120,7 @@ import { TranscriptButton } from "../../common/task-transcript";
 import { TerminateTaskConfirmDialog } from "../../issues/components/terminate-task-confirm-dialog";
 import { taskStatusConfig } from "../../agents/config";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { useT } from "../../i18n";
 
 interface ChannelsPageProps {
   channelId?: string;
@@ -194,6 +195,7 @@ function matchesMember(member: MemberWithUser, rawQuery: string): boolean {
 }
 
 export function ChannelsPage({ channelId }: ChannelsPageProps) {
+  const { t } = useT("channels");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const nav = useNavigation();
@@ -386,7 +388,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="调整频道列表宽度"
+        aria-label={t($ => $.resize_aria.channel_list)}
         data-panel-resize-handle="channel-list"
         className="relative z-20 flex w-0 shrink-0 cursor-col-resize items-center justify-center before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:transition-colors hover:before:bg-foreground/15 after:absolute after:inset-y-0 after:left-1/2 after:w-2 after:-translate-x-1/2"
         onPointerDown={startChannelListResize}
@@ -420,7 +422,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
           <div className="flex h-full items-center justify-center text-muted-foreground">
             <div className="text-center">
               <MessagesSquare className="mx-auto mb-2 h-10 w-10 opacity-30" />
-              <p className="text-sm">选择一个频道开始聊天</p>
+              <p className="text-sm">{t($ => $.empty_prompt)}</p>
             </div>
           </div>
         )}
@@ -430,7 +432,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
           <div
             role="separator"
             aria-orientation="vertical"
-            aria-label="调整右侧面板宽度"
+            aria-label={t($ => $.resize_aria.side_panel)}
             data-panel-resize-handle="channel-side-panel"
             className="relative z-20 flex w-0 shrink-0 cursor-col-resize items-center justify-center before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:transition-colors hover:before:bg-foreground/15 after:absolute after:inset-y-0 after:left-1/2 after:w-2 after:-translate-x-1/2"
             onPointerDown={startSidePanelResize}
@@ -495,6 +497,7 @@ function ChannelList({
   onSelect: (id: string) => void;
   wsId: string;
 }) {
+  const { t } = useT("channels");
   const qc = useQueryClient();
   const { data: channelGroups = [] } = useQuery(channelGroupsOptions(wsId));
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -551,7 +554,9 @@ function ChannelList({
       g.channels.sort((a, b) => a.position - b.position);
     }
     ug.sort((a, b) => a.position - b.position);
-    const sortedGroups = [...gMap.entries()].sort((a, b) => a[1].position - b[1].position);
+    const sortedGroups = [...gMap.entries()]
+      .filter(([, g]) => g.channels.length > 0)
+      .sort((a, b) => a[1].position - b[1].position);
     return { groups: sortedGroups, ungrouped: ug, groupMap: gMap };
   }, [channels, channelGroups]);
 
@@ -686,7 +691,7 @@ function ChannelList({
   return (
     <div className="flex h-full min-w-0 flex-col border-r bg-muted/30">
       <div className="flex h-11 items-center justify-between border-b px-3">
-        <h2 className="text-sm font-semibold">频道</h2>
+        <h2 className="text-sm font-semibold">{t($ => $.header)}</h2>
         <div className="flex items-center gap-0.5">
           <Tooltip>
             <TooltipTrigger
@@ -696,7 +701,7 @@ function ChannelList({
                 </Button>
               }
             />
-            <TooltipContent>新建分组</TooltipContent>
+            <TooltipContent>{t($ => $.new_group)}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
@@ -706,7 +711,7 @@ function ChannelList({
                 </Button>
               }
             />
-            <TooltipContent>新建频道</TooltipContent>
+            <TooltipContent>{t($ => $.new_channel)}</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -770,12 +775,12 @@ function ChannelList({
       <Dialog open={showCreateGroupDialog} onOpenChange={(v) => !v && setShowCreateGroupDialog(false)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>新建分组</DialogTitle>
-            <DialogDescription>为频道创建一个新的分组</DialogDescription>
+            <DialogTitle>{t($ => $.group_dialog.title)}</DialogTitle>
+            <DialogDescription>{t($ => $.group_dialog.description)}</DialogDescription>
           </DialogHeader>
           <div className="py-2">
             <Input
-              placeholder="分组名称"
+              placeholder={t($ => $.group_dialog.name_placeholder)}
               value={newGroupName}
               onChange={(e) => setNewGroupName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") handleCreateGroupSubmit(); }}
@@ -783,8 +788,8 @@ function ChannelList({
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateGroupDialog(false)}>取消</Button>
-            <Button onClick={handleCreateGroupSubmit} disabled={!newGroupName.trim()}>创建</Button>
+            <Button variant="outline" onClick={() => setShowCreateGroupDialog(false)}>{t($ => $.group_dialog.cancel)}</Button>
+            <Button onClick={handleCreateGroupSubmit} disabled={!newGroupName.trim()}>{t($ => $.group_dialog.create)}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -827,6 +832,7 @@ function ChannelGroupSection({
   onDelete: () => void;
   onSelect: (id: string) => void;
 }) {
+  const { t } = useT("channels");
   const { setNodeRef } = useDroppable({ id: `group:${groupId}` });
 
   return (
@@ -863,8 +869,8 @@ function ChannelGroupSection({
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem onClick={onStartRename}>重命名</ContextMenuItem>
-          <ContextMenuItem className="text-destructive" onClick={onDelete}>删除分组</ContextMenuItem>
+          <ContextMenuItem onClick={onStartRename}>{t($ => $.context_menu.rename)}</ContextMenuItem>
+          <ContextMenuItem className="text-destructive" onClick={onDelete}>{t($ => $.context_menu.delete_group)}</ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
       {!collapsed && (
@@ -1041,6 +1047,7 @@ function MessageList({
   canPost?: boolean;
   highlight?: ListChannelMessagesResponse["highlight"] | null;
 }) {
+  const { t } = useT("channels");
   const editorRef = useRef<ContentEditorRef>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1059,16 +1066,30 @@ function MessageList({
     if (messages.length > prevMsgCount.current) {
       const isNewMessage = messages.length - prevMsgCount.current <= 2;
       if (isNewMessage && !linkedMessageId) {
-        bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        requestAnimationFrame(() => {
+          bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        });
       }
     } else if (prevMsgCount.current === 0 && messages.length > 0 && !linkedMessageId) {
-      bottomRef.current?.scrollIntoView({ block: "end" });
+      // Use rAF to ensure the browser has painted the message elements
+      // before we attempt to scroll — without this, scrollIntoView may
+      // fire on an empty or partially-laid-out container.
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ block: "end" });
+      });
     }
     prevMsgCount.current = messages.length;
   }, [messages.length, linkedMessageId]);
 
+  // Scroll to bottom when entering a channel (including first visit).
+  // Only scroll when messages are already loaded to avoid scrolling an
+  // empty container; the effect above handles the initial-load case.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    if (messages.length > 0 && !linkedMessageId) {
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ block: "end" });
+      });
+    }
   }, [channelId]);
 
   useEffect(() => {
@@ -1108,11 +1129,11 @@ function MessageList({
   const handleCopyLink = useCallback(async (msg: ChannelMessage) => {
     const url = nav.getShareableUrl(paths.channelDetail(channelId, { messageId: msg.id }));
     if (await copyText(url)) {
-      toast.success("链接已复制");
+      toast.success(t($ => $.link_copied));
     } else {
-      toast.error("复制失败");
+      toast.error(t($ => $.copy_failed));
     }
-  }, [channelId, nav, paths]);
+  }, [channelId, nav, paths, t]);
 
   const sendMutation = useMutation({
     mutationFn: (content: string) => api.sendChannelMessage(channelId, { content }),
@@ -1122,7 +1143,7 @@ function MessageList({
       qc.invalidateQueries({ queryKey: channelKeys.channelMessages(wsId, channelId) });
       qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
     },
-    onError: () => toast.error("发送失败"),
+    onError: () => toast.error(t($ => $.send_failed)),
   });
 
   const openModal = useModalStore((s) => s.open);
@@ -1151,7 +1172,7 @@ function MessageList({
         )}
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            还没有消息，发第一条吧
+            {t($ => $.no_messages)}
           </div>
         ) : (
           <ul className="space-y-3">
@@ -1190,7 +1211,7 @@ function MessageList({
             <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
               <ContentEditor
                 ref={editorRef}
-                placeholder="输入消息，支持 Markdown、图片和 @提及"
+                placeholder={t($ => $.input_placeholder)}
                 onUpdate={(md) => setIsEmpty(!md.trim())}
                 onSubmit={handleSend}
                 onUploadFile={(file) => uploadWithToast(file)}
@@ -1224,7 +1245,7 @@ function MessageList({
                   }
                 />
                 <TooltipContent side="top">
-                  发送 · {formatShortcut(modKey, enterKey)}
+                  {t($ => $.send_tooltip, { shortcut: formatShortcut(modKey, enterKey) })}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -1234,7 +1255,7 @@ function MessageList({
       ) : (
         <div className="border-t px-4 py-3">
           <p className="text-center text-sm text-muted-foreground">
-            仅受邀成员可在此频道发送消息
+            {t($ => $.invite_only_notice)}
           </p>
         </div>
       )}
@@ -1256,6 +1277,7 @@ function MessageRow({
   onConvertAgent: (msg: ChannelMessage) => void;
   onCopyLink: (msg: ChannelMessage) => void;
 }) {
+  const { t } = useT("channels");
   const isSystem = message.author_type === "system" || !message.author_id;
   const authorId = message.author_id ?? "";
   return (
@@ -1297,7 +1319,7 @@ function MessageRow({
                 onClick={() => onOpenReplies(message.id)}
                 className="mt-1 text-xs text-primary hover:underline"
               >
-                {message.reply_count} 条回复
+                {t($ => $.replies_count, { count: message.reply_count ?? 0 })}
               </button>
             )}
             <ChannelAgentTaskStrip tasks={message.agent_tasks ?? []} />
@@ -1308,19 +1330,19 @@ function MessageRow({
       <ContextMenuContent>
         <ContextMenuItem onClick={() => onCopyLink(message)}>
           <Link className="mr-2 h-4 w-4" />
-          复制链接
+          {t($ => $.context_menu.copy_link)}
         </ContextMenuItem>
         <ContextMenuItem onClick={() => onOpenReplies(message.id)}>
           <MessageCircleReply className="mr-2 h-4 w-4" />
-          回复
+          {t($ => $.context_menu.reply)}
         </ContextMenuItem>
         <ContextMenuItem onClick={() => onConvertManual(message)}>
           <FileText className="mr-2 h-4 w-4" />
-          转换为 Issue
+          {t($ => $.context_menu.convert_issue)}
         </ContextMenuItem>
         <ContextMenuItem onClick={() => onConvertAgent(message)}>
           <Bot className="mr-2 h-4 w-4" />
-          由 Agent 转为 Issue
+          {t($ => $.context_menu.convert_agent)}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -1328,6 +1350,8 @@ function MessageRow({
 }
 
 function ChannelAgentTaskStrip({ tasks }: { tasks: ChannelMessage["agent_tasks"] }) {
+  const { t } = useT("channels");
+  const channelTaskStatusLabel = useChannelTaskStatusLabel();
   const [cancelTaskId, setCancelTaskId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
@@ -1370,7 +1394,7 @@ function ChannelAgentTaskStrip({ tasks }: { tasks: ChannelMessage["agent_tasks"]
                 agentName={agentName}
                 isLive={isRunning}
                 className="-mr-1 h-5 w-5 p-0"
-                title="查看执行历史"
+                title={t($ => $.task_strip.view_history)}
               />
             )}
             {isActive && (
@@ -1391,7 +1415,7 @@ function ChannelAgentTaskStrip({ tasks }: { tasks: ChannelMessage["agent_tasks"]
                     </button>
                   }
                 />
-                <TooltipContent side="top">停止</TooltipContent>
+                <TooltipContent side="top">{t($ => $.task_strip.stop)}</TooltipContent>
               </Tooltip>
             )}
           </div>
@@ -1434,25 +1458,28 @@ function ChannelLinkedIssuesStrip({ issues }: { issues: ChannelMessage["issues"]
   );
 }
 
-function channelTaskStatusLabel(status: string): string {
-  switch (status) {
-    case "queued":
-      return "排队中";
-    case "dispatched":
-      return "已派发";
-    case "waiting_local_directory":
-      return "等待目录";
-    case "running":
-      return "运行中";
-    case "completed":
-      return "已完成";
-    case "failed":
-      return "失败";
-    case "cancelled":
-      return "已取消";
-    default:
-      return status;
-  }
+function useChannelTaskStatusLabel() {
+  const { t } = useT("channels");
+  return (status: string): string => {
+    switch (status) {
+      case "queued":
+        return t($ => $.task_status.queued);
+      case "dispatched":
+        return t($ => $.task_status.dispatched);
+      case "waiting_local_directory":
+        return t($ => $.task_status.waiting_directory);
+      case "running":
+        return t($ => $.task_status.running);
+      case "completed":
+        return t($ => $.task_status.completed);
+      case "failed":
+        return t($ => $.task_status.failed);
+      case "cancelled":
+        return t($ => $.task_status.cancelled);
+      default:
+        return status;
+    }
+  };
 }
 
 function RepliesPanel({
@@ -1476,6 +1503,7 @@ function RepliesPanel({
   onClose: () => void;
   highlightMessageId?: string | null;
 }) {
+  const { t } = useT("channels");
   const editorRef = useRef<ContentEditorRef>(null);
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const { isDragOver, dropZoneProps } = useFileDropZone({
@@ -1489,11 +1517,11 @@ function RepliesPanel({
   const handleCopyLink = useCallback(async (msg: ChannelMessage) => {
     const url = nav.getShareableUrl(paths.channelDetail(channelId, { messageId: msg.id }));
     if (await copyText(url)) {
-      toast.success("链接已复制");
+      toast.success(t($ => $.link_copied));
     } else {
-      toast.error("复制失败");
+      toast.error(t($ => $.copy_failed));
     }
-  }, [channelId, nav, paths]);
+  }, [channelId, nav, paths, t]);
 
   const handleConvertManual = useCallback((msg: ChannelMessage) => {
     openModal("create-issue", {
@@ -1520,7 +1548,7 @@ function RepliesPanel({
       qc.invalidateQueries({ queryKey: channelKeys.channelMessages(wsId, channelId) });
       qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
     },
-    onError: () => toast.error("回复失败"),
+    onError: () => toast.error(t($ => $.reply_failed)),
   });
 
   const handleReply = useCallback(() => {
@@ -1545,7 +1573,7 @@ function RepliesPanel({
 
   return (
     <div className="flex h-full min-w-0 flex-col border-l bg-background shadow-sm">
-      <PanelHeader title="回复" onClose={onClose} />
+      <PanelHeader title={t($ => $.panel_header.replies)} onClose={onClose} />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {loading ? (
           <div className="flex items-center justify-center py-8">
@@ -1572,12 +1600,12 @@ function RepliesPanel({
                   />
                 ))
               ) : (
-                <p className="py-4 text-center text-xs text-muted-foreground">还没有回复</p>
+                <p className="py-4 text-center text-xs text-muted-foreground">{t($ => $.no_replies)}</p>
               )}
             </div>
           </div>
         ) : (
-          <p className="py-4 text-center text-xs text-muted-foreground">还没有回复</p>
+          <p className="py-4 text-center text-xs text-muted-foreground">{t($ => $.no_replies)}</p>
         )}
       </div>
       <div className="border-t px-3 py-3">
@@ -1588,7 +1616,7 @@ function RepliesPanel({
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
             <ContentEditor
               ref={editorRef}
-              placeholder="回复..."
+              placeholder={t($ => $.reply_placeholder)}
               onUpdate={(md) => setIsEmpty(!md.trim())}
               onSubmit={handleReply}
               onUploadFile={(file) => uploadWithToast(file)}
@@ -1622,7 +1650,7 @@ function RepliesPanel({
                 }
               />
               <TooltipContent side="top">
-                {`发送 · ${formatShortcut(modKey, enterKey)}`}
+                {t($ => $.send_tooltip, { shortcut: formatShortcut(modKey, enterKey) })}
               </TooltipContent>
             </Tooltip>
           </div>
@@ -1646,6 +1674,7 @@ function PanelMessage({
   onConvertManual?: (msg: ChannelMessage) => void;
   onConvertAgent?: (msg: ChannelMessage) => void;
 }) {
+  const { t } = useT("channels");
   if (!message) return null;
   const isSystem = message.author_type === "system" || !message.author_id;
   const authorId = message.author_id ?? "";
@@ -1689,19 +1718,19 @@ function PanelMessage({
         {onCopyLink && (
           <ContextMenuItem onClick={() => onCopyLink(message)}>
             <Link className="mr-2 h-4 w-4" />
-            复制链接
+            {t($ => $.context_menu.copy_link)}
           </ContextMenuItem>
         )}
         {onConvertManual && (
           <ContextMenuItem onClick={() => onConvertManual(message)}>
             <FileText className="mr-2 h-4 w-4" />
-            转换为 Issue
+            {t($ => $.context_menu.convert_issue)}
           </ContextMenuItem>
         )}
         {onConvertAgent && (
           <ContextMenuItem onClick={() => onConvertAgent(message)}>
             <Bot className="mr-2 h-4 w-4" />
-            由 Agent 转为 Issue
+            {t($ => $.context_menu.convert_agent)}
           </ContextMenuItem>
         )}
       </ContextMenuContent>
@@ -1726,6 +1755,7 @@ function ChannelMembersPanel({
   qc: ReturnType<typeof useQueryClient>;
   onClose: () => void;
 }) {
+  const { t } = useT("channels");
   const [query, setQuery] = useState("");
   const memberUserIds = useMemo(() => new Set(members.map((m) => m.user_id)), [members]);
   const ownerCount = members.filter((m) => m.role === "owner").length;
@@ -1733,32 +1763,32 @@ function ChannelMembersPanel({
   const addMutation = useMutation({
     mutationFn: (userId: string) => api.addChannelMember(channel.id, { user_id: userId }),
     onSuccess: () => {
-      toast.success("成员已添加");
+      toast.success(t($ => $.member_added));
       qc.invalidateQueries({ queryKey: channelKeys.members(wsId, channel.id) });
       qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
     },
-    onError: () => toast.error("添加失败"),
+    onError: () => toast.error(t($ => $.add_failed)),
   });
 
   const removeMutation = useMutation({
     mutationFn: (userId: string) => api.removeChannelMember(channel.id, userId),
     onSuccess: () => {
-      toast.success("成员已移除");
+      toast.success(t($ => $.member_removed));
       qc.invalidateQueries({ queryKey: channelKeys.members(wsId, channel.id) });
       qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
     },
-    onError: () => toast.error("移除失败"),
+    onError: () => toast.error(t($ => $.remove_failed)),
   });
 
   const updateMutation = useMutation({
     mutationFn: (accessMode: "open" | "invite") =>
       api.updateChannel(channel.id, { access_mode: accessMode }),
     onSuccess: () => {
-      toast.success("频道设置已更新");
+      toast.success(t($ => $.settings_updated));
       qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: channelKeys.detail(wsId, channel.id) });
     },
-    onError: () => toast.error("更新失败"),
+    onError: () => toast.error(t($ => $.update_failed)),
   });
 
   const candidates = useMemo(
@@ -1774,15 +1804,15 @@ function ChannelMembersPanel({
 
   return (
     <div className="flex h-full min-w-0 flex-col border-l bg-background shadow-sm">
-      <PanelHeader title={isInviteMode ? "成员与设置" : "参与者"} onClose={onClose} />
+      <PanelHeader title={isInviteMode ? t($ => $.panel_header.members_settings) : t($ => $.panel_header.participants)} onClose={onClose} />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {isInviteMode && (
           <>
             <section className="space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-medium">频道性质</h3>
-                  <p className="text-xs text-muted-foreground">控制成员是否需要被添加后才能进入。</p>
+                  <h3 className="text-sm font-medium">{t($ => $.members.channel_nature)}</h3>
+                  <p className="text-xs text-muted-foreground">{t($ => $.members.nature_description)}</p>
                 </div>
                 <Select
                   value={channel.access_mode}
@@ -1790,11 +1820,11 @@ function ChannelMembersPanel({
                   disabled={!canManage || updateMutation.isPending}
                 >
                   <SelectTrigger size="sm" className="w-24">
-                    <SelectValue>{channel.access_mode === "open" ? "公开" : "邀请"}</SelectValue>
+                    <SelectValue>{channel.access_mode === "open" ? t($ => $.create_channel_dialog.open) : t($ => $.create_channel_dialog.invite)}</SelectValue>
                   </SelectTrigger>
                   <SelectContent alignItemWithTrigger={false}>
-                    <SelectItem value="open">公开</SelectItem>
-                    <SelectItem value="invite">邀请</SelectItem>
+                    <SelectItem value="open">{t($ => $.create_channel_dialog.open)}</SelectItem>
+                    <SelectItem value="invite">{t($ => $.create_channel_dialog.invite)}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1805,7 +1835,7 @@ function ChannelMembersPanel({
 
         <section className="space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium">当前成员</h3>
+            <h3 className="text-sm font-medium">{t($ => $.members.current_members)}</h3>
             <Badge variant="outline" className="text-[10px]">{members.length}</Badge>
           </div>
           <ul className="space-y-1.5">
@@ -1831,13 +1861,13 @@ function ChannelMembersPanel({
                         render={
                           <span>
                             <Button variant="ghost" size="sm" className="h-7 text-xs" disabled>
-                              移除
+                              {t($ => $.members.remove)}
                             </Button>
                           </span>
                         }
                       />
                       <TooltipContent side="left">
-                        {!canManage ? "只有管理员或频道 Owner 可以移除成员" : "不能移除唯一 Owner"}
+                        {!canManage ? t($ => $.members.cannot_remove_admin) : t($ => $.members.cannot_remove_only_owner)}
                       </TooltipContent>
                     </Tooltip>
                   ) : (
@@ -1847,7 +1877,7 @@ function ChannelMembersPanel({
                       className="h-7 text-xs text-destructive"
                       onClick={() => removeMutation.mutate(member.user_id)}
                     >
-                      移除
+                      {t($ => $.members.remove)}
                     </Button>
                   ))}
                 </li>
@@ -1862,15 +1892,15 @@ function ChannelMembersPanel({
 
             <section className="space-y-2">
               <div>
-                <h3 className="text-sm font-medium">添加成员</h3>
-                <p className="text-xs text-muted-foreground">按姓名、邮箱或拼音搜索 Workspace 成员。</p>
+                <h3 className="text-sm font-medium">{t($ => $.members.add_member)}</h3>
+                <p className="text-xs text-muted-foreground">{t($ => $.members.search_description)}</p>
               </div>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="搜索成员"
+                  placeholder={t($ => $.members.search_placeholder)}
                   className="h-8 pl-7 text-sm"
                 />
               </div>
@@ -1896,13 +1926,13 @@ function ChannelMembersPanel({
                         disabled={!canManage || alreadyInChannel || addMutation.isPending}
                         onClick={() => addMutation.mutate(member.user_id)}
                       >
-                        {alreadyInChannel ? "已添加" : "添加"}
+                        {alreadyInChannel ? t($ => $.members.already_added) : t($ => $.members.add)}
                       </Button>
                     </li>
                   );
                 })}
                 {candidates.length === 0 && (
-                  <li className="py-6 text-center text-xs text-muted-foreground">没有匹配成员</li>
+                  <li className="py-6 text-center text-xs text-muted-foreground">{t($ => $.members.no_match)}</li>
                 )}
               </ul>
             </section>
@@ -1935,6 +1965,7 @@ function CreateChannelDialog({
   wsId: string;
   qc: ReturnType<typeof useQueryClient>;
 }) {
+  const { t } = useT("channels");
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [access, setAccess] = useState<"open" | "invite">("open");
@@ -1944,7 +1975,7 @@ function CreateChannelDialog({
   const createMutation = useMutation({
     mutationFn: () => api.createChannel({ name, description: desc || undefined, access_mode: access }),
     onSuccess: (ch) => {
-      toast.success("频道已创建");
+      toast.success(t($ => $.channel_created));
       qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
       onClose();
       setName("");
@@ -1952,35 +1983,35 @@ function CreateChannelDialog({
       setAccess("open");
       nav.push(paths.channelDetail(ch.id));
     },
-    onError: () => toast.error("创建失败"),
+    onError: () => toast.error(t($ => $.create_failed)),
   });
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>创建频道</DialogTitle>
-          <DialogDescription>创建一个新的频道来讨论话题</DialogDescription>
+          <DialogTitle>{t($ => $.create_channel_dialog.title)}</DialogTitle>
+          <DialogDescription>{t($ => $.create_channel_dialog.description)}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
-          <Input placeholder="频道名称" value={name} onChange={(e) => setName(e.target.value)} />
-          <Input placeholder="描述（可选）" value={desc} onChange={(e) => setDesc(e.target.value)} />
+          <Input placeholder={t($ => $.create_channel_dialog.name_placeholder)} value={name} onChange={(e) => setName(e.target.value)} />
+          <Input placeholder={t($ => $.create_channel_dialog.desc_placeholder)} value={desc} onChange={(e) => setDesc(e.target.value)} />
           <div className="flex items-center gap-4 text-sm">
             <label className="flex items-center gap-1.5">
               <input type="radio" checked={access === "open"} onChange={() => setAccess("open")} />
-              公开
+              {t($ => $.create_channel_dialog.open)}
             </label>
             <label className="flex items-center gap-1.5">
               <input type="radio" checked={access === "invite"} onChange={() => setAccess("invite")} />
-              邀请制
+              {t($ => $.create_channel_dialog.invite)}
             </label>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button variant="outline" onClick={onClose}>{t($ => $.create_channel_dialog.cancel)}</Button>
           <Button onClick={() => createMutation.mutate()} disabled={!name.trim() || createMutation.isPending}>
             {createMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-            创建
+            {t($ => $.create_channel_dialog.create)}
           </Button>
         </DialogFooter>
       </DialogContent>

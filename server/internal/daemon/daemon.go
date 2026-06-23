@@ -3180,6 +3180,19 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 	case task.IssueID != "":
 		meta.Kind = execenv.GCKindIssue
 		meta.IssueID = task.IssueID
+	case task.ChannelID != "":
+		// Channel-origin mention tasks have no parent record carrying a
+		// terminal status (channels are permanent). Persist the lane key
+		// (channel + thread) plus the task ID so the GC loop can ask the
+		// server for the task's terminal state AND for lane-liveness, and
+		// only reclaim once the whole lane has been quiet past GCTTL.
+		// Without this branch channel envRoots fell through to the default
+		// (no meta) and got blind-cleaned by orphan-by-mtime.
+		meta.Kind = execenv.GCKindChannel
+		meta.AgentID = task.AgentID
+		meta.ChannelID = task.ChannelID
+		meta.ChannelThreadID = task.ChannelThreadID
+		meta.TaskID = task.ID
 	case task.QuickCreatePrompt != "":
 		// Quick-create tasks reach WriteGCMeta before the server runs
 		// LinkTaskToIssue, so IssueID is always empty here. Persist the

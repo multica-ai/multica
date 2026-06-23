@@ -114,7 +114,7 @@ describe("ApiClient", () => {
 
     const client = new ApiClient("https://api.example.test");
 
-    await client.listAutopilots({ status: "active" });
+    await client.listAutopilots({ status: "active", mine: true });
     await client.getAutopilot("ap-1");
     await client.createAutopilot({
       title: "Daily triage",
@@ -143,7 +143,7 @@ describe("ApiClient", () => {
     }));
 
     expect(calls).toMatchObject([
-      { url: "https://api.example.test/api/autopilots?status=active", method: "GET" },
+      { url: "https://api.example.test/api/autopilots?status=active&mine=true", method: "GET" },
       { url: "https://api.example.test/api/autopilots/ap-1", method: "GET" },
       {
         url: "https://api.example.test/api/autopilots",

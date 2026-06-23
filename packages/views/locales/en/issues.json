@@ -8,7 +8,8 @@
     "show_archived": "Show archived",
     "hide_archived": "Hide archived",
     "top_level_only": "Top-level only",
-    "show_all_issues": "Show all issues"
+    "show_all_issues": "Show all issues",
+    "top_level_only_disabled_by_parent": "Not available when grouped by parent"
   },
   "status": {
     "backlog": "Backlog",

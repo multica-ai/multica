@@ -377,6 +377,7 @@
   "toolbar": {
     "result_count_title": "Matching automations / all automations",
     "filter_label": "Filter",
+    "mine_filter": "Mine",
     "filter_active_count_one": "{{count}} filter",
     "filter_active_count_other": "{{count}} filters",
     "clear_filters": "Clear filters",

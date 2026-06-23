@@ -221,6 +221,8 @@ func (d *Daemon) shouldCleanTaskDirForKind(ctx context.Context, taskDir string, 
 		return d.gcDecisionAutopilotRun(ctx, taskDir, meta)
 	case execenv.GCKindQuickCreate:
 		return d.gcDecisionQuickCreate(ctx, taskDir, meta)
+	case execenv.GCKindChannel:
+		return d.gcDecisionChannel(ctx, taskDir, meta)
 	default:
 		// Unknown kind: fall back to mtime-based orphan cleanup so a future
 		// daemon writing a kind we don't recognize doesn't get insta-wiped.
@@ -433,6 +435,83 @@ func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta
 		return gcActionClean
 	}
 	return gcActionSkip
+}
+
+// gcDecisionChannel reclaims a channel-origin mention task's envRoot only
+// when ALL of these hold:
+//  1. the task itself reached a terminal state (the row still exists);
+//  2. the task has been terminal past GCTTL (so transient bursts don't
+//     reclaim directories a follow-up might resume into);
+//  3. the whole (agent, channel, thread) lane is quiet past GCTTL — no
+//     task activity on the lane newer than now-GCTTL, which covers the
+//     cross-task resume window where task A is terminal but task B on the
+//     same lane is pending/running and about to reuse A's envRoot.
+//
+// Channels are permanent and carry no terminal status of their own, so the
+// lane-liveness check (not the channel record) is what bounds reclaim.
+// Together with the top-level isActiveEnvRoot guard (runTask marks any
+// envRoot it is about to use), this gives three layers of protection
+// against deleting an envRoot a running task depends on.
+//
+// Degradation: a 404 on the task row (hard-deleted / scoped token) falls
+// back to orphan-by-mtime, mirroring the issue and quick-create paths; any
+// lane-liveness query failure is treated as "skip" (don't delete on
+// uncertainty), matching the issue path's stance on transient errors.
+func (d *Daemon) gcDecisionChannel(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+	if strings.TrimSpace(meta.TaskID) == "" {
+		return d.orphanByMTime(taskDir, "empty channel task id")
+	}
+
+	// (1) + (2) own terminal state + own TTL.
+	status, err := d.client.GetTaskGCCheck(ctx, meta.TaskID)
+	if err != nil {
+		if isAccessNotFound(err) {
+			return d.orphanByMTime(taskDir, "channel task not accessible")
+		}
+		return gcActionSkip
+	}
+	if !isAgentTaskTerminal(status.Status) {
+		return gcActionSkip // pending/running — never reclaim
+	}
+	anchor := status.CompletedAt
+	if anchor.IsZero() {
+		anchor = meta.CompletedAt
+	}
+	if anchor.IsZero() {
+		return gcActionSkip // no usable anchor — stay safe
+	}
+	if time.Since(anchor) <= d.cfg.GCTTL {
+		return gcActionSkip // terminal, but not long enough ago
+	}
+
+	// (3) lane liveness: need workspace + channel + agent to ask. These
+	// come from .gc_meta.json; if the meta is incomplete we can't safely
+	// evaluate the lane, so skip rather than risk deleting an envRoot a
+	// live lane would resume into.
+	if meta.WorkspaceID == "" || meta.ChannelID == "" || meta.AgentID == "" {
+		return gcActionSkip
+	}
+	since := time.Now().Add(-d.cfg.GCTTL)
+	lane, err := d.client.GetChannelLaneGCCheck(ctx, meta.WorkspaceID, meta.ChannelID, meta.AgentID, meta.ChannelThreadID, since)
+	if err != nil {
+		// Don't delete on uncertainty — matches issue path's transient-error stance.
+		return gcActionSkip
+	}
+	if lane.Live {
+		return gcActionSkip
+	}
+
+	d.logger.Info("gc: eligible for cleanup",
+		"dir", filepath.Base(taskDir),
+		"kind", "channel",
+		"task", meta.TaskID,
+		"channel", meta.ChannelID,
+		"thread", meta.ChannelThreadID,
+		"status", status.Status,
+		"completed_at", anchor.Format(time.RFC3339),
+		"last_activity", lane.LastActivity.Format(time.RFC3339),
+	)
+	return gcActionClean
 }
 
 // isAgentTaskTerminal reports whether a value of agent_task_queue.status
