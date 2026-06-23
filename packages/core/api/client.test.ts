@@ -114,6 +114,58 @@ describe("ApiClient", () => {
     ]);
   });
 
+  it("uses the expected HTTP contract for project AICTX status", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        schema_version: 2,
+        contract_name: "D-MULTICA010-ProjectAictxStatusDTO",
+        workspace_id: "ws-1",
+        multica_project_id: "project-1",
+        project_binding_id: null,
+        state: "unconfigured",
+        context_index_status: "unknown",
+        binding: {
+          schema_version: 2,
+          contract_name: "D-MULTICA010-ProjectBindingDTO",
+          binding_id: null,
+          workspace_id: "ws-1",
+          multica_project_id: "project-1",
+          project_resource_id: null,
+          repo_root_ref_redacted: null,
+          repo_root_sha256: null,
+          binding_source: null,
+          verified_at: null,
+          verified_by: null,
+          symlink_policy: "reject_outside_root",
+          status: "missing",
+          reason_codes: ["feature_disabled"],
+        },
+        latest_context_pack_ref: null,
+        latest_context_pack_sha256: null,
+        latest_context_pack_created_at: null,
+        latest_handoff_ref: null,
+        latest_decision_ref: null,
+        redaction_status: "not_needed",
+        redaction_report_id: null,
+        audit_event_id: null,
+        reason_codes: ["feature_disabled"],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const status = await client.getProjectAictxStatus("project-1");
+
+    expect(status.state).toBe("unconfigured");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/projects/project-1/aictx/status",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("emits X-Client-* headers when identity is configured", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([]), {

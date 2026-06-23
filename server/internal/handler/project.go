@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,6 +37,49 @@ type ProjectResponse struct {
 	// payload to keep parent metadata and child collections separate; clients
 	// that need the list call ListProjectResources directly.
 	ResourceCount int64 `json:"resource_count"`
+}
+
+const (
+	projectAictxBindingFeatureFlag = "aictx_project_binding_enabled"
+	projectBindingContractName     = "D-MULTICA010-ProjectBindingDTO"
+	projectAictxStatusContractName = "D-MULTICA010-ProjectAictxStatusDTO"
+)
+
+type ProjectBindingResponse struct {
+	SchemaVersion       int      `json:"schema_version"`
+	ContractName        string   `json:"contract_name"`
+	BindingID           *string  `json:"binding_id"`
+	WorkspaceID         string   `json:"workspace_id"`
+	MulticaProjectID    string   `json:"multica_project_id"`
+	ProjectResourceID   *string  `json:"project_resource_id"`
+	RepoRootRefRedacted *string  `json:"repo_root_ref_redacted"`
+	RepoRootSHA256      *string  `json:"repo_root_sha256"`
+	BindingSource       *string  `json:"binding_source"`
+	VerifiedAt          *string  `json:"verified_at"`
+	VerifiedBy          *string  `json:"verified_by"`
+	SymlinkPolicy       string   `json:"symlink_policy"`
+	Status              string   `json:"status"`
+	ReasonCodes         []string `json:"reason_codes"`
+}
+
+type ProjectAictxStatusResponse struct {
+	SchemaVersion              int                    `json:"schema_version"`
+	ContractName               string                 `json:"contract_name"`
+	WorkspaceID                string                 `json:"workspace_id"`
+	MulticaProjectID           string                 `json:"multica_project_id"`
+	ProjectBindingID           *string                `json:"project_binding_id"`
+	State                      string                 `json:"state"`
+	ContextIndexStatus         string                 `json:"context_index_status"`
+	Binding                    ProjectBindingResponse `json:"binding"`
+	LatestContextPackRef       *string                `json:"latest_context_pack_ref"`
+	LatestContextPackSHA256    *string                `json:"latest_context_pack_sha256"`
+	LatestContextPackCreatedAt *string                `json:"latest_context_pack_created_at"`
+	LatestHandoffRef           *string                `json:"latest_handoff_ref"`
+	LatestDecisionRef          *string                `json:"latest_decision_ref"`
+	RedactionStatus            string                 `json:"redaction_status"`
+	RedactionReportID          *string                `json:"redaction_report_id"`
+	AuditEventID               *string                `json:"audit_event_id"`
+	ReasonCodes                []string               `json:"reason_codes"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -181,6 +225,128 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) GetProjectAictxStatus(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	if _, ok := h.requireWorkspaceMember(w, r, workspaceID, "project not found"); !ok {
+		return
+	}
+	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+		ID: idUUID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	workspace, err := h.Queries.GetWorkspace(r.Context(), wsUUID)
+	if err != nil {
+		writeJSON(w, http.StatusOK, missingProjectAictxStatus(project, "workspace_settings_unavailable"))
+		return
+	}
+	if !projectAictxBindingEnabled(workspace.Settings) {
+		writeJSON(w, http.StatusOK, missingProjectAictxStatus(project, "feature_disabled"))
+		return
+	}
+
+	resources, err := h.Queries.ListProjectResources(r.Context(), project.ID)
+	if err != nil {
+		writeJSON(w, http.StatusOK, missingProjectAictxStatus(project, "project_resources_unavailable"))
+		return
+	}
+	for _, resource := range resources {
+		if resource.ResourceType != "local_directory" {
+			continue
+		}
+		writeJSON(w, http.StatusOK, boundProjectAictxStatus(project, resource))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, missingProjectAictxStatus(project, "no_project_local_directory"))
+}
+
+func projectAictxBindingEnabled(settings []byte) bool {
+	var decoded map[string]any
+	if len(settings) == 0 || json.Unmarshal(settings, &decoded) != nil {
+		return false
+	}
+	return decoded[projectAictxBindingFeatureFlag] == true
+}
+
+func missingProjectAictxStatus(project db.Project, reason string) ProjectAictxStatusResponse {
+	projectID := uuidToString(project.ID)
+	workspaceID := uuidToString(project.WorkspaceID)
+	return ProjectAictxStatusResponse{
+		SchemaVersion:      2,
+		ContractName:       projectAictxStatusContractName,
+		WorkspaceID:        workspaceID,
+		MulticaProjectID:   projectID,
+		State:              "unconfigured",
+		ContextIndexStatus: "unknown",
+		Binding: ProjectBindingResponse{
+			SchemaVersion:    2,
+			ContractName:     projectBindingContractName,
+			WorkspaceID:      workspaceID,
+			MulticaProjectID: projectID,
+			SymlinkPolicy:    "reject_outside_root",
+			Status:           "missing",
+			ReasonCodes:      []string{reason},
+		},
+		RedactionStatus: "not_needed",
+		ReasonCodes:     []string{reason},
+	}
+}
+
+func boundProjectAictxStatus(project db.Project, resource db.ProjectResource) ProjectAictxStatusResponse {
+	projectID := uuidToString(project.ID)
+	workspaceID := uuidToString(project.WorkspaceID)
+	resourceID := uuidToString(resource.ID)
+	bindingID := "project_resource:" + resourceID
+	bindingSource := "project_resource"
+	rootRef := "project_resource://" + resourceID
+	rootHash := projectAictxResourceHash(project.ID, resource.ResourceRef)
+	reasonCodes := []string{"aictx_provider_unavailable"}
+
+	return ProjectAictxStatusResponse{
+		SchemaVersion:      2,
+		ContractName:       projectAictxStatusContractName,
+		WorkspaceID:        workspaceID,
+		MulticaProjectID:   projectID,
+		ProjectBindingID:   &bindingID,
+		State:              "provider_unavailable",
+		ContextIndexStatus: "unknown",
+		Binding: ProjectBindingResponse{
+			SchemaVersion:       2,
+			ContractName:        projectBindingContractName,
+			BindingID:           &bindingID,
+			WorkspaceID:         workspaceID,
+			MulticaProjectID:    projectID,
+			ProjectResourceID:   &resourceID,
+			RepoRootRefRedacted: &rootRef,
+			RepoRootSHA256:      &rootHash,
+			BindingSource:       &bindingSource,
+			SymlinkPolicy:       "reject_outside_root",
+			Status:              "bound",
+			ReasonCodes:         reasonCodes,
+		},
+		RedactionStatus: "not_needed",
+		ReasonCodes:     reasonCodes,
+	}
+}
+
+func projectAictxResourceHash(projectID pgtype.UUID, resourceRef []byte) string {
+	sum := sha256.Sum256(append([]byte(uuidToString(projectID)+"\x1f"), resourceRef...))
+	return fmt.Sprintf("sha256:%x", sum[:])
 }
 
 // validProjectStatuses / validProjectPriorities mirror the CHECK constraints on

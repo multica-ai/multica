@@ -8,6 +8,8 @@ import {
   EMPTY_USER,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
+  EMPTY_PROJECT_AICTX_STATUS,
+  ProjectAictxStatusSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -88,6 +90,76 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     const payload = { issues: [issueWithoutStage], total: 1 };
     const parsed = ListIssuesResponseSchema.parse(payload);
     expect(parsed.issues[0]?.stage).toBeNull();
+  });
+});
+
+const baseProjectAictxStatus = {
+  schema_version: 2,
+  contract_name: "D-MULTICA010-ProjectAictxStatusDTO",
+  workspace_id: "ws-1",
+  multica_project_id: "project-1",
+  project_binding_id: null,
+  state: "unconfigured",
+  context_index_status: "unknown",
+  binding: {
+    schema_version: 2,
+    contract_name: "D-MULTICA010-ProjectBindingDTO",
+    binding_id: null,
+    workspace_id: "ws-1",
+    multica_project_id: "project-1",
+    project_resource_id: null,
+    repo_root_ref_redacted: null,
+    repo_root_sha256: null,
+    binding_source: null,
+    verified_at: null,
+    verified_by: null,
+    symlink_policy: "reject_outside_root",
+    status: "missing",
+    reason_codes: ["feature_disabled"],
+  },
+  latest_context_pack_ref: null,
+  latest_context_pack_sha256: null,
+  latest_context_pack_created_at: null,
+  latest_handoff_ref: null,
+  latest_decision_ref: null,
+  redaction_status: "not_needed",
+  redaction_report_id: null,
+  audit_event_id: null,
+  reason_codes: ["feature_disabled"],
+};
+
+describe("ProjectAictxStatusSchema", () => {
+  it("parses the metadata-only MULTICA-010 project status contract", () => {
+    const parsed = ProjectAictxStatusSchema.parse(baseProjectAictxStatus);
+    expect(parsed.state).toBe("unconfigured");
+    expect(parsed.binding.status).toBe("missing");
+    expect(parsed.reason_codes).toEqual(["feature_disabled"]);
+  });
+
+  it("preserves unknown forward-compatible fields", () => {
+    const parsed = ProjectAictxStatusSchema.parse({
+      ...baseProjectAictxStatus,
+      future_field: { nested: true },
+      binding: {
+        ...baseProjectAictxStatus.binding,
+        future_binding_field: "kept",
+      },
+    }) as typeof baseProjectAictxStatus & {
+      future_field?: unknown;
+      binding: typeof baseProjectAictxStatus.binding & { future_binding_field?: unknown };
+    };
+    expect(parsed.future_field).toEqual({ nested: true });
+    expect(parsed.binding.future_binding_field).toBe("kept");
+  });
+
+  it("falls back safely when the response is malformed", () => {
+    const parsed = parseWithFallback(
+      { ...baseProjectAictxStatus, binding: "not-an-object" },
+      ProjectAictxStatusSchema,
+      EMPTY_PROJECT_AICTX_STATUS,
+      { endpoint: "GET /api/projects/:id/aictx/status" },
+    );
+    expect(parsed).toEqual(EMPTY_PROJECT_AICTX_STATUS);
   });
 });
 

@@ -17,6 +17,7 @@ import type {
   GroupedIssuesResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
+  ProjectAictxStatus,
   Squad,
   TimelineEntry,
   User,
@@ -189,6 +190,80 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_server_url: "",
   daemon_app_url: "",
   workspace_creation_disabled: false,
+};
+
+const NullableStringSchema = z.string().nullable().optional().default(null);
+
+export const ProjectBindingSchema = z.object({
+  schema_version: z.number(),
+  contract_name: z.string(),
+  binding_id: NullableStringSchema,
+  workspace_id: z.string(),
+  multica_project_id: z.string(),
+  project_resource_id: NullableStringSchema,
+  repo_root_ref_redacted: NullableStringSchema,
+  repo_root_sha256: NullableStringSchema,
+  binding_source: NullableStringSchema,
+  verified_at: NullableStringSchema,
+  verified_by: NullableStringSchema,
+  symlink_policy: z.string(),
+  status: z.string(),
+  reason_codes: z.array(z.string()).default([]),
+}).loose();
+
+export const ProjectAictxStatusSchema = z.object({
+  schema_version: z.number(),
+  contract_name: z.string(),
+  workspace_id: z.string(),
+  multica_project_id: z.string(),
+  project_binding_id: NullableStringSchema,
+  state: z.string(),
+  context_index_status: z.string(),
+  binding: ProjectBindingSchema,
+  latest_context_pack_ref: NullableStringSchema,
+  latest_context_pack_sha256: NullableStringSchema,
+  latest_context_pack_created_at: NullableStringSchema,
+  latest_handoff_ref: NullableStringSchema,
+  latest_decision_ref: NullableStringSchema,
+  redaction_status: z.string(),
+  redaction_report_id: NullableStringSchema,
+  audit_event_id: NullableStringSchema,
+  reason_codes: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_PROJECT_AICTX_STATUS: ProjectAictxStatus = {
+  schema_version: 2,
+  contract_name: "D-MULTICA010-ProjectAictxStatusDTO",
+  workspace_id: "",
+  multica_project_id: "",
+  project_binding_id: null,
+  state: "provider_unavailable",
+  context_index_status: "unknown",
+  binding: {
+    schema_version: 2,
+    contract_name: "D-MULTICA010-ProjectBindingDTO",
+    binding_id: null,
+    workspace_id: "",
+    multica_project_id: "",
+    project_resource_id: null,
+    repo_root_ref_redacted: null,
+    repo_root_sha256: null,
+    binding_source: null,
+    verified_at: null,
+    verified_by: null,
+    symlink_policy: "reject_outside_root",
+    status: "missing",
+    reason_codes: ["malformed_response"],
+  },
+  latest_context_pack_ref: null,
+  latest_context_pack_sha256: null,
+  latest_context_pack_created_at: null,
+  latest_handoff_ref: null,
+  latest_decision_ref: null,
+  redaction_status: "not_needed",
+  redaction_report_id: null,
+  audit_event_id: null,
+  reason_codes: ["malformed_response"],
 };
 
 export const CommentSchema = z.object({

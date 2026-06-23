@@ -73,6 +73,7 @@ import type {
   SendChatMessageResponse,
   CancelTaskResponse,
   Project,
+  ProjectAictxStatus,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -165,6 +166,7 @@ import {
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
+  EMPTY_PROJECT_AICTX_STATUS,
   EMPTY_WEBHOOK_DELIVERY,
   AppConfigSchema,
   type AppConfigResponse,
@@ -173,6 +175,7 @@ import {
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
+  ProjectAictxStatusSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -1858,6 +1861,13 @@ export class ApiClient {
 
   async getProject(id: string): Promise<Project> {
     return this.fetch(`/api/projects/${id}`);
+  }
+
+  async getProjectAictxStatus(id: string): Promise<ProjectAictxStatus> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/aictx/status`);
+    return parseWithFallback(raw, ProjectAictxStatusSchema, EMPTY_PROJECT_AICTX_STATUS, {
+      endpoint: "GET /api/projects/:id/aictx/status",
+    });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {

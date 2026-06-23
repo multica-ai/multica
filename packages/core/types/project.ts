@@ -47,6 +47,61 @@ export interface ListProjectsResponse {
   total: number;
 }
 
+export type ProjectBindingStatus = "bound" | "missing" | "stale" | "unauthorized";
+
+export type ProjectAictxState =
+  | "unconfigured"
+  | "ready"
+  | "stale"
+  | "generating"
+  | "preview_required"
+  | "applying"
+  | "blocked"
+  | "provider_unavailable"
+  | "permission_denied"
+  | "error";
+
+export type ProjectAictxContextIndexStatus = "ready" | "missing" | "stale" | "unknown";
+
+export type ProjectAictxRedactionStatus = "passed" | "not_needed" | "failed";
+
+export interface ProjectBinding {
+  schema_version: number;
+  contract_name: string;
+  binding_id: string | null;
+  workspace_id: string;
+  multica_project_id: string;
+  project_resource_id: string | null;
+  repo_root_ref_redacted: string | null;
+  repo_root_sha256: string | null;
+  binding_source: string | null;
+  verified_at: string | null;
+  verified_by: string | null;
+  symlink_policy: string;
+  status: ProjectBindingStatus;
+  reason_codes: string[];
+}
+
+export interface ProjectAictxStatus {
+  schema_version: number;
+  contract_name: string;
+  workspace_id: string;
+  multica_project_id: string;
+  project_binding_id: string | null;
+  state: ProjectAictxState;
+  context_index_status: ProjectAictxContextIndexStatus;
+  binding: ProjectBinding;
+  latest_context_pack_ref: string | null;
+  latest_context_pack_sha256: string | null;
+  latest_context_pack_created_at: string | null;
+  latest_handoff_ref: string | null;
+  latest_decision_ref: string | null;
+  redaction_status: ProjectAictxRedactionStatus;
+  redaction_report_id: string | null;
+  audit_event_id: string | null;
+  reason_codes: string[];
+}
+
 // ProjectResource is a typed pointer from a project to an external resource.
 // The resource_ref shape depends on resource_type. New types add a case in
 // validateAndNormalizeResourceRef on the server and a renderer in the UI.
