@@ -418,10 +418,24 @@ func (s *TaskService) resolveRuntimeForAgent(ctx context.Context, agent db.Multi
 		return pgtype.UUID{}, fmt.Errorf("no runtimes available in workspace for built-in agent")
 	}
 
-	rt := runtimes[0]
+	// Prefer an online runtime so built-in agents don't get pinned to a stale
+	// daemon. Fall back to the first runtime if none are online — the queue will
+	// wait for it to reconnect, same as a normal agent with a bound offline runtime.
+	var rt db.MulticaAgentRuntime
+	for _, r := range runtimes {
+		if r.Status == "online" {
+			rt = r
+			break
+		}
+	}
+	if rt.ID == (pgtype.UUID{}) {
+		rt = runtimes[0]
+	}
+
 	slog.Info("auto-selected runtime for built-in agent",
 		"agent_id", util.UUIDToString(agent.ID),
 		"runtime_id", util.UUIDToString(rt.ID),
+		"runtime_status", rt.Status,
 	)
 	return rt.ID, nil
 }

@@ -853,7 +853,7 @@ func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue d
 
 	// Verify leader agent is ready (has runtime, not archived).
 	agent, err := h.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+	if err != nil || (!agent.RuntimeID.Valid && !agent.IsBuiltin) || agent.ArchivedAt.Valid {
 		return false
 	}
 

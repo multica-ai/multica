@@ -28,27 +28,27 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID            string                  `json:"id"`
-	WorkspaceID   string                  `json:"workspace_id"`
-	Number        int32                   `json:"number"`
-	Identifier    string                  `json:"identifier"`
-	Title         string                  `json:"title"`
-	Description   *string                 `json:"description"`
-	Status        string                  `json:"status"`
-	Priority      string                  `json:"priority"`
-	AssigneeType  *string                 `json:"assignee_type"`
-	AssigneeID    *string                 `json:"assignee_id"`
-	CreatorType   string                  `json:"creator_type"`
-	CreatorID     string                  `json:"creator_id"`
-	ParentIssueID *string                 `json:"parent_issue_id"`
-	ProjectID     *string                 `json:"project_id"`
-	Position      float64                 `json:"position"`
-	StartDate     *string                 `json:"start_date"`
-	DueDate       *string                 `json:"due_date"`
-	CreatedAt     string                  `json:"created_at"`
-	UpdatedAt     string                  `json:"updated_at"`
-	WorkflowID    *string                 `json:"workflow_id"`
-	WorkflowRunID *string                 `json:"workflow_run_id"`
+	ID            string  `json:"id"`
+	WorkspaceID   string  `json:"workspace_id"`
+	Number        int32   `json:"number"`
+	Identifier    string  `json:"identifier"`
+	Title         string  `json:"title"`
+	Description   *string `json:"description"`
+	Status        string  `json:"status"`
+	Priority      string  `json:"priority"`
+	AssigneeType  *string `json:"assignee_type"`
+	AssigneeID    *string `json:"assignee_id"`
+	CreatorType   string  `json:"creator_type"`
+	CreatorID     string  `json:"creator_id"`
+	ParentIssueID *string `json:"parent_issue_id"`
+	ProjectID     *string `json:"project_id"`
+	Position      float64 `json:"position"`
+	StartDate     *string `json:"start_date"`
+	DueDate       *string `json:"due_date"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
+	WorkflowID    *string `json:"workflow_id"`
+	WorkflowRunID *string `json:"workflow_run_id"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -61,9 +61,9 @@ type IssueResponse struct {
 	// WS broadcast) emit no `labels` field at all — the client merge then
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
-	Labels *[]LabelResponse `json:"labels,omitempty"`
-	OriginType *string `json:"origin_type,omitempty"`
-	OriginID   *string `json:"origin_id,omitempty"`
+	Labels     *[]LabelResponse `json:"labels,omitempty"`
+	OriginType *string          `json:"origin_type,omitempty"`
+	OriginID   *string          `json:"origin_id,omitempty"`
 }
 
 func issueToResponse(i db.MulticaIssue, issuePrefix string) IssueResponse {
@@ -207,10 +207,10 @@ func assigneeGroupID(assigneeType pgtype.Text, assigneeID pgtype.UUID) string {
 // SearchIssueResponse extends IssueResponse with search metadata.
 type SearchIssueResponse struct {
 	IssueResponse
-	MatchSource                string  `json:"match_source"`
-	MatchedSnippet             *string `json:"matched_snippet,omitempty"`
-	MatchedDescriptionSnippet  *string `json:"matched_description_snippet,omitempty"`
-	MatchedCommentSnippet      *string `json:"matched_comment_snippet,omitempty"`
+	MatchSource               string  `json:"match_source"`
+	MatchedSnippet            *string `json:"matched_snippet,omitempty"`
+	MatchedDescriptionSnippet *string `json:"matched_description_snippet,omitempty"`
+	MatchedCommentSnippet     *string `json:"matched_comment_snippet,omitempty"`
 }
 
 // extractSnippet extracts a snippet of text around the first occurrence of query.
@@ -1525,35 +1525,44 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Re-load the agent for the runtime liveness check below. Safe by
 	// construction: validateAssigneePair just confirmed it exists in this
-	// workspace and the caller has visibility.
+	// workspace and the caller has visibility. Built-in agents are global
+	// (workspace_id = NULL), so we fall back to GetBuiltinAgent when the
+	// workspace-scoped lookup misses.
 	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
 		ID:          agentUUID,
 		WorkspaceID: wsUUID,
 	})
 	if err != nil {
-		writeError(w, http.StatusNotFound, "agent not found")
-		return
+		agent, err = h.Queries.GetBuiltinAgent(r.Context(), agentUUID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
 	}
-	if !agent.RuntimeID.Valid {
+	// Built-in agents have no fixed runtime; the service layer auto-selects one
+	// at enqueue time, so the fixed-runtime checks below do not apply.
+	if !agent.RuntimeID.Valid && !agent.IsBuiltin {
 		writeAgentUnavailable(w, "agent has no runtime")
 		return
 	}
-	if !h.isRuntimeOnline(r.Context(), agent.RuntimeID) {
-		writeAgentUnavailable(w, "agent's runtime is offline")
-		return
-	}
+	if agent.RuntimeID.Valid {
+		if !h.isRuntimeOnline(r.Context(), agent.RuntimeID) {
+			writeAgentUnavailable(w, "agent's runtime is offline")
+			return
+		}
 
-	// Daemon CLI version gate. The agent-side prompt + create-flow rely on
-	// behaviors introduced in MinQuickCreateCLIVersion (URL attachment
-	// handling, no-retry on partial failure). Older daemons either
-	// double-create issues on partial CLI failures or mishandle pasted
-	// screenshot URLs; fail closed before enqueuing rather than surface
-	// the breakage as an inbox failure twenty seconds later. Dev-built
-	// daemons (git-describe shape) are exempted inside CheckMinCLIVersion
-	// so `make daemon` works without weakening staging or production.
-	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), agent.RuntimeID); status != 0 {
-		writeJSON(w, status, payload)
-		return
+		// Daemon CLI version gate. The agent-side prompt + create-flow rely on
+		// behaviors introduced in MinQuickCreateCLIVersion (URL attachment
+		// handling, no-retry on partial failure). Older daemons either
+		// double-create issues on partial CLI failures or mishandle pasted
+		// screenshot URLs; fail closed before enqueuing rather than surface
+		// the breakage as an inbox failure twenty seconds later. Dev-built
+		// daemons (git-describe shape) are exempted inside CheckMinCLIVersion
+		// so `make daemon` works without weakening staging or production.
+		if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), agent.RuntimeID); status != 0 {
+			writeJSON(w, status, payload)
+			return
+		}
 	}
 
 	// Optional project_id — validate it belongs to the same workspace before
@@ -2002,53 +2011,54 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-			// When created with a workflow assignee, start the workflow run and
-			// create sub-issues for each node.
-			if issue.AssigneeType.Valid && issue.AssigneeType.String == "workflow" && workflowID.Valid {
-				workflow, err := h.Queries.GetWorkflow(ctx, workflowID)
-				if err != nil {
-					slog.Warn("failed to load workflow for new issue", "issue_id", uuidToString(issue.ID), "error", err)
-				} else {
-					run, nodeRuns, err := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, creatorType, actualCreatorID, pgtype.UUID{})
+	// When created with a workflow assignee, start the workflow run and
+	// create sub-issues for each node.
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "workflow" && workflowID.Valid {
+		workflow, err := h.Queries.GetWorkflow(ctx, workflowID)
+		if err != nil {
+			slog.Warn("failed to load workflow for new issue", "issue_id", uuidToString(issue.ID), "error", err)
+		} else {
+			run, nodeRuns, err := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, creatorType, actualCreatorID, pgtype.UUID{})
+			if err != nil {
+				slog.Warn("failed to start workflow run for new issue", "issue_id", uuidToString(issue.ID), "error", err)
+			} else {
+				for _, nr := range nodeRuns {
+					childNum, err := h.Queries.IncrementIssueCounter(ctx, wsUUID)
 					if err != nil {
-						slog.Warn("failed to start workflow run for new issue", "issue_id", uuidToString(issue.ID), "error", err)
-					} else {
-						for _, nr := range nodeRuns {
-							childNum, err := h.Queries.IncrementIssueCounter(ctx, wsUUID)
-							if err != nil {
-								slog.Warn("failed to increment issue counter for sub-issue", "error", err)
-								continue
-							}
-							_, err = h.createWorkflowSubIssue(ctx, h.Queries, issue, nr, wsUUID, childNum)
-							if err != nil {
-								slog.Warn("failed to create sub-issue for node run", "node_run_id", uuidToString(nr.ID), "error", err)
-							}
-						}
-						// Dispatch after sub-issues exist so tasks can link issue_id.
-							h.WorkflowService.DispatchRootNodeRuns(ctx, run.ID)
-						_, err = h.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
-							ID:            issue.ID,
-							AssigneeType:  issue.AssigneeType,
-							AssigneeID:    issue.AssigneeID,
-							StartDate:     issue.StartDate,
-							DueDate:       issue.DueDate,
-							ParentIssueID: issue.ParentIssueID,
-							ProjectID:     issue.ProjectID,
-							WorkflowID:    workflowID,
-							WorkflowRunID: run.ID,
-						})
-						if err != nil {
-							slog.Warn("failed to set workflow_run_id on parent issue", "issue_id", uuidToString(issue.ID), "error", err)
-						} else {
-							resp.WorkflowID = uuidToPtr(issue.AssigneeID)
-							resp.WorkflowRunID = uuidToPtr(run.ID)
-						}
+						slog.Warn("failed to increment issue counter for sub-issue", "error", err)
+						continue
+					}
+					_, err = h.createWorkflowSubIssue(ctx, h.Queries, issue, nr, wsUUID, childNum)
+					if err != nil {
+						slog.Warn("failed to create sub-issue for node run", "node_run_id", uuidToString(nr.ID), "error", err)
 					}
 				}
+				// Dispatch after sub-issues exist so tasks can link issue_id.
+				h.WorkflowService.DispatchRootNodeRuns(ctx, run.ID)
+				_, err = h.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
+					ID:            issue.ID,
+					AssigneeType:  issue.AssigneeType,
+					AssigneeID:    issue.AssigneeID,
+					StartDate:     issue.StartDate,
+					DueDate:       issue.DueDate,
+					ParentIssueID: issue.ParentIssueID,
+					ProjectID:     issue.ProjectID,
+					WorkflowID:    workflowID,
+					WorkflowRunID: run.ID,
+				})
+				if err != nil {
+					slog.Warn("failed to set workflow_run_id on parent issue", "issue_id", uuidToString(issue.ID), "error", err)
+				} else {
+					resp.WorkflowID = uuidToPtr(issue.AssigneeID)
+					resp.WorkflowRunID = uuidToPtr(run.ID)
+				}
 			}
+		}
+	}
 
 	writeJSON(w, http.StatusCreated, resp)
 }
+
 type UpdateIssueRequest struct {
 	Title         *string  `json:"title"`
 	Description   *string  `json:"description"`
@@ -2070,7 +2080,6 @@ type UpdateIssueRequest struct {
 	// a built-in agent (which has no bound runtime).
 	RuntimeID *string `json:"runtime_id"`
 }
-
 
 // parseOptionalRuntimeID converts the optional runtime_id string from the
 // request body to a pgtype.UUID. Returns an invalid (unset) UUID when nil
@@ -2316,11 +2325,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if issue.AssigneeType.Valid && issue.AssigneeType.String == "workflow" && !issue.WorkflowRunID.Valid {
 			workflow, wfErr := h.Queries.GetWorkflow(ctx, issue.AssigneeID)
 			if wfErr != nil {
-				slog.Warn("failed to load workflow for issue assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr); resp.WorkflowID = uuidToPtr(issue.AssigneeID)
+				slog.Warn("failed to load workflow for issue assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
+				resp.WorkflowID = uuidToPtr(issue.AssigneeID)
 			} else {
 				run, nodeRuns, wfErr := h.WorkflowService.StartRunForIssue(ctx, workflow, issue, actorType, actorID, parseOptionalRuntimeID(req.RuntimeID))
 				if wfErr != nil {
-					resp.WorkflowID = uuidToPtr(issue.AssigneeID); slog.Warn("failed to start workflow run on assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
+					resp.WorkflowID = uuidToPtr(issue.AssigneeID)
+					slog.Warn("failed to start workflow run on assignee change", "issue_id", uuidToString(issue.ID), "error", wfErr)
 				} else {
 					for _, nr := range nodeRuns {
 						childNum, cerr := h.Queries.IncrementIssueCounter(ctx, prevIssue.WorkspaceID)
@@ -2333,7 +2344,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 							slog.Warn("failed to create sub-issue for node run", "node_run_id", uuidToString(nr.ID), "error", cerr)
 						}
 					}
-				h.WorkflowService.DispatchRootNodeRuns(ctx, run.ID)
+					h.WorkflowService.DispatchRootNodeRuns(ctx, run.ID)
 					_, cerr := h.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
 						ID:            issue.ID,
 						AssigneeType:  issue.AssigneeType,
@@ -2824,7 +2835,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 			if h.shouldEnqueueAgentTask(r.Context(), issue) {
 				runtimeIDOverride := parseOptionalRuntimeID(req.Updates.RuntimeID)
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, pgtype.UUID{}, runtimeIDOverride)
+				h.TaskService.EnqueueTaskForIssue(r.Context(), issue, pgtype.UUID{}, runtimeIDOverride)
 			}
 			if h.shouldEnqueueSquadLeaderOnAssign(r.Context(), issue) {
 				h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
@@ -2836,7 +2847,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			prevIssue.Status == "backlog" && issue.Status != "done" && issue.Status != "cancelled" {
 			if h.isAgentAssigneeReady(r.Context(), issue) {
 				runtimeIDOverride := parseOptionalRuntimeID(req.Updates.RuntimeID)
-			h.TaskService.EnqueueTaskForIssue(r.Context(), issue, pgtype.UUID{}, runtimeIDOverride)
+				h.TaskService.EnqueueTaskForIssue(r.Context(), issue, pgtype.UUID{}, runtimeIDOverride)
 			}
 			if h.isSquadLeaderReady(r.Context(), issue) {
 				h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID)
