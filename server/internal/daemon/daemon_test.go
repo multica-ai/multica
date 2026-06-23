@@ -1041,6 +1041,23 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 	}
 }
 
+func TestCodexAdditionalWritableDirsIncludesWorkspaceRepoCache(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), "workspaces")
+	got := codexAdditionalWritableDirs(root, "ws-1")
+	want := []string{filepath.Join(root, ".repos", "ws-1")}
+
+	if len(got) != len(want) {
+		t.Fatalf("writable dirs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("writable dirs = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	t.Parallel()
 

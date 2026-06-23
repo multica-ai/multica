@@ -2404,3 +2404,31 @@ func TestHasManagedCodexMcpConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCodexArgsPrependsAdditionalWritableDirs(t *testing.T) {
+	args := buildCodexArgs(ExecOptions{
+		AdditionalWritableDirs: []string{"/var/multica/workspaces/.repos/ws-1"},
+		CustomArgs:             []string{"--add-dir", "/tmp/evil", "--listen=bad"},
+	}, slog.Default())
+
+	wantPrefix := []string{
+		"--add-dir",
+		"/var/multica/workspaces/.repos/ws-1",
+		"app-server",
+		"--listen",
+		"stdio://",
+	}
+	if len(args) < len(wantPrefix) {
+		t.Fatalf("args too short: %v", args)
+	}
+	for i, want := range wantPrefix {
+		if args[i] != want {
+			t.Fatalf("args[%d] = %q, want %q in %v", i, args[i], want, args)
+		}
+	}
+
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "/tmp/evil") || strings.Contains(joined, "--listen=bad") {
+		t.Fatalf("custom args must not override daemon-owned codex flags: %v", args)
+	}
+}
