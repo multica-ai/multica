@@ -729,6 +729,11 @@ func (d *Daemon) clearWSHeartbeatAcks() {
 
 // Run starts the daemon: resolves auth, registers runtimes, then polls for tasks.
 func (d *Daemon) Run(ctx context.Context) error {
+	// Guard against stale cwd (e.g. launched from a deleted worktree).
+	if home, err := os.UserHomeDir(); err == nil {
+		_ = os.Chdir(home)
+	}
+
 	// Wrap context so handleUpdate can cancel the daemon for restart.
 	ctx, cancel := context.WithCancel(ctx)
 	d.cancelFunc = cancel
