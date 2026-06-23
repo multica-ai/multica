@@ -1,0 +1,104 @@
+name: NexAI UI Smoke
+
+# NEX-584: PR CI 회귀 스모크 — 핵심 UI 선택자 빌드 검증
+# GitHub Actions 클라우드 러너에서 실제 Next.js 빌드 + 정적 분석으로
+# 핵심 UI 요소(상위바, 복사버튼, KST 타임스탬프, 다크테마) 존재 여부 검증.
+# 이 체크가 FAIL이면 main 머지 차단.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "packages/ui/**"
+      - "packages/core/**"
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "packages/ui/**"
+      - "packages/core/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nexai-ui-smoke:
+    name: nexai-ui-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build web app
+        run: pnpm exec turbo build --filter='@multica/web'
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          # 빌드 전용 환경 변수
+          NEXT_PUBLIC_DISABLE_AUTH: "false"
+          NEXT_PUBLIC_DEFAULT_WORKSPACE_SLUG: nexai
+
+      - name: Verify acceptance-critical selectors exist in build output
+        # 빌드된 정적/서버 JS 번들에서 data-acceptance 속성 선택자 존재 확인.
+        # 이 선택자들은 live-acceptance-gate.mjs가 프로덕션에서 검증하는 것들임.
+        run: |
+          set -euo pipefail
+          BUILD_DIR="apps/web/.next"
+          echo "=== NEX-584 UI 선택자 존재 검증 ==="
+
+          check_selector() {
+            local name="$1"
+            local pattern="$2"
+            if grep -r --include="*.js" -l "$pattern" "$BUILD_DIR" >/dev/null 2>&1; then
+              echo "✓ $name: found ($pattern)"
+            else
+              echo "✗ $name: MISSING ($pattern)" >&2
+              return 1
+            fi
+          }
+
+          # 복사 버튼 (NEX-571 — data-acceptance="copy-message")
+          check_selector "copy-message attr" 'copy-message'
+
+          # KST 타임스탬프 (NEX-583 — data-acceptance="chat-message-timestamp")
+          check_selector "chat-message-timestamp attr" 'chat-message-timestamp'
+
+          # 다크테마 지원 (theme/dark 클래스 또는 데이터 속성)
+          check_selector "dark theme support" '"dark"'
+
+          echo "=== 모든 선택자 검증 통과 ==="
+
+      - name: Verify KST timestamp format module exists
+        # KST 포맷팅 함수(formatKoreanTime 또는 KST 키워드)가 번들에 포함되었는지 확인
+        run: |
+          set -euo pipefail
+          BUILD_DIR="apps/web/.next"
+          if grep -r --include="*.js" -l "KST\|Asia/Seoul\|koreanTime\|formatKst" "$BUILD_DIR" >/dev/null 2>&1; then
+            echo "✓ KST timezone format: found in build"
+          else
+            echo "✗ KST timezone format: MISSING in build" >&2
+            exit 1
+          fi
+
+      - name: Check for direct docker run patterns in bot scripts
+        # 봇 스크립트에서 raw docker run 패턴 금지 검증 (정적 분석)
+        # NEX-584: 이 체크는 CI 차단 아님 — 경고만 출력 (보고 목적)
+        run: |
+          if grep -r "docker run" scripts/ --include="*.sh" 2>/dev/null | grep -v "# " | grep -v "gate-enforcer" | head -5; then
+            echo "::warning::raw 'docker run' 패턴이 scripts/에서 발견됨 — 배포 스크립트를 대신 사용할 것"
+          else
+            echo "✓ raw docker run 패턴 없음"
+          fi
