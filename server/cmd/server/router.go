@@ -613,6 +613,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
+					r.Post("/github/backfill-issue-pr-links", h.BackfillIssuePullRequestLinks)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
 				})
 

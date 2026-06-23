@@ -98,6 +98,19 @@ type GitHubConnectResponse struct {
 	Configured bool   `json:"configured"`
 }
 
+type GitHubBackfillIssuePRLinksRequest struct {
+	RepoOwner string `json:"repo_owner"`
+	RepoName  string `json:"repo_name"`
+}
+
+type GitHubBackfillIssuePRLinksResponse struct {
+	WorkspaceID        string `json:"workspace_id"`
+	RepoOwner          string `json:"repo_owner"`
+	RepoName           string `json:"repo_name"`
+	ScannedPRs         int    `json:"scanned_prs"`
+	LinkedIssuePRPairs int    `json:"linked_issue_pr_pairs"`
+}
+
 func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationResponse {
 	instID := i.InstallationID
 	return GitHubInstallationResponse{
@@ -555,6 +568,50 @@ func (h *Handler) DeleteGitHubInstallation(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// BackfillIssuePullRequestLinks rescans mirrored PR rows for one workspace/repo
+// and recreates missing issue↔PR link rows. This is an explicit admin repair
+// path for workspaces whose link table drifted after the PR mirror was already
+// populated. It intentionally reconstructs only the broad link rows: the PR
+// mirror stores title + branch but not body, so historical close_intent cannot
+// be recovered reliably here.
+func (h *Handler) BackfillIssuePullRequestLinks(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	var req GitHubBackfillIssuePRLinksRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.RepoOwner = strings.TrimSpace(req.RepoOwner)
+	req.RepoName = strings.TrimSpace(req.RepoName)
+	if req.RepoOwner == "" || req.RepoName == "" {
+		writeError(w, http.StatusBadRequest, "repo_owner and repo_name are required")
+		return
+	}
+
+	scanned, linked, err := h.backfillIssuePullRequestLinks(r.Context(), wsUUID, req.RepoOwner, req.RepoName)
+	if err != nil {
+		slog.Error("github: issue-pr backfill failed",
+			"workspace_id", workspaceID,
+			"repo_owner", req.RepoOwner,
+			"repo_name", req.RepoName,
+			"error", err,
+		)
+		writeError(w, http.StatusInternalServerError, "failed to backfill issue pull request links")
+		return
+	}
+	writeJSON(w, http.StatusOK, GitHubBackfillIssuePRLinksResponse{
+		WorkspaceID:        workspaceID,
+		RepoOwner:          req.RepoOwner,
+		RepoName:           req.RepoName,
+		ScannedPRs:         scanned,
+		LinkedIssuePRPairs: linked,
+	})
+}
+
 // ── List PRs for an issue ───────────────────────────────────────────────────
 
 func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Request) {
@@ -572,6 +629,64 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 		out = append(out, issuePullRequestRowToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
+}
+
+func (h *Handler) backfillIssuePullRequestLinks(ctx context.Context, workspaceID pgtype.UUID, repoOwner, repoName string) (int, int, error) {
+	if !h.workspaceAutoLinkPRsEnabled(ctx, workspaceID) {
+		return 0, 0, nil
+	}
+	rows, err := h.DB.Query(ctx, `
+SELECT id, title, branch
+FROM github_pull_request
+WHERE workspace_id = $1
+  AND repo_owner = $2
+  AND repo_name = $3
+ORDER BY pr_number ASC
+`, workspaceID, repoOwner, repoName)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer rows.Close()
+
+	prefix := h.getIssuePrefix(ctx, workspaceID)
+	type mirroredPR struct {
+		ID     pgtype.UUID
+		Title  string
+		Branch pgtype.Text
+	}
+	prs := make([]mirroredPR, 0)
+	for rows.Next() {
+		var pr mirroredPR
+		if err := rows.Scan(&pr.ID, &pr.Title, &pr.Branch); err != nil {
+			return 0, 0, err
+		}
+		prs = append(prs, pr)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, 0, err
+	}
+
+	linked := 0
+	for _, pr := range prs {
+		for _, ident := range extractIdentifiers(pr.Title, "", pr.Branch.String) {
+			issue, ok := h.lookupIssueByIdentifier(ctx, workspaceID, prefix, ident)
+			if !ok {
+				continue
+			}
+			if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
+				IssueID:             issue.ID,
+				PullRequestID:       pr.ID,
+				CloseIntent:         false,
+				PreserveCloseIntent: true,
+				LinkedByType:        strToText("system"),
+				LinkedByID:          pgtype.UUID{},
+			}); err != nil {
+				return len(prs), linked, err
+			}
+			linked++
+		}
+	}
+	return len(prs), linked, nil
 }
 
 // ── Webhook ─────────────────────────────────────────────────────────────────

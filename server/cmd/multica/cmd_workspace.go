@@ -53,6 +53,18 @@ var workspaceUpdateCmd = &cobra.Command{
 	RunE:  runWorkspaceUpdate,
 }
 
+var workspaceGitHubCmd = &cobra.Command{
+	Use:   "github",
+	Short: "Manage workspace-scoped GitHub integration actions",
+}
+
+var workspaceGitHubBackfillIssuePRLinksCmd = &cobra.Command{
+	Use:   "backfill-issue-pr-links [workspace-id|slug|prefix]",
+	Short: "Backfill missing issue↔PR link rows from mirrored GitHub PRs for one repo",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runWorkspaceGitHubBackfillIssuePRLinks,
+}
+
 var workspaceSwitchCmd = &cobra.Command{
 	Use:   "switch <workspace-id|slug|prefix>",
 	Short: "Set the default workspace for this profile",
@@ -75,6 +87,8 @@ func init() {
 	workspaceCmd.AddCommand(workspaceMemberCmd)
 	workspaceMemberCmd.AddCommand(workspaceMemberListCmd)
 	workspaceCmd.AddCommand(workspaceUpdateCmd)
+	workspaceCmd.AddCommand(workspaceGitHubCmd)
+	workspaceGitHubCmd.AddCommand(workspaceGitHubBackfillIssuePRLinksCmd)
 	workspaceCmd.AddCommand(workspaceSwitchCmd)
 
 	workspaceListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -89,6 +103,10 @@ func init() {
 	workspaceUpdateCmd.Flags().Bool("context-stdin", false, "Read context from stdin (preserves multi-line content verbatim)")
 	workspaceUpdateCmd.Flags().String("issue-prefix", "", "New issue prefix (uppercased server-side)")
 	workspaceUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	workspaceGitHubBackfillIssuePRLinksCmd.Flags().String("repo-owner", "", "GitHub repository owner/login to rescan")
+	workspaceGitHubBackfillIssuePRLinksCmd.Flags().String("repo-name", "", "GitHub repository name to rescan")
+	workspaceGitHubBackfillIssuePRLinksCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // workspaceSummary is the subset of fields the CLI needs from /api/workspaces
@@ -469,4 +487,54 @@ func runWorkspaceMembers(cmd *cobra.Command, args []string) error {
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+func runWorkspaceGitHubBackfillIssuePRLinks(cmd *cobra.Command, args []string) error {
+	wsID, err := resolveWorkspaceArg(cmd, args)
+	if err != nil {
+		return err
+	}
+	if wsID == "" {
+		return fmt.Errorf("workspace ID is required: pass an id/slug/prefix as argument or set MULTICA_WORKSPACE_ID")
+	}
+
+	repoOwner, _ := cmd.Flags().GetString("repo-owner")
+	repoName, _ := cmd.Flags().GetString("repo-name")
+	repoOwner = strings.TrimSpace(repoOwner)
+	repoName = strings.TrimSpace(repoName)
+	if repoOwner == "" || repoName == "" {
+		return fmt.Errorf("--repo-owner and --repo-name are required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	body := map[string]any{
+		"repo_owner": repoOwner,
+		"repo_name":  repoName,
+	}
+	var resp map[string]any
+	if err := client.PostJSON(ctx, "/api/workspaces/"+wsID+"/github/backfill-issue-pr-links", body, &resp); err != nil {
+		return fmt.Errorf("backfill issue PR links: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		headers := []string{"WORKSPACE ID", "REPO OWNER", "REPO NAME", "SCANNED PRS", "LINKED ISSUE-PR PAIRS"}
+		rows := [][]string{{
+			strVal(resp, "workspace_id"),
+			strVal(resp, "repo_owner"),
+			strVal(resp, "repo_name"),
+			strVal(resp, "scanned_prs"),
+			strVal(resp, "linked_issue_pr_pairs"),
+		}}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, resp)
 }
