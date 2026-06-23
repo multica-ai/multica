@@ -285,6 +285,65 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestAgentPromptLength(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name         string
+		provider     string
+		prompt       string
+		systemPrompt string
+		wantBytes    int
+		wantChars    int
+	}{
+		{
+			name:      "plain prompt",
+			provider:  "codex",
+			prompt:    "hello 世界",
+			wantBytes: len("hello 世界"),
+			wantChars: 8,
+		},
+		{
+			name:         "openclaw inline system prompt",
+			provider:     "openclaw",
+			systemPrompt: "system",
+			prompt:       "user",
+			wantBytes:    len("system\n\nuser"),
+			wantChars:    len("system\n\nuser"),
+		},
+		{
+			name:         "kimi inline system prompt",
+			provider:     "kimi",
+			systemPrompt: "系统",
+			prompt:       "用户",
+			wantBytes:    len("系统\n\n---\n\n用户"),
+			wantChars:    11,
+		},
+		{
+			name:         "kiro inline system prompt",
+			provider:     "kiro",
+			systemPrompt: "system",
+			prompt:       "user",
+			wantBytes:    len("system\n\n---\n\nuser"),
+			wantChars:    len("system\n\n---\n\nuser"),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotBytes, gotChars := agentPromptLength(tc.provider, tc.prompt, tc.systemPrompt)
+			if gotBytes != tc.wantBytes {
+				t.Fatalf("bytes = %d, want %d", gotBytes, tc.wantBytes)
+			}
+			if gotChars != tc.wantChars {
+				t.Fatalf("chars = %d, want %d", gotChars, tc.wantChars)
+			}
+		})
+	}
+}
+
 // TestComposeOpenclawIncludeRoots — the Elon must-fix regression: the
 // daemon must grant OpenClaw permission to follow the wrapper's $include
 // link from envRoot into the user's active config dir, while preserving

@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
@@ -3077,6 +3078,23 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
+func agentPromptLength(provider, prompt, systemPrompt string) (bytes int, chars int) {
+	combined := prompt
+	if systemPrompt != "" {
+		combined = systemPrompt + inlineSystemPromptSeparator(provider) + prompt
+	}
+	return len(combined), utf8.RuneCountInString(combined)
+}
+
+func inlineSystemPromptSeparator(provider string) string {
+	switch provider {
+	case "kiro", "kimi":
+		return "\n\n---\n\n"
+	default:
+		return "\n\n"
+	}
+}
+
 // gateResumeToReusedWorkdir clears the task's prior session unless the task
 // runs in the exact workdir the session was recorded against, and reports
 // whether that workdir was reused. CLI backends key their session stores to
@@ -3531,6 +3549,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if providerNeedsInlineSystemPrompt(provider) {
 		execOpts.SystemPrompt = runtimeBrief
 	}
+
+	agentPromptBytes, agentPromptChars := agentPromptLength(provider, prompt, execOpts.SystemPrompt)
+	taskLog.Info("agent prompt prepared",
+		"provider", provider,
+		"model", model,
+		"prompt_bytes", len(prompt),
+		"prompt_chars", utf8.RuneCountInString(prompt),
+		"runtime_brief_bytes", len(runtimeBrief),
+		"runtime_brief_chars", utf8.RuneCountInString(runtimeBrief),
+		"inline_system_prompt", execOpts.SystemPrompt != "",
+		"system_prompt_bytes", len(execOpts.SystemPrompt),
+		"system_prompt_chars", utf8.RuneCountInString(execOpts.SystemPrompt),
+		"final_prompt_bytes", agentPromptBytes,
+		"final_prompt_chars", agentPromptChars,
+		"agent_prompt_bytes", agentPromptBytes,
+		"agent_prompt_chars", agentPromptChars,
+	)
 
 	taskLog.Debug("invoking backend",
 		"provider", provider,
