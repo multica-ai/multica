@@ -560,3 +560,54 @@ func TestLarkJSONFrameDecoderCapturesReplyLinkage(t *testing.T) {
 		t.Errorf("CommandBody = %q want 去实现", msg.CommandBody)
 	}
 }
+
+// TestLarkJSONFrameDecoderCapturesThreadID verifies thread_id from a
+// topic (话题) message lands on the InboundMessage so the outbound
+// patcher can reply back into the thread.
+func TestLarkJSONFrameDecoderCapturesThreadID(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+		"type":"event_callback",
+		"header":{"event_id":"e","event_type":"im.message.receive_v1","app_id":"a"},
+		"event":{
+			"sender":{"sender_id":{"open_id":"ou_user"}},
+			"message":{
+				"message_id":"om_in_thread","chat_id":"c","chat_type":"group","message_type":"text",
+				"content":"{\"text\":\"@bot help\"}",
+				"thread_id":"omt_topic_123"
+			}
+		}
+	}`)
+	msg, ok, err := NewLarkJSONFrameDecoder().Decode(raw, db.LarkInstallation{BotOpenID: "ou_bot"})
+	if err != nil || !ok {
+		t.Fatalf("Decode ok=%v err=%v", ok, err)
+	}
+	if msg.ThreadID != "omt_topic_123" {
+		t.Errorf("ThreadID = %q want omt_topic_123", msg.ThreadID)
+	}
+}
+
+// TestLarkJSONFrameDecoderNonThreadHasEmptyThreadID verifies a normal
+// chat message (no thread_id in the event) leaves ThreadID empty, which
+// keeps the outbound on the unchanged chat-level send path.
+func TestLarkJSONFrameDecoderNonThreadHasEmptyThreadID(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+		"type":"event_callback",
+		"header":{"event_id":"e","event_type":"im.message.receive_v1","app_id":"a"},
+		"event":{
+			"sender":{"sender_id":{"open_id":"ou_user"}},
+			"message":{
+				"message_id":"om_plain","chat_id":"c","chat_type":"group","message_type":"text",
+				"content":"{\"text\":\"hi\"}"
+			}
+		}
+	}`)
+	msg, ok, err := NewLarkJSONFrameDecoder().Decode(raw, db.LarkInstallation{BotOpenID: "ou_bot"})
+	if err != nil || !ok {
+		t.Fatalf("Decode ok=%v err=%v", ok, err)
+	}
+	if msg.ThreadID != "" {
+		t.Errorf("ThreadID = %q want empty for non-thread message", msg.ThreadID)
+	}
+}

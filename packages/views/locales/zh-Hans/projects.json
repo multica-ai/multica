@@ -7,7 +7,17 @@
     "view_compact": "紧凑视图",
     "view_comfortable": "舒适视图",
     "search_placeholder": "搜索项目...",
-    "no_search_results": "未找到匹配的项目"
+    "no_search_results": "未找到匹配的项目",
+    "view_table": "表格",
+    "view_cards": "卡片",
+    "row_menu": "项目操作",
+    "pin": "钉到侧边栏",
+    "unpin": "取消钉选",
+    "delete": "删除",
+    "no_matches": "没有匹配的项目",
+    "selected_one": "已选 {{count}} 项",
+    "selected_other": "已选 {{count}} 项",
+    "clear_selection": "清除选择"
   },
   "table": {
     "name": "名称",
@@ -15,7 +25,8 @@
     "status": "状态",
     "progress": "进度",
     "lead": "负责人",
-    "created": "创建时间"
+    "created": "创建时间",
+    "issues": "Issue 数"
   },
   "status": {
     "planned": "计划中",
@@ -58,6 +69,7 @@
     "section_progress": "进度",
     "section_description": "描述",
     "description_placeholder": "添加描述...",
+    "description_hint": "会作为项目上下文提供给智能体，应用于该项目下的每个任务。",
     "empty_issues_title": "还没有关联的 issue",
     "empty_issues_hint": "新建一个 issue，或把已有的 issue 关联到这个项目。",
     "empty_issues_new_button": "新建 issue",
@@ -116,5 +128,21 @@
   },
   "chip": {
     "fallback_label": "项目"
+  },
+  "toolbar": {
+    "result_count_title": "当前结果 / 全部项目",
+    "filter_label": "筛选",
+    "filter_active_count_one": "{{count}} 项筛选",
+    "filter_active_count_other": "{{count}} 项筛选",
+    "clear_filters": "清除筛选",
+    "section_status": "状态",
+    "section_priority": "优先级",
+    "section_lead": "负责人",
+    "display": "显示",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "列",
+    "view": "视图"
   }
 }

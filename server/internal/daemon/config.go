@@ -80,7 +80,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity, qoder
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -102,6 +102,14 @@ type Config struct {
 	ClaudeArgs                     []string
 	CodexArgs                      []string
 	CodebuddyArgs                  []string
+
+	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
+	// executable path to use for that profile on THIS machine (MUL-3284).
+	// Sourced from the local CLI config (cli.CLIConfig.ProfileCommandOverrides),
+	// written by `multica runtime profile set-path`. appendProfileRuntimes
+	// prefers a matching, executable override over resolving the profile's
+	// command_name on PATH. nil/empty means "always resolve via PATH".
+	ProfileCommandOverrides map[string]string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -165,11 +173,26 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// file should not prevent daemon startup, since the daemon can still run
 	// purely from env-var configuration. We log a warning and proceed with
 	// no overrides.
+	var profileCommandOverrides map[string]string
 	if cliCfg, err := cli.LoadCLIConfigForProfile(overrides.Profile); err != nil {
 		slog.Warn("could not load CLI config for backend overrides; proceeding without",
 			"profile", overrides.Profile, "err", err)
-	} else if oc := openclawOverrideFrom(cliCfg); oc != nil {
-		applyOpenclawOverride(oc)
+	} else {
+		if oc := openclawOverrideFrom(cliCfg); oc != nil {
+			applyOpenclawOverride(oc)
+		}
+		// Per-machine custom-runtime command path overrides (MUL-3284).
+		// Copy into our own map so later mutation of the loaded config can't
+		// alias daemon state, and so an empty map normalizes to nil.
+		if len(cliCfg.ProfileCommandOverrides) > 0 {
+			profileCommandOverrides = make(map[string]string, len(cliCfg.ProfileCommandOverrides))
+			for id, path := range cliCfg.ProfileCommandOverrides {
+				if id == "" || strings.TrimSpace(path) == "" {
+					continue
+				}
+				profileCommandOverrides[id] = path
+			}
+		}
 	}
 
 	// Probe available agent CLIs. exec.LookPath is the primary path, but on
@@ -277,8 +300,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
 	}
+	qoderPath := envOrDefault("MULTICA_QODER_PATH", "qodercli")
+	if _, err := exec.LookPath(qoderPath); err == nil {
+		agents["qoder"] = AgentEntry{
+			Path:  qoderPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_QODER_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, agy, or qodercli and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -500,6 +530,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
 		CodebuddyArgs:                  codebuddyArgs,
+		ProfileCommandOverrides:        profileCommandOverrides,
 	}, nil
 }
 

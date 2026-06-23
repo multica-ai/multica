@@ -15,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/mention"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -826,6 +825,10 @@ type CancelledChatMessageResult struct {
 	MessageID      string
 	Content        string
 	RestoreToInput bool
+	// Attachments are the rows detached from the deleted user message so they
+	// survive the ON DELETE CASCADE and can re-bind when the restored draft is
+	// re-sent.
+	Attachments []db.Attachment
 }
 
 type CancelTaskResult struct {
@@ -885,6 +888,13 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 			return fmt.Errorf("list cancelled chat task messages: %w", err)
 		}
 		if len(messages) == 0 {
+			// Detach attachments BEFORE deleting the user message — the
+			// attachment FK is ON DELETE CASCADE, so deleting first would
+			// destroy rows the restored draft needs to re-bind.
+			detached, err := qtx.DetachAttachmentsFromUserChatMessageByTask(ctx, task.ID)
+			if err != nil {
+				return fmt.Errorf("detach cancelled chat message attachments: %w", err)
+			}
 			deleted, err := qtx.DeleteUserChatMessageByTask(ctx, task.ID)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
@@ -897,6 +907,7 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 				MessageID:      util.UUIDToString(deleted.ID),
 				Content:        deleted.Content,
 				RestoreToInput: true,
+				Attachments:    detached,
 			}
 			return nil
 		}
@@ -1284,7 +1295,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 							"agent_id", util.UUIDToString(task.AgentID),
 						)
 					} else {
-						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID)
+						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID, pgtype.UUID{})
 					}
 				}
 			}
@@ -1445,7 +1456,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
 	}
 
 	// Mirror the issue fallback for chat tasks: write an assistant
@@ -2097,7 +2108,7 @@ func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
 	return ws.IssuePrefix
 }
 
-func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID pgtype.UUID) {
+func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) {
 	if content == "" {
 		return
 	}
@@ -2118,16 +2129,15 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			rootComment = &root
 		}
 	}
-	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
-	content = mention.ExpandIssueIdentifiers(ctx, s.Queries, issue.WorkspaceID, content)
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:     issueID,
-		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  "agent",
-		AuthorID:    agentID,
-		Content:     content,
-		Type:        commentType,
-		ParentID:    parentID,
+		IssueID:      issueID,
+		WorkspaceID:  issue.WorkspaceID,
+		AuthorType:   "agent",
+		AuthorID:     agentID,
+		Content:      content,
+		Type:         commentType,
+		ParentID:     parentID,
+		SourceTaskID: sourceTaskID,
 	})
 	if err != nil {
 		return
@@ -2139,14 +2149,15 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		ActorID:     util.UUIDToString(agentID),
 		Payload: map[string]any{
 			"comment": map[string]any{
-				"id":          util.UUIDToString(comment.ID),
-				"issue_id":    util.UUIDToString(comment.IssueID),
-				"author_type": comment.AuthorType,
-				"author_id":   util.UUIDToString(comment.AuthorID),
-				"content":     comment.Content,
-				"type":        comment.Type,
-				"parent_id":   util.UUIDToPtr(comment.ParentID),
-				"created_at":  comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+				"id":             util.UUIDToString(comment.ID),
+				"issue_id":       util.UUIDToString(comment.IssueID),
+				"author_type":    comment.AuthorType,
+				"author_id":      util.UUIDToString(comment.AuthorID),
+				"content":        comment.Content,
+				"type":           comment.Type,
+				"parent_id":      util.UUIDToPtr(comment.ParentID),
+				"source_task_id": util.UUIDToPtr(comment.SourceTaskID),
+				"created_at":     comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
 			},
 			"issue_title":  issue.Title,
 			"issue_status": issue.Status,

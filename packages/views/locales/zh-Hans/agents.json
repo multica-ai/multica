@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "我的",
-    "all": "全部"
+    "all": "全部",
+    "archived": "已归档"
   },
   "sort": {
     "label_recent": "最近活跃",
@@ -65,7 +66,11 @@
     "workload": "工作负载",
     "runtime": "运行时",
     "activity_7d": "活动（7 天）",
-    "runs": "运行次数"
+    "runs": "运行次数",
+    "last_active": "最近活跃",
+    "model": "模型",
+    "created": "创建时间",
+    "owner": "Owner"
   },
   "row": {
     "you": "你",
@@ -73,7 +78,9 @@
     "no_description": "暂无描述",
     "fallback_runtime_cloud": "云端",
     "fallback_runtime_local": "本地",
-    "actions_aria": "行操作"
+    "actions_aria": "行操作",
+    "task_count_one": "{{count}} 个任务",
+    "task_count_other": "{{count}} 个任务"
   },
   "activity_tooltip": {
     "created_today": "今天创建",
@@ -453,5 +460,32 @@
     "runtime_offline": "守护进程离线",
     "runtime_recovery": "守护进程已重启",
     "manual": "用户取消"
+  },
+  "last_active": {
+    "today": "今天",
+    "days_ago_one": "{{count}} 天前",
+    "days_ago_other": "{{count}} 天前",
+    "none": "30 天内无活动"
+  },
+  "toolbar": {
+    "result_count_title": "当前结果 / 范围内全部",
+    "filter_label": "筛选",
+    "filter_active_count_one": "{{count}} 项筛选",
+    "filter_active_count_other": "{{count}} 项筛选",
+    "clear_filters": "清除筛选",
+    "section_availability": "可用性",
+    "section_runtime": "运行时",
+    "display": "显示",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "列",
+    "section_owner": "Owner",
+    "section_model": "模型"
+  },
+  "actions": {
+    "selected_one": "已选 {{count}} 项",
+    "selected_other": "已选 {{count}} 项",
+    "clear_selection": "清除选择"
   }
 }

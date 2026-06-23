@@ -1,4 +1,4 @@
-import { githubUrl } from "../components/shared";
+import { githubUrl, discordUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
 export function createEnDict(allowSignup: boolean): LandingDict {
@@ -244,6 +244,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           { label: "Documentation", href: "/docs" },
           { label: "API", href: githubUrl },
           { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
+          { label: "Discord", href: discordUrl },
         ],
       },
       company: {
@@ -292,6 +293,124 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.3.27",
+        date: "2026-06-22",
+        title: "Threaded Lark Replies and Smoother Team Workflows",
+        changes: [],
+        features: [
+          "Lark conversations now reply inside the original topic when a message starts from a topic, keeping team discussions easier to follow",
+          "Squad leaders can see member skills in the roster, making delegation more precise",
+          "Discord is now available from the website footer, help menu, README, and a dismissible in-app sidebar card",
+        ],
+        improvements: [
+          "Agent activity in Issue headers opens on hover, so live work is easier to check at a glance",
+          "Desktop sidebars and pinned navigation feel smoother, clearer, and less noisy",
+          "Chat replies, assignment catch-up, and contributor guidance are tighter so agent work stays in the right place with less noise",
+          "Remote CLI setup and custom runtime deletion now give clearer guidance before users continue",
+        ],
+        fixes: [
+          "Backlog parent Issues stay parked when child work finishes, avoiding unexpected follow-up automation",
+          "Project deletion now requires an owner or admin, and private GitHub skill imports work when a valid token is available",
+          "Login verification focuses the code field automatically, and detail sidebars no longer animate unexpectedly when pages open",
+          "Codex and daemon diagnostics are more reliable when permissions or slow task claims need investigation",
+        ],
+      },
+      {
+        version: "0.3.25",
+        date: "2026-06-18",
+        title: "More Reliable Agent Work Across Skills, Autopilots, and Chat",
+        changes: [],
+        features: [
+          "Local skill libraries on a developer machine can now be picked up automatically for agent runs",
+          "Autopilots can include default subscribers so the right teammates are included when new Issues are created",
+          "Chat attachments now stay tied to the current workspace and messages can continue sending without blocking the conversation",
+          "Failed agent comments can be retried directly from the Issue timeline",
+        ],
+        improvements: [
+          "Usage reporting is more accurate when the same model name is available from different providers",
+          "Older Codex usage records can be filled in for more complete usage history",
+          "Runtime storage reporting is more complete across multiple workspace locations",
+          "Background task guidance and release checks are stricter, helping catch risky changes earlier",
+        ],
+        fixes: [
+          "Issue mention chips in chat and comments now fit their container and no longer overlap nearby text",
+          "Workspace links now use the correct deployment host more reliably",
+          "Autopilot run folders are cleaned up after terminal runs finish",
+          "Desktop builds now handle commit-based version names correctly",
+          "Tencent CodeBuddy shows the correct provider logo",
+          "Daemon claim responses are smaller and faster to transfer",
+        ],
+      },
+      {
+        version: "0.3.24",
+        date: "2026-06-17",
+        title: "Custom Runtimes",
+        changes: [],
+        features: [
+          "Teams can create custom runtimes so agents use the right local tools and models",
+          "CLI agent create and update now supports thinking level",
+        ],
+        improvements: [
+          "Runtime profiles sync faster and prefer the best match for the current environment",
+          "Client error and freeze reports now group duplicates",
+          "Issue trigger previews are easier to read",
+        ],
+        fixes: [
+          "Office 365 email delivery is more reliable",
+          "GitHub installation context and pending CI display are more reliable",
+          "Codex runs fail quickly when the app server exits",
+          "Self-healing runtimes can be deleted again, and incompatible models are cleared on runtime switch",
+          "Unknown Issue icons and plain filenames are handled safely",
+        ],
+      },
+      {
+        version: "0.3.23",
+        date: "2026-06-16",
+        title: "Issue Date Filters and More Stable Agent Runs",
+        changes: [],
+        features: [
+          "Issues can now be filtered by created or updated date, with quick ranges and custom date selections",
+          "Command line users can now delete runtimes with safer defaults and an explicit option for related data",
+          "Lark connections can now use network proxies, helping teams in restricted network environments connect reliably",
+        ],
+        improvements: [
+          "Web and desktop failures are now easier to investigate with clearer reports for errors, freezes, and crashes",
+          "Project rows, comment previews, and comment composers are more consistent and easier to use",
+        ],
+        fixes: [
+          "Reply and edit previews now show the right agents or squads before a comment is saved",
+          "Plain Issue IDs in comments now stay as text unless they are intentionally linked",
+          "Google sign-in from command line login now returns to the command line correctly after browser authentication",
+          "Chat file uploads wait until an active agent is ready, avoiding failed uploads during loading",
+          "Transcript actions remain visible on touch devices where hover is unavailable",
+          "Agent instructions for posting comments now avoid shell formatting problems that could drop assignees, projects, or other fields",
+        ],
+      },
+      {
+        version: "0.3.22",
+        date: "2026-06-15",
+        title: "Faster Lists, Easier Runtime Setup, and Safer Issue Editing",
+        changes: [],
+        features: [
+          "Agents, autopilots, projects, runtimes, skills, and squads now use a faster, more consistent list experience with clearer rows, filters, selections, and actions",
+          "The command line can now manage workspace repositories, so local agents can pick up project repo context more easily",
+          "Cursor and OpenClaw are easier to set up: Cursor connection settings can be managed for you, and OpenClaw can connect through an existing gateway",
+          "When editing a comment, you can preview and control which agents or squads will run before saving",
+        ],
+        improvements: [
+          "Desktop recovery prompts now include more page context, making stuck-window reports easier to understand",
+          "Long Issues and inbox views now keep their scroll position and comment anchors more reliably when you navigate away and return",
+          "Cursor usage and billing details are clearer for Composer, cached inputs, and newer Cursor agent output",
+        ],
+        fixes: [
+          "Issue attachments, inline images, and file cards are more reliable across web, desktop, mobile, and shared token links",
+          "The editor and read-only Issue content now handle dollar amounts and email links more predictably",
+          "Desktop Cmd+W now closes the active tab first, then the window when no tab can be closed",
+          "Self-hosted Docker Compose uploads and default settings fail less often, with missing values caught earlier",
+          "Agent tasks now stop safely when their run credentials are invalid",
+        ],
+      },
       {
         version: "0.3.21",
         date: "2026-06-12",

@@ -24,6 +24,7 @@ import { BoardCardContent } from "./board-card";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import type { ChildProgress } from "./list-row";
+import { useDragSettle } from "./use-drag-settle";
 import { useT } from "../../i18n";
 import {
   type DragMoveUpdates,
@@ -33,6 +34,7 @@ import {
   buildColumns,
   computePosition,
   findColumn,
+  insertIdByPosition,
   issueMatchesGroup,
   getMoveUpdates,
 } from "../utils/drag-utils";
@@ -213,35 +215,27 @@ export function BoardView({
 
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
-  const isDraggingRef = useRef(false);
-  const isSettlingRef = useRef(false);
-  const [settleVersion, setSettleVersion] = useState(0);
-
-  // --- Local columns state ---
-  // Between drags: follows TQ via useEffect.
-  // During drag: local-only, driven by onDragOver/onDragEnd.
-  const [columns, setColumns] = useState<Record<string, string[]>>(() =>
-    buildColumns(groupedIssues, groups, grouping),
-  );
-  const columnsRef = useRef(columns);
-  columnsRef.current = columns;
+  // Shared drag/settle primitive: owns the local column mirror, the
+  // dragging/settling locks, the post-move animation-frame throttle, and the
+  // settle callback. Shared with list-view (and swimlane) so the surfaces
+  // can't drift apart. Local columns follow TQ between drags via the resync
+  // effect below; during a drag/settle they are frozen by the locks.
+  const {
+    columns,
+    setColumns,
+    columnsRef,
+    isDraggingRef,
+    isSettlingRef,
+    recentlyMovedRef,
+    settleVersion,
+    beginSettle,
+  } = useDragSettle(() => buildColumns(groupedIssues, groups, grouping));
 
   useEffect(() => {
     if (!isDraggingRef.current && !isSettlingRef.current) {
       setColumns(buildColumns(groupedIssues, groups, grouping));
     }
-  }, [groupedIssues, groups, grouping, settleVersion]);
-
-  // After a cross-column move, lock for one animation frame so dnd-kit's
-  // collision detection can stabilize before processing the next move.
-  // Without this, collision oscillates: A→B→A→B… until React bails out.
-  const recentlyMovedRef = useRef(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      recentlyMovedRef.current = false;
-    });
-    return () => cancelAnimationFrame(id);
-  }, [columns]);
+  }, [groupedIssues, groups, grouping, settleVersion, setColumns, isDraggingRef, isSettlingRef]);
 
   // --- Issue map ---
   // Frozen during drag so BoardColumn/DraggableBoardCard props stay
@@ -269,7 +263,7 @@ export function BoardView({
       const issue = issueMapRef.current.get(event.active.id as string) ?? null;
       setActiveIssue(issue);
     },
-    [],
+    [isDraggingRef],
   );
 
   const handleDragOver = useCallback(
@@ -296,7 +290,7 @@ export function BoardView({
         return { ...prev, [activeCol]: oldIds, [overCol]: newIds };
       });
     },
-    [groupIds, sortBy],
+    [groupIds, sortBy, recentlyMovedRef, setColumns],
   );
 
   const handleDragEnd = useCallback(
@@ -359,11 +353,24 @@ export function BoardView({
           resetColumns();
           return;
         }
-        isSettlingRef.current = true;
-        onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position), () => {
-          isSettlingRef.current = false;
-          setSettleVersion((v) => v + 1);
+        // Optimistically move the card into the target column *now*. Without
+        // this, the sortBy != "position" path never touches local columns on
+        // drop, so onDragOver having been a no-op leaves the card in its origin
+        // column for the whole request — it only jumps across when the mutation
+        // settles. That is the "snaps back to origin, then moves" glitch.
+        // Placement mirrors the cache (insertByPosition) so the settle rebuild
+        // from TanStack Query is a visual no-op.
+        setColumns((prev) => {
+          const fromIds = (prev[activeCol] ?? []).filter((cid) => cid !== activeId);
+          const toIds = insertIdByPosition(
+            prev[overCol] ?? [],
+            activeId,
+            currentIssue.position,
+            map,
+          );
+          return { ...prev, [activeCol]: fromIds, [overCol]: toIds };
         });
+        onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position), beginSettle());
         return;
       }
 
@@ -379,12 +386,14 @@ export function BoardView({
         return;
       }
 
-      isSettlingRef.current = true;
-      onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition), () => {
-        isSettlingRef.current = false;
-      });
+      // beginSettle() holds the lock and returns the onSettled callback that
+      // releases it and resyncs local columns from the cache: a no-op on
+      // success (onSuccess already patched the moved card in place), the revert
+      // on error (onError restored the snapshot). Without it a failed move would
+      // strand the card at the drop target, since onSettled no longer refetches.
+      onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition), beginSettle());
     },
-    [groupedIssues, groups, grouping, onMoveIssue, groupIds, groupMap, sortBy],
+    [groupedIssues, groups, grouping, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns],
   );
 
   return (

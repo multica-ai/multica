@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
+import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
@@ -16,7 +17,10 @@ import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 
 interface CommentInputProps {
   issueId: string;
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
+  /** Resolves true on success, false on failure. The composer keeps the text
+   *  (editor locked + button spinning) until this settles, then clears only on
+   *  success — a failed send must not silently discard the user's draft. */
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
 }
 
 function CommentInput({ issueId, onSubmit }: CommentInputProps) {
@@ -72,6 +76,10 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   }, [uploadWithToast, issueId]);
 
   useEffect(() => {
+    setSuppressedAgentIds(new Set());
+  }, [issueId]);
+
+  useEffect(() => {
     const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
     setSuppressedAgentIds((prev) => {
       const next = new Set([...prev].filter((id) => visible.has(id)));
@@ -101,19 +109,26 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     const suppressAgentIds = triggerPreview.agents
       .filter((agent) => suppressedAgentIds.has(agent.id))
       .map((agent) => agent.id);
+    // Pessimistic submit: keep the text in place (the editor is locked and the
+    // button spins via `submitting`) until the server actually accepts it, then
+    // clear. Clearing only on success means a slow send no longer looks like
+    // "comment posted but the box is still full", and a failed send keeps the
+    // draft instead of silently dropping it.
     setSubmitting(true);
     try {
-      await onSubmit(
+      const ok = await onSubmit(
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
       );
-      editorRef.current?.clearContent();
-      setContent("");
-      setIsEmpty(true);
-      setSuppressedAgentIds(new Set());
-      setPendingAttachments([]);
-      clearDraft(draftKey);
+      if (ok) {
+        editorRef.current?.clearContent();
+        setContent("");
+        setIsEmpty(true);
+        setSuppressedAgentIds(new Set());
+        setPendingAttachments([]);
+        clearDraft(draftKey);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -124,7 +139,17 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
       {...dropZoneProps}
       className="relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
     >
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
+      {/* Lock the editor while the send is in flight. ContentEditor can't
+          toggle Tiptap's `editable` post-mount (see its docstring), so the
+          documented way to make it non-interactive is a pointer-events-none +
+          dimmed wrapper. */}
+      <div
+        className={cn(
+          "flex-1 min-h-0 overflow-y-auto px-3 py-2",
+          submitting && "pointer-events-none opacity-60",
+        )}
+        aria-busy={submitting || undefined}
+      >
         <ContentEditor
           ref={editorRef}
           defaultValue={initialDraft}

@@ -212,6 +212,22 @@ func TestChildDoneSkippedWhenParentCancelled(t *testing.T) {
 	}
 }
 
+// TestChildDoneSkippedWhenParentBacklog — a parent deliberately parked in
+// `backlog` must not be woken when a child completes. Waking it would
+// re-activate the parent assignee, which can then promote sibling backlog
+// sub-issues into todo — the surprise auto-activation reported in #4320 /
+// MUL-3497. No system comment, no trigger, until the user explicitly moves
+// the parent out of backlog.
+func TestChildDoneSkippedWhenParentBacklog(t *testing.T) {
+	fx := newChildDoneFixture(t, "backlog")
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+		t.Errorf("parent at 'backlog' should not receive notification, got %d comments", got)
+	}
+}
+
 // TestChildDoneSkippedWhenNoParent — an issue with no parent_issue_id must
 // not produce any system comment on anything.
 func TestChildDoneSkippedWhenNoParent(t *testing.T) {

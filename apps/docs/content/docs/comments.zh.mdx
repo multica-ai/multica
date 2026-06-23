@@ -39,9 +39,9 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 引用 issue
 
-要链接另一个 issue，直接输入它的 issue key，例如 `MUL-123`。Multica 会在评论中解析真实存在的 issue key，并把它存成内部的 `mention://issue/<uuid>` 链接。Issue 链接只是交叉引用：不会通知成员，也不会触发智能体。
+要链接另一个 issue，请在评论的 mention 选择器里选择它。Multica 会把 issue 链接存成显式的 `[MUL-123](mention://issue/<uuid>)` mention 链接。Issue 链接只是交叉引用：不会通知成员，也不会触发智能体。
 
-通常不需要手写 `[MUL-123](mention://issue/<uuid>)`。这是 Multica 解析 key 之后使用的内部规范格式。
+直接输入裸 issue key，例如 `MUL-123`，会保持为普通文本。这样评论里的分支名和路径，例如 `feature/MUL-123`，也不会被改写。
 
 <Callout type="info">
 Markdown 加粗遵循 CommonMark 规则。当加粗文本以标点或闭引号结尾，并且后面紧跟韩语助词时，结尾的 `**` 可能不会被识别。

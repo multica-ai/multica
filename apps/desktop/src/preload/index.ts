@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
+import {
+  RENDERER_ROUTE_CONTEXT_CHANNEL,
+  type RendererRouteContextInput,
+} from "../shared/renderer-route-context";
 import {
   isNavigationGesture,
   NAVIGATION_GESTURE_CHANNEL,
@@ -74,6 +79,16 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
+  /** Read + clear any freeze/crash breadcrumb left by a previous session, so
+   *  the renderer can flush it to telemetry on boot. Returns null when there's
+   *  nothing pending (the normal case). */
+  getLastFreeze: (): FreezeBreadcrumb | null => {
+    try {
+      return ipcRenderer.sendSync("freeze:get-last") as FreezeBreadcrumb | null;
+    } catch {
+      return null;
+    }
+  },
   /** Listen for auth token delivered via deep link */
   onAuthToken: (callback: (token: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, token: string) =>
@@ -156,12 +171,27 @@ const desktopAPI = {
       ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
     };
   },
+  /** Report the renderer's memory-router path for recovery diagnostics. */
+  setRendererRouteContext: (context: RendererRouteContextInput) =>
+    ipcRenderer.send(RENDERER_ROUTE_CONTEXT_CHANNEL, context),
   /** Open the OS folder picker and return the chosen absolute path. */
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("local-directory:pick", defaultPath),
   /** Validate that a path is an existing readable+writable directory. */
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
+  /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
+   *  The renderer should close the active tab; if it was the last tab,
+   *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */
+  onCloseActiveTab: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on("tab:close-active", handler);
+    return () => {
+      ipcRenderer.removeListener("tab:close-active", handler);
+    };
+  },
+  /** Ask the main process to close the window (used after closing the last tab). */
+  closeWindow: () => ipcRenderer.send("window:close"),
 };
 
 interface DaemonStatus {

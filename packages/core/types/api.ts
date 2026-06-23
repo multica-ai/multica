@@ -12,6 +12,8 @@ export interface CreateIssueRequest {
   assignee_id?: string;
   parent_issue_id?: string;
   project_id?: string;
+  /** Ordered stage (>= 1) grouping this sub-issue under its parent. */
+  stage?: number;
   start_date?: string;
   due_date?: string;
   attachment_ids?: string[];
@@ -29,6 +31,8 @@ export interface UpdateIssueRequest {
   due_date?: string | null;
   parent_issue_id?: string | null;
   project_id?: string | null;
+  /** Ordered stage (>= 1); null clears it (unstaged). */
+  stage?: number | null;
   /** Attachment IDs to bind to this issue alongside the description update.
    *  Used by the description editor to register newly uploaded files so they
    *  surface in `issueAttachments` and keep their preview Eye on refresh. */
@@ -64,6 +68,9 @@ export interface ListIssuesParams {
    * majority on the client.
    */
   scheduled?: boolean;
+  date_field?: "created_at" | "updated_at";
+  date_start?: string;
+  date_end?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
 }
@@ -97,6 +104,9 @@ export interface ListGroupedIssuesParams {
   label_ids?: string[];
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
+  date_field?: "created_at" | "updated_at";
+  date_start?: string;
+  date_end?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
 }

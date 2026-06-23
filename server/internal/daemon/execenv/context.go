@@ -24,6 +24,7 @@ import (
 // Cursor:      skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
+// Qoder:       skills → {workDir}/.qoder/skills/{name}/SKILL.md  (project-level; see docs.qoder.com/cli/Skills.md)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 //
@@ -84,9 +85,10 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 // directory. Schema is intentionally a thin pass-through of the API response
 // so consumers (skills, future tooling) don't need a separate parser.
 type projectResourceFile struct {
-	ProjectID    string                  `json:"project_id,omitempty"`
-	ProjectTitle string                  `json:"project_title,omitempty"`
-	Resources    []ProjectResourceForEnv `json:"resources"`
+	ProjectID          string                  `json:"project_id,omitempty"`
+	ProjectTitle       string                  `json:"project_title,omitempty"`
+	ProjectDescription string                  `json:"project_description,omitempty"`
+	Resources          []ProjectResourceForEnv `json:"resources"`
 }
 
 // MarshalJSON renders the resource_ref field as raw JSON instead of a base64
@@ -131,9 +133,10 @@ func writeProjectResources(workDir string, ctx TaskContextForEnv, manifest *side
 		resources = []ProjectResourceForEnv{}
 	}
 	payload := projectResourceFile{
-		ProjectID:    ctx.ProjectID,
-		ProjectTitle: ctx.ProjectTitle,
-		Resources:    resources,
+		ProjectID:          ctx.ProjectID,
+		ProjectTitle:       ctx.ProjectTitle,
+		ProjectDescription: ctx.ProjectDescription,
+		Resources:          resources,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
@@ -212,6 +215,10 @@ func skillsDirPath(workDir, provider string) string {
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
 		return filepath.Join(workDir, ".kiro", "skills")
+	case "qoder":
+		// Qoder CLI discovers project-level skills under .qoder/skills/.
+		// See https://docs.qoder.com/cli/Skills.md
+		return filepath.Join(workDir, ".qoder", "skills")
 	case "antigravity":
 		// Antigravity (`agy`) auto-discovers workspace-level skills from
 		// .agents/skills/ in the workdir. The CLI inherits Gemini CLI's

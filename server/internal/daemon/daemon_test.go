@@ -111,6 +111,55 @@ func TestIsBlockedEnvKey(t *testing.T) {
 	}
 }
 
+func TestTaskScopedAuthToken(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		token   string
+		want    string
+		wantErr string
+	}{
+		{
+			name:    "missing token fails closed",
+			wantErr: "server did not provide task-scoped auth token",
+		},
+		{
+			name:    "member token fails closed",
+			token:   "mul_member_token",
+			wantErr: "server provided non-task-scoped auth token",
+		},
+		{
+			name:  "task token accepted",
+			token: " mat_task_token ",
+			want:  "mat_task_token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := taskScopedAuthToken(Task{AuthToken: tt.token})
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("taskScopedAuthToken() error = nil, want %q", tt.wantErr)
+				}
+				if err.Error() != tt.wantErr {
+					t.Fatalf("taskScopedAuthToken() error = %q, want %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("taskScopedAuthToken(): %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("taskScopedAuthToken() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // When `brew --prefix` is unavailable but the executable path is under a
 // known Cellar root, triggerRestart must recover the prefix from the
 // known-prefix list and target <prefix>/bin/multica.

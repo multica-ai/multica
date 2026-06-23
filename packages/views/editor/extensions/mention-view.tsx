@@ -69,7 +69,7 @@ function ProjectMention({
   };
 
   return (
-    <a href={projectPath} onClick={handleClick} className="project-mention inline-flex">
+    <a href={projectPath} onClick={handleClick} className="project-mention">
       <ProjectChip
         projectId={projectId}
         fallbackLabel={fallbackLabel}
@@ -101,7 +101,7 @@ function IssueMention({
   };
 
   return (
-    <a href={issuePath} onClick={handleClick} className="issue-mention inline-flex">
+    <a href={issuePath} onClick={handleClick} className="issue-mention">
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}

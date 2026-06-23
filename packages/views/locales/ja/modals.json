@@ -89,6 +89,7 @@
     "icon_tooltip": "アイコンを選択",
     "title_placeholder": "プロジェクトのタイトル",
     "description_placeholder": "説明を追加...",
+    "description_hint": "このプロジェクトのすべてのタスクで、コンテキストとしてエージェントに共有されます。",
     "lead": "リード",
     "no_lead": "リードなし",
     "lead_placeholder": "リードを指定...",

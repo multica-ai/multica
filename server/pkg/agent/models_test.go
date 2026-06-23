@@ -149,6 +149,78 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 	}
 }
 
+func TestModelKnownIncompatibleWithProvider(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		model    string
+		want     bool
+	}{
+		{
+			name:     "claude model is incompatible with codex",
+			provider: "codex",
+			model:    "claude-sonnet-4-6",
+			want:     true,
+		},
+		{
+			name:     "codex model is compatible with codex",
+			provider: "codex",
+			model:    "gpt-5.5",
+			want:     false,
+		},
+		{
+			name:     "codex model is incompatible with claude",
+			provider: "claude",
+			model:    "o3",
+			want:     true,
+		},
+		{
+			name:     "exact claude model is compatible with claude",
+			provider: "claude",
+			model:    "claude-opus-4-7",
+			want:     false,
+		},
+		{
+			name:     "provider-prefixed openai model is incompatible with codex",
+			provider: "codex",
+			model:    "openai/gpt-4o",
+			want:     true,
+		},
+		{
+			name:     "provider-prefixed anthropic model is incompatible with claude",
+			provider: "claude",
+			model:    "anthropic/claude-opus-4.7",
+			want:     true,
+		},
+		{
+			name:     "known openai-looking model outside codex catalog is incompatible",
+			provider: "codex",
+			model:    "gpt-99",
+			want:     true,
+		},
+		{
+			name:     "unknown custom model is not classified",
+			provider: "codex",
+			model:    "private-lab-model",
+			want:     false,
+		},
+		{
+			name:     "unknown target provider does not clear",
+			provider: "opencode",
+			model:    "claude-sonnet-4-6",
+			want:     false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ModelKnownIncompatibleWithProvider(tc.provider, tc.model); got != tc.want {
+				t.Fatalf("ModelKnownIncompatibleWithProvider(%q, %q) = %v, want %v", tc.provider, tc.model, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestInferCopilotProvider(t *testing.T) {
 	cases := map[string]string{
 		"gpt-5.5":           "openai",
@@ -253,6 +325,21 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	got, err := ListModels(ctx, "kiro", "/nonexistent/kiro-cli")
 	if err != nil {
 		t.Fatalf("ListModels(kiro) error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
+func TestListModelsQoderWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "qoder")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "qoder", "/nonexistent/qodercli")
+	if err != nil {
+		t.Fatalf("ListModels(qoder) error: %v", err)
 	}
 	if got == nil {
 		t.Error("expected non-nil slice even when binary is missing")
@@ -805,6 +892,31 @@ func TestParseHermesSessionNewModels(t *testing.T) {
 	}
 	if models[1].ID != "nous:anthropic/claude-opus-4.7" {
 		t.Errorf("expected current model second: %+v", models[1])
+	}
+}
+
+func TestParseHermesSessionNewModelsPreservesCustomModelIDsWithColons(t *testing.T) {
+	raw := []byte(`{
+      "sessionId": "ses_123",
+      "models": {
+        "availableModels": [
+          {"modelId": "custom:lfm2.5:8b", "name": "lfm2.5:8b", "description": "Provider: Custom"}
+        ],
+        "currentModelId": "custom:lfm2.5:8b"
+      }
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "custom:lfm2.5:8b" {
+		t.Errorf("model id must be preserved verbatim, got %+v", models[0])
+	}
+	if models[0].Provider != "custom" {
+		t.Errorf("provider should be derived from the first colon only, got %+v", models[0])
+	}
+	if !models[0].Default {
+		t.Errorf("current custom model should be marked default: %+v", models[0])
 	}
 }
 

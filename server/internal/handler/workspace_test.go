@@ -200,6 +200,15 @@ VALUES ($1, $2, 'owner')
 `, wsID, testUserID); err != nil {
 		t.Fatalf("create owner member: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO github_pending_check_suite (
+	workspace_id, installation_id, repo_owner, repo_name, pr_number,
+	suite_id, head_sha, app_id, status, suite_updated_at
+)
+VALUES ($1, 123456789, 'multica-ai', 'multica', 3366, 987654321, 'abc123', 15368, 'completed', now())
+`, wsID); err != nil {
+		t.Fatalf("create pending check suite: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
@@ -216,6 +225,14 @@ VALUES ($1, $2, 'owner')
 	}
 	if exists {
 		t.Fatal("workspace still exists after owner DELETE")
+	}
+
+	var pendingCount int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM github_pending_check_suite WHERE workspace_id = $1`, wsID).Scan(&pendingCount); err != nil {
+		t.Fatalf("verify pending check suites: %v", err)
+	}
+	if pendingCount != 0 {
+		t.Fatalf("pending check suites were not cleaned up for deleted workspace: %d", pendingCount)
 	}
 }
 

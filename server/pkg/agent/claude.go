@@ -135,6 +135,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
+		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
@@ -162,7 +163,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "assistant":
 				b.handleAssistant(msg, msgCh, &output, usage)
 			case "user":
-				b.handleUser(msg, msgCh)
+				if b.handleUser(msg, msgCh) {
+					sawAsyncLaunch = true
+				}
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
@@ -221,6 +224,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		case exitErr != nil && finalStatus == "completed":
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
+		}
+		if finalStatus == "completed" && sawAsyncLaunch {
+			finalStatus = "failed"
+			finalError = "claude launched an async background task; Multica-managed runs require foreground execution"
 		}
 
 		// cmd.Wait() has returned — os/exec's stderr copy goroutine has
@@ -297,17 +304,21 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 	}
 }
 
-func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
+func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return
+		return false
 	}
 
+	sawAsyncLaunch := false
 	for _, block := range content.Content {
 		if block.Type == "tool_result" {
 			resultStr := ""
 			if block.Content != nil {
 				resultStr = string(block.Content)
+				if claudeToolResultHasAsyncLaunch(block.Content) {
+					sawAsyncLaunch = true
+				}
 			}
 			trySend(ch, Message{
 				Type:   MessageToolResult,
@@ -316,6 +327,7 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
 			})
 		}
 	}
+	return sawAsyncLaunch
 }
 
 func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }) {
@@ -331,6 +343,12 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	}
 	if inputMap == nil {
 		inputMap = map[string]any{}
+	}
+	if forceClaudeToolInputForeground(inputMap) {
+		b.cfg.Logger.Info("claude: forced foreground tool execution",
+			"request_id", msg.RequestID,
+			"tool", req.ToolName,
+		)
 	}
 
 	response := map[string]any{
@@ -354,6 +372,50 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	if _, err := stdin.Write(data); err != nil {
 		b.cfg.Logger.Warn("claude: failed to write control response", "error", err)
 	}
+}
+
+func forceClaudeToolInputForeground(input map[string]any) bool {
+	if runInBackground, ok := input["run_in_background"].(bool); ok && runInBackground {
+		input["run_in_background"] = false
+		return true
+	}
+	return false
+}
+
+func claudeToolResultHasAsyncLaunch(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		if claudeMapHasAsyncLaunchStatus(v) {
+			return true
+		}
+		if content, ok := v["content"].([]any); ok {
+			return claudeArrayHasAsyncLaunchStatus(content)
+		}
+	case []any:
+		return claudeArrayHasAsyncLaunchStatus(v)
+	}
+	return false
+}
+
+func claudeArrayHasAsyncLaunchStatus(values []any) bool {
+	for _, value := range values {
+		if item, ok := value.(map[string]any); ok && claudeMapHasAsyncLaunchStatus(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func claudeMapHasAsyncLaunchStatus(value map[string]any) bool {
+	status, ok := value["status"].(string)
+	return ok && status == "async_launched"
 }
 
 // ── Claude SDK JSON types ──

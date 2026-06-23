@@ -90,6 +90,7 @@
     "icon_tooltip": "아이콘 선택",
     "title_placeholder": "프로젝트 제목",
     "description_placeholder": "설명 추가...",
+    "description_hint": "이 프로젝트의 모든 작업에서 컨텍스트로 에이전트에게 공유됩니다.",
     "lead": "리드",
     "no_lead": "리드 없음",
     "lead_placeholder": "리드 지정...",

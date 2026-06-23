@@ -59,6 +59,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
+import { SubscriberMultiSelect } from "./subscriber-multi-select";
 import {
   getDefaultTriggerConfig,
   getLocalTimezone,
@@ -83,6 +84,7 @@ export interface AutopilotInitial {
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
+  subscriber_user_ids?: string[];
 }
 
 export type AutopilotDialogProps =
@@ -285,6 +287,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [executionMode, setExecutionMode] = useState<AutopilotExecutionMode>(
     initial.execution_mode ?? "create_issue",
   );
+  const [subscriberUserIds, setSubscriberUserIds] = useState<string[]>(
+    initial.subscriber_user_ids ?? [],
+  );
 
   const initialCfg: TriggerConfig = (() => {
     if (isCreate) {
@@ -379,6 +384,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          subscribers: subscriberUserIds.map((user_id) => ({
+            user_type: "member" as const,
+            user_id,
+          })),
         });
         let triggerOk = true;
         let triggerErrMessage: string | null = null;
@@ -428,6 +437,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          subscribers: subscriberUserIds.map((user_id) => ({
+            user_type: "member" as const,
+            user_id,
+          })),
         });
         let triggerOk = true;
         let triggerErrMessage: string | null = null;
@@ -642,6 +655,13 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 projectId={projectId}
                 selectedProject={selectedProject}
                 onChange={setProjectId}
+              />
+            )}
+
+            {executionMode === "create_issue" && (
+              <SubscribersSection
+                selectedUserIds={subscriberUserIds}
+                onChange={setSubscriberUserIds}
               />
             )}
 
@@ -865,6 +885,28 @@ function ProjectSection({
             <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
           </button>
         }
+      />
+    </div>
+  );
+}
+
+function SubscribersSection({
+  selectedUserIds,
+  onChange,
+}: {
+  selectedUserIds: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_subscribers)}</SectionLabel>
+      <p className="mb-2 text-[11px] text-muted-foreground">
+        {t(($) => $.dialog.subscribers_hint)}
+      </p>
+      <SubscriberMultiSelect
+        selectedIds={selectedUserIds}
+        onChange={onChange}
       />
     </div>
   );

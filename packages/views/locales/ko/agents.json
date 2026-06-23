@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "내 것",
-    "all": "전체"
+    "all": "전체",
+    "archived": "보관됨"
   },
   "sort": {
     "label_recent": "최근 활동",
@@ -66,7 +67,11 @@
     "workload": "작업량",
     "runtime": "런타임",
     "activity_7d": "활동(7일)",
-    "runs": "실행"
+    "runs": "실행",
+    "last_active": "최근 활동",
+    "model": "모델",
+    "created": "생성일",
+    "owner": "소유자"
   },
   "row": {
     "you": "나",
@@ -74,7 +79,9 @@
     "no_description": "설명 없음",
     "fallback_runtime_cloud": "클라우드",
     "fallback_runtime_local": "로컬",
-    "actions_aria": "행 작업"
+    "actions_aria": "행 작업",
+    "task_count_one": "태스크 {{count}}개",
+    "task_count_other": "태스크 {{count}}개"
   },
   "activity_tooltip": {
     "created_today": "오늘 생성됨",
@@ -465,5 +472,32 @@
     "runtime_offline": "데몬 오프라인",
     "runtime_recovery": "데몬 재시작됨",
     "manual": "사용자가 취소함"
+  },
+  "last_active": {
+    "today": "오늘",
+    "days_ago_one": "{{count}}일 전",
+    "days_ago_other": "{{count}}일 전",
+    "none": "30일간 활동 없음"
+  },
+  "toolbar": {
+    "result_count_title": "일치하는 에이전트 / 범위 내 전체",
+    "filter_label": "필터",
+    "filter_active_count_one": "필터 {{count}}개",
+    "filter_active_count_other": "필터 {{count}}개",
+    "clear_filters": "필터 지우기",
+    "section_availability": "가용성",
+    "section_runtime": "런타임",
+    "display": "표시",
+    "sort_by": "정렬",
+    "direction_asc": "오름차순",
+    "direction_desc": "내림차순",
+    "section_columns": "열",
+    "section_owner": "소유자",
+    "section_model": "모델"
+  },
+  "actions": {
+    "selected_one": "{{count}}개 선택됨",
+    "selected_other": "{{count}}개 선택됨",
+    "clear_selection": "선택 해제"
   }
 }

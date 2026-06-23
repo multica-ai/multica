@@ -235,6 +235,25 @@ func (s *chatSessionService) AppendUserMessage(ctx context.Context, p AppendUser
 		return AppendResult{}, fmt.Errorf("touch chat session: %w", err)
 	}
 
+	// Record this message as the chat binding's most-recent reply
+	// target. The outbound patcher is event-driven and disconnected from
+	// the inbound message, so it cannot otherwise know which message /
+	// thread to reply into. We persist the latest trigger here (in the
+	// same tx as the chat_message write) so EventChatDone can thread the
+	// reply back into the originating Lark topic. last_lark_thread_id is
+	// NULL for non-thread messages, which keeps the outbound on the
+	// chat-level send path. Skipped when there is no Lark message_id
+	// (defensive: every real inbound carries one).
+	if p.LarkMessageID != "" {
+		if err := qtx.UpdateLarkChatSessionBindingReplyTarget(ctx, db.UpdateLarkChatSessionBindingReplyTargetParams{
+			ChatSessionID:     p.ChatSessionID,
+			LastLarkMessageID: textOrNull(p.LarkMessageID),
+			LastLarkThreadID:  textOrNull(p.LarkThreadID),
+		}); err != nil {
+			return AppendResult{}, fmt.Errorf("update reply target: %w", err)
+		}
+	}
+
 	// In-tx dedup Mark, gated on the supplied claim token. The whole
 	// point of doing this here — rather than after Commit — is that
 	// the chat_message write and the Mark either commit atomically or

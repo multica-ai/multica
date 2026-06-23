@@ -296,7 +296,7 @@ test: ## Run Go tests after ensuring the target DB exists and migrations are app
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	cd server && go run ./cmd/migrate up
-	cd server && go test ./...
+	cd server && go test -race ./...
 
 # Database
 ##@ Database
@@ -317,5 +317,10 @@ sqlc: ## Regenerate sqlc code
 # Cleanup
 ##@ Cleanup
 
-clean: ## Remove generated server binaries and temp files
+clean: ## Remove build caches, generated binaries, and temp files
 	rm -rf server/bin server/tmp
+	rm -rf apps/*/.next apps/*/.source apps/*/.expo
+	rm -rf apps/*/out apps/*/dist apps/*/dist-electron packages/*/dist
+	rm -rf .turbo apps/*/.turbo packages/*/.turbo
+	rm -rf apps/*/*.tsbuildinfo packages/*/*.tsbuildinfo
+	@echo "✓ Clean complete."

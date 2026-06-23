@@ -14,6 +14,12 @@ type Runtime struct {
 	Name     string `json:"name"`
 	Provider string `json:"provider"`
 	Status   string `json:"status"`
+	// ProfileID is non-empty when this runtime was registered from a
+	// workspace custom runtime profile (MUL-3284). It links the runtime row
+	// back to the profile so the daemon can resolve the profile's
+	// command_name to the executable to launch. Built-in (provider-detected)
+	// runtimes leave this empty.
+	ProfileID string `json:"profile_id,omitempty"`
 }
 
 // RepoData holds repository information from the workspace.
@@ -49,6 +55,7 @@ type Task struct {
 	Repos                    []RepoData            `json:"repos,omitempty"`
 	ProjectID                string                `json:"project_id,omitempty"`                  // issue's project, when present
 	ProjectTitle             string                `json:"project_title,omitempty"`               // human-readable project title for context injection
+	ProjectDescription       string                `json:"project_description,omitempty"`         // durable project-level context injected into the brief
 	ProjectResources         []ProjectResourceData `json:"project_resources,omitempty"`           // project-scoped resources to expose to the agent
 	PriorSessionID           string                `json:"prior_session_id,omitempty"`            // Claude session ID from a previous task on this issue
 	PriorWorkDir             string                `json:"prior_work_dir,omitempty"`              // work_dir from a previous task on this issue
@@ -100,8 +107,8 @@ type Task struct {
 	// AuthToken is the task-scoped credential the server mints at claim time.
 	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
 	// agent never sees the daemon's own (often workspace-owner) credential.
-	// Empty when the server-side runtime has no owning user — the daemon
-	// then falls back to its own token. See MUL-2600.
+	// Empty or non-task-scoped values are fatal for writable agent tasks; the
+	// daemon must not fall back to its own token. See MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
 }
 

@@ -53,6 +53,7 @@ catalog:
 
   # Virtualized timeline (issue detail comments)
   react-virtuoso: "^4.14.0"
+  "@tanstack/react-virtual": "^3.13.0"
 
   # Product analytics
   posthog-js: "^1.176.1"

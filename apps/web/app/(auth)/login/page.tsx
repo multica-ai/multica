@@ -125,11 +125,18 @@ function LoginPageContent() {
     router.push(await resolveLoggedInDestination(qc, onboarded, list));
   };
 
-  // Build Google OAuth state: encode platform + next URL so the callback
-  // can redirect to the right place after login.
+  // Build Google OAuth state: encode platform, next URL, and CLI callback
+  // params so the callback can redirect to the right place after login.
+  // CLI callback/state must survive the Google OAuth round-trip so the
+  // post-login callback page can redirect the JWT back to the CLI's local
+  // HTTP listener (critical for headless / WSL2 environments).
   const googleState = [
     platform === "desktop" ? "platform:desktop" : "",
     nextUrl ? `next:${nextUrl}` : "",
+    cliCallbackRaw && validateCliCallback(cliCallbackRaw)
+      ? `cli_callback:${encodeURIComponent(cliCallbackRaw)}`
+      : "",
+    cliState ? `cli_state:${encodeURIComponent(cliState)}` : "",
   ]
     .filter(Boolean)
     .join(",") || undefined;

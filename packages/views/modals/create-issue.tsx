@@ -35,7 +35,8 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multi
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
-import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
+import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
+import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -43,7 +44,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
-import { issueDetailOptions } from "@multica/core/issues/queries";
+import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import {
@@ -140,6 +141,11 @@ export function ManualCreatePanel({
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
+  // Stage only applies to a sub-issue; kept local (not in the persisted draft)
+  // since it's a per-creation choice tied to the chosen parent.
+  const [stage, setStage] = useState<number | null>(
+    typeof data?.stage === "number" ? (data.stage as number) : null,
+  );
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   // Start date is a low-frequency field — by default it lives in the
   // overflow ⋯ menu. Clicking the menu item flips this open, which both
@@ -155,6 +161,12 @@ export function ManualCreatePanel({
   const wsId = useWorkspaceId();
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
+    enabled: !!parentIssueId,
+  });
+  // Sibling stages under the chosen parent, so the Stage picker can offer the
+  // already-used max stage (and one beyond) instead of flooring at Stage 1–3.
+  const { data: parentChildren = [] } = useQuery({
+    ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
 
@@ -211,6 +223,7 @@ export function ManualCreatePanel({
     setDueDate(null);
     setProjectId(undefined);
     setParentIssueId(undefined);
+    setStage(null);
     setChildIssues([]);
     setDraft({
       title: "",
@@ -246,6 +259,8 @@ export function ManualCreatePanel({
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
+        // Stage is only meaningful for a sub-issue (relative to its siblings).
+        stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
       });
 
@@ -569,6 +584,17 @@ export function ManualCreatePanel({
                 triggerRender={<PillButton />}
                 align="start"
               />
+
+              {/* Stage — only relevant when creating a sub-issue under a parent */}
+              {parentIssueId && (
+                <StagePicker
+                  stage={stage}
+                  onUpdate={(u) => setStage(u.stage ?? null)}
+                  maxStage={maxSiblingStage(parentChildren)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                />
+              )}
 
               {/* Start date — collapsed into the ⋯ menu by default since it's
                   a low-frequency field. Renders inline only when the field

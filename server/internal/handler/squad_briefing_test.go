@@ -150,6 +150,70 @@ func TestBuildSquadLeaderBriefing_FullSquad(t *testing.T) {
 	}
 }
 
+// assignSkillToAgent creates a workspace skill and attaches it to the agent.
+func assignSkillToAgent(t *testing.T, agentID, skillName string) {
+	t.Helper()
+	ctx := context.Background()
+	var skillID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO skill (workspace_id, name, description, content, created_by)
+		VALUES ($1, $2, '', '', $3)
+		RETURNING id
+	`, testWorkspaceID, skillName, testUserID).Scan(&skillID); err != nil {
+		t.Fatalf("create skill %s: %v", skillName, err)
+	}
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(ctx, `DELETE FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`, agentID, skillID); err != nil {
+			t.Errorf("cleanup agent skill %s/%s: %v", agentID, skillName, err)
+		}
+		if _, err := testPool.Exec(ctx, `DELETE FROM skill WHERE id = $1`, skillID); err != nil {
+			t.Errorf("cleanup skill %s: %v", skillName, err)
+		}
+	})
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
+		agentID, skillID,
+	); err != nil {
+		t.Fatalf("assign skill %s to agent: %v", skillName, err)
+	}
+}
+
+// TestBuildSquadLeaderBriefing_MemberSkillsInRoster locks in the delegation
+// fix: an agent member's assigned skills appear in the leader roster so the
+// leader can route by capability. Agents with no skills get an explicit
+// marker; human members never carry a skills segment.
+func TestBuildSquadLeaderBriefing_MemberSkillsInRoster(t *testing.T) {
+	ctx := context.Background()
+	leaderID, _ := seededLeaderAgent(t)
+	squad := seedSquadForBriefing(t, leaderID, "Skilled Squad", "")
+
+	skilled := createHandlerTestAgent(t, "Skilled Bot", []byte("[]"))
+	addAgentMember(t, squad.ID, skilled, "backend")
+	// ListAgentSkillNamesByAgentIDs orders by name ASC → "polars" before "stat…".
+	assignSkillToAgent(t, skilled, "polars")
+	assignSkillToAgent(t, skilled, "statistical-analysis")
+
+	plain := createHandlerTestAgent(t, "Plain Bot", []byte("[]"))
+	addAgentMember(t, squad.ID, plain, "")
+
+	memberRowID, userID, userName := seededHumanMember(t)
+	_ = memberRowID
+	addHumanMember(t, squad.ID, userID, "reviewer")
+
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad)
+
+	if !strings.Contains(out, "skills: polars, statistical-analysis") {
+		t.Errorf("expected skilled member skills in roster, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Plain Bot — agent — no skills assigned") {
+		t.Errorf("expected no-skills marker for skill-less agent, got:\n%s", out)
+	}
+	if strings.Contains(out, userName+" — member (human), role: \"reviewer\" — skills:") ||
+		strings.Contains(out, userName+" — member (human), role: \"reviewer\" — no skills") {
+		t.Errorf("human member must not render a skills segment, got:\n%s", out)
+	}
+}
+
 func TestBuildSquadLeaderBriefing_OnlyLeader(t *testing.T) {
 	ctx := context.Background()
 	leaderID, _ := seededLeaderAgent(t)
@@ -226,34 +290,34 @@ func TestBuildSquadLeaderBriefing_MentionsRoundTrip(t *testing.T) {
 // claimAndDecodeAgent runs ClaimTaskByRuntime for the given runtime and
 // returns the agent block of the response. Fails the test on non-200.
 func claimAndDecodeAgent(t *testing.T, runtimeID string) *TaskAgentData {
-t.Helper()
-w := httptest.NewRecorder()
-req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-squad-briefing")
-req = withURLParam(req, "runtimeId", runtimeID)
-testHandler.ClaimTaskByRuntime(w, req)
-if w.Code != http.StatusOK {
-t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
-}
-var resp struct {
-Task *struct {
-Agent *TaskAgentData `json:"agent"`
-} `json:"task"`
-}
-if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-t.Fatalf("decode: %v", err)
-}
-if resp.Task == nil || resp.Task.Agent == nil {
-t.Fatalf("expected task.agent in response, got: %s", w.Body.String())
-}
-return resp.Task.Agent
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-squad-briefing")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Task *struct {
+			Agent *TaskAgentData `json:"agent"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Task == nil || resp.Task.Agent == nil {
+		t.Fatalf("expected task.agent in response, got: %s", w.Body.String())
+	}
+	return resp.Task.Agent
 }
 
 // queueSquadIssueTaskFor creates an issue assigned to the squad and a queued
 // task for the given (agentID, runtimeID). Returns the issue + task IDs.
 func queueSquadIssueTaskFor(t *testing.T, squadID, agentID, runtimeID string, issueNumber int) (issueID, taskID string) {
-t.Helper()
-ctx := context.Background()
-if err := testPool.QueryRow(ctx, `
+	t.Helper()
+	ctx := context.Background()
+	if err := testPool.QueryRow(ctx, `
 INSERT INTO issue (
 workspace_id, title, status, priority, creator_id, creator_type,
 assignee_type, assignee_id, number, position
@@ -261,101 +325,101 @@ assignee_type, assignee_id, number, position
 'squad', $3, $4, 0)
 RETURNING id
 `, testWorkspaceID, testUserID, squadID, issueNumber).Scan(&issueID); err != nil {
-t.Fatalf("create squad-assigned issue: %v", err)
-}
-t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+		t.Fatalf("create squad-assigned issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
 
-if err := testPool.QueryRow(ctx, `
+	if err := testPool.QueryRow(ctx, `
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
 VALUES ($1, $2, $3, 'queued', 0)
 RETURNING id
 `, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
-t.Fatalf("queue task: %v", err)
-}
-t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
-return
+		t.Fatalf("queue task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	return
 }
 
 // TestClaimTask_LeaderGetsBriefing — when the squad leader claims a task on
 // a squad-assigned issue, the response's agent.instructions must include
 // the Operating Protocol + Roster + user instructions.
 func TestClaimTask_LeaderGetsBriefing(t *testing.T) {
-if testHandler == nil {
-t.Skip("database not available")
-}
-ctx := context.Background()
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
 
-var leaderID, runtimeID string
-if err := testPool.QueryRow(ctx,
-`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
-testWorkspaceID,
-).Scan(&leaderID, &runtimeID); err != nil {
-t.Fatalf("get leader agent: %v", err)
-}
+	var leaderID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&leaderID, &runtimeID); err != nil {
+		t.Fatalf("get leader agent: %v", err)
+	}
 
-squad := seedSquadForBriefing(t, leaderID, "Briefing Claim Squad", "Be terse.")
+	squad := seedSquadForBriefing(t, leaderID, "Briefing Claim Squad", "Be terse.")
 
-helper := createHandlerTestAgent(t, "Briefing Helper", []byte("[]"))
-addAgentMember(t, squad.ID, helper, "implementer")
+	helper := createHandlerTestAgent(t, "Briefing Helper", []byte("[]"))
+	addAgentMember(t, squad.ID, helper, "implementer")
 
-queueSquadIssueTaskFor(t, util.UUIDToString(squad.ID), leaderID, runtimeID, 95001)
+	queueSquadIssueTaskFor(t, util.UUIDToString(squad.ID), leaderID, runtimeID, 95001)
 
-agent := claimAndDecodeAgent(t, runtimeID)
-for _, want := range []string{
-"## Squad Operating Protocol",
-"## Squad Roster",
-"Leader (you):",
-"## Squad Instructions (Briefing Claim Squad)",
-"Be terse.",
-"`[@Briefing Helper](mention://agent/" + helper + ")`",
-} {
-if !strings.Contains(agent.Instructions, want) {
-t.Errorf("expected agent.instructions to contain %q\n--- instructions ---\n%s", want, agent.Instructions)
-}
-}
+	agent := claimAndDecodeAgent(t, runtimeID)
+	for _, want := range []string{
+		"## Squad Operating Protocol",
+		"## Squad Roster",
+		"Leader (you):",
+		"## Squad Instructions (Briefing Claim Squad)",
+		"Be terse.",
+		"`[@Briefing Helper](mention://agent/" + helper + ")`",
+	} {
+		if !strings.Contains(agent.Instructions, want) {
+			t.Errorf("expected agent.instructions to contain %q\n--- instructions ---\n%s", want, agent.Instructions)
+		}
+	}
 }
 
 // TestClaimTask_NonLeaderGetsNoBriefing — when a non-leader squad member
 // claims a task on a squad-assigned issue, NO briefing is injected.
 func TestClaimTask_NonLeaderGetsNoBriefing(t *testing.T) {
-if testHandler == nil {
-t.Skip("database not available")
-}
-ctx := context.Background()
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
 
-var leaderID string
-if err := testPool.QueryRow(ctx,
-`SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
-testWorkspaceID,
-).Scan(&leaderID); err != nil {
-t.Fatalf("get leader agent: %v", err)
-}
+	var leaderID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&leaderID); err != nil {
+		t.Fatalf("get leader agent: %v", err)
+	}
 
-squad := seedSquadForBriefing(t, leaderID, "Non-Leader Squad", "Squad guidance.")
+	squad := seedSquadForBriefing(t, leaderID, "Non-Leader Squad", "Squad guidance.")
 
-// Create a second agent (NOT the leader) with its own runtime so the
-// claim path picks its task without ambiguity.
-helperID := createHandlerTestAgent(t, "Non Leader Helper", []byte("[]"))
-addAgentMember(t, squad.ID, helperID, "")
-var helperRuntime string
-if err := testPool.QueryRow(ctx,
-`SELECT runtime_id FROM agent WHERE id = $1`, helperID,
-).Scan(&helperRuntime); err != nil {
-t.Fatalf("get helper runtime: %v", err)
-}
+	// Create a second agent (NOT the leader) with its own runtime so the
+	// claim path picks its task without ambiguity.
+	helperID := createHandlerTestAgent(t, "Non Leader Helper", []byte("[]"))
+	addAgentMember(t, squad.ID, helperID, "")
+	var helperRuntime string
+	if err := testPool.QueryRow(ctx,
+		`SELECT runtime_id FROM agent WHERE id = $1`, helperID,
+	).Scan(&helperRuntime); err != nil {
+		t.Fatalf("get helper runtime: %v", err)
+	}
 
-queueSquadIssueTaskFor(t, util.UUIDToString(squad.ID), helperID, helperRuntime, 95002)
+	queueSquadIssueTaskFor(t, util.UUIDToString(squad.ID), helperID, helperRuntime, 95002)
 
-agent := claimAndDecodeAgent(t, helperRuntime)
-for _, mustNot := range []string{
-"Squad Operating Protocol",
-"Squad Roster",
-"Squad Instructions (Non-Leader Squad)",
-} {
-if strings.Contains(agent.Instructions, mustNot) {
-t.Errorf("non-leader claim should NOT contain %q\n--- instructions ---\n%s", mustNot, agent.Instructions)
-}
-}
+	agent := claimAndDecodeAgent(t, helperRuntime)
+	for _, mustNot := range []string{
+		"Squad Operating Protocol",
+		"Squad Roster",
+		"Squad Instructions (Non-Leader Squad)",
+	} {
+		if strings.Contains(agent.Instructions, mustNot) {
+			t.Errorf("non-leader claim should NOT contain %q\n--- instructions ---\n%s", mustNot, agent.Instructions)
+		}
+	}
 }
 
 // Avoid "imported and not used: pgtype" if helpers above are the only users.

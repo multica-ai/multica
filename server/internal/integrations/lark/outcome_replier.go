@@ -235,14 +235,33 @@ func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst db.LarkI
 		return err
 	}
 	text := issueCreatedText(res, r.publicURL)
-	if _, err := r.client.SendTextMessage(ctx, SendTextParams{
-		InstallationID: creds,
-		ChatID:         msg.ChatID,
-		Text:           text,
-	}); err != nil {
-		return fmt.Errorf("send issue-created text: %w", err)
+	// Share the Patcher's classified fallback: a thread reply that
+	// fails because the topic cannot receive it (recalled trigger,
+	// topics disabled, aggregated message) falls back to a chat-level
+	// send so the confirmation is not lost; transport/5xx/rate-limit
+	// failures stay failures rather than leaking into the group chat.
+	return sendWithThreadFallback(r.log, "send issue-created text", inboundReplyTarget(msg), func(t ReplyTarget) error {
+		_, err := r.client.SendTextMessage(ctx, SendTextParams{
+			InstallationID: creds,
+			ChatID:         msg.ChatID,
+			Text:           text,
+			ReplyTarget:    t,
+		})
+		return err
+	})
+}
+
+// inboundReplyTarget threads an outbound reply off the inbound trigger
+// message when that message lived inside a Lark topic (话题). It mirrors
+// threadReplyTarget (used by the event-driven Patcher) but reads the
+// live InboundMessage the replier already holds, so it needs no DB
+// round-trip. An empty thread_id yields the zero ReplyTarget — a
+// chat-level send, i.e. the unchanged behavior for non-thread messages.
+func inboundReplyTarget(msg InboundMessage) ReplyTarget {
+	if msg.ThreadID != "" && msg.MessageID != "" {
+		return ReplyTarget{MessageID: msg.MessageID, InThread: true}
 	}
-	return nil
+	return ReplyTarget{}
 }
 
 // issueCreatedText composes the user-facing confirmation. Identifier
@@ -285,14 +304,18 @@ func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst db.LarkIns
 	if err != nil {
 		return fmt.Errorf("render notice card: %w", err)
 	}
-	if _, err := r.client.SendInteractiveCard(ctx, SendCardParams{
-		InstallationID: creds,
-		ChatID:         msg.ChatID,
-		CardJSON:       cardJSON,
-	}); err != nil {
-		return fmt.Errorf("send notice card: %w", err)
-	}
-	return nil
+	// Same classified fallback as sendIssueCreated: only thread-reply
+	// failures that mean the topic cannot receive the message fall back
+	// to a chat-level send; ambiguous/transport failures stay failures.
+	return sendWithThreadFallback(r.log, "send notice card", inboundReplyTarget(msg), func(t ReplyTarget) error {
+		_, err := r.client.SendInteractiveCard(ctx, SendCardParams{
+			InstallationID: creds,
+			ChatID:         msg.ChatID,
+			CardJSON:       cardJSON,
+			ReplyTarget:    t,
+		})
+		return err
+	})
 }
 
 func (r *LarkOutcomeReplier) installationCredentials(inst db.LarkInstallation) (InstallationCredentials, error) {

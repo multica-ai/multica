@@ -20,10 +20,9 @@ export interface OpenclawRuntimeConfig {
 }
 
 // Sentinel the API substitutes for a non-empty `gateway.token` on every read.
-// When the form re-submits the same sentinel we strip the field client-side
-// so the backend's matching preserve hook restores the persisted token
-// instead of overwriting it. Mirrors `runtimeConfigGatewayTokenMask` in
-// server/internal/handler/agent.go.
+// When the form re-submits the same sentinel, the backend's matching
+// preserve hook restores the persisted token instead of overwriting it.
+// Mirrors `runtimeConfigGatewayTokenMask` in server/internal/handler/agent.go.
 export const OPENCLAW_GATEWAY_TOKEN_MASK = "***";
 
 // Parse an arbitrary runtime_config payload into the typed schema. Unknown
@@ -65,12 +64,10 @@ export function serializeOpenclawRuntimeConfig(
     if (cfg.gateway.host) gw.host = cfg.gateway.host;
     if (cfg.gateway.port) gw.port = cfg.gateway.port;
     if (cfg.gateway.tls) gw.tls = true;
-    // The mask sentinel must NEVER round-trip back to the server; the
-    // matching preserve hook on the backend treats its presence as "keep
-    // the persisted token", but emitting it here would still hit the wire
-    // and trip any future schema validation. Drop it client-side so the
-    // payload genuinely omits the field.
-    if (cfg.gateway.token && cfg.gateway.token !== OPENCLAW_GATEWAY_TOKEN_MASK) {
+    // The mask sentinel is the explicit "keep persisted token" signal for
+    // the API. Omitting the field means "clear/no token" for partial
+    // gateway pins, so the sentinel must survive serialization.
+    if (cfg.gateway.token) {
       gw.token = cfg.gateway.token;
     }
     if (Object.keys(gw).length > 0) out.gateway = gw;

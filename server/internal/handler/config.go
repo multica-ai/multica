@@ -11,6 +11,14 @@ import (
 
 type AppConfig struct {
 	CdnDomain string `json:"cdn_domain"`
+	// CdnSigned tells clients that the CDN domain above serves PRIVATE
+	// content through time-bounded signed URLs (CloudFront signing is
+	// enabled). When true, a raw storage URL on the CDN domain is NOT
+	// publicly fetchable — renderers must not pick it as a native
+	// <img>/<video> source and should fall back to the per-attachment
+	// API endpoint or a freshly signed download_url instead (MUL-3254).
+	// Omitted when false so older clients see the previous shape.
+	CdnSigned bool `json:"cdn_signed,omitempty"`
 	// Public auth config consumed by the web app at runtime so self-hosted
 	// deployments do not need to rebuild the frontend image when operators
 	// toggle signup or wire Google OAuth.
@@ -51,6 +59,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()
 	}
+	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 
 	// Re-read from env on every request so operators can rotate keys via

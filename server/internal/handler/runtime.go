@@ -33,6 +33,9 @@ type AgentRuntimeResponse struct {
 	// can bind agents) or "public" (any workspace member can). See migration
 	// 083 and canUseRuntimeForAgent.
 	Visibility string  `json:"visibility"`
+	// ProfileID is set when this runtime is an instance of a custom
+	// runtime_profile (MUL-3284); null for built-in runtimes.
+	ProfileID  *string `json:"profile_id"`
 	LastSeenAt *string `json:"last_seen_at"`
 	CreatedAt  string  `json:"created_at"`
 	UpdatedAt  string  `json:"updated_at"`
@@ -60,6 +63,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Metadata:     metadata,
 		OwnerID:      uuidToPtr(rt.OwnerID),
 		Visibility:   rt.Visibility,
+		ProfileID:    uuidToPtr(rt.ProfileID),
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
@@ -184,12 +188,14 @@ func (h *Handler) GetRuntimeTaskActivity(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// RuntimeUsageByAgentResponse is one (agent, model) row of "Cost by agent".
-// Model stays on the wire because cost is computed client-side from a model
-// pricing table, intentionally not stored server-side so pricing changes
-// don't require a back-fill. The client groups by agent_id and sums.
+// RuntimeUsageByAgentResponse is one (agent, provider, model) row of "Cost by
+// agent". provider + model stay on the wire because cost is computed
+// client-side from a model pricing table (intentionally not stored server-side
+// so pricing changes don't require a back-fill); provider disambiguates bare
+// model ids that collide across providers. The client groups by agent_id and sums.
 type RuntimeUsageByAgentResponse struct {
 	AgentID          string `json:"agent_id"`
+	Provider         string `json:"provider"`
 	Model            string `json:"model"`
 	InputTokens      int64  `json:"input_tokens"`
 	OutputTokens     int64  `json:"output_tokens"`
@@ -235,6 +241,7 @@ func (h *Handler) GetRuntimeUsageByAgent(w http.ResponseWriter, r *http.Request)
 	for i, row := range rows {
 		resp[i] = RuntimeUsageByAgentResponse{
 			AgentID:          uuidToString(row.AgentID),
+			Provider:         row.Provider,
 			Model:            row.Model,
 			InputTokens:      row.InputTokens,
 			OutputTokens:     row.OutputTokens,

@@ -258,6 +258,11 @@ func (c *APIClient) GetJSONWithHeaders(ctx context.Context, path string, out any
 
 // DeleteJSON performs a DELETE request.
 func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
+	return c.DeleteJSONResponse(ctx, path, nil)
+}
+
+// DeleteJSONResponse performs a DELETE request and optionally decodes the JSON response.
+func (c *APIClient) DeleteJSONResponse(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+path, nil)
 	if err != nil {
 		return err
@@ -273,6 +278,9 @@ func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
 
 	if resp.StatusCode >= 400 {
 		return newHTTPError(http.MethodDelete, path, resp)
+	}
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
 	}
 	return nil
 }

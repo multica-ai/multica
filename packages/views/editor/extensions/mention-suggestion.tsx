@@ -31,6 +31,7 @@ import { StatusIcon } from "../../issues/components/status-icon";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { cn } from "@multica/ui/lib/utils";
 import type { IssueStatus, ProjectStatus } from "@multica/core/types";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { SuggestionOptions } from "@tiptap/suggestion";
@@ -319,28 +320,22 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
         );
       });
 
-    if (contextLayout) {
-      return (
-        <div className="flex max-h-[420px] w-96 flex-col overflow-hidden rounded-lg border bg-popover py-1 shadow-xl">
-          {groups.map((group) => {
-            const isRecent = group.label === "Recent";
-            return (
-              <section key={group.label} className={isRecent ? "min-h-0" : "shrink-0"}>
-                <div className="shrink-0 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/80">
-                  {groupLabel(group.label)}
-                </div>
-                <div className={isRecent ? "max-h-64 overflow-y-auto overscroll-contain" : undefined}>
-                  {renderRows(group)}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      );
-    }
-
+    // One scroll container for every group. Previously the context layout made
+    // only the "Recent" group scrollable while the rest were `shrink-0`, so a
+    // query that mixed context items with search results squeezed Recent toward
+    // zero height and its un-clipped rows painted over the groups below it. With
+    // a single `overflow-y-auto` flex column the groups simply stack and the
+    // whole popup scrolls — no group can collapse onto another. The context
+    // variant only differs in width / max-height / chrome.
     return (
-      <div className="w-72 max-h-[300px] overflow-y-auto rounded-md border bg-popover py-1 shadow-md">
+      <div
+        className={cn(
+          "flex flex-col overflow-y-auto overscroll-contain border bg-popover py-1",
+          contextLayout
+            ? "max-h-[420px] w-96 rounded-lg shadow-xl"
+            : "max-h-[300px] w-72 rounded-md shadow-md",
+        )}
+      >
         {groups.map((group) => (
           <div key={group.label}>
             <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/80">

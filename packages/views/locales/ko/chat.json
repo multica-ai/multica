@@ -12,7 +12,8 @@
     "placeholder_default": "메시지 입력…",
     "send_tooltip": "보내기",
     "stop_tooltip": "중지",
-    "send_failed_toast": "메시지를 보내지 못했습니다"
+    "send_failed_toast": "메시지를 보내지 못했습니다",
+    "attachment_bind_failed_toast": "메시지는 보냈지만 파일이 첨부되지 않았습니다. 잠시 후 다시 시도해 주세요."
   },
   "message_list": {
     "show_details": "세부 정보 보기",
