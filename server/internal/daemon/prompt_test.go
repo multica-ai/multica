@@ -310,3 +310,51 @@ func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {
 		t.Errorf("buildCommentPrompt must NOT inject squad leader no_action rule for non-squad-leader agents, got:\n%s", out)
 	}
 }
+
+// TestBuildPromptUpstreamStageContext verifies that completed upstream-stage
+// node runs are surfaced in the generic assignment prompt with their sub-issue
+// IDs, latest comments, attachment metadata, and the CLI commands to read them.
+func TestBuildPromptUpstreamStageContext(t *testing.T) {
+	task := Task{
+		IssueID: "issue-456",
+		UpstreamStageContext: []UpstreamStageNode{
+			{
+				NodeTitle:     "Requirements Analysis",
+				IssueID:       "issue-123",
+				LatestComment: "Requirements gathered; see attached documents.",
+				Attachments: []ChatAttachmentMeta{
+					{ID: "att-1", Filename: "ai-requirements.md", ContentType: "text/markdown"},
+					{ID: "att-2", Filename: "system-requirements.md"},
+				},
+			},
+		},
+	}
+	out := BuildPrompt(task, "claude")
+
+	mustContain := []string{
+		"## Upstream Stage Context",
+		"Requirements Analysis",
+		"issue-123",
+		"Requirements gathered; see attached documents.",
+		"id=att-1 filename=\"ai-requirements.md\" content_type=text/markdown",
+		"id=att-2 filename=\"system-requirements.md\"",
+		"cs-workflow attachment download",
+		"cs-workflow issue get issue-123 --output json",
+		"cs-workflow issue comment list issue-123 --output json",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("BuildPrompt missing upstream context fragment %q:\n--- output ---\n%s", s, out)
+		}
+	}
+}
+
+// TestBuildPromptNoUpstreamStageContext verifies that the upstream section is
+// omitted when there are no upstream-stage node runs.
+func TestBuildPromptNoUpstreamStageContext(t *testing.T) {
+	task := Task{IssueID: "issue-456"}
+	out := BuildPrompt(task, "claude")
+	if strings.Contains(out, "## Upstream Stage Context") {
+		t.Errorf("BuildPrompt should NOT contain upstream context section when empty, got:\n%s", out)
+	}
+}

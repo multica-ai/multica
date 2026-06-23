@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -882,7 +883,9 @@ func TestCancelTask_TaskBelongsToDifferentIssue_Returns404(t *testing.T) {
 	`, agentID, issueXID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
+	})
 
 	// Issue Y — a sibling in the same workspace, used only as the URL cover.
 	var issueYID string
@@ -949,7 +952,9 @@ func TestCancelTask_SameIssue_Succeeds(t *testing.T) {
 	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
+	})
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues/"+issueID+"/tasks/"+taskID+"/cancel", nil)
@@ -1395,7 +1400,9 @@ func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
 	`, testWorkspaceID, storedUpperID, testUserID).Scan(&legacyUpperID); err != nil {
 		t.Fatalf("seed upper-case legacy runtime: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, legacyUpperID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, legacyUpperID)
+	})
 
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO multica_agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
@@ -1404,7 +1411,9 @@ func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
 	`, testWorkspaceID, storedLowerID, testUserID).Scan(&legacyLowerID); err != nil {
 		t.Fatalf("seed lower-case legacy runtime: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, legacyLowerID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_runtime WHERE id = $1`, legacyLowerID)
+	})
 
 	// Bind one agent to each legacy row to verify both sides get reassigned.
 	var upperAgentID, lowerAgentID string
@@ -1663,7 +1672,9 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
+	})
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-project-repos")
@@ -1751,7 +1762,9 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
+	})
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-fallback")
@@ -1895,7 +1908,9 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	`, "Mismatch Foreign", "mismatch-foreign-claim", "", "MFC").Scan(&foreignWorkspaceID); err != nil {
 		t.Fatalf("setup: create foreign workspace: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, foreignWorkspaceID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM multica_workspace WHERE id = $1`, foreignWorkspaceID)
+	})
 
 	var foreignIssueID string
 	if err := testPool.QueryRow(ctx, `
@@ -1917,7 +1932,9 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	`, localAgentID, localRuntimeID, foreignIssueID).Scan(&taskID); err != nil {
 		t.Fatalf("setup: create mismatched task: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM multica_agent_task_queue WHERE id = $1`, taskID)
+	})
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+localRuntimeID+"/claim", nil,
@@ -3320,5 +3337,443 @@ func TestMembershipCache_InvalidatedOnDeleteWorkspace(t *testing.T) {
 	}
 	if testHandler.MembershipCache.Get(ctx, extraUserID, wsID) {
 		t.Fatal("DeleteWorkspace handler did not invalidate extra-member cache entry")
+	}
+}
+
+// upstreamStageFixture holds IDs for the cross-stage context integration tests.
+type upstreamStageFixture struct {
+	runtimeID    string
+	agentID      string
+	workflowID   string
+	stage1ID     string
+	stage2ID     string
+	node1ID      string
+	node2ID      string
+	runID        string
+	nodeRun1ID   string
+	nodeRun2ID   string
+	issue1ID     string
+	issue2ID     string
+	commentID    string
+	attachmentID string
+	taskID       string
+}
+
+// createUpstreamStageContextFixture sets up a workflow with two stages and a
+// completed upstream node run whose sub-issue has a comment + attachment. The
+// returned task belongs to the downstream node run and is ready to be claimed.
+func createUpstreamStageContextFixture(t *testing.T, ctx context.Context, suffix string) upstreamStageFixture {
+	t.Helper()
+	f := upstreamStageFixture{}
+
+	// Runtime
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, last_seen_at, visibility
+		)
+		VALUES ($1, NULL, $2, 'cloud', 'handler_test_runtime', 'online', 'upstream ctx fixture', '{}'::jsonb, now(), 'private')
+		RETURNING id
+	`, testWorkspaceID, "upstream runtime "+suffix).Scan(&f.runtimeID); err != nil {
+		t.Fatalf("setup: create runtime: %v", err)
+	}
+
+	// Agent
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
+		RETURNING id
+	`, testWorkspaceID, "upstream agent "+suffix, f.runtimeID, testUserID).Scan(&f.agentID); err != nil {
+		t.Fatalf("setup: create agent: %v", err)
+	}
+
+	// Workflow
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow (workspace_id, title, description, status, created_by_type, created_by_id)
+		VALUES ($1, $2, '', 'active', 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, "upstream workflow "+suffix, parseUUID(testUserID)).Scan(&f.workflowID); err != nil {
+		t.Fatalf("setup: create workflow: %v", err)
+	}
+
+	// Stages
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow_stage (workflow_id, name, description, sort_order)
+		VALUES ($1, 'Stage 1', '', 0)
+		RETURNING id
+	`, parseUUID(f.workflowID)).Scan(&f.stage1ID); err != nil {
+		t.Fatalf("setup: create stage 1: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow_stage (workflow_id, name, description, sort_order)
+		VALUES ($1, 'Stage 2', '', 1)
+		RETURNING id
+	`, parseUUID(f.workflowID)).Scan(&f.stage2ID); err != nil {
+		t.Fatalf("setup: create stage 2: %v", err)
+	}
+
+	// Nodes
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow_node (
+			workflow_id, title, description, worker_type, worker_id,
+			critic_type, critic_id, sort_order, stage_id
+		)
+		VALUES ($1, 'Node 1', '', 'agent', $2, 'human', NULL, 0, $3)
+		RETURNING id
+	`, parseUUID(f.workflowID), parseUUID(f.agentID), parseUUID(f.stage1ID)).Scan(&f.node1ID); err != nil {
+		t.Fatalf("setup: create node 1: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow_node (
+			workflow_id, title, description, worker_type, worker_id,
+			critic_type, critic_id, sort_order, stage_id
+		)
+		VALUES ($1, 'Node 2', '', 'agent', $2, 'human', NULL, 0, $3)
+		RETURNING id
+	`, parseUUID(f.workflowID), parseUUID(f.agentID), parseUUID(f.stage2ID)).Scan(&f.node2ID); err != nil {
+		t.Fatalf("setup: create node 2: %v", err)
+	}
+
+	// Workflow run
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow_run (
+			workflow_id, workspace_id, workflow_title, status,
+			triggered_by_type, triggered_by_id, input
+		)
+		VALUES ($1, $2, 'Upstream Run', 'running', 'member', $3, '{}'::jsonb)
+		RETURNING id
+	`, parseUUID(f.workflowID), parseUUID(testWorkspaceID), parseUUID(testUserID)).Scan(&f.runID); err != nil {
+		t.Fatalf("setup: create workflow run: %v", err)
+	}
+
+	// Node run 1: completed upstream node
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow_node_run (
+			workflow_run_id, workflow_node_id, node_title, status,
+			worker_type, worker_id, critic_type, critic_id,
+			worker_output, completed_at
+		)
+		VALUES ($1, $2, 'Node 1', 'completed', 'agent', $3, 'human', NULL, $4, now())
+		RETURNING id
+	`, parseUUID(f.runID), parseUUID(f.node1ID), parseUUID(f.agentID), []byte(`{"output":"upstream output"}`)).Scan(&f.nodeRun1ID); err != nil {
+		t.Fatalf("setup: create node run 1: %v", err)
+	}
+
+	// Node run 2: downstream node (worker_assigned so it can be claimed)
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow_node_run (
+			workflow_run_id, workflow_node_id, node_title, status,
+			worker_type, worker_id, critic_type, critic_id
+		)
+		VALUES ($1, $2, 'Node 2', 'worker_assigned', 'agent', $3, 'human', NULL)
+		RETURNING id
+	`, parseUUID(f.runID), parseUUID(f.node2ID), parseUUID(f.agentID)).Scan(&f.nodeRun2ID); err != nil {
+		t.Fatalf("setup: create node run 2: %v", err)
+	}
+
+	// Sub-issue for upstream node run 1
+	issue1, err := testHandler.Queries.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Title:       "Upstream issue " + suffix,
+		Description: pgtype.Text{String: "", Valid: true},
+		Status:      "done",
+		Priority:    "none",
+		CreatorType: "member",
+		CreatorID:   parseUUID(testUserID),
+		Position:    0,
+		Number: func() int32 {
+			var n int32
+			_ = testPool.QueryRow(ctx, `SELECT COALESCE(MAX(number), 90000) + 1 FROM multica_issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&n)
+			return n
+		}(),
+		OriginType: pgtype.Text{String: "workflow", Valid: true},
+		OriginID:   parseUUID(f.nodeRun1ID),
+	})
+	if err != nil {
+		t.Fatalf("setup: create upstream issue: %v", err)
+	}
+	f.issue1ID = uuidToString(issue1.ID)
+
+	// Sub-issue for downstream node run 2 (task's issue_id)
+	issue2, err := testHandler.Queries.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Title:       "Downstream issue " + suffix,
+		Description: pgtype.Text{String: "", Valid: true},
+		Status:      "todo",
+		Priority:    "none",
+		CreatorType: "member",
+		CreatorID:   parseUUID(testUserID),
+		Position:    0,
+		Number: func() int32 {
+			var n int32
+			_ = testPool.QueryRow(ctx, `SELECT COALESCE(MAX(number), 90000) + 1 FROM multica_issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&n)
+			return n
+		}(),
+		OriginType: pgtype.Text{String: "workflow", Valid: true},
+		OriginID:   parseUUID(f.nodeRun2ID),
+	})
+	if err != nil {
+		t.Fatalf("setup: create downstream issue: %v", err)
+	}
+	f.issue2ID = uuidToString(issue2.ID)
+
+	// Comment on upstream sub-issue
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'agent', $3, $4, 'comment')
+		RETURNING id
+	`, parseUUID(f.issue1ID), parseUUID(testWorkspaceID), parseUUID(f.agentID), "Requirements complete; see attached docs.").Scan(&f.commentID); err != nil {
+		t.Fatalf("setup: create comment: %v", err)
+	}
+
+	// Attachment on comment
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_attachment (
+			id, workspace_id, issue_id, comment_id,
+			uploader_type, uploader_id, filename, url, content_type, size_bytes
+		)
+		VALUES (gen_random_uuid(), $1, $2, $3, 'agent', $4, $5, 'https://example.com/file', $6, 100)
+		RETURNING id
+	`, parseUUID(testWorkspaceID), parseUUID(f.issue1ID), parseUUID(f.commentID), parseUUID(f.agentID), "requirements.md", "text/markdown").Scan(&f.attachmentID); err != nil {
+		t.Fatalf("setup: create attachment: %v", err)
+	}
+
+	// Queued task for downstream node run
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			workflow_node_run_id, context
+		)
+		VALUES ($1, $2, $3, 'queued', 0, $4, '{}'::jsonb)
+		RETURNING id
+	`, parseUUID(f.agentID), parseUUID(f.runtimeID), parseUUID(f.issue2ID), parseUUID(f.nodeRun2ID)).Scan(&f.taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM multica_agent_task_queue WHERE id = $1`, f.taskID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM multica_attachment WHERE id = $1`, f.attachmentID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM multica_comment WHERE id = $1`, f.commentID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = ANY($1::uuid[])`, []string{f.issue1ID, f.issue2ID})
+		_, _ = testPool.Exec(ctx, `DELETE FROM multica_workflow_node_run WHERE id = ANY($1::uuid[])`, []string{f.nodeRun1ID, f.nodeRun2ID})
+		_, _ = testPool.Exec(ctx, `DELETE FROM multica_workflow_run WHERE id = $1`, f.runID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM multica_workflow_node WHERE id = ANY($1::uuid[])`, []string{f.node1ID, f.node2ID})
+		_, _ = testPool.Exec(ctx, `DELETE FROM multica_workflow_stage WHERE id = ANY($1::uuid[])`, []string{f.stage1ID, f.stage2ID})
+		_, _ = testPool.Exec(ctx, `DELETE FROM multica_workflow WHERE id = $1`, f.workflowID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM multica_agent WHERE id = $1`, f.agentID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM multica_agent_runtime WHERE id = $1`, f.runtimeID)
+	})
+
+	return f
+}
+
+// claimUpstreamTaskByRuntime claims the task created by the fixture and
+// returns the full response body so tests can assert on upstream_stage_context.
+func claimUpstreamTaskByRuntime(t *testing.T, runtimeID string) (map[string]any, string) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "upstream-ctx-test")
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task map[string]any `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	return resp.Task, w.Body.String()
+}
+
+// TestClaimTaskByRuntime_UpstreamStageContext verifies that a downstream
+// workflow task receives upstream-stage context including the latest comment,
+// attachment metadata, and sub-issue references.
+func TestClaimTaskByRuntime_UpstreamStageContext(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	f := createUpstreamStageContextFixture(t, ctx, "cross-stage")
+
+	task, body := claimUpstreamTaskByRuntime(t, f.runtimeID)
+	if task == nil {
+		t.Fatalf("expected task, got nil: %s", body)
+	}
+
+	ctxRaw, ok := task["upstream_stage_context"].([]any)
+	if !ok || len(ctxRaw) != 1 {
+		t.Fatalf("expected upstream_stage_context with 1 entry, got %v: %s", task["upstream_stage_context"], body)
+	}
+	up, ok := ctxRaw[0].(map[string]any)
+	if !ok {
+		t.Fatalf("upstream entry is not an object: %v", ctxRaw[0])
+	}
+	if up["node_title"] != "Node 1" {
+		t.Errorf("node_title = %v, want Node 1", up["node_title"])
+	}
+	if up["issue_id"] != f.issue1ID {
+		t.Errorf("issue_id = %v, want %s", up["issue_id"], f.issue1ID)
+	}
+	if !strings.Contains(up["latest_comment"].(string), "Requirements complete") {
+		t.Errorf("latest_comment missing expected text: %v", up["latest_comment"])
+	}
+
+	atts, ok := up["attachments"].([]any)
+	if !ok || len(atts) != 1 {
+		t.Fatalf("expected 1 attachment, got %v", up["attachments"])
+	}
+	att, ok := atts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("attachment is not an object: %v", atts[0])
+	}
+	if att["id"] != f.attachmentID {
+		t.Errorf("attachment id = %v, want %s", att["id"], f.attachmentID)
+	}
+	if att["filename"] != "requirements.md" {
+		t.Errorf("attachment filename = %v, want requirements.md", att["filename"])
+	}
+	if att["content_type"] != "text/markdown" {
+		t.Errorf("attachment content_type = %v, want text/markdown", att["content_type"])
+	}
+}
+
+// TestClaimTaskByRuntime_NoUpstreamContextForSameStage verifies that a
+// completed node in the same stage is NOT surfaced as upstream context.
+func TestClaimTaskByRuntime_NoUpstreamContextForSameStage(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	f := createUpstreamStageContextFixture(t, ctx, "same-stage")
+
+	// Move node 2 into the same stage as node 1 so they are no longer cross-stage.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE multica_workflow_node SET stage_id = $1 WHERE id = $2
+	`, parseUUID(f.stage1ID), parseUUID(f.node2ID)); err != nil {
+		t.Fatalf("move node 2 to stage 1: %v", err)
+	}
+
+	task, body := claimUpstreamTaskByRuntime(t, f.runtimeID)
+	if task == nil {
+		t.Fatalf("expected task, got nil: %s", body)
+	}
+	if task["upstream_stage_context"] != nil {
+		t.Errorf("expected no upstream_stage_context for same-stage node, got %v", task["upstream_stage_context"])
+	}
+}
+
+// TestClaimTaskByRuntime_UpstreamContextTruncation verifies that long latest
+// comments are truncated in the upstream context.
+func TestClaimTaskByRuntime_UpstreamContextTruncation(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	f := createUpstreamStageContextFixture(t, ctx, "truncation")
+
+	longContent := strings.Repeat("a", 600)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE multica_comment SET content = $1 WHERE id = $2
+	`, longContent, parseUUID(f.commentID)); err != nil {
+		t.Fatalf("update comment content: %v", err)
+	}
+
+	task, body := claimUpstreamTaskByRuntime(t, f.runtimeID)
+	if task == nil {
+		t.Fatalf("expected task, got nil: %s", body)
+	}
+	ctxRaw, ok := task["upstream_stage_context"].([]any)
+	if !ok || len(ctxRaw) != 1 {
+		t.Fatalf("expected upstream_stage_context with 1 entry, got %v: %s", task["upstream_stage_context"], body)
+	}
+	up := ctxRaw[0].(map[string]any)
+	comment := up["latest_comment"].(string)
+	if len(comment) > 510 {
+		t.Errorf("latest_comment too long (%d chars), expected truncation around 503", len(comment))
+	}
+	if !strings.HasSuffix(comment, "...") {
+		t.Errorf("latest_comment should end with '...', got %q", comment)
+	}
+}
+
+// TestClaimTaskByRuntime_UpstreamContextLimit verifies that at most 10
+// upstream completed nodes are surfaced.
+func TestClaimTaskByRuntime_UpstreamContextLimit(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	f := createUpstreamStageContextFixture(t, ctx, "limit")
+
+	// Create 15 extra completed upstream nodes in stage 1.
+	for i := 0; i < 15; i++ {
+		var nodeID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO multica_workflow_node (
+				workflow_id, title, description, worker_type, worker_id,
+				critic_type, critic_id, sort_order, stage_id
+			)
+			VALUES ($1, $2, '', 'agent', $3, 'human', NULL, $4, $5)
+			RETURNING id
+		`, parseUUID(f.workflowID), fmt.Sprintf("Extra Node %d", i), parseUUID(f.agentID), i+1, parseUUID(f.stage1ID)).Scan(&nodeID); err != nil {
+			t.Fatalf("setup: create extra node %d: %v", i, err)
+		}
+
+		var nodeRunID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO multica_workflow_node_run (
+				workflow_run_id, workflow_node_id, node_title, status,
+				worker_type, worker_id, critic_type, critic_id,
+				completed_at
+			)
+			VALUES ($1, $2, $3, 'completed', 'agent', $4, 'human', NULL, now())
+			RETURNING id
+		`, parseUUID(f.runID), parseUUID(nodeID), fmt.Sprintf("Extra Node %d", i), parseUUID(f.agentID)).Scan(&nodeRunID); err != nil {
+			t.Fatalf("setup: create extra node run %d: %v", i, err)
+		}
+
+		var issueID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO multica_issue (
+				workspace_id, title, description, status, priority,
+				creator_id, creator_type, number, position,
+				origin_type, origin_id
+			)
+			VALUES (
+				$1, $2, '', 'done', 'none',
+				$3, 'member',
+				(SELECT COALESCE(MAX(number), 90000) + 1 FROM multica_issue WHERE workspace_id = $1),
+				0, 'workflow', $4
+			)
+			RETURNING id
+		`, testWorkspaceID, fmt.Sprintf("Extra issue %d", i), parseUUID(testUserID), parseUUID(nodeRunID)).Scan(&issueID); err != nil {
+			t.Fatalf("setup: create extra issue %d: %v", i, err)
+		}
+
+		t.Cleanup(func() {
+			_, _ = testPool.Exec(ctx, `DELETE FROM multica_issue WHERE id = $1`, issueID)
+			_, _ = testPool.Exec(ctx, `DELETE FROM multica_workflow_node_run WHERE id = $1`, nodeRunID)
+			_, _ = testPool.Exec(ctx, `DELETE FROM multica_workflow_node WHERE id = $1`, nodeID)
+		})
+	}
+
+	task, body := claimUpstreamTaskByRuntime(t, f.runtimeID)
+	if task == nil {
+		t.Fatalf("expected task, got nil: %s", body)
+	}
+	ctxRaw, ok := task["upstream_stage_context"].([]any)
+	if !ok {
+		t.Fatalf("expected upstream_stage_context array, got %v: %s", task["upstream_stage_context"], body)
+	}
+	if len(ctxRaw) != 10 {
+		t.Errorf("expected 10 upstream entries, got %d", len(ctxRaw))
 	}
 }

@@ -395,7 +395,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.MulticaI
 	if len(triggerCommentID) > 1 {
 		overrideRuntimeID = triggerCommentID[1]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false, overrideRuntimeID, pgtype.UUID{})
+	return s.enqueueIssueTask(ctx, issue, commentID, false, overrideRuntimeID, pgtype.UUID{}, nil)
 }
 
 // resolveRuntimeForAgent returns a runtime_id for the agent. For normal agents
@@ -440,12 +440,47 @@ func (s *TaskService) resolveRuntimeForAgent(ctx context.Context, agent db.Multi
 	return rt.ID, nil
 }
 
+// buildWorkflowTaskContext rebuilds the JSON context that the workflow
+// completion gateway needs to route a task. Used by rerun paths that create
+// a fresh task for a workflow node run but cannot reuse the source task's
+// context (e.g. the source context was empty or missing).
+func (s *TaskService) buildWorkflowTaskContext(ctx context.Context, nodeRunID pgtype.UUID, phase string) ([]byte, error) {
+	nodeRun, err := s.Queries.GetWorkflowNodeRun(ctx, nodeRunID)
+	if err != nil {
+		return nil, fmt.Errorf("get node run: %w", err)
+	}
+	run, err := s.Queries.GetWorkflowRun(ctx, nodeRun.WorkflowRunID)
+	if err != nil {
+		return nil, fmt.Errorf("get run: %w", err)
+	}
+	workflow, err := s.Queries.GetWorkflow(ctx, run.WorkflowID)
+	if err != nil {
+		return nil, fmt.Errorf("get workflow: %w", err)
+	}
+	node, err := s.Queries.GetWorkflowNode(ctx, nodeRun.WorkflowNodeID)
+	if err != nil {
+		return nil, fmt.Errorf("get node: %w", err)
+	}
+	contextPayload := map[string]any{
+		"type":                   "workflow",
+		"workflow_id":            util.UUIDToString(workflow.ID),
+		"workflow_title":         workflow.Title,
+		"workflow_run_id":        util.UUIDToString(run.ID),
+		"workflow_node_id":       util.UUIDToString(node.ID),
+		"node_title":             node.Title,
+		"node_run_id":            util.UUIDToString(nodeRun.ID),
+		"phase":                  phase,
+		"worker_can_await_input": phase == "worker",
+	}
+	return json.Marshal(contextPayload)
+}
+
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
 // and the manual rerun path. forceFreshSession=true marks the task so the
 // daemon claim handler skips the (agent_id, issue_id) resume lookup — the
 // user already judged the prior output bad, a fresh agent session is the
 // expected behavior.
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.MulticaIssue, triggerCommentID pgtype.UUID, forceFreshSession bool, overrideRuntimeID pgtype.UUID, workflowNodeRunID pgtype.UUID) (db.MulticaAgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.MulticaIssue, triggerCommentID pgtype.UUID, forceFreshSession bool, overrideRuntimeID, workflowNodeRunID pgtype.UUID, contextJSON []byte) (db.MulticaAgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.MulticaAgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -475,6 +510,18 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.MulticaIssu
 		runtimeID = overrideRuntimeID
 	}
 
+	// For workflow-bound reruns, inherit or rebuild the context that the
+	// workflow completion gateway needs to route the task (phase, node/run IDs).
+	// CreateAgentTask does not set this by default, so a rerun of a workflow
+	// task would otherwise complete without advancing the node run.
+	if workflowNodeRunID.Valid && len(contextJSON) == 0 {
+		var errCtx error
+		contextJSON, errCtx = s.buildWorkflowTaskContext(ctx, workflowNodeRunID, "worker")
+		if errCtx != nil {
+			slog.Warn("rerun: failed to build workflow context", "workflow_node_run_id", util.UUIDToString(workflowNodeRunID), "error", errCtx)
+		}
+	}
+
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           issue.AssigneeID,
 		RuntimeID:         runtimeID,
@@ -484,10 +531,26 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.MulticaIssu
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		WorkflowNodeRunID: workflowNodeRunID,
+		Context:           contextJSON,
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
 		return db.MulticaAgentTaskQueue{}, fmt.Errorf("create task: %w", err)
+	}
+
+	// For workflow-bound tasks created outside the normal dispatchWorker flow
+	// (e.g. manual reruns), link the new task to the node run so the UI and
+	// workflow state machine track the correct active worker task.
+	if workflowNodeRunID.Valid {
+		if _, linkErr := s.Queries.LinkNodeRunWorkerTask(ctx, db.LinkNodeRunWorkerTaskParams{
+			ID:                workflowNodeRunID,
+			WorkerAgentTaskID: task.ID,
+		}); linkErr != nil {
+			slog.Warn("task enqueue: failed to link node run worker task",
+				"task_id", util.UUIDToString(task.ID),
+				"workflow_node_run_id", util.UUIDToString(workflowNodeRunID),
+				"error", linkErr)
+		}
 	}
 
 	slog.Info("task enqueued",
@@ -511,7 +574,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.MulticaIssu
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.MulticaIssue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.MulticaAgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false, pgtype.UUID{})
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false, pgtype.UUID{}, nil)
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -521,10 +584,10 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Multic
 // as a worker (do not skip). This matters for agents that are simultaneously
 // the leader and a worker of the same squad — see migration 090.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.MulticaIssue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.MulticaAgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false, pgtype.UUID{})
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false, pgtype.UUID{}, nil)
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.MulticaIssue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, forceFreshSession bool, workflowNodeRunID pgtype.UUID) (db.MulticaAgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.MulticaIssue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, forceFreshSession bool, workflowNodeRunID pgtype.UUID, contextJSON []byte) (db.MulticaAgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -550,10 +613,26 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.MulticaIs
 		IsLeaderTask:      pgtype.Bool{Bool: isLeader, Valid: isLeader},
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		WorkflowNodeRunID: workflowNodeRunID,
+		Context:           contextJSON,
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.MulticaAgentTaskQueue{}, fmt.Errorf("create task: %w", err)
+	}
+
+	// For workflow-bound tasks created outside the normal dispatchWorker flow
+	// (e.g. manual reruns), link the new task to the node run so the UI and
+	// workflow state machine track the correct active worker task.
+	if workflowNodeRunID.Valid {
+		if _, linkErr := s.Queries.LinkNodeRunWorkerTask(ctx, db.LinkNodeRunWorkerTaskParams{
+			ID:                workflowNodeRunID,
+			WorkerAgentTaskID: task.ID,
+		}); linkErr != nil {
+			slog.Warn("mention task enqueue: failed to link node run worker task",
+				"task_id", util.UUIDToString(task.ID),
+				"workflow_node_run_id", util.UUIDToString(workflowNodeRunID),
+				"error", linkErr)
+		}
 	}
 
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
@@ -1465,6 +1544,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		agentID           pgtype.UUID
 		isLeader          bool
 		workflowNodeRunID pgtype.UUID
+		contextJSON       []byte
 	)
 	if sourceTaskID.Valid {
 		sourceTask, err := s.Queries.GetAgentTask(ctx, sourceTaskID)
@@ -1477,6 +1557,10 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		agentID = sourceTask.AgentID
 		isLeader = sourceTask.IsLeaderTask
 		workflowNodeRunID = sourceTask.WorkflowNodeRunID
+		// Inherit the workflow context so the completion gateway can route the
+		// rerun. CreateAgentTask does not set context by default, so a workflow
+		// rerun would otherwise complete without advancing the node run.
+		contextJSON = sourceTask.Context
 		// Inherit trigger provenance so a per-row rerun of a comment- or
 		// mention-triggered task stays a comment-triggered task. Without
 		// this the daemon's buildCommentPrompt path is skipped (it keys on
@@ -1534,7 +1618,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader, overrideRuntimeID, workflowNodeRunID)
+	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader, overrideRuntimeID, workflowNodeRunID, contextJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -1555,12 +1639,12 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 // stays in sync; otherwise (squad member, prior assignee that has since been
 // reassigned, mention agent) we use the mention path with the same
 // force_fresh_session=true contract.
-func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.MulticaIssue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, overrideRuntimeID pgtype.UUID, workflowNodeRunID pgtype.UUID) (db.MulticaAgentTaskQueue, error) {
+func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.MulticaIssue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, overrideRuntimeID, workflowNodeRunID pgtype.UUID, contextJSON []byte) (db.MulticaAgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, overrideRuntimeID, workflowNodeRunID)
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, overrideRuntimeID, workflowNodeRunID, contextJSON)
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, true, workflowNodeRunID)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, true, workflowNodeRunID, contextJSON)
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of

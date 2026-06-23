@@ -483,6 +483,73 @@ func (q *Queries) ListActiveNodeRuns(ctx context.Context, workflowRunID pgtype.U
 	return items, nil
 }
 
+const listCompletedUpstreamNodeRuns = `-- name: ListCompletedUpstreamNodeRuns :many
+SELECT
+    wnr.id,
+    wnr.workflow_node_id,
+    wnr.node_title,
+    wnr.status,
+    wnr.worker_output
+FROM multica_workflow_node_run wnr
+JOIN multica_workflow_node wn ON wn.id = wnr.workflow_node_id
+LEFT JOIN multica_workflow_stage ws ON ws.id = wn.stage_id
+WHERE wnr.workflow_run_id = $1
+  AND wnr.workflow_node_id != $2
+  AND wnr.status = 'completed'
+  AND ws.sort_order < COALESCE(
+      (SELECT ws2.sort_order
+       FROM multica_workflow_node wn2
+       LEFT JOIN multica_workflow_stage ws2 ON ws2.id = wn2.stage_id
+       WHERE wn2.id = $2),
+      -1
+  )
+ORDER BY ws.sort_order ASC, wn.sort_order ASC, wnr.created_at ASC
+LIMIT $3
+`
+
+type ListCompletedUpstreamNodeRunsParams struct {
+	WorkflowRunID  pgtype.UUID `json:"workflow_run_id"`
+	WorkflowNodeID pgtype.UUID `json:"workflow_node_id"`
+	Limit          int32       `json:"limit"`
+}
+
+type ListCompletedUpstreamNodeRunsRow struct {
+	ID             pgtype.UUID `json:"id"`
+	WorkflowNodeID pgtype.UUID `json:"workflow_node_id"`
+	NodeTitle      string      `json:"node_title"`
+	Status         string      `json:"status"`
+	WorkerOutput   []byte      `json:"worker_output"`
+}
+
+// Returns completed node runs from earlier stages (lower stage sort_order) for
+// the same workflow run. Used to build upstream context for workflow agent prompts.
+// If the current node has no stage, no upstream rows are returned.
+func (q *Queries) ListCompletedUpstreamNodeRuns(ctx context.Context, arg ListCompletedUpstreamNodeRunsParams) ([]ListCompletedUpstreamNodeRunsRow, error) {
+	rows, err := q.db.Query(ctx, listCompletedUpstreamNodeRuns, arg.WorkflowRunID, arg.WorkflowNodeID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCompletedUpstreamNodeRunsRow{}
+	for rows.Next() {
+		var i ListCompletedUpstreamNodeRunsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkflowNodeID,
+			&i.NodeTitle,
+			&i.Status,
+			&i.WorkerOutput,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMyWorkflowTasks = `-- name: ListMyWorkflowTasks :many
 SELECT wnr.id, wnr.workflow_run_id, wnr.workflow_node_id, wnr.node_title, wnr.status, wnr.retry_count, wnr.worker_type, wnr.worker_id, wnr.worker_output, wnr.critic_type, wnr.critic_id, wnr.critic_output, wnr.critic_comment, wnr.agent_task_id, wnr.started_at, wnr.completed_at, wnr.created_at, wnr.updated_at, wnr.worker_agent_task_id, wnr.critic_agent_task_id,
        wr.workflow_title,

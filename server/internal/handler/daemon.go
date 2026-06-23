@@ -1572,8 +1572,162 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Workflow task: enrich with upstream-stage context so the agent can read
+	// prior-stage sub-issues and download their attachments.
+	if task.WorkflowNodeRunID.Valid && resp.WorkspaceID != "" {
+		if upstream := h.buildUpstreamStageContext(r.Context(), *task); len(upstream) > 0 {
+			resp.UpstreamStageContext = upstream
+		}
+	}
+
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+// buildUpstreamStageContext gathers completed node runs from earlier workflow
+// stages, resolves their sub-issues, and returns a compact summary of the
+// latest comment + attachments for each. The result is injected into the
+// agent prompt so downstream stages can see prior-stage outputs.
+func (h *Handler) buildUpstreamStageContext(ctx context.Context, task db.MulticaAgentTaskQueue) []UpstreamStageNode {
+	if !task.WorkflowNodeRunID.Valid {
+		return nil
+	}
+
+	nodeRun, err := h.Queries.GetWorkflowNodeRun(ctx, task.WorkflowNodeRunID)
+	if err != nil {
+		slog.Warn("buildUpstreamStageContext: failed to get node run", "task_id", uuidToString(task.ID), "error", err)
+		return nil
+	}
+
+	run, err := h.Queries.GetWorkflowRun(ctx, nodeRun.WorkflowRunID)
+	if err != nil {
+		slog.Warn("buildUpstreamStageContext: failed to get workflow run", "task_id", uuidToString(task.ID), "error", err)
+		return nil
+	}
+
+	// Fetch completed upstream node runs from earlier stages.
+	upstreamRows, err := h.Queries.ListCompletedUpstreamNodeRuns(ctx, db.ListCompletedUpstreamNodeRunsParams{
+		WorkflowRunID:  nodeRun.WorkflowRunID,
+		WorkflowNodeID: nodeRun.WorkflowNodeID,
+		Limit:          10,
+	})
+	if err != nil {
+		slog.Warn("buildUpstreamStageContext: failed to list upstream node runs", "task_id", uuidToString(task.ID), "error", err)
+		return nil
+	}
+	if len(upstreamRows) == 0 {
+		return nil
+	}
+
+	// Resolve sub-issue for each upstream node run.
+	type upstreamInfo struct {
+		row     db.ListCompletedUpstreamNodeRunsRow
+		issueID pgtype.UUID
+	}
+	upstreams := make([]upstreamInfo, 0, len(upstreamRows))
+	issueIDs := make([]pgtype.UUID, 0, len(upstreamRows))
+	for _, row := range upstreamRows {
+		issue, err := h.Queries.GetIssueByOrigin(ctx, db.GetIssueByOriginParams{
+			WorkspaceID: run.WorkspaceID,
+			OriginType:  pgtype.Text{String: "workflow", Valid: true},
+			OriginID:    row.ID,
+		})
+		if err != nil {
+			slog.Warn("buildUpstreamStageContext: failed to resolve upstream sub-issue",
+				"node_run_id", uuidToString(row.ID), "error", err)
+			continue
+		}
+		upstreams = append(upstreams, upstreamInfo{row: row, issueID: issue.ID})
+		issueIDs = append(issueIDs, issue.ID)
+	}
+
+	if len(issueIDs) == 0 {
+		return nil
+	}
+
+	// Batch-load the latest comment per upstream sub-issue.
+	latestComments, err := h.Queries.ListLatestCommentsByIssues(ctx, db.ListLatestCommentsByIssuesParams{
+		Column1:     issueIDs,
+		WorkspaceID: run.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("buildUpstreamStageContext: failed to list latest comments", "task_id", uuidToString(task.ID), "error", err)
+	}
+	commentByIssue := make(map[string]db.MulticaComment, len(latestComments))
+	commentIDs := make([]pgtype.UUID, 0, len(latestComments))
+	for _, c := range latestComments {
+		commentByIssue[uuidToString(c.IssueID)] = c
+		commentIDs = append(commentIDs, c.ID)
+	}
+
+	// Batch-load attachments for those latest comments.
+	attachmentsByComment := make(map[string][]ChatAttachmentMeta)
+	if len(commentIDs) > 0 {
+		attachmentRows, err := h.Queries.ListAttachmentsByCommentIDs(ctx, db.ListAttachmentsByCommentIDsParams{
+			Column1:     commentIDs,
+			WorkspaceID: run.WorkspaceID,
+		})
+		if err != nil {
+			slog.Warn("buildUpstreamStageContext: failed to list attachments", "task_id", uuidToString(task.ID), "error", err)
+		} else {
+			for _, a := range attachmentRows {
+				cid := uuidToString(a.CommentID)
+				attachmentsByComment[cid] = append(attachmentsByComment[cid], ChatAttachmentMeta{
+					ID:          uuidToString(a.ID),
+					Filename:    a.Filename,
+					ContentType: a.ContentType,
+				})
+			}
+		}
+	}
+
+	const maxCommentLen = 500
+	result := make([]UpstreamStageNode, 0, len(upstreams))
+	for _, up := range upstreamRows {
+		infoIdx := -1
+		for i, info := range upstreams {
+			if info.row.ID == up.ID {
+				infoIdx = i
+				break
+			}
+		}
+		if infoIdx < 0 {
+			continue
+		}
+		info := upstreams[infoIdx]
+		issueIDStr := uuidToString(info.issueID)
+
+		node := UpstreamStageNode{
+			NodeTitle: up.NodeTitle,
+			IssueID:   issueIDStr,
+		}
+
+		if comment, ok := commentByIssue[issueIDStr]; ok {
+			text := comment.Content
+			if len(text) > maxCommentLen {
+				text = text[:maxCommentLen] + "..."
+			}
+			node.LatestComment = text
+			if atts, ok := attachmentsByComment[uuidToString(comment.ID)]; ok {
+				node.Attachments = atts
+			}
+		} else if len(up.WorkerOutput) > 0 {
+			// Fallback to worker_output summary if no comment exists.
+			var output map[string]any
+			if json.Unmarshal(up.WorkerOutput, &output) == nil {
+				if txt, ok := output["output"].(string); ok && txt != "" {
+					if len(txt) > maxCommentLen {
+						txt = txt[:maxCommentLen] + "..."
+					}
+					node.LatestComment = txt
+				}
+			}
+		}
+
+		result = append(result, node)
+	}
+
+	return result
 }
 
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.
