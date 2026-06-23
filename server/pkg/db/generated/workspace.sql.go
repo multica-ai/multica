@@ -126,6 +126,96 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 	return issue_counter, err
 }
 
+const listAllWorkspaces = `-- name: ListAllWorkspaces :many
+SELECT w.id, w.name, w.slug, w.description, w.settings,
+       w.created_at, w.updated_at, w.context, w.repos,
+       w.issue_prefix, w.issue_counter, w.avatar_url
+FROM workspace w
+ORDER BY w.name ASC
+`
+
+// Lists ALL workspaces (super-admin only). Unlike ListWorkspaces which is
+// scoped to a specific user's memberships, this returns every workspace.
+func (q *Queries) ListAllWorkspaces(ctx context.Context) ([]Workspace, error) {
+	rows, err := q.db.Query(ctx, listAllWorkspaces)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Workspace{}
+	for rows.Next() {
+		var i Workspace
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.Description,
+			&i.Settings,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Context,
+			&i.Repos,
+			&i.IssuePrefix,
+			&i.IssueCounter,
+			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserWorkspaces = `-- name: ListUserWorkspaces :many
+SELECT w.id AS workspace_id, w.name AS workspace_name, w.slug AS workspace_slug,
+       m.role, m.id AS member_id, m.created_at
+FROM member m
+JOIN workspace w ON w.id = m.workspace_id
+WHERE m.user_id = $1
+ORDER BY w.name ASC
+`
+
+type ListUserWorkspacesRow struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	WorkspaceName string             `json:"workspace_name"`
+	WorkspaceSlug string             `json:"workspace_slug"`
+	Role          string             `json:"role"`
+	MemberID      pgtype.UUID        `json:"member_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+// Lists all workspaces a specific user belongs to, with their role in each.
+// Used by super-admin user management to show/edit workspace memberships.
+func (q *Queries) ListUserWorkspaces(ctx context.Context, userID pgtype.UUID) ([]ListUserWorkspacesRow, error) {
+	rows, err := q.db.Query(ctx, listUserWorkspaces, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserWorkspacesRow{}
+	for rows.Next() {
+		var i ListUserWorkspacesRow
+		if err := rows.Scan(
+			&i.WorkspaceID,
+			&i.WorkspaceName,
+			&i.WorkspaceSlug,
+			&i.Role,
+			&i.MemberID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,

@@ -105,4 +105,34 @@ export interface AdminUser {
   avatar_url: string | null;
   created_at: string;
   updated_at: string;
+  workspaces: AdminUserWorkspace[];
+}
+
+export interface AdminUserWorkspace {
+  workspace_id: string;
+  workspace_name: string;
+  workspace_slug: string;
+  role: MemberRole;
+  member_id: string;
+}
+
+export interface AdminWorkspaceSummary {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+/** Pending invitation shape returned by super-admin list endpoint. */
+export interface AdminPendingInvitation {
+  id: string;
+  workspace_id: string;
+  workspace_name: string;
+  workspace_slug: string;
+  invitee_email: string;
+  invitee_name: string;
+  role: MemberRole;
+  inviter_name: string;
+  inviter_email: string;
+  created_at: string;
+  expires_at: string;
 }

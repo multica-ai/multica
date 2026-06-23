@@ -50,3 +50,22 @@ WITH deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 )
 DELETE FROM workspace WHERE id = $1;
+
+-- name: ListAllWorkspaces :many
+-- Lists ALL workspaces (super-admin only). Unlike ListWorkspaces which is
+-- scoped to a specific user's memberships, this returns every workspace.
+SELECT w.id, w.name, w.slug, w.description, w.settings,
+       w.created_at, w.updated_at, w.context, w.repos,
+       w.issue_prefix, w.issue_counter, w.avatar_url
+FROM workspace w
+ORDER BY w.name ASC;
+
+-- name: ListUserWorkspaces :many
+-- Lists all workspaces a specific user belongs to, with their role in each.
+-- Used by super-admin user management to show/edit workspace memberships.
+SELECT w.id AS workspace_id, w.name AS workspace_name, w.slug AS workspace_slug,
+       m.role, m.id AS member_id, m.created_at
+FROM member m
+JOIN workspace w ON w.id = m.workspace_id
+WHERE m.user_id = $1
+ORDER BY w.name ASC;
