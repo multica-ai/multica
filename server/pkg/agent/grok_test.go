@@ -306,6 +306,50 @@ func TestPickGrokAuthMethod(t *testing.T) {
 	}
 }
 
+func TestSelectACPApprovalOptionID(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		params string
+		want   string
+	}{
+		{
+			// Grok's real write-permission request (from a live ACP session).
+			name:   "grok edit options prefers allow_always",
+			params: `{"options":[{"optionId":"allow-edits-session","name":"Yes, allow all edits during this session","kind":"allow_always"},{"optionId":"allow-once","name":"Yes","kind":"allow_once"},{"optionId":"reject-once","name":"No","kind":"reject_once"}]}`,
+			want:   "allow-edits-session",
+		},
+		{
+			name:   "falls back to allow_once when no allow_always",
+			params: `{"options":[{"optionId":"reject-once","kind":"reject_once"},{"optionId":"yes","kind":"allow_once"}]}`,
+			want:   "yes",
+		},
+		{
+			name:   "never selects a reject option",
+			params: `{"options":[{"optionId":"no","kind":"reject_always"},{"optionId":"no2","kind":"reject_once"}]}`,
+			want:   "",
+		},
+		{
+			name:   "empty when no options (caller uses legacy fallback)",
+			params: `{"sessionId":"x"}`,
+			want:   "",
+		},
+		{
+			name:   "empty on malformed params",
+			params: `not json`,
+			want:   "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := selectACPApprovalOptionID([]byte(tc.params)); got != tc.want {
+				t.Errorf("selectACPApprovalOptionID(%s) = %q, want %q", tc.params, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseGrokModels(t *testing.T) {
 	t.Parallel()
 

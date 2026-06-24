@@ -179,6 +179,11 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		stdin:        stdin,
 		pending:      make(map[int]*pendingRPC),
 		pendingTools: make(map[string]*pendingToolCall),
+		// Grok's session/request_permission options use IDs the other ACP
+		// runtimes don't (e.g. "allow-edits-session"); pick a real allow option
+		// from each request so write/exec tools get approved instead of the turn
+		// cancelling.
+		permissionOptionID: selectACPApprovalOptionID,
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
 		},
