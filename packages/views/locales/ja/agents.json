@@ -525,6 +525,10 @@
     "create_dialog_title_personal": "新規個人テンプレート",
     "create_dialog_desc": "再利用可能な設定テンプレートを作成し、その後に設定を入力します。",
     "name_placeholder": "テンプレート名",
+    "name_label": "名前",
+    "description_label": "説明",
+    "description_placeholder": "任意の説明",
+    "description_saved_toast": "説明を保存しました",
     "name_required": "名前は必須です",
     "created_toast": "テンプレートを作成しました",
     "create_failed_toast": "テンプレートの作成に失敗しました"

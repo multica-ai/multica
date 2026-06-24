@@ -95,6 +95,38 @@ func (q *Queries) ClearAgentSystemTemplate(ctx context.Context, id pgtype.UUID) 
 	return i, err
 }
 
+const clearOtherDefaultTemplates = `-- name: ClearOtherDefaultTemplates :exec
+UPDATE agent_config_template
+SET is_default = false, updated_at = now()
+WHERE workspace_id = $1
+  AND scope = $2
+  AND is_default = true
+  AND id <> $3
+  AND ($4::uuid IS NULL OR created_by = $4::uuid)
+`
+
+type ClearOtherDefaultTemplatesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Scope       string      `json:"scope"`
+	ID          pgtype.UUID `json:"id"`
+	CreatedBy   pgtype.UUID `json:"created_by"`
+}
+
+// Unset is_default on every other template that shares the default slot
+// with the given template: same workspace + scope, and for personal scope
+// the same creator (the unique partial index is per (workspace, created_by)).
+// The calling template is excluded by id. Keeps the set-default toggle a
+// swap instead of a unique-constraint violation.
+func (q *Queries) ClearOtherDefaultTemplates(ctx context.Context, arg ClearOtherDefaultTemplatesParams) error {
+	_, err := q.db.Exec(ctx, clearOtherDefaultTemplates,
+		arg.WorkspaceID,
+		arg.Scope,
+		arg.ID,
+		arg.CreatedBy,
+	)
+	return err
+}
+
 const countAgentTemplateReferences = `-- name: CountAgentTemplateReferences :one
 SELECT count(*) FROM agent
 WHERE system_template_id = $1 OR personal_template_id = $1

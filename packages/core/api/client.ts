@@ -149,7 +149,6 @@ import type {
   UpdateAgentConfigTemplateRequest,
   AgentTemplateBinding,
   UpdateAgentTemplateBindingRequest,
-  InstructionsHistoryScope,
   InstructionsHistoryDetail,
   ListInstructionsHistoryResponse,
   WikiPage,
@@ -3297,18 +3296,18 @@ export class ApiClient {
 
   async listInstructionsHistory(
     workspaceId: string,
-    scope: InstructionsHistoryScope,
+    templateId: string,
   ): Promise<ListInstructionsHistoryResponse> {
-    const search = new URLSearchParams({ scope });
+    const search = new URLSearchParams({ template_id: templateId });
     return this.fetch(`/api/workspaces/${workspaceId}/instructions-history?${search}`);
   }
 
   async getInstructionsHistory(
     workspaceId: string,
     versionId: string,
-    scope: InstructionsHistoryScope,
+    templateId: string,
   ): Promise<InstructionsHistoryDetail> {
-    const search = new URLSearchParams({ scope });
+    const search = new URLSearchParams({ template_id: templateId });
     return this.fetch(`/api/workspaces/${workspaceId}/instructions-history/${versionId}?${search}`);
   }
 

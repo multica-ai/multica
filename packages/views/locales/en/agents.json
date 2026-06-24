@@ -578,6 +578,10 @@
     "create_dialog_title_personal": "New personal template",
     "create_dialog_desc": "Create a reusable config template, then fill in its config.",
     "name_placeholder": "Template name",
+    "name_label": "Name",
+    "description_label": "Description",
+    "description_placeholder": "Optional description",
+    "description_saved_toast": "Description saved",
     "name_required": "Name is required",
     "created_toast": "Template created",
     "create_failed_toast": "Failed to create template"

@@ -9,6 +9,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import type { AgentConfigTemplate } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
   Dialog,
@@ -348,6 +349,7 @@ function CreateTemplateDialog({
 }) {
   const { t } = useT("agents");
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -363,6 +365,7 @@ function CreateTemplateDialog({
       const created = await api.createAgentConfigTemplate({
         scope,
         name: trimmed,
+        description: description.trim(),
         is_default: false,
         config: {},
       });
@@ -379,7 +382,7 @@ function CreateTemplateDialog({
     } finally {
       setSubmitting(false);
     }
-  }, [name, scope, onCreated, t]);
+  }, [name, description, scope, onCreated, t]);
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -392,22 +395,33 @@ function CreateTemplateDialog({
           </DialogTitle>
           <DialogDescription>{t(($) => $.template.create_dialog_desc)}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-2">
-          <Input
-            autoFocus
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              if (error) setError(null);
-            }}
-            placeholder={t(($) => $.template.name_placeholder)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void handleSubmit();
-              }
-            }}
-          />
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">{t(($) => $.template.name_label)}</Label>
+            <Input
+              autoFocus
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                if (error) setError(null);
+              }}
+              placeholder={t(($) => $.template.name_placeholder)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleSubmit();
+                }
+              }}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">{t(($) => $.template.description_label)}</Label>
+            <Input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={t(($) => $.template.description_placeholder)}
+            />
+          </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
         <div className="flex justify-end gap-2">

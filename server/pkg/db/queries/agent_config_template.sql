@@ -42,6 +42,20 @@ RETURNING *;
 DELETE FROM agent_config_template
 WHERE id = $1;
 
+-- name: ClearOtherDefaultTemplates :exec
+-- Unset is_default on every other template that shares the default slot
+-- with the given template: same workspace + scope, and for personal scope
+-- the same creator (the unique partial index is per (workspace, created_by)).
+-- The calling template is excluded by id. Keeps the set-default toggle a
+-- swap instead of a unique-constraint violation.
+UPDATE agent_config_template
+SET is_default = false, updated_at = now()
+WHERE workspace_id = $1
+  AND scope = $2
+  AND is_default = true
+  AND id <> $3
+  AND (sqlc.narg('created_by')::uuid IS NULL OR created_by = sqlc.narg('created_by')::uuid);
+
 -- name: CountAgentTemplateReferences :one
 -- Count how many agents reference this template (system or personal)
 SELECT count(*) FROM agent

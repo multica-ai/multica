@@ -55,6 +55,24 @@ export function TemplateSelector({
     ? "__skip__"
     : binding?.personal_template_id || "__default__";
 
+  // Map a select value to its trigger label. Sentinel values (__default__ /
+  // __skip__) are UI-only — the Select renders the raw value unless we format
+  // it here, which is how `__default__` leaked onto the screen.
+  const systemNameById = new Map(
+    systemTemplates?.map((tpl) => [tpl.id, tpl.name]),
+  );
+  const personalNameById = new Map(
+    personalTemplates?.map((tpl) => [tpl.id, tpl.name]),
+  );
+  const labelFor = (
+    value: string,
+    names: Map<string, string>,
+  ): string => {
+    if (value === "__default__") return t(($) => $.template.follow_default);
+    if (value === "__skip__") return t(($) => $.template.skip);
+    return names.get(value) ?? value;
+  };
+
   const handleSystemChange = useCallback(
     (value: string | null) => {
       if (value === null) return;
@@ -62,10 +80,15 @@ export function TemplateSelector({
       const isSkip = value === "__skip__";
       const isDefault = value === "__default__";
 
+      // "Default" (follow the scope's default template) and "No template"
+      // (skip) both clear any specific binding. The clear must be sent as an
+      // empty string, NOT null: JSON null unmarshals into a nil *string on the
+      // Go side, so the empty-string clear branch never runs and the old
+      // binding would silently stay put (clicking "Default" did nothing).
       api.updateAgentTemplateBinding(agentId, {
-        system_template_id: isDefault ? null : isSkip ? null : value,
+        system_template_id: isDefault || isSkip ? "" : value,
         personal_template_id: undefined, // no change
-        skip_system_template: isSkip ? true : isDefault ? false : false,
+        skip_system_template: isSkip,
       }).then((newBinding) => {
         onBindingChange(newBinding);
         queryClient.invalidateQueries({
@@ -88,10 +111,12 @@ export function TemplateSelector({
       const isSkip = value === "__skip__";
       const isDefault = value === "__default__";
 
+      // See handleSystemChange: clear cases send "" so the backend's
+      // empty-string clear branch actually fires.
       api.updateAgentTemplateBinding(agentId, {
         system_template_id: undefined, // no change
-        personal_template_id: isDefault ? null : isSkip ? null : value,
-        skip_personal_template: isSkip ? true : isDefault ? false : false,
+        personal_template_id: isDefault || isSkip ? "" : value,
+        skip_personal_template: isSkip,
       }).then((newBinding) => {
         onBindingChange(newBinding);
         queryClient.invalidateQueries({
@@ -134,7 +159,9 @@ export function TemplateSelector({
             onValueChange={handleSystemChange}
           >
             <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
+              <SelectValue>
+                {(value: string) => labelFor(value, systemNameById)}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__default__">{t(($) => $.template.follow_default)}</SelectItem>
@@ -157,7 +184,9 @@ export function TemplateSelector({
             onValueChange={handlePersonalChange}
           >
             <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
+              <SelectValue>
+                {(value: string) => labelFor(value, personalNameById)}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__default__">{t(($) => $.template.follow_default)}</SelectItem>

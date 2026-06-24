@@ -134,3 +134,101 @@ func testMemberID(t *testing.T) string {
 	}
 	return uuidToString(member.ID)
 }
+
+// TestUpdateAgentConfigTemplate_SetDefaultSwaps verifies that promoting a
+// second template to default vacates the existing default slot instead of
+// tripping the partial unique index (issue #4 default-mechanism correctness).
+func TestUpdateAgentConfigTemplate_SetDefaultSwaps(t *testing.T) {
+	cleanPersonalTemplates(t)
+
+	create := func(name string) string {
+		w := httptest.NewRecorder()
+		req := newRequestWithMemberCtx(http.MethodPost, "/api/agent-config-templates", map[string]any{
+			"scope": "personal",
+			"name":  name,
+		})
+		testHandler.CreateAgentConfigTemplate(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create %q expected 201, got %d: %s", name, w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		return resp["id"].(string)
+	}
+	setDefault := func(id string) {
+		w := httptest.NewRecorder()
+		req := newRequestWithMemberCtx(http.MethodPut, "/api/agent-config-templates/"+id, map[string]any{
+			"is_default": true,
+		})
+		req = withURLParam(req, "templateId", id)
+		testHandler.UpdateAgentConfigTemplate(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("set-default %s expected 200, got %d: %s", id, w.Code, w.Body.String())
+		}
+	}
+	isDefault := func(id string) bool {
+		tpl, err := testHandler.Queries.GetAgentConfigTemplate(context.Background(), parseUUID(id))
+		if err != nil {
+			t.Fatalf("get template %s: %v", id, err)
+		}
+		return tpl.IsDefault
+	}
+
+	first := create("first")
+	second := create("second")
+
+	setDefault(first)
+	if !isDefault(first) {
+		t.Fatalf("first should be default after promoting it")
+	}
+
+	// Promoting the second must swap — no 23505 conflict — and demote the first.
+	setDefault(second)
+	if isDefault(first) {
+		t.Fatalf("first should have been demoted when second became default")
+	}
+	if !isDefault(second) {
+		t.Fatalf("second should be default after promoting it")
+	}
+}
+
+// TestGetAgentTemplateBinding_UsesIDParam guards the route-param fix: the
+// binding handlers live under /api/agents/{id}/template-binding, so they must
+// read the "id" chi param — not "agentId". Reading the wrong name returned an
+// empty string and parseUUIDOrBadRequest rejected it as "invalid agent_id"
+// (issue #3).
+func TestGetAgentTemplateBinding_UsesIDParam(t *testing.T) {
+	ctx := context.Background()
+	var agentID string
+	err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, 'binding-param-test', '', 'cloud', '{}'::jsonb,
+		        $2, 'workspace', 1, NULL, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, handlerTestRuntimeID(t)).Scan(&agentID)
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequestWithMemberCtx(http.MethodGet, "/api/agents/"+agentID+"/template-binding", nil)
+	req = withURLParam(req, "id", agentID)
+	testHandler.GetAgentTemplateBinding(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s (route param 'id' not read)", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode binding: %v", err)
+	}
+	if resp["skip_system_template"] == nil {
+		t.Fatalf("expected binding fields, got %v", resp)
+	}
+}

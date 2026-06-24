@@ -20,7 +20,6 @@ import {
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
-import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,6 +44,7 @@ import {
   instructionsHistoryKey,
 } from "./instructions-history-dialog";
 import { configTemplateKeys } from "./config-template-keys";
+import { SkillPickerList } from "./skill-picker-list";
 
 // ─── Types & helpers ────────────────────────────────────────────────────────
 
@@ -54,6 +54,17 @@ interface AgentDefaultsConfig {
   custom_args?: string[];
   skills?: string[];
 }
+
+// Stable empty defaults. The tab components reset their local state via
+// `useEffect([prop])` when the prop reference changes; without these, the
+// `?? {}` / `?? []` fallbacks mint a fresh object on every render and the
+// effect fires on each keystroke — wiping the row the user just typed into
+// (env/custom_args) or the skill they just toggled (skills). Module-level
+// constants keep the identity stable across renders, so the reset only fires
+// when the template actually changes value (switch / refetch after save).
+const EMPTY_ENV: Record<string, string> = {};
+const EMPTY_ARGS: string[] = [];
+const EMPTY_SKILLS: string[] = [];
 
 let nextEnvId = 0;
 interface EnvEntry {
@@ -540,7 +551,7 @@ function DefaultsSkillsTab({
 }) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
-  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  const { data: workspaceSkills = [], isLoading } = useQuery(skillListOptions(wsId));
 
   const [selected, setSelected] = useState<Set<string>>(new Set(selectedSkillIds));
 
@@ -569,41 +580,17 @@ function DefaultsSkillsTab({
         {t(($) => $.tab_body.skills.intro)}
       </p>
 
-      {workspaceSkills.length > 0 ? (
-        <ul className="space-y-1.5">
-          {workspaceSkills.map((skill) => (
-            <li
-              key={skill.id}
-              className={`flex items-center gap-2.5 rounded-md border px-3 py-2 ${
-                !readOnly ? "cursor-pointer hover:bg-accent/50" : ""
-              }`}
-              onClick={() => { if (!readOnly) toggleSkill(skill.id); }}
-            >
-              <Checkbox
-                checked={selected.has(skill.id)}
-                onCheckedChange={() => { if (!readOnly) toggleSkill(skill.id); }}
-                disabled={readOnly}
-              />
-              <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">{skill.name}</div>
-                {skill.description && (
-                  <div className="truncate text-xs text-muted-foreground">
-                    {skill.description}
-                  </div>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
-          <FileText className="h-8 w-8 text-muted-foreground/40" />
-          <p className="mt-3 text-sm text-muted-foreground">
-            {t(($) => $.tab_body.skills.empty_title)}
-          </p>
-        </div>
-      )}
+      {/* Reuses the same searchable SkillPickerList the agent detail page's
+          SkillAddDialog / create-form use — one surface owns search + row
+          rendering, so a workspace with many skills stays searchable here too. */}
+      <SkillPickerList
+        skills={workspaceSkills}
+        selectedIds={selected}
+        onToggle={(skill) => { if (!readOnly) toggleSkill(skill.id); }}
+        loading={isLoading}
+        disabled={readOnly}
+        emptyMessage={t(($) => $.tab_body.skills.empty_title)}
+      />
 
       {!readOnly && (
         <div className="flex items-center justify-end gap-3">
@@ -631,6 +618,7 @@ export function DefaultsForm({
   readOnly,
   saving,
   historyScope,
+  templateId,
   onRestoreInstructions,
   onSaveField,
 }: {
@@ -638,6 +626,9 @@ export function DefaultsForm({
   readOnly: boolean;
   saving: boolean;
   historyScope?: "personal" | "system";
+  /** Template whose instructions history the History button opens. Required
+   *  when historyScope is set — history is template-owned (migration 127). */
+  templateId?: string;
   onRestoreInstructions?: (instructions: string) => Promise<void>;
   onSaveField: (field: keyof AgentDefaultsConfig, value: unknown) => void;
 }) {
@@ -704,7 +695,7 @@ export function DefaultsForm({
         {activeTab === "env" && (
           <TabContent>
             <DefaultsEnvTab
-              env={config.custom_env ?? {}}
+              env={config.custom_env ?? EMPTY_ENV}
               readOnly={readOnly}
               saving={saving}
               onSave={(v) => onSaveField("custom_env", v)}
@@ -715,7 +706,7 @@ export function DefaultsForm({
         {activeTab === "custom_args" && (
           <TabContent>
             <DefaultsCustomArgsTab
-              args={config.custom_args ?? []}
+              args={config.custom_args ?? EMPTY_ARGS}
               readOnly={readOnly}
               saving={saving}
               onSave={(v) => onSaveField("custom_args", v)}
@@ -726,7 +717,7 @@ export function DefaultsForm({
         {activeTab === "skills" && (
           <TabContent>
             <DefaultsSkillsTab
-              selectedSkillIds={config.skills ?? []}
+              selectedSkillIds={config.skills ?? EMPTY_SKILLS}
               readOnly={readOnly}
               saving={saving}
               onSave={(v) => onSaveField("skills", v)}
@@ -764,9 +755,10 @@ export function DefaultsForm({
         </AlertDialog>
       )}
 
-      {historyScope && onRestoreInstructions && (
+      {historyScope && templateId && onRestoreInstructions && (
         <InstructionsHistoryDialog
           workspaceId={wsId}
+          templateId={templateId}
           scope={historyScope}
           open={historyOpen}
           currentContent={config.instructions ?? ""}
@@ -874,32 +866,71 @@ export function TemplateConfigEditor({
     await saveConfig({ ...config, instructions }, "instructions", { showSavedToast: false });
   }, [config, saveConfig]);
 
-  const historyScope = !readOnly && template.is_default ? scope : undefined;
+  const saveDescription = useCallback(async (next: string) => {
+    const trimmed = next.trim();
+    if (trimmed === (template.description ?? "")) return;
+    setSaving(true);
+    try {
+      await api.updateAgentConfigTemplate(template.id, { description: trimmed });
+      await qc.invalidateQueries({ queryKey: configTemplateKeys.all(wsId) });
+      toast.success(t(($) => $.template.description_saved_toast));
+    } catch (e) {
+      const msg = e instanceof ApiError ? e.message
+        : e instanceof Error ? e.message
+        : t(($) => $.template.update_failed);
+      toast.error(msg);
+    } finally {
+      setSaving(false);
+    }
+  }, [template.id, template.description, qc, wsId, t]);
+
+  // Every template carries its own instructions history (migration 127), so
+  // the History affordance shows for any editable template — not only the
+  // default one. The old `template.is_default` gate was a leftover from when
+  // history was scope/member-owned.
+  const historyScope = !readOnly ? scope : undefined;
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
-        <div
-          className={`flex h-7 w-7 items-center justify-center rounded-md ${
-            scope === "system" ? "bg-amber-500/10" : "bg-blue-500/10"
-          }`}
-        >
-          {scope === "system" ? (
-            <Settings2 className="h-4 w-4 text-amber-500" />
-          ) : (
-            <Sliders className="h-4 w-4 text-blue-500" />
-          )}
+      <div className="flex shrink-0 flex-col gap-1 border-b px-4 py-2.5">
+        <div className="flex items-center gap-3">
+          <div
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+              scope === "system" ? "bg-amber-500/10" : "bg-blue-500/10"
+            }`}
+          >
+            {scope === "system" ? (
+              <Settings2 className="h-4 w-4 text-amber-500" />
+            ) : (
+              <Sliders className="h-4 w-4 text-blue-500" />
+            )}
+          </div>
+          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{template.name}</h2>
         </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold">{template.name}</h2>
-        </div>
+        {/* Description — editable inline, saved on blur. Read-only viewers see
+            plain text (or nothing when empty). Kept out of the tabbed form
+            because it's template metadata, not part of the merged config. */}
+        {readOnly ? (
+          template.description ? (
+            <p className="pl-10 text-xs text-muted-foreground">{template.description}</p>
+          ) : null
+        ) : (
+          <Input
+            key={`desc-${template.id}-${template.description ?? ""}`}
+            defaultValue={template.description ?? ""}
+            placeholder={t(($) => $.template.description_placeholder)}
+            onBlur={(e) => void saveDescription(e.target.value)}
+            className="ml-10 h-7 text-xs text-muted-foreground"
+          />
+        )}
       </div>
       <DefaultsForm
         config={config}
         readOnly={readOnly}
         saving={saving}
         historyScope={historyScope}
+        templateId={template.id}
         onRestoreInstructions={historyScope ? handleRestoreInstructions : undefined}
         onSaveField={handleSaveField}
       />

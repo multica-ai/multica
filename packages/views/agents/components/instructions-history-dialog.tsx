@@ -28,11 +28,15 @@ import type { InstructionsHistoryItem, InstructionsHistoryScope } from "@multica
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 
-export const instructionsHistoryKey = (workspaceId: string, scope: InstructionsHistoryScope) =>
-  ["workspaces", workspaceId, "instructions-history", scope] as const;
+export const instructionsHistoryKey = (workspaceId: string, templateId: string) =>
+  ["workspaces", workspaceId, "instructions-history", "template", templateId] as const;
 
 interface InstructionsHistoryDialogProps {
   workspaceId: string;
+  /** Template whose instructions history is shown. History is template-owned
+   *  (migration 127), so this is the actual key — `scope` only picks the
+   *  description copy. */
+  templateId: string;
   scope: InstructionsHistoryScope;
   open: boolean;
   currentContent: string;
@@ -41,10 +45,11 @@ interface InstructionsHistoryDialogProps {
 }
 
 // Centered modal (was a right-side Sheet). Shows the instructions version
-// history for a scope's default config — list on the left, selected version's
+// history for a config template — list on the left, selected version's
 // content on the right.
 export function InstructionsHistoryDialog({
   workspaceId,
+  templateId,
   scope,
   open,
   currentContent: _currentContent,
@@ -57,14 +62,14 @@ export function InstructionsHistoryDialog({
   const [restoring, setRestoring] = useState(false);
 
   const historyQuery = useQuery({
-    queryKey: instructionsHistoryKey(workspaceId, scope),
-    queryFn: () => api.listInstructionsHistory(workspaceId, scope),
+    queryKey: instructionsHistoryKey(workspaceId, templateId),
+    queryFn: () => api.listInstructionsHistory(workspaceId, templateId),
     enabled: open,
   });
 
   const selectedVersion = useQuery({
-    queryKey: [...instructionsHistoryKey(workspaceId, scope), selectedId],
-    queryFn: () => api.getInstructionsHistory(workspaceId, selectedId!, scope),
+    queryKey: [...instructionsHistoryKey(workspaceId, templateId), selectedId],
+    queryFn: () => api.getInstructionsHistory(workspaceId, selectedId!, templateId),
     enabled: open && selectedId !== null,
   });
 
@@ -79,7 +84,7 @@ export function InstructionsHistoryDialog({
     try {
       const detail = selectedVersion.data?.id === restoreCandidate.id
         ? selectedVersion.data
-        : await api.getInstructionsHistory(workspaceId, restoreCandidate.id, scope);
+        : await api.getInstructionsHistory(workspaceId, restoreCandidate.id, templateId);
       await onRestore(detail.content);
       setRestoreCandidate(null);
       setSelectedId(detail.id);

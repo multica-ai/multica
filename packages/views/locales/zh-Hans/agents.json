@@ -566,6 +566,10 @@
     "create_dialog_title_personal": "新建个人模板",
     "create_dialog_desc": "创建一个可复用的配置模板，创建后再填写具体配置。",
     "name_placeholder": "模板名称",
+    "name_label": "名称",
+    "description_label": "描述",
+    "description_placeholder": "可选描述",
+    "description_saved_toast": "描述已保存",
     "name_required": "名称不能为空",
     "created_toast": "模板已创建",
     "create_failed_toast": "创建模板失败"

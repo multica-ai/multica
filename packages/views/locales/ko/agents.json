@@ -580,6 +580,10 @@
     "create_dialog_title_personal": "새 개인 템플릿",
     "create_dialog_desc": "재사용 가능한 구성 템플릿을 만든 후 구성을 입력하세요.",
     "name_placeholder": "템플릿 이름",
+    "name_label": "이름",
+    "description_label": "설명",
+    "description_placeholder": "선택 설명",
+    "description_saved_toast": "설명이 저장되었습니다",
     "name_required": "이름은 필수입니다",
     "created_toast": "템플릿이 생성되었습니다",
     "create_failed_toast": "템플릿 생성 실패"

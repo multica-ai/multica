@@ -340,6 +340,30 @@ func (h *Handler) UpdateAgentConfigTemplate(w http.ResponseWriter, r *http.Reque
 		commit = func() error { return realTx.Commit(r.Context()) }
 	}
 
+	// Setting a new default must vacate the existing default slot first —
+	// the partial unique index allows at most one default per (workspace,
+	// scope) [system] or (workspace, created_by) [personal]. Without this
+	// swap the UpdateAgentConfigTemplate below would hit a 23505 conflict.
+	// Personal defaults are scoped per creator, so only clear within the
+	// same created_by; system templates pass a NULL created_by to clear
+	// across the whole workspace+scope.
+	if req.IsDefault != nil && *req.IsDefault && !tpl.IsDefault {
+		var createdByFilter pgtype.UUID
+		if tpl.Scope == "personal" {
+			createdByFilter = tpl.CreatedBy
+		}
+		if err := q.ClearOtherDefaultTemplates(r.Context(), db.ClearOtherDefaultTemplatesParams{
+			WorkspaceID: wsUUID,
+			Scope:       tpl.Scope,
+			ID:          tplUUID,
+			CreatedBy:   createdByFilter,
+		}); err != nil {
+			slog.Error("clear other default templates failed", "template_id", templateID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to update template")
+			return
+		}
+	}
+
 	updated, err := q.UpdateAgentConfigTemplate(r.Context(), db.UpdateAgentConfigTemplateParams{
 		ID:          tplUUID,
 		Name:        nameText,
@@ -465,7 +489,7 @@ type AgentTemplateBindingResponse struct {
 }
 
 func (h *Handler) GetAgentTemplateBinding(w http.ResponseWriter, r *http.Request) {
-	agentID := chi.URLParam(r, "agentId")
+	agentID := chi.URLParam(r, "id")
 
 	agentUUID, ok := parseUUIDOrBadRequest(w, agentID, "agent_id")
 	if !ok {
@@ -503,7 +527,7 @@ type UpdateAgentTemplateBindingRequest struct {
 }
 
 func (h *Handler) UpdateAgentTemplateBinding(w http.ResponseWriter, r *http.Request) {
-	agentID := chi.URLParam(r, "agentId")
+	agentID := chi.URLParam(r, "id")
 
 	agentUUID, ok := parseUUIDOrBadRequest(w, agentID, "agent_id")
 	if !ok {
