@@ -183,8 +183,8 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
           side={isMobile ? "bottom" : "right"}
           className={
             isMobile
-              ? "h-[80vh] gap-3 overflow-y-auto rounded-t-xl p-4"
-              : "w-[60vw] max-w-[60vw] gap-3 overflow-y-auto p-6 sm:max-w-[60vw]"
+              ? "h-[80vh]! gap-3 overflow-y-auto rounded-t-xl p-4"
+              : "w-[60vw]! max-w-[60vw]! gap-3 overflow-y-auto p-6 sm:max-w-[60vw]!"
           }
         >
           {selected && (
