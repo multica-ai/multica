@@ -374,30 +374,33 @@ func main() {
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 
-	// Lark inbound supervisor: holds the §4.4 WS lease per installation
-	// and runs the EventConnector for each. Nil when the Lark master
-	// key is unset — self-host deployments that have not opted in to
-	// Lark do not pay any goroutine cost. Lifecycle is bound to
-	// sweepCtx so the Hub winds down alongside the other long-running
-	// workers, AFTER the HTTP server has drained.
-	// Cutover control (MUL-3515): MULTICA_LARK_HUB_DISABLED parks the Lark
-	// inbound hub WITHOUT taking down the rest of the API — the process still
-	// serves HTTP normally, it just never claims a WS lease or opens a Feishu
-	// connection. The switch is generation-agnostic: in a pre-cutover build it
-	// parks the OLD (lark_*) hub, in this build it parks the NEW (channel_*)
-	// hub. The lark_*->channel_* rollout uses it twice — first to stop the old
-	// hub on the current build so migration 124 takes a clean snapshot, then to
-	// hold this build's new hub dormant until that migration has run and the old
-	// pods have drained, so the two never double-process the same bot. Nil-ing
-	// LarkHub here reuses the same "Lark not configured" path, so the shutdown
-	// join below also skips it. The operator flips it off last to bring the new
-	// hub up on channel_*. See migration 124's ROLLOUT note for the full order.
-	if h.LarkHub != nil && os.Getenv("MULTICA_LARK_HUB_DISABLED") == "true" {
-		slog.Warn("Lark inbound hub disabled via MULTICA_LARK_HUB_DISABLED; API serves normally but no Feishu WebSocket is opened")
-		h.LarkHub = nil
+	// Channel inbound supervisor (MUL-3620): holds the §4.4 WS lease per
+	// installation and drives each channel.Channel. It is built
+	// unconditionally (it is channel-agnostic, not Lark-specific), so it
+	// always exists here; with no platform registered or no installation
+	// rows it simply idles. Lifecycle is bound to sweepCtx so it winds down
+	// alongside the other long-running workers, AFTER the HTTP server has
+	// drained.
+	// Cutover control (MUL-3515): MULTICA_LARK_HUB_DISABLED parks the inbound
+	// channel supervisor WITHOUT taking down the rest of the API — the process
+	// still serves HTTP normally, it just never claims a WS lease or opens a
+	// Feishu connection. The switch is generation-agnostic: in a pre-cutover
+	// build it parks the OLD (lark_*) hub, in this build it parks the NEW
+	// (channel_*) supervisor. The lark_*->channel_* rollout uses it twice —
+	// first to stop the old hub on the current build so migration 124 takes a
+	// clean snapshot, then to hold this build's new supervisor dormant until
+	// that migration has run and the old pods have drained, so the two never
+	// double-process the same bot. Nil-ing it here makes the start below and
+	// the shutdown join skip it. The operator flips it off last to bring the
+	// new supervisor up on channel_*. See migration 124's ROLLOUT note for the
+	// full order. The env var keeps its name for operator/runbook
+	// compatibility across the cutover.
+	if h.ChannelSupervisor != nil && os.Getenv("MULTICA_LARK_HUB_DISABLED") == "true" {
+		slog.Warn("Lark inbound supervisor disabled via MULTICA_LARK_HUB_DISABLED; API serves normally but no Feishu WebSocket is opened")
+		h.ChannelSupervisor = nil
 	}
-	if h.LarkHub != nil {
-		go h.LarkHub.Run(sweepCtx)
+	if h.ChannelSupervisor != nil {
+		go h.ChannelSupervisor.Run(sweepCtx)
 	}
 
 	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
@@ -472,19 +475,26 @@ func main() {
 	sweepCancel()
 	heartbeatScheduler.Stop()
 
-	// Join the Lark Hub's per-installation supervisor goroutines so the
+	// Join the channel supervisor's per-installation goroutines so the
 	// lease renewer can issue a final release before process exit;
 	// otherwise the next replica would have to wait the full LeaseTTL
 	// before picking up the installation on the other side of the
 	// redeploy. The wait is bounded — if a supervisor is wedged (DB
-	// pool stalled, a future real EventConnector ignoring ctx, etc.)
-	// the fallback is the natural LeaseTTL expiry on the other side,
-	// which is strictly better than holding shutdown open forever.
-	if h.LarkHub != nil {
-		if !h.LarkHub.WaitWithTimeout(h.LarkHub.ShutdownTimeout()) {
-			slog.Warn("lark hub: supervisors did not exit within shutdown timeout; proceeding",
-				"timeout", h.LarkHub.ShutdownTimeout().String(),
+	// pool stalled, a connector ignoring ctx, etc.) the fallback is the
+	// natural LeaseTTL expiry on the other side, which is strictly better
+	// than holding shutdown open forever. Then drain the Feishu runtime:
+	// the supervisors have stopped delivering inbound events, so flush the
+	// debounced run triggers and join any in-flight outbound replies
+	// (each bounded by ReplyTimeout) so a binding card / offline notice is
+	// not lost on shutdown.
+	if h.ChannelSupervisor != nil {
+		if !h.ChannelSupervisor.WaitWithTimeout(h.ChannelSupervisor.ShutdownTimeout()) {
+			slog.Warn("channel supervisor: connections did not exit within shutdown timeout; proceeding",
+				"timeout", h.ChannelSupervisor.ShutdownTimeout().String(),
 			)
+		}
+		if h.ChannelRouter != nil {
+			h.ChannelRouter.Drain()
 		}
 	}
 

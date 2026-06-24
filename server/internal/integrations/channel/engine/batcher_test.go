@@ -1,4 +1,4 @@
-package lark
+package engine
 
 import (
 	"sync"
@@ -14,8 +14,6 @@ type fakeBatchTimer struct {
 	fired   bool
 }
 
-// Stop mirrors *time.Timer.Stop: returns true only if the timer was still
-// armed (not already stopped or fired).
 func (t *fakeBatchTimer) Stop() bool {
 	if t.stopped || t.fired {
 		return false
@@ -24,9 +22,8 @@ func (t *fakeBatchTimer) Stop() bool {
 	return true
 }
 
-// fakeTimerFactory hands out fakeBatchTimers and lets a test fire whichever
-// ones are currently armed — modelling the wall clock advancing past the
-// window for every pending session at once.
+// fakeTimerFactory hands out fakeBatchTimers and lets a test fire whichever are
+// currently armed — modelling the wall clock advancing past the window.
 type fakeTimerFactory struct {
 	mu  sync.Mutex
 	all []*fakeBatchTimer
@@ -40,8 +37,6 @@ func (f *fakeTimerFactory) after(_ time.Duration, fn func()) stoppableTimer {
 	return t
 }
 
-// fireArmed invokes every timer that is armed (not stopped, not already
-// fired) right now.
 func (f *fakeTimerFactory) fireArmed() {
 	f.mu.Lock()
 	armed := make([]*fakeBatchTimer, 0, len(f.all))
@@ -70,7 +65,7 @@ func (f *fakeTimerFactory) armedCount() int {
 }
 
 // newTestBatcher builds a batcher whose timers are driven by f. Shared with
-// dispatcher_test.go (same package) to drive the debounce coalescing test.
+// router_test.go (same package) to drive the debounce coalescing test.
 func newTestBatcher(f *fakeTimerFactory) *pendingBatcher {
 	return &pendingBatcher{
 		window:    DefaultChatRunBatchWindow,
@@ -123,10 +118,6 @@ func TestPendingBatcher_MultiSessionIndependent(t *testing.T) {
 }
 
 func TestPendingBatcher_StaleTimerFireIsNoop(t *testing.T) {
-	// Reproduces the AfterFunc race: a timer fires concurrently with the
-	// Stop() that was meant to cancel it after a reschedule. The
-	// generation guard must make the stale fire a no-op so the burst still
-	// flushes exactly once.
 	f := &fakeTimerFactory{}
 	b := newTestBatcher(f)
 	calls := 0
@@ -135,7 +126,6 @@ func TestPendingBatcher_StaleTimerFireIsNoop(t *testing.T) {
 	first := f.all[0]
 	b.Schedule("s", func() { calls++ }) // resets: cancels first, arms a new timer
 
-	// First timer fires anyway despite having been Stop()ed.
 	first.fired = true
 	first.fn()
 	if calls != 0 {
@@ -164,8 +154,6 @@ func TestPendingBatcher_FlushAllDrainsPending(t *testing.T) {
 		t.Fatalf("FlushAll must clear pending state; got %d", got)
 	}
 
-	// After FlushAll the batcher is terminal: a later Schedule runs inline
-	// rather than silently dropping (the shutdown-race best-effort path).
 	ran := false
 	b.Schedule("d", func() { ran = true })
 	if !ran {
@@ -183,8 +171,6 @@ func TestNewPendingBatcher_DefaultsWindow(t *testing.T) {
 }
 
 func TestPendingBatcher_RealTimerFlushes(t *testing.T) {
-	// Exercises the production afterFunc (time.AfterFunc) path with a short
-	// real window so a mis-wired default would be caught.
 	b := newPendingBatcher(15 * time.Millisecond)
 	done := make(chan struct{})
 	b.Schedule("s", func() { close(done) })

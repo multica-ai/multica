@@ -36,11 +36,22 @@ type Channel interface {
 	Type() Type
 
 	// Connect establishes the platform link (e.g. dials the outbound
-	// WebSocket long-conn, or starts the inbound HTTP listener). The
-	// connection mode is the implementation's choice and invisible to
-	// the core. Connect blocks only until the link is established (or
-	// fails); the ongoing receive loop runs in the background and is
-	// torn down by Disconnect or by ctx cancellation.
+	// WebSocket long-conn, or starts the inbound HTTP listener) and then
+	// BLOCKS, running the receive loop, until the link ends. The
+	// connection mode is the implementation's choice and invisible to the
+	// core. It returns:
+	//
+	//   - nil when ctx is cancelled (graceful shutdown / lease loss);
+	//   - a non-nil error when the link drops and cannot be recovered
+	//     locally — the supervisor treats this as "this attempt failed"
+	//     and reconnects under exponential backoff.
+	//
+	// While Connect runs, the adapter delivers each inbound message by
+	// invoking the InboundHandler it captured at construction
+	// (Config.Handler). Send may be called concurrently from another
+	// goroutine for the lifetime of the connection. Implementations MUST
+	// tolerate repeated Connect calls on different contexts: the
+	// supervisor may Connect, return, and Connect again after backoff.
 	Connect(ctx context.Context) error
 
 	// Disconnect tears the platform link down and releases its
@@ -72,6 +83,13 @@ type Channel interface {
 type Config struct {
 	Type Type
 	Raw  json.RawMessage
+
+	// Handler is the shared inbound entry point the engine injects so the
+	// built Channel can deliver normalized InboundMessage values into the
+	// core (see InboundHandler). A Factory captures it and invokes it from
+	// the Channel's receive loop. It may be nil when a Channel is built
+	// purely for its outbound Send path (no inbound delivery needed).
+	Handler InboundHandler
 }
 
 // Factory builds a Channel from its per-installation Config. Each adapter

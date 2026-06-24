@@ -91,6 +91,22 @@ WHERE ci.status = 'active'
   AND ci.channel_type = sqlc.arg('channel_type')
 ORDER BY ci.created_at ASC;
 
+-- name: ListAllActiveChannelInstallations :many
+-- Boot path for the channel-agnostic engine Supervisor (MUL-3620): every
+-- active installation across ALL channel types, so one Supervisor drives every
+-- platform's connections rather than a per-platform hub. This is the de-
+-- hardcoded counterpart of ListActiveChannelInstallations — the Supervisor
+-- routes each row to its registered channel.Factory by channel_type, so it
+-- never needs to know which platforms exist. Same orphan guard as the per-type
+-- query: the workspace + agent JOINs drop installations whose owning rows are
+-- gone (channel_installation has no FK, MUL-3515 §4), matching the old ON
+-- DELETE CASCADE semantics (row existence, not agent archival).
+SELECT ci.* FROM channel_installation ci
+JOIN workspace w ON w.id = ci.workspace_id
+JOIN agent a ON a.id = ci.agent_id
+WHERE ci.status = 'active'
+ORDER BY ci.created_at ASC;
+
 -- name: SetChannelInstallationStatus :exec
 UPDATE channel_installation
 SET status = $2, updated_at = now()

@@ -287,18 +287,10 @@ func TestLarkOutcomeReplierOfflineSwallowsAPIError(t *testing.T) {
 	rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc"}, DispatchResult{Outcome: OutcomeAgentOffline})
 }
 
-// TestNoopReplierIsHandledByHub verifies that NewHub installs a noop
-// replier by default — so the inbound pipeline runs even when the
-// caller never calls SetOutcomeReplier (e.g. in deployments that
-// only run the inbound dispatcher pre-outbound-wiring). This guards
-// the "no nil replier crash" contract on hub.handleEvent.
-func TestNoopReplierIsHandledByHub(t *testing.T) {
-	t.Parallel()
-	hub := NewHub(nil, nil, nil, HubConfig{})
-	if hub.replier == nil {
-		t.Fatal("Hub.replier must default to noop, not nil")
-	}
-}
+// The legacy "install a noop replier by default" safety is now split: the
+// engine Router skips reply scheduling entirely when no OutboundReplier is
+// registered (boot registers one only when larkClient.IsConfigured()), and
+// NewLarkOutcomeReplier still falls back to its own noop when unconfigured.
 
 // TestLarkOutcomeReplierIssueCreatedSendsConfirmation pins the
 // recovered /issue confirmation path. Before the plain-text refactor

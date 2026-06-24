@@ -1,0 +1,254 @@
+package lark
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+)
+
+// This file is the Feishu ResolverSet: the platform-specific implementations
+// the channel-agnostic engine.Router runs the inbound pipeline through. Each
+// resolver translates between the engine's normalized channel.InboundMessage /
+// engine types and the Feishu store / services. Platform-specific fields the
+// normalized envelope does not carry (app_id, event_type, the un-enriched
+// command body, create time) are read from the original InboundMessage the
+// feishuChannel stashes in channel.InboundMessage.Raw — the documented adapter
+// boundary (the core never reads Raw).
+
+// originFeishuChat is the issue.origin_type label written for issues created
+// via the Feishu /issue command. Kept as "lark_chat" (unchanged from the
+// pre-cutover dispatcher) so analytics classification does not shift.
+const originFeishuChat = "lark_chat"
+
+// larkMsgFromRaw decodes the original Feishu InboundMessage the feishuChannel
+// stashed in channel.InboundMessage.Raw.
+func larkMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
+	var lm InboundMessage
+	if len(msg.Raw) == 0 {
+		return InboundMessage{}, errors.New("lark: inbound message Raw is empty")
+	}
+	if err := json.Unmarshal(msg.Raw, &lm); err != nil {
+		return InboundMessage{}, fmt.Errorf("decode feishu inbound raw: %w", err)
+	}
+	return lm, nil
+}
+
+// NewFeishuResolverSet assembles the Feishu ResolverSet from the store, chat
+// service, audit logger, and (optional) outbound replier + typing indicator.
+func NewFeishuResolverSet(store *ChannelStore, chat ChatSessionService, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager) engine.ResolverSet {
+	set := engine.ResolverSet{
+		Installation: &feishuInstallationResolver{store: store},
+		Identity:     &feishuIdentityResolver{store: store},
+		Dedup:        &feishuDeduper{store: store},
+		Session:      &feishuSessionBinder{chat: chat},
+		Audit:        &feishuAuditor{audit: audit},
+		OriginType:   originFeishuChat,
+	}
+	if replier != nil {
+		set.Replier = &feishuOutboundReplier{replier: replier}
+	}
+	if typing != nil {
+		set.Typing = &feishuTypingNotifier{mgr: typing}
+	}
+	return set
+}
+
+// ---- installation routing ----
+
+type feishuInstallationResolver struct{ store *ChannelStore }
+
+func (r *feishuInstallationResolver) ResolveInstallation(ctx context.Context, msg channel.InboundMessage) (engine.ResolvedInstallation, error) {
+	lm, err := larkMsgFromRaw(msg)
+	if err != nil {
+		return engine.ResolvedInstallation{}, err
+	}
+	inst, err := r.store.GetLarkInstallationByAppID(ctx, lm.AppID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return engine.ResolvedInstallation{}, engine.ErrInstallationNotFound
+		}
+		return engine.ResolvedInstallation{}, err
+	}
+	return engine.ResolvedInstallation{
+		ID:              inst.ID,
+		WorkspaceID:     inst.WorkspaceID,
+		AgentID:         inst.AgentID,
+		InstallerUserID: inst.InstallerUserID,
+		Active:          InstallationStatus(inst.Status) == InstallationActive,
+		Platform:        inst,
+	}, nil
+}
+
+// ---- identity ----
+
+type feishuIdentityResolver struct{ store *ChannelStore }
+
+func (r *feishuIdentityResolver) ResolveSender(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) (engine.ResolvedIdentity, error) {
+	binding, err := r.store.GetLarkUserBindingByOpenID(ctx, GetUserBindingByOpenIDParams{
+		InstallationID: inst.ID,
+		ChannelUserID:  msg.Source.SenderID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
+		}
+		return engine.ResolvedIdentity{}, err
+	}
+	isMember, err := r.store.IsWorkspaceMember(ctx, inst.WorkspaceID, binding.MulticaUserID)
+	if err != nil {
+		return engine.ResolvedIdentity{}, err
+	}
+	if !isMember {
+		return engine.ResolvedIdentity{}, engine.ErrSenderNotMember
+	}
+	return engine.ResolvedIdentity{UserID: binding.MulticaUserID}, nil
+}
+
+// ---- dedup ----
+
+type feishuDeduper struct{ store *ChannelStore }
+
+func (r *feishuDeduper) Claim(ctx context.Context, installationID pgtype.UUID, messageID string) (pgtype.UUID, error) {
+	claim, err := r.store.ClaimLarkInboundDedup(ctx, ClaimInboundDedupParams{
+		InstallationID: installationID,
+		MessageID:      messageID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, engine.ErrDuplicate
+		}
+		return pgtype.UUID{}, err
+	}
+	return claim.ClaimToken, nil
+}
+
+func (r *feishuDeduper) Mark(ctx context.Context, installationID pgtype.UUID, messageID string, claimToken pgtype.UUID) error {
+	_, err := r.store.MarkLarkInboundDedupProcessed(ctx, MarkInboundDedupProcessedParams{
+		InstallationID: installationID,
+		MessageID:      messageID,
+		ClaimToken:     claimToken,
+	})
+	return err
+}
+
+func (r *feishuDeduper) Release(ctx context.Context, installationID pgtype.UUID, messageID string, claimToken pgtype.UUID) error {
+	_, err := r.store.ReleaseLarkInboundDedup(ctx, ReleaseInboundDedupParams{
+		InstallationID: installationID,
+		MessageID:      messageID,
+		ClaimToken:     claimToken,
+	})
+	return err
+}
+
+// ---- session bind / append ----
+
+type feishuSessionBinder struct{ chat ChatSessionService }
+
+func (r *feishuSessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessionParams) (pgtype.UUID, error) {
+	return r.chat.EnsureChatSession(ctx, EnsureChatSessionParams{
+		WorkspaceID:    p.Installation.WorkspaceID,
+		InstallationID: p.Installation.ID,
+		AgentID:        p.Installation.AgentID,
+		ChatID:         ChatID(p.Message.Source.ChatID),
+		ChatType:       ChatType(p.Message.Source.ChatType),
+		Sender:         p.Sender,
+	})
+}
+
+func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
+	lm, err := larkMsgFromRaw(p.Message)
+	if err != nil {
+		return engine.AppendResult{}, err
+	}
+	res, err := r.chat.AppendUserMessage(ctx, AppendUserMessageParams{
+		ChatSessionID:  p.SessionID,
+		Sender:         p.Sender,
+		Body:           p.Message.Text,
+		CommandBody:    lm.CommandBody,
+		InstallationID: p.InstallationID,
+		LarkMessageID:  p.Message.MessageID,
+		LarkThreadID:   p.Message.Source.ThreadID,
+		ClaimToken:     p.ClaimToken,
+	})
+	if err != nil {
+		if errors.Is(err, ErrClaimLost) {
+			return engine.AppendResult{}, engine.ErrClaimLost
+		}
+		return engine.AppendResult{}, err
+	}
+	out := engine.AppendResult{DedupMarked: res.DedupMarked}
+	if res.IssueCommand != nil {
+		out.IssueCommand = &engine.IssueCommand{
+			Title:       res.IssueCommand.Title,
+			Description: res.IssueCommand.Description,
+		}
+	}
+	return out, nil
+}
+
+// ---- audit ----
+
+type feishuAuditor struct{ audit AuditLogger }
+
+func (r *feishuAuditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason engine.DropReason) error {
+	// event_type is platform-specific (read from Raw); a decode failure is
+	// non-fatal — the drop is still worth auditing without it.
+	lm, _ := larkMsgFromRaw(msg)
+	return r.audit.RecordDrop(ctx, AuditDropParams{
+		InstallationID: instID,
+		ChatID:         ChatID(msg.Source.ChatID),
+		EventType:      lm.EventType,
+		LarkEventID:    msg.EventID,
+		LarkMessageID:  msg.MessageID,
+		Reason:         DropReason(string(reason)),
+	})
+}
+
+// ---- outbound replier ----
+
+type feishuOutboundReplier struct{ replier OutcomeReplier }
+
+func (r *feishuOutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, res engine.Result) {
+	larkInst, ok := inst.Platform.(Installation)
+	if !ok {
+		return
+	}
+	lm, _ := larkMsgFromRaw(msg)
+	r.replier.Reply(ctx, larkInst, lm, dispatchResultFromEngine(res))
+}
+
+// dispatchResultFromEngine maps the engine verdict to the Feishu DispatchResult
+// the OutcomeReplier consumes. The Outcome/DropReason string values match 1:1.
+func dispatchResultFromEngine(res engine.Result) DispatchResult {
+	return DispatchResult{
+		Outcome:         Outcome(string(res.Outcome)),
+		DropReason:      DropReason(string(res.DropReason)),
+		InstallationID:  res.InstallationID,
+		ChatSessionID:   res.ChatSessionID,
+		SenderOpenID:    OpenID(res.Sender),
+		IssueID:         res.IssueID,
+		IssueNumber:     res.IssueNumber,
+		IssueIdentifier: res.IssueIdentifier,
+		IssueTitle:      res.IssueTitle,
+	}
+}
+
+// ---- typing indicator ----
+
+type feishuTypingNotifier struct{ mgr *TypingIndicatorManager }
+
+func (r *feishuTypingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+	larkInst, ok := inst.Platform.(Installation)
+	if !ok {
+		return
+	}
+	lm, _ := larkMsgFromRaw(msg)
+	r.mgr.Add(ctx, larkInst, sessionID, msg.MessageID, lm.CreateTime)
+}
