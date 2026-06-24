@@ -47,10 +47,10 @@ func seedCollabNodeRun(t *testing.T, status string) string {
 
 	var nodeRunID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO multica_workflow_node_run (workflow_run_id, workflow_node_id, node_title, status, worker_type, critic_type)
-		VALUES ($1, $2, 'Collab Node', $3, 'agent', 'api')
+		INSERT INTO multica_workflow_node_run (workflow_run_id, workflow_node_id, node_title, status, worker_type, critic_type, runtime_id)
+		VALUES ($1, $2, 'Collab Node', $3, 'agent', 'api', $4)
 		RETURNING id
-	`, runID, nodeID, status).Scan(&nodeRunID); err != nil {
+	`, runID, nodeID, status, testRuntimeID).Scan(&nodeRunID); err != nil {
 		t.Fatalf("seed node run: %v", err)
 	}
 	return nodeRunID
@@ -377,8 +377,14 @@ func TestGetSessionPermission_AllowsWorkspaceMember(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if !resp.HasAccess {
-		t.Fatalf("workspace member should have access")
+	if !resp.CanObserve {
+		t.Fatalf("workspace member should be able to observe")
+	}
+	if !resp.CanControl {
+		t.Fatalf("workspace owner should be able to control")
+	}
+	if resp.Role != "owner" {
+		t.Fatalf("role: expected owner, got %s", resp.Role)
 	}
 	if resp.NodeRunID != nodeRunID {
 		t.Fatalf("node_run_id: expected %q, got %q", nodeRunID, resp.NodeRunID)
