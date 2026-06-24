@@ -2,10 +2,10 @@
 
 ## Context
 
-用户需要一个全新的「研发全景图」页面，替代现有 workflow 详情页的默认 Overview 视图。该页面以泳道卡片风格展示单个 workflow 的 Stage → Agent → Plugin 三层架构，参考 `docs/cospowers-architecture.drawio` 的视觉风格。
+用户需要一个全新的「研发全景图」页面，作为 workflow 详情页 `/workflows/[id]` 的新默认视图。该页面以泳道卡片风格展示单个 workflow 的 Stage → Agent → Plugin 三层架构，参考 `docs/cospowers-architecture.drawio` 的视觉风格。
 
 **核心决策**：
-- 替代现有 Overview 为默认视图
+- 新增 ArchitecturePage 为默认视图（不修改现有 Overview 页面）
 - 数据来自 workflow 的 Stage/Node/Agent 模型
 - 泳道卡片风格（Stage = 水平行，Plugin = 卡片，Agent = 关联信息）
 - 点击 Agent/Plugin 弹出右侧滑出面板
@@ -83,7 +83,7 @@
 
 | 组件 | 职责 | 文件位置 |
 |---|---|---|
-| `ArchitecturePage` | 页面主容器，替代 `WorkflowOverviewPage` | `packages/views/workflows/components/overview/workflow-overview-page.tsx` (替换) |
+| `ArchitecturePage` | 页面主容器，作为默认视图 | `packages/views/workflows/components/overview/architecture-page.tsx` (新建) |
 | `StageSwimlane` | 单个阶段的泳道行容器 | `packages/views/workflows/components/overview/stage-swimlane.tsx` (新建) |
 | `PluginCard` | Plugin 卡片（每个 node = 一个 plugin 卡片），显示 plugin 名称+描述 | `packages/views/workflows/components/overview/plugin-card.tsx` (新建) |
 | `CriticBadge` | 评估器小卡片（虚线边框） | `packages/views/workflows/components/overview/critic-badge.tsx` (新建) |
@@ -94,7 +94,7 @@
 
 ```
 WorkflowDetailShell
-  └── ArchitecturePage (替代 OverviewPage)
+  └── ArchitecturePage (默认视图)
         ├── useQuery(workflowStagesOptions) → stages[]
         ├── useQuery(workflowNodesOptions) → nodes[]
         ├── useQuery(workflowEdgesOptions) → edges[]
@@ -166,8 +166,8 @@ WorkflowDetailShell
 - 下半部分：关联 Agent 信息
 - 复用现有 panel 动画样式
 
-### Step 5: 实现 ArchitecturePage
-- 替换 `workflow-overview-page.tsx` 的内容
+### Step 5: 新建 ArchitecturePage
+- 在 `architecture-page.tsx` 中新建页面组件
 - 查询数据 → 按 stage 分组 → 渲染 StageSwimlane 列表
 - 管理选中状态和详情面板
 
@@ -199,7 +199,8 @@ WorkflowDetailShell
 
 | 文件 | 操作 |
 |---|---|
-| `packages/views/workflows/components/overview/workflow-overview-page.tsx` | **重写** |
+| `packages/views/workflows/components/overview/architecture-page.tsx` | **新建** |
+| `packages/views/workflows/components/overview/workflow-overview-page.tsx` | **不动**（保留现有概览页） |
 | `packages/views/workflows/components/overview/stage-swimlane.tsx` | **新建** |
 | `packages/views/workflows/components/overview/plugin-card.tsx` | **新建** |
 | `packages/views/workflows/components/overview/critic-badge.tsx` | **新建** |
