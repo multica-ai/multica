@@ -1440,9 +1440,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						if row.ResourceType == "github_repo" {
 							var payload struct {
 								URL string `json:"url"`
+								Ref string `json:"ref,omitempty"`
 							}
 							if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-								projectRepos = append(projectRepos, RepoData{URL: payload.URL})
+								projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
 							}
 						}
 					}
@@ -1717,9 +1718,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							if row.ResourceType == "github_repo" {
 								var payload struct {
 									URL string `json:"url"`
+									Ref string `json:"ref,omitempty"`
 								}
 								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-									projectRepos = append(projectRepos, RepoData{URL: payload.URL})
+									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
 								}
 							}
 						}

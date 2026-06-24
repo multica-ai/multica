@@ -119,13 +119,17 @@ var (
 // surfaced through a per-task claim (project github_repo resources today,
 // possibly other typed sources later) — those don't show up in
 // GetWorkspaceRepos, so they would be wiped on refresh if we shared one map.
+// taskRepoRefs tracks optional checkout refs for the specific task that
+// surfaced each project repo so two projects using the same URL don't leak refs
+// into each other.
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
 	reposVersion    string // stored for future use: skip refresh when version unchanged
 	allowedRepoURLs map[string]struct{}
 	taskRepoURLs    map[string]struct{}
-	settings        json.RawMessage // workspace settings (JSONB)
+	taskRepoRefs    map[string]map[string]string // taskID -> repo URL -> checkout ref
+	settings        json.RawMessage              // workspace settings (JSONB)
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
 	// profileSetSig is a content hash of the workspace's custom runtime
@@ -1236,7 +1240,7 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 // idempotent. Called from runTask before the agent spawns so
 // `multica repo checkout` accepts project-only URLs without an extra round
 // trip back to GetWorkspaceRepos (which doesn't carry project resources).
-func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
+func (d *Daemon) registerTaskRepos(workspaceID, taskID string, repos []RepoData) {
 	if len(repos) == 0 {
 		return
 	}
@@ -1255,6 +1259,9 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 	if ws.taskRepoURLs == nil {
 		ws.taskRepoURLs = make(map[string]struct{}, len(repos))
 	}
+	if taskID != "" && ws.taskRepoRefs == nil {
+		ws.taskRepoRefs = make(map[string]map[string]string)
+	}
 	candidates := make([]repoCandidate, 0, len(repos))
 	for _, repo := range repos {
 		url := strings.TrimSpace(repo.URL)
@@ -1266,6 +1273,14 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 		_, inWorkspace := ws.allowedRepoURLs[url]
 		_, inTask := ws.taskRepoURLs[url]
 		ws.taskRepoURLs[url] = struct{}{}
+		if taskID != "" {
+			if ws.taskRepoRefs[taskID] == nil {
+				ws.taskRepoRefs[taskID] = make(map[string]string, len(repos))
+			}
+			if _, exists := ws.taskRepoRefs[taskID][url]; !exists {
+				ws.taskRepoRefs[taskID][url] = strings.TrimSpace(repo.Ref)
+			}
+		}
 		candidates = append(candidates, repoCandidate{
 			url:     url,
 			tracked: inWorkspace || inTask,
@@ -1291,6 +1306,33 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 			defer d.bgSyncs.Done()
 			d.syncWorkspaceRepos(workspaceID, toSync)
 		}()
+	}
+}
+
+func (d *Daemon) taskRepoDefaultRef(workspaceID, taskID, repoURL string) string {
+	taskID = strings.TrimSpace(taskID)
+	repoURL = strings.TrimSpace(repoURL)
+	if taskID == "" || repoURL == "" {
+		return ""
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok || ws.taskRepoRefs == nil {
+		return ""
+	}
+	return strings.TrimSpace(ws.taskRepoRefs[taskID][repoURL])
+}
+
+func (d *Daemon) clearTaskRepoRefs(workspaceID, taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if ws, ok := d.workspaces[workspaceID]; ok && ws.taskRepoRefs != nil {
+		delete(ws.taskRepoRefs, taskID)
 	}
 }
 
@@ -3281,7 +3323,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// in the per-workspace allowlist and the local cache, otherwise
 	// `multica repo checkout` would reject project-only URLs that aren't also
 	// bound at the workspace level.
-	d.registerTaskRepos(task.WorkspaceID, task.Repos)
+	d.registerTaskRepos(task.WorkspaceID, task.ID, task.Repos)
+	defer d.clearTaskRepoRefs(task.WorkspaceID, task.ID)
 
 	entry, ok := d.cfg.Agents[provider]
 	// A custom runtime profile (MUL-3284) overrides the executable path: the
@@ -4323,7 +4366,7 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
-		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, Ref: r.Ref}
 	}
 	return result
 }

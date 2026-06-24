@@ -206,6 +206,7 @@ func preserveMaskedGatewayToken(incoming any, persistedRuntimeConfig []byte) {
 type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
+	Ref         string `json:"ref,omitempty"`
 }
 
 // ProjectResourceData is the wire shape for a project resource included in a

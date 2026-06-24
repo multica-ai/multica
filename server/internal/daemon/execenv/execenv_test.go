@@ -157,7 +157,7 @@ func TestPrepareWithProjectResources(t *testing.T) {
 			{
 				ID:           "33333333-4444-5555-6666-777777777777",
 				ResourceType: "github_repo",
-				ResourceRef:  json.RawMessage(`{"url":"https://github.com/multica-ai/multica","default_branch_hint":"main"}`),
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/multica-ai/multica","ref":"release/v2","default_branch_hint":"main"}`),
 			},
 		},
 	}
@@ -221,7 +221,8 @@ func TestPrepareWithProjectResources(t *testing.T) {
 		"Always write copy in British English. Ship behind a feature flag.",
 		"GitHub repo",
 		"https://github.com/multica-ai/multica",
-		"default branch: `main`",
+		"checkout ref: `release/v2`",
+		"default branch hint: `main`",
 		".multica/project/resources.json",
 	} {
 		if !strings.Contains(s, want) {
@@ -290,7 +291,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	taskCtx := TaskContextForEnv{
 		IssueID: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
 		Repos: []RepoContextForEnv{
-			{URL: "https://github.com/org/backend"},
+			{URL: "https://github.com/org/backend", Ref: "release/v2"},
 			{URL: "https://github.com/org/frontend"},
 		},
 	}
@@ -333,6 +334,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	for _, want := range []string{
 		"multica repo checkout",
 		"https://github.com/org/backend",
+		"default ref: `release/v2`",
 		"https://github.com/org/frontend",
 	} {
 		if !strings.Contains(s, want) {
