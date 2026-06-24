@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -140,6 +141,23 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	// Feature flags: loaded once at startup from MULTICA_FEATURE_FLAGS_FILE
+	// (a YAML rule set) with FF_<KEY> env overrides layered on top.
+	// See docs/feature-flags.md for the schema and lifecycle rules.
+	//
+	// Booting the server without any flag config is intentional: when the
+	// env var is unset, every IsEnabled call falls through to the caller's
+	// default, so existing code paths are unchanged until someone adds a
+	// rule. A misconfigured (malformed / missing) file surfaces as a hard
+	// error so operators see misconfig the same way they do for any other
+	// MULTICA_*_FILE knob.
+	flags, err := featureflag.NewServiceFromEnv(featureflag.WithLogger(slog.Default()))
+	if err != nil {
+		slog.Error("feature flag configuration failed to load", "error", err)
+		os.Exit(1)
+	}
+	_ = flags // wired into handlers/services as call sites adopt flags; see docs/feature-flags.md
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
