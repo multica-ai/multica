@@ -20,6 +20,7 @@ import type {
   UpdateAgentRequest,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
+  UpsertAgentRuntimeBindingRequest,
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
@@ -27,6 +28,7 @@ import type {
   RuntimeProfile,
   CreateRuntimeProfileRequest,
   UpdateRuntimeProfileRequest,
+  AgentRuntimeBinding,
   InboxItem,
   IssueSubscriber,
   Comment,
@@ -137,6 +139,7 @@ import { parseWithFallback } from "./schema";
 import {
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
+  AgentRuntimeBindingSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChildIssuesResponseSchema,
@@ -152,6 +155,7 @@ import {
   DashboardUsageDailyListSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
+  EMPTY_AGENT_RUNTIME_BINDING,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
   EMPTY_CLOUD_RUNTIME_NODE,
@@ -870,6 +874,44 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  async getAgentRuntimeBinding(id: string): Promise<AgentRuntimeBinding> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/runtime-binding`);
+    return parseWithFallback(
+      raw,
+      AgentRuntimeBindingSchema,
+      EMPTY_AGENT_RUNTIME_BINDING,
+      { endpoint: "GET /api/agents/:id/runtime-binding" },
+    );
+  }
+
+  async upsertAgentRuntimeBinding(
+    id: string,
+    data: UpsertAgentRuntimeBindingRequest,
+  ): Promise<AgentRuntimeBinding> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/runtime-binding`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      AgentRuntimeBindingSchema,
+      EMPTY_AGENT_RUNTIME_BINDING,
+      { endpoint: "PUT /api/agents/:id/runtime-binding" },
+    );
+  }
+
+  async deleteAgentRuntimeBinding(id: string): Promise<AgentRuntimeBinding> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/runtime-binding`, {
+      method: "DELETE",
+    });
+    return parseWithFallback(
+      raw,
+      AgentRuntimeBindingSchema,
+      EMPTY_AGENT_RUNTIME_BINDING,
+      { endpoint: "DELETE /api/agents/:id/runtime-binding" },
+    );
   }
 
   async archiveAgent(id: string): Promise<Agent> {
