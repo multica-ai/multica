@@ -526,6 +526,39 @@ type UpdateAgentTemplateBindingRequest struct {
 	SkipPersonalTemplate *bool  `json:"skip_personal_template"`
 }
 
+// personalTemplateOwnerMemberID returns the workspace member whose personal
+// templates may be bound to agent. For owned agents that is the owner; for
+// legacy ownerless agents it is the current user (admin managing the agent).
+func (h *Handler) personalTemplateOwnerMemberID(ctx context.Context, r *http.Request, agent db.Agent) (pgtype.UUID, bool) {
+	wsID := uuidToString(agent.WorkspaceID)
+	if agent.OwnerID.Valid {
+		member, err := h.getWorkspaceMember(ctx, uuidToString(agent.OwnerID), wsID)
+		if err != nil {
+			return pgtype.UUID{}, false
+		}
+		return member.ID, true
+	}
+	userID := requestUserID(r)
+	if userID == "" {
+		return pgtype.UUID{}, false
+	}
+	member, err := h.getWorkspaceMember(ctx, userID, wsID)
+	if err != nil {
+		return pgtype.UUID{}, false
+	}
+	return member.ID, true
+}
+
+func personalTemplateAllowedForAgent(tpl db.AgentConfigTemplate, ownerMemberID pgtype.UUID) bool {
+	if tpl.Scope != "personal" {
+		return false
+	}
+	if !tpl.CreatedBy.Valid || !ownerMemberID.Valid {
+		return false
+	}
+	return tpl.CreatedBy == ownerMemberID
+}
+
 func (h *Handler) UpdateAgentTemplateBinding(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "id")
 
@@ -551,6 +584,9 @@ func (h *Handler) UpdateAgentTemplateBinding(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
 	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
 
 	var req UpdateAgentTemplateBindingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -564,11 +600,11 @@ func (h *Handler) UpdateAgentTemplateBinding(w http.ResponseWriter, r *http.Requ
 		if !ok {
 			return
 		}
-		_, err := h.Queries.GetAgentConfigTemplateInWorkspace(r.Context(), db.GetAgentConfigTemplateInWorkspaceParams{
+		tpl, err := h.Queries.GetAgentConfigTemplateInWorkspace(r.Context(), db.GetAgentConfigTemplateInWorkspaceParams{
 			ID:          tplUUID,
 			WorkspaceID: agent.WorkspaceID,
 		})
-		if err != nil {
+		if err != nil || tpl.Scope != "system" {
 			writeError(w, http.StatusBadRequest, "invalid system_template_id")
 			return
 		}
@@ -579,11 +615,16 @@ func (h *Handler) UpdateAgentTemplateBinding(w http.ResponseWriter, r *http.Requ
 		if !ok {
 			return
 		}
-		_, err := h.Queries.GetAgentConfigTemplateInWorkspace(r.Context(), db.GetAgentConfigTemplateInWorkspaceParams{
+		tpl, err := h.Queries.GetAgentConfigTemplateInWorkspace(r.Context(), db.GetAgentConfigTemplateInWorkspaceParams{
 			ID:          tplUUID,
 			WorkspaceID: agent.WorkspaceID,
 		})
 		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid personal_template_id")
+			return
+		}
+		ownerMemberID, ok := h.personalTemplateOwnerMemberID(r.Context(), r, agent)
+		if !ok || !personalTemplateAllowedForAgent(tpl, ownerMemberID) {
 			writeError(w, http.StatusBadRequest, "invalid personal_template_id")
 			return
 		}

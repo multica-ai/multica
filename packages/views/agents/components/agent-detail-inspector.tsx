@@ -258,7 +258,7 @@ export function AgentDetailInspector({
       </Section>
 
       {/* Config Templates — agent-level template binding */}
-      <TemplateSection agentId={agent.id} />
+      <TemplateSection agentId={agent.id} canEdit={canEdit} />
 
       {/* Details — read-only (no hover, no chip styling — these aren't clickable) */}
       <Section label={t(($) => $.inspector.section_details)}>
@@ -1002,7 +1002,7 @@ function PresenceBadge({
 }
 
 /** Wrapper that loads the agent's template binding and renders TemplateSelector. */
-function TemplateSection({ agentId }: { agentId: string }) {
+function TemplateSection({ agentId, canEdit }: { agentId: string; canEdit: boolean }) {
   const workspaceId = useWorkspaceId();
   const { data: binding } = useQuery({
     queryKey: ["agent-template-binding", workspaceId, agentId],
@@ -1018,6 +1018,7 @@ function TemplateSection({ agentId }: { agentId: string }) {
         agentId={agentId}
         binding={effectiveBinding}
         onBindingChange={setLocalBinding}
+        canEdit={canEdit}
       />
     </div>
   );

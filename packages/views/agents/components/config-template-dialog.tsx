@@ -282,7 +282,7 @@ export function ConfigTemplateDialog({
             </div>
 
             {/* Detail pane */}
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 overflow-hidden">
               {selected ? (
                 <TemplateConfigEditor
                   template={selected}

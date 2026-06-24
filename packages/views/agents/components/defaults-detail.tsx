@@ -887,39 +887,39 @@ export function TemplateConfigEditor({
   const historyScope = !readOnly ? scope : undefined;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0 flex-col">
       {/* Header */}
-      <div className="flex shrink-0 flex-col gap-1 border-b px-4 py-2.5">
-        <div className="flex items-center gap-3">
-          <div
-            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
-              scope === "system" ? "bg-amber-500/10" : "bg-blue-500/10"
-            }`}
-          >
-            {scope === "system" ? (
-              <Settings2 className="h-4 w-4 text-amber-500" />
-            ) : (
-              <Sliders className="h-4 w-4 text-blue-500" />
-            )}
-          </div>
-          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{template.name}</h2>
+      <div className="flex shrink-0 gap-3 border-b px-4 py-2.5 min-w-0">
+        <div
+          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+            scope === "system" ? "bg-amber-500/10" : "bg-blue-500/10"
+          }`}
+        >
+          {scope === "system" ? (
+            <Settings2 className="h-4 w-4 text-amber-500" />
+          ) : (
+            <Sliders className="h-4 w-4 text-blue-500" />
+          )}
         </div>
-        {/* Description — editable inline, saved on blur. Read-only viewers see
-            plain text (or nothing when empty). Kept out of the tabbed form
-            because it's template metadata, not part of the merged config. */}
-        {readOnly ? (
-          template.description ? (
-            <p className="pl-10 text-xs text-muted-foreground">{template.description}</p>
-          ) : null
-        ) : (
-          <Input
-            key={`desc-${template.id}-${template.description ?? ""}`}
-            defaultValue={template.description ?? ""}
-            placeholder={t(($) => $.template.description_placeholder)}
-            onBlur={(e) => void saveDescription(e.target.value)}
-            className="ml-10 h-7 text-xs text-muted-foreground"
-          />
-        )}
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-sm font-semibold">{template.name}</h2>
+          {/* Description — editable inline, saved on blur. Read-only viewers see
+              plain text (or nothing when empty). Kept out of the tabbed form
+              because it's template metadata, not part of the merged config. */}
+          {readOnly ? (
+            template.description ? (
+              <p className="mt-1 truncate text-xs text-muted-foreground">{template.description}</p>
+            ) : null
+          ) : (
+            <Input
+              key={`desc-${template.id}-${template.description ?? ""}`}
+              defaultValue={template.description ?? ""}
+              placeholder={t(($) => $.template.description_placeholder)}
+              onBlur={(e) => void saveDescription(e.target.value)}
+              className="mt-1 h-7 text-xs text-muted-foreground"
+            />
+          )}
+        </div>
       </div>
       <DefaultsForm
         config={config}

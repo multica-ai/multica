@@ -24,12 +24,14 @@ interface TemplateSelectorProps {
   agentId: string;
   binding: AgentTemplateBinding | undefined;
   onBindingChange: (binding: AgentTemplateBinding) => void;
+  canEdit?: boolean;
 }
 
 export function TemplateSelector({
   agentId,
   binding,
   onBindingChange,
+  canEdit = true,
 }: TemplateSelectorProps) {
   const { t } = useT("agents");
   const workspaceId = useWorkspaceId();
@@ -75,7 +77,7 @@ export function TemplateSelector({
 
   const handleSystemChange = useCallback(
     (value: string | null) => {
-      if (value === null) return;
+      if (value === null || !canEdit) return;
 
       const isSkip = value === "__skip__";
       const isDefault = value === "__default__";
@@ -101,12 +103,12 @@ export function TemplateSelector({
         });
       });
     },
-    [workspaceId, agentId, onBindingChange, queryClient, t],
+    [workspaceId, agentId, onBindingChange, queryClient, t, canEdit],
   );
 
   const handlePersonalChange = useCallback(
     (value: string | null) => {
-      if (value === null) return;
+      if (value === null || !canEdit) return;
 
       const isSkip = value === "__skip__";
       const isDefault = value === "__default__";
@@ -129,10 +131,8 @@ export function TemplateSelector({
         });
       });
     },
-    [workspaceId, agentId, onBindingChange, queryClient, t],
+    [workspaceId, agentId, onBindingChange, queryClient, t, canEdit],
   );
-
-  const isLoading = loadingSystem || loadingPersonal;
 
   if (isLoading) {
     return (
@@ -157,8 +157,9 @@ export function TemplateSelector({
           <Select
             value={systemValue}
             onValueChange={handleSystemChange}
+            disabled={!canEdit}
           >
-            <SelectTrigger className="h-8 text-xs">
+            <SelectTrigger className="h-8 text-xs" disabled={!canEdit}>
               <SelectValue>
                 {(value: string) => labelFor(value, systemNameById)}
               </SelectValue>
@@ -182,8 +183,9 @@ export function TemplateSelector({
           <Select
             value={personalValue}
             onValueChange={handlePersonalChange}
+            disabled={!canEdit}
           >
-            <SelectTrigger className="h-8 text-xs">
+            <SelectTrigger className="h-8 text-xs" disabled={!canEdit}>
               <SelectValue>
                 {(value: string) => labelFor(value, personalNameById)}
               </SelectValue>
