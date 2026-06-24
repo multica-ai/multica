@@ -1,11 +1,11 @@
 ---
 title: 安装一个 Agent 运行时
-description: Multica 驱动本机上已安装的 AI 编程工具。这一页讲清楚怎么安装目前支持的 12 款工具，让守护进程能扫到。
+description: Multica 驱动本机上已安装的 AI 编程工具。这一页讲清楚怎么安装目前支持的 13 款工具，让守护进程能扫到。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-在 Multica 里，一个**运行时**（runtime）就是你机器上的守护进程，配上守护进程在 `PATH` 里扫到的某一款 AI 编程工具。如果 onboarding 的 "连接运行时" 这一步显示 **未检测到支持的工具**，说明守护进程扫了 `PATH`，但 12 款它认得的工具一个都没找到。装下面任意一款（或几款），回到这一步重新扫描，几秒内运行时就会出现。
+在 Multica 里，一个**运行时**（runtime）就是你机器上的守护进程，配上守护进程在 `PATH` 里扫到的某一款 AI 编程工具。如果 onboarding 的 "连接运行时" 这一步显示 **未检测到支持的工具**，说明守护进程扫了 `PATH`，但 13 款它认得的工具一个都没找到。装下面任意一款（或几款），回到这一步重新扫描，几秒内运行时就会出现。
 
 这一页是装机的入口，和它配套的是：
 
@@ -31,9 +31,9 @@ multica daemon restart
 
 桌面端的话，重启 app 即可。守护进程只在启动时扫一次 `PATH`。
 
-## 12 款支持的工具
+## 13 款支持的工具
 
-大致按常见程度排序。挑你已经有账号 / API key 的那几款就行 —— 不需要 12 个全装。
+大致按常见程度排序。挑你已经有账号 / API key 的那几款就行 —— 不需要 13 个全装。
 
 ### Claude Code（Anthropic）
 
@@ -76,16 +76,6 @@ Cursor 编辑器的 CLI 对应物。**会话续接可用**——当前 Cursor Ag
 | 安装 | 看 GitHub 的 CLI 文档 [github.com/github/copilot-cli](https://github.com/github/copilot-cli)。 |
 | 认证 | CLI 里走 GitHub 浏览器登录。 |
 | 备注 | 登录账号必须有有效的 GitHub Copilot 订阅。 |
-
-### Gemini（Google）
-
-支持 Gemini 2.5 和 3 系列。没有会话续接，没有 MCP —— 适合一次性、无需上下文记忆的任务。
-
-| | |
-|---|---|
-| 守护进程扫描 | `gemini` |
-| 安装 | 看官方指引 [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli)。常见装法是 npm 包 `@google/gemini-cli`。 |
-| 认证 | 跑 `gemini` 会提示 Google 账号登录，或设置 `GEMINI_API_KEY`。 |
 
 ### OpenCode（SST）
 
@@ -145,6 +135,26 @@ ACP 协议 agent（和 Kimi 共享传输层）。会话续接可用，MCP 配置
 |---|---|
 | 守护进程扫描 | `pi` |
 | 安装 | 看 Inflection 的 CLI 文档 [pi.ai](https://pi.ai/)。 |
+| 认证 | 按厂商文档。 |
+
+### CodeBuddy（Tencent）
+
+一款兼容 Claude Code 的 CLI agent。Multica 用和 Claude Code 一样的 stream-json 协议驱动它：会话续接通过 `--resume` 可用，MCP 配置通过 `--mcp-config` 传入，skill 放在 `.claude/skills/`。模型为动态发现。
+
+| | |
+|---|---|
+| 守护进程扫描 | `codebuddy` |
+| 安装 | 看官方 CLI 文档 [codebuddy.ai/cli](https://www.codebuddy.ai/cli)。 |
+| 认证 | 按厂商文档。 |
+
+### Qoder（Alibaba）
+
+一款 agentic 编程 CLI，在 stdio 上使用 ACP 协议（和 Hermes、Kimi、Kiro CLI 共享传输层）。会话续接通过 ACP `session/resume` 工作，MCP 配置通过 ACP `mcpServers` 传入，模型为动态发现，skill 复制到 `.qoder/skills/`。
+
+| | |
+|---|---|
+| 守护进程扫描 | `qodercli` |
+| 安装 | 看官方 CLI 文档 [qoder.com/cli](https://qoder.com/cli)。 |
 | 认证 | 按厂商文档。 |
 
 ### Antigravity（Google）
