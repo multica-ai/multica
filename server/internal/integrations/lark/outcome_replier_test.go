@@ -103,7 +103,7 @@ func (s *stubAPIClientWithRecorder) DeleteMessageReaction(ctx context.Context, p
 // stubCredentialsResolver returns a fixed plaintext secret.
 type stubCredentialsResolver struct{ secret string }
 
-func (s stubCredentialsResolver) DecryptAppSecret(inst db.LarkInstallation) (string, error) {
+func (s stubCredentialsResolver) DecryptAppSecret(inst Installation) (string, error) {
 	if s.secret == "" {
 		return "", errors.New("no secret configured")
 	}
@@ -198,7 +198,7 @@ func TestLarkOutcomeReplierAgentOfflineSendsCard(t *testing.T) {
 		PublicURL:   "https://multica.test",
 		Logger:      log,
 	})
-	inst := db.LarkInstallation{AppID: "cli_x"}
+	inst := Installation{AppID: "cli_x"}
 	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
 	msg := InboundMessage{ChatID: "oc_chat_1", SenderOpenID: "ou_user_1"}
 	rep.Reply(context.Background(), inst, msg, DispatchResult{Outcome: OutcomeAgentOffline})
@@ -234,7 +234,7 @@ func TestLarkOutcomeReplierAgentArchivedSendsCard(t *testing.T) {
 		Logger:      log,
 	})
 	msg := InboundMessage{ChatID: "oc_chat_arch"}
-	rep.Reply(context.Background(), db.LarkInstallation{}, msg, DispatchResult{Outcome: OutcomeAgentArchived})
+	rep.Reply(context.Background(), Installation{}, msg, DispatchResult{Outcome: OutcomeAgentArchived})
 	if len(stub.interactiveOut) != 1 {
 		t.Fatalf("expected one SendInteractiveCard call, got %d", len(stub.interactiveOut))
 	}
@@ -259,8 +259,8 @@ func TestLarkOutcomeReplierIngestedAndDroppedAreSilent(t *testing.T) {
 		Logger:      log,
 	})
 	msg := InboundMessage{ChatID: "oc_x"}
-	rep.Reply(context.Background(), db.LarkInstallation{}, msg, DispatchResult{Outcome: OutcomeIngested})
-	rep.Reply(context.Background(), db.LarkInstallation{}, msg, DispatchResult{Outcome: OutcomeDropped, DropReason: DropReasonDuplicate})
+	rep.Reply(context.Background(), Installation{}, msg, DispatchResult{Outcome: OutcomeIngested})
+	rep.Reply(context.Background(), Installation{}, msg, DispatchResult{Outcome: OutcomeDropped, DropReason: DropReasonDuplicate})
 	if len(stub.interactiveOut) != 0 || len(stub.bindingCalls) != 0 {
 		t.Errorf("Ingested/Dropped should not trigger any APIClient call; got interactive=%d binding=%d",
 			len(stub.interactiveOut), len(stub.bindingCalls))
@@ -284,7 +284,7 @@ func TestLarkOutcomeReplierOfflineSwallowsAPIError(t *testing.T) {
 		Logger:      log,
 	})
 	// Should NOT panic.
-	rep.Reply(context.Background(), db.LarkInstallation{}, InboundMessage{ChatID: "oc"}, DispatchResult{Outcome: OutcomeAgentOffline})
+	rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc"}, DispatchResult{Outcome: OutcomeAgentOffline})
 }
 
 // TestNoopReplierIsHandledByHub verifies that NewHub installs a noop
@@ -322,7 +322,7 @@ func TestLarkOutcomeReplierIssueCreatedSendsConfirmation(t *testing.T) {
 		Logger:      log,
 	})
 
-	inst := db.LarkInstallation{AppID: "cli_x"}
+	inst := Installation{AppID: "cli_x"}
 	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
 	msg := InboundMessage{ChatID: "oc_chat_42", SenderOpenID: "ou_user"}
 	rep.Reply(context.Background(), inst, msg, DispatchResult{
@@ -376,7 +376,7 @@ func TestLarkOutcomeReplierOutcomeIngestedSilentWithoutIssue(t *testing.T) {
 		Logger:      log,
 	})
 
-	rep.Reply(context.Background(), db.LarkInstallation{}, InboundMessage{ChatID: "oc"},
+	rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc"},
 		DispatchResult{Outcome: OutcomeIngested}) // no IssueID
 
 	stub.mu.Lock()
@@ -410,7 +410,7 @@ func TestLarkOutcomeReplierIssueCreatedThreadFallback(t *testing.T) {
 		Logger:      log,
 	})
 
-	rep.Reply(context.Background(), db.LarkInstallation{AppID: "cli_x"}, threadedInboundMsg("oc_chat_42"), DispatchResult{
+	rep.Reply(context.Background(), Installation{AppID: "cli_x"}, threadedInboundMsg("oc_chat_42"), DispatchResult{
 		Outcome:         OutcomeIngested,
 		IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
 		IssueNumber:     42,
@@ -447,7 +447,7 @@ func TestLarkOutcomeReplierIssueCreatedNoFallbackOnAmbiguous(t *testing.T) {
 		Logger:      log,
 	})
 
-	rep.Reply(context.Background(), db.LarkInstallation{AppID: "cli_x"}, threadedInboundMsg("oc_chat_42"), DispatchResult{
+	rep.Reply(context.Background(), Installation{AppID: "cli_x"}, threadedInboundMsg("oc_chat_42"), DispatchResult{
 		Outcome:         OutcomeIngested,
 		IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
 		IssueNumber:     42,
@@ -479,7 +479,7 @@ func TestLarkOutcomeReplierNoticeThreadFallback(t *testing.T) {
 		Logger:      log,
 	})
 
-	rep.Reply(context.Background(), db.LarkInstallation{AppID: "cli_x"}, threadedInboundMsg("oc_chat_1"), DispatchResult{Outcome: OutcomeAgentOffline})
+	rep.Reply(context.Background(), Installation{AppID: "cli_x"}, threadedInboundMsg("oc_chat_1"), DispatchResult{Outcome: OutcomeAgentOffline})
 
 	stub.mu.Lock()
 	defer stub.mu.Unlock()
@@ -509,7 +509,7 @@ func TestLarkOutcomeReplierNoticeNoFallbackOnAmbiguous(t *testing.T) {
 		Logger:      log,
 	})
 
-	rep.Reply(context.Background(), db.LarkInstallation{}, threadedInboundMsg("oc_chat_arch"), DispatchResult{Outcome: OutcomeAgentArchived})
+	rep.Reply(context.Background(), Installation{}, threadedInboundMsg("oc_chat_arch"), DispatchResult{Outcome: OutcomeAgentArchived})
 
 	stub.mu.Lock()
 	defer stub.mu.Unlock()

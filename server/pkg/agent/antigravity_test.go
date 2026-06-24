@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -71,12 +72,14 @@ func TestBuildAntigravityArgsModel(t *testing.T) {
 	}
 }
 
-func TestBuildAntigravityArgsNoTimeoutOmitsPrintTimeout(t *testing.T) {
+func TestBuildAntigravityArgsNoCapUsesLargePrintTimeout(t *testing.T) {
 	t.Parallel()
 
-	// timeout <= 0 means "no wall-clock cap" (MUL-3064): agy must be launched
-	// WITHOUT --print-timeout, otherwise antigravityFormatTimeout(0) clamps to
-	// 1s and the run is killed almost immediately — the opposite of "no cap".
+	// timeout <= 0 means "no wall-clock cap", but agy's --print-timeout DEFAULTS
+	// to 5m when omitted, so dropping the flag silently caps every turn at 5
+	// minutes and kills any run whose build/tests outlive it (MUL-3570). "No cap"
+	// must therefore be expressed by passing a value large enough to defer to the
+	// daemon's idle/tool watchdogs — NOT by omitting the flag.
 	args := buildAntigravityArgs(
 		"hello",
 		"/tmp/agy.log",
@@ -88,14 +91,101 @@ func TestBuildAntigravityArgsNoTimeoutOmitsPrintTimeout(t *testing.T) {
 	want := []string{
 		"-p", "hello",
 		"--dangerously-skip-permissions",
+		"--print-timeout", antigravityFormatTimeout(antigravityNoCapPrintTimeout),
 		"--log-file", "/tmp/agy.log",
 		"--add-dir", "/work",
 	}
 	if !slices.Equal(args, want) {
 		t.Fatalf("buildAntigravityArgs(timeout=0) mismatch\n got: %v\nwant: %v", args, want)
 	}
-	if slices.Contains(args, "--print-timeout") {
-		t.Fatalf("--print-timeout must be omitted when timeout <= 0; got %v", args)
+	// The no-cap value must be well clear of agy's 5m default; otherwise the
+	// guillotine still fires on a routine build+test turn.
+	if antigravityNoCapPrintTimeout <= 5*time.Minute {
+		t.Fatalf("antigravityNoCapPrintTimeout %s must be far larger than agy's 5m default", antigravityNoCapPrintTimeout)
+	}
+}
+
+func TestAntigravityPrintTimeoutResolvesBudget(t *testing.T) {
+	t.Parallel()
+
+	if got := antigravityPrintTimeout(20 * time.Minute); got != 20*time.Minute {
+		t.Errorf("positive cap should pass through: got %s, want 20m", got)
+	}
+	if got := antigravityPrintTimeout(0); got != antigravityNoCapPrintTimeout {
+		t.Errorf("zero cap should resolve to no-cap sentinel: got %s, want %s", got, antigravityNoCapPrintTimeout)
+	}
+	if got := antigravityPrintTimeout(-1); got != antigravityNoCapPrintTimeout {
+		t.Errorf("negative cap should resolve to no-cap sentinel: got %s, want %s", got, antigravityNoCapPrintTimeout)
+	}
+}
+
+func TestAntigravityPrintTimedOut(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	timedOut := filepath.Join(dir, "timeout.log")
+	if err := os.WriteFile(timedOut, []byte(strings.Join([]string{
+		`I0623 17:17:38.930400 65926 printmode.go:156] Print mode: conversation=ea49cf41-4156-425a-a2f7-4238335d4c8b, sending message`,
+		`E0623 17:17:59.017212 65926 printmode.go:289] Print mode: timed out after 100 polls (printed=3)`,
+	}, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !antigravityPrintTimedOut(timedOut) {
+		t.Error("expected the print-mode timeout marker to be detected")
+	}
+
+	clean := filepath.Join(dir, "clean.log")
+	if err := os.WriteFile(clean, []byte(
+		`I0623 17:17:38.930400 65926 printmode.go:156] Print mode: conversation=abc, sending message`,
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if antigravityPrintTimedOut(clean) {
+		t.Error("a clean log must not be flagged as timed out")
+	}
+
+	if antigravityPrintTimedOut("/nonexistent/path") {
+		t.Error("missing log file must be treated as not-timed-out")
+	}
+	if antigravityPrintTimedOut("") {
+		t.Error("empty log path must be treated as not-timed-out")
+	}
+}
+
+func TestAntigravityProviderError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	providerErr := filepath.Join(dir, "provider-error.log")
+	if err := os.WriteFile(providerErr, []byte(strings.Join([]string{
+		`I0624 12:34:24.652899 94820 printmode.go:156] Print mode: conversation=44a57718-801c-41e7-9691-3225be2b1cb8, sending message`,
+		`E0624 12:34:25.944050 94820 log.go:398] agent executor error: FAILED_PRECONDITION (code 400): User location is not supported for the API use.: FAILED_PRECONDITION (code 400): User location is not supported for the API use.`,
+	}, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := antigravityProviderError(providerErr)
+	if !strings.Contains(got, "FAILED_PRECONDITION") || !strings.Contains(got, "User location is not supported") {
+		t.Fatalf("expected provider error to be extracted, got %q", got)
+	}
+
+	authNoise := filepath.Join(dir, "auth-noise.log")
+	if err := os.WriteFile(authNoise, []byte(strings.Join([]string{
+		`W0624 12:34:21.518895 94820 log_context.go:117] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.`,
+		`I0624 12:34:24.084675 94820 printmode.go:192] Print mode: silent auth succeeded`,
+	}, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := antigravityProviderError(authNoise); got != "" {
+		t.Fatalf("auth retry noise must not be treated as terminal provider error, got %q", got)
+	}
+
+	if got := antigravityProviderError("/nonexistent/path"); got != "" {
+		t.Fatalf("missing log should yield empty provider error, got %q", got)
+	}
+	if got := antigravityProviderError(""); got != "" {
+		t.Fatalf("empty log path should yield empty provider error, got %q", got)
 	}
 }
 
@@ -212,6 +302,145 @@ func TestReadAntigravityConversationIDMissingFile(t *testing.T) {
 	}
 	if got := readAntigravityConversationID(""); got != "" {
 		t.Errorf("expected empty string for empty path, got %q", got)
+	}
+}
+
+// fakeAgyPrintTimeoutScript returns a POSIX-sh script that impersonates `agy -p`
+// hitting its own --print-timeout: it prints a couple of "I will ..." narration
+// lines (as agy streams to stdout), writes the printmode.go "timed out after N
+// polls" marker into the --log-file the daemon handed it, prints agy's
+// user-facing "Error: timed out waiting for response" line, and EXITS 0 — exactly
+// the sequence that made a stalled turn look "completed" (MUL-3570).
+func fakeAgyPrintTimeoutScript() string {
+	return `#!/bin/sh
+log=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) log="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+echo "I will run the Go unit tests to verify the build."
+echo "I will wait for the Go unit tests to complete."
+if [ -n "$log" ]; then
+  printf 'I0623 17:17:38.930400 1 printmode.go:156] Print mode: conversation=ea49cf41-4156-425a-a2f7-4238335d4c8b, sending message\n' >> "$log"
+  printf 'E0623 17:17:59.017212 1 printmode.go:289] Print mode: timed out after 100 polls (printed=2)\n' >> "$log"
+fi
+echo "Error: timed out waiting for response"
+exit 0
+`
+}
+
+// fakeAgyProviderErrorScript reproduces a real agy failure mode observed with
+// Gemini 3.5 Flash (High): the process exits 0 and prints nothing to stdout,
+// while the terminal provider error only appears in the daemon-owned log file.
+func fakeAgyProviderErrorScript() string {
+	return `#!/bin/sh
+log=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) log="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -n "$log" ]; then
+  printf 'I0624 12:34:24.652899 1 printmode.go:156] Print mode: conversation=44a57718-801c-41e7-9691-3225be2b1cb8, sending message\n' >> "$log"
+  printf 'E0624 12:34:25.944050 1 log.go:398] agent executor error: FAILED_PRECONDITION (code 400): User location is not supported for the API use.: FAILED_PRECONDITION (code 400): User location is not supported for the API use.\n' >> "$log"
+fi
+exit 0
+`
+}
+
+// TestAntigravityBackendPrintTimeoutSurfacesAsTimeout is the end-to-end guard for
+// MUL-3570: agy aborts a long turn by printing its timeout sentinel and exiting
+// 0, so the backend must classify the result as a timeout (not a truncated
+// "completed") while still preserving the narration printed before the cut-off.
+func TestAntigravityBackendPrintTimeoutSurfacesAsTimeout(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyPrintTimeoutScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Timeout: 0 ("no cap") so runContext never trips — the only signal that the
+	// turn died is agy's own print-timeout marker in the log.
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// Drain the message stream so the lifecycle goroutine can finish.
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "timeout" {
+			t.Fatalf("expected status=timeout, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "print mode timed out") {
+			t.Errorf("expected error to explain the print-mode timeout, got %q", result.Error)
+		}
+		// Narration streamed before the cut-off must still reach the result so
+		// the user sees how far the turn got.
+		if !strings.Contains(result.Output, "I will wait for the Go unit tests to complete") {
+			t.Errorf("expected partial narration to be preserved in output, got %q", result.Output)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestAntigravityBackendProviderErrorSurfacesAsFailed(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyProviderErrorScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "User location is not supported") {
+			t.Errorf("expected provider error to be surfaced, got %q", result.Error)
+		}
+		if result.Output != "" {
+			t.Errorf("expected empty stdout to remain empty, got %q", result.Output)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
 	}
 }
 

@@ -27,7 +27,7 @@ import (
 // are logged and swallowed; the next inbound message for the same
 // user retries the reply on its own.
 type OutcomeReplier interface {
-	Reply(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, res DispatchResult)
+	Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult)
 }
 
 // OutcomeReplierQueries is the narrow subset of *db.Queries the
@@ -44,7 +44,7 @@ type noopReplier struct {
 	log *slog.Logger
 }
 
-func (n *noopReplier) Reply(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, res DispatchResult) {
+func (n *noopReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
 	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived:
 		n.log.Warn("lark outcome replier: outbound reply skipped (replier not wired)",
@@ -145,7 +145,7 @@ func NewLarkOutcomeReplier(cfg OutcomeReplierConfig) OutcomeReplier {
 // Reply implements OutcomeReplier. Reads carefully — the switch is
 // the SOURCE OF TRUTH for which outcomes generate a reply, and a
 // missing branch silently drops the user-visible side effect.
-func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, res DispatchResult) {
+func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
 	case OutcomeNeedsBinding:
 		if err := r.sendBindingPrompt(ctx, inst, res); err != nil {
@@ -196,7 +196,7 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst db.LarkInstallation
 	}
 }
 
-func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst db.LarkInstallation, res DispatchResult) error {
+func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Installation, res DispatchResult) error {
 	if res.SenderOpenID == "" {
 		return errors.New("missing sender open_id")
 	}
@@ -226,7 +226,7 @@ func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst db.Lark
 // after MUL-2671's plain-text refactor. The link to Multica is
 // included on its own line so Lark's auto-linker turns it into a
 // tappable URL.
-func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, res DispatchResult) error {
+func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
 	}
@@ -288,7 +288,7 @@ func issueCreatedText(res DispatchResult, publicURL string) string {
 	return line + "\n" + strings.TrimRight(publicURL, "/") + "/issues/" + identifier
 }
 
-func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, body string) error {
+func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installation, msg InboundMessage, body string) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
 	}
@@ -318,7 +318,7 @@ func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst db.LarkIns
 	})
 }
 
-func (r *LarkOutcomeReplier) installationCredentials(inst db.LarkInstallation) (InstallationCredentials, error) {
+func (r *LarkOutcomeReplier) installationCredentials(inst Installation) (InstallationCredentials, error) {
 	secret, err := r.credentials.DecryptAppSecret(inst)
 	if err != nil {
 		return InstallationCredentials{}, fmt.Errorf("decrypt app_secret: %w", err)

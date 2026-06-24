@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -140,6 +141,23 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	// Feature flags: loaded once at startup from MULTICA_FEATURE_FLAGS_FILE
+	// (a YAML rule set) with FF_<KEY> env overrides layered on top.
+	// See docs/feature-flags.md for the schema and lifecycle rules.
+	//
+	// Booting the server without any flag config is intentional: when the
+	// env var is unset, every IsEnabled call falls through to the caller's
+	// default, so existing code paths are unchanged until someone adds a
+	// rule. A misconfigured (malformed / missing) file surfaces as a hard
+	// error so operators see misconfig the same way they do for any other
+	// MULTICA_*_FILE knob.
+	flags, err := featureflag.NewServiceFromEnv(featureflag.WithLogger(slog.Default()))
+	if err != nil {
+		slog.Error("feature flag configuration failed to load", "error", err)
+		os.Exit(1)
+	}
+	_ = flags // wired into handlers/services as call sites adopt flags; see docs/feature-flags.md
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -347,7 +365,6 @@ func main() {
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
-	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 
@@ -357,6 +374,22 @@ func main() {
 	// Lark do not pay any goroutine cost. Lifecycle is bound to
 	// sweepCtx so the Hub winds down alongside the other long-running
 	// workers, AFTER the HTTP server has drained.
+	// Cutover control (MUL-3515): MULTICA_LARK_HUB_DISABLED parks the Lark
+	// inbound hub WITHOUT taking down the rest of the API — the process still
+	// serves HTTP normally, it just never claims a WS lease or opens a Feishu
+	// connection. The switch is generation-agnostic: in a pre-cutover build it
+	// parks the OLD (lark_*) hub, in this build it parks the NEW (channel_*)
+	// hub. The lark_*->channel_* rollout uses it twice — first to stop the old
+	// hub on the current build so migration 124 takes a clean snapshot, then to
+	// hold this build's new hub dormant until that migration has run and the old
+	// pods have drained, so the two never double-process the same bot. Nil-ing
+	// LarkHub here reuses the same "Lark not configured" path, so the shutdown
+	// join below also skips it. The operator flips it off last to bring the new
+	// hub up on channel_*. See migration 124's ROLLOUT note for the full order.
+	if h.LarkHub != nil && os.Getenv("MULTICA_LARK_HUB_DISABLED") == "true" {
+		slog.Warn("Lark inbound hub disabled via MULTICA_LARK_HUB_DISABLED; API serves normally but no Feishu WebSocket is opened")
+		h.LarkHub = nil
+	}
 	if h.LarkHub != nil {
 		go h.LarkHub.Run(sweepCtx)
 	}
@@ -378,11 +411,19 @@ func main() {
 	schedulerMgr := scheduler.NewManager(pool, scheduler.Options{})
 	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
 		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
-	} else {
-		go func() {
-			_ = schedulerMgr.Run(sweepCtx)
-		}()
 	}
+	// MUL-3551: scheduled-Autopilot dispatch runs on the same DB-backed
+	// scheduler. The job owns its plan_times via PlansForScope (each
+	// trigger has its own cron expression, so the Cadence planner does
+	// not fit). Crash recovery, occurrence-level idempotency, lease
+	// theft, and retry are all reused from the manager + sys_cron_executions
+	// — there is no separate goroutine for scheduled Autopilot anymore.
+	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
+		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
+	}
+	go func() {
+		_ = schedulerMgr.Run(sweepCtx)
+	}()
 
 	if metricsServer != nil {
 		go func() {

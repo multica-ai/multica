@@ -97,7 +97,8 @@ func BuildColdCommentsHint(issueID, triggerCommentID, triggerThreadID string) st
 		"Read the triggering conversation first: "+
 			"`multica issue comment list %s --thread %s --tail 30 --output json` "+
 			"(that thread's root + its 30 newest replies). "+
-			"Need cross-thread background? `multica issue comment list %s --recent 10 --output json`.\n\n",
+			"Need cross-thread background? `multica issue comment list %s --recent 10 --output json` "+
+			"(resolved threads come back folded — `--full` to expand).\n\n",
 		issueID, threadID, issueID,
 	)
 }

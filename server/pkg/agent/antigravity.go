@@ -146,6 +146,23 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		} else if waitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("agy exited with error: %v", waitErr)
+		} else if finalStatus == "completed" && antigravityPrintTimedOut(logPath) {
+			// agy hit its own --print-timeout: it printed "Error: timed out
+			// waiting for response" to stdout and EXITED 0, so runCtx never
+			// tripped and waitErr is nil — the checks above leave the turn as
+			// "completed". Surface it as a real timeout instead of a truncated
+			// success the user can't distinguish from a finished task (MUL-3570).
+			finalStatus = "timeout"
+			finalError = fmt.Sprintf(
+				"agy print mode timed out after %s waiting for the agent response; a long-running command likely outlived --print-timeout",
+				antigravityPrintTimeout(timeout),
+			)
+		} else if providerErr := antigravityProviderError(logPath); finalStatus == "completed" && providerErr != "" {
+			// agy can also surface terminal model/provider failures only in the
+			// per-run log while exiting 0 with empty stdout. Without promoting
+			// that marker, the daemon records a failed turn as a blank success.
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("agy provider error: %s", providerErr)
 		}
 		if finalError != "" {
 			finalError = withAgentStderr(finalError, "agy", stderrBuf.Tail())
@@ -178,6 +195,51 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 var antigravityConversationIDRe = regexp.MustCompile(
 	`conversation=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})`,
 )
+
+// antigravityPrintTimeoutRe matches the glog line agy's printmode.go writes when
+// the print-mode wall-clock budget (--print-timeout) elapses before the agent
+// produced a final response. agy then prints "Error: timed out waiting for
+// response" to stdout and EXITS 0 — runCtx never trips and cmd.Wait returns nil
+// — so without this signal the daemon would record the truncated turn as a
+// successful "completed" (MUL-3570).
+//
+// Example: `E0623 17:17:59.017212 65926 printmode.go:289] Print mode: timed out
+// after 100 polls (printed=3)`
+var antigravityPrintTimeoutRe = regexp.MustCompile(`Print mode: timed out after \d+ polls`)
+
+var antigravityProviderErrorRe = regexp.MustCompile(`agent executor error:\s*(.+)`)
+
+// antigravityPrintTimedOut reports whether the per-run log shows agy hit its own
+// print-mode timeout. Best-effort: returns false if the log is missing or the
+// marker format changes upstream, in which case the run is classified by its
+// exit status as before.
+func antigravityPrintTimedOut(logPath string) bool {
+	if logPath == "" {
+		return false
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return false
+	}
+	return antigravityPrintTimeoutRe.Match(data)
+}
+
+// antigravityProviderError extracts terminal upstream/model errors that agy logs
+// but does not necessarily print to stdout or reflect in its exit code.
+func antigravityProviderError(logPath string) string {
+	if logPath == "" {
+		return ""
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return ""
+	}
+	matches := antigravityProviderErrorRe.FindAllSubmatch(data, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(string(matches[len(matches)-1][1]))
+}
 
 // readAntigravityConversationID scans the per-run log file for the
 // conversation UUID. Best-effort: returns "" if the log file is missing, the
@@ -245,14 +307,14 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
-	// Only pass --print-timeout when a positive wall-clock cap is configured.
-	// timeout <= 0 means "no cap" (MUL-3064): agy then runs without its own
-	// print-timeout guillotine, matching every other backend's runContext
-	// semantics. Passing antigravityFormatTimeout(0) would clamp to 1s and kill
-	// the run almost immediately — the opposite of "no cap".
-	if timeout > 0 {
-		args = append(args, "--print-timeout", antigravityFormatTimeout(timeout))
-	}
+	// agy's --print-timeout has NO "disabled" value and DEFAULTS TO 5m when the
+	// flag is omitted, so "no cap" cannot be expressed by dropping it — that
+	// silently guillotines every turn at 5 minutes, killing any run whose build
+	// or tests outlive the budget (MUL-3570). Always pass the flag: the
+	// configured wall-clock cap when positive, else a value so large agy's own
+	// timeout never fires before the daemon's idle/tool watchdogs reclaim a
+	// genuinely stuck run (see antigravityPrintTimeout).
+	args = append(args, "--print-timeout", antigravityFormatTimeout(antigravityPrintTimeout(timeout)))
 	args = append(args, "--log-file", logPath)
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--conversation", opts.ResumeSessionID)
@@ -288,6 +350,27 @@ func antigravityModelError(model string, available []Model) error {
 		"antigravity model %q is not available from `agy models`; pick one of: %s",
 		model, strings.Join(ids, ", "),
 	)
+}
+
+// antigravityNoCapPrintTimeout is the --print-timeout value used when the daemon
+// configures no wall-clock cap (opts.Timeout <= 0). agy's --print-timeout has no
+// "disabled" sentinel and falls back to a 5-minute default when omitted, so "no
+// cap" must instead be a value large enough that agy's own guillotine never
+// fires before the daemon's idle (30m) / tool (2h) watchdogs reclaim a genuinely
+// stuck run. 24h is effectively unbounded for any real turn while still being a
+// finite duration agy can parse.
+const antigravityNoCapPrintTimeout = 24 * time.Hour
+
+// antigravityPrintTimeout resolves the wall-clock budget handed to agy's
+// --print-timeout: the daemon's configured cap when positive, else the no-cap
+// sentinel above. It is the single source of truth shared by
+// buildAntigravityArgs (which sets the flag) and Execute (which labels a
+// print-mode timeout).
+func antigravityPrintTimeout(timeout time.Duration) time.Duration {
+	if timeout > 0 {
+		return timeout
+	}
+	return antigravityNoCapPrintTimeout
 }
 
 // antigravityFormatTimeout renders a Go duration in the `<n>m<n>s` shape the
