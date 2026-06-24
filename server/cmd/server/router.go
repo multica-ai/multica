@@ -698,6 +698,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteAgentRuntime)
 
 					// Runtime-level permissions (L1.4)
+					r.Get("/permission", h.GetRuntimePermissionForMe)
 					r.Route("/permissions", func(r chi.Router) {
 						r.Get("/", h.ListRuntimePermissions)
 						r.Post("/", h.CreateRuntimePermission)

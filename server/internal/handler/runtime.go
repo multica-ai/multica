@@ -699,6 +699,30 @@ func (h *Handler) requireRuntimePermission(w http.ResponseWriter, r *http.Reques
 	return member, rt, role, true
 }
 
+type MyRuntimePermissionResponse struct {
+	Role       string              `json:"role"`
+	CanControl bool                `json:"can_control"`
+	CanObserve bool                `json:"can_observe"`
+}
+
+// GetRuntimePermissionForMe handles GET /api/runtimes/{runtimeId}/permission.
+// It returns the calling user's effective runtime role and capabilities, so the
+// frontend can gate takeover/handback/finalize controls without reimplementing
+// the permission resolution logic.
+func (h *Handler) GetRuntimePermissionForMe(w http.ResponseWriter, r *http.Request) {
+	_, _, role, ok := h.requireRuntimePermission(w, r, chi.URLParam(r, "runtimeId"))
+	if !ok {
+		return
+	}
+
+	caps := runtimeCapabilities(role)
+	writeJSON(w, http.StatusOK, MyRuntimePermissionResponse{
+		Role:       string(role),
+		CanControl: caps.Control,
+		CanObserve: caps.Observe,
+	})
+}
+
 // ── Runtime permission management ─────────────────────────────────────────────
 
 type RuntimePermissionResponse struct {

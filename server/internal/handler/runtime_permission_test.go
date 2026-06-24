@@ -156,6 +156,32 @@ func TestCanObserveRuntime(t *testing.T) {
 	}
 }
 
+func TestGetRuntimePermissionForMe(t *testing.T) {
+	runtimeID := handlerTestRuntimeID(t)
+
+	req := newRequest("GET", "/api/runtimes/"+runtimeID+"/permission", nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	rr := httptest.NewRecorder()
+	router := chi.NewRouter()
+	router.Get("/api/runtimes/{runtimeId}/permission", testHandler.GetRuntimePermissionForMe)
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp MyRuntimePermissionResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if resp.Role != "owner" {
+		t.Fatalf("expected role owner, got %s", resp.Role)
+	}
+	if !resp.CanControl || !resp.CanObserve {
+		t.Fatalf("owner should control and observe, got control=%v observe=%v", resp.CanControl, resp.CanObserve)
+	}
+}
+
 // ── Management API tests ─────────────────────────────────────────────────────
 
 func TestListRuntimePermissions(t *testing.T) {
