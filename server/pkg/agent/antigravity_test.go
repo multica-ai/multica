@@ -153,6 +153,42 @@ func TestAntigravityPrintTimedOut(t *testing.T) {
 	}
 }
 
+func TestAntigravityProviderError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	providerErr := filepath.Join(dir, "provider-error.log")
+	if err := os.WriteFile(providerErr, []byte(strings.Join([]string{
+		`I0624 12:34:24.652899 94820 printmode.go:156] Print mode: conversation=44a57718-801c-41e7-9691-3225be2b1cb8, sending message`,
+		`E0624 12:34:25.944050 94820 log.go:398] agent executor error: FAILED_PRECONDITION (code 400): User location is not supported for the API use.: FAILED_PRECONDITION (code 400): User location is not supported for the API use.`,
+	}, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := antigravityProviderError(providerErr)
+	if !strings.Contains(got, "FAILED_PRECONDITION") || !strings.Contains(got, "User location is not supported") {
+		t.Fatalf("expected provider error to be extracted, got %q", got)
+	}
+
+	authNoise := filepath.Join(dir, "auth-noise.log")
+	if err := os.WriteFile(authNoise, []byte(strings.Join([]string{
+		`W0624 12:34:21.518895 94820 log_context.go:117] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.`,
+		`I0624 12:34:24.084675 94820 printmode.go:192] Print mode: silent auth succeeded`,
+	}, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := antigravityProviderError(authNoise); got != "" {
+		t.Fatalf("auth retry noise must not be treated as terminal provider error, got %q", got)
+	}
+
+	if got := antigravityProviderError("/nonexistent/path"); got != "" {
+		t.Fatalf("missing log should yield empty provider error, got %q", got)
+	}
+	if got := antigravityProviderError(""); got != "" {
+		t.Fatalf("empty log path should yield empty provider error, got %q", got)
+	}
+}
+
 func TestBuildAntigravityArgsResume(t *testing.T) {
 	t.Parallel()
 
@@ -295,6 +331,26 @@ exit 0
 `
 }
 
+// fakeAgyProviderErrorScript reproduces a real agy failure mode observed with
+// Gemini 3.5 Flash (High): the process exits 0 and prints nothing to stdout,
+// while the terminal provider error only appears in the daemon-owned log file.
+func fakeAgyProviderErrorScript() string {
+	return `#!/bin/sh
+log=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) log="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -n "$log" ]; then
+  printf 'I0624 12:34:24.652899 1 printmode.go:156] Print mode: conversation=44a57718-801c-41e7-9691-3225be2b1cb8, sending message\n' >> "$log"
+  printf 'E0624 12:34:25.944050 1 log.go:398] agent executor error: FAILED_PRECONDITION (code 400): User location is not supported for the API use.: FAILED_PRECONDITION (code 400): User location is not supported for the API use.\n' >> "$log"
+fi
+exit 0
+`
+}
+
 // TestAntigravityBackendPrintTimeoutSurfacesAsTimeout is the end-to-end guard for
 // MUL-3570: agy aborts a long turn by printing its timeout sentinel and exiting
 // 0, so the backend must classify the result as a timeout (not a truncated
@@ -340,6 +396,48 @@ func TestAntigravityBackendPrintTimeoutSurfacesAsTimeout(t *testing.T) {
 		// the user sees how far the turn got.
 		if !strings.Contains(result.Output, "I will wait for the Go unit tests to complete") {
 			t.Errorf("expected partial narration to be preserved in output, got %q", result.Output)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestAntigravityBackendProviderErrorSurfacesAsFailed(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyProviderErrorScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "User location is not supported") {
+			t.Errorf("expected provider error to be surfaced, got %q", result.Error)
+		}
+		if result.Output != "" {
+			t.Errorf("expected empty stdout to remain empty, got %q", result.Output)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")

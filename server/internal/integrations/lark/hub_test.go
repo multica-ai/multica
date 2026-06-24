@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // fakeHubQueries is the unit-test seam for HubQueries. The lease state
@@ -20,7 +19,7 @@ import (
 // and "another replica holds the lease" scenarios across one test.
 type fakeHubQueries struct {
 	mu             sync.Mutex
-	installations  []db.LarkInstallation
+	installations  []Installation
 	listErr        error
 	leaseOwner     map[string]string    // installation_id -> ws_lease_token
 	leaseExpiresAt map[string]time.Time // installation_id -> expiry
@@ -50,23 +49,23 @@ func newFakeHubQueries() *fakeHubQueries {
 	}
 }
 
-func (f *fakeHubQueries) ListActiveLarkInstallations(ctx context.Context) ([]db.LarkInstallation, error) {
+func (f *fakeHubQueries) ListActiveLarkInstallations(ctx context.Context) ([]Installation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
-	out := make([]db.LarkInstallation, len(f.installations))
+	out := make([]Installation, len(f.installations))
 	copy(out, f.installations)
 	return out, nil
 }
 
-func (f *fakeHubQueries) AcquireLarkWSLease(ctx context.Context, arg db.AcquireLarkWSLeaseParams) (db.LarkInstallation, error) {
+func (f *fakeHubQueries) AcquireLarkWSLease(ctx context.Context, arg AcquireWSLeaseParams) (Installation, error) {
 	atomic.AddInt32(&f.acquireCount, 1)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.acquireErr != nil {
-		return db.LarkInstallation{}, f.acquireErr
+		return Installation{}, f.acquireErr
 	}
 	id := uuidString(arg.ID)
 	owner, hasOwner := f.leaseOwner[id]
@@ -78,13 +77,13 @@ func (f *fakeHubQueries) AcquireLarkWSLease(ctx context.Context, arg db.AcquireL
 		f.leaseExpiresAt[id] = arg.NewExpiresAt.Time
 		// Return the (synthetic) row — the supervise loop only checks
 		// the error, not the row contents.
-		return db.LarkInstallation{ID: arg.ID}, nil
+		return Installation{ID: arg.ID}, nil
 	}
 	// Live lease held by someone else.
-	return db.LarkInstallation{}, errPgxNoRows
+	return Installation{}, errPgxNoRows
 }
 
-func (f *fakeHubQueries) ReleaseLarkWSLease(ctx context.Context, arg db.ReleaseLarkWSLeaseParams) error {
+func (f *fakeHubQueries) ReleaseLarkWSLease(ctx context.Context, arg ReleaseWSLeaseParams) error {
 	f.mu.Lock()
 	block := f.releaseBlock
 	f.mu.Unlock()
@@ -132,7 +131,7 @@ type fakeConnector struct {
 	emit   EventEmitter
 }
 
-func (f *fakeConnector) Run(ctx context.Context, _ db.LarkInstallation, emit EventEmitter) error {
+func (f *fakeConnector) Run(ctx context.Context, _ Installation, emit EventEmitter) error {
 	f.mu.Lock()
 	idx := f.runs
 	f.runs++
@@ -170,10 +169,10 @@ func newDiscardLogger() *slog.Logger {
 func TestHubAcquiresLeaseAndStartsSupervisor(t *testing.T) {
 	q := newFakeHubQueries()
 	instID := uuidFromString(t, "11111111-1111-1111-1111-111111111111")
-	q.installations = []db.LarkInstallation{{ID: instID, Status: "active"}}
+	q.installations = []Installation{{ID: instID, Status: "active"}}
 
 	conn := &fakeConnector{}
-	factory := func(_ db.LarkInstallation) (EventConnector, error) { return conn, nil }
+	factory := func(_ Installation) (EventConnector, error) { return conn, nil }
 
 	hub := NewHub(q, factory, nil, HubConfig{
 		LeaseTTL:           500 * time.Millisecond,
@@ -208,12 +207,12 @@ func TestHubAcquiresLeaseAndStartsSupervisor(t *testing.T) {
 func TestHubSkipsInstallationWhenAnotherReplicaHoldsLease(t *testing.T) {
 	q := newFakeHubQueries()
 	instID := uuidFromString(t, "22222222-2222-2222-2222-222222222222")
-	q.installations = []db.LarkInstallation{{ID: instID, Status: "active"}}
+	q.installations = []Installation{{ID: instID, Status: "active"}}
 	// Another replica already owns the lease for the next 10 seconds.
 	q.presetLease(instID, "other-replica", time.Now().Add(10*time.Second))
 
 	conn := &fakeConnector{}
-	factory := func(_ db.LarkInstallation) (EventConnector, error) { return conn, nil }
+	factory := func(_ Installation) (EventConnector, error) { return conn, nil }
 
 	hub := NewHub(q, factory, nil, HubConfig{
 		LeaseTTL:           500 * time.Millisecond,
@@ -242,13 +241,13 @@ func TestHubSkipsInstallationWhenAnotherReplicaHoldsLease(t *testing.T) {
 func TestHubReclaimsLeaseAfterAnotherReplicaExpires(t *testing.T) {
 	q := newFakeHubQueries()
 	instID := uuidFromString(t, "33333333-3333-3333-3333-333333333333")
-	q.installations = []db.LarkInstallation{{ID: instID, Status: "active"}}
+	q.installations = []Installation{{ID: instID, Status: "active"}}
 	// Set the other replica's lease to expire in 80ms so the hub
 	// (which polls/renews on 20ms intervals) will pick it up.
 	q.presetLease(instID, "other-replica", time.Now().Add(80*time.Millisecond))
 
 	conn := &fakeConnector{}
-	factory := func(_ db.LarkInstallation) (EventConnector, error) { return conn, nil }
+	factory := func(_ Installation) (EventConnector, error) { return conn, nil }
 
 	hub := NewHub(q, factory, nil, HubConfig{
 		LeaseTTL:           500 * time.Millisecond,
@@ -273,10 +272,10 @@ func TestHubReclaimsLeaseAfterAnotherReplicaExpires(t *testing.T) {
 func TestHubReapsSupervisorWhenInstallationRevoked(t *testing.T) {
 	q := newFakeHubQueries()
 	instID := uuidFromString(t, "44444444-4444-4444-4444-444444444444")
-	q.installations = []db.LarkInstallation{{ID: instID, Status: "active"}}
+	q.installations = []Installation{{ID: instID, Status: "active"}}
 
 	conn := &fakeConnector{}
-	factory := func(_ db.LarkInstallation) (EventConnector, error) { return conn, nil }
+	factory := func(_ Installation) (EventConnector, error) { return conn, nil }
 
 	hub := NewHub(q, factory, nil, HubConfig{
 		LeaseTTL:           500 * time.Millisecond,
@@ -330,7 +329,7 @@ func TestHubReapsSupervisorWhenInstallationRevoked(t *testing.T) {
 func TestHubRestartsSupervisorOnCredentialsRotation(t *testing.T) {
 	q := newFakeHubQueries()
 	instID := uuidFromString(t, "abcdabcd-abcd-abcd-abcd-abcdabcdabcd")
-	q.installations = []db.LarkInstallation{{
+	q.installations = []Installation{{
 		ID:                 instID,
 		Status:             "active",
 		AppID:              "app_one",
@@ -341,7 +340,7 @@ func TestHubRestartsSupervisorOnCredentialsRotation(t *testing.T) {
 	type seenInst struct{ AppID string }
 	var mu sync.Mutex
 	var seen []seenInst
-	factory := func(inst db.LarkInstallation) (EventConnector, error) {
+	factory := func(inst Installation) (EventConnector, error) {
 		mu.Lock()
 		seen = append(seen, seenInst{AppID: inst.AppID})
 		mu.Unlock()
@@ -404,7 +403,7 @@ func TestHubRestartsSupervisorOnCredentialsRotation(t *testing.T) {
 func TestHubDoesNotRestartSupervisorOnUnchangedRow(t *testing.T) {
 	q := newFakeHubQueries()
 	instID := uuidFromString(t, "bcdebcde-bcde-bcde-bcde-bcdebcdebcde")
-	q.installations = []db.LarkInstallation{{
+	q.installations = []Installation{{
 		ID:                 instID,
 		Status:             "active",
 		AppID:              "app_stable",
@@ -413,7 +412,7 @@ func TestHubDoesNotRestartSupervisorOnUnchangedRow(t *testing.T) {
 	}}
 
 	starts := int32(0)
-	factory := func(_ db.LarkInstallation) (EventConnector, error) {
+	factory := func(_ Installation) (EventConnector, error) {
 		atomic.AddInt32(&starts, 1)
 		return &fakeConnector{}, nil
 	}
@@ -452,13 +451,13 @@ func TestHubDoesNotRestartSupervisorOnUnchangedRow(t *testing.T) {
 // tokens, both old and new supervisors of the same Hub used the same
 // hub-wide nodeID as their lease token. The rotation race went:
 //
-//   1. Old supervisor cancelled by maybeRestartOnRotation.
-//   2. New supervisor started; acquireLease takes the lease.
-//   3. Old supervisor finishes post-cancel unwind and calls
-//      releaseLease(nodeID).
-//   4. DB row's CurrentToken still equals nodeID (because new
-//      supervisor wrote the SAME token). DELETE matches → DB row
-//      cleared → new supervisor's lease silently lost.
+//  1. Old supervisor cancelled by maybeRestartOnRotation.
+//  2. New supervisor started; acquireLease takes the lease.
+//  3. Old supervisor finishes post-cancel unwind and calls
+//     releaseLease(nodeID).
+//  4. DB row's CurrentToken still equals nodeID (because new
+//     supervisor wrote the SAME token). DELETE matches → DB row
+//     cleared → new supervisor's lease silently lost.
 //
 // Per-supervisor tokens (nodeID + "-g" + gen) make step 3's
 // CurrentToken belong to the OLD supervisor, and the DB row's actual
@@ -481,7 +480,7 @@ func TestHubRotationStaleReleaseDoesNotClearSuccessorLease(t *testing.T) {
 	}
 
 	// Old supervisor acquires.
-	if _, err := q.AcquireLarkWSLease(context.Background(), db.AcquireLarkWSLeaseParams{
+	if _, err := q.AcquireLarkWSLease(context.Background(), AcquireWSLeaseParams{
 		ID:           instID,
 		NewToken:     pgtype.Text{String: tokenA, Valid: true},
 		NewExpiresAt: pgtype.Timestamptz{Time: expires, Valid: true},
@@ -507,7 +506,7 @@ func TestHubRotationStaleReleaseDoesNotClearSuccessorLease(t *testing.T) {
 	delete(q.leaseOwner, uuidString(instID))
 	delete(q.leaseExpiresAt, uuidString(instID))
 	q.mu.Unlock()
-	if _, err := q.AcquireLarkWSLease(context.Background(), db.AcquireLarkWSLeaseParams{
+	if _, err := q.AcquireLarkWSLease(context.Background(), AcquireWSLeaseParams{
 		ID:           instID,
 		NewToken:     pgtype.Text{String: tokenB, Valid: true},
 		NewExpiresAt: pgtype.Timestamptz{Time: expires, Valid: true},
@@ -522,7 +521,7 @@ func TestHubRotationStaleReleaseDoesNotClearSuccessorLease(t *testing.T) {
 
 	// Old supervisor's defer / cleanup fires AFTER new acquired.
 	// Without per-supervisor tokens this would clobber tokenB's lease.
-	if err := q.ReleaseLarkWSLease(context.Background(), db.ReleaseLarkWSLeaseParams{
+	if err := q.ReleaseLarkWSLease(context.Background(), ReleaseWSLeaseParams{
 		ID:           instID,
 		CurrentToken: pgtype.Text{String: tokenA, Valid: true},
 	}); err != nil {
@@ -545,10 +544,10 @@ func TestHubRotationStaleReleaseDoesNotClearSuccessorLease(t *testing.T) {
 // rotation race through the live supervise loop — not just the lease
 // state machine in isolation. Drives a hub through:
 //
-//   1. install row with credentials A → supervisor1 acquires lease(A)
-//   2. credentials rotate to B → maybeRestartOnRotation cancels sup1
-//   3. supervisor2 starts, acquires lease(B)
-//   4. sup1's post-cancel releaseLease(A) runs; must NOT clear lease(B)
+//  1. install row with credentials A → supervisor1 acquires lease(A)
+//  2. credentials rotate to B → maybeRestartOnRotation cancels sup1
+//  3. supervisor2 starts, acquires lease(B)
+//  4. sup1's post-cancel releaseLease(A) runs; must NOT clear lease(B)
 //
 // Even with the timing being non-deterministic (real goroutines), the
 // fake's lease map either ends up with sup2's token or empty — empty
@@ -558,7 +557,7 @@ func TestHubRotationStaleReleaseDoesNotClearSuccessorLease(t *testing.T) {
 func TestHubRotationEndToEndKeepsSuccessorLeased(t *testing.T) {
 	q := newFakeHubQueries()
 	instID := uuidFromString(t, "feedfeed-feed-feed-feed-feedfeedfeed")
-	q.installations = []db.LarkInstallation{{
+	q.installations = []Installation{{
 		ID:                 instID,
 		Status:             "active",
 		AppID:              "app_one",
@@ -570,7 +569,7 @@ func TestHubRotationEndToEndKeepsSuccessorLeased(t *testing.T) {
 	// running and refreshes the lease at each tick, mirroring
 	// production timing for the rotation handoff.
 	factoryCalls := int32(0)
-	factory := func(_ db.LarkInstallation) (EventConnector, error) {
+	factory := func(_ Installation) (EventConnector, error) {
 		atomic.AddInt32(&factoryCalls, 1)
 		return &fakeConnector{}, nil
 	}
@@ -641,10 +640,10 @@ func TestHubRotationEndToEndKeepsSuccessorLeased(t *testing.T) {
 func TestHubBacksOffOnFactoryError(t *testing.T) {
 	q := newFakeHubQueries()
 	instID := uuidFromString(t, "55555555-5555-5555-5555-555555555555")
-	q.installations = []db.LarkInstallation{{ID: instID, Status: "active"}}
+	q.installations = []Installation{{ID: instID, Status: "active"}}
 
 	factoryCalls := int32(0)
-	factory := func(_ db.LarkInstallation) (EventConnector, error) {
+	factory := func(_ Installation) (EventConnector, error) {
 		atomic.AddInt32(&factoryCalls, 1)
 		return nil, errors.New("boom")
 	}
@@ -686,7 +685,7 @@ func TestHubBacksOffOnFactoryError(t *testing.T) {
 func TestHubLeaseLossCancelsConnector(t *testing.T) {
 	q := newFakeHubQueries()
 	instID := uuidFromString(t, "66666666-6666-6666-6666-666666666666")
-	q.installations = []db.LarkInstallation{{ID: instID, Status: "active"}}
+	q.installations = []Installation{{ID: instID, Status: "active"}}
 
 	// fakeConnector default behavior blocks on ctx.Done — perfect for
 	// "simulate a socket that never returns until we explicitly cancel
@@ -702,7 +701,7 @@ func TestHubLeaseLossCancelsConnector(t *testing.T) {
 			},
 		},
 	}
-	factory := func(_ db.LarkInstallation) (EventConnector, error) { return conn, nil }
+	factory := func(_ Installation) (EventConnector, error) { return conn, nil }
 
 	hub := NewHub(q, factory, nil, HubConfig{
 		LeaseTTL:           500 * time.Millisecond,
@@ -748,7 +747,7 @@ func TestHubLeaseLossCancelsConnector(t *testing.T) {
 func TestHubEmitReturnsDispatchResultAndError(t *testing.T) {
 	q := newFakeHubQueries()
 	instID := uuidFromString(t, "77777777-7777-7777-7777-777777777777")
-	q.installations = []db.LarkInstallation{{ID: instID, Status: "active"}}
+	q.installations = []Installation{{ID: instID, Status: "active"}}
 
 	// Capture what emit returned on the first invocation so the
 	// connector goroutine can stash it for the test.
@@ -776,7 +775,7 @@ func TestHubEmitReturnsDispatchResultAndError(t *testing.T) {
 			},
 		},
 	}
-	factory := func(_ db.LarkInstallation) (EventConnector, error) { return conn, nil }
+	factory := func(_ Installation) (EventConnector, error) { return conn, nil }
 
 	// No dispatcher wired -> emit must return ErrDispatcherNotConfigured.
 	// The point is the error surfaces back to the connector instead of
@@ -821,10 +820,10 @@ func TestHubReleaseLeaseBoundedByTimeout(t *testing.T) {
 	q := newFakeHubQueries()
 	q.releaseBlock = make(chan struct{}) // never closed; release always sees ctx.Done
 	instID := uuidFromString(t, "88888888-8888-8888-8888-888888888888")
-	q.installations = []db.LarkInstallation{{ID: instID, Status: "active"}}
+	q.installations = []Installation{{ID: instID, Status: "active"}}
 
 	conn := &fakeConnector{}
-	factory := func(_ db.LarkInstallation) (EventConnector, error) { return conn, nil }
+	factory := func(_ Installation) (EventConnector, error) { return conn, nil }
 
 	releaseTimeout := 50 * time.Millisecond
 	hub := NewHub(q, factory, nil, HubConfig{
@@ -880,10 +879,10 @@ func TestHubReleaseLeaseBoundedByTimeout(t *testing.T) {
 func TestHubWaitWithTimeoutReturnsTrueWhenSupervisorsExit(t *testing.T) {
 	q := newFakeHubQueries()
 	instID := uuidFromString(t, "99999999-9999-9999-9999-999999999999")
-	q.installations = []db.LarkInstallation{{ID: instID, Status: "active"}}
+	q.installations = []Installation{{ID: instID, Status: "active"}}
 
 	conn := &fakeConnector{}
-	factory := func(_ db.LarkInstallation) (EventConnector, error) { return conn, nil }
+	factory := func(_ Installation) (EventConnector, error) { return conn, nil }
 
 	hub := NewHub(q, factory, nil, HubConfig{
 		LeaseTTL:           500 * time.Millisecond,
@@ -919,10 +918,10 @@ func TestHubWaitWithTimeoutReturnsFalseWhenSupervisorStuck(t *testing.T) {
 	q := newFakeHubQueries()
 	q.releaseBlock = make(chan struct{}) // never closed
 	instID := uuidFromString(t, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-	q.installations = []db.LarkInstallation{{ID: instID, Status: "active"}}
+	q.installations = []Installation{{ID: instID, Status: "active"}}
 
 	conn := &fakeConnector{}
-	factory := func(_ db.LarkInstallation) (EventConnector, error) { return conn, nil }
+	factory := func(_ Installation) (EventConnector, error) { return conn, nil }
 
 	// LeaseReleaseTimeout > ShutdownTimeout so the release is still
 	// blocked when the join deadline expires. This pins the "join
@@ -994,12 +993,12 @@ func waitFor(timeout time.Duration, cond func() bool) bool {
 // invariant: a Reply that exceeds ReplyTimeout MUST get its ctx
 // cancelled instead of running unbounded.
 type slowReplier struct {
-	delay       time.Duration
-	startCh     chan struct{}
-	finishCh    chan struct{}
-	mu          sync.Mutex
-	callCount   int
-	lastCtxErr  error // ctx.Err() observed when Reply returned
+	delay      time.Duration
+	startCh    chan struct{}
+	finishCh   chan struct{}
+	mu         sync.Mutex
+	callCount  int
+	lastCtxErr error // ctx.Err() observed when Reply returned
 }
 
 func newSlowReplier(delay time.Duration) *slowReplier {
@@ -1010,7 +1009,7 @@ func newSlowReplier(delay time.Duration) *slowReplier {
 	}
 }
 
-func (s *slowReplier) Reply(ctx context.Context, _ db.LarkInstallation, _ InboundMessage, _ DispatchResult) {
+func (s *slowReplier) Reply(ctx context.Context, _ Installation, _ InboundMessage, _ DispatchResult) {
 	s.mu.Lock()
 	s.callCount++
 	s.mu.Unlock()
@@ -1060,7 +1059,7 @@ func TestHubScheduleReplyReturnsImmediately(t *testing.T) {
 	hub.SetOutcomeReplier(rep)
 
 	start := time.Now()
-	hub.scheduleReply(db.LarkInstallation{}, InboundMessage{EventID: "e1"},
+	hub.scheduleReply(Installation{}, InboundMessage{EventID: "e1"},
 		DispatchResult{Outcome: OutcomeNeedsBinding}, newDiscardLogger())
 	elapsed := time.Since(start)
 
@@ -1103,7 +1102,7 @@ func TestHubReplyTimeoutCancelsHungReplier(t *testing.T) {
 	hub.SetOutcomeReplier(rep)
 
 	start := time.Now()
-	hub.scheduleReply(db.LarkInstallation{}, InboundMessage{EventID: "e2"},
+	hub.scheduleReply(Installation{}, InboundMessage{EventID: "e2"},
 		DispatchResult{Outcome: OutcomeAgentOffline}, newDiscardLogger())
 
 	select {
@@ -1138,7 +1137,7 @@ func TestHubWaitDrainsInFlightReplies(t *testing.T) {
 	})
 	hub.SetOutcomeReplier(rep)
 
-	hub.scheduleReply(db.LarkInstallation{}, InboundMessage{EventID: "e3"},
+	hub.scheduleReply(Installation{}, InboundMessage{EventID: "e3"},
 		DispatchResult{Outcome: OutcomeNeedsBinding}, newDiscardLogger())
 
 	// Wait should block until the reply finishes its 30ms work.
@@ -1174,7 +1173,7 @@ func TestHubNoopReplierInlineNoGoroutine(t *testing.T) {
 	// goroutines schedule, but with the fast-path it must return
 	// instantly.
 	for i := 0; i < 1000; i++ {
-		hub.scheduleReply(db.LarkInstallation{}, InboundMessage{EventID: "e"},
+		hub.scheduleReply(Installation{}, InboundMessage{EventID: "e"},
 			DispatchResult{Outcome: OutcomeNeedsBinding}, newDiscardLogger())
 	}
 	done := make(chan struct{})
@@ -1220,7 +1219,7 @@ func TestHubACKNotBlockedByOutboundReply(t *testing.T) {
 	t.Parallel()
 
 	conn := newFakeWSConn()
-	decoder := FrameDecoderFunc(func(payload []byte, _ db.LarkInstallation) (InboundMessage, bool, error) {
+	decoder := FrameDecoderFunc(func(payload []byte, _ Installation) (InboundMessage, bool, error) {
 		return InboundMessage{EventID: string(payload)}, true, nil
 	})
 	c := quietConnector(t, conn, decoder, time.Hour) // disable ping
@@ -1245,7 +1244,7 @@ func TestHubACKNotBlockedByOutboundReply(t *testing.T) {
 			Outcome:      OutcomeNeedsBinding,
 			SenderOpenID: "ou_user_42",
 		}
-		hub.scheduleReply(db.LarkInstallation{}, msg, res, newDiscardLogger())
+		hub.scheduleReply(Installation{}, msg, res, newDiscardLogger())
 		return res, nil
 	}
 
@@ -1253,7 +1252,7 @@ func TestHubACKNotBlockedByOutboundReply(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- c.Run(ctx, db.LarkInstallation{AppID: "test_app"}, emit)
+		done <- c.Run(ctx, Installation{AppID: "test_app"}, emit)
 	}()
 
 	start := time.Now()

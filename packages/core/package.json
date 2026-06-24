@@ -99,6 +99,7 @@
     "./logger": "./logger.ts",
     "./utils": "./utils.ts",
     "./constants/*": "./constants/*.ts",
+    "./feature-flags": "./feature-flags/index.ts",
     "./platform": "./platform/index.ts",
     "./analytics": "./analytics/index.ts",
     "./i18n": "./i18n/index.ts",

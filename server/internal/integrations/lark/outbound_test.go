@@ -18,17 +18,17 @@ import (
 
 type fakePatcherQueries struct {
 	mu              sync.Mutex
-	binding         db.LarkChatSessionBinding
+	binding         ChatSessionBinding
 	bindingErr      error
-	installation    db.LarkInstallation
+	installation    Installation
 	installationErr error
 	agent           db.Agent
 	agentErr        error
-	card            db.LarkOutboundCardMessage
+	card            OutboundCardMessage
 	cardErr         error
-	created         []db.CreateLarkOutboundCardMessageParams
-	createReturn    db.LarkOutboundCardMessage
-	statusUpdates   []db.UpdateLarkOutboundCardStatusParams
+	created         []CreateOutboundCardMessageParams
+	createReturn    OutboundCardMessage
+	statusUpdates   []UpdateOutboundCardStatusParams
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -40,22 +40,22 @@ func (f *fakePatcherQueries) GetChatSession(ctx context.Context, id pgtype.UUID)
 func (f *fakePatcherQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error) {
 	return f.agent, f.agentErr
 }
-func (f *fakePatcherQueries) GetLarkInstallation(ctx context.Context, id pgtype.UUID) (db.LarkInstallation, error) {
+func (f *fakePatcherQueries) GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error) {
 	return f.installation, f.installationErr
 }
-func (f *fakePatcherQueries) GetLarkChatSessionBindingBySession(ctx context.Context, sessID pgtype.UUID) (db.LarkChatSessionBinding, error) {
+func (f *fakePatcherQueries) GetLarkChatSessionBindingBySession(ctx context.Context, sessID pgtype.UUID) (ChatSessionBinding, error) {
 	return f.binding, f.bindingErr
 }
-func (f *fakePatcherQueries) GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (db.LarkOutboundCardMessage, error) {
+func (f *fakePatcherQueries) GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error) {
 	return f.card, f.cardErr
 }
-func (f *fakePatcherQueries) CreateLarkOutboundCardMessage(ctx context.Context, arg db.CreateLarkOutboundCardMessageParams) (db.LarkOutboundCardMessage, error) {
+func (f *fakePatcherQueries) CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.created = append(f.created, arg)
 	return f.createReturn, nil
 }
-func (f *fakePatcherQueries) UpdateLarkOutboundCardStatus(ctx context.Context, arg db.UpdateLarkOutboundCardStatusParams) error {
+func (f *fakePatcherQueries) UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.statusUpdates = append(f.statusUpdates, arg)
@@ -64,7 +64,7 @@ func (f *fakePatcherQueries) UpdateLarkOutboundCardStatus(ctx context.Context, a
 
 type fakeCredentials struct{ secret string }
 
-func (f fakeCredentials) DecryptAppSecret(inst db.LarkInstallation) (string, error) {
+func (f fakeCredentials) DecryptAppSecret(inst Installation) (string, error) {
 	return f.secret, nil
 }
 
@@ -162,13 +162,13 @@ func (f *fakeAPIClient) DeleteMessageReaction(ctx context.Context, p DeleteReact
 func newTestPatcher(t *testing.T) (*Patcher, *fakePatcherQueries, *fakeAPIClient) {
 	t.Helper()
 	q := &fakePatcherQueries{
-		binding: db.LarkChatSessionBinding{
+		binding: ChatSessionBinding{
 			ChatSessionID:  uuidFromString(t, "cccccccc-cccc-cccc-cccc-cccccccccccc"),
 			InstallationID: uuidFromString(t, "1111aaaa-1111-1111-1111-111111111111"),
-			LarkChatID:     "oc_test_chat",
-			LarkChatType:   "p2p",
+			ChannelChatID:  "oc_test_chat",
+			ChatType:       "p2p",
 		},
-		installation: db.LarkInstallation{
+		installation: Installation{
 			ID:                 uuidFromString(t, "1111aaaa-1111-1111-1111-111111111111"),
 			AppID:              "cli_test_app",
 			AppSecretEncrypted: []byte("ciphertext"),
@@ -215,8 +215,8 @@ func TestPatcherSendsPlainTextOnChatDone(t *testing.T) {
 	if got.Text != "Hello! I'm cc, a coding agent…" {
 		t.Errorf("text mismatch: got %q", got.Text)
 	}
-	if got.ChatID != ChatID(q.binding.LarkChatID) {
-		t.Errorf("chat_id mismatch: got %q want %q", got.ChatID, q.binding.LarkChatID)
+	if got.ChatID != ChatID(q.binding.ChannelChatID) {
+		t.Errorf("chat_id mismatch: got %q want %q", got.ChatID, q.binding.ChannelChatID)
 	}
 	if got.InstallationID.AppID != "cli_test_app" {
 		t.Errorf("expected installation app_id propagated; got %q", got.InstallationID.AppID)
@@ -258,8 +258,8 @@ func TestPatcherRoutesMarkdownReplyToCard(t *testing.T) {
 	if got.Markdown != body {
 		t.Errorf("markdown body must be forwarded verbatim; got %q", got.Markdown)
 	}
-	if got.ChatID != ChatID(q.binding.LarkChatID) {
-		t.Errorf("chat_id mismatch: got %q want %q", got.ChatID, q.binding.LarkChatID)
+	if got.ChatID != ChatID(q.binding.ChannelChatID) {
+		t.Errorf("chat_id mismatch: got %q want %q", got.ChatID, q.binding.ChannelChatID)
 	}
 	if len(api.textSent) != 0 {
 		t.Errorf("markdown body must NOT also fire SendTextMessage; got %d", len(api.textSent))
@@ -495,8 +495,8 @@ func TestDefaultRendererConfigCarriesUpdateMulti(t *testing.T) {
 // reply_in_thread=true, so it lands inside the 话题 instead of the group.
 func TestPatcherRepliesInThreadWhenTriggerWasInThread(t *testing.T) {
 	p, q, api := newTestPatcher(t)
-	q.binding.LastLarkMessageID = pgtype.Text{String: "om_trigger", Valid: true}
-	q.binding.LastLarkThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic", Valid: true}
 	taskID := uuidFromString(t, "ee666666-ee66-ee66-ee66-eeeeeeeeeeee")
 
 	p.handleEvent(events.Event{
@@ -525,7 +525,7 @@ func TestPatcherRepliesInThreadWhenTriggerWasInThread(t *testing.T) {
 func TestPatcherSendsToChatWhenNoThread(t *testing.T) {
 	p, q, api := newTestPatcher(t)
 	// binding has a message id but NO thread id → must not thread.
-	q.binding.LastLarkMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
 	taskID := uuidFromString(t, "ee777777-ee77-ee77-ee77-eeeeeeeeeeee")
 
 	p.handleEvent(events.Event{
@@ -550,8 +550,8 @@ func TestPatcherSendsToChatWhenNoThread(t *testing.T) {
 // card path also threads when the trigger was in a topic.
 func TestPatcherThreadReplyMarkdownRoutesToThread(t *testing.T) {
 	p, q, api := newTestPatcher(t)
-	q.binding.LastLarkMessageID = pgtype.Text{String: "om_trigger", Valid: true}
-	q.binding.LastLarkThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic", Valid: true}
 	taskID := uuidFromString(t, "ee888888-ee88-ee88-ee88-eeeeeeeeeeee")
 
 	p.handleEvent(events.Event{
@@ -580,8 +580,8 @@ func TestPatcherThreadReplyMarkdownRoutesToThread(t *testing.T) {
 func TestPatcherThreadReplyFallsBackToChatLevel(t *testing.T) {
 	p, q, api := newTestPatcher(t)
 	api.threadReplyErr = errThreadReplyClassified
-	q.binding.LastLarkMessageID = pgtype.Text{String: "om_trigger", Valid: true}
-	q.binding.LastLarkThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic", Valid: true}
 	taskID := uuidFromString(t, "ee999999-ee99-ee99-ee99-eeeeeeeeeeee")
 
 	p.handleEvent(events.Event{
@@ -611,8 +611,8 @@ func TestPatcherThreadReplyFallsBackToChatLevel(t *testing.T) {
 func TestPatcherThreadReplyDoesNotFallBackOnAmbiguousError(t *testing.T) {
 	p, q, api := newTestPatcher(t)
 	api.threadReplyErr = errThreadReplyTransport
-	q.binding.LastLarkMessageID = pgtype.Text{String: "om_trigger", Valid: true}
-	q.binding.LastLarkThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic", Valid: true}
 	taskID := uuidFromString(t, "ee888888-ee88-ee88-ee88-eeeeeeeeeeee")
 
 	p.handleEvent(events.Event{
