@@ -52,6 +52,11 @@
     "title": "아직 사용량이 없습니다",
     "body": "여기에서 에이전트가 작업을 실행하기 시작하면 토큰 비용과 실행 시간이 이 화면에 표시됩니다."
   },
+  "pricing": {
+    "unmapped_notice_one": "기본 가격이 등록되지 않은 모델 {{count}}개가 있어 해당 토큰은 비용 합계에서 제외됩니다.",
+    "unmapped_notice_other": "기본 가격이 등록되지 않은 모델 {{count}}개가 있어 해당 토큰은 비용 합계에서 제외됩니다.",
+    "open_button": "사용자 지정 가격 설정"
+  },
   "duration": {
     "less_than_minute": "1분 미만"
   }

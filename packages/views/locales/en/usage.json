@@ -52,6 +52,11 @@
     "title": "No usage yet",
     "body": "Once agents start running tasks here, their token spend and run time will appear in this view."
   },
+  "pricing": {
+    "unmapped_notice_one": "{{count}} model has no maintained price — its tokens are excluded from cost totals.",
+    "unmapped_notice_other": "{{count}} models have no maintained price — their tokens are excluded from cost totals.",
+    "open_button": "Set custom prices"
+  },
   "duration": {
     "less_than_minute": "<1m"
   }

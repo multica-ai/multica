@@ -222,6 +222,49 @@ describe("estimateCost", () => {
         output_tokens: 1_000_000,
       }),
     ).toBeCloseTo(1.75 + 14, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "gpt-5.2-codex",
+        input_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(1.75 + 1.75, 5);
+  });
+
+  it("prices Gemini preview IDs emitted by local runtimes", () => {
+    expect(isModelPriced("gemini-3.1-pro-preview")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "gemini-3.1-pro-preview",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(2 + 12 + 0.2, 5);
+
+    expect(isModelPriced("gemini-3-flash-preview")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "gemini-3-flash-preview",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.5 + 3 + 0.05, 5);
+
+    expect(isModelPriced("gemini-2.5-flash-lite")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "gemini-2.5-flash-lite",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.1 + 0.4 + 0.01, 5);
   });
 
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
@@ -341,6 +384,17 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(0.14 + 0.28 + 0.0028, 5);
   });
 
+  it("prices deepseek-v4-pro at the current official $0.435 / $0.87 tier", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "deepseek-v4-pro",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(0.435 + 0.87 + 0.003625, 5);
+  });
+
   it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
     // The DeepSeek docs explicitly route both legacy names to v4-flash —
     // they must hit the same numbers, not the older $0.27/$1.10 tier.
@@ -376,6 +430,50 @@ describe("estimateCost", () => {
         output_tokens: 1_000_000,
       }),
     ).toBeCloseTo(4.95, 5);
+  });
+
+  it("prices Kimi K2.7 Code and HighSpeed at their published tiers", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-k2.7-code",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.95 + 4 + 0.19, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-k2.7-code-highspeed",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(1.9 + 8 + 0.38, 5);
+  });
+
+  it("prices MiniMax M2.7 and highspeed using the official cache-write rate", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "minimax-m2.7",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.3 + 1.2 + 0.03 + 0.375, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "minimax-m2.7-highspeed",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.6 + 2.4 + 0.03 + 0.375, 5);
   });
 
   it("prices glm-5.1 at the official $1.4 / $4.4 tier", () => {

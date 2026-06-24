@@ -325,7 +325,7 @@ func geminiStaticModels() []Model {
 		{ID: "pro", Label: "Pro", Provider: "google"},
 		{ID: "flash", Label: "Flash", Provider: "google"},
 		{ID: "flash-lite", Label: "Flash Lite", Provider: "google"},
-		{ID: "gemini-3-pro-preview", Label: "Gemini 3 Pro (preview)", Provider: "google"},
+		{ID: "gemini-3.1-pro-preview", Label: "Gemini 3.1 Pro (preview)", Provider: "google"},
 		{ID: "gemini-3-flash-preview", Label: "Gemini 3 Flash (preview)", Provider: "google"},
 		{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", Provider: "google"},
 		{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", Provider: "google"},

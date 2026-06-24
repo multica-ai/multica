@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban } from "lucide-react";
+import { AlertCircle, BarChart3, FolderKanban } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Button } from "@multica/ui/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -39,9 +40,11 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import {
   addDaysIso,
   aggregateByWeek,
+  collectUnmappedModels,
   formatTokens,
   todayIso,
 } from "../../runtimes/utils";
+import { CustomPricingDialog } from "../../runtimes/components/custom-pricing-dialog";
 import { useT } from "../../i18n";
 import {
   aggregateAgentTokens,
@@ -164,9 +167,10 @@ export function DashboardPage() {
     if (!stillAllowed) setDays(DEFAULT_DAYS_BY_DIM[next]);
   };
 
-  // The user can save model prices from the runtimes page; re-render when
-  // they do so the dashboard reflects the new rates.
-  useCustomPricingStore((s) => s.pricings);
+  // The user can save model prices from the runtimes page or this dashboard;
+  // include the store slice in cost memo deps so saved rates immediately
+  // re-price KPI, chart, and leaderboard totals for the same usage rows.
+  const pricings = useCustomPricingStore((s) => s.pricings);
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -246,14 +250,16 @@ export function DashboardPage() {
     runTimeDailyRows.length === 0;
 
   // Cost / token math — re-derived when usage, days, or pricings change.
-  const totals = useMemo(
-    () => computeDailyTotals(dailyUsageInWindow),
-    [dailyUsageInWindow],
-  );
-  const dailyCost = useMemo(
-    () => aggregateDailyCost(dailyUsageInWindow),
-    [dailyUsageInWindow],
-  );
+  const totals = useMemo(() => {
+    // computeDailyTotals calls estimateCost(), which reads custom prices
+    // through a vanilla store accessor; this marks the real React dependency.
+    void pricings;
+    return computeDailyTotals(dailyUsageInWindow);
+  }, [dailyUsageInWindow, pricings]);
+  const dailyCost = useMemo(() => {
+    void pricings;
+    return aggregateDailyCost(dailyUsageInWindow);
+  }, [dailyUsageInWindow, pricings]);
   const dailyTokens = useMemo(
     () => aggregateDailyTokens(dailyUsageInWindow),
     [dailyUsageInWindow],
@@ -273,10 +279,10 @@ export function DashboardPage() {
   // pre-zeroed inside the helpers, so sparse weeks render as empty bars
   // instead of being dropped (MUL-2382 weekly window scoping). Week
   // boundaries follow the viewer's timezone.
-  const weekly = useMemo(
-    () => aggregateByWeek(dailyUsage, viewTZ, weekCount),
-    [dailyUsage, viewTZ, weekCount],
-  );
+  const weekly = useMemo(() => {
+    void pricings;
+    return aggregateByWeek(dailyUsage, viewTZ, weekCount);
+  }, [dailyUsage, viewTZ, weekCount, pricings]);
   const weeklyCost = weekly.weeklyCostStack;
   const weeklyTokens = weekly.weeklyTokens;
   const weeklyTime = useMemo(
@@ -287,10 +293,10 @@ export function DashboardPage() {
     () => aggregateWeeklyTasks(runTimeDailyRows, viewTZ, weekCount),
     [runTimeDailyRows, viewTZ, weekCount],
   );
-  const agentTokenRows = useMemo(
-    () => aggregateAgentTokens(byAgentUsage),
-    [byAgentUsage],
-  );
+  const agentTokenRows = useMemo(() => {
+    void pricings;
+    return aggregateAgentTokens(byAgentUsage);
+  }, [byAgentUsage, pricings]);
 
   // Run-time totals — taskCount + failedCount summed for the KPI row.
   const runTimeTotals = useMemo(() => {
@@ -353,6 +359,8 @@ export function DashboardPage() {
             <DashboardEmpty />
           ) : (
             <>
+              <UnmappedPricingNotice usage={dailyUsageInWindow} />
+
               {/* KPI row — same 3-divide-x card grid the runtime usage
                   section uses, expanded to four tiles. */}
               <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
@@ -419,6 +427,47 @@ export function DashboardPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function UnmappedPricingNotice({
+  usage,
+}: {
+  usage: import("@multica/core/types").DashboardUsageDaily[];
+}) {
+  const { t } = useT("usage");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const unmapped = collectUnmappedModels(usage);
+  if (unmapped.length === 0) return null;
+
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs"
+    >
+      <AlertCircle className="h-4 w-4 shrink-0 text-warning" />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <p className="text-foreground">
+          {t(($) => $.pricing.unmapped_notice, { count: unmapped.length })}
+        </p>
+        <p className="truncate font-mono text-[11px] text-muted-foreground">
+          {unmapped.join(", ")}
+        </p>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setDialogOpen(true)}
+      >
+        {t(($) => $.pricing.open_button)}
+      </Button>
+      <CustomPricingDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        unmappedModels={unmapped}
+      />
     </div>
   );
 }
