@@ -1,6 +1,6 @@
 "use client";
 
-import { Hand, Play, CheckCircle, XCircle } from "lucide-react";
+import { Hand, Play, CheckCircle, XCircle, MessageSquare } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -13,6 +13,11 @@ import {
 } from "@multica/core/workflows/queries";
 import { myRuntimePermissionOptions } from "@multica/core/runtimes/queries";
 import { useNodeRunControlPermission } from "@multica/core/permissions";
+import { useChatStore } from "@multica/core/chat";
+import {
+  isEmbeddedInCostrict,
+  postCostrictNavigateToSession,
+} from "@multica/core/platform";
 import { useT } from "../../i18n";
 
 interface NodeRunControlActionsProps {
@@ -35,6 +40,19 @@ export function NodeRunControlActions({
   const takeoverMutation = useTakeoverNodeRun(wsId);
   const handbackMutation = useHandbackNodeRun(wsId);
   const finalizeMutation = useFinalizeNodeRun(wsId);
+  const setChatSession = useChatStore((s) => s.setActiveSession);
+  const setChatOpen = useChatStore((s) => s.setOpen);
+
+  const handleOpenSession = () => {
+    const sessionId = nodeRun.session_id;
+    if (!sessionId) return;
+    if (isEmbeddedInCostrict()) {
+      postCostrictNavigateToSession({ sessionId });
+      return;
+    }
+    setChatSession(sessionId);
+    setChatOpen(true);
+  };
 
   const { data: sessionPerm } = useSessionPermission(nodeRun.session_id);
   const { data: runtimePerm } = useQuery({
@@ -90,6 +108,17 @@ export function NodeRunControlActions({
       )}
       {canHandbackOrFinalize && (
         <>
+          {nodeRun.session_id && (
+            <Button
+              size={size}
+              variant="outline"
+              className={buttonClass}
+              onClick={handleOpenSession}
+            >
+              <MessageSquare className={iconClass + " mr-1"} />
+              {t(($) => $.node_run.open_session)}
+            </Button>
+          )}
           <Button
             size={size}
             variant="outline"
