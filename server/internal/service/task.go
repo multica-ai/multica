@@ -18,6 +18,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -124,6 +125,22 @@ var trivialDoneMarkers = []string{
 	"сделано",
 	"完成",
 	"完了",
+}
+
+var ErrAgentModelRuntimeIncompatible = errors.New("agent model is incompatible with runtime provider")
+
+func (s *TaskService) validateAgentModelRuntime(ctx context.Context, a db.Agent) error {
+	if !a.RuntimeID.Valid || !a.Model.Valid || strings.TrimSpace(a.Model.String) == "" {
+		return nil
+	}
+	runtime, err := s.Queries.GetAgentRuntime(ctx, a.RuntimeID)
+	if err != nil {
+		return fmt.Errorf("load runtime for model validation: %w", err)
+	}
+	if !agentpkg.ModelKnownIncompatibleWithProvider(runtime.Provider, a.Model.String) {
+		return nil
+	}
+	return fmt.Errorf("%w: model %q is not compatible with runtime provider %q", ErrAgentModelRuntimeIncompatible, a.Model.String, runtime.Provider)
 }
 
 func isTrivialDoneOutput(output string) bool {
@@ -472,6 +489,10 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	if err := s.validateAgentModelRuntime(ctx, agent); err != nil {
+		slog.Error("task enqueue failed: incompatible model/runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agent.ID), "error", err)
+		return db.AgentTaskQueue{}, err
+	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           issue.AssigneeID,
@@ -542,6 +563,10 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 	if !agent.RuntimeID.Valid {
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+	if err := s.validateAgentModelRuntime(ctx, agent); err != nil {
+		slog.Error("mention task enqueue failed: incompatible model/runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.AgentTaskQueue{}, err
 	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
@@ -632,6 +657,9 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+	if err := s.validateAgentModelRuntime(ctx, agent); err != nil {
+		return db.AgentTaskQueue{}, err
 	}
 
 	payload := QuickCreateContext{
@@ -738,6 +766,9 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	}
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
+	}
+	if err := s.validateAgentModelRuntime(ctx, agent); err != nil {
+		return db.AgentTaskQueue{}, err
 	}
 
 	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
@@ -1001,6 +1032,25 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 		return nil, fmt.Errorf("claim task: %w", err)
 	}
 
+	if err := s.validateAgentModelRuntime(ctx, agent); err != nil {
+		outcome = "incompatible_model_runtime"
+		errMsg := err.Error()
+		if failed, failErr := s.FailTask(ctx, task.ID, errMsg, "", "", "api_invalid_request"); failErr == nil {
+			slog.Warn("task claim blocked: incompatible model/runtime",
+				"task_id", util.UUIDToString(failed.ID),
+				"agent_id", util.UUIDToString(agentID),
+				"error", errMsg,
+			)
+		} else {
+			slog.Error("task claim compatibility failure could not fail task",
+				"task_id", util.UUIDToString(task.ID),
+				"agent_id", util.UUIDToString(agentID),
+				"error", failErr,
+			)
+		}
+		return nil, err
+	}
+
 	slog.Info("task claimed", "task_id", util.UUIDToString(task.ID), "agent_id", util.UUIDToString(agentID))
 	s.captureTaskDispatched(ctx, task)
 
@@ -1118,6 +1168,9 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 
 		task, err := s.ClaimTask(ctx, candidate.AgentID)
 		if err != nil {
+			if errors.Is(err, ErrAgentModelRuntimeIncompatible) {
+				continue
+			}
 			loopMs = time.Since(loopStart).Milliseconds()
 			outcome = "error_claim"
 			return nil, err

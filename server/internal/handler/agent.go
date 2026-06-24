@@ -775,6 +775,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
 		return
 	}
+	if rejectIncompatibleAgentModel(w, runtime.Provider, req.Model) {
+		return
+	}
 
 	// Probe workspace agent count BEFORE the insert so the funnel has a
 	// clean "first agent ever in this workspace" signal — Step 4 of
@@ -977,6 +980,14 @@ func redactAgentResponseForActor(resp *AgentResponse, actorType string) {
 	}
 }
 
+func rejectIncompatibleAgentModel(w http.ResponseWriter, provider, model string) bool {
+	if !agent.ModelKnownIncompatibleWithProvider(provider, model) {
+		return false
+	}
+	writeError(w, http.StatusBadRequest, fmt.Sprintf("model %q is not compatible with runtime provider %q", model, provider))
+	return true
+}
+
 // canManageAgent checks whether the current user can update or archive an agent.
 // Only the agent owner or workspace owner/admin can manage any agent,
 // regardless of whether it is public or private.
@@ -1107,6 +1118,18 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.MaxConcurrentTasks = pgtype.Int4{Int32: *req.MaxConcurrentTasks, Valid: true}
 	}
 	if req.Model != nil {
+		provider := targetProvider
+		if provider == "" {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for model validation")
+				return
+			}
+		}
+		if rejectIncompatibleAgentModel(w, provider, *req.Model) {
+			return
+		}
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
 	} else if req.RuntimeID != nil && existing.Model.Valid && agent.ModelKnownIncompatibleWithProvider(targetProvider, existing.Model.String) {
 		// Model is runtime-native. When moving an agent across known provider
