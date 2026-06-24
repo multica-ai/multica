@@ -3455,6 +3455,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+	} else {
+		// MUL-3560: log which brief shipped (slim vs legacy) and where
+		// it landed, so operators verifying the staging rollout can
+		// confirm at a glance which template the task was given — and
+		// `cat` the exact file at brief_path to see the rendered bytes.
+		// brief_chars is the rendered rune count; the brief_path file
+		// also carries the canonical content inside the marker block.
+		taskLog.Info("execenv: runtime brief written",
+			"provider", provider,
+			"brief_path", execenv.RuntimeConfigPath(env.WorkDir, provider),
+			"brief_chars", len(runtimeBrief),
+			"brief_mode", execenv.BriefMode(),
+		)
 	}
 	// Workdir is preserved for reuse by future tasks on the same (agent,
 	// issue) pair in cloud mode; the work_dir path is stored in DB on task
