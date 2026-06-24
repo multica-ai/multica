@@ -47,6 +47,16 @@ type CommentResponse struct {
 	// clipped to the summary budget, false when it fit. nil (omitted) means the
 	// caller did not request a summary projection, so Content is verbatim.
 	ContentTruncated *bool `json:"content_truncated,omitempty"`
+	// Fold projection fields — populated only under fold=true, and only on the
+	// thread ROOT of a resolved thread (mirrors the human timeline fold; see
+	// foldResolvedThreads). Both are nil/omitted everywhere else: every comment
+	// under an unresolved thread, and every non-root comment. ThreadResolved
+	// marks a thread whose discussion was collapsed to its conclusion;
+	// FoldedCount is how many comments in that thread were dropped from the
+	// response (0 when the thread was already at root + conclusion). The reader
+	// pulls the folded comments back with `comment list --full`.
+	ThreadResolved *bool `json:"thread_resolved,omitempty"`
+	FoldedCount    *int  `json:"folded_count,omitempty"`
 }
 
 func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
@@ -99,6 +109,136 @@ func summarizeContent(content string) (string, bool) {
 	return content, false
 }
 
+// foldStat is the per-thread fold annotation attached to a resolved thread's
+// root under fold=true. FoldedCount is how many comments in the thread were
+// dropped from the response. See CommentResponse.ThreadResolved / FoldedCount.
+type foldStat struct {
+	FoldedCount int
+}
+
+// foldResolvedThreads collapses every resolved thread in a COMPLETE-thread
+// comment set down to the comments a reader actually needs, mirroring the human
+// timeline fold (deriveThreadResolution in
+// packages/views/issues/components/thread-utils.ts) so agents see what humans
+// see:
+//
+//   - unresolved thread     → every comment kept, unchanged, no annotation.
+//   - reply-resolved thread → keep the thread root + the resolution reply (the
+//     conclusion), drop every other reply. Root + conclusion, never conclusion
+//     alone: a conclusion is often referential ("go with what we said above")
+//     and unreadable without the root question.
+//   - root-resolved thread  → keep only the root, drop every reply (the whole
+//     discussion was a settled dead-end; the root states the topic).
+//
+// The thread root of each resolved thread is annotated (foldStat keyed by the
+// root's id string) so the response can mark it thread_resolved and report how
+// many comments were folded; a reader that needs the dropped discussion pulls
+// it back with `comment list --full`.
+//
+// Resolution is derived exactly as the UI does: the root wins if resolved;
+// otherwise the reply with the latest resolved_at is THE resolution. The single
+// resolved-per-thread invariant (ClearOtherThreadResolutions) normally makes
+// this unambiguous; the latest-wins tiebreak keeps the projection total if an
+// older/concurrent write ever left two.
+//
+// Callers MUST invoke this only on a set containing COMPLETE threads (the
+// default list, --recent, and untailed --thread reads). Partial-thread reads
+// (--since, --tail) are rejected upstream because a fold computed over a partial
+// thread could drop a resolution that was never fetched. As defense in depth,
+// any comment whose thread root is absent from the set is treated as its own
+// root and kept verbatim, so a partial thread degrades to "unchanged" rather
+// than to silent data loss.
+func foldResolvedThreads(comments []db.Comment) ([]db.Comment, map[string]foldStat) {
+	if len(comments) == 0 {
+		return comments, nil
+	}
+
+	byID := make(map[string]db.Comment, len(comments))
+	for _, c := range comments {
+		byID[uuidToString(c.ID)] = c
+	}
+
+	// rootOf walks parent_id up to the thread root within this set. It stops at
+	// the first comment whose parent is absent (in a complete-thread set that is
+	// the real root; in a partial set it is the highest ancestor we hold). The
+	// loop is bounded by len(comments) so an unexpected cycle cannot hang it —
+	// the PK forbids real cycles, but never trust a graph walk over stored data.
+	rootOf := func(c db.Comment) db.Comment {
+		cur := c
+		for i := 0; i < len(comments); i++ {
+			if !cur.ParentID.Valid {
+				return cur
+			}
+			parent, ok := byID[uuidToString(cur.ParentID)]
+			if !ok {
+				return cur
+			}
+			cur = parent
+		}
+		return cur
+	}
+
+	type thread struct {
+		root    db.Comment
+		replies []db.Comment // non-root, in input (chronological) order
+	}
+	threads := map[string]*thread{}
+	for _, c := range comments {
+		root := rootOf(c)
+		rid := uuidToString(root.ID)
+		th := threads[rid]
+		if th == nil {
+			th = &thread{root: root}
+			threads[rid] = th
+		}
+		if uuidToString(c.ID) != rid {
+			th.replies = append(th.replies, c)
+		}
+	}
+
+	keep := make(map[string]bool, len(comments))
+	stats := map[string]foldStat{}
+	for rid, th := range threads {
+		// Root-resolved: keep only the root.
+		if th.root.ResolvedAt.Valid {
+			keep[rid] = true
+			stats[rid] = foldStat{FoldedCount: len(th.replies)}
+			continue
+		}
+		// Reply-resolved: the latest-resolved reply is the conclusion.
+		var resolution *db.Comment
+		for i := range th.replies {
+			r := &th.replies[i]
+			if !r.ResolvedAt.Valid {
+				continue
+			}
+			if resolution == nil || r.ResolvedAt.Time.After(resolution.ResolvedAt.Time) {
+				resolution = r
+			}
+		}
+		if resolution == nil {
+			// Unresolved thread: keep everything, no annotation.
+			keep[rid] = true
+			for _, r := range th.replies {
+				keep[uuidToString(r.ID)] = true
+			}
+			continue
+		}
+		keep[rid] = true
+		keep[uuidToString(resolution.ID)] = true
+		// Every reply except the conclusion is folded away.
+		stats[rid] = foldStat{FoldedCount: len(th.replies) - 1}
+	}
+
+	out := make([]db.Comment, 0, len(comments))
+	for _, c := range comments {
+		if keep[uuidToString(c.ID)] {
+			out = append(out, c)
+		}
+	}
+	return out, stats
+}
+
 // commentHardCap bounds the comments returned per issue. Sized as a defensive
 // safety net rather than a UX paging window: prod p99 is ~30 comments and
 // the all-time max observed is ~1.1k, so 2000 leaves ~2x headroom while still
@@ -122,6 +262,15 @@ const commentHardCap = 2000
 //     comment's content to a fixed budget and sets content_truncated, so an
 //     agent can scan a list cheaply before pulling a full body. Composes with
 //     every mode (default, since, thread, recent, roots_only).
+//
+//   - fold=true — resolve-aware thread projection. Collapses each resolved
+//     thread to root + conclusion (reply-resolved) or root only (root-resolved),
+//     reusing the human timeline fold so an agent does not pay tokens for
+//     settled discussion. The resolved thread's root carries thread_resolved +
+//     folded_count; `--full` (no fold param) brings the dropped comments back.
+//     Needs whole threads to compute a resolution, so it is rejected with since,
+//     tail, and roots_only (partial-thread / reply-less reads) and composes with
+//     the default list, recent, untailed thread, and summary.
 //
 //   - thread=<comment-uuid> — return the root of the thread containing this
 //     comment plus every descendant. The anchor may be a root or any reply;
@@ -245,7 +394,40 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// fold=true is a thread-level projection: it collapses every resolved thread
+	// in the result to root + conclusion (reply-resolved) or root only
+	// (root-resolved), reusing the human timeline's fold semantics so an agent
+	// reading a long issue doesn't pay tokens for settled discussion. Unlike
+	// summary (a per-comment content clip that composes with everything), fold
+	// needs WHOLE threads to compute a resolution, so it is rejected on the
+	// partial-thread reads (since / tail) and on roots_only (which carries no
+	// replies to fold). It composes with summary, the default list, recent, and
+	// untailed thread reads.
+	fold := false
+	if foldStr := q.Get("fold"); foldStr != "" {
+		switch foldStr {
+		case "true":
+			fold = true
+		case "false":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid fold parameter; expected boolean")
+			return
+		}
+	}
+
 	// --- combination validation ----------------------------------------
+	if fold && sinceTime.Valid {
+		writeError(w, http.StatusBadRequest, "fold and since are mutually exclusive: since returns a partial thread, and a fold over a partial thread could hide a resolution that was not fetched")
+		return
+	}
+	if fold && tailStr != "" {
+		writeError(w, http.StatusBadRequest, "fold and tail are mutually exclusive: tail returns a partial thread, which cannot be folded safely")
+		return
+	}
+	if fold && rootsOnly {
+		writeError(w, http.StatusBadRequest, "fold and roots_only are mutually exclusive: roots_only returns no replies to fold")
+		return
+	}
 	if rootsOnly && threadStr != "" {
 		writeError(w, http.StatusBadRequest, "roots_only and thread are mutually exclusive")
 		return
@@ -365,6 +547,17 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Apply the resolve-aware fold before anything keys off the comment set
+	// (reaction/attachment grouping, the response array): folding drops comments,
+	// and the dropped ones should not pay a reactions/attachments round-trip or
+	// appear in the response. fetchCommentsForList only ever returns complete
+	// threads on the modes fold is allowed with (default, recent, untailed
+	// thread), which is the precondition foldResolvedThreads documents.
+	var foldInfo map[string]foldStat
+	if fold {
+		result.Comments, foldInfo = foldResolvedThreads(result.Comments)
+	}
+
 	commentIDs := make([]pgtype.UUID, len(result.Comments))
 	for i, c := range result.Comments {
 		commentIDs[i] = c.ID
@@ -384,6 +577,14 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 				la := timestampToString(st.LastActivityAt)
 				resp[i].LastActivityAt = &la
 			}
+		}
+		// Attach fold annotations on a resolved thread's root (nil map elsewhere;
+		// keyed by root id, so only root comments match).
+		if st, ok := foldInfo[cid]; ok {
+			resolved := true
+			resp[i].ThreadResolved = &resolved
+			fc := st.FoldedCount
+			resp[i].FoldedCount = &fc
 		}
 		// Apply the summary projection last so it clips whatever content the
 		// chosen read mode produced, uniformly across every mode.

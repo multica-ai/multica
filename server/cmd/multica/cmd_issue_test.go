@@ -1756,6 +1756,7 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	cmd.Flags().String("since", "", "")
 	cmd.Flags().Bool("roots-only", false, "")
 	cmd.Flags().Bool("summary", false, "")
+	cmd.Flags().Bool("full", false, "")
 	cmd.Flags().String("thread", "", "")
 	cmd.Flags().Int("recent", 0, "")
 	cmd.Flags().Int("tail", 0, "")
@@ -2084,6 +2085,82 @@ func TestRunIssueCommentList_SummaryPassesThrough(t *testing.T) {
 	}
 	if got := gotQuery.Get("roots_only"); got != "true" {
 		t.Errorf("roots_only query = %q, want true", got)
+	}
+}
+
+// TestRunIssueCommentList_FoldDefaultAndFullEscape pins the CLI's resolve-aware
+// fold default and its --full escape hatch (MUL-3555):
+//
+//   - the complete-thread reads (default list, --recent, untailed --thread) send
+//     fold=true by default, so an agent skips settled discussion automatically;
+//   - --full suppresses fold so a caller can pull the whole discussion back;
+//   - the partial-thread reads (--since, --thread + --tail) and --roots-only
+//     never send fold — folding them would be unsafe, and the server rejects it,
+//     so the CLI must not add the param there in the first place.
+func TestRunIssueCommentList_FoldDefaultAndFullEscape(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			gotQuery = r.URL.Query()
+			w.Write([]byte("[]"))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name     string
+		setup    func(c *cobra.Command)
+		wantFold bool
+	}{
+		{name: "default list folds", setup: func(c *cobra.Command) {}, wantFold: true},
+		{name: "recent folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("recent", "10")
+		}, wantFold: true},
+		{name: "untailed thread folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+		}, wantFold: true},
+		{name: "full opts out", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("full", "true")
+		}, wantFold: false},
+		{name: "since never folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("since", "2026-01-01T00:00:00Z")
+		}, wantFold: false},
+		{name: "thread+tail never folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+			_ = c.Flags().Set("tail", "5")
+		}, wantFold: false},
+		{name: "roots-only never folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("roots-only", "true")
+		}, wantFold: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotQuery = nil
+			cmd := newIssueCommentListTestCmd()
+			tc.setup(cmd)
+			if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+				t.Fatalf("runIssueCommentList: %v", err)
+			}
+			gotFold := gotQuery.Get("fold") == "true"
+			if gotFold != tc.wantFold {
+				t.Errorf("fold query = %q, want fold=%v", gotQuery.Get("fold"), tc.wantFold)
+			}
+		})
 	}
 }
 
