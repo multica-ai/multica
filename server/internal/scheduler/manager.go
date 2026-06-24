@@ -195,6 +195,27 @@ func (m *Manager) plansForTick(
 	scope Scope,
 	now time.Time,
 ) ([]time.Time, error) {
+	// Hook-driven jobs (e.g. Autopilot schedule triggers, which derive
+	// plan_times from per-trigger cron expressions instead of a
+	// uniform Cadence grid) bypass the Cadence planner entirely. We
+	// still read the latest stored plan so the hook can decide whether
+	// to resume from there, and still apply MaxPlansPerTick as a
+	// safety cap on whatever the hook returns.
+	if job.PlansForScope != nil {
+		info, err := latestPlan(ctx, m.pool, job.Name, scope)
+		if err != nil {
+			return nil, err
+		}
+		plans, err := job.PlansForScope(ctx, scope, now, info)
+		if err != nil {
+			return nil, fmt.Errorf("scheduler: plans hook for %q: %w", job.Name, err)
+		}
+		if job.MaxPlansPerTick > 0 && len(plans) > job.MaxPlansPerTick {
+			plans = plans[:job.MaxPlansPerTick]
+		}
+		return plans, nil
+	}
+
 	eligible := now.Add(-job.ScheduleDelay)
 	latest := FloorPlan(eligible, job.Cadence)
 	if latest.After(eligible) {
