@@ -292,6 +292,40 @@ SET status = 'failed', completed_at = now(), failure_reason = 'linked issue was 
 WHERE issue_id = $1
   AND status IN ('issue_created', 'running');
 
+-- name: FailStaleIssueCreatedAutopilotRunsForAutopilot :many
+-- Fails old create_issue runs whose linked issue has no active task but does
+-- have at least one failed task. This is the recovery guard for scheduled
+-- autopilots whose issue task exhausts retries and leaves the run stuck in
+-- issue_created until the next scheduled tick.
+WITH stale_runs AS (
+    SELECT ar.id
+    FROM autopilot_run ar
+    JOIN issue i ON i.id = ar.issue_id
+    WHERE ar.autopilot_id = $1
+      AND ar.status = 'issue_created'
+      AND ar.created_at < $2
+      AND i.status NOT IN ('in_review', 'done', 'blocked', 'cancelled')
+      AND EXISTS (
+          SELECT 1
+          FROM agent_task_queue failed
+          WHERE failed.issue_id = ar.issue_id
+            AND failed.status = 'failed'
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM agent_task_queue active
+          WHERE active.issue_id = ar.issue_id
+            AND active.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+      )
+)
+UPDATE autopilot_run ar
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = $3
+FROM stale_runs
+WHERE ar.id = stale_runs.id
+RETURNING ar.*;
+
 -- =====================
 -- Scheduler Recovery
 -- =====================
