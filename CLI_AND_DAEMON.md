@@ -150,6 +150,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | Kimi | `kimi` | Moonshot coding agent |
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
 | [Qoder CLI](https://docs.qoder.com/) | `qodercli` | Qoder ACP coding agent |
+| [ForgeCode](https://forgecode.dev/) | `forge` | Open-source coding harness (forgecode.dev) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -223,8 +224,12 @@ Agent-specific overrides:
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
 | `MULTICA_QODER_PATH` | Custom path to the `qodercli` binary |
 | `MULTICA_QODER_MODEL` | Override the Qoder model used |
+| `MULTICA_FORGE_PATH` | Custom path to the `forge` binary |
+| `MULTICA_FORGE_MODEL` | Override the ForgeCode model (`provider/model`, e.g. `anthropic/claude-sonnet-4-20250514`) |
 
 The daemon launches Qoder as `qodercli --yolo --acp`, matching Qoder’s ACP “bypass permissions” mode so tool runs do not block on interactive approval in headless runs.
+
+The daemon launches ForgeCode in one-shot mode as `forge -C <workdir> --cid <conversation-id> -p <prompt>`. ForgeCode has no `--model` flag, so the model is selected via the `FORGE_SESSION__PROVIDER_ID` / `FORGE_SESSION__MODEL_ID` environment variables (the daemon derives them from `MULTICA_FORGE_MODEL`’s `provider/model` value). Because ForgeCode does not stream structured JSON events, the daemon forwards the rendered Markdown stdout as text and reads token usage from a post-run `forge conversation dump <conversation-id>`.
 
 `MULTICA_CLAUDE_ARGS` and `MULTICA_CODEX_ARGS` are parsed with POSIX shellword quoting, so values such as `--model "gpt-5.1 codex" --sandbox read-only` are split like a shell command line. Agent arguments are applied in this order: hardcoded Multica defaults, daemon-wide env defaults, then per-agent `custom_args` from the task.
 

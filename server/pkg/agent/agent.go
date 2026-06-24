@@ -133,14 +133,15 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "forge".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
 // runtime_profile.protocol_family CHECK constraint (migration 120): a custom
 // runtime profile may only be based on a backend Multica officially supports.
-// (qoder is a built-in provider New can construct, but it is not offered as a
-// custom-profile base, so it is intentionally absent from this list.)
+// (qoder and forge are built-in providers New can construct, but they are
+// not offered as a custom-profile base, so they are intentionally absent
+// from this list.)
 var SupportedTypes = []string{
 	"claude",
 	"codebuddy",
@@ -200,8 +201,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &antigravityBackend{cfg: cfg}, nil
 	case "qoder":
 		return &qoderBackend{cfg: cfg}, nil
+	case "forge":
+		return &forgeBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, forge)", agentType)
 	}
 }
 
@@ -230,6 +233,7 @@ var launchHeaders = map[string]string{
 	"opencode":    "opencode run (json)",
 	"pi":          "pi (json mode)",
 	"qoder":       "qodercli --acp",
+	"forge":       "forge -p (one-shot)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

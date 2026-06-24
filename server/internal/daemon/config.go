@@ -304,8 +304,16 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			Model: strings.TrimSpace(os.Getenv("MULTICA_QODER_MODEL")),
 		}
 	}
+	// ForgeCode (forgecode.dev) is an open-source CLI coding harness.
+	// MULTICA_FORGE_MODEL uses the "provider/model" form (e.g.
+	// "anthropic/claude-sonnet-4-20250514"); the backend splits it into the
+	// FORGE_SESSION__PROVIDER_ID / FORGE_SESSION__MODEL_ID env vars ForgeCode
+	// reads, because the CLI has no --model flag.
+	if e, ok := probe("MULTICA_FORGE_PATH", "forge", "MULTICA_FORGE_MODEL"); ok {
+		agents["forge"] = e
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, or qodercli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, qodercli, or forge and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -654,7 +662,7 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
 	"claude", "codex", "opencode", "openclaw", "hermes",
-	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy",
+	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy", "forge",
 }
 
 var codexDesktopAppBundlePaths = func() []string {
