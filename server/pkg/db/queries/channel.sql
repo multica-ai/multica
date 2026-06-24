@@ -279,15 +279,15 @@ WHERE reply_to_id = $1;
 -- name: ReparentChannelMessage :one
 -- Moves a message between the top-level timeline (thread_id NULL) and a reply
 -- (thread_id set). Converge passes the target thread + reply_to; release passes
--- both NULL. order_at is re-stamped so the message lands as the latest entry in
--- its new location (replies and the timeline order by order_at ASC); created_at
--- is deliberately LEFT UNTOUCHED so the unread model (created_at > last_read_at)
--- is not corrupted by a mere re-location. Both columns are sqlc.narg so NULL is
--- expressible for the release path.
+-- both NULL. order_at is synced to created_at so the message sorts at its
+-- original authored time in the new location (UI displays created_at); created_at
+-- itself is deliberately LEFT UNTOUCHED so the unread model (created_at >
+-- last_read_at) is not corrupted by a mere re-location. Both thread columns are
+-- sqlc.narg so NULL is expressible for the release path.
 UPDATE channel_message
 SET thread_id   = sqlc.narg('thread_id'),
     reply_to_id = sqlc.narg('reply_to_id'),
-    order_at    = now(),
+    order_at    = created_at,
     updated_at  = now()
 WHERE id = $1
 RETURNING *;

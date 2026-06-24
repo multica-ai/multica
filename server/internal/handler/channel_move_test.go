@@ -25,8 +25,8 @@ func TestMoveChannelMessage_ConvergeAndRelease(t *testing.T) {
 	msgA := sendV2Message(t, ch.ID, "top-level A — will be converged")
 	msgB := sendV2Message(t, ch.ID, "top-level B — thread target")
 
-	// Converge A into B: A should leave the top-level list and appear as B's
-	// latest reply (created_at re-stamped, so it sorts last).
+	// Converge A into B: A should leave the top-level list and appear in B's
+	// thread sorted by its original authored time (order_at = created_at).
 	rr := httptest.NewRecorder()
 	req := withURLParam(newRequest(http.MethodPatch, "/", map[string]any{
 		"target_message_id": msgB.ID,
@@ -55,9 +55,8 @@ func TestMoveChannelMessage_ConvergeAndRelease(t *testing.T) {
 		t.Fatalf("converged A should reply_to B")
 	}
 
-	// Release A back to top-level: it should reappear in the timeline. A's
-	// thread_id/reply_to_id are cleared and created_at re-stamped so it lands
-	// as the latest top-level message.
+	// Release A back to top-level: it should reappear in the timeline at its
+	// original authored-time position (order_at = created_at).
 	rr = httptest.NewRecorder()
 	req = withURLParam(newRequest(http.MethodPatch, "/", map[string]any{
 		"target_message_id": nil,
@@ -156,11 +155,11 @@ func TestMoveChannelMessage_RefusesPopulatedThread(t *testing.T) {
 }
 
 // TestMoveChannelMessage_PreservesCreatedAt (H1): converging a message must
-// bump only order_at (so it sorts as the latest reply) and leave created_at
-// untouched — the unread model (has_unread / first_unread / last_activity in
-// ListChannels) keys on created_at, so a mere re-location must not re-stamp
-// it. Before the fix, created_at was set to now() and the moved message
-// falsely read as unread for every member whose last_read_at < now().
+// leave created_at untouched and keep order_at equal to it so list order matches
+// the displayed authored time — the unread model (has_unread / first_unread /
+// last_activity in ListChannels) keys on created_at, so a mere re-location must
+// not re-stamp it. Before the fix, created_at was set to now() and the moved
+// message falsely read as unread for every member whose last_read_at < now().
 func TestMoveChannelMessage_PreservesCreatedAt(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("no database")
@@ -184,16 +183,55 @@ func TestMoveChannelMessage_PreservesCreatedAt(t *testing.T) {
 		t.Fatalf("converge MoveChannelMessage: %d (%s)", rr.Code, rr.Body.String())
 	}
 
-	// created_at must equal its original send time; order_at must be bumped
-	// strictly past it (they were equal at send).
+	// created_at must equal its original send time; order_at must match it so
+	// sort order aligns with the displayed timestamp.
 	var createdAt, orderAt time.Time
 	if err := testPool.QueryRow(ctx,
 		`SELECT created_at, order_at FROM channel_message WHERE id = $1`, msgA.ID).
 		Scan(&createdAt, &orderAt); err != nil {
 		t.Fatalf("scan moved message: %v", err)
 	}
-	if !orderAt.After(createdAt) {
-		t.Fatalf("expected order_at > created_at (created_at preserved, order_at bumped to latest); got created_at=%v order_at=%v", createdAt, orderAt)
+	if !orderAt.Equal(createdAt) {
+		t.Fatalf("expected order_at == created_at after reparent; got created_at=%v order_at=%v", createdAt, orderAt)
+	}
+}
+
+// TestMoveChannelMessage_SortByAuthoredTime: a message converged into a thread
+// that already has a newer reply must sort before that reply (by created_at),
+// not jump to the end with order_at = now().
+func TestMoveChannelMessage_SortByAuthoredTime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM channel WHERE workspace_id = $1`, testWorkspaceID)
+	})
+
+	ch := createV2Channel(t, "Move Sort Channel")
+	msgA := sendV2Message(t, ch.ID, "older top-level — will be converged")
+	time.Sleep(10 * time.Millisecond)
+	msgB := sendV2Message(t, ch.ID, "thread target")
+	time.Sleep(10 * time.Millisecond)
+	replyNewer := replyV2Message(t, ch.ID, msgB.ID, "newer reply already in thread")
+
+	rr := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPatch, "/", map[string]any{
+		"target_message_id": msgB.ID,
+	}), "id", ch.ID)
+	req = withURLParam(req, "msgId", msgA.ID)
+	testHandler.MoveChannelMessage(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("converge MoveChannelMessage: %d (%s)", rr.Code, rr.Body.String())
+	}
+
+	thread := getV2Thread(t, ch.ID, msgB.ID)
+	if len(thread.Replies) != 2 {
+		t.Fatalf("expected 2 replies after converge, got %d", len(thread.Replies))
+	}
+	if thread.Replies[0].ID != msgA.ID || thread.Replies[1].ID != replyNewer.ID {
+		t.Fatalf("expected replies sorted by authored time [A, newer]; got [%s, %s]",
+			thread.Replies[0].ID, thread.Replies[1].ID)
 	}
 }
 

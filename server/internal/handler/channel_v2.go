@@ -1048,8 +1048,8 @@ func (h *Handler) DeleteChannelMessage(w http.ResponseWriter, r *http.Request) {
 // MoveChannelMessage re-parents a message between the top-level timeline and a
 // thread — the backend for the channel "converge"/"release" drag.
 //
-//	target_message_id set  → converge: a top-level message becomes the latest
-//	                         reply of the target message's thread. The moved
+//	target_message_id set  → converge: a top-level message joins the target
+//	                         message's thread. The moved message must not already
 //	                         message must not already have a thread (replies or
 //	                         a linked issue) — collapsing a populated thread
 //	                         would orphan its replies/issues, so it is refused
@@ -1057,9 +1057,9 @@ func (h *Handler) DeleteChannelMessage(w http.ResponseWriter, r *http.Request) {
 //	                         if it does not yet exist (atomically, via upsert).
 //	target_message_id null → release: a reply becomes a new top-level message.
 //
-// Either path re-stamps order_at (NOT created_at) so the message lands as the
-// latest entry in its new location without polluting the unread model, which
-// keys on created_at. Permission mirrors edit/delete: the author or a channel
+// Either path syncs order_at to created_at (NOT now()) so list order matches the
+// displayed authored time in the new location without polluting the unread
+// model, which keys on created_at. Permission mirrors edit/delete: the author or a channel
 // manager may move a message. The structural mutation (find/create target
 // thread, reparent, bump target) runs in one transaction; the source thread's
 // denormalized counter is refreshed afterwards (best-effort, post-commit) so a

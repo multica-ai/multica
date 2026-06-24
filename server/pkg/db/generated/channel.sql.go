@@ -1551,7 +1551,7 @@ const reparentChannelMessage = `-- name: ReparentChannelMessage :one
 UPDATE channel_message
 SET thread_id   = $2,
     reply_to_id = $3,
-    order_at    = now(),
+    order_at    = created_at,
     updated_at  = now()
 WHERE id = $1
 RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id, order_at
@@ -1565,11 +1565,11 @@ type ReparentChannelMessageParams struct {
 
 // Moves a message between the top-level timeline (thread_id NULL) and a reply
 // (thread_id set). Converge passes the target thread + reply_to; release passes
-// both NULL. order_at is re-stamped so the message lands as the latest entry in
-// its new location (replies and the timeline order by order_at ASC); created_at
-// is deliberately LEFT UNTOUCHED so the unread model (created_at > last_read_at)
-// is not corrupted by a mere re-location. Both columns are sqlc.narg so NULL is
-// expressible for the release path.
+// both NULL. order_at is synced to created_at so the message sorts at its
+// original authored time in the new location (UI displays created_at); created_at
+// itself is deliberately LEFT UNTOUCHED so the unread model (created_at >
+// last_read_at) is not corrupted by a mere re-location. Both thread columns are
+// sqlc.narg so NULL is expressible for the release path.
 func (q *Queries) ReparentChannelMessage(ctx context.Context, arg ReparentChannelMessageParams) (ChannelMessage, error) {
 	row := q.db.QueryRow(ctx, reparentChannelMessage, arg.ID, arg.ThreadID, arg.ReplyToID)
 	var i ChannelMessage
