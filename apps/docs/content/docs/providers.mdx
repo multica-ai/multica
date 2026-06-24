@@ -56,7 +56,14 @@ From Anysphere, the CLI counterpart to the Cursor editor. **Session resumption w
 
 ### Grok Build
 
-From xAI. An agentic coding CLI (binary `grok`). Uses the ACP protocol over stdio via `grok agent stdio` (shares a transport with Hermes, Kimi, Kiro CLI, and Qoder), with one extra step: the daemon performs an ACP `authenticate` round-trip after `initialize`, preferring the `xai.api_key` method when `XAI_API_KEY` is set and otherwise the `cached_token` written by `grok login`. Session resumption works through ACP `session/resume`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically (`grok models`), and skills are copied into `.grok/skills/` for native discovery. Grok is also Claude Code-compatible, so it additionally reads `CLAUDE.md` / `AGENTS.md` and `.claude/skills/`.
+From xAI. An agentic coding CLI (binary `grok`). Uses the ACP protocol over stdio via `grok agent stdio` (shares a transport with Hermes, Kimi, Kiro CLI, and Qoder), with one extra step: the daemon performs an ACP `authenticate` round-trip after `initialize`. Session resumption works through ACP `session/resume`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically (`grok models`), and skills are copied into `.grok/skills/` for native discovery. Grok is also Claude Code-compatible, so it additionally reads `CLAUDE.md` / `AGENTS.md` and `.claude/skills/`.
+
+**Authenticating the runtime host.** Grok accepts two credential paths and Multica supports both:
+
+- **Browser login (`grok login`)** — a one-time OAuth that works with a SuperGrok subscription and persists a cached token on the host. Do this once on any runtime host that has a browser. Grok normally opens a browser on first launch, but the daemon authenticates non-interactively (it never pops a browser mid-task), so the token must already exist before a task runs.
+- **API key (`XAI_API_KEY`)** — set this in the runtime's environment for headless / CI hosts with no browser.
+
+When `XAI_API_KEY` is present Multica prefers it; otherwise it falls back to the cached `grok login` token. If neither is available the task fails with a hint to run `grok login` or set `XAI_API_KEY` rather than hanging.
 
 ### Hermes
 

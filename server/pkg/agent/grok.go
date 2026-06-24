@@ -31,9 +31,18 @@ var grokBlockedArgs = map[string]blockedArgMode{
 // Qoder use, so we reuse hermesClient and the shared ACP helpers. The one
 // Grok-specific wrinkle is an explicit `authenticate` round-trip between
 // `initialize` and `session/new`: Grok's initialize response advertises
-// `authMethods`, and the client must pick one (`xai.api_key` when XAI_API_KEY
-// is present, otherwise the `cached_token` written by `grok login`) before any
-// session can be created. See https://docs.x.ai/build/cli/headless-scripting.
+// `authMethods`, and the client must pick one before any session can be
+// created. Grok supports two credential paths and we cover both:
+//
+//   - `xai.api_key` — used when XAI_API_KEY is configured for the runtime.
+//     The right choice for headless / CI hosts with no browser.
+//   - `cached_token` — the token persisted by `grok login`, a one-time
+//     browser OAuth that also covers a SuperGrok subscription. Grok normally
+//     opens a browser on first launch; the daemon is headless, so we never
+//     trigger that — `authenticate` is sent with `_meta.headless = true`, and
+//     if no credential is present the task fails with a clear hint instead.
+//
+// See https://docs.x.ai/build/cli/headless-scripting.
 type grokBackend struct {
 	cfg Config
 }
