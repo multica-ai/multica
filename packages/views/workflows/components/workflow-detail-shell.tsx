@@ -2,7 +2,7 @@
 
 import { useWorkflowViewStore } from "@multica/core/workflows/stores/view-store";
 import { WorkflowDetailPage } from "./workflow-detail-page";
-import { WorkflowOverviewPage, WorkflowPanoramaPage } from "./overview";
+import { WorkflowPanoramaPage } from "./overview";
 
 import { useT } from "../../i18n";
 import { Button } from "@multica/ui/components/ui/button";
@@ -14,7 +14,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { GitFork, Layers, Pen } from "lucide-react";
+import { GitFork, Pen } from "lucide-react";
 
 export interface WorkflowDetailShellProps {
   workflowId: string;
@@ -33,7 +33,6 @@ export function WorkflowDetailShell({ workflowId }: WorkflowDetailShellProps) {
         render={
           <Button variant="outline" size="icon-sm" className="text-muted-foreground" title={t(($) => $.view.section)}>
             {viewMode === "panorama" ? <GitFork className="size-4" /> :
-             viewMode === "overview" ? <Layers className="size-4" /> :
              <Pen className="size-4" />}
           </Button>
         }
@@ -44,10 +43,6 @@ export function WorkflowDetailShell({ workflowId }: WorkflowDetailShellProps) {
           <DropdownMenuItem onClick={() => setViewMode("panorama")}>
             <GitFork className="size-4 mr-2" />
             {t(($) => $.view.panorama)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setViewMode("overview")}>
-            <Layers className="size-4 mr-2" />
-            {t(($) => $.view.overview)}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setViewMode("editor")}>
             <Pen className="size-4 mr-2" />
@@ -60,10 +55,6 @@ export function WorkflowDetailShell({ workflowId }: WorkflowDetailShellProps) {
 
   if (viewMode === "editor") {
     return <WorkflowDetailPage workflowId={workflowId} viewToggle={viewToggle} />;
-  }
-
-  if (viewMode === "overview") {
-    return <WorkflowOverviewPage workflowId={workflowId} viewToggle={viewToggle} />;
   }
 
   return <WorkflowPanoramaPage workflowId={workflowId} viewToggle={viewToggle} />;

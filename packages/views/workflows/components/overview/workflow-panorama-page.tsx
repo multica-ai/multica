@@ -27,11 +27,17 @@ import {
 } from "./architecture-detail-panel";
 import type { Agent } from "@multica/core/types";
 import type { BuiltinPlugin } from "@multica/core/api/schemas";
+import { PanelsTopLeft } from "lucide-react";
 
 export interface WorkflowPanoramaPageProps {
   workflowId: string;
   viewToggle?: ReactNode;
 }
+
+type PanoramaSelection = {
+  nodeId: string;
+  focus: "worker" | "critic";
+};
 
 /** Loading skeleton for panorama view. */
 function PanoramaSkeleton() {
@@ -52,7 +58,7 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
   const navigation = useNavigation();
   const setViewMode = useWorkflowViewStore((s) => s.setViewMode);
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedCard, setSelectedCard] = useState<PanoramaSelection | null>(null);
 
   // ── Queries ──
   const {
@@ -100,16 +106,13 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
 
   // Build detail panel data for selected node
   const selectedPanelData: ArchitectureDetailPanelData | null = useMemo(() => {
-    if (!selectedNodeId) return null;
-    const node = nodes.find((n) => n.id === selectedNodeId);
+    if (!selectedCard) return null;
+    const node = nodes.find((n) => n.id === selectedCard.nodeId);
     if (!node) return null;
 
-    const isCriticNode = !!node.critic_id;
-
-    if (isCriticNode) {
-      // Critic node: worker_id is the critic's agent
-      const criticAgent = agentLookup.get(node.worker_id ?? "") ?? null;
-      return { node, agent: null, plugin: null, criticAgent };
+    if (selectedCard.focus === "critic") {
+      const criticAgent = agentLookup.get(node.critic_id ?? "") ?? null;
+      return { node, agent: null, plugin: null, criticAgent, focus: "critic" };
     }
 
     const agent = agentLookup.get(node.worker_id ?? "") ?? null;
@@ -120,16 +123,16 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
       ? agentLookup.get(node.critic_id) ?? null
       : null;
 
-    return { node, agent, plugin, criticAgent };
-  }, [selectedNodeId, nodes, agentLookup, pluginLookup]);
+    return { node, agent, plugin, criticAgent, focus: "worker" };
+  }, [selectedCard, nodes, agentLookup, pluginLookup]);
 
   // ── Handlers ──
-  const handleCardClick = (nodeId: string) => {
-    setSelectedNodeId(nodeId);
+  const handleCardClick = (nodeId: string, focus: "worker" | "critic") => {
+    setSelectedCard({ nodeId, focus });
   };
 
   const handleDetailClose = () => {
-    setSelectedNodeId(null);
+    setSelectedCard(null);
   };
 
   const handleOpenInEditor = () => {
@@ -193,24 +196,40 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
   return (
     <div className="flex flex-col h-full">
       <PageHeader className="justify-between px-5 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <h1 className="text-sm font-medium truncate">{workflow.title}</h1>
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-muted/60 text-muted-foreground">
+            <PanelsTopLeft className="h-4 w-4" strokeWidth={1.9} />
+          </span>
+          <div className="min-w-0">
+            <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+              Workflow panorama
+            </div>
+            <h1 className="text-sm font-medium truncate">{workflow.title}</h1>
+          </div>
         </div>
         {viewToggle && <div className="flex items-center gap-1">{viewToggle}</div>}
       </PageHeader>
 
-      <div className="flex-1 overflow-auto p-6 flex flex-col gap-4">
+      <div className="flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.08),_transparent_38%)] p-6">
+        <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2">
         {sortedStages.map((stage, idx) => (
           <div key={stage.id}>
             <StageSwimlane
               stage={stage}
               nodes={nodes}
+              edges={edges}
               agentLookup={agentLookup}
               pluginLookup={pluginLookup}
               onCardClick={handleCardClick}
+              selectedCard={selectedCard}
             />
             {idx < sortedStages.length - 1 && (
-              <DataFlowArrow edges={edges} nodes={nodes} />
+              <DataFlowArrow
+                edges={edges}
+                nodes={nodes}
+                sourceStageId={stage.id}
+                targetStageId={sortedStages[idx + 1]!.id}
+              />
             )}
           </div>
         ))}
@@ -220,6 +239,7 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
             {t(($) => $.overview.stage_canvas.empty_title)}
           </div>
         )}
+        </div>
       </div>
 
       {selectedPanelData && (

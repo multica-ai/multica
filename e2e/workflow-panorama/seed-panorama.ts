@@ -23,42 +23,43 @@ const DEMO_WORKSPACE = "demo111";
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 /**
- * Log in as the demo user (kdemo648) via UI flow.
- * The web app uses HttpOnly cookies for auth, so we must go through
- * the actual login form rather than setting localStorage tokens.
+ * Log in as the demo user (kdemo648) by setting auth cookies directly.
+ *
+ * Uses TestApiClient for API auth (token), then injects the token as
+ * HttpOnly cookies into the browser context. This avoids the UI login
+ * flow entirely and eliminates rate-limit / login-repeat issues.
  */
-export async function loginAsDemo(page: Page): Promise<string> {
-  // Navigate to login page
-  await page.goto(`${BASE_PATH}/login`);
-  await page.waitForURL(`**/login`, { timeout: 10000 });
+export async function loginAsDemo(page: Page, api?: TestApiClient): Promise<string> {
+  const client = api ?? new TestApiClient();
+  await client.login(DEMO_EMAIL, DEMO_NAME);
+  await client.ensureWorkspace("Demo Workspace", DEMO_WORKSPACE);
 
-  // Step 1: Enter email
-  const emailInput = page.getByPlaceholder("you@example.com");
-  await emailInput.fill(DEMO_EMAIL);
-  await page.waitForTimeout(300);
+  const token = client.getToken();
+  if (!token) throw new Error("Failed to obtain auth token");
 
-  // Step 2: Click Continue
-  const continueBtn = page.getByRole("button", { name: /continue|继续/i });
-  await continueBtn.click();
-  await page.waitForTimeout(500);
+  // Set the HttpOnly auth cookie (same name the server uses: multica_auth)
+  const frontendOrigin = process.env.FRONTEND_ORIGIN || "http://localhost:3000";
+  await page.context().addCookies([
+    {
+      name: "multica_auth",
+      value: token,
+      domain: "localhost",
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax" as const,
+      expires: Math.floor(Date.now() / 1000) + 2592000, // 30 days
+    },
+  ]);
 
-  // Step 3: Enter verification code (fixed dev code 123456).
-  // The code input is a plain textbox without a placeholder — use role lookup.
-  const codeInput = page.getByRole("textbox").last();
-  await codeInput.fill("123456");
-
-  // The form auto-submits when a valid 6-digit code is entered.
-  // After login, force-navigate to the correct workspace (demo111).
-  // The default redirect may land on a different workspace.
-  await page.waitForURL(`**/issues`, { timeout: 15000 });
-  await page.goto(`${BASE_PATH}/${DEMO_WORKSPACE}/issues`);
-  await page.waitForURL(`**/${DEMO_WORKSPACE}/issues`, { timeout: 10000 });
+  // Navigate to workspace — should be authenticated now
+  await page.goto(`${BASE_PATH}/${DEMO_WORKSPACE}/issues`, { waitUntil: "load", timeout: 15000 });
 
   return DEMO_WORKSPACE;
 }
 
 /**
  * Create a TestApiClient logged in as the demo user.
+ * Exported so tests can reuse the same client for API operations.
  */
 export async function createDemoApi(): Promise<TestApiClient> {
   const api = new TestApiClient();
@@ -81,8 +82,8 @@ const test = baseTest.extend<PanoramaFixtures>({
     await api.cleanup();
   },
 
-  slug: async ({ page }, use) => {
-    const s = await loginAsDemo(page);
+  slug: async ({ page, seededApi }, use) => {
+    const s = await loginAsDemo(page, seededApi);
     await use(s);
   },
 });

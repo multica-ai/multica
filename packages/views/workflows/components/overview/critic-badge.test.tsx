@@ -72,6 +72,6 @@ describe("CriticBadge", () => {
     const onClick = vi.fn();
     render(<CriticBadge node={MOCK_CRITIC_NODE} criticAgent={MOCK_CRITIC_AGENT} onClick={onClick} />);
     fireEvent.click(screen.getByTestId("critic-badge-critic-1"));
-    expect(onClick).toHaveBeenCalledWith("critic-1");
+    expect(onClick).toHaveBeenCalledWith("critic-1", "critic");
   });
 });

@@ -1,22 +1,20 @@
-// panorama-page.test.tsx
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, cleanup, screen } from "@testing-library/react";
+import { fireEvent, cleanup, screen, within } from "@testing-library/react";
 import { renderWithI18n } from "../../../test/i18n";
 
-// ── Mock data ──
 const MOCK_WORKFLOW = { id: "wf-1", title: "Test Workflow" };
 
 const MOCK_STAGES = [
-  { id: "stage-1", workflow_id: "wf-1", name: "需求接入", description: "", sort_order: 0, node_count: 2, created_at: "", updated_at: "" },
-  { id: "stage-2", workflow_id: "wf-1", name: "需求分析", description: "", sort_order: 1, node_count: 1, created_at: "", updated_at: "" },
+  { id: "stage-1", workflow_id: "wf-1", name: "Intake", description: "", sort_order: 0, node_count: 2, created_at: "", updated_at: "" },
+  { id: "stage-2", workflow_id: "wf-1", name: "Analysis", description: "", sort_order: 1, node_count: 1, created_at: "", updated_at: "" },
 ];
 
 const MOCK_NODES = [
-  { id: "n1", workflow_id: "wf-1", title: "brainstorming", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent" as const, worker_id: "agent-1", critic_type: "", critic_id: null, critic_api_url: null, sort_order: 0, stage_id: "stage-1", created_at: "", updated_at: "" },
-  { id: "n2", workflow_id: "wf-1", title: "session-context", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent" as const, worker_id: "agent-2", critic_type: "", critic_id: null, critic_api_url: null, sort_order: 1, stage_id: "stage-1", created_at: "", updated_at: "" },
-  { id: "n3", workflow_id: "wf-1", title: "requirement-analysis", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent" as const, worker_id: "agent-3", critic_type: "", critic_id: null, critic_api_url: null, sort_order: 0, stage_id: "stage-2", created_at: "", updated_at: "" },
+  { id: "n1", workflow_id: "wf-1", title: "brainstorming", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent" as const, worker_id: "agent-1", critic_type: "agent" as const, critic_id: "agent-2", critic_api_url: null, sort_order: 0, stage_id: "stage-1", created_at: "", updated_at: "" },
+  { id: "n2", workflow_id: "wf-1", title: "session-context", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent" as const, worker_id: "agent-2", critic_type: "human", critic_id: null, critic_api_url: null, sort_order: 1, stage_id: "stage-1", created_at: "", updated_at: "" },
+  { id: "n3", workflow_id: "wf-1", title: "requirement-analysis", description: "", position_x: 0, position_y: 0, format_schema: null, worker_type: "agent" as const, worker_id: "agent-3", critic_type: "human", critic_id: null, critic_api_url: null, sort_order: 0, stage_id: "stage-2", created_at: "", updated_at: "" },
 ];
 
 const MOCK_EDGES = [
@@ -27,7 +25,7 @@ const MOCK_EDGES = [
 const MOCK_AGENTS = [
   { id: "agent-1", workspace_id: "ws-1", runtime_id: "rt-1", name: "Brainstorming Agent", description: "Brainstorms", instructions: "", avatar_url: null, runtime_mode: "cloud" as const, runtime_config: {}, custom_env: {}, custom_args: [], custom_env_redacted: false, visibility: "workspace" as const, status: "idle" as const, max_concurrent_tasks: 1, model: "claude-sonnet-4-6", thinking_level: "medium", plugin_id: "plugin-1", is_builtin: false, owner_id: null, skills: [], created_at: "", updated_at: "", archived_at: null, archived_by: null },
   { id: "agent-2", workspace_id: "ws-1", runtime_id: "rt-1", name: "Session Agent", description: "Session context", instructions: "", avatar_url: null, runtime_mode: "cloud" as const, runtime_config: {}, custom_env: {}, custom_args: [], custom_env_redacted: false, visibility: "workspace" as const, status: "working" as const, max_concurrent_tasks: 1, model: "claude-opus-4-8", thinking_level: "", plugin_id: "plugin-2", is_builtin: false, owner_id: null, skills: [], created_at: "", updated_at: "", archived_at: null, archived_by: null },
-  { id: "agent-3", workspace_id: "ws-1", runtime_id: "rt-1", name: "Req Analysis Agent", description: "Requirements analysis", instructions: "", avatar_url: null, runtime_mode: "local" as const, runtime_config: {}, custom_env: {}, custom_args: [], custom_env_redacted: false, visibility: "workspace" as const, status: "idle" as const, max_concurrent_tasks: 2, model: "claude-haiku-4-5-20251001", thinking_level: "", plugin_id: null, is_builtin: false, owner_id: null, skills: [], created_at: "", updated_at: "", archived_at: null, archived_by: null },
+  { id: "agent-3", workspace_id: "ws-1", runtime_id: "rt-1", name: "Analysis Agent", description: "Requirements analysis", instructions: "", avatar_url: null, runtime_mode: "local" as const, runtime_config: {}, custom_env: {}, custom_args: [], custom_env_redacted: false, visibility: "workspace" as const, status: "idle" as const, max_concurrent_tasks: 2, model: "claude-haiku-4-5-20251001", thinking_level: "", plugin_id: null, is_builtin: false, owner_id: null, skills: [], created_at: "", updated_at: "", archived_at: null, archived_by: null },
 ];
 
 const MOCK_PLUGINS = {
@@ -35,10 +33,12 @@ const MOCK_PLUGINS = {
     { id: "plugin-1", name: "Cospowers Brainstorming", description: "Brainstorming plugin", slug: "cospowers-brainstorming", version: "1.0.0", category: "engineering" },
     { id: "plugin-2", name: "Cospowers Session", description: "Session context plugin", slug: "cospowers-session", version: "1.0.0", category: "engineering" },
   ],
-  total: 2, page: 1, pageSize: 100, hasMore: false,
+  total: 2,
+  page: 1,
+  pageSize: 100,
+  hasMore: false,
 };
 
-// ── Hoisted mocks ──
 const mocks = vi.hoisted(() => ({
   workflowData: undefined as unknown,
   stagesData: undefined as unknown as unknown[],
@@ -117,22 +117,35 @@ describe("WorkflowPanoramaPage", () => {
 
   it("renders stage swimlanes for each stage", () => {
     renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
-    expect(screen.getByText("需求接入")).toBeTruthy();
-    expect(screen.getByText("需求分析")).toBeTruthy();
+    expect(screen.getByText("Intake")).toBeTruthy();
+    expect(screen.getByText("Analysis")).toBeTruthy();
   });
 
   it("renders plugin cards with resolved names", () => {
     renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
     expect(screen.getByText("Cospowers Brainstorming")).toBeTruthy();
     expect(screen.getByText("Cospowers Session")).toBeTruthy();
-    // n3 agent has no plugin_id → falls back to node title
     expect(screen.getByText("requirement-analysis")).toBeTruthy();
+  });
+
+  it("renders a stage-to-stage flow summary label", () => {
+    renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
+    expect(screen.getByText("session-context -> requirement-analysis")).toBeTruthy();
   });
 
   it("opens detail panel on card click", () => {
     renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
     fireEvent.click(screen.getByTestId("plugin-card-n1"));
     expect(screen.getByTestId("architecture-detail-panel")).toBeTruthy();
+  });
+
+  it("opens critic detail panel on critic badge click", () => {
+    renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
+    fireEvent.click(screen.getByTestId("critic-badge-n1"));
+    const panel = screen.getByTestId("architecture-detail-panel");
+    expect(panel).toBeTruthy();
+    expect(within(panel).getAllByText("Critic").length).toBeGreaterThan(0);
+    expect(within(panel).getByText("Session Agent")).toBeTruthy();
   });
 
   it("shows loading skeleton when loading", () => {

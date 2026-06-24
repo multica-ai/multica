@@ -19,10 +19,4 @@ describe("useWorkflowViewStore", () => {
     useWorkflowViewStore.getState().setViewMode("panorama");
     expect(useWorkflowViewStore.getState().viewMode).toBe("panorama");
   });
-
-  it("setViewMode switches to overview", () => {
-    useWorkflowViewStore.getState().setViewMode("panorama");
-    useWorkflowViewStore.getState().setViewMode("overview");
-    expect(useWorkflowViewStore.getState().viewMode).toBe("overview");
-  });
 });

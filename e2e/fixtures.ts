@@ -20,6 +20,12 @@ interface TestWorkspace {
 }
 
 export class TestApiClient {
+  private static readonly DEFAULT_NODE_GRID_COLUMNS = 4;
+  private static readonly DEFAULT_NODE_GRID_X_START = 120;
+  private static readonly DEFAULT_NODE_GRID_Y_START = 80;
+  private static readonly DEFAULT_NODE_GRID_X_GAP = 260;
+  private static readonly DEFAULT_NODE_GRID_Y_GAP = 180;
+
   private token: string | null = null;
   private workspaceSlug: string | null = null;
   private workspaceId: string | null = null;
@@ -27,6 +33,7 @@ export class TestApiClient {
   private createdWorkflowIds: string[] = [];
   private createdWorkflowStageIds: string[] = [];
   private createdAgentIds: string[] = [];
+  private workflowNodeCounts = new Map<string, number>();
 
   async login(email: string, name: string) {
     const devCode = process.env.MULTICA_DEV_VERIFICATION_CODE;
@@ -167,7 +174,29 @@ export class TestApiClient {
     });
     const workflow = await res.json();
     this.createdWorkflowIds.push(workflow.id);
+    this.workflowNodeCounts.set(workflow.id, 0);
     return workflow;
+  }
+
+  async listWorkflows(workspaceId?: string) {
+    const query = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+    const res = await this.authedFetch(`/api/workflows${query}`);
+    return res.json();
+  }
+
+  async getWorkflow(id: string) {
+    const res = await this.authedFetch(`/api/workflows/${id}`);
+    return res.json();
+  }
+
+  async listWorkflowNodes(workflowId: string) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes`);
+    return res.json();
+  }
+
+  async listWorkflowEdges(workflowId: string) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/edges`);
+    return res.json();
   }
 
   async createWorkflowStage(workflowId: string, name: string, sortOrder: number) {
@@ -191,24 +220,28 @@ export class TestApiClient {
     critic_id?: string | null;
     stage_id?: string | null;
     format_schema?: unknown;
+    critic_api_url?: string | null;
   }) {
+    const defaultPosition = this.getDefaultNodePosition(workflowId);
     const body: Record<string, unknown> = {
       title: data.title,
       description: data.description ?? "",
-      position_x: data.position_x ?? 0,
-      position_y: data.position_y ?? 0,
+      position_x: data.position_x ?? defaultPosition.x,
+      position_y: data.position_y ?? defaultPosition.y,
       worker_type: data.worker_type ?? "agent",
       critic_type: data.critic_type ?? "human",
     };
     if (data.worker_id !== undefined) body.worker_id = data.worker_id;
     if (data.critic_id !== undefined) body.critic_id = data.critic_id;
     if (data.format_schema !== undefined) body.format_schema = data.format_schema;
+    if (data.critic_api_url !== undefined) body.critic_api_url = data.critic_api_url;
 
     const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes`, {
       method: "POST",
       body: JSON.stringify(body),
     });
     const node = await res.json();
+    this.incrementWorkflowNodeCount(workflowId);
 
     // If stage_id is provided, assign the node to the stage
     if (data.stage_id !== undefined) {
@@ -233,6 +266,9 @@ export class TestApiClient {
         }),
       }
     );
+    if (!res.ok) {
+      throw new Error(`create workflow edge failed: ${res.status} ${await res.text()}`);
+    }
     return res.json();
   }
 
@@ -284,6 +320,14 @@ export class TestApiClient {
     return res.json();
   }
 
+  async listAgents(params?: { include_archived?: boolean }) {
+    const query = new URLSearchParams();
+    if (params?.include_archived) query.set("include_archived", "true");
+    const qs = query.toString();
+    const res = await this.authedFetch(`/api/agents${qs ? `?${qs}` : ""}`);
+    return res.json();
+  }
+
   async listBuiltinPlugins() {
     const res = await this.authedFetch("/api/plugins/builtin");
     return res.json();
@@ -332,6 +376,7 @@ export class TestApiClient {
     }
     this.createdWorkflowIds = [];
     this.createdWorkflowStageIds = [];
+    this.workflowNodeCounts.clear();
 
     for (const id of this.createdAgentIds) {
       try {
@@ -365,5 +410,20 @@ export class TestApiClient {
     if (this.workspaceSlug) headers["X-Workspace-Slug"] = this.workspaceSlug;
     else if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
     return fetch(`${API_BASE}${path}`, { ...init, headers });
+  }
+
+  private getDefaultNodePosition(workflowId: string) {
+    const index = this.workflowNodeCounts.get(workflowId) ?? 0;
+    const column = index % TestApiClient.DEFAULT_NODE_GRID_COLUMNS;
+    const row = Math.floor(index / TestApiClient.DEFAULT_NODE_GRID_COLUMNS);
+    return {
+      x: TestApiClient.DEFAULT_NODE_GRID_X_START + column * TestApiClient.DEFAULT_NODE_GRID_X_GAP,
+      y: TestApiClient.DEFAULT_NODE_GRID_Y_START + row * TestApiClient.DEFAULT_NODE_GRID_Y_GAP,
+    };
+  }
+
+  private incrementWorkflowNodeCount(workflowId: string) {
+    const nextCount = (this.workflowNodeCounts.get(workflowId) ?? 0) + 1;
+    this.workflowNodeCounts.set(workflowId, nextCount);
   }
 }

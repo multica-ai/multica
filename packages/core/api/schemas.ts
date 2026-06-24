@@ -850,6 +850,18 @@ export const EMPTY_WORKFLOW_ADMINS_RESPONSE = { admins: [] };
 // the base URL is read from BUILTIN_PLUGIN_API_BASE_URL at runtime by the server).
 // ---------------------------------------------------------------------------
 
+const PluginBundleSchema = z.object({
+  skills_count: z.number().default(0),
+  agents_count: z.number().default(0),
+  commands_count: z.number().default(0),
+  hooks_count: z.number().default(0),
+  skills_namespaces: z.array(z.string()).default([]),
+}).loose();
+
+const PluginMetadataSchema = z.object({
+  bundle: PluginBundleSchema.optional(),
+}).loose();
+
 export const BuiltinPluginSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -857,7 +869,8 @@ export const BuiltinPluginSchema = z.object({
   slug: z.string(),
   version: z.string(),
   category: z.string(),
-});
+  metadata: PluginMetadataSchema.optional(),
+}).loose();
 
 export type BuiltinPlugin = z.infer<typeof BuiltinPluginSchema>;
 

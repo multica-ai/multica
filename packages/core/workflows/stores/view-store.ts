@@ -5,7 +5,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type WorkflowViewMode = "panorama" | "overview" | "editor";
+export type WorkflowViewMode = "panorama" | "editor";
 
 interface WorkflowViewState {
   viewMode: WorkflowViewMode;

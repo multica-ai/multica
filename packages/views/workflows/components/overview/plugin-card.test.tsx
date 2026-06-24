@@ -88,7 +88,7 @@ describe("PluginCard", () => {
     const onClick = vi.fn();
     render(<PluginCard node={MOCK_NODE} agent={MOCK_AGENT} plugin={MOCK_PLUGIN} onClick={onClick} />);
     fireEvent.click(screen.getByTestId("plugin-card-node-1"));
-    expect(onClick).toHaveBeenCalledWith("node-1");
+    expect(onClick).toHaveBeenCalledWith("node-1", "worker");
   });
 
   it("renders without agent info when agent is null", () => {
