@@ -17,9 +17,12 @@ export {
   canEditAgent,
   canPromoteAgent,
   canDemoteBuiltinAgent,
+  canManageRuntimePermissions,
+  canControlNodeRun,
 } from "./rules";
 
 export {
   useAgentPermissions,
   useSkillPermissions,
 } from "./use-resource-permissions";
+export { useRuntimePermissions, useNodeRunControlPermission } from "./use-runtime-permissions";

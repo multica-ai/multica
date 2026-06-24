@@ -17,6 +17,8 @@ import type {
   WorkflowRun,
   WorkflowNodeRun,
   WorkflowStage,
+  RuntimePermission,
+  SessionPermissionResponse,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
@@ -814,6 +816,8 @@ const WorkflowNodeRunSchema = z.object({
   critic_comment: z.string().default(""),
   critic_agent_task_id: z.string().nullable().default(null),
   agent_task_id: z.string().nullable().default(null),
+  session_id: z.string().nullable().default(null),
+  runtime_id: z.string().nullable().default(null),
   started_at: z.string().nullable().default(null),
   completed_at: z.string().nullable().default(null),
   created_at: z.string().default(""),
@@ -845,6 +849,53 @@ export const WorkflowAdminsResponseSchema = z.object({
 }).loose();
 
 export const EMPTY_WORKFLOW_ADMINS_RESPONSE = { admins: [] };
+
+// ---------------------------------------------------------------------------
+// Runtime permission schemas
+// ---------------------------------------------------------------------------
+
+export const MyRuntimePermissionSchema = z.object({
+  role: z.string().default(""),
+  can_control: z.boolean().default(false),
+  can_observe: z.boolean().default(false),
+}).loose();
+
+export const RuntimePermissionSchema = z.object({
+  id: z.string(),
+  runtime_id: z.string(),
+  user_id: z.string(),
+  role: z.string().default(""),
+  user_name: z.string().default(""),
+  user_email: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const RuntimePermissionListSchema = z.object({
+  permissions: z.array(RuntimePermissionSchema).default([]),
+}).loose();
+
+export const EMPTY_RUNTIME_PERMISSION_LIST_RESPONSE: { permissions: RuntimePermission[] } = { permissions: [] };
+
+export const SessionPermissionSchema = z.object({
+  workspace_id: z.string().default(""),
+  node_run_id: z.string().default(""),
+  device_id: z.string().default(""),
+  session_id: z.string().default(""),
+  role: z.string().default(""),
+  can_control: z.boolean().default(false),
+  can_observe: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_SESSION_PERMISSION: SessionPermissionResponse = {
+  workspace_id: "",
+  node_run_id: "",
+  device_id: "",
+  session_id: "",
+  role: "",
+  can_control: false,
+  can_observe: false,
+};
 
 // ---------------------------------------------------------------------------
 // External Plugin API (proxied through the Multica backend;

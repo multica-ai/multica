@@ -50,6 +50,16 @@ export type {
   RuntimeLocalSkillImportResult,
   IssueUsageSummary,
 } from "./agent";
+export type {
+  RuntimePermissionRole,
+  RuntimeCapabilities,
+  MyRuntimePermissionResponse,
+  RuntimePermission,
+  RuntimePermissionListResponse,
+  CreateRuntimePermissionRequest,
+  UpdateRuntimePermissionRequest,
+  SessionPermissionResponse,
+} from "./runtime";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";

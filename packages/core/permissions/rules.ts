@@ -149,6 +149,47 @@ export function canDeleteRuntime(
   );
 }
 
+/**
+ * Manage explicit runtime-level permissions (grant/change/revoke roles).
+ * Mirrors the backend gate in `runtime.go`: only workspace owners/admins and
+ * the runtime owner may edit permissions.
+ */
+export function canManageRuntimePermissions(
+  runtime: RuntimeDevice,
+  ctx: PermissionContext,
+): Decision {
+  if (ctx.userId === null) {
+    return deny("not_authenticated", "Sign in to manage runtime permissions.");
+  }
+  if (isAdminLike(ctx.role)) return ALLOW;
+  if (runtime.owner_id !== null && runtime.owner_id === ctx.userId) {
+    return ALLOW;
+  }
+  return deny(
+    "not_resource_owner",
+    "Only the runtime owner and workspace admins can manage permissions.",
+  );
+}
+
+/**
+ * Perform takeover/handback/finalize on a workflow node-run. The backend
+ * resolves the effective runtime role; the UI gates on the returned
+ * `can_control` capability so the two stay in sync.
+ */
+export function canControlNodeRun(
+  canControl: boolean,
+  ctx: PermissionContext,
+): Decision {
+  if (ctx.userId === null) {
+    return deny("not_authenticated", "Sign in to control this node run.");
+  }
+  if (canControl) return ALLOW;
+  return deny(
+    "not_resource_owner",
+    "You don't have permission to control this node run.",
+  );
+}
+
 // ---- Workspace -------------------------------------------------------------
 
 export function canUpdateWorkspaceSettings(ctx: PermissionContext): Decision {

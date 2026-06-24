@@ -26,6 +26,7 @@ export const workflowKeys = {
   templates: () => ["templates"] as const,
   admins: () => ["workflow-admins"] as const,
   stages: (wsId: string, workflowId: string) => [...workflowKeys.detail(wsId, workflowId), "stages"] as const,
+  sessionPermission: (sessionId: string) => ["workflows", "session-permission", sessionId] as const,
 };
 
 // ── Queries ──
@@ -100,6 +101,15 @@ export function myWorkflowTasksOptions(wsId: string) {
     queryKey: workflowKeys.myTasks(wsId),
     queryFn: () => api.listMyWorkflowTasks(wsId),
     select: (data) => data.node_runs,
+  });
+}
+
+export function useSessionPermission(sessionId: string | null | undefined) {
+  return useQuery({
+    queryKey: workflowKeys.sessionPermission(sessionId ?? ""),
+    queryFn: () => api.getSessionPermission(sessionId!),
+    enabled: !!sessionId,
+    staleTime: 30 * 1000,
   });
 }
 
@@ -254,6 +264,74 @@ export function useSkipNodeRun(wsId: string) {
     mutationFn: (nodeRunId: string) => api.skipNodeRun(nodeRunId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.myTasks(wsId) });
+    },
+  });
+}
+
+interface NodeRunControlVars {
+  nodeRunId: string;
+  sessionId?: string | null;
+  workflowId?: string;
+  runId?: string;
+}
+
+export function useTakeoverNodeRun(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nodeRunId }: NodeRunControlVars) => api.takeoverNodeRun(nodeRunId),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.myTasks(wsId) });
+      if (vars.workflowId && vars.runId) {
+        queryClient.invalidateQueries({
+          queryKey: workflowKeys.nodeRuns(wsId, vars.workflowId, vars.runId),
+        });
+      }
+      if (vars.sessionId) {
+        queryClient.invalidateQueries({
+          queryKey: workflowKeys.sessionPermission(vars.sessionId),
+        });
+      }
+    },
+  });
+}
+
+export function useHandbackNodeRun(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ nodeRunId }: NodeRunControlVars) => api.handbackNodeRun(nodeRunId),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.myTasks(wsId) });
+      if (vars.workflowId && vars.runId) {
+        queryClient.invalidateQueries({
+          queryKey: workflowKeys.nodeRuns(wsId, vars.workflowId, vars.runId),
+        });
+      }
+      if (vars.sessionId) {
+        queryClient.invalidateQueries({
+          queryKey: workflowKeys.sessionPermission(vars.sessionId),
+        });
+      }
+    },
+  });
+}
+
+export function useFinalizeNodeRun(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: NodeRunControlVars & { approved: boolean }) =>
+      api.finalizeNodeRun(vars.nodeRunId, vars.approved),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.myTasks(wsId) });
+      if (vars.workflowId && vars.runId) {
+        queryClient.invalidateQueries({
+          queryKey: workflowKeys.nodeRuns(wsId, vars.workflowId, vars.runId),
+        });
+      }
+      if (vars.sessionId) {
+        queryClient.invalidateQueries({
+          queryKey: workflowKeys.sessionPermission(vars.sessionId),
+        });
+      }
     },
   });
 }

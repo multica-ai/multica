@@ -100,6 +100,10 @@ export interface WorkflowNodeRun {
   critic_comment: string;
   critic_agent_task_id: string | null;
   agent_task_id: string | null;
+  /** Non-null when this node run is bound to a CSC session for human/agent collaboration. */
+  session_id: string | null;
+  /** Runtime that owns the session for this node run, if any. */
+  runtime_id: string | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
