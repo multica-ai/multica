@@ -164,8 +164,9 @@ export function WorkflowDagViewer({
   const totalCount = nodes.length;
   const summary = getRunSummary(nodeRuns);
 
-  // Auto-select a running node on first load so the active task is surfaced
-  // without the user needing to click the DAG.
+  // Auto-select the most relevant node on first load so the active task is
+  // surfaced without the user needing to click the DAG.
+  // Priority: running > blocked > first pending.
   const hasAutoSelectedRef = useRef(false);
   useEffect(() => {
     if (hasAutoSelectedRef.current) return;
@@ -173,9 +174,12 @@ export function WorkflowDagViewer({
       hasAutoSelectedRef.current = true;
       return;
     }
-    const runningNodes = nodeRuns.filter((nr) => runningSet.has(nr.status));
-    if (runningNodes.length === 0) return;
-    const pick = runningNodes[Math.floor(Math.random() * runningNodes.length)];
+    const blockedSet = new Set(["blocked"]);
+    const pendingSet = new Set(["pending"]);
+    const pick =
+      nodeRuns.find((nr) => runningSet.has(nr.status)) ??
+      nodeRuns.find((nr) => blockedSet.has(nr.status)) ??
+      nodeRuns.find((nr) => pendingSet.has(nr.status));
     if (!pick) return;
     setSelectedNodeId(pick.workflow_node_id);
     hasAutoSelectedRef.current = true;
