@@ -298,10 +298,20 @@ RETURNING *;
 -- re-loaded by the handler so a trigger update between scope-list and
 -- handler-run sees the latest enabled / cron values.
 --
+-- last_fired_at is read so the planner hook can anchor cold-start
+-- enumeration on the most recent successful fire (set by either the
+-- legacy goroutine before the new scheduler took over, or the new
+-- scheduler's own TouchAutopilotTriggerFiredAt call). Without it,
+-- a trigger that was created days ago and fired by the legacy code
+-- looks like a brand-new trigger to the new scheduler on first tick
+-- and the half-open `(created_at, now]` enumeration replays the most
+-- recent already-fired occurrence — exactly the post-deploy
+-- spurious-fire reported on MUL-3551 dev.
+--
 -- Filters out webhook / api triggers, disabled triggers, paused/archived
 -- autopilots, and any trigger missing its cron expression. ORDER BY id
 -- keeps the per-tick scope list stable across replicas.
-SELECT t.id, t.autopilot_id, t.cron_expression, t.timezone, t.created_at
+SELECT t.id, t.autopilot_id, t.cron_expression, t.timezone, t.created_at, t.last_fired_at
 FROM autopilot_trigger t
 JOIN autopilot a ON a.id = t.autopilot_id
 WHERE t.kind = 'schedule'
