@@ -373,6 +373,48 @@ func TestLabelNameTooLong(t *testing.T) {
 	})
 }
 
+// TestLabelNameRejectsNewlines — names containing a newline ("\n" or "\r") must
+// return 400, while a normal name is accepted. Each bad case embeds the newline
+// away from the edges so TrimSpace can't strip it.
+func TestLabelNameRejectsNewlines(t *testing.T) {
+	badNames := []string{
+		"bug\nP0",
+		"bug\rP0",
+		"line1\nline2",
+		"bug\r\nP0",
+	}
+	for _, name := range badNames {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/labels", map[string]any{
+			"name":  name,
+			"color": "#3b82f6",
+		})
+		testHandler.CreateLabel(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("CreateLabel name %q: expected 400, got %d: %s", name, w.Code, w.Body.String())
+		}
+	}
+
+	// A normal name is accepted.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/labels", map[string]any{
+		"name":  "newline-ok",
+		"color": "#3b82f6",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel normal name: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created LabelResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+created.ID, nil)
+		req = withURLParam(req, "id", created.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+}
+
 // TestColorCaseNormalization — input `#ABCDEF` must be stored as `#abcdef`
 // so the case-insensitive uniqueness and downstream CSS rendering are
 // consistent. Also accepts a bare `ABCDEF` (no leading #).
