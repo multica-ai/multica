@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -34,7 +35,11 @@ type ChannelResponse struct {
 	IsMember       bool    `json:"is_member"`
 	MemberRole     *string `json:"member_role,omitempty"`
 	HasUnread      bool    `json:"has_unread"`
-	LastActivityAt string  `json:"last_activity_at,omitempty"`
+	// First top-level message newer than the member's last_read_at. Drives the
+	// "jump to last read" landing point on channel entry. Nil when not a member
+	// or fully read.
+	FirstUnreadMessageID *string `json:"first_unread_message_id,omitempty"`
+	LastActivityAt       string  `json:"last_activity_at,omitempty"`
 	// Group context (only set on list).
 	GroupID       *string `json:"group_id,omitempty"`
 	GroupName     *string `json:"group_name,omitempty"`
@@ -82,10 +87,11 @@ func channelListRowToResponse(c db.ListChannelsRow) ChannelResponse {
 		CreatedBy:      uuidToPtr(c.CreatedBy),
 		CreatedAt:      timestampToString(c.CreatedAt),
 		UpdatedAt:      timestampToString(c.UpdatedAt),
-		IsMember:       c.IsMember,
-		MemberRole:     textToPtr(c.MemberRole),
-		HasUnread:      c.HasUnread,
-		LastActivityAt: timestampToString(c.LastActivityAt),
+		IsMember:            c.IsMember,
+		MemberRole:          textToPtr(c.MemberRole),
+		HasUnread:           c.HasUnread,
+		FirstUnreadMessageID: uuidToPtr(c.FirstUnreadMessageID),
+		LastActivityAt:      timestampToString(c.LastActivityAt),
 		GroupID:        uuidToPtr(c.GroupID),
 		GroupName:      textToPtr(c.GroupName),
 		GroupPosition:  c.GroupPosition,
@@ -122,6 +128,26 @@ func channelSlugWithSuffix(base string, attempt int) string {
 		return base
 	}
 	return base + "-" + strconv.Itoa(attempt)
+}
+
+// truncateUTF8 returns the longest prefix of s that is at most maxBytes long
+// AND ends on a UTF-8 rune boundary. A plain s[:maxBytes] can split a
+// multi-byte rune (e.g. the lead byte of a CJK character), producing an
+// invalid UTF-8 byte sequence that PostgreSQL rejects on INSERT with
+// SQLSTATE 22021 — which surfaces as a generic "failed to create reply
+// thread" and makes the message unreplyable. Callers deriving a thread
+// title from arbitrary message content must use this instead of byte slicing.
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	end := maxBytes
+	// Walk back past any continuation bytes so we cut before, not inside,
+	// the rune that straddles the maxBytes boundary.
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end]
 }
 
 // ---------- access control ----------
@@ -170,10 +196,16 @@ func (h *Handler) loadChannelContext(w http.ResponseWriter, r *http.Request, wsU
 func (c channelContext) canManage() bool { return c.wsAdmin || c.channelOwn }
 
 // canPost reports whether the user may post threads/messages. Locked channels
-// restrict posting to managers; otherwise any member of the channel may post.
+// restrict posting to managers. Open channels are workspace-wide — any
+// workspace member may post (matching the frontend canPost gate and the
+// open-channel notify semantics); invite-only channels require channel
+// membership. Reaching this handler already proves workspace membership.
 func (c channelContext) canPost() bool {
 	if c.channel.IsLocked {
 		return c.canManage()
+	}
+	if c.channel.AccessMode == "open" {
+		return true
 	}
 	return c.member != nil || c.wsAdmin
 }

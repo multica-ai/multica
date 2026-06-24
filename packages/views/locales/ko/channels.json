@@ -19,6 +19,10 @@
   "member_added": "멤버가 추가되었습니다",
   "member_removed": "멤버가 제거되었습니다",
   "settings_updated": "채널 설정이 업데이트되었습니다",
+  "new_messages": "새 메시지",
+  "jump_to_last_read": "마지막으로 읽은 위치로",
+  "channel_deleted": "채널이 삭제되었습니다",
+  "delete_failed": "삭제 실패",
   "replies_count_other": "답글 {{count}}개",
   "new_group": "새 그룹",
   "new_channel": "새 채널",
@@ -42,10 +46,25 @@
   "context_menu": {
     "rename": "이름 변경",
     "delete_group": "그룹 삭제",
+    "delete_channel": "채널 삭제",
     "copy_link": "링크 복사",
     "reply": "답글",
     "convert_issue": "이슈로 변환",
     "convert_agent": "Agent가 이슈로 변환"
+  },
+  "delete_channel": {
+    "aria_label": "채널 {{name}} 삭제",
+    "title": "채널 삭제",
+    "description": "채널 \"{{name}}\"을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없으며 채널의 모든 메시지와 스레드가 삭제됩니다.",
+    "cancel": "취소",
+    "confirm": "삭제"
+  },
+  "delete_group": {
+    "aria_label": "그룹 {{name}} 삭제",
+    "title": "그룹 삭제",
+    "description": "그룹 \"{{name}}\"을(를) 삭제하시겠습니까? 그룹의 채널은 미분류로 이동하며 삭제되지 않습니다.",
+    "cancel": "취소",
+    "confirm": "삭제"
   },
   "panel_header": {
     "replies": "답글",
@@ -82,5 +101,21 @@
   "resize_aria": {
     "channel_list": "채널 목록 너비 조정",
     "side_panel": "사이드 패널 너비 조정"
+  },
+  "move": {
+    "converged": "답장 스레드로 이동했습니다",
+    "released": "타임라인으로 이동했습니다",
+    "failed": "메시지 이동에 실패했습니다"
+  },
+  "drag": {
+    "instructions": "메시지를 길게 눌러 드래그하세요. 다른 메시지에 놓으면 해당 메시지의 최신 답장으로 통합되고, 메시지 목록에 놓으면 답장을 타임라인으로 해제합니다.",
+    "picked_up": "선택함: {{preview}}",
+    "dropped": "놓았습니다.",
+    "dropped_over": "{{target}}에 놓았습니다.",
+    "cancelled": "드래그가 취소되었습니다.",
+    "aria_message": "메시지: {{preview}}",
+    "aria_reply": "답장: {{preview}}",
+    "aria_group": "채널 그룹: {{name}}",
+    "aria_channel": "채널: {{name}}"
   }
 }

@@ -797,9 +797,15 @@ function ActivityBlock({
                 details.source_type === "channel_message" ? (
                   <span className="truncate">
                     {"mentioned in channel "}
-                    <span className="font-medium text-foreground">
-                      {details.source_channel_name || "channel"}
-                    </span>
+                    <AppLink
+                      href={paths.channelDetail(
+                        (details.source_channel_id as string) ?? "",
+                        details.source_id ? { messageId: details.source_id as string } : undefined,
+                      )}
+                      className="font-medium text-foreground hover:underline"
+                    >
+                      {(details.source_channel_name as string) || "channel"}
+                    </AppLink>
                   </span>
                 ) : (
                   <span className="truncate">
@@ -3081,10 +3087,21 @@ export function IssueDetail({
           )}
 
           {issue.source_channel_id && (
-            <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
+            <AppLink
+              href={paths.channelDetail(
+                issue.source_channel_id,
+                issue.source_message_id ? { messageId: issue.source_message_id } : undefined,
+              )}
+              title={t(($) => $.detail.from_channel_tooltip)}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            >
               <MessagesSquare className="h-3.5 w-3.5" />
-              <span>来自频道讨论</span>
-            </div>
+              <span>
+                {t(($) => $.detail.from_channel, {
+                  channel: issue.source_channel_name ?? t(($) => $.detail.from_channel_default),
+                })}
+              </span>
+            </AppLink>
           )}
 
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">

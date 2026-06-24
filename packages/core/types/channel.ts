@@ -15,6 +15,10 @@ export interface ChannelSummary {
   is_member: boolean;
   member_role?: string;
   has_unread: boolean;
+  // First top-level message newer than the member's last_read_at. Drives the
+  // "jump to last read" landing point on channel entry. Null when the user is
+  // not a member or has no unread.
+  first_unread_message_id?: string | null;
   last_activity_at?: string;
   group_id?: string | null;
   group_name?: string | null;
@@ -94,12 +98,21 @@ export interface ChannelMessage {
   created_at: string;
   updated_at: string;
   agent_tasks?: ChannelAgentTask[];
+  issues?: ThreadLinkedIssue[];
 }
 
 export interface ListChannelMessagesResponse {
   messages: ChannelMessage[];
   total: number;
   has_more?: boolean;
+  // Present only when ?around targeted a reply: the window is centered on
+  // root_message_id (a top-level message), and the client should auto-expand
+  // thread_id and scroll-highlight message_id (the original reply).
+  highlight?: {
+    root_message_id: string;
+    thread_id: string;
+    message_id: string;
+  };
 }
 
 export interface MessageThreadResponse {
@@ -158,16 +171,4 @@ export interface CreateChannelThreadRequest {
 
 export interface CreateChannelMessageRequest {
   content: string;
-}
-
-export interface ConvertMessageToIssueRequest {
-  title?: string;
-  description?: string;
-  project_id?: string;
-}
-
-export interface ConvertMessageToIssueResponse {
-  issue_id: string;
-  issue_number: number;
-  title: string;
 }

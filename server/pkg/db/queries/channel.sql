@@ -25,6 +25,18 @@ SELECT
             WHERE m.channel_id = c.id AND m.created_at > cm.last_read_at
         )
     )::boolean AS has_unread,
+    -- First top-level message newer than the member's last_read_at, so the
+    -- client can land at the read/unread boundary ("jump to last read") on
+    -- entry. Replies are excluded — the flat timeline only renders top-level
+    -- messages. NULL when the user is not a member or has no unread.
+    (
+        SELECT m.id FROM channel_message m
+        WHERE m.channel_id = c.id
+          AND m.thread_id IS NULL
+          AND m.created_at > cm.last_read_at
+        ORDER BY m.created_at ASC, m.id ASC
+        LIMIT 1
+    ) AS first_unread_message_id,
     cg.name AS group_name,
     COALESCE(cg.position, 0)::float8 AS group_position
 FROM channel c
@@ -116,6 +128,35 @@ UPDATE channel_thread SET
     updated_at = now()
 WHERE id = $1;
 
+-- name: RefreshChannelThreadStats :one
+-- Recomputes a thread's reply count and last_message_at from its actual
+-- messages. Used by the release move after a reply leaves the thread, so the
+-- denormalized counter and last-activity stay correct (and ListChannelThreads
+-- ordering by last_message_at DESC does not go stale). Returns the updated
+-- thread so the caller can decide whether to clean it up.
+UPDATE channel_thread t SET
+    message_count = sub.cnt,
+    last_message_at = CASE WHEN sub.cnt > 0 THEN sub.last ELSE t.last_message_at END,
+    updated_at = now()
+FROM (
+    SELECT count(*)::int AS cnt, max(order_at) AS last
+    FROM channel_message WHERE thread_id = $1
+) sub
+WHERE t.id = $1
+RETURNING t.*;
+
+-- name: DeleteChannelThreadIfEmptyAndNoIssue :exec
+-- Removes a thread only when it has zero messages (no replies) and no linked
+-- issue — the terminal state after releasing the last reply of a thread that
+-- never produced an issue. channel_message.thread_id ON DELETE CASCADE makes
+-- deleting a thread with replies catastrophic, so the NOT EXISTS guards are
+-- load-bearing. A thread still linked to an issue is preserved (the issue's
+-- source_thread_id back-reference must stay valid).
+DELETE FROM channel_thread t
+WHERE t.id = $1
+  AND NOT EXISTS (SELECT 1 FROM channel_message m WHERE m.thread_id = t.id)
+  AND NOT EXISTS (SELECT 1 FROM issue i WHERE i.source_thread_id = t.id);
+
 -- name: DeleteChannelThread :exec
 DELETE FROM channel_thread WHERE id = $1;
 
@@ -146,11 +187,14 @@ SELECT * FROM channel_message WHERE id = $1;
 
 -- name: ListChannelMessages :many
 -- Lists top-level channel messages (thread_id IS NULL), with reply_count.
+-- Ordered by order_at (display position), NOT created_at: order_at is the only
+-- column the converge/release move re-stamps, so a moved message lands as the
+-- latest entry without disturbing created_at (which drives unread state).
 SELECT m.*,
     COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
 FROM channel_message m
 WHERE m.channel_id = $1 AND m.thread_id IS NULL
-ORDER BY m.created_at ASC;
+ORDER BY m.order_at ASC;
 
 -- name: ListChannelMessagesLatest :many
 -- Lists the N most recent top-level messages (for initial page load).
@@ -159,7 +203,7 @@ SELECT m.*,
     COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
 FROM channel_message m
 WHERE m.channel_id = $1 AND m.thread_id IS NULL
-ORDER BY m.created_at DESC
+ORDER BY m.order_at DESC
 LIMIT $2;
 
 -- name: ListChannelMessagesPaginated :many
@@ -167,19 +211,19 @@ LIMIT $2;
 SELECT m.*,
     COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
 FROM channel_message m
-WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.created_at < $2
-ORDER BY m.created_at DESC
+WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.order_at < $2
+ORDER BY m.order_at DESC
 LIMIT $3;
 
 -- name: ListChannelMessagesAfter :many
--- Lists top-level channel messages strictly newer than a timestamp (created_at > $2),
+-- Lists top-level channel messages strictly newer than a timestamp (order_at > $2),
 -- in ASC order. Used by the ?around=<id> deep-link to load context above the target
--- message. The older side reuses ListChannelMessagesPaginated (created_at < $2).
+-- message. The older side reuses ListChannelMessagesPaginated (order_at < $2).
 SELECT m.*,
     COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
 FROM channel_message m
-WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.created_at > $2
-ORDER BY m.created_at ASC
+WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.order_at > $2
+ORDER BY m.order_at ASC
 LIMIT $3;
 
 -- name: CreateChannelMessageTopLevel :one
@@ -195,15 +239,30 @@ VALUES ($1, $2, $3, $4, sqlc.narg('author_id'), $5, $6)
 RETURNING *;
 
 -- name: ListMessageReplies :many
--- Lists all replies (thread messages) for a given root message.
+-- Lists all replies (thread messages) for a given root message, ordered by
+-- order_at so a reply converged into this thread lands as the latest reply.
 SELECT m.* FROM channel_message m
 JOIN channel_thread t ON t.id = m.thread_id
 WHERE t.root_message_id = $1
-ORDER BY m.created_at ASC;
+ORDER BY m.order_at ASC;
 
 -- name: GetThreadByRootMessage :one
 -- Finds the thread created from a specific root message.
 SELECT * FROM channel_thread WHERE root_message_id = $1;
+
+-- name: UpsertChannelThreadByRoot :one
+-- Atomic find-or-create of the thread anchored at a root message. Closes the
+-- check-then-create race in ReplyToMessage / move-converge: two concurrent
+-- first-replies on the same root can no longer create two thread rows, because
+-- the UNIQUE partial index on root_message_id (migration 126) makes the second
+-- INSERT conflict. The no-op DO UPDATE lets RETURNING yield the surviving row
+-- whether it inserted or conflicted, so the caller always gets the canonical
+-- thread. title is set only on insert (kept on conflict).
+INSERT INTO channel_thread (channel_id, workspace_id, title, created_by, root_message_id)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (root_message_id) WHERE root_message_id IS NOT NULL
+DO UPDATE SET root_message_id = EXCLUDED.root_message_id
+RETURNING *;
 
 -- name: CreateChannelThreadFromMessage :one
 -- Creates a thread anchored to a root message.
@@ -216,6 +275,22 @@ RETURNING *;
 SELECT count(*)::int AS reply_count
 FROM channel_message
 WHERE reply_to_id = $1;
+
+-- name: ReparentChannelMessage :one
+-- Moves a message between the top-level timeline (thread_id NULL) and a reply
+-- (thread_id set). Converge passes the target thread + reply_to; release passes
+-- both NULL. order_at is synced to created_at so the message sorts at its
+-- original authored time in the new location (UI displays created_at); created_at
+-- itself is deliberately LEFT UNTOUCHED so the unread model (created_at >
+-- last_read_at) is not corrupted by a mere re-location. Both thread columns are
+-- sqlc.narg so NULL is expressible for the release path.
+UPDATE channel_message
+SET thread_id   = sqlc.narg('thread_id'),
+    reply_to_id = sqlc.narg('reply_to_id'),
+    order_at    = created_at,
+    updated_at  = now()
+WHERE id = $1
+RETURNING *;
 
 -- name: HasAgentChannelMessageSince :one
 -- Used by channel-origin task completion fallback. If the agent already wrote
@@ -283,6 +358,17 @@ SELECT id, number, title, status, priority, source_thread_id
 FROM issue
 WHERE source_thread_id = $1
 ORDER BY created_at ASC;
+
+-- name: ListIssuesByChannelMessages :many
+-- Issues produced from threads whose root is one of the given channel
+-- messages, with the root message id echoed back so callers can group issues
+-- by source message. Powers the top-level message → linked issue card on the
+-- channel timeline (OPE-1943 bidirectional display).
+SELECT i.id, i.number, i.title, i.status, i.priority, i.source_thread_id, t.root_message_id
+FROM issue i
+JOIN channel_thread t ON i.source_thread_id = t.id
+WHERE t.root_message_id = ANY($1::uuid[])
+ORDER BY i.created_at ASC;
 
 -- ============ Channel Groups ============
 

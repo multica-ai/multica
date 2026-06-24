@@ -166,8 +166,6 @@ import type {
   ListChannelMessagesResponse,
   MessageThreadResponse,
   ChannelContextResponse,
-  ConvertMessageToIssueRequest,
-  ConvertMessageToIssueResponse,
   ChannelMessage,
   ChannelGroup,
   CreateChannelRequest,
@@ -986,6 +984,8 @@ export class ApiClient {
     project_id?: string | null;
     parent_issue_id?: string | null;
     attachment_ids?: string[];
+    source_channel_id?: string;
+    source_message_id?: string;
   }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",
@@ -2812,10 +2812,18 @@ export class ApiClient {
     return this.fetch(`/api/channels/${channelId}/messages/${messageId}/thread`);
   }
 
-  async convertMessageToIssue(channelId: string, messageId: string, data?: ConvertMessageToIssueRequest): Promise<ConvertMessageToIssueResponse> {
-    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/convert-issue`, {
-      method: "POST",
-      body: JSON.stringify(data ?? {}),
+  // Reparent a message between the top-level timeline and a thread — the
+  // backend for the channel "converge"/"release" drag. A non-null
+  // targetMessageId converges the message into that message's thread as its
+  // latest reply; null releases a reply back to the top-level timeline.
+  async moveChannelMessage(
+    channelId: string,
+    messageId: string,
+    targetMessageId: string | null,
+  ): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/move`, {
+      method: "PATCH",
+      body: JSON.stringify({ target_message_id: targetMessageId }),
     });
   }
 

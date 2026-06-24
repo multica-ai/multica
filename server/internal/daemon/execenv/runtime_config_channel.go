@@ -49,8 +49,8 @@ func writeChannelCommands(b *strings.Builder) {
 	b.WriteString("### Core\n")
 	b.WriteString("- `multica channel context <channel-id> --message <message-id> --include-replies --recent 20 --output json` — Fetch channel info, members, the triggering message, its replies, and recent channel messages. Use this only when you need conversation history beyond the triggering message.\n")
 	b.WriteString("- `multica channel message list <channel-id> --output json` — List recent top-level messages in the channel timeline.\n")
-	b.WriteString("- `multica channel message reply <channel-id> <message-id> --content \"...\"` — Reply to a specific message (auto-creates a thread). This is the default way to post your final result: reply to the triggering message so the result stays in that message's thread instead of cluttering the channel timeline.\n")
-	b.WriteString("- `multica channel message send <channel-id> --content \"...\"` — Post a top-level (standalone) message to the channel timeline. Use this only for a broadcast that is not a reply to anything; do not use it for a normal result when a triggering message exists.\n")
+	b.WriteString("- `multica channel message send <channel-id> --content \"...\"` — Post a top-level message on the channel timeline. **Default when the user @-mentioned you from the main message area.**\n")
+	b.WriteString("- `multica channel message reply <channel-id> <message-id> --content \"...\"` — Reply inside a message's thread (auto-creates a thread when the target is a top-level message). **Default when the user @-mentioned you from the replies panel** — use the thread root message ID, not the triggering reply ID.\n")
 	b.WriteString("- `multica channel member list <channel-id> --output json` — List the channel's members (people and agents) when you need to know who is in the conversation.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory when the task needs code (creates a git worktree with a dedicated branch).\n")
 	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--project <project-id>]` — Create an issue **only if the channel conversation explicitly asks you to open one**. Do not create an issue for an ordinary channel question.\n\n")
@@ -85,23 +85,24 @@ func writeChannelWorkflow(b *strings.Builder, ctx TaskContextForEnv) {
 	fmt.Fprintf(b, "  `multica channel context %s --message %s --include-replies --recent 20 --output json`\n", ctx.ChannelID, ctx.ChannelMessageID)
 	b.WriteString("- Do NOT run `multica issue get`, `multica issue metadata list`, `multica issue comment list`, `multica issue comment add`, or `multica issue status` unless you explicitly decide to create or update an issue as part of the work.\n")
 	if ctx.ChannelThreadRootMsgID != "" {
-		fmt.Fprintf(b, "- To reply in the same thread, use `multica channel message reply %s %s --content \"...\"` (the second ID is the thread root). Do NOT reply to the triggering message directly — that would create a nested thread.\n", ctx.ChannelID, ctx.ChannelThreadRootMsgID)
-		fmt.Fprintf(b, "- To send a top-level channel message (outside the thread), use `multica channel message send %s --content \"...\"` only for a standalone broadcast that is not a reply.\n\n", ctx.ChannelID)
+		fmt.Fprintf(b, "- **Default (replies panel):** reply in the same thread: `multica channel message reply %s %s --content \"...\"` (the second ID is the thread root). Do NOT reply to the triggering message directly — that would create a nested thread.\n", ctx.ChannelID, ctx.ChannelThreadRootMsgID)
+		fmt.Fprintf(b, "- Use `multica channel message send %s --content \"...\"` only when the triggering message or recent conversation explicitly asks for a main-timeline answer.\n\n", ctx.ChannelID)
 	} else {
-		fmt.Fprintf(b, "- Reply to the triggering message so your result stays in its thread: `multica channel message reply %s %s --content \"...\"` (auto-creates a thread under the triggering message). Use `multica channel message send %s --content \"...\"` only for a standalone broadcast that is not a reply.\n\n", ctx.ChannelID, ctx.ChannelMessageID, ctx.ChannelID)
+		fmt.Fprintf(b, "- **Default (main message area):** post on the channel timeline: `multica channel message send %s --content \"...\"`. Do NOT use `message reply` unless the triggering message or recent conversation explicitly asks you to answer in a thread instead.\n\n", ctx.ChannelID)
 	}
+	b.WriteString("- If the triggering message or channel context you fetch (`--include-replies --recent N`) states a different delivery preference, follow that instead of the defaults above.\n\n")
 }
 
 // writeChannelOutput emits the Output body for channel-origin tasks: results
 // go back to the channel (when a reply is useful), not to an issue comment.
 func writeChannelOutput(b *strings.Builder, ctx TaskContextForEnv) {
-	b.WriteString("This is a channel-origin task, not an Issue task. Your final answer should normally be posted back to the channel only when a reply is useful — and when it is, reply to the triggering message (or its thread) so the result stays in that conversation, not as a standalone top-level message.\n\n")
+	b.WriteString("This is a channel-origin task, not an Issue task. When a visible reply is useful, post it where the user invoked you — main timeline for a main-area @-mention, the same thread for a replies-panel @-mention — unless recent conversation explicitly states otherwise.\n\n")
 	if ctx.ChannelThreadRootMsgID != "" {
-		fmt.Fprintf(b, "- Reply in the same thread: `multica channel message reply %s %s --content \"...\"`.\n", ctx.ChannelID, ctx.ChannelThreadRootMsgID)
-		fmt.Fprintf(b, "- Use `multica channel message send %s --content \"...\"` only for a standalone broadcast that is not a reply.\n", ctx.ChannelID)
+		fmt.Fprintf(b, "- Default: reply in the same thread: `multica channel message reply %s %s --content \"...\"`.\n", ctx.ChannelID, ctx.ChannelThreadRootMsgID)
+		fmt.Fprintf(b, "- Use `multica channel message send %s --content \"...\"` only when explicitly asked for a main-timeline answer.\n", ctx.ChannelID)
 	} else {
-		fmt.Fprintf(b, "- Reply to the triggering message so your result stays in its thread: `multica channel message reply %s %s --content \"...\"`.\n", ctx.ChannelID, ctx.ChannelMessageID)
-		b.WriteString("- Use `multica channel message send <channel-id> --content \"...\"` only for a standalone broadcast that is not a reply.\n")
+		fmt.Fprintf(b, "- Default: post on the main timeline: `multica channel message send %s --content \"...\"`.\n", ctx.ChannelID)
+		b.WriteString("- Use `multica channel message reply` only when explicitly asked to answer in a thread.\n")
 	}
 	b.WriteString("- Do NOT call `multica issue comment add` for this task unless you explicitly created or selected a real issue that needs a comment.\n")
 }

@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -234,7 +235,7 @@ func (h *Handler) ListThreadMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"thread":   channelThreadToResponse(thread),
 		"messages": resp,
-		"issues":   threadIssuesToResponse(issues),
+		"issues":   threadIssuesToResponse(issues, h.getIssuePrefix(r.Context(), wsUUID)),
 	})
 }
 
@@ -332,22 +333,24 @@ func (h *Handler) loadThreadInChannel(w http.ResponseWriter, r *http.Request, ch
 }
 
 type threadIssueResponse struct {
-	ID       string `json:"id"`
-	Number   int32  `json:"number"`
-	Title    string `json:"title"`
-	Status   string `json:"status"`
-	Priority string `json:"priority"`
+	ID         string `json:"id"`
+	Identifier string `json:"identifier"`
+	Number     int32  `json:"number"`
+	Title      string `json:"title"`
+	Status     string `json:"status"`
+	Priority   string `json:"priority"`
 }
 
-func threadIssuesToResponse(rows []db.ListThreadIssuesRow) []threadIssueResponse {
+func threadIssuesToResponse(rows []db.ListThreadIssuesRow, issuePrefix string) []threadIssueResponse {
 	out := make([]threadIssueResponse, len(rows))
 	for i, row := range rows {
 		out[i] = threadIssueResponse{
-			ID:       uuidToString(row.ID),
-			Number:   row.Number,
-			Title:    row.Title,
-			Status:   row.Status,
-			Priority: row.Priority,
+			ID:         uuidToString(row.ID),
+			Identifier: issuePrefix + "-" + strconv.Itoa(int(row.Number)),
+			Number:     row.Number,
+			Title:      row.Title,
+			Status:     row.Status,
+			Priority:   row.Priority,
 		}
 	}
 	return out

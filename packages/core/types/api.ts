@@ -20,6 +20,13 @@ export interface CreateIssueRequest {
    *  created from (OPE-1943). The backend records source_channel_id from
    *  the thread and reflows issue status changes back to the thread. */
   source_thread_id?: string;
+  /** When set together with source_message_id, links the new issue back to
+   *  the channel message it was converted from (manual "转换为 Issue"). The
+   *  backend resolves/creates the message's thread and links — mirroring the
+   *  agent-convert path so both routes produce structurally identical issues.
+   *  Takes precedence over source_thread_id when both are set. */
+  source_channel_id?: string;
+  source_message_id?: string;
 }
 
 export interface UpdateIssueRequest {

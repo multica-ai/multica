@@ -42,6 +42,11 @@ type TaskService struct {
 	// goes through the DB. Wired in router.go from the shared Redis
 	// client.
 	EmptyClaim *EmptyClaimCache
+	// SourceLinker links a quick-create-produced issue back to its source
+	// channel thread when the quick-create was triggered from a channel
+	// message. Optional — nil (tests) skips the linkage. Wired by the
+	// handler layer after construction (Handler implements it).
+	SourceLinker QuickCreateSourceLinker
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -811,6 +816,26 @@ type QuickCreateContext struct {
 	// pass `--parent <uuid>` so the sub-issue relationship is preserved
 	// across the manual→agent mode flip.
 	ParentIssueID string `json:"parent_issue_id,omitempty"`
+	// SourceChannelID / SourceMessageID are set when the quick-create is
+	// triggered from a channel message ("由 Agent 转为 Issue"). The
+	// completion callback uses them to link the produced issue back to the
+	// message's thread — mirroring the manual ConvertMessageToIssue path —
+	// so both conversion routes produce structurally identical issues and
+	// both enjoy the bidirectional display + status reflow (OPE-1943).
+	SourceChannelID string `json:"source_channel_id,omitempty"`
+	SourceMessageID string `json:"source_message_id,omitempty"`
+}
+
+// QuickCreateSourceLinker links a quick-create-produced issue back to the
+// channel thread of the message that triggered the conversion, mirroring the
+// manual ConvertMessageToIssue path so both routes produce structurally
+// identical issues (source_channel_id + source_thread_id + activity) and both
+// enjoy the bidirectional display + status reflow. Implemented by the handler
+// layer (which owns the channel/thread helpers); optional — nil disables the
+// linkage (e.g. in tests). Best-effort: implementations must not block the
+// completion inbox notification.
+type QuickCreateSourceLinker interface {
+	LinkQuickCreateIssueToSource(ctx context.Context, issue db.Issue, sourceChannelID, sourceMessageID, requesterID pgtype.UUID)
 }
 
 // QuickCreateContextType marks a task as a quick-create job.
@@ -835,7 +860,14 @@ const QuickCreateContextType = "quick_create"
 // parentIssueID is optional (zero-valued pgtype.UUID when the user didn't
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+//
+// sourceChannelID / sourceMessageID are optional (zero-valued when the
+// quick-create was NOT triggered from a channel message). When provided, the
+// completion callback links the produced issue back to the message's thread
+// so the agent conversion route mirrors the manual ConvertMessageToIssue
+// route. The handler validates the message belongs to the channel + workspace
+// before passing them in.
+func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, sourceChannelID, sourceMessageID pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -861,6 +893,12 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 	if parentIssueID.Valid {
 		payload.ParentIssueID = util.UUIDToString(parentIssueID)
+	}
+	if sourceChannelID.Valid {
+		payload.SourceChannelID = util.UUIDToString(sourceChannelID)
+	}
+	if sourceMessageID.Valid {
+		payload.SourceMessageID = util.UUIDToString(sourceMessageID)
 	}
 	if len(attachmentIDs) > 0 {
 		payload.AttachmentIDs = make([]string, 0, len(attachmentIDs))
@@ -2783,6 +2821,29 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 			"issue_id", util.UUIDToString(issue.ID),
 			"error", err,
 		)
+	}
+
+	// When the quick-create was triggered from a channel message, link the
+	// produced issue back to that message's thread — the agent-route
+	// counterpart of the manual ConvertMessageToIssue linkage, so both
+	// routes produce structurally identical issues and both enjoy the
+	// bidirectional display + status reflow (OPE-1943). Best-effort: the
+	// handler implementation logs failures and never blocks the inbox
+	// notification below. Idempotent — the handler skips when the issue is
+	// already source-linked.
+	if s.SourceLinker != nil && qc.SourceChannelID != "" && qc.SourceMessageID != "" && !issue.SourceThreadID.Valid {
+		sourceChannelID, errc := util.ParseUUID(qc.SourceChannelID)
+		sourceMessageID, errm := util.ParseUUID(qc.SourceMessageID)
+		if errc == nil && errm == nil {
+			s.SourceLinker.LinkQuickCreateIssueToSource(ctx, issue, sourceChannelID, sourceMessageID, requesterID)
+		} else {
+			slog.Warn("quick-create completion: invalid source ids, skipping channel linkage",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"source_channel_id", qc.SourceChannelID,
+				"source_message_id", qc.SourceMessageID,
+			)
+		}
 	}
 
 	// Subscribe the requester so they receive notifications for follow-up

@@ -257,8 +257,6 @@ export type {
   UpdateChannelRequest,
   CreateChannelThreadRequest,
   CreateChannelMessageRequest,
-  ConvertMessageToIssueRequest,
-  ConvertMessageToIssueResponse,
 } from "./channel";
 export type {
   Squad,

@@ -40,6 +40,8 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 		pgtype.UUID{},
 		pgtype.UUID{},
 		nil,
+		pgtype.UUID{}, // source_channel_id (none — not from a channel)
+		pgtype.UUID{}, // source_message_id
 	)
 	if err != nil {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)
@@ -115,6 +117,8 @@ func TestQuickCreateCompletion_RequesterPreferenceDisabled(t *testing.T) {
 		pgtype.UUID{},
 		pgtype.UUID{},
 		nil,
+		pgtype.UUID{}, // source_channel_id (none — not from a channel)
+		pgtype.UUID{}, // source_message_id
 	)
 	if err != nil {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)
@@ -190,6 +194,8 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 		pgtype.UUID{},
 		pgtype.UUID{},
 		nil,
+		pgtype.UUID{}, // source_channel_id (none — not from a channel)
+		pgtype.UUID{}, // source_message_id
 	)
 	if err != nil {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)

@@ -19,6 +19,10 @@
   "member_added": "メンバーを追加しました",
   "member_removed": "メンバーを削除しました",
   "settings_updated": "チャンネル設定を更新しました",
+  "new_messages": "新着メッセージ",
+  "jump_to_last_read": "最後に読んだ位置へ",
+  "channel_deleted": "チャンネルを削除しました",
+  "delete_failed": "削除に失敗しました",
   "replies_count_other": "返信 {{count}}件",
   "new_group": "新しいグループ",
   "new_channel": "新しいチャンネル",
@@ -42,10 +46,25 @@
   "context_menu": {
     "rename": "名前を変更",
     "delete_group": "グループを削除",
+    "delete_channel": "チャンネルを削除",
     "copy_link": "リンクをコピー",
     "reply": "返信",
     "convert_issue": "Issueに変換",
     "convert_agent": "AgentがIssueに変換"
+  },
+  "delete_channel": {
+    "aria_label": "チャンネル {{name}} を削除",
+    "title": "チャンネルを削除",
+    "description": "チャンネル「{{name}}」を削除しますか？この操作は取り消せません。チャンネル内のすべてのメッセージとスレッドが削除されます。",
+    "cancel": "キャンセル",
+    "confirm": "削除"
+  },
+  "delete_group": {
+    "aria_label": "グループ {{name}} を削除",
+    "title": "グループを削除",
+    "description": "グループ「{{name}}」を削除しますか？グループ内のチャンネルは「グループなし」に移動し、削除されません。",
+    "cancel": "キャンセル",
+    "confirm": "削除"
   },
   "panel_header": {
     "replies": "返信",
@@ -82,5 +101,21 @@
   "resize_aria": {
     "channel_list": "チャンネルリストの幅を調整",
     "side_panel": "サイドパネルの幅を調整"
+  },
+  "move": {
+    "converged": "返信スレッドに移動しました",
+    "released": "タイムラインに移動しました",
+    "failed": "メッセージの移動に失敗しました"
+  },
+  "drag": {
+    "instructions": "メッセージを長押ししてドラッグします。別のメッセージにドロップするとそのメッセージの最新返信として統合し、メッセージリストにドロップすると返信をタイムラインに解放します。",
+    "picked_up": "取得しました: {{preview}}",
+    "dropped": "ドロップしました。",
+    "dropped_over": "{{target}}にドロップしました。",
+    "cancelled": "ドラッグをキャンセルしました。",
+    "aria_message": "メッセージ: {{preview}}",
+    "aria_reply": "返信: {{preview}}",
+    "aria_group": "チャネルグループ: {{name}}",
+    "aria_channel": "チャネル: {{name}}"
   }
 }

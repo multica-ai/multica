@@ -975,7 +975,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Delete("/", h.DeleteChannelMessage)
 						r.Post("/reply", h.ReplyToMessage)
 						r.Get("/thread", h.GetMessageThread)
-						r.Post("/convert-issue", h.ConvertMessageToIssue)
+						r.Patch("/move", h.MoveChannelMessage)
 					})
 					// V1 threads (backward compat)
 					r.Get("/threads", h.ListChannelThreads)

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -262,92 +264,152 @@ func TestV2ReplyAutoCreateThread(t *testing.T) {
 	}
 }
 
-// TestV2ConvertMessageToIssueNoThread verifies that ConvertMessageToIssue
-// creates a thread when none exists, fulfilling "Issue from thread" invariant.
-func TestV2ConvertMessageToIssueNoThread(t *testing.T) {
+// TestV2ReplyMultibyteThreadTitle verifies that replying to a message whose
+// content has a multi-byte UTF-8 rune straddling the 50-byte title-truncation
+// boundary succeeds. A naive title[:50] slices the rune mid-sequence, producing
+// invalid UTF-8 that PostgreSQL rejects on INSERT (SQLSTATE 22021) — which
+// surfaced to users as a generic "failed to create reply thread" and made the
+// message unreplyable. Any CJK/emoji content near the byte boundary hit this.
+func TestV2ReplyMultibyteThreadTitle(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("no database")
 	}
 	ctx := context.Background()
-
-	var projectID string
-	if err := testPool.QueryRow(ctx,
-		`INSERT INTO project (workspace_id, title) VALUES ($1, 'Convert test') RETURNING id`,
-		testWorkspaceID).Scan(&projectID); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND project_id = $2`, testWorkspaceID, projectID)
-		testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
 		testPool.Exec(ctx, `DELETE FROM channel WHERE workspace_id = $1`, testWorkspaceID)
 	})
 
-	// Channel + message (no thread yet).
 	rr := httptest.NewRecorder()
 	testHandler.CreateChannel(rr, newRequest(http.MethodPost, "/api/channels", map[string]any{
-		"name": "Convert Test Channel",
+		"name": "Multibyte Title Test",
+	}))
+	var channel ChannelResponse
+	decodeJSON(t, rr, &channel)
+
+	// 49 ASCII bytes + a 3-byte CJK rune ("中" = e4 b8 ad) + a suffix. The
+	// rune's lead byte sits at byte index 49, so a [:50] truncation would
+	// include it without its two continuation bytes → invalid UTF-8.
+	content := strings.Repeat("x", 49) + "中" + "后缀内容"
+	rr = httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/", map[string]any{
+		"content": content,
+	}), "id", channel.ID)
+	testHandler.SendChannelMessage(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("SendChannelMessage: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var origMsg ChannelMessageV2Response
+	decodeJSON(t, rr, &origMsg)
+
+	// Reply — auto-creates a thread titled from the (truncated) message content.
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodPost, "/", map[string]any{
+		"content": "a reply",
+	}), "id", channel.ID)
+	req = withURLParam(req, "msgId", origMsg.ID)
+	testHandler.ReplyToMessage(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("ReplyToMessage on multibyte content: expected 201, got %d (%s)", rr.Code, rr.Body.String())
+	}
+	var replyResp struct {
+		Message ChannelMessageV2Response `json:"message"`
+		Thread  ChannelThreadResponse     `json:"thread"`
+	}
+	decodeJSON(t, rr, &replyResp)
+	if replyResp.Thread.ID == "" {
+		t.Fatal("expected thread to be created on reply")
+	}
+	// The auto-derived title must be valid UTF-8 (the regression) and a
+	// prefix of the content truncated before — not inside — the CJK rune.
+	if !utf8.ValidString(replyResp.Thread.Title) {
+		t.Fatalf("thread title is not valid UTF-8: %q", replyResp.Thread.Title)
+	}
+	if want := strings.Repeat("x", 49); replyResp.Thread.Title != want {
+		t.Fatalf("thread title = %q, want %q (truncated before the multi-byte rune)", replyResp.Thread.Title, want)
+	}
+}
+
+// TestV2AgentReplyAutoCreatesThreadWithNullCreator verifies that an agent
+// replying to a fresh top-level message auto-creates a thread. The hazard:
+// channel_thread.created_by REFERENCES "user"(id), but agents live in the
+// agent table — stamping the agent UUID into created_by violates the FK and
+// the reply fails with a generic "failed to create reply thread". This is the
+// @-mention-then-agent-replies path (the daemon instructs the agent to reply
+// so it "auto-creates a thread"). Agents must get a NULL created_by, mirroring
+// the CreateThread handler.
+func TestV2AgentReplyAutoCreatesThreadWithNullCreator(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM channel WHERE workspace_id = $1`, testWorkspaceID)
+	})
+
+	// Open channel + a top-level message authored by the test user.
+	rr := httptest.NewRecorder()
+	testHandler.CreateChannel(rr, newRequest(http.MethodPost, "/api/channels", map[string]any{
+		"name": "Agent Reply Thread Test", "access_mode": "open",
 	}))
 	var channel ChannelResponse
 	decodeJSON(t, rr, &channel)
 
 	rr = httptest.NewRecorder()
-	req := withURLParam(newRequest(http.MethodPost, "/", map[string]any{
-		"content": "We should implement feature X",
-	}), "id", channel.ID)
+	req := withURLParam(newRequest(http.MethodPost, "/", map[string]any{"content": "Agent please reply"}), "id", channel.ID)
 	testHandler.SendChannelMessage(rr, req)
-	var msg ChannelMessageV2Response
-	decodeJSON(t, rr, &msg)
-
-	// Convert message to issue.
-	rr = httptest.NewRecorder()
-	req = withURLParam(newRequest(http.MethodPost, "/", map[string]any{
-		"project_id": projectID,
-	}), "id", channel.ID)
-	req = withURLParam(req, "msgId", msg.ID)
-	testHandler.ConvertMessageToIssue(rr, req)
 	if rr.Code != http.StatusCreated {
-		t.Fatalf("ConvertMessageToIssue: %d (%s)", rr.Code, rr.Body.String())
+		t.Fatalf("SendChannelMessage: %d (%s)", rr.Code, rr.Body.String())
 	}
-	var issueResp struct {
-		IssueID     string `json:"issue_id"`
-		IssueNumber int32  `json:"issue_number"`
-		Title       string `json:"title"`
-		ThreadID    string `json:"thread_id"`
+	var origMsg ChannelMessageV2Response
+	decodeJSON(t, rr, &origMsg)
+
+	// An agent (in the test workspace) + a running task that authorises the
+	// X-Agent-ID / X-Task-ID header pair resolveActor checks.
+	agentID := createHandlerTestAgent(t, "agent-reply-thread-agent", nil)
+	taskID := createHandlerTestTaskForAgent(t, agentID)
+
+	// Agent replies → auto-creates a thread.
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodPost, "/", map[string]any{"content": "agent reply"}), "id", channel.ID)
+	req = withURLParam(req, "msgId", origMsg.ID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	testHandler.ReplyToMessage(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("agent ReplyToMessage: expected 201, got %d (%s)", rr.Code, rr.Body.String())
 	}
-	decodeJSON(t, rr, &issueResp)
-	if issueResp.ThreadID == "" {
-		t.Fatal("expected thread_id in response — thread should be created implicitly")
+	var replyResp struct {
+		Message ChannelMessageV2Response `json:"message"`
+		Thread  ChannelThreadResponse    `json:"thread"`
 	}
-	if issueResp.IssueID == "" {
-		t.Fatal("expected issue_id in response")
+	decodeJSON(t, rr, &replyResp)
+	if replyResp.Thread.ID == "" {
+		t.Fatal("expected thread to be created on agent reply")
 	}
 
-	// Verify thread has system "created from thread" message.
-	rr = httptest.NewRecorder()
-	req = withURLParam(newRequest(http.MethodGet, "/", nil), "id", channel.ID)
-	req = withURLParam(req, "msgId", msg.ID)
-	testHandler.GetMessageThread(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GetMessageThread after convert: %d (%s)", rr.Code, rr.Body.String())
+	// The agent-created thread's created_by must be NULL — an agent UUID would
+	// violate the channel_thread_created_by_fkey. Assert both the response
+	// (CreatedBy is omitted when NULL) and the persisted row.
+	if replyResp.Thread.CreatedBy != nil && *replyResp.Thread.CreatedBy != "" {
+		t.Fatalf("agent-created thread created_by = %q, want NULL", *replyResp.Thread.CreatedBy)
 	}
-	var threadResp struct {
-		Replies []ChannelMessageResponse `json:"replies"`
-		Thread  *ChannelThreadResponse   `json:"thread"`
+	var dbCreatedBy *string
+	if err := testPool.QueryRow(ctx,
+		`SELECT created_by::text FROM channel_thread WHERE id = $1`, replyResp.Thread.ID,
+	).Scan(&dbCreatedBy); err != nil {
+		t.Fatalf("query thread created_by: %v", err)
 	}
-	decodeJSON(t, rr, &threadResp)
-	if threadResp.Thread == nil {
-		t.Fatal("expected thread to exist after convert")
-	}
-	foundSystem := false
-	for _, reply := range threadResp.Replies {
-		if reply.AuthorType == "system" {
-			foundSystem = true
-		}
-	}
-	if !foundSystem {
-		t.Fatal("expected system 'created from thread' message in thread after convert")
+	if dbCreatedBy != nil && *dbCreatedBy != "" {
+		t.Fatalf("persisted thread created_by = %q, want NULL (FK to user forbids agent UUID)", *dbCreatedBy)
 	}
 }
+
+// TestV2ConvertMessageToIssueNoThread was removed alongside the dead
+// ConvertMessageToIssue handler (OPE-3457): manual message→issue conversion now
+// flows through CreateIssue with source_channel_id/source_message_id, which
+// reuses ensureThreadForMessage + linkIssueToExistingThread — the same
+// helpers the agent quick-create completion path uses. That live path is
+// covered by the CreateIssue / quick-create tests.
 
 // TestV2IssueReflowToChannelTimeline verifies that issue status changes
 // produce a top-level system message in the channel main timeline.

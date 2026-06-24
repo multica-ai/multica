@@ -68,6 +68,12 @@ type IssueResponse struct {
 	// was produced from (OPE-1943). nil when the issue was created directly.
 	SourceChannelID *string `json:"source_channel_id,omitempty"`
 	SourceThreadID  *string `json:"source_thread_id,omitempty"`
+	// SourceChannelName / SourceMessageID enrich the detail response so the
+	// "from channel discussion" badge can show the channel's display name and
+	// deep-link back to the originating message (the thread root). Populated
+	// only by GetIssue; nil (omitted) on list/update/WS-broadcast paths.
+	SourceChannelName *string `json:"source_channel_name,omitempty"`
+	SourceMessageID   *string `json:"source_message_id,omitempty"`
 }
 
 // validIssueStatuses / validIssuePriorities mirror the CHECK constraints on
@@ -1802,6 +1808,26 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Enrich the "from channel discussion" badge: resolve the source thread's
+	// root message (deep-link target) and the channel's display name. Each
+	// lookup is independent + best-effort so a missing name still deep-links
+	// and a missing message still names the channel.
+	if issue.SourceThreadID.Valid {
+		if thread, err := h.Queries.GetChannelThread(r.Context(), issue.SourceThreadID); err == nil && thread.RootMessageID.Valid {
+			msgID := uuidToString(thread.RootMessageID)
+			resp.SourceMessageID = &msgID
+		}
+	}
+	if issue.SourceChannelID.Valid {
+		if ch, err := h.Queries.GetChannel(r.Context(), db.GetChannelParams{
+			ID:          issue.SourceChannelID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			name := ch.Name
+			resp.SourceChannelName = &name
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1956,6 +1982,13 @@ type QuickCreateIssueRequest struct {
 	ProjectID     string   `json:"project_id,omitempty"`
 	ParentIssueID string   `json:"parent_issue_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	// SourceChannelID / SourceMessageID are set when the quick-create is
+	// triggered from a channel message ("由 Agent 转为 Issue"). The
+	// completion callback links the produced issue back to the message's
+	// thread so the agent route mirrors the manual ConvertMessageToIssue
+	// route (OPE-1943). Both must be provided together.
+	SourceChannelID string `json:"source_channel_id,omitempty"`
+	SourceMessageID string `json:"source_message_id,omitempty"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -2129,7 +2162,46 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		parentIssueUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, attachmentIDs)
+	// Optional source_channel_id / source_message_id — set when the modal
+	// was opened from a channel message ("由 Agent 转为 Issue"). Re-validate
+	// the message belongs to this channel + workspace so a forged request
+	// can't smuggle a foreign message id through (the handler is the trust
+	// boundary). Both must be provided together; the completion callback
+	// uses them to link the produced issue back to the message's thread.
+	var sourceChannelUUID pgtype.UUID
+	var sourceMessageUUID pgtype.UUID
+	hasSource := strings.TrimSpace(req.SourceChannelID) != "" || strings.TrimSpace(req.SourceMessageID) != ""
+	if hasSource {
+		if strings.TrimSpace(req.SourceChannelID) == "" || strings.TrimSpace(req.SourceMessageID) == "" {
+			writeError(w, http.StatusBadRequest, "source_channel_id and source_message_id must be provided together")
+			return
+		}
+		chUUID, ok := parseUUIDOrBadRequest(w, req.SourceChannelID, "source_channel_id")
+		if !ok {
+			return
+		}
+		msgUUID, ok := parseUUIDOrBadRequest(w, req.SourceMessageID, "source_message_id")
+		if !ok {
+			return
+		}
+		channel, err := h.Queries.GetChannel(r.Context(), db.GetChannelParams{
+			ID:          chUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "source channel not found in this workspace")
+			return
+		}
+		msg, err := h.Queries.GetChannelMessage(r.Context(), msgUUID)
+		if err != nil || uuidToString(msg.ChannelID) != uuidToString(channel.ID) {
+			writeError(w, http.StatusBadRequest, "source message not found in this channel")
+			return
+		}
+		sourceChannelUUID = chUUID
+		sourceMessageUUID = msgUUID
+	}
+
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, attachmentIDs, sourceChannelUUID, sourceMessageUUID)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -2254,6 +2326,14 @@ type CreateIssueRequest struct {
 	// it was produced from (OPE-1943 Channel feature). The thread receives a
 	// "created from thread" system message and future status changes reflow back.
 	SourceThreadID *string `json:"source_thread_id,omitempty"`
+	// SourceChannelID / SourceMessageID, when set together, link the new issue
+	// back to the channel message it was converted from (the manual "转换为
+	// Issue" path). The handler resolves (or implicitly creates) the message's
+	// thread and links the issue to it — mirroring the agent-convert completion
+	// path so both conversion routes produce structurally identical issues.
+	// SourceMessageID takes precedence over SourceThreadID when both are set.
+	SourceChannelID *string `json:"source_channel_id,omitempty"`
+	SourceMessageID *string `json:"source_message_id,omitempty"`
 }
 
 func duplicateIssueMessage(issue IssueResponse) string {
@@ -2342,6 +2422,45 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// IssueService.Create (atomically with the create), so every entry
 	// point — HTTP, Lark, future MCP — gets the same boundary check
 	// without duplicating the lookup here.
+
+	// Optional source_channel_id / source_message_id — set when the modal
+	// was opened from a channel message (manual "转换为 Issue"). Re-validate
+	// the message belongs to this channel + workspace so a forged request
+	// can't smuggle a foreign message id through (trust boundary). Both must
+	// be provided together; the linkage is applied after the issue is created.
+	var sourceChannelUUID pgtype.UUID
+	var sourceMessageUUID pgtype.UUID
+	if (req.SourceChannelID != nil && strings.TrimSpace(*req.SourceChannelID) != "") ||
+		(req.SourceMessageID != nil && strings.TrimSpace(*req.SourceMessageID) != "") {
+		if req.SourceChannelID == nil || strings.TrimSpace(*req.SourceChannelID) == "" ||
+			req.SourceMessageID == nil || strings.TrimSpace(*req.SourceMessageID) == "" {
+			writeError(w, http.StatusBadRequest, "source_channel_id and source_message_id must be provided together")
+			return
+		}
+		chUUID, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(*req.SourceChannelID), "source_channel_id")
+		if !ok {
+			return
+		}
+		msgUUID, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(*req.SourceMessageID), "source_message_id")
+		if !ok {
+			return
+		}
+		channel, err := h.Queries.GetChannel(r.Context(), db.GetChannelParams{
+			ID:          chUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "source channel not found in this workspace")
+			return
+		}
+		msg, err := h.Queries.GetChannelMessage(r.Context(), msgUUID)
+		if err != nil || uuidToString(msg.ChannelID) != uuidToString(channel.ID) {
+			writeError(w, http.StatusBadRequest, "source message not found in this channel")
+			return
+		}
+		sourceChannelUUID = chUUID
+		sourceMessageUUID = msgUUID
+	}
 
 	// project_id is mandatory for top-level issues (OPE-1372): the Web UI
 	// enforces it client-side, but CLI/API callers could otherwise create
@@ -2515,8 +2634,25 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
 	// Link the issue back to its source channel thread (OPE-1943) if produced
-	// from one, and reflow a "created from thread" note into that thread.
-	if req.SourceThreadID != nil && strings.TrimSpace(*req.SourceThreadID) != "" {
+	// from one, and reflow a "created from thread" note into that thread. The
+	// source-message path (manual "转换为 Issue" from a channel message) takes
+	// precedence — it resolves/creates the message's thread and links, mirroring
+	// the agent-convert completion path so both routes produce structurally
+	// identical issues. The source-thread path covers callers that already hold
+	// a thread id (kept for backwards compatibility).
+	if sourceMessageUUID.Valid {
+		// Agents live in the agent table, not "user"; channel_thread.created_by
+		// REFERENCES "user"(id), so an agent-created issue's CreatorID would
+		// violate the FK on implicit thread creation. Pass NULL for agent-authored
+		// issues (mirrors the CreateThread handler); members keep their UUID.
+		threadCreator := issue.CreatorID
+		if issue.CreatorType == "agent" {
+			threadCreator = pgtype.UUID{}
+		}
+		if thread, ok := h.ensureThreadForMessage(r.Context(), sourceChannelUUID, sourceMessageUUID, wsUUID, threadCreator); ok {
+			h.linkIssueToExistingThread(r.Context(), &issue, thread)
+		}
+	} else if req.SourceThreadID != nil && strings.TrimSpace(*req.SourceThreadID) != "" {
 		h.linkIssueToThread(r.Context(), &issue, strings.TrimSpace(*req.SourceThreadID))
 	}
 

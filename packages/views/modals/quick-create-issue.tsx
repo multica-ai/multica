@@ -234,6 +234,13 @@ export function AgentCreatePanel({
   const parentIssueIdentifier =
     (data?.parent_issue_identifier as string | undefined) ?? undefined;
 
+  // Source-channel context — seeded when the modal is opened from a channel
+  // message ("由 Agent 转为 Issue"). Carried through (not as an editable
+  // field) so the backend can link the agent-produced issue back to the
+  // message's thread on completion, mirroring the manual convert route.
+  const sourceChannelId = (data?.source_channel_id as string | undefined) ?? undefined;
+  const sourceMessageId = (data?.source_message_id as string | undefined) ?? undefined;
+
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
@@ -333,6 +340,9 @@ export function AgentCreatePanel({
         project_id: projectId ?? undefined,
         parent_issue_id: parentIssueId,
         ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
+        ...(sourceChannelId && sourceMessageId
+          ? { source_channel_id: sourceChannelId, source_message_id: sourceMessageId }
+          : {}),
       });
       setLastActor(actor.type, actor.id);
       setLastProjectId(projectId);

@@ -64,7 +64,13 @@ export function channelMessagesOptions(
         ? lastPage.messages[0]!.created_at
         : undefined,
     enabled: !!channelId,
-    select: (data) => [...data.pages].reverse().flatMap((p) => p.messages),
+    // Flatten pages into the message list (ASC display order) and surface the
+    // first page's `highlight` (set when ?around targets a reply) so callers
+    // can auto-expand the thread + scroll-highlight the reply.
+    select: (data) => ({
+      messages: [...data.pages].reverse().flatMap((p) => p.messages),
+      highlight: data.pages[0]?.highlight ?? null,
+    }),
   });
 }
 
