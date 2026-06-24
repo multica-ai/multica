@@ -241,11 +241,15 @@ function scrollToElement(container: HTMLElement | null, target: HTMLElement) {
   });
 }
 
+function maxScrollTop(container: HTMLElement) {
+  return Math.max(0, container.scrollHeight - container.clientHeight);
+}
+
 // Scroll the message list to its very bottom by setting scrollTop directly.
 // Instant and reliable — used for incoming messages and initial page loads.
 function scrollListToBottom(container: HTMLElement | null) {
   if (!container) return;
-  container.scrollTop = container.scrollHeight;
+  container.scrollTop = maxScrollTop(container);
 }
 
 // Animated smooth scroll to bottom using a rAF loop. Unlike native
@@ -256,20 +260,34 @@ function scrollListToBottom(container: HTMLElement | null) {
 function animateScrollToBottom(container: HTMLElement | null, onDone?: () => void) {
   if (!container) { onDone?.(); return; }
   const el = container;
-  const start = el.scrollTop;
-  const end = el.scrollHeight;
-  const distance = end - start;
-  if (distance <= 0) { onDone?.(); return; }
-  const duration = Math.min(Math.max(distance / 2, 150), 400);
-  let startTime: number | undefined;
-  function step(now: number) {
-    if (startTime === undefined) startTime = now;
-    const t = Math.min((now - startTime) / duration, 1);
-    el.scrollTop = start + distance * (1 - Math.pow(1 - t, 3));
-    if (t < 1) requestAnimationFrame(step);
-    else onDone?.();
+
+  function run(attempt = 0) {
+    const target = maxScrollTop(el);
+    const start = el.scrollTop;
+    const distance = target - start;
+    if (distance <= 1) {
+      // The new message row may not have been laid out yet — retry a few frames
+      // before giving up so self-send scroll doesn't no-op at the bottom.
+      if (attempt < 4) {
+        requestAnimationFrame(() => run(attempt + 1));
+        return;
+      }
+      onDone?.();
+      return;
+    }
+    const duration = Math.min(Math.max(distance / 2, 150), 400);
+    let startTime: number | undefined;
+    function step(now: number) {
+      if (startTime === undefined) startTime = now;
+      const t = Math.min((now - startTime) / duration, 1);
+      el.scrollTop = start + distance * (1 - Math.pow(1 - t, 3));
+      if (t < 1) requestAnimationFrame(step);
+      else onDone?.();
+    }
+    requestAnimationFrame(step);
   }
-  requestAnimationFrame(step);
+
+  requestAnimationFrame(() => run());
 }
 
 function formatTime(ts?: string): string {
@@ -672,6 +690,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
               hasUnread={activeHasUnread}
               onMarkRead={handleMarkRead}
               onJumpToMessage={setAnchorMessageId}
+              messagesAnchorId={anchorMessageId}
             />
           </div>
         ) : (
@@ -1672,6 +1691,7 @@ function MessageList({
   hasUnread = false,
   onMarkRead,
   onJumpToMessage,
+  messagesAnchorId = null,
 }: {
   messages: ChannelMessage[];
   loading: boolean;
@@ -1693,6 +1713,8 @@ function MessageList({
   // Re-anchor the messages query: a message id loads a window around it; null
   // resets to the latest page (used after send and by "jump to last read").
   onJumpToMessage?: (messageId: string | null) => void;
+  /** Non-null when the first messages page is centered on a specific message. */
+  messagesAnchorId?: string | null;
 }) {
   const { t } = useT("channels");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -1718,6 +1740,7 @@ function MessageList({
   });
   const [isEmpty, setIsEmpty] = useState(true);
   const prevMsgCount = useRef(messages.length);
+  const prevTailId = useRef<string | null>(messages.at(-1)?.id ?? null);
   // Set to true when the current user sends a message so the live-follow
   // effect can scroll to bottom unconditionally (regardless of isNearBottom).
   const pendingSelfScrollRef = useRef(false);
@@ -1769,6 +1792,7 @@ function MessageList({
   // the bottom and override the unread-boundary landing).
   useEffect(() => {
     prevMsgCount.current = 0;
+    prevTailId.current = null;
     liveAtLatestRef.current = false;
   }, [channelId]);
 
@@ -1783,28 +1807,36 @@ function MessageList({
   // always scroll to bottom so their own message is immediately visible.
   useEffect(() => {
     const prev = prevMsgCount.current;
+    const prevTail = prevTailId.current;
+    const tailId = messages.at(-1)?.id ?? null;
+    const grew = messages.length > prev;
+    const tailChanged = tailId !== null && tailId !== prevTail;
     prevMsgCount.current = messages.length;
+    prevTailId.current = tailId;
+
     const followLatest = !linkedMessageId || liveAtLatestRef.current;
-    if (messages.length > prev && prev > 0) {
-      const selfSent = pendingSelfScrollRef.current;
-      if (selfSent) {
-        // Keep the flag true during the entire animation so updateJumpVisibility
-        // suppresses the "jump to last read" indicator (the channel-list refetch
-        // may set hasUnread=true before the messages refetch lands, and the
-        // scroll may not have reached the bottom yet).
-        requestAnimationFrame(() =>
-          animateScrollToBottom(scrollRef.current, () => {
-            pendingSelfScrollRef.current = false;
-          }),
-        );
-      } else if (followLatest && isNearBottom()) {
-        requestAnimationFrame(() => scrollListToBottom(scrollRef.current));
-        pendingSelfScrollRef.current = false;
-      } else {
-        pendingSelfScrollRef.current = false;
-      }
+    const selfSent = pendingSelfScrollRef.current;
+
+    if (selfSent && messages.length > 0 && (grew || prev === 0 || tailChanged)) {
+      // Keep the flag true during the entire animation so updateJumpVisibility
+      // suppresses the "jump to last read" indicator (the channel-list refetch
+      // may set hasUnread=true before the messages refetch lands, and the
+      // scroll may not have reached the bottom yet).
+      requestAnimationFrame(() =>
+        animateScrollToBottom(scrollRef.current, () => {
+          pendingSelfScrollRef.current = false;
+        }),
+      );
+      return;
     }
-  }, [messages.length, linkedMessageId, isNearBottom]);
+
+    if (grew && prev > 0 && followLatest && isNearBottom()) {
+      requestAnimationFrame(() => scrollListToBottom(scrollRef.current));
+    }
+    if (selfSent && !grew && !tailChanged) {
+      pendingSelfScrollRef.current = false;
+    }
+  }, [messages, linkedMessageId, isNearBottom]);
 
   // Catch-up: clear unread once the user reaches the bottom (seen all new
   // messages). Also fires when a live message lands while already at the
@@ -1937,7 +1969,13 @@ function MessageList({
       liveAtLatestRef.current = true;
       // Deep-link / jump-to-read windows omit the latest page — re-anchor so
       // the sent message is actually loaded before the live-follow effect runs.
-      onJumpToMessage?.(null);
+      if (messagesAnchorId) {
+        onJumpToMessage?.(null);
+      }
+      // Drop ?message= so linkedMessageId stops pinning the scroll logic after send.
+      if (linkedMessageId) {
+        nav.replace(paths.channelDetail(channelId));
+      }
     },
     onSuccess: () => {
       editorRef.current?.clearContent();
