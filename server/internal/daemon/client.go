@@ -1,7 +1,5 @@
 package daemon
 
-// CEREBRO-PATCH(daemon-client): cerebro modification of upstream file
-
 import (
 	"bytes"
 	"context"
@@ -14,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-client): Cloudflare Access service-token headers
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -95,40 +92,28 @@ type Client struct {
 	token   string
 	client  *http.Client
 
+	// bundleClient downloads skill bundles. Unlike client it carries no fixed
+	// Timeout: bundles can be large and slow on jittery links, so the caller
+	// supplies a per-request, size-scaled deadline via context instead of
+	// being capped by the 30s control-plane timeout that fits heartbeat /
+	// claim but not a multi-megabyte body read. (GitHub #4505)
+	bundleClient *http.Client
+
 	// Identity headers sent on every request as X-Client-*. Populated by
 	// SetIdentity(); empty values are simply omitted.
 	platform string
 	version  string
 	os       string
-
-	// cfServiceToken is the per-machine Cloudflare Access service-token attached
-	// to every HTTP request and the wakeup websocket so the daemon passes the
-	// wall. Empty falls back to env in cfHeaderToken(); both unset = no headers.
-	// CEREBRO-PATCH(cf-access-client): Cloudflare Access service-token.
-	cfServiceToken cfaccess.ServiceToken
-}
-
-// SetCFServiceToken records the per-machine Cloudflare Access service-token.
-// CEREBRO-PATCH(cf-access-client): wall credential for daemon HTTP + websocket.
-func (c *Client) SetCFServiceToken(t cfaccess.ServiceToken) { c.cfServiceToken = t }
-
-// cfHeaderToken returns the configured Cloudflare Access service-token, falling
-// back to the CEREBRO_CF_ACCESS_CLIENT_ID/_SECRET env vars (cloud runtimes).
-// CEREBRO-PATCH(cf-access-client): shared by the HTTP client and the websocket dialer.
-func (c *Client) cfHeaderToken() cfaccess.ServiceToken {
-	if c.cfServiceToken.Configured() {
-		return c.cfServiceToken
-	}
-	return cfaccess.ServiceTokenFromEnv()
 }
 
 // NewClient creates a new daemon API client.
 func NewClient(baseURL string) *Client {
 	return &Client{
-		baseURL:  baseURL,
-		client:   &http.Client{Timeout: 30 * time.Second},
-		platform: "daemon",
-		os:       normalizeGOOS(runtime.GOOS),
+		baseURL:      baseURL,
+		client:       &http.Client{Timeout: 30 * time.Second},
+		bundleClient: &http.Client{},
+		platform:     "daemon",
+		os:           normalizeGOOS(runtime.GOOS),
 	}
 }
 
@@ -164,9 +149,7 @@ func (c *Client) setIdentityHeaders(req *http.Request) {
 	if c.os != "" {
 		req.Header.Set("X-Client-OS", c.os)
 	}
-	// CEREBRO-PATCH(cf-access-client): pass the Cloudflare Access wall on every
-	// daemon API request. No-op when no service-token is configured.
-	c.cfHeaderToken().Apply(req.Header)
+	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilitySkillBundlesV1)
 }
 
 // SetToken sets the auth token for authenticated requests.
@@ -187,6 +170,33 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 		return nil, err
 	}
 	return resp.Task, nil
+}
+
+// ResolveSkillBundle downloads a single skill bundle. It uses bundleClient (no
+// fixed timeout) so the deadline is governed entirely by ctx, which the daemon
+// scales to the bundle's size, and retries transient transport blips within
+// whatever budget ctx leaves. Resolving one skill per request — rather than the
+// agent's whole bundle in one atomic body read — lets each download fit its own
+// deadline and be cached independently, so a slow link makes incremental
+// progress instead of failing the entire set on every dispatch. (GitHub #4505)
+func (c *Client) ResolveSkillBundle(ctx context.Context, runtimeID, taskID string, ref SkillRefData) (SkillData, error) {
+	var resp struct {
+		Bundles []SkillData `json:"bundles"`
+	}
+	path := fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/skill-bundles/resolve", runtimeID, taskID)
+	if err := c.postJSONViaWithRetry(ctx, c.bundleClient, path, map[string]any{
+		"skills": []SkillRefData{ref},
+	}, &resp, skillBundleResolveRetrySchedule); err != nil {
+		return SkillData{}, err
+	}
+	if len(resp.Bundles) != 1 {
+		return SkillData{}, fmt.Errorf("resolve skill bundle: expected 1 bundle, got %d", len(resp.Bundles))
+	}
+	return resp.Bundles[0], nil
+}
+
+func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/prepare-lease", runtimeID, taskID), map[string]any{}, nil)
 }
 
 func (c *Client) StartTask(ctx context.Context, taskID string) error {
@@ -293,7 +303,8 @@ func (c *Client) RecoverOrphans(ctx context.Context, runtimeID string) error {
 }
 
 // GetTaskStatus returns the current status of a task. Used by the daemon to
-// detect if a task was cancelled while it was executing.
+// detect terminal/interruption signals (cancelled, failed, completed, or a
+// 404 task-not-found) while a task is executing.
 func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, error) {
 	var resp struct {
 		Status string `json:"status"`
@@ -304,94 +315,26 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 	return resp.Status, nil
 }
 
-// HeartbeatResponse contains the server's response to a heartbeat, including any pending actions.
-// CEREBRO-PATCH(daemon-heartbeat-pending-ping): cerebro keeps an explicit struct (rather
-// than an alias to protocol.DaemonHeartbeatAckPayload) so it can carry the cerebro-only
-// PendingPing field alongside upstream's protocol-aliased pending actions.
-type HeartbeatResponse struct {
-	RuntimeID   string `json:"runtime_id"`
-	Status      string `json:"status"`
-	RuntimeGone bool   `json:"runtime_gone,omitempty"`
-	// CEREBRO-PATCH(heartbeat-account-id-ack): JEH-881 registered cerebro account_id.
-	CerebroAccountID         string                    `json:"cerebro_account_id,omitempty"`
-	PendingPing              *PendingPing              `json:"pending_ping,omitempty"`
-	PendingUpdate            *PendingUpdate            `json:"pending_update,omitempty"`
-	PendingModelList         *PendingModelList         `json:"pending_model_list,omitempty"`
-	PendingLocalSkills       *PendingLocalSkills       `json:"pending_local_skills,omitempty"`
-	PendingLocalSkillImport  *PendingLocalSkillImport  `json:"pending_local_skill_import,omitempty"`
-	PendingLocalSkillImports []PendingLocalSkillImport `json:"pending_local_skill_imports,omitempty"`
-}
-
-// PendingPing represents a ping test request from the server.
-type PendingPing struct {
-	ID string `json:"id"`
-	// SandboxEnabled mirrors the runtime's per-runtime sandbox override
-	// (JEH-418) at the moment the server issued this ping request.
-	// nil = inherit the daemon's env-var default. Without this field, an
-	// admin who disabled sandbox via the UI would still see pings fail
-	// because the ping path ran sandboxed against env-var-default=true.
-	SandboxEnabled       *bool           `json:"sandbox_enabled,omitempty"`
-	RuntimeSandboxPolicy json.RawMessage `json:"runtime_sandbox_policy,omitempty"`
-}
-
-// Upstream pending-action types are aliased to the wire protocol so HTTP and WS
-// heartbeat paths share a single type and a single decoder shape.
+// HeartbeatResponse, PendingUpdate, etc. alias the wire types so HTTP and WS
+// heartbeat paths share a single type and a single decoder shape. Aliases
+// (rather than wrappers) keep call sites unchanged.
 type (
+	HeartbeatResponse       = protocol.DaemonHeartbeatAckPayload
 	PendingUpdate           = protocol.DaemonHeartbeatPendingUpdate
 	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
 	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
-// SendHeartbeatOpts bundles optional fields the daemon attaches to a
-// heartbeat. Each field is independently optional — the zero value of
-// SendHeartbeatOpts gives the original `(runtime_id only)` wire shape.
-type SendHeartbeatOpts struct {
-	// Account piggybacks the runtime's detected login identity (JEH-997).
-	// nil = daemon could not derive an identity yet; the server skips its
-	// account-registration hook entirely.
-	Account *protocol.DaemonHeartbeatAccount
-	// CLIVersion is the daemon-detected agent CLI version (W4.2).
-	// Empty = no advertised version; server keeps its stored value.
-	CLIVersion string
-	// Capabilities is an optional snapshot of the runtime's tool surface
-	// (W4.2). Server refreshes the runtime's capabilities row when set.
-	Capabilities map[string]any
-}
-
-// SendHeartbeat posts a runtime liveness ping. opts carries the optional
-// account piggyback (JEH-997) and CLI-version + capabilities snapshot
-// (W4.2). Zero-value opts keeps the wire shape minimal.
-func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, opts SendHeartbeatOpts) (*HeartbeatResponse, error) {
-	body := protocol.DaemonHeartbeatRequestPayload{
-		RuntimeID:           runtimeID,
-		SupportsBatchImport: true,
-		Account:             opts.Account,
-		CLIVersion:          opts.CLIVersion,
-		Capabilities:        opts.Capabilities,
-	}
+func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
-	if err := c.postJSON(ctx, "/api/daemon/heartbeat", body, &resp); err != nil {
+	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
+		"runtime_id":            runtimeID,
+		"supports_batch_import": true,
+	}, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
-}
-
-// RefreshCapabilities is the operator-triggered manual path (W4.2).
-// Daemons send a fresh capabilities snapshot to the runtime row
-// without waiting for the next heartbeat.
-func (c *Client) RefreshCapabilities(ctx context.Context, runtimeID, cliVersion string, capabilities map[string]any) error {
-	body := map[string]any{"capabilities": capabilities}
-	if cliVersion != "" {
-		body["cli_version"] = cliVersion
-	}
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/refresh-capabilities", runtimeID), body, nil)
-}
-
-// CEREBRO-PATCH(daemon-client-report-ping-result): cerebro-only ping result
-// reporter consumed by daemon.handlePing.
-func (c *Client) ReportPingResult(ctx context.Context, runtimeID, pingID string, result map[string]any) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/ping/%s/result", runtimeID, pingID), result, nil)
 }
 
 // ReportUpdateResult sends the CLI update result back to the server.
@@ -412,45 +355,6 @@ func (c *Client) ReportLocalSkillListResult(ctx context.Context, runtimeID, requ
 // ReportLocalSkillImportResult sends a runtime-local-skill bundle back to the server.
 func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/import/%s/result", runtimeID, requestID), result, nil)
-}
-
-// RuntimeToolScanServer is the wire shape for one server's tools/list result
-// in the daemon scan report. Empty Tools with non-empty Error signals an
-// unreachable MCP server; the server records the error but keeps prior rows.
-// CEREBRO-PATCH(daemon-client-runtime-tool-scan): JEH-1710 daemon→server scan
-// wire types. Mirrors handler.RuntimeToolScanServer / RuntimeToolScanTool.
-type RuntimeToolScanServer struct {
-	Name  string                `json:"name"`
-	Tools []RuntimeToolScanTool `json:"tools"`
-	Error string                `json:"error,omitempty"`
-}
-
-// RuntimeToolScanTool is one entry inside a server's tools/list response.
-type RuntimeToolScanTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema,omitempty"`
-}
-
-// GetRuntimeMcpConfig fetches the runtime's tools_config blob so the daemon
-// can iterate the declared MCP servers without claiming a task first.
-// Returns an empty {"mcpServers":{}} document when nothing is configured.
-func (c *Client) GetRuntimeMcpConfig(ctx context.Context, runtimeID string) (json.RawMessage, error) {
-	var raw json.RawMessage
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/mcp-config", runtimeID), &raw); err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
-// ReportRuntimeToolScan POSTs the per-server tools/list result back to the
-// server, which upserts the (runtime, server, tool) registry rows.
-func (c *Client) ReportRuntimeToolScan(ctx context.Context, runtimeID string, scannedAt time.Time, servers []RuntimeToolScanServer) error {
-	body := map[string]any{
-		"scanned_at": scannedAt.UTC().Format(time.RFC3339Nano),
-		"servers":    servers,
-	}
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tool-scan", runtimeID), body, nil)
 }
 
 // WorkspaceInfo holds minimal workspace metadata returned by the API.
@@ -523,9 +427,10 @@ func (c *Client) GetChatSessionGCCheck(ctx context.Context, sessionID string) (*
 }
 
 // AutopilotRunGCStatus carries the status of an autopilot run. CompletedAt
-// is the run's terminal timestamp (zero for non-terminal runs); the GC loop
-// uses it as the TTL anchor instead of UpdatedAt because autopilot_run rows
-// have no updated_at column.
+// is the run's terminal timestamp (zero for non-terminal runs). The GC loop
+// reclaims a terminal run's never-reused workdir as soon as it sees the
+// terminal status, so it no longer gates on CompletedAt; the field is kept for
+// the API response contract and diagnostics.
 type AutopilotRunGCStatus struct {
 	Status      string    `json:"status"`
 	CompletedAt time.Time `json:"completed_at"`
@@ -594,98 +499,41 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 	return &resp, nil
 }
 
-// CEREBRO-PATCH(daemon-repo-grants): FIR-2512 repo capability check via grants resolver.
-
-// CheckRepoCapability asks the server whether the given agent (optionally in a
-// project context) holds the requested capability for a repo URL. It sets
-// raise_approval so an "Ask" verdict creates a shared-inbox approval rather than
-// a silent block (FIR-2586); when that happens the server answers
-// decision="pending" with an approvalID the caller long-polls via
-// PollRepoApproval. Returns (allowed, decision, reason, approvalID, error).
-func (c *Client) CheckRepoCapability(ctx context.Context, workspaceID, agentID, projectID, repoURL, capability string) (bool, string, string, string, error) { // CEREBRO-PATCH(daemon-repo-approval): FIR-2586 raise shared-inbox approval on Ask.
-	var resp struct {
-		Allowed    bool   `json:"allowed"`
-		Decision   string `json:"decision"`
-		Reason     string `json:"reason"`
-		ApprovalID string `json:"approval_id"`
-	}
-	body := map[string]any{
-		"url":            repoURL,
-		"capability":     capability,
-		"agent_id":       agentID,
-		"project_id":     projectID,
-		"raise_approval": true,
-	}
-	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/repo/check", workspaceID), body, &resp); err != nil {
-		return false, "", "", "", err
-	}
-	return resp.Allowed, resp.Decision, resp.Reason, resp.ApprovalID, nil
+// RuntimeProfile mirrors the server's workspace custom runtime profile
+// (MUL-3284). protocol_family is the provider used for task routing (it
+// selects the agent backend), while command_name is the actual executable
+// the daemon resolves on PATH and launches. fixed_args are launch arguments
+// every agent on this runtime inherits.
+type RuntimeProfile struct {
+	ID             string   `json:"id"`
+	WorkspaceID    string   `json:"workspace_id"`
+	DisplayName    string   `json:"display_name"`
+	ProtocolFamily string   `json:"protocol_family"`
+	CommandName    string   `json:"command_name"`
+	Description    *string  `json:"description"`
+	FixedArgs      []string `json:"fixed_args"`
+	Visibility     string   `json:"visibility"`
+	Enabled        bool     `json:"enabled"`
 }
 
-// PollRepoApproval reads the current status of a pending repo-checkout approval.
-// Single-shot: the caller loops on it (with its own sleep + deadline) until the
-// decision is no longer "pending". Returns (allowed, decision, reason, error).
-func (c *Client) PollRepoApproval(ctx context.Context, workspaceID, approvalID string) (bool, string, string, error) {
-	var resp struct {
-		Allowed  bool   `json:"allowed"`
-		Decision string `json:"decision"`
-		Reason   string `json:"reason"`
-	}
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/repo/check/%s", workspaceID, approvalID), &resp); err != nil {
-		return false, "", "", err
-	}
-	return resp.Allowed, resp.Decision, resp.Reason, nil
+// RuntimeProfilesResponse is the body of
+// GET /api/daemon/workspaces/{workspaceID}/runtime-profiles. The server only
+// returns enabled profiles for the workspace.
+type RuntimeProfilesResponse struct {
+	WorkspaceID     string           `json:"workspace_id"`
+	RuntimeProfiles []RuntimeProfile `json:"runtime_profiles"`
 }
 
-// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — local-runtime per-tool resolve.
-//
-// ToolPolicyResolution is the daemon's view of one local-runtime tool-call
-// verdict from handler.ResolveDaemonToolPolicy. Allowed is the immediate answer;
-// Decision is "allow"/"deny"/"pending"; ApprovalID is set when an enforce-stage
-// Ask raised a shared-inbox approval the caller long-polls via
-// PollToolPolicyApproval.
-type ToolPolicyResolution struct {
-	Allowed    bool   `json:"allowed"`
-	Decision   string `json:"decision"`
-	Mode       string `json:"mode"`
-	Reason     string `json:"reason"`
-	ApprovalID string `json:"approval_id"`
-}
-
-// ResolveToolPolicy asks the server to resolve one local-runtime tool call
-// (Claude/Codex/etc. PreToolUse) against the same per-tool chain the gateway
-// gate uses. The server reads the staged rollout mode from workspace settings,
-// short-circuits to allow when off, logs would-blocks under observe, and on an
-// enforce-stage Ask raises a shared-inbox approval and returns decision="pending"
-// with an ApprovalID. Args are informational context attached to the inbox ask,
-// never part of the decision.
-func (c *Client) ResolveToolPolicy(ctx context.Context, workspaceID, agentID, toolName, resourcePattern string, args map[string]any) (ToolPolicyResolution, error) {
-	body := map[string]any{
-		"agent_id":         agentID,
-		"tool_name":        toolName,
-		"resource_pattern": resourcePattern,
-		"args":             args,
+// GetRuntimeProfiles fetches the workspace's enabled custom runtime profiles.
+// Mirrors GetWorkspaceRepos. Callers must treat this as best-effort: an older
+// server with no profiles route returns 404, which the daemon swallows and
+// continues with built-in runtimes only.
+func (c *Client) GetRuntimeProfiles(ctx context.Context, workspaceID string) (*RuntimeProfilesResponse, error) {
+	var resp RuntimeProfilesResponse
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/runtime-profiles", workspaceID), &resp); err != nil {
+		return nil, err
 	}
-	var resp ToolPolicyResolution
-	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/tool-policy/resolve", workspaceID), body, &resp); err != nil {
-		return ToolPolicyResolution{}, err
-	}
-	return resp, nil
-}
-
-// PollToolPolicyApproval reads the current status of a pending local-runtime
-// tool approval. Single-shot: the caller loops on it (own sleep + deadline)
-// until the decision is no longer "pending". Returns (allowed, decision, reason).
-func (c *Client) PollToolPolicyApproval(ctx context.Context, workspaceID, approvalID string) (bool, string, string, error) {
-	var resp struct {
-		Allowed  bool   `json:"allowed"`
-		Decision string `json:"decision"`
-		Reason   string `json:"reason"`
-	}
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/tool-policy/resolve/%s", workspaceID, approvalID), &resp); err != nil {
-		return false, "", "", err
-	}
-	return resp.Allowed, resp.Decision, resp.Reason, nil
+	return &resp, nil
 }
 
 // defaultTerminalRetrySchedule is the backoff used by postJSONWithRetry for
@@ -700,6 +548,16 @@ var defaultTerminalRetrySchedule = []time.Duration{
 	16 * time.Second,
 	32 * time.Second,
 	64 * time.Second,
+}
+
+// skillBundleResolveRetrySchedule rides out brief transport blips on a single
+// bundle download. Kept short on purpose: the real budget is the size-scaled
+// context deadline the daemon sets per skill, and a skill that still fails is
+// retried on the next dispatch once its siblings are cached. N entries → N+1
+// attempts. (GitHub #4505)
+var skillBundleResolveRetrySchedule = []time.Duration{
+	500 * time.Millisecond,
+	2 * time.Second,
 }
 
 // retrySleep is the sleep used between retry attempts. Pulled into a package
@@ -760,6 +618,13 @@ func isTransientError(err error) bool {
 // idempotent success (see service/task.go), so a duplicate replay from a
 // retry is safe even if the server's prior response was lost in transit.
 func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any, respBody any, schedule []time.Duration) error {
+	return c.postJSONViaWithRetry(ctx, c.client, path, reqBody, respBody, schedule)
+}
+
+// postJSONViaWithRetry is postJSONWithRetry over an explicit http.Client, so
+// large-body endpoints can run on bundleClient (deadline from ctx) while the
+// control-plane keeps its fixed 30s client.
+func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any, schedule []time.Duration) error {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -768,7 +633,7 @@ func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any
 			}
 			return err
 		}
-		err := c.postJSON(ctx, path, reqBody, respBody)
+		err := c.postJSONVia(ctx, httpClient, path, reqBody, respBody)
 		if err == nil {
 			return nil
 		}
@@ -786,6 +651,13 @@ func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
+	return c.postJSONVia(ctx, c.client, path, reqBody, respBody)
+}
+
+// postJSONVia is postJSON over an explicit http.Client. Callers pick the client
+// to control the timeout regime: c.client (fixed 30s) for control-plane calls,
+// c.bundleClient (deadline from ctx) for large skill-bundle downloads.
+func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any) error {
 	var body io.Reader
 	if reqBody != nil {
 		data, err := json.Marshal(reqBody)
@@ -805,7 +677,7 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 	}
 	c.setIdentityHeaders(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
