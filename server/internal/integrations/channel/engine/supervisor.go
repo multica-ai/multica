@@ -287,10 +287,19 @@ func (s *Supervisor) Run(ctx context.Context) {
 // Wait blocks until every supervisor goroutine the Supervisor started has
 // exited. Call this AFTER cancelling Run's context.
 //
+// It first waits for Run to return (stopChan closed) and only then joins the
+// supervisor WaitGroup. This ordering is load-bearing: Run is the sole caller
+// of startSupervisor, which does s.wg.Add(1), and calling WaitGroup.Add
+// concurrently with WaitGroup.Wait is a data race (and undefined per the
+// WaitGroup contract). Once Run has returned no further Add can happen, so the
+// wg.Wait below is race-free. (Run always closes stopChan via defer, even on
+// panic; callers always pair Wait with a started Run + cancelled ctx.)
+//
 // Prefer WaitWithTimeout in shutdown paths so a stuck supervisor (typically
 // a hung lease release on a frozen DB pool) cannot block process exit
 // indefinitely.
 func (s *Supervisor) Wait() {
+	<-s.stopChan
 	s.wg.Wait()
 }
 
