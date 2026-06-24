@@ -13,3 +13,11 @@ ON CONFLICT (task_id) DO UPDATE SET
     input_tokens = EXCLUDED.input_tokens,
     cache_read_tokens = EXCLUDED.cache_read_tokens,
     updated_at = now();
+
+-- FIR-1931: append one row per recorded run footprint so the session sheet can
+-- draw the development curve over a session (one point per agent run).
+-- Append-only; the gauge keeps reading the single-row Upsert above.
+
+-- name: InsertCerebroTaskContextFootprintHistory :exec
+INSERT INTO cerebro_task_context_footprint_history (task_id, model, input_tokens, cache_read_tokens)
+VALUES ($1, $2, $3, $4);

@@ -11,6 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const insertCerebroTaskContextFootprintHistory = `-- name: InsertCerebroTaskContextFootprintHistory :exec
+
+INSERT INTO cerebro_task_context_footprint_history (task_id, model, input_tokens, cache_read_tokens)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertCerebroTaskContextFootprintHistoryParams struct {
+	TaskID          pgtype.UUID `json:"task_id"`
+	Model           string      `json:"model"`
+	InputTokens     int64       `json:"input_tokens"`
+	CacheReadTokens int64       `json:"cache_read_tokens"`
+}
+
+// FIR-1931: append one row per recorded run footprint so the session sheet can
+// draw the development curve over a session (one point per agent run).
+// Append-only; the gauge keeps reading the single-row Upsert above.
+func (q *Queries) InsertCerebroTaskContextFootprintHistory(ctx context.Context, arg InsertCerebroTaskContextFootprintHistoryParams) error {
+	_, err := q.db.Exec(ctx, insertCerebroTaskContextFootprintHistory,
+		arg.TaskID,
+		arg.Model,
+		arg.InputTokens,
+		arg.CacheReadTokens,
+	)
+	return err
+}
+
 const upsertCerebroTaskContextFootprint = `-- name: UpsertCerebroTaskContextFootprint :exec
 
 INSERT INTO cerebro_task_context_footprint (task_id, model, input_tokens, cache_read_tokens, updated_at)

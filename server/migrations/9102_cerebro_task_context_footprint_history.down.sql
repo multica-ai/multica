@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS cerebro_task_context_footprint_history;

@@ -3382,6 +3382,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.3
+      recharts:
+        specifier: 3.8.0
+        version: 3.8.0(@types/react@19.2.15)(react-dom@19.2.3(react@19.2.3))(react-is@19.2.6)(react@19.2.3)(redux@5.0.1)
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -17308,7 +17311,7 @@ snapshots:
       immer: 11.1.8
       redux: 5.0.1
       redux-thunk: 3.1.0(redux@5.0.1)
-      reselect: 5.1.1
+      reselect: 5.2.0
     optionalDependencies:
       react: 19.2.3
       react-redux: 9.3.0(@types/react@19.2.15)(react@19.2.3)(redux@5.0.1)

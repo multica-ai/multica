@@ -86,3 +86,22 @@ export interface UsageBreakdown {
   total_cache_read_tokens: number;
   total_cache_write_tokens: number;
 }
+
+// FIR-1931: one point on a session's development curve — one agent run's context
+// footprint. is_compaction marks a sharp drop from a fuller previous run.
+export interface ContextTimelinePoint {
+  observed_at: string;
+  context_tokens: number;
+  max_context_tokens: number;
+  used_percent: number;
+  cache_share_percent: number;
+  is_compaction: boolean;
+}
+
+// The development curve over a session (one point per run). has_data is false for
+// sessions that ran before the history feature deployed — show an empty state.
+export interface ContextTimeline {
+  session_id: string;
+  has_data: boolean;
+  points: ContextTimelinePoint[];
+}

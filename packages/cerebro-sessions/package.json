@@ -16,6 +16,7 @@
     "@multica/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",
+    "recharts": "3.8.0",
     "zod": "catalog:"
   },
   "peerDependencies": {

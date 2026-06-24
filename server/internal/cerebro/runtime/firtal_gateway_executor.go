@@ -1895,6 +1895,16 @@ func (e *FirtalGatewayExecutor) recordTaskUsage(ctx context.Context, task db.Age
 		}); err != nil {
 			e.logger.Warn("firtal gateway context footprint upsert failed", "task_id", util.UUIDToString(task.ID), "model", completion.Model, "error", err)
 		}
+		// FIR-1931: also append a history row (one point per run) so the session
+		// sheet can draw the development curve. Best-effort like the upsert above.
+		if err := e.cerebro.InsertCerebroTaskContextFootprintHistory(ctx, cerebrodb.InsertCerebroTaskContextFootprintHistoryParams{
+			TaskID:          task.ID,
+			Model:           completion.Model,
+			InputTokens:     completion.ContextInputTokens,
+			CacheReadTokens: completion.ContextCacheReadTokens,
+		}); err != nil {
+			e.logger.Warn("firtal gateway context footprint history insert failed", "task_id", util.UUIDToString(task.ID), "model", completion.Model, "error", err)
+		}
 	}
 
 	cents := usage.CostCents

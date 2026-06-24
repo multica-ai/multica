@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { api, parseWithFallback } from "@multica/core/api";
 import type {
+  ContextTimeline,
   ContextUsage,
   HandoffActionInput,
   HandoffBrief,
@@ -99,6 +100,36 @@ export async function getUsageBreakdown(issueId: string): Promise<UsageBreakdown
   return parseWithFallback(raw, UsageBreakdownSchema, USAGE_BREAKDOWN_FALLBACK, {
     endpoint: path,
   }) as UsageBreakdown;
+}
+
+// FIR-1931: the development curve over a session (one point per agent run).
+const ContextTimelinePointSchema = z.object({
+  observed_at: z.string().default(""),
+  context_tokens: z.number().default(0),
+  max_context_tokens: z.number().default(0),
+  used_percent: z.number().default(0),
+  cache_share_percent: z.number().default(0),
+  is_compaction: z.boolean().default(false),
+}).loose();
+
+const ContextTimelineSchema = z.object({
+  session_id: z.string().default(""),
+  has_data: z.boolean().default(false),
+  points: z.array(ContextTimelinePointSchema).default([]),
+}).loose();
+
+export const CONTEXT_TIMELINE_FALLBACK: ContextTimeline = {
+  session_id: "",
+  has_data: false,
+  points: [],
+};
+
+export async function getContextTimeline(issueId: string, sessionId: string): Promise<ContextTimeline> {
+  const path = `${base(issueId)}/${encodeURIComponent(sessionId)}/context-timeline`;
+  const raw = await api.cerebroRequest<unknown>(path);
+  return parseWithFallback(raw, ContextTimelineSchema, CONTEXT_TIMELINE_FALLBACK, {
+    endpoint: path,
+  }) as ContextTimeline;
 }
 
 export function listSessions(issueId: string): Promise<Session[]> {

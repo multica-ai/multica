@@ -2018,7 +2018,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/cerebro/issues/{issueId}/sessions", func(r chi.Router) {
 				r.Get("/", cerebroSessionsHandler.List)
 				r.Get("/context-usage", cerebroSessionsHandler.ContextUsage)       // CEREBRO-PATCH(cerebro-session-context-usage): FIR-1709 active-session context-window measurement.
-				r.Get("/usage-breakdown", cerebroSessionsHandler.UsageBreakdown) // CEREBRO-PATCH(cerebro-session-usage-breakdown): FIR-1931 per-session cost/token/cache sheet.
+				r.Get("/usage-breakdown", cerebroSessionsHandler.UsageBreakdown)                // CEREBRO-PATCH(cerebro-session-usage-breakdown): FIR-1931 per-session cost/token/cache sheet.
+				r.Get("/{sessionId}/context-timeline", cerebroSessionsHandler.ContextTimeline) // CEREBRO-PATCH(cerebro-session-context-timeline): FIR-1931 per-run context development curve.
 				r.Post("/start-fresh", cerebroSessionsHandler.StartFresh)
 				r.Patch("/{sessionId}", cerebroSessionsHandler.Update)
 			})

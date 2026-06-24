@@ -35,4 +35,15 @@ func (h *Handler) recordCerebroTaskContextFootprint(ctx context.Context, taskID 
 		slog.Warn("record cerebro task context footprint failed",
 			"task_id", taskID, "model", u.Model, "error", err)
 	}
+
+	// FIR-1931: also append a history row (one point per run) so the session sheet
+	// can draw the development curve over a session. Best-effort, like the upsert
+	// above — a failure here must never fail the usage report.
+	if _, err := h.DB.Exec(ctx, `
+		INSERT INTO cerebro_task_context_footprint_history (task_id, model, input_tokens, cache_read_tokens)
+		VALUES ($1, $2, $3, $4)
+	`, parseUUID(taskID), u.Model, u.ContextInputTokens, u.ContextCacheReadTokens); err != nil {
+		slog.Warn("record cerebro task context footprint history failed",
+			"task_id", taskID, "model", u.Model, "error", err)
+	}
 }

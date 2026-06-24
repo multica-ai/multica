@@ -1078,6 +1078,15 @@ type CerebroTaskContextFootprint struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroTaskContextFootprintHistory struct {
+	ID              pgtype.UUID        `json:"id"`
+	TaskID          pgtype.UUID        `json:"task_id"`
+	Model           string             `json:"model"`
+	InputTokens     int64              `json:"input_tokens"`
+	CacheReadTokens int64              `json:"cache_read_tokens"`
+	ObservedAt      pgtype.Timestamptz `json:"observed_at"`
+}
+
 type CerebroToolPolicy struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`

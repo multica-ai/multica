@@ -12,6 +12,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@multica/ui/components/ui/sheet";
+import { SessionTimelineChart } from "./session-timeline-chart";
 import { useUsageBreakdown } from "./use-sessions";
 import type { SessionUsageRow } from "./types";
 
@@ -131,6 +132,17 @@ export function SessionUsageSheet({
                         </span>
                       </span>
                     ) : null}
+                  </div>
+                  {/* Development curve over the session (one point per run). */}
+                  <div className="mt-3">
+                    <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Context over the session
+                    </p>
+                    <SessionTimelineChart
+                      issueId={issueId}
+                      sessionId={s.session_id}
+                      enabled={open}
+                    />
                   </div>
                 </div>
               ))}

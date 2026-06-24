@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getContextUsage, getUsageBreakdown, listSessions, startFresh, updateSession } from "./api";
+import { getContextTimeline, getContextUsage, getUsageBreakdown, listSessions, startFresh, updateSession } from "./api";
 import type { HandoffActionInput } from "./types";
 
 const key = (issueId: string) => ["cerebro-sessions", issueId] as const;
@@ -32,6 +32,16 @@ export function useUsageBreakdown(issueId: string, enabled = true) {
     queryKey: ["cerebro-session-usage-breakdown", issueId],
     queryFn: () => getUsageBreakdown(issueId),
     enabled,
+  });
+}
+
+// FIR-1931: the development curve over a session (one point per agent run).
+// `enabled` lets the caller fetch only when the chart is actually shown.
+export function useContextTimeline(issueId: string, sessionId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["cerebro-session-context-timeline", issueId, sessionId],
+    queryFn: () => getContextTimeline(issueId, sessionId),
+    enabled: enabled && !!sessionId,
   });
 }
 
