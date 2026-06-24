@@ -576,8 +576,7 @@ func (q *Queries) FindRuntimePauseInboxCard(ctx context.Context, arg FindRuntime
 const setInboxMutedUntil = `-- name: SetInboxMutedUntil :one
 
 UPDATE inbox_item
-SET muted_until = $2,
-    read = false
+SET muted_until = $2
 WHERE id = $1
 RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
@@ -594,7 +593,10 @@ type SetInboxMutedUntilParams struct {
 // adds columns (route, project_id, muted_until) via 9NNN migrations.
 // Mute an inbox item until the given timestamp (caller computes "next 08:00
 // local" or whatever duration applies). Idempotent — re-muting just updates
-// the timestamp.
+// the timestamp. Muting must NOT touch `read`: a reminder/snooze should only
+// count as unread when it FIRES (the cerebro_reminder sweeper re-surfaces it
+// unread at muted_until), not the moment it is set — otherwise the muted row
+// inflates the unread count while it is hidden (FIR-1730).
 func (q *Queries) SetInboxMutedUntil(ctx context.Context, arg SetInboxMutedUntilParams) (InboxItem, error) {
 	row := q.db.QueryRow(ctx, setInboxMutedUntil, arg.ID, arg.MutedUntil)
 	var i InboxItem
@@ -623,8 +625,7 @@ func (q *Queries) SetInboxMutedUntil(ctx context.Context, arg SetInboxMutedUntil
 
 const setInboxMutedUntilByIssue = `-- name: SetInboxMutedUntilByIssue :execrows
 UPDATE inbox_item
-SET muted_until = $5,
-    read = false
+SET muted_until = $5
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false
 `
 
@@ -638,7 +639,9 @@ type SetInboxMutedUntilByIssueParams struct {
 
 // Mute every sibling inbox item for the same recipient + issue. The inbox UI
 // deduplicates rows by issue_id, so muting only the clicked notification can
-// make an unmuted sibling resurface after refetch.
+// make an unmuted sibling resurface after refetch. Like SetInboxMutedUntil
+// this must NOT set `read` — muting hides a row, it does not make it unread
+// (FIR-1730).
 func (q *Queries) SetInboxMutedUntilByIssue(ctx context.Context, arg SetInboxMutedUntilByIssueParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setInboxMutedUntilByIssue,
 		arg.WorkspaceID,

@@ -7,20 +7,23 @@
 -- name: SetInboxMutedUntil :one
 -- Mute an inbox item until the given timestamp (caller computes "next 08:00
 -- local" or whatever duration applies). Idempotent — re-muting just updates
--- the timestamp.
+-- the timestamp. Muting must NOT touch `read`: a reminder/snooze should only
+-- count as unread when it FIRES (the cerebro_reminder sweeper re-surfaces it
+-- unread at muted_until), not the moment it is set — otherwise the muted row
+-- inflates the unread count while it is hidden (FIR-1730).
 UPDATE inbox_item
-SET muted_until = $2,
-    read = false
+SET muted_until = $2
 WHERE id = $1
 RETURNING *;
 
 -- name: SetInboxMutedUntilByIssue :execrows
 -- Mute every sibling inbox item for the same recipient + issue. The inbox UI
 -- deduplicates rows by issue_id, so muting only the clicked notification can
--- make an unmuted sibling resurface after refetch.
+-- make an unmuted sibling resurface after refetch. Like SetInboxMutedUntil
+-- this must NOT set `read` — muting hides a row, it does not make it unread
+-- (FIR-1730).
 UPDATE inbox_item
-SET muted_until = $5,
-    read = false
+SET muted_until = $5
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;
 
 -- name: ClearInboxMute :one

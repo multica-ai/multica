@@ -66,9 +66,13 @@ export function useMuteInbox() {
     onMutate: async ({ id, mutedUntil }) => {
       await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
       const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      // FIR-1730: muting must not mark the row unread — a reminder/snooze only
+      // becomes unread when it FIRES (the cerebro_reminder sweeper re-surfaces
+      // it), not when it is set. Setting read:false here made the muted row
+      // count as unread while hidden, inflating the unread badge.
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
         updateInboxIssueSiblings(old, id, (item) =>
-          ({ ...item, muted_until: mutedUntil.toISOString(), read: false }),
+          ({ ...item, muted_until: mutedUntil.toISOString() }),
         ),
       );
       return { prev };
