@@ -175,8 +175,8 @@ func TestGrokBackendInvokesAgentStdioAndFiltersBlockedArgs(t *testing.T) {
 		t.Fatalf("read argv file: %v", err)
 	}
 	argv := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(argv) < 2 || argv[0] != "agent" || argv[1] != "stdio" {
-		t.Fatalf("expected argv to start with [agent stdio], got %v", argv)
+	if len(argv) < 3 || argv[0] != "--always-approve" || argv[1] != "agent" || argv[2] != "stdio" {
+		t.Fatalf("expected argv to start with [--always-approve agent stdio], got %v", argv)
 	}
 	// The blocked tokens must appear exactly once (the daemon's own), not
 	// duplicated by the custom args.

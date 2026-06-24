@@ -18,9 +18,13 @@ import (
 // overridden by user-configured custom_args. `agent` + `stdio` put the Grok
 // Build CLI into ACP server mode (`grok agent stdio`); letting users strip or
 // duplicate them would break the daemon↔Grok JSON-RPC transport contract.
+// `--always-approve` is daemon-owned so headless ACP always auto-approves
+// tool executions — the daemon cannot answer grok's interactive permission
+// prompts, and without this grok aborts the turn with stopReason=cancelled.
 var grokBlockedArgs = map[string]blockedArgMode{
-	"agent": blockedStandalone,
-	"stdio": blockedStandalone,
+	"agent":            blockedStandalone,
+	"stdio":            blockedStandalone,
+	"--always-approve": blockedStandalone,
 }
 
 // grokBackend implements Backend by spawning `grok agent stdio` and
@@ -101,8 +105,13 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
+	// `--always-approve` (grok's global auto-approve-all-tools flag, the analog
+	// of qoder's `--yolo` / hermes' HERMES_YOLO_MODE) precedes the `agent stdio`
+	// subcommand. The daemon is headless and cannot answer grok's mid-turn
+	// tool-permission prompts, so without it grok runs for a few seconds and
+	// then aborts the turn with stopReason=cancelled.
 	grokArgs := append(
-		[]string{"agent", "stdio"},
+		[]string{"--always-approve", "agent", "stdio"},
 		filterCustomArgs(opts.CustomArgs, grokBlockedArgs, b.cfg.Logger)...,
 	)
 	cmd := exec.CommandContext(runCtx, execPath, grokArgs...)
