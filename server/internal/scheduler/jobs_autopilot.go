@@ -120,6 +120,13 @@ type autopilotTriggerConfig struct {
 	CronExpression string
 	Timezone       string
 	CreatedAt      time.Time
+	// LastFiredAt is autopilot_trigger.last_fired_at; zero if the
+	// trigger has never fired (or under no scheduler so far). Used by
+	// the planner hook to anchor cold-start enumeration so that
+	// occurrences which have already been processed (e.g. by the
+	// legacy goroutine pre-migration, or by a prior incarnation of
+	// this process pre-restart) are not replayed.
+	LastFiredAt time.Time
 }
 
 // autopilotScheduleCache holds the per-tick map of trigger configs.
@@ -185,11 +192,16 @@ func autopilotScopes(
 			if r.CreatedAt.Valid {
 				createdAt = r.CreatedAt.Time.UTC()
 			}
+			lastFiredAt := time.Time{}
+			if r.LastFiredAt.Valid {
+				lastFiredAt = r.LastFiredAt.Time.UTC()
+			}
 			next[id] = autopilotTriggerConfig{
 				TriggerID:      id,
 				CronExpression: cron,
 				Timezone:       tz,
 				CreatedAt:      createdAt,
+				LastFiredAt:    lastFiredAt,
 			}
 			scopes = append(scopes, Scope{Kind: ScopeKindAutopilotTrigger, ID: id})
 		}
@@ -238,15 +250,44 @@ func autopilotPlansForScope(cache *autopilotScheduleCache) func(
 			return []time.Time{latest.PlanTime}, nil
 		}
 
-		// Anchor on the most recent stored plan_time so the cron evaluator
-		// only enumerates new occurrences. Before the first run we anchor
-		// on the trigger's created_at — never replay history.
-		after := cfg.CreatedAt
-		if latest.Found && latest.PlanTime.After(after) {
+		// Anchor selection — three cases, in order:
+		//
+		//   1. `latest.Found`: this trigger has at least one
+		//      sys_cron_executions row written by the new scheduler.
+		//      Resume strictly after the most recent plan_time.
+		//
+		//   2. `cfg.LastFiredAt` is set: the trigger has been fired
+		//      before, either by the legacy goroutine pre-migration
+		//      or by a previous incarnation of this process. Resume
+		//      strictly after the last successful fire so we do not
+		//      replay an already-handled occurrence. This is the case
+		//      that produced the post-deploy spurious-fire reported
+		//      on MUL-3551 dev: without it, a trigger that fired at
+		//      Mon 17:10 under the legacy code would be enumerated
+		//      again the moment the new scheduler took over, because
+		//      the (created_at, now] half-open interval still
+		//      contained Mon 17:10.
+		//
+		//   3. Brand-new trigger that has never fired: anchor on
+		//      created_at so only occurrences after the trigger
+		//      existed are enumerated.
+		//
+		// Each case feeds into a final safety cap that prevents
+		// enumerating more than `replayWindow` of history at once.
+		var after time.Time
+		switch {
+		case latest.Found:
 			after = latest.PlanTime
+		case !cfg.LastFiredAt.IsZero():
+			after = cfg.LastFiredAt
+		default:
+			after = cfg.CreatedAt
 		}
 		// Bound replay by CatchUpWindow so a long pause / dormant
 		// trigger does not enumerate millions of historical buckets.
+		// `after` is normally already recent (either latest.PlanTime
+		// or last_fired_at); the cap only matters for the unusual
+		// "trigger created weeks ago but never fired" path.
 		if oldest := now.Add(-replayWindow); after.Before(oldest) {
 			after = oldest
 		}

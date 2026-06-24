@@ -588,3 +588,186 @@ func TestAutopilotScheduleJobBadCronStaysSilent(t *testing.T) {
 		t.Fatalf("bad cron must not fire dispatch, got %d run rows", runRows)
 	}
 }
+
+// seedColdStartTrigger creates an autopilot + a schedule trigger
+// (kind='schedule', timezone=UTC, given cron) and returns the
+// trigger plus the queries/service handles. Cleanup of the autopilot
+// (which cascades to the trigger) is registered on t. The trigger's
+// timestamps are NOT touched here — callers must set them
+// explicitly via SQL so test wall-clock has no influence on the
+// outcome.
+func seedColdStartTrigger(t *testing.T, cron string) (db.AutopilotTrigger, *db.Queries, *service.AutopilotService) {
+	t.Helper()
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Cold-start regression",
+		Description:        pgtype.Text{String: "deterministic cold-start", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "run_only",
+		IssueTitleTemplate: pgtype.Text{},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(context.Background(),
+			`DELETE FROM autopilot WHERE id = $1`, ap.ID); err != nil {
+			t.Logf("cleanup autopilot: %v", err)
+		}
+	})
+
+	trigger, err := queries.CreateAutopilotTrigger(ctx, db.CreateAutopilotTriggerParams{
+		AutopilotID:    ap.ID,
+		Kind:           "schedule",
+		Enabled:        true,
+		CronExpression: pgtype.Text{String: cron, Valid: true},
+		Timezone:       pgtype.Text{String: "UTC", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilotTrigger: %v", err)
+	}
+	return trigger, queries, autopilotSvc
+}
+
+// TestAutopilotScheduleJobColdStartHonorsLastFiredAt is the regression
+// for the post-deploy spurious-fire reported on MUL-3551:
+//
+//	Trigger fired by the legacy goroutine at Mon 17:10 Beijing
+//	(last_fired_at written then). Deploy switches to the new
+//	scheduler at Tue ~12:30 Beijing. First tick re-fired Monday's
+//	already-handled 17:10 occurrence because the cold-start anchor
+//	was (created_at, capped to now-24h) — well before Mon 17:10.
+//
+// Fix: the cold-start anchor must be `last_fired_at` when it is set,
+// so an occurrence that the legacy code (or a previous incarnation
+// of this scheduler) already processed is NOT replayed.
+//
+// The test is wall-clock-independent: it sets created_at and
+// last_fired_at to fixed UTC timestamps, then invokes the
+// JobSpec.PlansForScope hook directly with a pinned `now`. The cron
+// (`0 17 * * 1-5` UTC) has a deterministic next fire at Tue 17:00
+// UTC, which is in the future relative to the pinned now=Tue 12:00
+// UTC; with the fix the half-open `(last_fired_at=Mon 17:00 UTC,
+// now=Tue 12:00 UTC]` interval is empty, so the hook returns no
+// plans. Without the fix the anchor would degrade to
+// `max(created_at, now-24h)` which still includes Mon 17:00 UTC and
+// the hook would replay it — the exact bug we are pinning.
+func TestAutopilotScheduleJobColdStartHonorsLastFiredAt(t *testing.T) {
+	ctx := context.Background()
+	trigger, queries, autopilotSvc := seedColdStartTrigger(t, "0 17 * * 1-5")
+
+	// Fully pinned UTC timestamps. Both real days, but the test does
+	// NOT compare against time.Now() — the pinned `now` below is
+	// what feeds the cron evaluator.
+	createdAt := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)    // Sat, several days before
+	lastFiredAt := time.Date(2026, 6, 22, 17, 0, 0, 0, time.UTC) // Mon 17:00 UTC — last legacy fire
+	pinnedNow := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC)   // Tue 12:00 UTC — 5h before next fire
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE autopilot_trigger
+		   SET created_at    = $2,
+		       last_fired_at = $3
+		 WHERE id = $1
+	`, trigger.ID, createdAt, lastFiredAt); err != nil {
+		t.Fatalf("seed deterministic timestamps: %v", err)
+	}
+
+	// Build a fresh JobSpec; its scope cache lives inside the
+	// closure returned here. Populate the cache by running the scope
+	// provider once — the provider does not consult `now`, so the
+	// value passed here is ignored.
+	job := scheduler.AutopilotScheduleDispatchJob(testPool, queries, autopilotSvc)
+	if _, err := job.Scopes(ctx, pinnedNow); err != nil {
+		t.Fatalf("populate scope cache: %v", err)
+	}
+
+	scope := scheduler.Scope{
+		Kind: scheduler.ScopeKindAutopilotTrigger,
+		ID:   util.UUIDToString(trigger.ID),
+	}
+
+	// Cold-start invariant: no sys_cron_executions row exists yet
+	// for this scope, so LatestPlanInfo.Found is false. The fix
+	// must NOT enumerate Mon 17:00 UTC.
+	plans, err := job.PlansForScope(ctx, scope, pinnedNow, scheduler.LatestPlanInfo{Found: false})
+	if err != nil {
+		t.Fatalf("planner hook: %v", err)
+	}
+	if len(plans) != 0 {
+		t.Fatalf("cold-start cron=%q with last_fired_at=%s and now=%s must yield no plans (next fire is Tue 17:00 UTC, in the future); got %v",
+			"0 17 * * 1-5",
+			lastFiredAt.Format(time.RFC3339),
+			pinnedNow.Format(time.RFC3339),
+			plans,
+		)
+	}
+}
+
+// TestAutopilotScheduleJobColdStartBrandNewTriggerStillFires is the
+// counterpart to TestAutopilotScheduleJobColdStartHonorsLastFiredAt:
+// a brand-new trigger (last_fired_at NULL) MUST still fire its
+// first due occurrence on cold start. The fix for the
+// last_fired_at-honors-cold-start path must not regress the
+// "never-fired-before" path.
+//
+// Also wall-clock-independent: created_at and `now` are both
+// pinned, and the cron (`0 12 * * *` daily noon UTC) has a single
+// fire (Tue 12:00 UTC) inside the deterministic `(created_at=Tue
+// 11:50 UTC, now=Tue 12:05 UTC]` window.
+func TestAutopilotScheduleJobColdStartBrandNewTriggerStillFires(t *testing.T) {
+	ctx := context.Background()
+	trigger, queries, autopilotSvc := seedColdStartTrigger(t, "0 12 * * *")
+
+	createdAt := time.Date(2026, 6, 23, 11, 50, 0, 0, time.UTC)  // 10 min before the fire
+	pinnedNow := time.Date(2026, 6, 23, 12, 5, 0, 0, time.UTC)   // 5 min after the fire
+	expectedFire := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC) // the daily noon UTC fire
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE autopilot_trigger
+		   SET created_at    = $2,
+		       last_fired_at = NULL
+		 WHERE id = $1
+	`, trigger.ID, createdAt); err != nil {
+		t.Fatalf("seed deterministic timestamps: %v", err)
+	}
+
+	job := scheduler.AutopilotScheduleDispatchJob(testPool, queries, autopilotSvc)
+	if _, err := job.Scopes(ctx, pinnedNow); err != nil {
+		t.Fatalf("populate scope cache: %v", err)
+	}
+
+	scope := scheduler.Scope{
+		Kind: scheduler.ScopeKindAutopilotTrigger,
+		ID:   util.UUIDToString(trigger.ID),
+	}
+
+	plans, err := job.PlansForScope(ctx, scope, pinnedNow, scheduler.LatestPlanInfo{Found: false})
+	if err != nil {
+		t.Fatalf("planner hook: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("brand-new trigger should fire its first due occurrence; got %d plans: %v", len(plans), plans)
+	}
+	if !plans[0].Equal(expectedFire) {
+		t.Fatalf("plan_time mismatch: got %s want %s",
+			plans[0].Format(time.RFC3339), expectedFire.Format(time.RFC3339))
+	}
+}
