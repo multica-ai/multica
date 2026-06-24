@@ -1335,6 +1335,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.PriorWorkDir = prior.WorkDir.String
 				}
 			}
+
+			// Workflow handback continuation (Design Two): when a human takes
+			// over a node and hands it back, the bound CSC session on the
+			// node_run is the canonical resume pointer — not GetLastTaskSession,
+			// whose original worker task may have been cancelled (not
+			// completed/failed) at takeover and thus not returned. Prefer the
+			// node-run binding so the daemon resumes the exact session the human
+			// just drove via Cloud. Runtime must match (a session can only be
+			// resumed on the runtime that owns it).
+			if resp.PriorSessionID == "" && task.WorkflowNodeRunID.Valid {
+				if nr, err := h.Queries.GetWorkflowNodeRun(r.Context(), task.WorkflowNodeRunID); err == nil {
+					if nr.SessionID.Valid && nr.RuntimeID.Valid && nr.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = nr.SessionID.String
+					}
+				}
+			}
 		}
 	}
 

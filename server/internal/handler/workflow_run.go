@@ -26,6 +26,10 @@ type ReviewNodeRunRequest struct {
 	Comment  string `json:"comment"`
 }
 
+type FinalizeNodeRunRequest struct {
+	Approved *bool `json:"approved,omitempty"`
+}
+
 // ── Response types ───────────────────────────────────────────────────────────
 
 type WorkflowRunResponse struct {
@@ -422,6 +426,124 @@ func (h *Handler) SkipNodeRun(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal: the skip already persisted.
 	}
 
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// loadNodeRunForWorkspace resolves a node-run URL param and verifies the caller
+// can access its workspace, returning the node run and its parent run. On any
+// failure it writes the response and returns ok=false.
+func (h *Handler) loadNodeRunForWorkspace(w http.ResponseWriter, r *http.Request) (db.MulticaWorkflowNodeRun, db.MulticaWorkflowRun, string, bool) {
+	nodeRunID := chi.URLParam(r, "nodeRunId")
+	nodeRunUUID, ok := parseUUIDOrBadRequest(w, nodeRunID, "node run id")
+	if !ok {
+		return db.MulticaWorkflowNodeRun{}, db.MulticaWorkflowRun{}, "", false
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	nodeRun, err := h.Queries.GetWorkflowNodeRun(r.Context(), nodeRunUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "node run not found")
+		return db.MulticaWorkflowNodeRun{}, db.MulticaWorkflowRun{}, "", false
+	}
+	run, err := h.Queries.GetWorkflowRun(r.Context(), nodeRun.WorkflowRunID)
+	if err != nil || uuidToString(run.WorkspaceID) != workspaceID {
+		writeError(w, http.StatusNotFound, "node run not found")
+		return db.MulticaWorkflowNodeRun{}, db.MulticaWorkflowRun{}, "", false
+	}
+	return nodeRun, run, workspaceID, true
+}
+
+// TakeoverNodeRun pauses a running node so a human can intervene in its CSC
+// session (working → blocked). Node-level control only — the CSC session
+// actions (message/interrupt/permission) flow through Cloud Web, not here.
+//
+// NOTE: runtime-level takeover permission (beyond workspace membership) is
+// deferred (task L1.4 / plan module A5); for now workspace access gates this.
+func (h *Handler) TakeoverNodeRun(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	nodeRun, run, workspaceID, ok := h.loadNodeRunForWorkspace(w, r)
+	if !ok {
+		return
+	}
+
+	updated, err := h.WorkflowService.TakeoverNodeRun(r.Context(), nodeRun)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	resp := workflowNodeRunToResponse(*updated)
+	h.publish(protocol.EventWorkflowNodeRunBlocked, workspaceID, "member", userID, map[string]any{
+		"node_run": resp,
+		"run_id":   uuidToString(run.ID),
+	})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// HandbackNodeRun returns control to the agent (blocked → working) so the
+// daemon resumes the same CSC session.
+func (h *Handler) HandbackNodeRun(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	nodeRun, run, workspaceID, ok := h.loadNodeRunForWorkspace(w, r)
+	if !ok {
+		return
+	}
+
+	updated, err := h.WorkflowService.HandbackNodeRun(r.Context(), nodeRun)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	resp := workflowNodeRunToResponse(*updated)
+	h.publish(protocol.EventWorkflowNodeRunResumed, workspaceID, "member", userID, map[string]any{
+		"node_run": resp,
+		"run_id":   uuidToString(run.ID),
+	})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// FinalizeNodeRun lets a human conclude a taken-over node directly
+// (blocked → completed / failed) instead of handing it back.
+func (h *Handler) FinalizeNodeRun(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req FinalizeNodeRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	outcome := service.NodeRunStatusCompleted
+	eventType := protocol.EventWorkflowNodeRunCompleted
+	if req.Approved != nil && !*req.Approved {
+		outcome = service.NodeRunStatusFailed
+		eventType = protocol.EventWorkflowNodeRunFailed
+	}
+
+	nodeRun, run, workspaceID, ok := h.loadNodeRunForWorkspace(w, r)
+	if !ok {
+		return
+	}
+
+	updated, err := h.WorkflowService.FinalizeNodeRun(r.Context(), nodeRun, outcome)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	resp := workflowNodeRunToResponse(*updated)
+	h.publish(eventType, workspaceID, "member", userID, map[string]any{
+		"node_run": resp,
+		"run_id":   uuidToString(run.ID),
+	})
 	writeJSON(w, http.StatusOK, resp)
 }
 

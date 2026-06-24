@@ -326,6 +326,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		r.Post("/runtimes/{runtimeId}/recover-orphans", h.RecoverOrphanedTasks)
 		r.Post("/tasks/{taskId}/session", h.PinTaskSession)
+		r.Post("/node-runs/{nodeRunId}/session", h.BindNodeRunSession)
 	})
 
 
@@ -558,6 +559,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/node-runs/{nodeRunId}/submit", h.SubmitNodeRun)
 			r.Post("/api/node-runs/{nodeRunId}/review", h.ReviewNodeRun)
 			r.Post("/api/node-runs/{nodeRunId}/skip", h.SkipNodeRun)
+			// Human takeover / handback around a live CSC session (Design Two).
+			r.Post("/api/node-runs/{nodeRunId}/blocked", h.TakeoverNodeRun)
+			r.Post("/api/node-runs/{nodeRunId}/working", h.HandbackNodeRun)
+			r.Post("/api/node-runs/{nodeRunId}/finalize", h.FinalizeNodeRun)
+
+			// Cross-system permission seam for Design Two: cs-cloud asks Multica
+			// whether a Casdoor-authenticated user may access a CSC session bound
+			// to a workflow node-run.
+			r.Get("/api/sessions/{sessionId}/permission", h.GetSessionPermission)
 
 			// My workflow tasks
 			r.Get("/api/my-tasks", h.ListMyWorkflowTasks)

@@ -233,6 +233,27 @@ func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir 
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/session", taskID), body, nil)
 }
 
+// BindNodeRunSession persists the {runtime, device, session} binding for a
+// workflow node-run so Cloud Web can locate and attach to the live CSC session
+// for real-time collaboration (Design Two). Idempotent server-side: a
+// re-dispatch overwrites with the latest session. No-op when all fields empty.
+func (c *Client) BindNodeRunSession(ctx context.Context, nodeRunID, runtimeID, deviceID, sessionID string) error {
+	if runtimeID == "" && deviceID == "" && sessionID == "" {
+		return nil
+	}
+	body := map[string]any{}
+	if runtimeID != "" {
+		body["runtime_id"] = runtimeID
+	}
+	if deviceID != "" {
+		body["device_id"] = deviceID
+	}
+	if sessionID != "" {
+		body["session_id"] = sessionID
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/node-runs/%s/session", nodeRunID), body, nil)
+}
+
 // RecoverOrphans tells the server to fail any dispatched/running tasks the
 // previous daemon process for this runtime left behind. The server will
 // auto-retry eligible tasks.

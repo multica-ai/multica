@@ -743,6 +743,9 @@ type MulticaWorkflowNodeRun struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 	WorkerAgentTaskID pgtype.UUID        `json:"worker_agent_task_id"`
 	CriticAgentTaskID pgtype.UUID        `json:"critic_agent_task_id"`
+	RuntimeID         pgtype.UUID        `json:"runtime_id"`
+	DeviceID          pgtype.Text        `json:"device_id"`
+	SessionID         pgtype.Text        `json:"session_id"`
 }
 
 type MulticaWorkflowRun struct {

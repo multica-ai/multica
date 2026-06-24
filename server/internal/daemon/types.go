@@ -54,6 +54,7 @@ type Task struct {
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind for the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	WorkflowNodeRunID       string                `json:"workflow_node_run_id,omitempty"`      // non-empty when this task executes a workflow node-run; daemon writes back the session binding for it (Design Two)
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message content for chat tasks
 	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments linked to the chat message; agent uses these to `cs-workflow attachment download <id>`
 	UpstreamStageContext    []UpstreamStageNode   `json:"upstream_stage_context,omitempty"`    // completed upstream-stage node runs the agent should read

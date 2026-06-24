@@ -177,6 +177,7 @@ type AgentTaskResponse struct {
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
+	WorkflowNodeRunID       string                `json:"workflow_node_run_id,omitempty"`      // non-empty when this task executes a workflow node-run; daemon uses it to write back the session binding
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
 	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `cs-workflow attachment download <id>` per entry
 	UpstreamStageContext    []UpstreamStageNode   `json:"upstream_stage_context,omitempty"`    // completed upstream-stage node runs the agent should read
@@ -280,7 +281,11 @@ func taskToResponse(t db.MulticaAgentTaskQueue) AgentTaskResponse {
 		// with issue_id = "" once a task has no linked issue.
 		ChatSessionID:  uuidToString(t.ChatSessionID),
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
-		Kind:           computeTaskKind(t),
+		// Surface the workflow node-run this task executes so the daemon can
+		// write back the {runtime, device, session} binding (Design Two): the
+		// daemon needs the node_run_id to call POST /api/daemon/node-runs/{id}/session.
+		WorkflowNodeRunID: uuidToString(t.WorkflowNodeRunID),
+		Kind:              computeTaskKind(t),
 	}
 }
 
