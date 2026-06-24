@@ -172,15 +172,3 @@ export interface CreateChannelThreadRequest {
 export interface CreateChannelMessageRequest {
   content: string;
 }
-
-export interface ConvertMessageToIssueRequest {
-  title?: string;
-  description?: string;
-  project_id?: string;
-}
-
-export interface ConvertMessageToIssueResponse {
-  issue_id: string;
-  issue_number: number;
-  title: string;
-}

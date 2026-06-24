@@ -163,8 +163,6 @@ import type {
   ListChannelMessagesResponse,
   MessageThreadResponse,
   ChannelContextResponse,
-  ConvertMessageToIssueRequest,
-  ConvertMessageToIssueResponse,
   ChannelMessage,
   ChannelGroup,
   CreateChannelRequest,
@@ -2339,13 +2337,6 @@ export class ApiClient {
     return this.fetch(`/api/channels/${channelId}/messages/${messageId}/move`, {
       method: "PATCH",
       body: JSON.stringify({ target_message_id: targetMessageId }),
-    });
-  }
-
-  async convertMessageToIssue(channelId: string, messageId: string, data?: ConvertMessageToIssueRequest): Promise<ConvertMessageToIssueResponse> {
-    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/convert-issue`, {
-      method: "POST",
-      body: JSON.stringify(data ?? {}),
     });
   }
 
