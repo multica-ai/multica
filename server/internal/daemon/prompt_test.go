@@ -289,8 +289,6 @@ func TestBuildChannelMentionPromptUsesChannelContextNotIssueWorkflow(t *testing.
 		NewCommentCount:                  3,
 		NewCommentsSince:                 "2026-06-03T00:00:00Z",
 		ChatSessionID:                    "",
-		ChannelThreadID:                  "thread-1",
-		ChannelReplyToID:                 "reply-parent-1",
 		QuickCreatePrompt:                "",
 		RequestingUserProfileDescription: "prefers direct replies",
 	}, "normal")
@@ -301,9 +299,8 @@ func TestBuildChannelMentionPromptUsesChannelContextNotIssueWorkflow(t *testing.
 		"Channel name: release",
 		"Triggering message ID: message-1",
 		"multica channel context channel-1 --message message-1 --include-replies --recent 20 --output json",
-		// No thread root → the agent must default to replying to the
-		// triggering message (IDs filled in), NOT to a top-level send.
-		"multica channel message reply channel-1 message-1",
+		// Main message area @-mention → default to a top-level send on the timeline.
+		"post on the main channel timeline",
 		"multica channel message send channel-1",
 		"Prior session available",
 		"Guodage",
@@ -322,11 +319,8 @@ func TestBuildChannelMentionPromptUsesChannelContextNotIssueWorkflow(t *testing.
 		"multica issue comment add",
 		"Issue Metadata",
 		"triggering comment",
-		// The no-thread-root branch must NOT push the agent to post a
-		// top-level message as the default result carrier — that lands the
-		// reply in the main channel feed instead of the triggering message's
-		// reply area.
-		"default to a top-level channel message",
+		// Main-area default must NOT steer the agent into message reply (thread).
+		"reply to the triggering message so it stays in that message's thread",
 	}
 	for _, s := range mustNotContain {
 		if strings.Contains(out, s) {
@@ -355,7 +349,8 @@ func TestBuildChannelMentionPromptThreadReplyTargetsThreadRoot(t *testing.T) {
 
 	mustContain := []string{
 		"Thread root message ID: root-msg-1",
-		"reply in the same thread: `multica channel message reply channel-1 root-msg-1",
+		"reply in the same thread (the user @-mentioned you from the replies panel)",
+		"`multica channel message reply channel-1 root-msg-1",
 		"Do NOT reply to the triggering message directly",
 	}
 	for _, s := range mustContain {
@@ -363,8 +358,8 @@ func TestBuildChannelMentionPromptThreadReplyTargetsThreadRoot(t *testing.T) {
 			t.Errorf("thread-reply channel prompt missing %q\n--- output ---\n%s", s, out)
 		}
 	}
-	if strings.Contains(out, "default to a top-level channel message") {
-		t.Errorf("thread-reply channel prompt must NOT default to a top-level message\n--- output ---\n%s", out)
+	if strings.Contains(out, "post on the main channel timeline") {
+		t.Errorf("thread-reply channel prompt must NOT default to a main-timeline send\n--- output ---\n%s", out)
 	}
 }
 

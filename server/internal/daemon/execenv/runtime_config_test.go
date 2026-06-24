@@ -1485,9 +1485,9 @@ func TestChannelTaskBriefOmitsIssueWorkflow(t *testing.T) {
 		"multica channel member list <channel-id>",
 		// Channel agents may still open an issue when asked — but only then.
 		"only if the channel conversation explicitly asks you to open one",
-		// No thread root → the brief must default to replying to the
-		// triggering message (IDs filled in), not to a top-level send.
-		"multica channel message reply 11111111-2222-3333-4444-555555555555 66666666-7777-8888-9999-000000000000",
+		// Main message area @-mention → default to a top-level send on the timeline.
+		"Default (main message area):",
+		"multica channel message send 11111111-2222-3333-4444-555555555555",
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
@@ -1530,6 +1530,31 @@ func TestChannelTaskBriefOmitsIssueWorkflow(t *testing.T) {
 		if strings.Contains(out, s) {
 			t.Errorf("channel brief must not leak issue-workflow text %q", s)
 		}
+	}
+}
+
+func TestChannelTaskBriefThreadReplyDefaultsToThread(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		AgentName:              "Channel Agent",
+		AgentID:                "agent-1",
+		ChannelID:              "11111111-2222-3333-4444-555555555555",
+		ChannelName:            "release",
+		ChannelMessageID:       "66666666-7777-8888-9999-000000000000",
+		ChannelThreadRootMsgID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, s := range []string{
+		"Default (replies panel):",
+		"multica channel message reply 11111111-2222-3333-4444-555555555555 aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("thread channel brief missing %q", s)
+		}
+	}
+	if strings.Contains(out, "Default (main message area):") {
+		t.Errorf("thread channel brief must not use main-area default")
 	}
 }
 
