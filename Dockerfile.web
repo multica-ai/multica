@@ -25,7 +25,9 @@ COPY packages/views/package.json packages/views/
 COPY packages/tsconfig/package.json packages/tsconfig/
 COPY packages/eslint-config/package.json packages/eslint-config/
 
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm config set registry https://registry.npmmirror.com && \
+    pnpm install --frozen-lockfile
 
 # --- Build ---
 FROM node:22-alpine AS builder
@@ -67,10 +69,19 @@ ENV NEXT_PUBLIC_DINGTALK_CLIENT_ID=$NEXT_PUBLIC_DINGTALK_CLIENT_ID
 ENV NEXT_PUBLIC_HIDE_EMAIL_LOGIN=$NEXT_PUBLIC_HIDE_EMAIL_LOGIN
 ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
-ENV STANDALONE=true
+ARG STANDALONE=true
+ENV STANDALONE=$STANDALONE
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # Build the web app (standalone output for minimal runtime)
-RUN pnpm --filter @multica/web build
+# HTTP_PROXY / HTTPS_PROXY / NO_PROXY are forwarded inline so they are
+# available to Node.js (next/font Google Fonts download) only during this
+# step and do not leak into the final image or other layers.
+RUN --mount=type=cache,target=/app/apps/web/.next/cache \
+    HTTP_PROXY="${HTTP_PROXY:-}" \
+    HTTPS_PROXY="${HTTPS_PROXY:-}" \
+    NO_PROXY="${NO_PROXY:-}" \
+    pnpm --filter @multica/web build
 
 # --- Runtime ---
 FROM node:22-alpine AS runner
