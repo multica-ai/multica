@@ -43,12 +43,12 @@ func TestClaimTaskConcurrentCapacityRespected(t *testing.T) {
 	pool := newTaskClaimRacePool(t)
 	queries := db.New(pool)
 
-	triggerName := fmt.Sprintf("claim_capacity_sleep_%d", time.Now().UnixNano())
-	functionName := triggerName + "_fn"
-	createSleepTrigger(t, ctx, pool, triggerName, functionName)
-
 	agentID := createClaimCapacityFixture(t, ctx, pool)
 	agentUUID := util.MustParseUUID(agentID)
+
+	triggerName := fmt.Sprintf("claim_capacity_sleep_%d", time.Now().UnixNano())
+	functionName := triggerName + "_fn"
+	createSleepTrigger(t, ctx, pool, triggerName, functionName, agentID)
 	svc := NewTaskService(queries, pool, nil, events.New())
 
 	const workers = 2
@@ -104,7 +104,7 @@ func TestClaimTaskConcurrentCapacityRespected(t *testing.T) {
 	}
 }
 
-func createSleepTrigger(t *testing.T, ctx context.Context, pool *pgxpool.Pool, triggerName, functionName string) {
+func createSleepTrigger(t *testing.T, ctx context.Context, pool *pgxpool.Pool, triggerName, functionName, agentID string) {
 	t.Helper()
 
 	if _, err := pool.Exec(ctx, fmt.Sprintf(`
@@ -124,9 +124,9 @@ func createSleepTrigger(t *testing.T, ctx context.Context, pool *pgxpool.Pool, t
 		CREATE TRIGGER %s
 		BEFORE UPDATE OF status ON agent_task_queue
 		FOR EACH ROW
-		WHEN (OLD.status = 'queued' AND NEW.status = 'dispatched')
+		WHEN (OLD.status = 'queued' AND NEW.status = 'dispatched' AND NEW.agent_id = %s::uuid)
 		EXECUTE FUNCTION %s();
-	`, quoteIdent(triggerName), quoteIdent(functionName))); err != nil {
+	`, quoteIdent(triggerName), quoteLiteral(agentID), quoteIdent(functionName))); err != nil {
 		t.Fatalf("create sleep trigger: %v", err)
 	}
 
@@ -161,12 +161,6 @@ func createClaimCapacityFixture(t *testing.T, ctx context.Context, pool *pgxpool
 	`, "Claim Capacity Test", slug, "temporary task claim race test workspace", "CCR").Scan(&workspaceID); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	t.Cleanup(func() {
-		cleanupCtx := context.Background()
-		pool.Exec(cleanupCtx, `DELETE FROM workspace WHERE id = $1`, workspaceID)
-		pool.Exec(cleanupCtx, `DELETE FROM "user" WHERE id = $1`, userID)
-	})
-
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'owner')
@@ -197,6 +191,16 @@ func createClaimCapacityFixture(t *testing.T, ctx context.Context, pool *pgxpool
 	`, workspaceID, "Claim Capacity Agent", runtimeID, userID).Scan(&agentID); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		pool.Exec(cleanupCtx, `DELETE FROM agent_task_queue WHERE agent_id = $1`, agentID)
+		pool.Exec(cleanupCtx, `DELETE FROM issue WHERE workspace_id = $1`, workspaceID)
+		pool.Exec(cleanupCtx, `DELETE FROM agent WHERE id = $1`, agentID)
+		pool.Exec(cleanupCtx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+		pool.Exec(cleanupCtx, `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, workspaceID, userID)
+		pool.Exec(cleanupCtx, `DELETE FROM workspace WHERE id = $1`, workspaceID)
+		pool.Exec(cleanupCtx, `DELETE FROM "user" WHERE id = $1`, userID)
+	})
 
 	for i := 0; i < 2; i++ {
 		var issueID string
@@ -220,4 +224,8 @@ func createClaimCapacityFixture(t *testing.T, ctx context.Context, pool *pgxpool
 
 func quoteIdent(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
+}
+
+func quoteLiteral(s string) string {
+	return `'` + strings.ReplaceAll(s, `'`, `''`) + `'`
 }
