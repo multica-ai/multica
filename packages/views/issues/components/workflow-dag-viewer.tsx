@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DAGCanvas } from "../../workflows/components";
 import { ReactFlowProvider } from "@xyflow/react";
@@ -163,6 +163,23 @@ export function WorkflowDagViewer({
 
   const totalCount = nodes.length;
   const summary = getRunSummary(nodeRuns);
+
+  // Auto-select a running node on first load so the active task is surfaced
+  // without the user needing to click the DAG.
+  const hasAutoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (hasAutoSelectedRef.current) return;
+    if (selectedNodeId) {
+      hasAutoSelectedRef.current = true;
+      return;
+    }
+    const runningNodes = nodeRuns.filter((nr) => runningSet.has(nr.status));
+    if (runningNodes.length === 0) return;
+    const pick = runningNodes[Math.floor(Math.random() * runningNodes.length)];
+    if (!pick) return;
+    setSelectedNodeId(pick.workflow_node_id);
+    hasAutoSelectedRef.current = true;
+  }, [nodeRuns, selectedNodeId]);
 
   const handleCancel = async () => {
     if (!runId || !confirm("Cancel this workflow run? All active sub-issues will stop.")) return;

@@ -1876,6 +1876,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {descDragOver && <FileDropOverlay />}
           </div>
 
+          {/* Workflow DAG — shown when the issue is assigned to a workflow */}
+          {issue.assignee_type === "workflow" && issue.assignee_id && (
+            <div className="mt-10">
+              <WorkflowDagViewer
+                workflowId={issue.assignee_id}
+                runId={issue.workflow_run_id}
+                wsId={wsId}
+                parentIssueId={issue.id}
+                onRunningChange={setIsWorkflowRunning}
+              />
+            </div>
+          )}
+
           {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (
             <div className="mt-6">
@@ -1965,19 +1978,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               </div>
             );
           })()}
-
-          {/* Workflow DAG — shown when the issue is assigned to a workflow */}
-          {issue.assignee_type === "workflow" && issue.assignee_id && (
-            <div className="mt-10">
-              <WorkflowDagViewer
-                workflowId={issue.assignee_id}
-                runId={issue.workflow_run_id}
-                wsId={wsId}
-                parentIssueId={issue.id}
-                onRunningChange={setIsWorkflowRunning}
-              />
-            </div>
-          )}
 
           <div className="my-8 border-t" />
 
