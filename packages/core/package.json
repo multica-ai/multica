@@ -43,6 +43,7 @@
     "./inbox/queries": "./inbox/queries.ts",
     "./inbox/mutations": "./inbox/mutations.ts",
     "./inbox/ws-updaters": "./inbox/ws-updaters.ts",
+    "./inbox/inbox-filter-store": "./inbox/inbox-filter-store.ts",
     "./notification-preferences": "./notification-preferences/index.ts",
     "./notification-preferences/queries": "./notification-preferences/queries.ts",
     "./notification-preferences/mutations": "./notification-preferences/mutations.ts",
