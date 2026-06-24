@@ -837,12 +837,8 @@ export function TemplateConfigEditor({
       });
       const invalidations: Promise<unknown>[] = [
         qc.invalidateQueries({ queryKey: configTemplateKeys.all(wsId) }),
+        qc.invalidateQueries({ queryKey: instructionsHistoryKey(wsId, template.id) }),
       ];
-      if (template.is_default) {
-        invalidations.push(
-          qc.invalidateQueries({ queryKey: instructionsHistoryKey(wsId, scope) }),
-        );
-      }
       await Promise.all(invalidations);
       if (options?.showSavedToast !== false) {
         toast.success(getSavedToast(field));
@@ -856,7 +852,7 @@ export function TemplateConfigEditor({
     } finally {
       setSaving(false);
     }
-  }, [wsId, qc, template.id, template.is_default, scope, getSavedToast, getSaveFailedToast]);
+  }, [wsId, qc, template.id, getSavedToast, getSaveFailedToast]);
 
   const handleSaveField = useCallback(async (field: keyof AgentDefaultsConfig, value: unknown) => {
     await saveConfig({ ...config, [field]: value }, field);
