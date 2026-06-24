@@ -56,8 +56,15 @@ type InboundMessage struct {
 	ChannelID ChannelID
 	// ChannelType is the WuKongIM channel type (DM / group / topic).
 	ChannelType ChannelType
-	// Body is the message text handed to the agent.
+	// Body is the message text handed to the agent. If the user typed a
+	// leading /new directive, the dispatcher strips it from Body before any
+	// downstream write — the agent never sees the command itself.
 	Body string
+	// ForceFreshSession is set by the dispatcher when the user's message
+	// began with /new. The flag is forwarded to EnqueueChatTask so the
+	// daemon skips prior chat-session resume for THIS dispatch without
+	// clearing the session's stored resume pointer for future messages.
+	ForceFreshSession bool
 	// AddressedToBot is the bridge's verdict on whether a group message was
 	// directed at the bot (@mention or reply-to-bot). Ignored for DMs.
 	AddressedToBot bool

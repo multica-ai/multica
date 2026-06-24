@@ -59,6 +59,17 @@ func (d *Dispatcher) logger() *slog.Logger {
 // binding, ingested, …) are reported via DispatchResult; a non-nil error is
 // reserved for infra failures the caller may retry.
 func (d *Dispatcher) Handle(ctx context.Context, msg InboundMessage) (DispatchResult, error) {
+	// 0. Parse a leading /new directive. Strip it from Body so the persisted
+	//    chat_message (and the agent's view of the turn) never sees the
+	//    command itself; the only side effect is ForceFreshSession=true,
+	//    which is forwarded to EnqueueChatTask below. Mirrors Lark's
+	//    inboundEnricher /new handling so the two integrations stay
+	//    product-identical.
+	if cmd, ok := parseFreshSessionCommand(msg.Body); ok {
+		msg.ForceFreshSession = true
+		msg.Body = cmd.Body
+	}
+
 	// 1. Route to installation by robot_id. Runs before the dedup claim because
 	//    a routing failure has no installation row to attach a claim to.
 	inst, err := d.Queries.GetOctoInstallationByRobotID(ctx, msg.RobotID)
@@ -209,7 +220,7 @@ func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, ins
 	//    already handed back the full session row, so there is no reload here. A
 	//    daemon that is merely disconnected is not an error — as long as the
 	//    agent has a runtime, the task waits to be claimed.
-	task, err := d.TaskService.EnqueueChatTask(ctx, session, binding.MulticaUserID, false)
+	task, err := d.TaskService.EnqueueChatTask(ctx, session, binding.MulticaUserID, msg.ForceFreshSession)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):

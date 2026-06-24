@@ -79,10 +79,14 @@ type fakeEnqueuer struct {
 	err  error
 	// called records whether EnqueueChatTask was invoked.
 	called bool
+	// forceFresh captures the forceFreshSession arg from the last call so
+	// /new-directive tests can assert it propagated through the dispatcher.
+	forceFresh bool
 }
 
 func (f *fakeEnqueuer) EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
 	f.called = true
+	f.forceFresh = forceFreshSession
 	return f.task, f.err
 }
 
@@ -427,3 +431,60 @@ func TestHandle_EmptyMessageID_SkipsDedup(t *testing.T) {
 		t.Errorf("empty MessageID must not Mark/Release, got marked=%v released=%v", q.marked, q.released)
 	}
 }
+
+// /new directive: the first-line command must be stripped from the persisted
+// chat_message body (the agent never sees the command itself) AND
+// EnqueueChatTask must receive forceFreshSession=true so the daemon skips
+// prior chat-session resume for this dispatch. Without both, /new is either
+// echoed back as user content or silently downgraded to a normal turn.
+func TestHandle_NewCommand_StripsAndForcesFreshSession(t *testing.T) {
+	q := &fakeQueries{
+		inst:    activeInstallation(),
+		binding: boundUser(),
+	}
+	c := &fakeChat{session: db.ChatSession{ID: validUUID(0x22)}, appendResult: AppendResult{DedupMarked: true}}
+	e := &fakeEnqueuer{task: db.AgentTaskQueue{ID: validUUID(0x33)}}
+	d := newDispatcher(q, c, e, &fakeAudit{})
+
+	msg := dmMessage()
+	msg.Body = "/new restart please"
+
+	res, err := d.Handle(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if res.Outcome != OutcomeIngested {
+		t.Fatalf("got %q, want ingested", res.Outcome)
+	}
+	if c.appendParams.Body != "restart please" {
+		t.Errorf("AppendUserMessage Body = %q, want %q (the /new prefix must be stripped before persistence)", c.appendParams.Body, "restart please")
+	}
+	if !e.forceFresh {
+		t.Errorf("expected EnqueueChatTask to receive forceFreshSession=true after /new")
+	}
+}
+
+// A normal message (no /new) MUST NOT set forceFreshSession — the regression
+// the previous test guards against has a mirror: silently sending fresh on
+// every message would invalidate Octo's session-resume product semantics.
+func TestHandle_NoNewCommand_KeepsFreshFalse(t *testing.T) {
+	q := &fakeQueries{
+		inst:    activeInstallation(),
+		binding: boundUser(),
+	}
+	c := &fakeChat{session: db.ChatSession{ID: validUUID(0x22)}, appendResult: AppendResult{DedupMarked: true}}
+	e := &fakeEnqueuer{task: db.AgentTaskQueue{ID: validUUID(0x33)}}
+	d := newDispatcher(q, c, e, &fakeAudit{})
+
+	res, err := d.Handle(context.Background(), dmMessage())
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if res.Outcome != OutcomeIngested {
+		t.Fatalf("got %q, want ingested", res.Outcome)
+	}
+	if e.forceFresh {
+		t.Errorf("plain message must not set forceFreshSession")
+	}
+}
+
