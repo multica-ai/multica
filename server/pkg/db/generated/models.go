@@ -959,19 +959,6 @@ type CerebroSession struct {
 	RootCommentID pgtype.UUID        `json:"root_comment_id"`
 }
 
-type CerebroShareToken struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Token          string             `json:"token"`
-	ResourceKind   string             `json:"resource_kind"`
-	ResourceID     pgtype.UUID        `json:"resource_id"`
-	Action         string             `json:"action"`
-	PersonaGrantID string             `json:"persona_grant_id"`
-	CreatedByID    pgtype.UUID        `json:"created_by_id"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	RevokedAt      pgtype.Timestamptz `json:"revoked_at"`
-}
-
 type CerebroSprint struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

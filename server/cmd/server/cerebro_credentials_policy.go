@@ -1,6 +1,6 @@
 // CEREBRO-PATCH(cerebro-credentials-policy): JEH-1197 — net-new cerebro-only
 // factory for the credential registry's PolicyChecker. Lives under
-// server/cmd/server/ alongside cerebro_persona_mask.go so the router's
+// server/cmd/server/ as a cerebro-prefixed file so the router's
 // CEREBRO-PATCH stays a single line. See docs/cerebro-patches.md.
 //
 // JEH-1197: credential governance policy wiring.
@@ -20,7 +20,7 @@
 // row in cerebro_credential_audit with the same reason.
 //
 // Kept in a cerebro-prefixed file so the router's CEREBRO-PATCH stays
-// a single line. Matches the cerebro_persona_mask.go pattern.
+// a single line.
 
 package main
 

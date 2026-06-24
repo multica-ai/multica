@@ -10,9 +10,8 @@ reuse it later.
 Slice 1 ships only this headless package — the actual UI (`MicButton`)
 and backend (`/api/cerebro/dictation/transcribe`) land in slices 2 and 3.
 The feature is gated behind the `cerebro_voice_dictation_enabled` flag in
-`@multica/cerebro-feature-flags`. (The two voice-output toggles live next to
-it: `cerebro_voice_output_enabled` and `cerebro_voice_summary_enabled` — see
-JEH-740.)
+`@multica/cerebro-feature-flags`. (The voice-output toggle lives next to
+it: `cerebro_voice_output_enabled` — see JEH-740.)
 
 ## Owns
 

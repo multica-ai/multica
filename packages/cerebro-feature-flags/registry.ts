@@ -7,10 +7,6 @@
  */
 
 export type CerebroFlagKey =
-  | "cerebro_access_control"
-  | "cerebro_members_admin"
-  | "cerebro_sandbox_ui"
-  | "cerebro_mcp_guide"
   | "cerebro_channels"
   | "cerebro_chat_message_cost"
   // FIR-39: per-comment cost badge on issues + channels (mirror of the chat
@@ -91,11 +87,8 @@ export type CerebroFlagKey =
   | "cerebro_inbox_favorites"
   | "cerebro_voice_dictation_enabled"
   | "cerebro_voice_output_enabled"
-  | "cerebro_voice_summary_enabled"
-  | "cerebro_autopilot_scopes"
   | "cerebro_groups_enabled"
   | "cerebro_runtime_pause"
-  | "cerebro_runtime_accounts"
   | "cerebro_tasks"
   | "cerebro_pin_input"
   | "cerebro_workflows"
@@ -224,7 +217,6 @@ export type CerebroFlagKey =
   // TECH-3108: workspace connection registry (API + MCP connections managed from settings).
   | "cerebro_connections"
   // TECH-3077: skill metadata — category/domain/tag filtering, data-domain links, impact analysis.
-  | "cerebro_skill_metadata"
   // TECH-3077: skill self-learning — observation recording, pattern extraction, auto change-requests.
   | "cerebro_skill_learning"
   // TECH-3099: sub-issue comment guard — three checks extending cerebro_comment_target_guard.
@@ -303,10 +295,6 @@ export type CerebroFlagKey =
  * groups the three voice flags under a single "Voice" section.
  */
 export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
-  cerebro_access_control: true,
-  cerebro_members_admin: true,
-  cerebro_sandbox_ui: true,
-  cerebro_mcp_guide: true,
   cerebro_channels: true,
   cerebro_channel_permissions: true, // TECH-3698
   cerebro_chat_message_cost: true,
@@ -364,11 +352,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_inbox_favorites: true,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
-  cerebro_voice_summary_enabled: false,
-  cerebro_autopilot_scopes: true,
   cerebro_groups_enabled: true,
   cerebro_runtime_pause: true,
-  cerebro_runtime_accounts: true,
   cerebro_tasks: false,
   cerebro_pin_input: true,
   cerebro_workflows: false,
@@ -558,7 +543,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // to true-default so admins don't lose access when personal/workspace override is cleared.
   cerebro_connections: true,
   // TECH-3077: ON — skill metadata schema (category, domain, tags, data-domain links).
-  cerebro_skill_metadata: true,
   // TECH-3077: OFF — skill self-learning is a later phase; enable when observation
   // infrastructure is in place.
   cerebro_skill_learning: false,
@@ -691,13 +675,6 @@ export interface CerebroFlagDefinition {
  */
 export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   {
-    key: "cerebro_access_control",
-    label: "Cerebro access control",
-    group: "permissions",
-    description:
-      "Enable the cerebro-fork access-control flow (combined restrict + pick) for issues and projects.",
-  },
-  {
     key: "cerebro_credentials_per_actor",
     label: "Credentials per actor",
     group: "permissions",
@@ -724,27 +701,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Open the Settings → Collections surface and the per-folder access editor (Valgt her / Arvet): grant a folder to groups, members, the whole workspace, agents, or runtimes, with a viewer/editor/full access role. Grants cascade to sub-folders.",
-  },
-  {
-    key: "cerebro_members_admin",
-    label: "Cerebro members admin",
-    group: "workspace",
-    description:
-      "Use the cerebro-fork members admin tab with bulk actions and richer filters.",
-  },
-  {
-    key: "cerebro_sandbox_ui",
-    label: "Cerebro sandbox UI",
-    group: "agents",
-    description:
-      "Show the cerebro-fork sandbox panels and developer affordances inside agent runs.",
-  },
-  {
-    key: "cerebro_mcp_guide",
-    label: "Cerebro MCP guide",
-    group: "agents",
-    description:
-      "Show the cerebro-fork MCP setup guide in the runtimes and docs panels.",
   },
   {
     key: "cerebro_channels",
@@ -933,20 +889,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Read assistant replies aloud in Danish via plapre-nano. Per-message read button + global voice mode.",
   },
   {
-    key: "cerebro_voice_summary_enabled",
-    label: "Voice summary",
-    group: "voice",
-    description:
-      "When voice mode is on, summarise long replies into spoken-style Danish before reading them aloud. Reduces TTS latency on long answers and keeps the conversation natural in hands-free use.",
-  },
-  {
-    key: "cerebro_autopilot_scopes",
-    label: "Autopilot scopes",
-    group: "agents",
-    description:
-      "Enable scoped autopilots (workspace, personal, group) — gated visibility on top of the workspace-wide default.",
-  },
-  {
     key: "cerebro_groups_enabled",
     label: "Groups",
     group: "workspace",
@@ -959,13 +901,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Pause and resume agent runtimes manually or automatically. When a provider returns 429, the runtime auto-pauses until the rate-limit window resets, then resumes interrupted work on its own.",
-  },
-  {
-    key: "cerebro_runtime_accounts",
-    label: "Runtime account availability",
-    group: "agents",
-    description:
-      "Show availability status per account on the runtime detail card: how many runtimes are free, throttled, or paused. Coordinator agents use this to pick the right runtime.",
   },
   {
     key: "cerebro_tasks",
