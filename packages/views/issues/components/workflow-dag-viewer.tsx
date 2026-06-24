@@ -18,6 +18,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@multica/ui/components/ui/dialog";
+import { NodeRunControlActions } from "../../workflows/components/node-run-control-actions";
 import { ExecutionLogSection } from "./execution-log-section";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -301,6 +302,14 @@ export function WorkflowDagViewer({
               <span className="text-[10px] text-muted-foreground">retry {selectedNodeRun.retry_count}</span>
             )}
           </div>
+
+          <NodeRunControlActions
+            nodeRun={selectedNodeRun}
+            workflowId={workflowId}
+            runId={runId ?? undefined}
+            wsId={wsId}
+            size="sm"
+          />
 
           {/* Worker */}
           <div className="space-y-1">
