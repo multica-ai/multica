@@ -376,7 +376,7 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	switch provider {
 	case "claude", "codebuddy":
 		b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-	case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity":
+	case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity", "grok":
 		b.WriteString("You have the following skills installed (discovered automatically):\n\n")
 	case "hermes":
 		b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")

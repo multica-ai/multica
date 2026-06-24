@@ -154,6 +154,7 @@ var SupportedTypes = []string{
 	"kimi",
 	"kiro",
 	"antigravity",
+	"grok",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -200,8 +201,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &antigravityBackend{cfg: cfg}, nil
 	case "qoder":
 		return &qoderBackend{cfg: cfg}, nil
+	case "grok":
+		return &grokBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, grok)", agentType)
 	}
 }
 
@@ -223,6 +226,7 @@ var launchHeaders = map[string]string{
 	"codex":       "codex app-server",
 	"copilot":     "copilot (json)",
 	"cursor":      "cursor-agent (stream-json)",
+	"grok":        "grok agent stdio",
 	"hermes":      "hermes acp",
 	"kimi":        "kimi acp",
 	"kiro":        "kiro-cli acp",

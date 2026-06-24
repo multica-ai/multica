@@ -219,6 +219,11 @@ func skillsDirPath(workDir, provider string) string {
 		// Qoder CLI discovers project-level skills under .qoder/skills/.
 		// See https://docs.qoder.com/cli/Skills.md
 		return filepath.Join(workDir, ".qoder", "skills")
+	case "grok":
+		// Grok Build discovers project-level skills from .grok/skills/ walked
+		// up to the repo root (it also reads .claude/skills via Claude Code
+		// compatibility). See https://docs.x.ai/build/features/skills-plugins-marketplaces
+		return filepath.Join(workDir, ".grok", "skills")
 	case "antigravity":
 		// Antigravity (`agy`) auto-discovers workspace-level skills from
 		// .agents/skills/ in the workdir. The CLI inherits Gemini CLI's

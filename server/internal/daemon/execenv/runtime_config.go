@@ -187,7 +187,7 @@ func runtimeConfigPath(workDir, provider string) string {
 	switch provider {
 	case "claude", "codebuddy":
 		return filepath.Join(workDir, "CLAUDE.md")
-	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder":
+	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "grok":
 		return filepath.Join(workDir, "AGENTS.md")
 	default:
 		return ""
@@ -750,15 +750,17 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		case "claude", "codebuddy":
 			// Claude/CodeBuddy discovers skills natively from .claude/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity":
+		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity", "grok":
 			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, Kiro, Qoder,
-			// and Antigravity discover skills natively from their respective paths.
-			// For OpenClaw, the daemon also writes a per-task openclaw-config.json
-			// (exported via OPENCLAW_CONFIG_PATH) that pins agents.defaults.workspace
-			// to the task workdir so the CLI's scanner picks up {workDir}/skills/.
+			// Antigravity, and Grok discover skills natively from their respective
+			// paths. For OpenClaw, the daemon also writes a per-task
+			// openclaw-config.json (exported via OPENCLAW_CONFIG_PATH) that pins
+			// agents.defaults.workspace to the task workdir so the CLI's scanner
+			// picks up {workDir}/skills/.
 			// Qoder discovers project skills from {workDir}/.qoder/skills/.
 			// Antigravity inherits Gemini CLI's workspace skill layout —
 			// {workDir}/.agents/skills/ — see resolveSkillsDir.
+			// Grok discovers project skills from {workDir}/.grok/skills/.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
 		case "hermes":
 			// Hermes has no native skill discovery path wired up in resolveSkillsDir;

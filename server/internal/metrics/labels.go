@@ -119,6 +119,7 @@ var (
 		"copilot":       "copilot",
 		"cursor":        "cursor",
 		"gemini":        "gemini",
+		"grok":          "grok",
 		"hermes":        "hermes",
 		"kiro":          "kiro",
 		"kimi":          "kimi",
