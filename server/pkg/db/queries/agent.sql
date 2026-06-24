@@ -596,6 +596,15 @@ WHERE issue_id = @issue_id
   AND status IN ('queued', 'dispatched')
   AND trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid;
 
+-- name: HasActiveTaskForTriggerCommentAndAgent :one
+-- Returns true if an active (non-terminal) task already exists for the
+-- same (trigger_comment, agent) pair. Used by @mention idempotency to
+-- prevent duplicate agent runs from a single trigger event — even when
+-- the first run has already transitioned past 'dispatched' into 'running'.
+SELECT count(*) > 0 AS has_active FROM agent_task_queue
+WHERE trigger_comment_id = $1 AND agent_id = $2
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
+
 -- name: GetLatestTaskIsLeaderForIssueAndAgent :one
 -- Returns the is_leader_task flag of the agent's most recent task on this
 -- issue, or NULL if the agent has never had a task on this issue. Used by

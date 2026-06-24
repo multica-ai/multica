@@ -1322,6 +1322,27 @@ func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppre
 
 func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, triggers []commentAgentTrigger) {
 	for _, trigger := range triggers {
+		// Idempotency guard: if this trigger comment already has an active
+		// task for this agent (queued, dispatched, running, or waiting),
+		// skip enqueue to prevent duplicate runs from a single @mention event.
+		// The application check covers the window between task completion and
+		// the next trigger; a matching unique partial index on (trigger_comment_id,
+		// agent_id) in 126_mention_trigger_idempotency catches concurrent races.
+		if triggerCommentID.Valid {
+			hasActive, err := h.Queries.HasActiveTaskForTriggerCommentAndAgent(ctx, db.HasActiveTaskForTriggerCommentAndAgentParams{
+				TriggerCommentID: triggerCommentID,
+				AgentID:          trigger.Agent.ID,
+			})
+			if err != nil {
+				slog.Warn("trigger idempotency check failed, falling through to db constraint",
+					"trigger_comment_id", uuidToString(triggerCommentID),
+					"agent_id", uuidToString(trigger.Agent.ID),
+					"error", err)
+			} else if hasActive {
+				continue
+			}
+		}
+
 		switch trigger.Source {
 		case commentTriggerSourceIssueAssignee:
 			if trigger.Squad != nil {

@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_one_active_task_per_trigger_comment_agent;

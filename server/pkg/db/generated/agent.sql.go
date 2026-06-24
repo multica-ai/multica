@@ -1781,6 +1781,28 @@ func (q *Queries) HasActiveTaskForIssue(ctx context.Context, issueID pgtype.UUID
 	return has_active, err
 }
 
+const hasActiveTaskForTriggerCommentAndAgent = `-- name: HasActiveTaskForTriggerCommentAndAgent :one
+SELECT count(*) > 0 AS has_active FROM agent_task_queue
+WHERE trigger_comment_id = $1 AND agent_id = $2
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+`
+
+type HasActiveTaskForTriggerCommentAndAgentParams struct {
+	TriggerCommentID pgtype.UUID `json:"trigger_comment_id"`
+	AgentID          pgtype.UUID `json:"agent_id"`
+}
+
+// Returns true if an active (non-terminal) task already exists for the
+// same (trigger_comment, agent) pair. Used by @mention idempotency to
+// prevent duplicate agent runs from a single trigger event — even when
+// the first run has already transitioned past 'dispatched' into 'running'.
+func (q *Queries) HasActiveTaskForTriggerCommentAndAgent(ctx context.Context, arg HasActiveTaskForTriggerCommentAndAgentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveTaskForTriggerCommentAndAgent, arg.TriggerCommentID, arg.AgentID)
+	var has_active bool
+	err := row.Scan(&has_active)
+	return has_active, err
+}
+
 const hasPendingTaskForIssue = `-- name: HasPendingTaskForIssue :one
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched')
