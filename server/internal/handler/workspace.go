@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -87,6 +88,177 @@ func settingsIncludesAgentDefaults(settings any) bool {
 	}
 	_, ok = settingsMap["agent_defaults"]
 	return ok
+}
+
+func settingsIncludesKnowledgeCurator(settings any) bool {
+	settingsMap, ok := settings.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = settingsMap["knowledge_curator"]
+	return ok
+}
+
+func settingsIncludesKnowledgeRAG(settings any) bool {
+	settingsMap, ok := settings.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = settingsMap["knowledge_rag"]
+	return ok
+}
+
+func validateKnowledgeCuratorSettings(settings any) error {
+	settingsMap, ok := settings.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := settingsMap["knowledge_curator"]
+	if !ok || raw == nil {
+		return nil
+	}
+	curator, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("knowledge_curator must be an object")
+	}
+	if v, ok := curator["enabled"]; ok {
+		if _, ok := v.(bool); !ok {
+			return fmt.Errorf("knowledge_curator.enabled must be a boolean")
+		}
+	}
+	stringFields := []string{"provider", "model", "embedding_model", "base_url"}
+	for _, field := range stringFields {
+		if v, ok := curator[field]; ok && v != nil {
+			value, ok := v.(string)
+			if !ok {
+				return fmt.Errorf("knowledge_curator.%s must be a string", field)
+			}
+			if len(value) > 500 {
+				return fmt.Errorf("knowledge_curator.%s is too long", field)
+			}
+		}
+	}
+	if v, ok := curator["provider"].(string); ok && strings.TrimSpace(v) == "" {
+		return fmt.Errorf("knowledge_curator.provider cannot be empty")
+	}
+	for _, section := range []string{"chat", "embedding"} {
+		raw, ok := curator[section]
+		if !ok || raw == nil {
+			continue
+		}
+		values, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("knowledge_curator.%s must be an object", section)
+		}
+		for _, field := range []string{"provider", "model", "base_url"} {
+			if v, ok := values[field]; ok && v != nil {
+				value, ok := v.(string)
+				if !ok {
+					return fmt.Errorf("knowledge_curator.%s.%s must be a string", section, field)
+				}
+				if len(value) > 500 {
+					return fmt.Errorf("knowledge_curator.%s.%s is too long", section, field)
+				}
+			}
+		}
+		if v, ok := values["provider"].(string); ok && strings.TrimSpace(v) == "" {
+			return fmt.Errorf("knowledge_curator.%s.provider cannot be empty", section)
+		}
+		if section == "embedding" {
+			if v, ok := values["dimensions"]; ok && v != nil {
+				dimensions, ok := jsonNumberToFloat(v)
+				if !ok || dimensions != float64(int(dimensions)) || !validKnowledgeEmbeddingDimension(int(dimensions)) {
+					return fmt.Errorf("knowledge_curator.embedding.dimensions must be one of 1536, 3072, 1024, 768")
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validKnowledgeEmbeddingDimension(v int) bool {
+	for _, supported := range service.SupportedKnowledgeEmbeddingDimensions {
+		if v == supported {
+			return true
+		}
+	}
+	return false
+}
+
+func validateKnowledgeRAGSettings(settings any) error {
+	settingsMap, ok := settings.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := settingsMap["knowledge_rag"]
+	if !ok || raw == nil {
+		return nil
+	}
+	policy, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("knowledge_rag must be an object")
+	}
+	if v, ok := policy["auto_inject"]; ok {
+		if _, ok := v.(bool); !ok {
+			return fmt.Errorf("knowledge_rag.auto_inject must be a boolean")
+		}
+	}
+	if v, ok := policy["limit"]; ok && v != nil {
+		limit, ok := jsonNumberToFloat(v)
+		if !ok || limit < 1 || limit > 8 || limit != float64(int(limit)) {
+			return fmt.Errorf("knowledge_rag.limit must be an integer between 1 and 8")
+		}
+	}
+	if v, ok := policy["confidence_threshold"]; ok && v != nil {
+		threshold, ok := v.(string)
+		if !ok {
+			return fmt.Errorf("knowledge_rag.confidence_threshold must be a string")
+		}
+		switch threshold {
+		case "low", "medium", "high":
+		default:
+			return fmt.Errorf("knowledge_rag.confidence_threshold is invalid")
+		}
+	}
+	if v, ok := policy["type_filters"]; ok && v != nil {
+		values, ok := v.([]any)
+		if !ok {
+			return fmt.Errorf("knowledge_rag.type_filters must be an array")
+		}
+		for _, rawType := range values {
+			itemType, ok := rawType.(string)
+			if !ok {
+				return fmt.Errorf("knowledge_rag.type_filters must contain strings")
+			}
+			switch itemType {
+			case "lesson", "playbook", "reference":
+			default:
+				return fmt.Errorf("knowledge_rag.type_filters contains an invalid type")
+			}
+		}
+	}
+	if v, ok := policy["token_budget"]; ok && v != nil {
+		budget, ok := jsonNumberToFloat(v)
+		if !ok || budget < 500 || budget > 8000 || budget != float64(int(budget)) {
+			return fmt.Errorf("knowledge_rag.token_budget must be an integer between 500 and 8000")
+		}
+	}
+	return nil
+}
+
+func jsonNumberToFloat(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case int:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	default:
+		return 0, false
+	}
 }
 
 type MemberResponse struct {
@@ -316,10 +488,25 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// When settings includes agent_defaults, require owner/admin role.
+	// Sensitive workspace-level runtime settings require owner/admin role.
 	if req.Settings != nil {
-		if settingsIncludesAgentDefaults(req.Settings) {
+		includesAgentDefaults := settingsIncludesAgentDefaults(req.Settings)
+		includesKnowledgeCurator := settingsIncludesKnowledgeCurator(req.Settings)
+		includesKnowledgeRAG := settingsIncludesKnowledgeRAG(req.Settings)
+		if includesAgentDefaults || includesKnowledgeCurator || includesKnowledgeRAG {
 			if _, ok := h.requireWorkspaceRole(w, r, id, "workspace not found", "owner", "admin"); !ok {
+				return
+			}
+		}
+		if includesKnowledgeCurator {
+			if err := validateKnowledgeCuratorSettings(req.Settings); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if includesKnowledgeRAG {
+			if err := validateKnowledgeRAGSettings(req.Settings); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 		}

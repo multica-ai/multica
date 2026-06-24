@@ -56,6 +56,7 @@ type Task struct {
 	ProjectID                string                `json:"project_id,omitempty"`                  // issue's project, when present
 	ProjectTitle             string                `json:"project_title,omitempty"`               // human-readable project title for context injection
 	ProjectResources         []ProjectResourceData `json:"project_resources,omitempty"`           // project-scoped resources to expose to the agent
+	KnowledgeContext         []KnowledgeContext    `json:"knowledge_context,omitempty"`           // high-confidence knowledge injected by the server at claim time
 	PriorSessionID           string                `json:"prior_session_id,omitempty"`            // Claude session ID from a previous task on this issue
 	PriorWorkDir             string                `json:"prior_work_dir,omitempty"`              // work_dir from a previous task on this issue
 	TriggerCommentID         string                `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
@@ -121,6 +122,19 @@ type Task struct {
 	AuthToken string `json:"auth_token,omitempty"`
 }
 
+// KnowledgeContext is a compact, prompt-safe knowledge item selected by the
+// server for this specific task claim.
+type KnowledgeContext struct {
+	ID                string  `json:"id"`
+	Title             string  `json:"title"`
+	Summary           string  `json:"summary,omitempty"`
+	RecommendedAction string  `json:"recommended_action,omitempty"`
+	AntiPatterns      string  `json:"anti_patterns,omitempty"`
+	SourceIssue       string  `json:"source_issue,omitempty"`
+	Score             float64 `json:"score"`
+	Reason            string  `json:"reason"`
+}
+
 // ChatAttachmentMeta is the structured attachment metadata the daemon
 // hands to the agent for chat tasks. We pass id + filename + content_type
 // so the chat prompt can list them explicitly and instruct the agent to
@@ -177,6 +191,28 @@ type TaskUsageEntry struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
+}
+
+// CuratorDraftTask is a curator draft task dispatched to a local daemon
+// runtime for execution. Config contains non-sensitive LLM connection info
+// (base_url, model, etc.). The daemon supplies its own API key via
+// MULTICA_CURATOR_CHAT_API_KEY — no credentials are transmitted in the claim response.
+type CuratorDraftTask struct {
+	ID         string          `json:"id"`
+	DraftKind  string          `json:"draft_kind"`
+	Status     string          `json:"status"`
+	Config     json.RawMessage `json:"config"`
+	DraftInput json.RawMessage `json:"draft_input"`
+}
+
+// CuratorDraftConfig is the non-sensitive LLM connection info from the task's
+// config field. The APIKey is not included here — it comes from daemon config.
+type CuratorDraftConfig struct {
+	BaseURL             string `json:"base_url"`
+	Model               string `json:"model"`
+	EmbeddingModel      string `json:"embedding_model"`
+	EmbeddingDimensions int    `json:"embedding_dimensions"`
+	Provider            string `json:"provider"`
 }
 
 // TaskResult is the outcome of executing a task.

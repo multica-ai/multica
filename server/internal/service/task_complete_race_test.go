@@ -36,8 +36,9 @@ func (r *mockRow) Scan(dest ...any) error {
 			&i.Priority, &i.AssigneeType, &i.AssigneeID, &i.CreatorType,
 			&i.CreatorID, &i.ParentIssueID, &i.AcceptanceCriteria,
 			&i.ContextRefs, &i.Position, &i.DueDate, &i.CreatedAt,
-			&i.UpdatedAt, &i.Number, &i.ProjectID, &i.OriginType,
-			&i.OriginID, &i.FirstExecutedAt,
+			&i.UpdatedAt, &i.Number, &i.ProjectID, &i.ArchivedAt,
+			&i.ArchivedBy, &i.OriginType, &i.OriginID, &i.FirstExecutedAt,
+			&i.StartDate, &i.Metadata,
 		}
 		for i, p := range ptrs {
 			if i >= len(dest) {
@@ -163,6 +164,15 @@ func (m *mockDBTX) QueryRow(_ context.Context, sql string, args ...interface{}) 
 	if strings.Contains(sql, "-- name: GetIssue") {
 		return &mockRow{issue: &m.issue}
 	}
+	if strings.Contains(sql, "-- name: GetThreadRoot") {
+		for i := range m.comments {
+			if m.comments[i].ID == args[0].(pgtype.UUID) {
+				comment := m.comments[i]
+				return &mockRow{comment: &comment}
+			}
+		}
+		return &mockRow{err: pgx.ErrNoRows}
+	}
 	if strings.Contains(sql, "-- name: GetComment :one") {
 		for i := range m.comments {
 			if m.comments[i].ID == args[0].(pgtype.UUID) {
@@ -236,6 +246,9 @@ func (m *mockDBTX) QueryRow(_ context.Context, sql string, args ...interface{}) 
 			assignScannedValue(dest[8], &comment.ParentID)
 			assignScannedValue(dest[9], &comment.WorkspaceID)
 			assignScannedValue(dest[10], &comment.DeletedAt)
+			assignScannedValue(dest[11], &comment.ResolvedAt)
+			assignScannedValue(dest[12], &comment.ResolvedByType)
+			assignScannedValue(dest[13], &comment.ResolvedByID)
 			return nil
 		})
 	}

@@ -1,0 +1,16 @@
+DROP FUNCTION IF EXISTS knowledge_effect_hourly_rollup_lag_seconds;
+DROP FUNCTION IF EXISTS rollup_knowledge_effect_hourly;
+DROP FUNCTION IF EXISTS prune_knowledge_effect_hourly_dirty;
+DROP FUNCTION IF EXISTS rollup_knowledge_effect_hourly_window;
+DROP TRIGGER IF EXISTS trg_tu_dirty_knowledge_effect ON task_usage;
+DROP FUNCTION IF EXISTS enqueue_knowledge_effect_dirty_for_tu;
+DROP TRIGGER IF EXISTS trg_issue_project_dirty_knowledge_effect ON issue;
+DROP FUNCTION IF EXISTS enqueue_knowledge_effect_dirty_for_issue_project;
+DROP TRIGGER IF EXISTS trg_issue_delete_dirty_knowledge_effect ON issue;
+DROP FUNCTION IF EXISTS enqueue_knowledge_effect_dirty_for_issue_delete;
+DROP TRIGGER IF EXISTS trg_atq_dirty_knowledge_effect ON agent_task_queue;
+DROP FUNCTION IF EXISTS enqueue_knowledge_effect_dirty_for_atq;
+DROP TRIGGER IF EXISTS trg_knowledge_injection_dirty_effect ON knowledge_injection_event;
+DROP FUNCTION IF EXISTS enqueue_knowledge_effect_dirty_for_injection;
+DROP FUNCTION IF EXISTS compute_task_kind;
+DROP FUNCTION IF EXISTS knowledge_effect_hour_bucket;

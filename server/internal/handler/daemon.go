@@ -1821,6 +1821,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
+	h.injectKnowledgeContextForClaim(r.Context(), &resp, *task)
+
 	// Mint a task-scoped `mat_` token bound to (agent, task, workspace,
 	// owner). The daemon will inject this as MULTICA_TOKEN into the agent
 	// process instead of its own credential, so any API call the agent
@@ -1872,6 +1874,172 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+func (h *Handler) injectKnowledgeContextForClaim(ctx context.Context, resp *AgentTaskResponse, task db.AgentTaskQueue) {
+	if h.KnowledgeService == nil || resp == nil || resp.WorkspaceID == "" {
+		return
+	}
+	workspaceID := parseUUID(resp.WorkspaceID)
+	workspace, workspaceErr := h.Queries.GetWorkspace(ctx, workspaceID)
+	policy := readKnowledgeRAGPolicy(nil)
+	if workspaceErr == nil {
+		policy = readKnowledgeRAGPolicy(workspace.Settings)
+	}
+	if !policy.AutoInject {
+		return
+	}
+	var issue *db.Issue
+	issueIdentifier := ""
+	if task.IssueID.Valid {
+		if row, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: task.IssueID, WorkspaceID: workspaceID}); err == nil {
+			issue = &row
+			if workspaceErr == nil && workspace.IssuePrefix != "" {
+				issueIdentifier = workspace.IssuePrefix + "-" + strconv.Itoa(int(row.Number))
+			}
+		}
+	}
+
+	labels := h.issueLabelNamesForClaim(ctx, workspaceID, task.IssueID)
+	lastResult, lastError, lastFailure := h.lastTaskOutcomeForClaim(ctx, task)
+	projectResources := make([]service.KnowledgeTaskProjectResource, 0, len(resp.ProjectResources))
+	for _, resource := range resp.ProjectResources {
+		projectResources = append(projectResources, service.KnowledgeTaskProjectResource{
+			ResourceType: resource.ResourceType,
+			Label:        resource.Label,
+		})
+	}
+	items, err := h.KnowledgeService.SearchForTaskClaim(ctx, service.KnowledgeTaskClaimParams{
+		WorkspaceID:             workspaceID,
+		AgentTaskID:             task.ID,
+		AgentID:                 task.AgentID,
+		Issue:                   issue,
+		IssueIdentifier:         issueIdentifier,
+		IssueLabels:             labels,
+		ProjectTitle:            resp.ProjectTitle,
+		ProjectResources:        projectResources,
+		TriggerCommentContent:   resp.TriggerCommentContent,
+		NewCommentCount:         resp.NewCommentCount,
+		NewCommentsSince:        resp.NewCommentsSince,
+		ChatMessage:             resp.ChatMessage,
+		AutopilotTitle:          resp.AutopilotTitle,
+		AutopilotDescription:    resp.AutopilotDescription,
+		AutopilotSource:         resp.AutopilotSource,
+		AutopilotTriggerPayload: strings.TrimSpace(string(resp.AutopilotTriggerPayload)),
+		QuickCreatePrompt:       resp.QuickCreatePrompt,
+		LastTaskResult:          lastResult,
+		LastTaskError:           lastError,
+		LastTaskFailureReason:   lastFailure,
+		Limit:                   policy.Limit,
+		TypeFilters:             policy.TypeFilters,
+		ConfidenceThreshold:     policy.ConfidenceThreshold,
+		TokenBudget:             policy.TokenBudget,
+	})
+	if err != nil {
+		slog.Warn("task claim: failed to inject knowledge context",
+			"task_id", uuidToString(task.ID),
+			"workspace_id", resp.WorkspaceID,
+			"error", err,
+		)
+		return
+	}
+	resp.KnowledgeContext = items
+}
+
+type knowledgeRAGPolicy struct {
+	AutoInject          bool
+	Limit               int32
+	TypeFilters         []string
+	ConfidenceThreshold string
+	TokenBudget         int32
+}
+
+func readKnowledgeRAGPolicy(raw []byte) knowledgeRAGPolicy {
+	policy := knowledgeRAGPolicy{
+		AutoInject:          true,
+		Limit:               5,
+		ConfidenceThreshold: "high",
+		TokenBudget:         2000,
+	}
+	if len(raw) == 0 {
+		return policy
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return policy
+	}
+	rag, ok := settings["knowledge_rag"].(map[string]any)
+	if !ok {
+		return policy
+	}
+	if v, ok := rag["auto_inject"].(bool); ok {
+		policy.AutoInject = v
+	}
+	if v, ok := rag["limit"].(float64); ok && v >= 0 && v <= 8 {
+		policy.Limit = int32(v)
+	}
+	if v, ok := rag["confidence_threshold"].(string); ok {
+		switch v {
+		case "low", "medium", "high":
+			policy.ConfidenceThreshold = v
+		}
+	}
+	if values, ok := rag["type_filters"].([]any); ok {
+		for _, rawType := range values {
+			itemType, ok := rawType.(string)
+			if !ok {
+				continue
+			}
+			switch itemType {
+			case "lesson", "playbook", "reference":
+				policy.TypeFilters = append(policy.TypeFilters, itemType)
+			}
+		}
+	}
+	if v, ok := rag["token_budget"].(float64); ok && v >= 500 && v <= 8000 {
+		policy.TokenBudget = int32(v)
+	}
+	return policy
+}
+
+func (h *Handler) issueLabelNamesForClaim(ctx context.Context, workspaceID, issueID pgtype.UUID) []string {
+	if !issueID.Valid {
+		return nil
+	}
+	rows, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{IssueID: issueID, WorkspaceID: workspaceID})
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row.Name) != "" {
+			out = append(out, row.Name)
+		}
+	}
+	return out
+}
+
+func (h *Handler) lastTaskOutcomeForClaim(ctx context.Context, task db.AgentTaskQueue) ([]byte, string, string) {
+	if !task.IssueID.Valid {
+		return nil, "", ""
+	}
+	row, err := h.Queries.GetLastTaskOutcomeForIssueAndAgent(ctx, db.GetLastTaskOutcomeForIssueAndAgentParams{
+		AgentID:       task.AgentID,
+		IssueID:       task.IssueID,
+		CurrentTaskID: task.ID,
+	})
+	if err != nil {
+		return nil, "", ""
+	}
+	errorText := ""
+	if row.Error.Valid {
+		errorText = row.Error.String
+	}
+	failureReason := ""
+	if row.FailureReason.Valid {
+		failureReason = row.FailureReason.String
+	}
+	return row.Result, errorText, failureReason
 }
 
 func (h *Handler) injectIssueSquadLeaderBriefing(ctx context.Context, resp *AgentTaskResponse, task db.AgentTaskQueue, issue db.Issue) {

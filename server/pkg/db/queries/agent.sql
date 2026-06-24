@@ -514,6 +514,18 @@ WHERE agent_id = $1 AND issue_id = $2 AND started_at IS NOT NULL
 ORDER BY started_at DESC
 LIMIT 1;
 
+-- name: GetLastTaskOutcomeForIssueAndAgent :one
+-- Returns the latest completed/failed prior task for claim-time RAG query
+-- building. The current task is excluded because ClaimTask marks it
+-- dispatched before the response is assembled.
+SELECT result, error, failure_reason, status FROM agent_task_queue
+WHERE agent_id = sqlc.arg('agent_id')
+  AND issue_id = sqlc.arg('issue_id')
+  AND id <> sqlc.arg('current_task_id')
+  AND status IN ('completed', 'failed')
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1;
+
 -- name: FailAgentTask :one
 -- Marks a task as failed. session_id and work_dir are merged via COALESCE so
 -- if the agent already established a real session before failing (e.g. it

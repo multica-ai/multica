@@ -8,6 +8,7 @@ import (
 	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	pgvector "github.com/pgvector/pgvector-go"
 )
 
 type ActivityLog struct {
@@ -368,6 +369,20 @@ type ContactSalesInquiry struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type CuratorDraftTask struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+	DraftKind   string             `json:"draft_kind"`
+	Status      string             `json:"status"`
+	InputData   []byte             `json:"input_data"`
+	Result      []byte             `json:"result"`
+	Error       pgtype.Text        `json:"error"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DaemonConnection struct {
 	ID              pgtype.UUID        `json:"id"`
 	AgentID         pgtype.UUID        `json:"agent_id"`
@@ -609,6 +624,238 @@ type IssueSubscriber struct {
 type IssueToLabel struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 	LabelID pgtype.UUID `json:"label_id"`
+}
+
+type KnowledgeCandidate struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	CommentID      pgtype.UUID        `json:"comment_id"`
+	AgentTaskID    pgtype.UUID        `json:"agent_task_id"`
+	SourceType     string             `json:"source_type"`
+	SourceID       pgtype.UUID        `json:"source_id"`
+	TriggerReason  string             `json:"trigger_reason"`
+	SignalStrength string             `json:"signal_strength"`
+	Signals        []string           `json:"signals"`
+	Score          int32              `json:"score"`
+	Status         string             `json:"status"`
+	DedupeKey      string             `json:"dedupe_key"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	Metadata       []byte             `json:"metadata"`
+	EvaluatedAt    pgtype.Timestamptz `json:"evaluated_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Evidence       []byte             `json:"evidence"`
+}
+
+type KnowledgeEffectHourly struct {
+	BucketHour        pgtype.Timestamptz `json:"bucket_hour"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	Model             string             `json:"model"`
+	Provider          string             `json:"provider"`
+	TaskKind          string             `json:"task_kind"`
+	HasInjection      bool               `json:"has_injection"`
+	TaskCount         int64              `json:"task_count"`
+	SuccessfulCount   int64              `json:"successful_count"`
+	FailedCount       int64              `json:"failed_count"`
+	TotalDurationSecs float64            `json:"total_duration_secs"`
+	DurationTaskCount int64              `json:"duration_task_count"`
+	InputTokens       int64              `json:"input_tokens"`
+	OutputTokens      int64              `json:"output_tokens"`
+	CacheReadTokens   int64              `json:"cache_read_tokens"`
+	CacheWriteTokens  int64              `json:"cache_write_tokens"`
+	RerunCount        int64              `json:"rerun_count"`
+	FollowUpCount     int64              `json:"follow_up_count"`
+	MaxAttempt        int32              `json:"max_attempt"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeEffectHourlyDirty struct {
+	BucketHour   pgtype.Timestamptz `json:"bucket_hour"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	AgentID      pgtype.UUID        `json:"agent_id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	Model        string             `json:"model"`
+	Provider     string             `json:"provider"`
+	TaskKind     string             `json:"task_kind"`
+	HasInjection bool               `json:"has_injection"`
+	EnqueuedAt   pgtype.Timestamptz `json:"enqueued_at"`
+}
+
+type KnowledgeEffectHourlyRollupState struct {
+	ID                int16              `json:"id"`
+	WatermarkAt       pgtype.Timestamptz `json:"watermark_at"`
+	LastRunStartedAt  pgtype.Timestamptz `json:"last_run_started_at"`
+	LastRunFinishedAt pgtype.Timestamptz `json:"last_run_finished_at"`
+	LastRunRows       int64              `json:"last_run_rows"`
+	LastError         pgtype.Text        `json:"last_error"`
+}
+
+type KnowledgeEmbedding struct {
+	ID              pgtype.UUID        `json:"id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	Model           string             `json:"model"`
+	ContentHash     string             `json:"content_hash"`
+	Embedding1536   pgvector.Vector    `json:"embedding_1536"`
+	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	Dimension       int32              `json:"dimension"`
+	Embedding3072   pgvector.Vector    `json:"embedding_3072"`
+	Embedding1024   pgvector.Vector    `json:"embedding_1024"`
+	Embedding768    pgvector.Vector    `json:"embedding_768"`
+}
+
+type KnowledgeEmbeddingAttempt struct {
+	ID              pgtype.UUID        `json:"id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Status          string             `json:"status"`
+	Provider        pgtype.Text        `json:"provider"`
+	Model           pgtype.Text        `json:"model"`
+	Dimension       pgtype.Int4        `json:"dimension"`
+	ContentHash     pgtype.Text        `json:"content_hash"`
+	ErrorMessage    pgtype.Text        `json:"error_message"`
+	AttemptedAt     pgtype.Timestamptz `json:"attempted_at"`
+	EmbeddedAt      pgtype.Timestamptz `json:"embedded_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeFeedback struct {
+	ID              pgtype.UUID        `json:"id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	MemberID        pgtype.UUID        `json:"member_id"`
+	Value           string             `json:"value"`
+	Note            pgtype.Text        `json:"note"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	AgentTaskID     pgtype.UUID        `json:"agent_task_id"`
+}
+
+type KnowledgeGovernanceFinding struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	KnowledgeItemID      pgtype.UUID        `json:"knowledge_item_id"`
+	FindingType          string             `json:"finding_type"`
+	Status               string             `json:"status"`
+	Severity             int32              `json:"severity"`
+	Reason               string             `json:"reason"`
+	Evidence             []byte             `json:"evidence"`
+	SuggestedAction      string             `json:"suggested_action"`
+	SourceMap            []byte             `json:"source_map"`
+	DraftKnowledgeItemID pgtype.UUID        `json:"draft_knowledge_item_id"`
+	ResolvedBy           pgtype.UUID        `json:"resolved_by"`
+	ResolvedAt           pgtype.Timestamptz `json:"resolved_at"`
+	DismissedBy          pgtype.UUID        `json:"dismissed_by"`
+	DismissedAt          pgtype.Timestamptz `json:"dismissed_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeInjectionEvent struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	KnowledgeItemID  pgtype.UUID        `json:"knowledge_item_id"`
+	AgentTaskID      pgtype.UUID        `json:"agent_task_id"`
+	InjectionTarget  string             `json:"injection_target"`
+	RetrievalEventID pgtype.UUID        `json:"retrieval_event_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	Rank             pgtype.Int4        `json:"rank"`
+	Score            pgtype.Float8      `json:"score"`
+	InjectionReason  pgtype.Text        `json:"injection_reason"`
+	TokenBudget      pgtype.Int4        `json:"token_budget"`
+	DiscardedReason  pgtype.Text        `json:"discarded_reason"`
+}
+
+type KnowledgeItem struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	AgentID             pgtype.UUID        `json:"agent_id"`
+	Title               string             `json:"title"`
+	Type                string             `json:"type"`
+	DomainLabels        []string           `json:"domain_labels"`
+	ProblemPattern      string             `json:"problem_pattern"`
+	TriggerConditions   string             `json:"trigger_conditions"`
+	DiagnosticSteps     string             `json:"diagnostic_steps"`
+	RecommendedPractice string             `json:"recommended_practice"`
+	AntiPatterns        string             `json:"anti_patterns"`
+	Applicability       string             `json:"applicability"`
+	ConfidenceStatus    string             `json:"confidence_status"`
+	LifecycleStatus     string             `json:"lifecycle_status"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	ReviewedBy          pgtype.UUID        `json:"reviewed_by"`
+	ReviewedAt          pgtype.Timestamptz `json:"reviewed_at"`
+	PublishedAt         pgtype.Timestamptz `json:"published_at"`
+	ArchivedAt          pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy           pgtype.UUID        `json:"updated_by"`
+	DeprecatedAt        pgtype.Timestamptz `json:"deprecated_at"`
+	StaleScore          pgtype.Numeric     `json:"stale_score"`
+	EffectivenessScore  pgtype.Numeric     `json:"effectiveness_score"`
+	ConflictGroup       pgtype.Text        `json:"conflict_group"`
+	ReviewReason        pgtype.Text        `json:"review_reason"`
+	UpdateSuggestion    pgtype.Text        `json:"update_suggestion"`
+	ReviewNeededAt      pgtype.Timestamptz `json:"review_needed_at"`
+	GovernanceCheckedAt pgtype.Timestamptz `json:"governance_checked_at"`
+}
+
+type KnowledgePublishTarget struct {
+	ID              pgtype.UUID        `json:"id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	TargetType      string             `json:"target_type"`
+	TargetID        pgtype.UUID        `json:"target_id"`
+	TargetUrl       pgtype.Text        `json:"target_url"`
+	TargetTitle     pgtype.Text        `json:"target_title"`
+	Metadata        []byte             `json:"metadata"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeRetrievalEvent struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	MemberID            pgtype.UUID        `json:"member_id"`
+	Query               pgtype.Text        `json:"query"`
+	RetrievalMode       string             `json:"retrieval_mode"`
+	Filters             []byte             `json:"filters"`
+	ResultCount         int32              `json:"result_count"`
+	TopKnowledgeItemIds []pgtype.UUID      `json:"top_knowledge_item_ids"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	AgentTaskID         pgtype.UUID        `json:"agent_task_id"`
+	QuerySource         string             `json:"query_source"`
+	ResultScores        []byte             `json:"result_scores"`
+}
+
+type KnowledgeSource struct {
+	ID              pgtype.UUID        `json:"id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	SourceType      string             `json:"source_type"`
+	SourceID        pgtype.UUID        `json:"source_id"`
+	SourceUrl       pgtype.Text        `json:"source_url"`
+	SourceTitle     pgtype.Text        `json:"source_title"`
+	SourceExcerpt   pgtype.Text        `json:"source_excerpt"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type KnowledgeUsageEvent struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	AgentTaskID     pgtype.UUID        `json:"agent_task_id"`
+	UsageSource     string             `json:"usage_source"`
+	ReferenceText   pgtype.Text        `json:"reference_text"`
+	TaskStatus      pgtype.Text        `json:"task_status"`
+	TaskResult      []byte             `json:"task_result"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type LarkBindingToken struct {
@@ -1186,4 +1433,14 @@ type WorkspaceInvitation struct {
 	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
 	CreatedByIp        pgtype.Text        `json:"created_by_ip"`
 	CreatedByUserAgent pgtype.Text        `json:"created_by_user_agent"`
+}
+
+type WorkspaceSecret struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Name           string             `json:"name"`
+	EncryptedValue []byte             `json:"encrypted_value"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }

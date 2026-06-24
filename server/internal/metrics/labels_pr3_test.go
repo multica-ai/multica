@@ -107,7 +107,9 @@ func TestOnboardingStartedUnknownPlatformCollapses(t *testing.T) {
 		if v == "web" || v == "unknown" {
 			continue
 		}
-		t.Errorf("found unexpected platform label value %q (count=%v) — NormalizePlatform should have collapsed it", v, count)
+		if count > 0 {
+			t.Errorf("found unexpected platform label value %q (count=%v) — NormalizePlatform should have collapsed it", v, count)
+		}
 	}
 	// Defensive check: no label value should look like a raw header (anything
 	// over the longest allow-list entry is almost certainly a leak).

@@ -488,3 +488,158 @@ func boolLabel(b bool) string {
 	}
 	return "false"
 }
+
+// prewarm ensures every known label combination for business event metrics is
+// materialised at registration time. Mirrors the logic in BusinessMetrics.prewarm().
+func (e *businessEventMetrics) prewarm() {
+	if e == nil {
+		return
+	}
+	signupSources := []string{
+		"direct", "google", "bing", "duckduckgo", "twitter", "linkedin",
+		"facebook", "instagram", "github", "gitlab", "hacker_news", "reddit",
+		"youtube", "discord", "slack", "product_hunt", "medium", "dev_to",
+		"email", "organic", "referral", "partner", "affiliate", "paid", "other",
+	}
+	platforms := []string{"server", "web", "desktop", "cli", "mobile", "ios", "unknown"}
+	paths := []string{"full", "runtime_skipped", "cloud_waitlist", "skip_existing", "invite_accept", "unknown"}
+	cadences := []string{"hourly", "daily", "weekly", "monthly", "manual", "webhook", "unknown"}
+	triggers := []string{"schedule", "webhook", "manual", "unknown"}
+	skipReasons := []string{"already_running", "recent_run", "runtime_offline", "throttled", "max_concurrency", "trigger_disabled", "signature_invalid", "unknown", "other"}
+	webhookProviders := []string{"github", "generic", "gitlab", "stripe", "other"}
+	webhookStatuses := []string{"queued", "dispatched", "failed", "rejected", "ignored", "duplicate", "other"}
+	eventKinds := []string{"pull_request", "pull_request_review", "issues", "issue_comment", "push", "installation", "installation_repositories", "check_run", "check_suite", "ping", "other"}
+	actions := []string{"opened", "closed", "reopened", "merged", "synchronize", "edited", "submitted", "created", "deleted", "labeled", "unlabeled", "assigned", "unassigned", "requested", "completed", "none", "other"}
+	reviewResults := []string{"approved", "changes_requested", "commented", "dismissed", "other"}
+	cloudOps := []string{"provision", "terminate", "status", "gateway", "billing", "fleet", "other"}
+	cloudStatuses := []string{"ok", "4xx", "5xx", "timeout", "error"}
+	daemonKinds := []string{"heartbeat", "task_claim", "task_complete", "task_usage", "task_progress", "task_messages", "log", "other"}
+	feedbackKinds := []string{"bug", "feature", "general", "praise", "other"}
+	contactSources := []string{"page", "onboarding", "agents_page", "unknown", "other"}
+	sources := []string{"issue", "chat", "autopilot", "autopilot_issue", "quick_create", "manual", "api", "other"}
+	runtimeModes := []string{"local", "cloud", "unknown"}
+	providers := []string{
+		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor",
+		"gemini", "hermes", "kiro", "kimi", "multica_agent", "openclaw",
+		"opencode", "pi", "other",
+	}
+	reasons := []string{
+		"auth_failed", "timeout", "oom", "image_pull", "provision_failed",
+		"lease_expired", "cancelled", "blocked", "unknown", "other",
+	}
+
+	// Signup
+	for _, src := range signupSources {
+		e.signup.WithLabelValues(src).Add(0)
+	}
+
+	// Workspace created
+	for _, src := range sources {
+		e.workspaceCreated.WithLabelValues(src).Add(0)
+	}
+
+	// Team invites (no labels, just ensure series exists)
+	e.teamInviteSent.WithLabelValues().Add(0)
+	e.teamInviteAccepted.WithLabelValues().Add(0)
+
+	// Onboarding
+	for _, p := range platforms {
+		e.onboardingStarted.WithLabelValues(p).Add(0)
+	}
+	e.onboardingQuestionnaireSubmit.WithLabelValues().Add(0)
+	for _, path := range paths {
+		e.onboardingCompleted.WithLabelValues(path).Add(0)
+	}
+
+	// Cloud waitlist
+	e.cloudWaitlistJoined.WithLabelValues().Add(0)
+
+	// Issue / chat / agent / squad / autopilot
+	for _, src := range sources {
+		for _, p := range platforms {
+			e.issueCreated.WithLabelValues(src, p).Add(0)
+		}
+		e.issueExecuted.WithLabelValues(src).Add(0)
+	}
+	for _, p := range platforms {
+		e.chatMessageSent.WithLabelValues(p).Add(0)
+	}
+	for _, mode := range runtimeModes {
+		for _, src := range sources {
+			e.agentCreated.WithLabelValues(mode, src).Add(0)
+		}
+	}
+	e.squadCreated.WithLabelValues().Add(0)
+	for _, cadence := range cadences {
+		e.autopilotCreated.WithLabelValues(cadence).Add(0)
+	}
+
+	// Runtime
+	for _, mode := range runtimeModes {
+		for _, prov := range providers {
+			e.runtimeRegistered.WithLabelValues(mode, prov).Add(0)
+			e.runtimeReady.WithLabelValues(mode, prov).Add(0)
+			e.runtimeReadySeconds.WithLabelValues(mode, prov).Observe(0)
+			e.runtimeOffline.WithLabelValues(mode, prov).Add(0)
+			for _, reason := range reasons {
+				for _, recoverable := range []string{"true", "false"} {
+					e.runtimeFailed.WithLabelValues(mode, prov, reason, recoverable).Add(0)
+				}
+			}
+		}
+	}
+
+	// Daemon WS
+	for _, kind := range daemonKinds {
+		e.daemonWSMessageReceived.WithLabelValues(kind).Add(0)
+	}
+
+	// Autopilot runs
+	for _, cadence := range cadences {
+		for _, trigger := range triggers {
+			e.autopilotRunStarted.WithLabelValues(cadence, trigger).Add(0)
+			e.autopilotRunTerminal.WithLabelValues(cadence, trigger, "completed").Add(0)
+			e.autopilotRunTerminal.WithLabelValues(cadence, trigger, "failed").Add(0)
+		}
+	}
+	for _, cadence := range cadences {
+		for _, reason := range skipReasons {
+			e.autopilotRunSkipped.WithLabelValues(cadence, reason).Add(0)
+		}
+	}
+
+	// Webhooks
+	for _, prov := range webhookProviders {
+		for _, status := range webhookStatuses {
+			e.webhookDelivery.WithLabelValues(prov, status).Add(0)
+		}
+	}
+
+	// GitHub events
+	for _, kind := range eventKinds {
+		for _, action := range actions {
+			e.githubEventReceived.WithLabelValues(kind, action).Add(0)
+		}
+	}
+	for _, result := range reviewResults {
+		e.githubPRReview.WithLabelValues(result).Add(0)
+	}
+
+	// Cloud runtime
+	for _, op := range cloudOps {
+		for _, status := range cloudStatuses {
+			e.cloudRuntimeRequest.WithLabelValues(op, status).Add(0)
+		}
+		e.cloudRuntimeRequestDurationSecs.WithLabelValues(op).Observe(0)
+	}
+
+	// Feedback & contact sales
+	for _, kind := range feedbackKinds {
+		for _, p := range platforms {
+			e.feedbackSubmitted.WithLabelValues(kind, p).Add(0)
+		}
+	}
+	for _, src := range contactSources {
+		e.contactSalesSubmitted.WithLabelValues(src).Add(0)
+	}
+}

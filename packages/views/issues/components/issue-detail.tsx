@@ -9,6 +9,7 @@ import {
   Archive,
   ArrowDownToLine,
   ArrowUpToLine,
+  BookOpenCheck,
   Calendar,
   CalendarClock,
   CalendarDays,
@@ -33,6 +34,7 @@ import {
   Tag,
   Trash2,
   Users,
+  FileText,
   FoldVertical,
   UnfoldVertical,
 } from "lucide-react";
@@ -101,8 +103,17 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { childIssuesOptions, issueAttachmentsOptions, issueDetailOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
+import {
+  curatorDraftTaskOptions,
+  knowledgeCandidatesOptions,
+  knowledgeInjectionsOptions,
+  knowledgeKeys,
+  knowledgeListOptions,
+} from "@multica/core/knowledge/queries";
+import { useCreateKnowledgeDraftFromIssue, useCreateKnowledgeFeedback } from "@multica/core/knowledge/mutations";
+import type { KnowledgeCandidate, KnowledgeFeedbackValue } from "@multica/core/knowledge/types";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -261,6 +272,18 @@ function metadataHealthPort(metadata: Record<string, unknown> | undefined): numb
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return null;
+}
+
+function candidateKnowledgeItemId(candidate: KnowledgeCandidate): string | null {
+  if (!candidate.metadata || typeof candidate.metadata !== "object") return null;
+  const metadata = candidate.metadata as Record<string, unknown>;
+  const value = metadata.knowledge_item_id;
+  if (typeof value === "string" && value.length > 0) return value;
+  const draftGeneration = metadata.draft_generation;
+  if (!draftGeneration || typeof draftGeneration !== "object") return null;
+  const draftMetadata = draftGeneration as Record<string, unknown>;
+  const draftValue = draftMetadata.knowledge_item_id ?? draftMetadata.knowledge_id;
+  return typeof draftValue === "string" && draftValue.length > 0 ? draftValue : null;
 }
 
 function formatActivity(
@@ -960,6 +983,7 @@ export function IssueDetail({
   highlightCommentId,
 }: IssueDetailProps) {
   const { t, i18n } = useT("issues");
+  const { t: tKnowledge } = useT("knowledge");
   const timeAgo = useTimeAgo();
   // `issueId` is the raw route param — may be a UUID *or* a human-readable
   // identifier (e.g. "OPE-460") when the URL has been canonicalized.  We keep
@@ -1015,6 +1039,7 @@ export function IssueDetail({
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const [previewLogs, setPreviewLogs] = useState<{ title: string; logs: string } | null>(null);
@@ -1252,6 +1277,50 @@ export function IssueDetail({
   // WS events arriving before the issue loads are an acceptable edge case
   // (the refetch-on-mount will pick them up).
   const resolvedId = issue?.id ?? id;
+  const createKnowledgeDraft = useCreateKnowledgeDraftFromIssue();
+  const createKnowledgeFeedback = useCreateKnowledgeFeedback();
+  const [curatorDraftTaskId, setCuratorDraftTaskId] = useState<string | null>(null);
+  const { data: curatorDraftTask } = useQuery({
+    ...curatorDraftTaskOptions(wsId, curatorDraftTaskId),
+  });
+  const { data: knowledgeCandidatesData } = useQuery({
+    ...knowledgeCandidatesOptions(wsId, { issue_id: resolvedId, limit: 20 }),
+    enabled: !!issue,
+  });
+  const knowledgeCandidates = knowledgeCandidatesData?.candidates ?? [];
+  const { data: issueKnowledgeDraftsData } = useQuery({
+    ...knowledgeListOptions(wsId, {
+      source_type: "issue",
+      source_id: resolvedId,
+      status: "draft",
+      limit: 20,
+    }),
+    enabled: !!issue,
+  });
+  const existingKnowledgeIds = useMemo(
+    () => knowledgeCandidates
+      .map(candidateKnowledgeItemId)
+      .filter((id): id is string => id !== null),
+    [knowledgeCandidates],
+  );
+  const issueKnowledgeDraftIds = useMemo(
+    () => issueKnowledgeDraftsData?.items
+      .map((item) => item.id)
+      .filter((id): id is string => Boolean(id)) ?? [],
+    [issueKnowledgeDraftsData],
+  );
+  // Track knowledge IDs created in the current page session, since
+  // local curator task completion may finish after the initial list query.
+  const [sessionKnowledgeIds, setSessionKnowledgeIds] = useState<string[]>([]);
+  const allExistingDraftIds = useMemo(
+    () => [...new Set([...sessionKnowledgeIds, ...issueKnowledgeDraftIds, ...existingKnowledgeIds])],
+    [sessionKnowledgeIds, issueKnowledgeDraftIds, existingKnowledgeIds],
+  );
+  const { data: knowledgeInjectionsData } = useQuery({
+    ...knowledgeInjectionsOptions(wsId, resolvedId),
+    enabled: !!issue,
+  });
+  const knowledgeInjections = knowledgeInjectionsData?.injections ?? [];
   const { data: localRuntimes = [] } = useQuery({
     queryKey: ["local-preview-runtimes", wsId],
     queryFn: () => api.listRuntimes({ workspace_id: wsId, owner: "me" }),
@@ -2029,6 +2098,53 @@ export function IssueDetail({
     }
   };
 
+  const handleCreateKnowledgeDraft = async () => {
+    try {
+      const result = await createKnowledgeDraft.mutateAsync({ issue_id: resolvedId });
+      if ("task_id" in result) {
+        setCuratorDraftTaskId(result.task_id);
+        toast.success(tKnowledge(($) => $.issue.generating));
+        return;
+      }
+      toast.success(tKnowledge(($) => $.issue.generated));
+      if (result.item.id) {
+        setSessionKnowledgeIds((prev) => prev.includes(result.item.id) ? prev : [...prev, result.item.id]);
+        queryClient.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
+        router.push(paths.knowledgeDetail(result.item.id));
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : tKnowledge(($) => $.issue.generate_failed));
+    }
+  };
+
+  // Poll curator draft task status and redirect on completion.
+  useEffect(() => {
+    if (!curatorDraftTask || !curatorDraftTaskId) return;
+    if (curatorDraftTask.status === "completed") {
+      const detail = curatorDraftTask.result as { item?: { id?: string } } | undefined;
+      const itemId = detail?.item?.id;
+      if (itemId) {
+        toast.success(tKnowledge(($) => $.issue.generated));
+        setSessionKnowledgeIds((prev) => prev.includes(itemId) ? prev : [...prev, itemId]);
+        queryClient.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
+        router.push(paths.knowledgeDetail(itemId));
+      }
+      setCuratorDraftTaskId(null);
+    } else if (curatorDraftTask.status === "failed") {
+      toast.error(curatorDraftTask.error ?? tKnowledge(($) => $.issue.generate_failed));
+      setCuratorDraftTaskId(null);
+    }
+  }, [curatorDraftTask, curatorDraftTaskId, queryClient, router, tKnowledge, wsId]);
+
+  const handleKnowledgeFeedback = async (knowledgeId: string, value: KnowledgeFeedbackValue) => {
+    try {
+      await createKnowledgeFeedback.mutateAsync({ id: knowledgeId, value });
+      toast.success(tKnowledge(($) => $.toast.feedback_sent));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : tKnowledge(($) => $.toast.action_failed));
+    }
+  };
+
   useIssueDetailScrollRestore({
     restoreKey: `${wsId}:${id}`,
     scrollContainerEl: scrollContainerRef.current,
@@ -2344,6 +2460,224 @@ export function IssueDetail({
           {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
         </div>
       )}
+
+      {/* Knowledge */}
+      <div>
+        <button
+          type="button"
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${knowledgeOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setKnowledgeOpen(!knowledgeOpen)}
+        >
+          {tKnowledge(($) => $.issue.section)}
+          {knowledgeCandidates.length > 0 && (
+            <span className="tabular-nums text-muted-foreground">
+              · {knowledgeCandidates.length}
+            </span>
+          )}
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${knowledgeOpen ? "rotate-90" : ""}`} />
+        </button>
+        {knowledgeOpen && (
+          <div className="space-y-2 pl-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 w-full justify-start text-xs"
+              disabled={createKnowledgeDraft.isPending}
+              onClick={handleCreateKnowledgeDraft}
+            >
+              <BookOpenCheck className="h-3.5 w-3.5" />
+              {createKnowledgeDraft.isPending
+                ? tKnowledge(($) => $.issue.generating)
+                : tKnowledge(($) => $.issue.generate_draft)}
+            </Button>
+
+            {/* Existing drafts notice */}
+            {allExistingDraftIds.length > 0 && (
+              <AppLink
+                href={paths.knowledgeDetail(allExistingDraftIds[0]!)}
+                className="flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900"
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0" />
+                <span>{tKnowledge(($) => $.issue.existing_draft)}</span>
+                <span className="ml-auto font-medium underline underline-offset-2">
+                  {tKnowledge(($) => $.issue.open_draft)}
+                </span>
+              </AppLink>
+            )}
+
+            {/* Injections */}
+            <div className="space-y-1.5">
+              <p className="px-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {tKnowledge(($) => $.issue.injections)}
+              </p>
+              {knowledgeInjections.length === 0 ? (
+                <p className="px-2 text-xs text-muted-foreground">
+                  {tKnowledge(($) => $.issue.no_injections)}
+                </p>
+              ) : (
+                knowledgeInjections.map((inj) => (
+                  <div key={inj.injection_event_id} className="rounded-md border bg-muted/10 px-2 py-2">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <AppLink
+                        href={paths.knowledgeDetail(inj.knowledge_item_id)}
+                        className="min-w-0 flex-1 truncate text-xs font-medium hover:underline"
+                      >
+                        {inj.knowledge_title || `(${tKnowledge(($) => $.detail.untitled)})`}
+                      </AppLink>
+                      <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] ${inj.was_used ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-muted text-muted-foreground"}`}>
+                        {inj.was_used
+                          ? tKnowledge(($) => $.issue.used_badge)
+                          : tKnowledge(($) => $.issue.not_used_badge)}
+                      </span>
+                      {inj.rank != null && (
+                        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                          {tKnowledge(($) => $.issue.rank_label, { rank: String(inj.rank) })}
+                        </span>
+                      )}
+                    </div>
+                    {inj.injection_reason && (
+                      <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                        {inj.injection_reason}
+                      </p>
+                    )}
+                    <div className="mt-1 flex items-center gap-3 text-[11px] text-muted-foreground">
+                      {inj.source_issue_id && (
+                        <AppLink
+                          href={paths.issueDetail(inj.source_issue_id)}
+                          className="inline-flex items-center gap-1 hover:underline"
+                        >
+                          <BookOpenCheck className="h-3 w-3" />
+                          {tKnowledge(($) => $.issue.injection_source_issue)}
+                        </AppLink>
+                      )}
+                      {inj.score != null && (
+                        <span>{tKnowledge(($) => $.issue.score_label, { score: inj.score.toFixed(2) })}</span>
+                      )}
+                    </div>
+                    <div className="mt-2 flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        render={<AppLink href={paths.knowledgeDetail(inj.knowledge_item_id)} />}
+                      >
+                        {tKnowledge(($) => $.issue.view_knowledge)}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        disabled={createKnowledgeFeedback.isPending}
+                        onClick={() => handleKnowledgeFeedback(inj.knowledge_item_id, "helpful")}
+                      >
+                        {tKnowledge(($) => $.feedback.helpful)}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        disabled={createKnowledgeFeedback.isPending}
+                        onClick={() => handleKnowledgeFeedback(inj.knowledge_item_id, "not_helpful")}
+                      >
+                        {tKnowledge(($) => $.feedback.not_helpful)}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        disabled={createKnowledgeFeedback.isPending}
+                        onClick={() => handleKnowledgeFeedback(inj.knowledge_item_id, "misleading")}
+                      >
+                        {tKnowledge(($) => $.feedback.misleading)}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        disabled={createKnowledgeFeedback.isPending}
+                        onClick={() => handleKnowledgeFeedback(inj.knowledge_item_id, "outdated")}
+                      >
+                        {tKnowledge(($) => $.feedback.outdated)}
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="px-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {tKnowledge(($) => $.issue.candidates)}
+              </p>
+              {knowledgeCandidates.length === 0 ? (
+                <p className="px-2 text-xs text-muted-foreground">
+                  {tKnowledge(($) => $.issue.no_candidates)}
+                </p>
+              ) : (
+                knowledgeCandidates.map((candidate) => {
+                  const knowledgeId = candidateKnowledgeItemId(candidate);
+                  return (
+                    <div key={candidate.id} className="rounded-md border bg-muted/10 px-2 py-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                          {candidate.trigger_reason || candidate.source_type}
+                        </span>
+                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          {candidate.status}
+                        </span>
+                      </div>
+                      {candidate.signals.length > 0 && (
+                        <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                          {candidate.signals.join(" · ")}
+                        </p>
+                      )}
+                      {knowledgeId && (
+                        <div className="mt-2 flex items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-1.5 text-[11px]"
+                            render={<AppLink href={paths.knowledgeDetail(knowledgeId)} />}
+                          >
+                            {tKnowledge(($) => $.issue.open_draft)}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-1.5 text-[11px]"
+                            disabled={createKnowledgeFeedback.isPending}
+                            onClick={() => handleKnowledgeFeedback(knowledgeId, "helpful")}
+                          >
+                            {tKnowledge(($) => $.feedback.helpful)}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-1.5 text-[11px]"
+                            disabled={createKnowledgeFeedback.isPending}
+                            onClick={() => handleKnowledgeFeedback(knowledgeId, "misleading")}
+                          >
+                            {tKnowledge(($) => $.feedback.misleading)}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Details */}
       <div>

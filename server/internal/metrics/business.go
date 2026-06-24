@@ -148,7 +148,7 @@ func NewBusinessMetrics() *BusinessMetrics {
 		activeTasks: map[string]activeTaskLabels{},
 		events:      newBusinessEventMetrics(),
 	}
-	m.prewarmFailureReasons()
+	m.prewarm()
 	return m
 }
 
@@ -322,12 +322,88 @@ func (m *BusinessMetrics) clearTaskInProgress(taskID string) {
 	}
 }
 
-func (m *BusinessMetrics) prewarmFailureReasons() {
-	for _, source := range []string{"issue", "chat", "autopilot", "autopilot_issue", "quick_create", "other"} {
-		for _, runtimeMode := range []string{"local", "cloud", "unknown"} {
-			for _, reason := range taskfailure.AllReasons() {
-				m.taskFailed.WithLabelValues(source, runtimeMode, reason.String()).Add(0)
+// prewarm ensures every known label combination for every metric is
+// materialised at registration time so that /metrics always emits the
+// series (with value 0). Without this, Grafana panels that reference
+// these metrics show "No data" until the first real event arrives.
+func (m *BusinessMetrics) prewarm() {
+	sources := []string{"issue", "chat", "autopilot", "autopilot_issue", "quick_create", "manual", "api", "other"}
+	runtimeModes := []string{"local", "cloud", "unknown"}
+	providers := []string{
+		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor",
+		"gemini", "hermes", "kiro", "kimi", "multica_agent", "openclaw",
+		"opencode", "pi", "other",
+	}
+	terminalStatuses := []string{"completed", "failed", "cancelled", "blocked", "other"}
+	tokenTypes := []string{"input", "output", "cache_read", "cache_write"}
+	models := []string{"unknown"}
+	reasons := make([]string, 0, len(taskfailure.AllReasons()))
+	for _, r := range taskfailure.AllReasons() {
+		reasons = append(reasons, r.String())
+	}
+
+	// Agent task pipeline counters
+	for _, src := range sources {
+		for _, mode := range runtimeModes {
+			m.taskEnqueued.WithLabelValues(src, mode).Add(0)
+			m.taskDispatched.WithLabelValues(src, mode).Add(0)
+			m.taskInProgress.WithLabelValues(src, mode).Set(0)
+			m.taskQueuedExpired.WithLabelValues(src, mode).Add(0)
+			for _, prov := range providers {
+				m.taskStarted.WithLabelValues(src, mode, prov).Add(0)
+			}
+			for _, status := range terminalStatuses {
+				m.taskTerminal.WithLabelValues(src, mode, status).Add(0)
 			}
 		}
 	}
+	// taskFailed: full failure-reason cartesian product
+	for _, src := range sources {
+		for _, mode := range runtimeModes {
+			for _, reason := range reasons {
+				m.taskFailed.WithLabelValues(src, mode, reason).Add(0)
+			}
+		}
+	}
+
+	// Task duration histograms
+	for _, src := range sources {
+		for _, mode := range runtimeModes {
+			m.taskQueueWait.WithLabelValues(src, mode).Observe(0)
+			for _, status := range terminalStatuses {
+				m.taskRunSeconds.WithLabelValues(src, mode, status).Observe(0)
+				m.taskTotalSeconds.WithLabelValues(src, mode, status).Observe(0)
+			}
+		}
+	}
+
+	// Task iteration count histogram
+	for _, src := range sources {
+		for _, status := range terminalStatuses {
+			m.taskIterations.WithLabelValues(src, status).Observe(0)
+		}
+	}
+
+	// LLM metrics — use "unknown" model placeholder so series exist at startup
+	for _, prov := range providers {
+		for _, model := range models {
+			for _, tt := range tokenTypes {
+				for _, mode := range runtimeModes {
+					for _, src := range sources {
+						m.llmTokens.WithLabelValues(prov, model, tt, mode, src).Add(0)
+						m.llmCostUSD.WithLabelValues(prov, model, tt, mode, src).Add(0)
+					}
+				}
+			}
+			for _, mode := range runtimeModes {
+				m.llmRequests.WithLabelValues(prov, model, mode).Add(0)
+			}
+		}
+	}
+
+	// Scheduler
+	m.taskLeaseExpired.WithLabelValues("other").Add(0)
+
+	// Business events
+	m.events.prewarm()
 }
