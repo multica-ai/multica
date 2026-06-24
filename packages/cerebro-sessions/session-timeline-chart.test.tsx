@@ -60,6 +60,22 @@ describe("SessionTimelineChart", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows a single run's value inline, without needing a hover", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      session_id: "s1",
+      has_data: true,
+      points: [
+        { observed_at: "t1", context_tokens: 50000, max_context_tokens: 1000000, used_percent: 5, cache_share_percent: 0, is_compaction: false },
+      ],
+    });
+    renderWithClient(
+      <SessionTimelineChart issueId="issue-1" sessionId="s1" enabled={true} />,
+    );
+    // The value is in the DOM directly — not hidden in a hover-only tooltip.
+    expect(await screen.findByText(/5% used/i)).toBeInTheDocument();
+    expect(screen.getByText(/builds out as the session runs/i)).toBeInTheDocument();
+  });
+
   it("does not fetch while disabled", () => {
     mockCerebroRequest.mockResolvedValue({ session_id: "s1", has_data: false, points: [] });
     renderWithClient(
