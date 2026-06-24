@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-// FIR-1957 — change requests render as compact lines; clicking a line opens a
-// single modal containing the diff, an inline comment, and approve/reject.
+// FIR-1957 — change requests render as compact lines; clicking a line folds a
+// sheet over the detail with the diff, an inline comment, and approve/reject.
 
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -90,18 +90,18 @@ describe("SkillChangeRequestQueue", () => {
     expect(
       await screen.findByText("Tighten the rules", {}, { timeout: 30000 }),
     ).toBeTruthy();
-    // The diff is NOT shown inline — only inside the modal.
+    // The diff is NOT shown inline — only inside the review sheet.
     expect(screen.queryByText("current (1.0.0)")).toBeNull();
     expect(screen.queryByText("line four")).toBeNull();
   });
 
-  it("opens a modal with the diff, a comment box, and approve/reject when a line is clicked", async () => {
+  it("opens a sheet with the diff, a comment box, and approve/reject when a line is clicked", async () => {
     renderQueue();
 
     const row = await screen.findByText("Tighten the rules", {}, { timeout: 30000 });
     fireEvent.click(row);
 
-    // Modal now shows the diff (added line) and version labels.
+    // The sheet now shows the diff (added line) and version labels.
     expect(await screen.findByText("line four")).toBeTruthy();
     expect(screen.getByText(/current \(1\.0\.0\)/)).toBeTruthy();
     expect(

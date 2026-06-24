@@ -15,12 +15,13 @@ import { toast } from "sonner";
 import type { MemberWithUser, Skill, SkillChangeRequest } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@multica/ui/components/ui/sheet";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { skillChangeRequestsOptions } from "../../core/queries";
@@ -68,6 +69,7 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
   const [open, setOpen] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState("");
+  const isMobile = useIsMobile();
 
   const { data: requests = [], isLoading } = useQuery(
     skillChangeRequestsOptions(skill.id),
@@ -176,20 +178,27 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
         </div>
       )}
 
-      <Dialog open={!!selected} onOpenChange={(v) => !v && closeReview()}>
-        <DialogContent className="max-h-[85vh] gap-3 overflow-y-auto sm:max-w-2xl">
+      <Sheet open={!!selected} onOpenChange={(v) => !v && closeReview()}>
+        <SheetContent
+          side={isMobile ? "bottom" : "right"}
+          className={
+            isMobile
+              ? "h-[80vh] gap-3 overflow-y-auto rounded-t-xl p-4"
+              : "w-[60vw] max-w-[60vw] gap-3 overflow-y-auto p-6 sm:max-w-[60vw]"
+          }
+        >
           {selected && (
             <>
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 pr-6">
+              <SheetHeader className="p-0">
+                <SheetTitle className="flex items-center gap-2 pr-6">
                   <span className="truncate">{selected.title}</span>
                   <span
                     className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${STATUS_CLASS[selected.status]}`}
                   >
                     {STATUS_LABEL[selected.status]}
                   </span>
-                </DialogTitle>
-              </DialogHeader>
+                </SheetTitle>
+              </SheetHeader>
 
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Clock className="h-3 w-3" />
@@ -221,7 +230,7 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
                     rows={3}
                     className="resize-none text-sm"
                   />
-                  <DialogFooter className="gap-1.5 sm:justify-between">
+                  <SheetFooter className="flex-row items-center justify-between gap-1.5 p-0">
                     <Button
                       type="button"
                       variant="ghost"
@@ -254,7 +263,7 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
                         {mutation.isPending ? "Saving…" : "Approve"}
                       </Button>
                     </div>
-                  </DialogFooter>
+                  </SheetFooter>
                 </>
               ) : (
                 <>
@@ -264,17 +273,17 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
                       {selected.review_comment}
                     </div>
                   )}
-                  <DialogFooter>
+                  <SheetFooter className="flex-row justify-end p-0">
                     <Button type="button" variant="ghost" size="sm" onClick={closeReview}>
                       Close
                     </Button>
-                  </DialogFooter>
+                  </SheetFooter>
                 </>
               )}
             </>
           )}
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
