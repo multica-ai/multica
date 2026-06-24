@@ -381,24 +381,6 @@ func main() {
 	// rows it simply idles. Lifecycle is bound to sweepCtx so it winds down
 	// alongside the other long-running workers, AFTER the HTTP server has
 	// drained.
-	// Cutover control (MUL-3515): MULTICA_LARK_HUB_DISABLED parks the inbound
-	// channel supervisor WITHOUT taking down the rest of the API — the process
-	// still serves HTTP normally, it just never claims a WS lease or opens a
-	// Feishu connection. The switch is generation-agnostic: in a pre-cutover
-	// build it parks the OLD (lark_*) hub, in this build it parks the NEW
-	// (channel_*) supervisor. The lark_*->channel_* rollout uses it twice —
-	// first to stop the old hub on the current build so migration 124 takes a
-	// clean snapshot, then to hold this build's new supervisor dormant until
-	// that migration has run and the old pods have drained, so the two never
-	// double-process the same bot. Nil-ing it here makes the start below and
-	// the shutdown join skip it. The operator flips it off last to bring the
-	// new supervisor up on channel_*. See migration 124's ROLLOUT note for the
-	// full order. The env var keeps its name for operator/runbook
-	// compatibility across the cutover.
-	if h.ChannelSupervisor != nil && os.Getenv("MULTICA_LARK_HUB_DISABLED") == "true" {
-		slog.Warn("Lark inbound supervisor disabled via MULTICA_LARK_HUB_DISABLED; API serves normally but no Feishu WebSocket is opened")
-		h.ChannelSupervisor = nil
-	}
 	if h.ChannelSupervisor != nil {
 		go h.ChannelSupervisor.Run(sweepCtx)
 	}

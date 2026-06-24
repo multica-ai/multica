@@ -39,25 +39,13 @@
 --     version upgrade is a clean cutover. Only a self-host re-tuned to
 --     multi-replica RollingUpdate needs the prd procedure below.
 --
---     PRD (rolling multica-api, maxUnavailable:0) overlaps old and new pods,
---     so use the MULTICA_LARK_HUB_DISABLED switch (cmd/server/main.go) to park
---     a hub while the API stays up. For a clean, drift-free cutover:
---       1. Pre-release the hub-park switch on the CURRENT build and set
---          MULTICA_LARK_HUB_DISABLED=true. The old hub stops everywhere (no
---          more lease/dedup/binding/thread writes to lark_*); the API stays up.
---       2. Run this migration — a clean snapshot, no live hub writing lark_*.
---       3. Deploy the channel build with the switch still ON. channel_* already
---          exists (step 2), so the new HTTP paths never 500, and the new hub
---          stays parked while old pods drain.
---       4. Flip MULTICA_LARK_HUB_DISABLED off — the new hub comes up on
---          channel_*. Only the Feishu bot is unavailable across steps 1-4; the
---          API stays up throughout.
---     The earlier "ship new code, THEN migrate after pods drain" order is
---     wrong: it serves channel_* HTTP before channel_* exists, violating (a).
---     Rollback to a pre-cutover build is not lossless once the new hub has
---     written Feishu state into channel_*. See the PR "Deployment / rollout"
---     section for the full runbook (incl. a lower-effort single-deploy variant
---     that trades a small transient drift for one fewer release).
+--     PRD (rolling multica-api, maxUnavailable:0) overlapped old and new pods.
+--     A one-time MULTICA_LARK_HUB_DISABLED park-switch existed during the
+--     cutover to hold a hub dormant while the API stayed up, so only one hub
+--     was ever live (invariant b). That cutover is complete and the switch has
+--     since been removed (MUL-3515); this note is kept as history. Rollback to
+--     a pre-cutover build is not lossless once the new hub has written Feishu
+--     state into channel_*.
 --
 -- app_secret_encrypted is BYTEA; it is carried into the JSONB config as a
 -- base64 string. PostgreSQL's encode(...,'base64') MIME-wraps the output
