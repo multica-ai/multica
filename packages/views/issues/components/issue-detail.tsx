@@ -274,8 +274,14 @@ function metadataHealthPort(metadata: Record<string, unknown> | undefined): numb
 
 function candidateKnowledgeItemId(candidate: KnowledgeCandidate): string | null {
   if (!candidate.metadata || typeof candidate.metadata !== "object") return null;
-  const value = (candidate.metadata as Record<string, unknown>).knowledge_item_id;
-  return typeof value === "string" && value.length > 0 ? value : null;
+  const metadata = candidate.metadata as Record<string, unknown>;
+  const value = metadata.knowledge_item_id;
+  if (typeof value === "string" && value.length > 0) return value;
+  const draftGeneration = metadata.draft_generation;
+  if (!draftGeneration || typeof draftGeneration !== "object") return null;
+  const draftMetadata = draftGeneration as Record<string, unknown>;
+  const draftValue = draftMetadata.knowledge_item_id ?? draftMetadata.knowledge_id;
+  return typeof draftValue === "string" && draftValue.length > 0 ? draftValue : null;
 }
 
 function formatActivity(
@@ -2035,6 +2041,7 @@ export function IssueDetail({
       toast.success(tKnowledge(($) => $.issue.generated));
       if (result.item.id) {
         setSessionKnowledgeIds((prev) => prev.includes(result.item.id) ? prev : [...prev, result.item.id]);
+        queryClient.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
         router.push(paths.knowledgeDetail(result.item.id));
       }
     } catch (err) {

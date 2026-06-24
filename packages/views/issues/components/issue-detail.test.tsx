@@ -15,13 +15,15 @@ const mockEventSources = vi.hoisted(() => [] as EventSourceMock[]);
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
+import enKnowledge from "../../locales/en/knowledge.json";
 import zhHansCommon from "../../locales/zh-Hans/common.json";
 import zhHansIssues from "../../locales/zh-Hans/issues.json";
+import zhHansKnowledge from "../../locales/zh-Hans/knowledge.json";
 import type { SupportedLocale } from "@multica/core/i18n";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, issues: enIssues },
-  "zh-Hans": { common: zhHansCommon, issues: zhHansIssues },
+  en: { common: enCommon, issues: enIssues, knowledge: enKnowledge },
+  "zh-Hans": { common: zhHansCommon, issues: zhHansIssues, knowledge: zhHansKnowledge },
 };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
@@ -304,6 +306,12 @@ const mockApiObj = vi.hoisted(() => ({
   listAgents: vi.fn().mockResolvedValue([]),
   getProject: vi.fn(),
   listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+  listKnowledge: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+  listKnowledgeCandidates: vi.fn().mockResolvedValue({ candidates: [], total: 0 }),
+  listKnowledgeInjections: vi.fn().mockResolvedValue({ injections: [] }),
+  createKnowledgeDraftFromIssue: vi.fn(),
+  createKnowledgeFeedback: vi.fn(),
+  getCuratorDraftTask: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -778,6 +786,24 @@ describe("IssueDetail (shared)", () => {
     mockEventSources.length = 0;
     window.getSelection()?.removeAllRanges();
     mockApiObj.getProject.mockReset();
+    mockApiObj.listKnowledge.mockResolvedValue({ items: [], total: 0 });
+    mockApiObj.listKnowledgeCandidates.mockResolvedValue({ candidates: [], total: 0 });
+    mockApiObj.listKnowledgeInjections.mockResolvedValue({ injections: [] });
+    mockApiObj.createKnowledgeDraftFromIssue.mockResolvedValue({
+      item: { id: "knowledge-new" },
+      sources: [],
+      source_summary: {},
+      publish_targets: [],
+      embeddings: [],
+      embedding_status: null,
+      feedback_summary: [],
+    });
+    mockApiObj.createKnowledgeFeedback.mockResolvedValue(undefined);
+    mockApiObj.getCuratorDraftTask.mockResolvedValue({
+      id: "task-1",
+      status: "queued",
+      draft_kind: "issue",
+    });
     useActiveIssueContextStore.setState({ current: null });
   });
 
@@ -1307,6 +1333,42 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Activity").length).toBeGreaterThanOrEqual(1);
     });
+  });
+
+  it("shows the existing knowledge draft notice from the issue source query", async () => {
+    mockApiObj.listKnowledge.mockResolvedValue({
+      items: [{ id: "knowledge-1" }],
+      total: 1,
+    });
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("Knowledge draft already exists")).toBeInTheDocument();
+    const draftLink = screen.getByRole("link", {
+      name: /Knowledge draft already exists\s+Open draft/,
+    });
+    expect(draftLink).toHaveAttribute("href", "/test/knowledge/knowledge-1");
+    expect(mockApiObj.listKnowledge).toHaveBeenCalledWith({
+      source_type: "issue",
+      source_id: "issue-1",
+      status: "draft",
+      limit: 20,
+    });
+  });
+
+  it("does not show the existing knowledge draft notice when the issue has no draft", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(mockApiObj.listKnowledge).toHaveBeenCalledWith({
+        source_type: "issue",
+        source_id: "issue-1",
+        status: "draft",
+        limit: 20,
+      });
+    });
+    expect(screen.queryByText("Knowledge draft already exists")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Open draft/ })).not.toBeInTheDocument();
   });
 
   it("renders comments from timeline", async () => {
