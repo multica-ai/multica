@@ -27,6 +27,10 @@ const ContextUsageSchema = z.object({
   used_percent: z.number().default(0),
   cache_share_percent: z.number().default(0),
   approximate: z.boolean().default(false),
+  // FIR-1960: an older server omits these — default to 0/false so the bar simply
+  // shows no compaction marker rather than NaN.
+  compactions: z.number().default(0),
+  last_run_compaction: z.boolean().default(false),
 }).loose();
 
 export const CONTEXT_USAGE_FALLBACK: ContextUsage = {
@@ -42,6 +46,8 @@ export const CONTEXT_USAGE_FALLBACK: ContextUsage = {
   used_percent: 0,
   cache_share_percent: 0,
   approximate: false,
+  compactions: 0,
+  last_run_compaction: false,
 };
 
 export async function getContextUsage(issueId: string, sessionId?: string): Promise<ContextUsage> {

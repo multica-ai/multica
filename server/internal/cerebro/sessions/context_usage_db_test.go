@@ -340,3 +340,64 @@ func TestContextUsage_FootprintIsNotApproximate(t *testing.T) {
 		t.Errorf("approximate = true, want false for the last-turn footprint")
 	}
 }
+
+// TestContextUsage_TracksCompactions proves FIR-1960: the lightweight context
+// measurement reports the session's compaction count and whether the latest run
+// was itself a compaction, reusing the same heuristic as the development curve.
+// Three runs 200k → 700k → 100k on the 1M opus window: the final sharp drop
+// (100k < 60% of 700k, prev was 70% full) is one compaction, and it is the
+// latest run.
+func TestContextUsage_TracksCompactions(t *testing.T) {
+	if sessTestPool == nil {
+		t.Skip("no test DB")
+	}
+	issueID, workspaceID := seedIssue(t)
+	h := NewHandler(sessTestPool, db.New(sessTestPool))
+
+	rootID := seedRootComment(t, issueID, workspaceID)
+	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "claude-opus-4-8", 100_000, 0)
+	seedFootprintHistory(t, taskID, "claude-opus-4-8", 200_000, 0, 300)
+	seedFootprintHistory(t, taskID, "claude-opus-4-8", 700_000, 0, 200)
+	seedFootprintHistory(t, taskID, "claude-opus-4-8", 100_000, 0, 100)
+
+	var resp contextUsageResponse
+	if err := json.Unmarshal(callContextUsageForSession(h, issueID, workspaceID, rootID).Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.HasData {
+		t.Fatalf("has_data = false, want true")
+	}
+	if resp.Compactions != 1 {
+		t.Errorf("compactions = %d, want 1", resp.Compactions)
+	}
+	if !resp.LastRunCompaction {
+		t.Errorf("last_run_compaction = false, want true (latest run was the 700k → 100k drop)")
+	}
+}
+
+// TestContextUsage_NoCompactionWhenSteady proves a session whose context only
+// rises reports zero compactions and last_run_compaction=false.
+func TestContextUsage_NoCompactionWhenSteady(t *testing.T) {
+	if sessTestPool == nil {
+		t.Skip("no test DB")
+	}
+	issueID, workspaceID := seedIssue(t)
+	h := NewHandler(sessTestPool, db.New(sessTestPool))
+
+	rootID := seedRootComment(t, issueID, workspaceID)
+	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "claude-opus-4-8", 100_000, 0)
+	seedFootprintHistory(t, taskID, "claude-opus-4-8", 200_000, 0, 300)
+	seedFootprintHistory(t, taskID, "claude-opus-4-8", 400_000, 0, 200)
+	seedFootprintHistory(t, taskID, "claude-opus-4-8", 600_000, 0, 100)
+
+	var resp contextUsageResponse
+	if err := json.Unmarshal(callContextUsageForSession(h, issueID, workspaceID, rootID).Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Compactions != 0 {
+		t.Errorf("compactions = %d, want 0", resp.Compactions)
+	}
+	if resp.LastRunCompaction {
+		t.Errorf("last_run_compaction = true, want false (context only rose)")
+	}
+}

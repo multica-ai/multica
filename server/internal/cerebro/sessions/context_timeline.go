@@ -158,3 +158,24 @@ func (h *Handler) sessionContextTimeline(ctx context.Context, issueID, rootID pg
 	}
 	return points, nil
 }
+
+// sessionCompactionStats summarises the session's compaction boundaries for the
+// lightweight context measurement (the bar), reusing the development-curve points
+// so the heuristic lives in exactly one place. count is how many runs were a
+// sharp drop from a fuller previous run; latestIsCompaction is true when the most
+// recent run was itself such a drop — i.e. the window was just compacted.
+func (h *Handler) sessionCompactionStats(ctx context.Context, issueID, rootID pgtype.UUID, isFirst bool) (count int, latestIsCompaction bool, err error) {
+	points, err := h.sessionContextTimeline(ctx, issueID, rootID, isFirst)
+	if err != nil {
+		return 0, false, err
+	}
+	for _, p := range points {
+		if p.IsCompaction {
+			count++
+		}
+	}
+	if n := len(points); n > 0 {
+		latestIsCompaction = points[n-1].IsCompaction
+	}
+	return count, latestIsCompaction, nil
+}

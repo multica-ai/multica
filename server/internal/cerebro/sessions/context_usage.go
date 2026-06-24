@@ -54,6 +54,15 @@ type contextUsageResponse struct {
 	// must then prefix "~" and the token figure is clamped to the window so a
 	// heavy issue never displays an impossible figure like 6986k / 1000k tokens.
 	Approximate bool `json:"approximate"`
+	// FIR-1960: surface compaction tracking in the lightweight measurement, not
+	// only the development-curve sheet. Compactions counts the sharp context drops
+	// in this session's run history (a compaction or fresh turn after a fairly-full
+	// run); LastRunCompaction is true when the most recent run was itself such a
+	// drop — the window was just compacted. Both are read from
+	// cerebro_task_context_footprint_history and stay zero/false for sessions that
+	// predate footprint history.
+	Compactions       int  `json:"compactions"`
+	LastRunCompaction bool `json:"last_run_compaction"`
 }
 
 // ContextUsage serves GET /api/cerebro/issues/{issueId}/sessions/context-usage.
@@ -110,6 +119,14 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	resp.CacheWriteTokens = u.cacheWrite
 	resp.OutputTokens = u.output
 	resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent, resp.Approximate = u.derive()
+
+	// FIR-1960: track compactions inside the measurement itself. Best-effort — a
+	// failure here must never blank the bar, so a query error just leaves the
+	// counts at zero rather than failing the whole response.
+	if comps, lastComp, cerr := h.sessionCompactionStats(r.Context(), issue.ID, rootID, isFirst); cerr == nil {
+		resp.Compactions = comps
+		resp.LastRunCompaction = lastComp
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

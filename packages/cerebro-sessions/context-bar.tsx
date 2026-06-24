@@ -61,6 +61,14 @@ export function SessionContextBar({
     const cache =
       data.cache_share_percent > 0 ? ` · ${data.cache_share_percent}% from cache` : "";
     const model = data.model ? ` · ${data.model}` : "";
+    // FIR-1960: surface compaction tracking in the bar itself. A compaction is a
+    // sharp context drop after a fairly-full run — showing the count explains a
+    // sudden fall in fullness instead of it looking like a mystery jump.
+    const compactions = data.compactions ?? 0;
+    const compaction =
+      compactions > 0
+        ? ` · ${compactions} compaction${compactions === 1 ? "" : "s"}`
+        : "";
     // Show the whole prompt the model read, not just fresh input. Fall back to
     // deriving it if an older server hasn't sent context_tokens yet.
     const ctxTokens =
@@ -68,7 +76,7 @@ export function SessionContextBar({
       data.input_tokens + data.cache_read_tokens + data.cache_write_tokens;
     detail = `${formatTokens(ctxTokens)} / ${formatTokens(
       data.max_context_tokens,
-    )} tokens${cache}${model}`;
+    )} tokens${cache}${compaction}${model}`;
   } else {
     fraction = estimateSessionContextFraction(groups);
     approximate = true;
@@ -77,8 +85,13 @@ export function SessionContextBar({
   const pct = Math.max(0, Math.min(1, fraction));
   const usedPct = Math.round(pct * 100);
   const leftPct = 100 - usedPct;
-  const warm = pct >= WARM_THRESHOLD;
-  const recommendHandoff = active && pct >= HANDOFF_THRESHOLD;
+  // FIR-1960: an approximate (estimated) reading must NEVER drive the loud red
+  // "hand off" state — that was the false `~100% context used` lock-up Jesper
+  // flagged on runs with no last-turn footprint. Only a real measured footprint
+  // may warm the bar or recommend a handoff; an estimate stays neutral and is
+  // honestly labelled "estimate", so we say "we're not sure" instead of "full".
+  const warm = !approximate && pct >= WARM_THRESHOLD;
+  const recommendHandoff = active && !approximate && pct >= HANDOFF_THRESHOLD;
 
   // Quiet until half full, then warm to orange, then to destructive near the
   // handoff line — semantic/amber tokens only, no custom colours.
@@ -117,7 +130,8 @@ export function SessionContextBar({
           </span>
           <span className="text-muted-foreground">
             {leftPct}% left
-            {detail ? ` · ${detail}` : approximate ? " · estimate" : ""}
+            {detail ? ` · ${detail}` : ""}
+            {approximate ? " · estimate" : ""}
           </span>
         </div>
         <div className="h-1 w-full overflow-hidden rounded-full bg-border">

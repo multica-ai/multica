@@ -54,6 +54,13 @@ export interface ContextUsage {
   // footprint). The figure is then clamped to the window and the bar prefixes "~"
   // (FIR-1931): a heavy issue must never display an impossible 6986k / 1000k.
   approximate: boolean;
+  // FIR-1960: compaction tracking surfaced in the measurement itself, not only the
+  // development-curve sheet. compactions counts the sharp context drops in this
+  // session's run history; last_run_compaction is true when the most recent run
+  // was itself a drop — the window was just compacted. Zero/false for sessions
+  // that predate footprint history (an older server omits them; default to 0).
+  compactions: number;
+  last_run_compaction: boolean;
 }
 
 // FIR-1931: one row of the per-session usage breakdown the context bar opens in a
