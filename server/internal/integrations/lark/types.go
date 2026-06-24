@@ -126,4 +126,7 @@ const (
 // minutes'`) enforces the same bound at the storage layer, so a
 // misconfigured caller or a hand-inserted SQL row cannot exceed it.
 // Keep these two values in sync if the product value changes.
-const BindingTokenTTL = 15 * time.Minute
+// expires_at is computed in Go while created_at defaults to DB now(); keep
+// below the CHECK cap (created_at + 15 minutes) so clock skew cannot reject
+// the INSERT.
+const BindingTokenTTL = 14*time.Minute + 59*time.Second

@@ -111,6 +111,9 @@ services:
       MULTICA_LARK_SECRET_KEY: ${MULTICA_LARK_SECRET_KEY:-}
       MULTICA_LARK_HTTP_BASE_URL: ${MULTICA_LARK_HTTP_BASE_URL:-}
       MULTICA_LARK_CALLBACK_BASE_URL: ${MULTICA_LARK_CALLBACK_BASE_URL:-}
+      # WeCom intelligent robot integration. Unset = disabled.
+      # Generate: openssl rand -base64 32
+      MULTICA_WECOM_SECRET_KEY: ${MULTICA_WECOM_SECRET_KEY:-}
     restart: unless-stopped
 
   frontend:

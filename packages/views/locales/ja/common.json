@@ -24,5 +24,20 @@
     "error_already_bound": "この Lark アカウントはすでに別の Multica ユーザーに連携されています。アカウントを移すには、まず明示的に連携を解除する必要があります。",
     "error_not_member": "現在ログイン中の Multica アカウントは、このワークスペースのメンバーではありません。",
     "error_unknown": "問題が発生しました。もう一度試し、それでも解決しない場合はワークスペース管理者にお問い合わせください。"
+  },
+  "wecom_bind": {
+    "page_title": "WeCom アカウントを連携",
+    "verifying_auth": "ログイン状態を確認しています…",
+    "redeeming": "連携しています…",
+    "needs_auth_description": "連携を完了するには Multica にログインしてください。",
+    "sign_in": "ログイン",
+    "done_description": "連携が完了しました。WeCom に戻ってボットと会話を続けられます。",
+    "error_missing_token": "リンクにバインディングトークンが含まれていません。",
+    "error_mixed_content": "このページは HTTPS ですが、API が http://localhost:8080 に設定されており、ブラウザがリクエストをブロックします。PC の localhost でリンクを開いてください。",
+    "error_expired": "この連携リンクは無効か期限切れです。WeCom でボットに新しいメッセージを送り、新しいリンクを取得してください。",
+    "error_already_bound": "この WeCom アカウントはすでに別の Multica ユーザーに連携されています。",
+    "error_not_member": "現在ログイン中の Multica アカウントは、このワークスペースのメンバーではありません。",
+    "error_unknown": "連携に失敗しました。リンクが期限切れか、すでに使用されている可能性があります。",
+    "open_localhost_bind": "localhost でリンクを開く"
   }
 }

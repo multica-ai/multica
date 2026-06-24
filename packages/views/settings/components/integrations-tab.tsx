@@ -1,6 +1,7 @@
 "use client";
 
 import { LarkTab } from "./lark-tab";
+import { WecomTab } from "./wecom-tab";
 import { useT } from "../../i18n";
 
 // Integrations is the umbrella tab for third-party platform connections.
@@ -16,6 +17,10 @@ export function IntegrationsTab() {
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">{t(($) => $.lark.section_title)}</h2>
         <LarkTab />
+      </section>
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">{t(($) => $.wecom.section_title)}</h2>
+        <WecomTab />
       </section>
     </div>
   );

@@ -24,5 +24,20 @@
     "error_already_bound": "이 Lark 계정은 이미 다른 Multica 사용자에 연결되어 있습니다. 계정 이전은 먼저 명시적으로 연결을 해제해야 합니다.",
     "error_not_member": "현재 로그인한 Multica 계정이 이 워크스페이스의 멤버가 아닙니다.",
     "error_unknown": "문제가 발생했어요. 다시 시도해 보고, 계속되면 워크스페이스 관리자에게 문의하세요."
+  },
+  "wecom_bind": {
+    "page_title": "WeCom 계정 연결",
+    "verifying_auth": "로그인 상태를 확인하는 중…",
+    "redeeming": "연결하는 중…",
+    "needs_auth_description": "연결을 완료하려면 Multica에 로그인하세요.",
+    "sign_in": "로그인",
+    "done_description": "연결이 완료되었습니다. WeCom으로 돌아가 봇과 대화를 이어가세요.",
+    "error_missing_token": "링크에 바인딩 토큰이 없습니다.",
+    "error_mixed_content": "이 페이지는 HTTPS인데 API가 http://localhost:8080으로 설정되어 브라우저가 요청을 차단합니다. PC의 localhost에서 링크를 여세요.",
+    "error_expired": "이 바인딩 링크가 유효하지 않거나 만료되었습니다. WeCom에서 봇에게 새 메시지를 보내 새 링크를 받으세요.",
+    "error_already_bound": "이 WeCom 계정은 이미 다른 Multica 사용자에 연결되어 있습니다.",
+    "error_not_member": "현재 로그인한 Multica 계정이 이 워크스페이스의 멤버가 아닙니다.",
+    "error_unknown": "연결에 실패했습니다. 링크가 만료되었거나 이미 사용되었을 수 있습니다.",
+    "open_localhost_bind": "localhost에서 링크 열기"
   }
 }

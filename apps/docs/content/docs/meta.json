@@ -32,6 +32,7 @@
     "---Integrations---",
     "github-integration",
     "lark-bot-integration",
+    "wecom-bot-integration",
     "---Self-hosting & ops---",
     "environment-variables",
     "auth-setup",

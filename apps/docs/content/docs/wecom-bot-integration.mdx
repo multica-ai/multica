@@ -1,0 +1,140 @@
+---
+title: WeCom Bot integration
+description: Bind a Multica agent to a WeCom (企业微信) intelligent robot, then talk to it from a DM or group @-mention — or type /issue to file a Multica issue.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bind any [agent](/agents) to a WeCom intelligent robot and your team can work with it from inside WeCom — DM the Bot, @-mention it in a group, or type `/issue` to file a [Multica issue](/issues) without opening the web app. The agent's replies stream back into the chat and update to the final answer when the run completes.
+
+Each Bot is bound **one-to-one** to a single Multica agent per workspace. Binding a second agent creates a second installation; one agent never has two Bots in the same workspace.
+
+## What the integration does
+
+| Surface | Behavior |
+|---|---|
+| **Settings → Integrations → WeCom** | Workspace owners/admins enter Bot credentials from the WeCom admin console. |
+| **Agent → Integrations** | Shows whether this agent is connected to a WeCom Bot; credentials are managed in Settings. |
+| **DM the Bot** | A workspace member messages the Bot directly. Each person gets their **own** Multica [chat](/chat) session. |
+| **@-mention in a group** | Add the Bot to a WeCom group and @-mention it. Only @-messages are processed; the **whole group shares one** chat session (see below). |
+| **`/issue` command** | Typing `/issue <title>` (optionally with a body) creates a new Multica issue attributed to you. |
+| **Stream replies** | The Bot first replies "received, processing…", then patches the same stream message with the agent's final answer. |
+
+## Architecture
+
+WeCom uses the **long-connection API mode** (`wss://openws.work.weixin.qq.com`) — unlike Lark's inbound callback bootstrap:
+
+- **No inbound webhook URL** to configure in WeCom; the Backend **dials out** to WeCom.
+- The Backend must reach the public internet (WeCom WSS + `qyapi.weixin.qq.com`).
+- Users must reach your **frontend public URL** for identity binding (`{PUBLIC_URL}/wecom/bind?token=…`).
+- Agent runs still execute on members' local **Daemons** — not inside the Multica server container.
+
+## WeCom admin console prep
+
+Before filling credentials in Multica:
+
+1. Create an **intelligent robot** with **API long-connection** mode (not callback URL mode).
+2. Note the **Bot ID** and **long-connection Secret**.
+3. Prepare **CorpID** and a **self-built app Secret** to resolve encrypted `open_userid` to plaintext `userid` (the app needs `openuserid_to_userid` API access).
+4. **Self-built app AgentId** — optional in most setups.
+
+<Callout type="info">
+Multica encrypts Bot and Corp secrets at rest using `MULTICA_WECOM_SECRET_KEY` on the API server.
+</Callout>
+
+## Bind an agent (owner / admin)
+
+Unlike Lark's scan-to-install flow, WeCom MVP uses **manual credentials in Settings**:
+
+1. Open **Settings → Integrations → WeCom**.
+2. Fill in agent ID, Bot ID, long-connection Secret, CorpID, corp app Secret, and optional AgentId.
+3. Click **Connect**. The Backend Hub subscribes to WeCom messages automatically.
+
+Check **Agent → Integrations** for "Connected Bot: Bot {bot_id}".
+
+## Use the Bot (members)
+
+### Prerequisite: workspace membership
+
+Users must be **workspace members** (invite accepted). Non-members cannot redeem binding tokens.
+
+### First message: bind your WeCom identity
+
+On the first DM or @-mention, unbound users receive a binding link:
+
+`{MULTICA_PUBLIC_URL}/wecom/bind?token=…`
+
+Sign in to Multica to complete the link. The page should show a success message when done.
+
+### Chat and `/issue`
+
+- **Ask the agent** — DM or @-mention in a group.
+- **File an issue** — `/issue Fix the login redirect` with optional description lines.
+- **Agent offline / archived** — short status notice instead of silent drop.
+
+## Group chat session model
+
+| Scenario | `chat_session` granularity |
+|---|---|
+| **DM** | One session per person |
+| **Group @** | **One session per WeCom group** |
+
+Rationale: group chat is modeled as one collaborative room (same as Lark). Session owner is the **installer** admin so member churn does not cascade-delete the session. Each `chat_message` still records the real sender's Multica user ID.
+
+Rules:
+
+- **Must @ the Bot** in groups; other messages are silently dropped.
+- Bursts within **3 seconds** debounce into one agent run.
+- Replies are visible to the whole group.
+
+Per-user threads inside a group are **not supported** in the current MVP.
+
+## Permissions
+
+- **Connect / disconnect** — workspace owner or admin.
+- **Talk to the Bot** — workspace member with a bound WeCom identity.
+- Dropped messages store only a drop reason for audit — **not** message bodies.
+
+## Self-host setup
+
+WeCom is **off until** you set an at-rest encryption key.
+
+```dotenv
+MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>  # openssl rand -base64 32
+MULTICA_PUBLIC_URL=https://multica.example.com
+MULTICA_APP_URL=https://multica.example.com
+FRONTEND_ORIGIN=https://multica.example.com
+```
+
+Restart the API. Expect `wecom integration enabled public_url=…` in logs.
+
+### Docker Compose
+
+Three services (not a single image): PostgreSQL + backend (`Dockerfile`) + frontend (`Dockerfile.web`).
+
+```bash
+make selfhost-build
+```
+
+`MULTICA_WECOM_SECRET_KEY` is passed through `docker-compose.selfhost.yml`. Migrations run on backend startup.
+
+Without `REDIS_URL`, the WeCom Hub runs in-process (single backend replica is fine for small teams).
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| "WeCom integration not enabled" in Settings | `MULTICA_WECOM_SECRET_KEY` missing |
+| Binding prompt without URL | `MULTICA_PUBLIC_URL` unset or token mint failed |
+| Bind page stuck on "Binding…" | Rebuild frontend with the redeem race fix |
+| Bind 403 | User not a workspace member yet |
+| No Bot reply | No @ in group; unbound user; daemon offline |
+
+## Next steps
+
+- [Agents](/agents)
+- [Chat](/chat)
+- [Issues](/issues)
+- [Daemon runtimes](/daemon-runtimes)
+- [Environment variables](/environment-variables)
+- [Self-host quickstart](/self-host-quickstart)
