@@ -843,18 +843,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Track workflow run state from the DAG viewer (source of truth for running status).
   const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
 
-  // For workflow-generated sub-issues, fetch the node run so control actions
-  // (take over / hand back / open session / finalize) can be surfaced here too.
-  const isWorkflowOrigin = issue?.origin_type === "workflow" && !!issue?.origin_id;
-  const { data: nodeRuns = [] } = useQuery({
-    ...workflowNodeRunsOptions(wsId, issue?.workflow_id ?? "", issue?.workflow_run_id ?? ""),
-    enabled: isWorkflowOrigin && !!issue?.workflow_id && !!issue?.workflow_run_id,
-  });
-  const originNodeRun: WorkflowNodeRun | undefined = useMemo(
-    () => nodeRuns.find((nr) => nr.id === issue?.origin_id),
-    [nodeRuns, issue?.origin_id],
-  );
-
   // Fire `onDelete` once when the issue transitions from loaded to missing.
   // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
   // be notified directly — instead, the detail page observes its own cache
@@ -1055,6 +1043,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     enabled: !!parentIssueId,
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
+
+  // For workflow-generated sub-issues, fetch the node run so control actions
+  // (take over / hand back / open session / finalize) can be surfaced here too.
+  // Older sub-issues may not have workflow_id/workflow_run_id stamped, so fall
+  // back to the parent issue's workflow fields when available.
+  const isWorkflowOrigin = issue?.origin_type === "workflow" && !!issue?.origin_id;
+  const effectiveWorkflowId = issue?.workflow_id ?? parentIssue?.workflow_id;
+  const effectiveWorkflowRunId = issue?.workflow_run_id ?? parentIssue?.workflow_run_id;
+  const { data: nodeRuns = [] } = useQuery({
+    ...workflowNodeRunsOptions(wsId, effectiveWorkflowId ?? "", effectiveWorkflowRunId ?? ""),
+    enabled: isWorkflowOrigin && !!effectiveWorkflowId && !!effectiveWorkflowRunId,
+  });
+  const originNodeRun: WorkflowNodeRun | undefined = useMemo(
+    () => nodeRuns.find((nr) => nr.id === issue?.origin_id),
+    [nodeRuns, issue?.origin_id],
+  );
 
   // Project segment in the breadcrumb. The issue's project_id is the source of
   // truth — same URL renders the same breadcrumb regardless of entry path.
