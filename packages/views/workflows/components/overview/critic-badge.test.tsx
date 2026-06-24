@@ -7,7 +7,7 @@ import type { WorkflowNode, Agent } from "@multica/core/types";
 const MOCK_CRITIC_NODE: WorkflowNode = {
   id: "critic-1",
   workflow_id: "wf-1",
-  title: "评估器",
+  title: "evaluator",
   description: "",
   position_x: 0, position_y: 0,
   format_schema: null,
@@ -25,8 +25,8 @@ const MOCK_CRITIC_AGENT: Agent = {
   id: "agent-critic-1",
   workspace_id: "ws-1",
   runtime_id: "rt-1",
-  name: "审核师",
-  description: "负责代码审查",
+  name: "Reviewer",
+  description: "Code reviewer",
   instructions: "", avatar_url: null,
   runtime_mode: "cloud", runtime_config: {},
   custom_env: {}, custom_args: [],
@@ -53,19 +53,30 @@ describe("CriticBadge", () => {
   it("renders critic agent name", () => {
     const onClick = vi.fn();
     render(<CriticBadge node={MOCK_CRITIC_NODE} criticAgent={MOCK_CRITIC_AGENT} onClick={onClick} />);
-    expect(screen.getByText("审核师")).toBeInTheDocument();
+    expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 
   it("falls back to node title when critic agent is null", () => {
     const onClick = vi.fn();
     render(<CriticBadge node={MOCK_CRITIC_NODE} criticAgent={null} onClick={onClick} />);
-    expect(screen.getByText("评估器")).toBeInTheDocument();
+    expect(screen.getByText("evaluator")).toBeInTheDocument();
   });
 
-  it("renders agent model when criticAgent is provided", () => {
+  it("does not render model text (removed in compact version)", () => {
     const onClick = vi.fn();
     render(<CriticBadge node={MOCK_CRITIC_NODE} criticAgent={MOCK_CRITIC_AGENT} onClick={onClick} />);
-    expect(screen.getByText("claude-sonnet-4-6")).toBeInTheDocument();
+    expect(screen.queryByText(/claude-sonnet/)).not.toBeInTheDocument();
+  });
+
+  it("does not render ArrowUpRight icon (removed in compact version)", () => {
+    const onClick = vi.fn();
+    const { container } = render(<CriticBadge node={MOCK_CRITIC_NODE} criticAgent={MOCK_CRITIC_AGENT} onClick={onClick} />);
+    // ArrowUpRight icon no longer present
+    const arrows = container.querySelectorAll("svg");
+    const hasArrowUpRight = Array.from(arrows).some(
+      (svg) => svg.outerHTML.includes("ArrowUpRight") || svg.getAttribute("class")?.includes("lucide-arrow-up")
+    );
+    expect(hasArrowUpRight).toBe(false);
   });
 
   it("fires onClick when clicked", () => {
@@ -73,5 +84,20 @@ describe("CriticBadge", () => {
     render(<CriticBadge node={MOCK_CRITIC_NODE} criticAgent={MOCK_CRITIC_AGENT} onClick={onClick} />);
     fireEvent.click(screen.getByTestId("critic-badge-critic-1"));
     expect(onClick).toHaveBeenCalledWith("critic-1", "critic");
+  });
+
+  it("calls elementRef callback with the DOM element", () => {
+    const onClick = vi.fn();
+    const refs: (HTMLButtonElement | null)[] = [];
+    render(
+      <CriticBadge
+        node={MOCK_CRITIC_NODE}
+        criticAgent={MOCK_CRITIC_AGENT}
+        onClick={onClick}
+        elementRef={(el) => refs.push(el)}
+      />,
+    );
+    expect(refs.length).toBeGreaterThan(0);
+    expect(refs[0]).toBeInstanceOf(HTMLButtonElement);
   });
 });
