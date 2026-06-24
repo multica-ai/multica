@@ -261,6 +261,28 @@ func TestLoadConfig_AutoUpdateDefault_SelfHostOff(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_SharedMemoryRecallFromEnvironment(t *testing.T) {
+	stageFakeAgent(t)
+	vault := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "recall.jsonl")
+	t.Setenv("MULTICA_SHARED_MEMORY_VAULT", vault)
+	t.Setenv("MULTICA_SHARED_MEMORY_MAX_HITS", "4")
+	t.Setenv("MULTICA_SHARED_MEMORY_MAX_BYTES", "8192")
+	t.Setenv("MULTICA_SHARED_MEMORY_INDEX_MAX_AGE", "48h")
+	t.Setenv("MULTICA_SHARED_MEMORY_LOG", logPath)
+
+	cfg, err := LoadConfig(Overrides{ServerURL: "http://localhost:8080", WorkspacesRoot: t.TempDir()})
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if cfg.SharedMemoryVault != vault || cfg.SharedMemoryMaxHits != 4 || cfg.SharedMemoryMaxBytes != 8192 {
+		t.Fatalf("shared memory config = %#v", cfg)
+	}
+	if cfg.SharedMemoryIndexMaxAge != 48*time.Hour || cfg.SharedMemoryLogPath != logPath {
+		t.Fatalf("shared memory age/log = %s/%q", cfg.SharedMemoryIndexMaxAge, cfg.SharedMemoryLogPath)
+	}
+}
+
 // TestLoadConfig_AutoUpdateDefault_CloudOn confirms the symmetric case: a
 // daemon pointed at Multica's hosted cloud keeps the historical opt-in
 // auto-update default. We pass the WSS form of the URL to also exercise that

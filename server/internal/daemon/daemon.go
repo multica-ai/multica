@@ -3543,7 +3543,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}()
 	}
 
-	prompt := BuildPrompt(task, provider)
+	recallResult := d.runSharedMemoryRecall(ctx, task)
+	prompt := prependRecallBundle(BuildPrompt(task, provider), &recallResult)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).

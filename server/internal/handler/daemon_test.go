@@ -690,6 +690,48 @@ func TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntime_PopulatesIssueRecallQueryFields(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Recall query claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Recall query claim agent")
+	const title = "Implement bounded shared-memory recall"
+	const description = "Load an index before selecting at most five relevant notes."
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET title = $1, description = $2 WHERE id = $3`, title, description, issueID); err != nil {
+		t.Fatalf("update issue recall fields: %v", err)
+	}
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "recall-query-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID               string `json:"id"`
+			IssueTitle       string `json:"issue_title"`
+			IssueDescription string `json:"issue_description"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil || resp.Task.ID != taskID {
+		t.Fatalf("expected claimed task %s, got %#v", taskID, resp.Task)
+	}
+	if resp.Task.IssueTitle != title || resp.Task.IssueDescription != description {
+		t.Fatalf("issue recall fields = %q/%q, want %q/%q", resp.Task.IssueTitle, resp.Task.IssueDescription, title, description)
+	}
+}
+
 func TestClaimTaskByRuntime_MissingRuntimeOwnerCancelsAndRejects(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

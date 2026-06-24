@@ -127,6 +127,35 @@ The tighter of the two wins. If your daemon is already running 20 tasks, new tas
 
 If you see tasks stuck in `queued` without moving to `dispatched`, one of these two limits is usually saturated.
 
+## Bounded shared-memory recall
+
+A local daemon can inject a bounded recall bundle from a canonical Ars Contexta vault before each agent task. Configure the vault on the machine that runs the daemon:
+
+```bash
+export MULTICA_SHARED_MEMORY_VAULT="/absolute/path/to/vault"
+multica recall index --vault "$MULTICA_SHARED_MEMORY_VAULT"
+multica daemon restart
+```
+
+The indexer reads only `notes/**/*.md`. It excludes `self/`, operational files, `MEMORY.md`, aggregated agent-memory indexes, unnamed files, and sync-conflict files. Every task receives a visible `hit`, `no_hit`, or `controlled_error` status; recall failure never blocks the task.
+
+Optional limits:
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `MULTICA_SHARED_MEMORY_MAX_HITS` | `5` | Maximum selected notes; values above 5 are rejected |
+| `MULTICA_SHARED_MEMORY_MAX_BYTES` | `12288` | Maximum rendered bundle size |
+| `MULTICA_SHARED_MEMORY_INDEX_MAX_AGE` | `168h` | Maximum accepted index age |
+| `MULTICA_SHARED_MEMORY_LOG` | profile-local `logs/recall.jsonl` | Append-only status and diagnostics log |
+
+Use the same engine manually for diagnosis:
+
+```bash
+multica recall query --vault "$MULTICA_SHARED_MEMORY_VAULT" --issue MUL-123 --comment "current request"
+```
+
+The query combines the issue title, description, and current comment. Output includes the index version plus each hit's path, filesystem recency, relevance score, and bounded excerpt.
+
 ## What happens to in-flight tasks after a daemon crash
 
 When the daemon crashes or is force-killed, the tasks it had picked up are left in `dispatched` or `running`. On the next start, the daemon tells the server: "these tasks are no longer mine, please mark them failed." The server flips them to `failed` with reason `runtime_recovery` — for retryable sources, the tasks are automatically requeued.

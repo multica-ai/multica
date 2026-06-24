@@ -224,11 +224,13 @@ type ProjectResourceData struct {
 }
 
 type AgentTaskResponse struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	RuntimeID   string `json:"runtime_id"`
-	IssueID     string `json:"issue_id"`
-	WorkspaceID string `json:"workspace_id"`
+	ID               string `json:"id"`
+	AgentID          string `json:"agent_id"`
+	RuntimeID        string `json:"runtime_id"`
+	IssueID          string `json:"issue_id"`
+	IssueTitle       string `json:"issue_title,omitempty"`
+	IssueDescription string `json:"issue_description,omitempty"`
+	WorkspaceID      string `json:"workspace_id"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —

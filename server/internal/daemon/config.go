@@ -60,6 +60,9 @@ const (
 	DefaultGCOrphanTTL             = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
 	DefaultGCArtifactTTL           = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
 	DefaultAutoUpdateCheckInterval = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
+	DefaultSharedMemoryMaxHits     = 5
+	DefaultSharedMemoryMaxBytes    = 12 * 1024
+	DefaultSharedMemoryIndexMaxAge = 7 * 24 * time.Hour
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -102,6 +105,11 @@ type Config struct {
 	ClaudeArgs                     []string
 	CodexArgs                      []string
 	CodebuddyArgs                  []string
+	SharedMemoryVault              string
+	SharedMemoryMaxHits            int
+	SharedMemoryMaxBytes           int
+	SharedMemoryIndexMaxAge        time.Duration
+	SharedMemoryLogPath            string
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
 	// executable path to use for that profile on THIS machine (MUL-3284).
@@ -436,6 +444,31 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	sharedMemoryVault := strings.TrimSpace(os.Getenv("MULTICA_SHARED_MEMORY_VAULT"))
+	sharedMemoryMaxHits, err := intFromEnv("MULTICA_SHARED_MEMORY_MAX_HITS", DefaultSharedMemoryMaxHits)
+	if err != nil {
+		return Config{}, err
+	}
+	if sharedMemoryMaxHits < 1 || sharedMemoryMaxHits > DefaultSharedMemoryMaxHits {
+		return Config{}, fmt.Errorf("MULTICA_SHARED_MEMORY_MAX_HITS must be between 1 and %d", DefaultSharedMemoryMaxHits)
+	}
+	sharedMemoryMaxBytes, err := intFromEnv("MULTICA_SHARED_MEMORY_MAX_BYTES", DefaultSharedMemoryMaxBytes)
+	if err != nil {
+		return Config{}, err
+	}
+	if sharedMemoryMaxBytes < 512 {
+		return Config{}, fmt.Errorf("MULTICA_SHARED_MEMORY_MAX_BYTES must be at least 512")
+	}
+	sharedMemoryIndexMaxAge, err := durationFromEnv("MULTICA_SHARED_MEMORY_INDEX_MAX_AGE", DefaultSharedMemoryIndexMaxAge)
+	if err != nil {
+		return Config{}, err
+	}
+	sharedMemoryLogPath := strings.TrimSpace(os.Getenv("MULTICA_SHARED_MEMORY_LOG"))
+	if sharedMemoryLogPath == "" {
+		if profileDir, profileErr := cli.ProfileDir(profile); profileErr == nil {
+			sharedMemoryLogPath = filepath.Join(profileDir, "logs", "recall.jsonl")
+		}
+	}
 
 	// Health port: override > default
 	healthPort := DefaultHealthPort
@@ -527,6 +560,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
 		CodebuddyArgs:                  codebuddyArgs,
+		SharedMemoryVault:              sharedMemoryVault,
+		SharedMemoryMaxHits:            sharedMemoryMaxHits,
+		SharedMemoryMaxBytes:           sharedMemoryMaxBytes,
+		SharedMemoryIndexMaxAge:        sharedMemoryIndexMaxAge,
+		SharedMemoryLogPath:            sharedMemoryLogPath,
 		ProfileCommandOverrides:        profileCommandOverrides,
 	}, nil
 }
