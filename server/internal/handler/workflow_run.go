@@ -48,24 +48,27 @@ type WorkflowRunResponse struct {
 }
 
 type WorkflowNodeRunResponse struct {
-	ID              string          `json:"id"`
-	WorkflowRunID   string          `json:"workflow_run_id"`
-	WorkflowNodeID  string          `json:"workflow_node_id"`
-	NodeTitle       string          `json:"node_title"`
-	Status          string          `json:"status"`
-	RetryCount      int32           `json:"retry_count"`
-	WorkerType      string          `json:"worker_type"`
-	WorkerID        *string         `json:"worker_id"`
-	WorkerOutput    json.RawMessage `json:"worker_output"`
-	CriticType      string          `json:"critic_type"`
-	CriticID        *string         `json:"critic_id"`
-	CriticOutput    json.RawMessage `json:"critic_output"`
-	CriticComment   string          `json:"critic_comment"`
-	AgentTaskID     *string         `json:"agent_task_id"`
-	StartedAt       *string         `json:"started_at"`
-	CompletedAt     *string         `json:"completed_at"`
-	CreatedAt       string          `json:"created_at"`
-	UpdatedAt       string          `json:"updated_at"`
+	ID             string          `json:"id"`
+	WorkflowRunID  string          `json:"workflow_run_id"`
+	WorkflowNodeID string          `json:"workflow_node_id"`
+	NodeTitle      string          `json:"node_title"`
+	Status         string          `json:"status"`
+	RetryCount     int32           `json:"retry_count"`
+	WorkerType     string          `json:"worker_type"`
+	WorkerID       *string         `json:"worker_id"`
+	WorkerOutput   json.RawMessage `json:"worker_output"`
+	CriticType     string          `json:"critic_type"`
+	CriticID       *string         `json:"critic_id"`
+	CriticOutput   json.RawMessage `json:"critic_output"`
+	CriticComment  string          `json:"critic_comment"`
+	AgentTaskID    *string         `json:"agent_task_id"`
+	RuntimeID      *string         `json:"runtime_id"`
+	DeviceID       *string         `json:"device_id"`
+	SessionID      *string         `json:"session_id"`
+	StartedAt      *string         `json:"started_at"`
+	CompletedAt    *string         `json:"completed_at"`
+	CreatedAt      string          `json:"created_at"`
+	UpdatedAt      string          `json:"updated_at"`
 }
 
 // ── Converters ───────────────────────────────────────────────────────────────
@@ -103,6 +106,9 @@ func workflowNodeRunToResponse(nr db.MulticaWorkflowNodeRun) WorkflowNodeRunResp
 		CriticOutput:   json.RawMessage(nr.CriticOutput),
 		CriticComment:  nr.CriticComment.String,
 		AgentTaskID:    uuidToPtr(nr.AgentTaskID),
+		RuntimeID:      uuidToPtr(nr.RuntimeID),
+		DeviceID:       textToPtr(nr.DeviceID),
+		SessionID:      textToPtr(nr.SessionID),
 		StartedAt:      timestampToPtr(nr.StartedAt),
 		CompletedAt:    timestampToPtr(nr.CompletedAt),
 		CreatedAt:      timestampToString(nr.CreatedAt),
@@ -218,26 +224,7 @@ func (h *Handler) GetWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	}
 	nodeRunResp := make([]WorkflowNodeRunResponse, len(nodeRuns))
 	for i, nr := range nodeRuns {
-		nodeRunResp[i] = workflowNodeRunToResponse(db.MulticaWorkflowNodeRun{
-		ID:             nr.ID,
-		WorkflowRunID:  nr.WorkflowRunID,
-		WorkflowNodeID: nr.WorkflowNodeID,
-		NodeTitle:      nr.NodeTitle,
-		Status:         nr.Status,
-		RetryCount:     nr.RetryCount,
-		WorkerType:     nr.WorkerType,
-		WorkerID:       nr.WorkerID,
-		WorkerOutput:   nr.WorkerOutput,
-		CriticType:     nr.CriticType,
-		CriticID:       nr.CriticID,
-		CriticOutput:   nr.CriticOutput,
-		CriticComment:  nr.CriticComment,
-		AgentTaskID:    nr.AgentTaskID,
-		StartedAt:      nr.StartedAt,
-		CompletedAt:    nr.CompletedAt,
-		CreatedAt:      nr.CreatedAt,
-		UpdatedAt:      nr.UpdatedAt,
-	})
+		nodeRunResp[i] = workflowNodeRunToResponse(nr)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -618,25 +605,28 @@ func (h *Handler) ListMyWorkflowTasks(w http.ResponseWriter, r *http.Request) {
 	resp := make([]WorkflowNodeRunResponse, len(nodeRuns))
 	for i, nr := range nodeRuns {
 		resp[i] = workflowNodeRunToResponse(db.MulticaWorkflowNodeRun{
-		ID:             nr.ID,
-		WorkflowRunID:  nr.WorkflowRunID,
-		WorkflowNodeID: nr.WorkflowNodeID,
-		NodeTitle:      nr.NodeTitle,
-		Status:         nr.Status,
-		RetryCount:     nr.RetryCount,
-		WorkerType:     nr.WorkerType,
-		WorkerID:       nr.WorkerID,
-		WorkerOutput:   nr.WorkerOutput,
-		CriticType:     nr.CriticType,
-		CriticID:       nr.CriticID,
-		CriticOutput:   nr.CriticOutput,
-		CriticComment:  nr.CriticComment,
-		AgentTaskID:    nr.AgentTaskID,
-		StartedAt:      nr.StartedAt,
-		CompletedAt:    nr.CompletedAt,
-		CreatedAt:      nr.CreatedAt,
-		UpdatedAt:      nr.UpdatedAt,
-	})
+			ID:             nr.ID,
+			WorkflowRunID:  nr.WorkflowRunID,
+			WorkflowNodeID: nr.WorkflowNodeID,
+			NodeTitle:      nr.NodeTitle,
+			Status:         nr.Status,
+			RetryCount:     nr.RetryCount,
+			WorkerType:     nr.WorkerType,
+			WorkerID:       nr.WorkerID,
+			WorkerOutput:   nr.WorkerOutput,
+			CriticType:     nr.CriticType,
+			CriticID:       nr.CriticID,
+			CriticOutput:   nr.CriticOutput,
+			CriticComment:  nr.CriticComment,
+			AgentTaskID:    nr.AgentTaskID,
+			RuntimeID:      nr.RuntimeID,
+			DeviceID:       nr.DeviceID,
+			SessionID:      nr.SessionID,
+			StartedAt:      nr.StartedAt,
+			CompletedAt:    nr.CompletedAt,
+			CreatedAt:      nr.CreatedAt,
+			UpdatedAt:      nr.UpdatedAt,
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": resp, "total": len(resp)})
 }
@@ -646,15 +636,27 @@ func paginationFromQuery(r *http.Request) (int32, int32) { return 50, 0 }
 func (h *Handler) ListWorkflowNodeRuns(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	wf, ok := h.loadWorkflowInWorkspace(w, r, id)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	runID := chi.URLParam(r, "runId")
 	runUUID, ok := parseUUIDOrBadRequest(w, runID, "run id")
-	if !ok { return }
+	if !ok {
+		return
+	}
 	run, err := h.Queries.GetWorkflowRun(r.Context(), runUUID)
-	if err != nil { writeError(w, http.StatusNotFound, "run not found"); return }
-	if uuidToString(run.WorkflowID) != uuidToString(wf.ID) { writeError(w, http.StatusNotFound, "run not found"); return }
+	if err != nil {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	if uuidToString(run.WorkflowID) != uuidToString(wf.ID) {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
 	nodeRuns, err := h.Queries.ListWorkflowNodeRunsByRun(r.Context(), run.ID)
-	if err != nil { nodeRuns = nil }
+	if err != nil {
+		nodeRuns = nil
+	}
 	resp := make([]WorkflowNodeRunResponse, 0, len(nodeRuns))
 	for _, nr := range nodeRuns {
 		resp = append(resp, workflowNodeRunToResponse(nr))

@@ -818,6 +818,7 @@ const WorkflowNodeRunSchema = z.object({
   agent_task_id: z.string().nullable().default(null),
   session_id: z.string().nullable().default(null),
   runtime_id: z.string().nullable().default(null),
+  device_id: z.string().nullable().default(null),
   started_at: z.string().nullable().default(null),
   completed_at: z.string().nullable().default(null),
   created_at: z.string().default(""),

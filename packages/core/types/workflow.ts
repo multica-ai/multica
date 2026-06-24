@@ -104,6 +104,8 @@ export interface WorkflowNodeRun {
   session_id: string | null;
   /** Runtime that owns the session for this node run, if any. */
   runtime_id: string | null;
+  /** Device identifier for the runtime/session bound to this node run, if any. */
+  device_id: string | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
