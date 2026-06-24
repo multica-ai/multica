@@ -123,7 +123,7 @@ import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
 // CEREBRO-PATCH(session-activity-context): FIR-1769 P2/P3 — per-session activity fold + context hairline.
 // CEREBRO-PATCH(session-review-fir1787): context indicator moves above the composer (SessionContextBar) per FIR-1787 review.
 // CEREBRO-PATCH(thread-session-fir1874): thread = session — group by thread, state from resolved_at; handoff on Send.
-import { SessionHeader, SessionHandoff, SessionContextBar, SessionHandoffMenu, groupTimelineByThread, activeSessionId as computeActiveSessionId, partitionSessionGroups, hasHandoffBrief, useSessions, sessionIdForComment } from "@multica/cerebro-sessions";
+import { SessionHeader, SessionHandoff, SessionContextBar, SessionHandoffMenu, HandoffArmedBanner, groupTimelineByThread, activeSessionId as computeActiveSessionId, partitionSessionGroups, hasHandoffBrief, useSessions, useSubmitWithHandoff, sessionIdForComment, type OpenThread } from "@multica/cerebro-sessions";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -1097,6 +1097,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
         .map((sg) => ({ id: sg.session.id, name: sg.session.name })),
     [sessionThreadGroups],
   );
+  // CEREBRO-PATCH(handoff-arm-fir1874): the Send-button menu arms a handoff; it fires on Send (Jesper A).
+  const [armedHandoff, setArmedHandoff] = useState<OpenThread | null>(null);
+  useEffect(() => {
+    if (armedHandoff && !openThreads.some((t) => t.id === armedHandoff.id)) setArmedHandoff(null);
+  }, [armedHandoff, openThreads]);
+  const submitWithHandoff = useSubmitWithHandoff(id, armedHandoff ? { rootCommentId: armedHandoff.id } : null, () => setArmedHandoff(null), submitComment);
   const [openSessionId, setOpenSessionId] = useState<string>("default");
   useEffect(() => {
     setOpenSessionId(activeSessionId);
@@ -2727,10 +2733,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               {/* CEREBRO-PATCH(thread-session-fir1874): Handoff folds into the Send button. */}
               <CommentComposer
                 issueId={id}
-                onSubmit={submitComment}
+                onSubmit={sessionsEnabled ? submitWithHandoff : submitComment}
                 pinnable
                 triggerAgentId={triggerAgentId}
-                sendMenu={sessionsEnabled ? <SessionHandoffMenu issueId={id} openThreads={openThreads} /> : undefined}
+                // CEREBRO-PATCH(handoff-arm-fir1874): arm in the menu, show the banner, fire on Send.
+                sendMenu={sessionsEnabled ? <SessionHandoffMenu openThreads={openThreads} armedId={armedHandoff?.id ?? null} onArm={setArmedHandoff} /> : undefined}
+                topBanner={sessionsEnabled && armedHandoff ? <HandoffArmedBanner name={armedHandoff.name} onCancel={() => setArmedHandoff(null)} /> : undefined}
               />
             </div>
               </TabsContent>

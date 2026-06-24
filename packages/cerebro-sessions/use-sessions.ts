@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getContextTimeline, getContextUsage, getUsageBreakdown, listSessions, startFresh, updateSession } from "./api";
 import type { HandoffActionInput } from "./types";
@@ -51,6 +52,31 @@ export function useStartFresh(issueId: string) {
     mutationFn: (input: HandoffActionInput) => startFresh(issueId, input),
     onSuccess: () => qc.invalidateQueries({ queryKey: key(issueId) }),
   });
+}
+
+// FIR-1874 point 2 (Jesper A): wrap a comment submit so that, when a handoff is
+// armed, pressing Send first resolves the chosen thread + stores its summary
+// (the handoff), then posts the new comment — which becomes the fresh session
+// carrying that summary. The handoff runs first so it fails closed: if it
+// errors, the comment is not posted and the draft is preserved. `onDone` clears
+// the armed state after a successful send.
+export function useSubmitWithHandoff(
+  issueId: string,
+  armed: { rootCommentId: string } | null,
+  onDone: () => void,
+  submit: (content: string, attachmentIds?: string[]) => Promise<void>,
+) {
+  const handoff = useStartFresh(issueId);
+  return useCallback(
+    async (content: string, attachmentIds?: string[]) => {
+      if (armed) {
+        await handoff.mutateAsync({ root_comment_id: armed.rootCommentId });
+      }
+      await submit(content, attachmentIds);
+      if (armed) onDone();
+    },
+    [issueId, armed, handoff, onDone, submit],
+  );
 }
 
 export function useUpdateSession(issueId: string) {

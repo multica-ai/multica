@@ -32,6 +32,9 @@ export interface CommentComposerProps {
   /** New-comment only: a control folded in beside Send (FIR-1874 — "Start new
    *  session with Handoff"). */
   sendMenu?: ReactNode;
+  /** New-comment only: a banner pinned across the top of the field (FIR-1874 —
+   *  the armed-handoff indicator). */
+  topBanner?: ReactNode;
 }
 
 export function CommentComposer({
@@ -46,6 +49,7 @@ export function CommentComposer({
   size = "default",
   placeholder,
   sendMenu,
+  topBanner,
 }: CommentComposerProps) {
   const isReply = variant === "reply";
   const draft = useCommentDraft(
@@ -71,6 +75,7 @@ export function CommentComposer({
       avatar={isReply ? avatar : null}
       pin={isReply ? "sticky-bottom" : pinnable ? "fixed" : "none"}
       sendMenu={isReply ? undefined : sendMenu}
+      topSlot={isReply ? undefined : topBanner}
       suppressPlaceholder={!!triggerAgentId}
       hasTopOverlay={!!triggerAgentId}
       confirmBeforeSend={confirmBeforeSend}

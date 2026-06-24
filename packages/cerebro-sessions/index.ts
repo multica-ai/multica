@@ -5,6 +5,7 @@ export * from "./context-estimate";
 export * from "./session-header";
 export * from "./session-handoff";
 export * from "./session-handoff-menu";
+export * from "./handoff-armed-banner";
 export * from "./context-hairline";
 export * from "./active-context-hairline";
 export * from "./context-bar";

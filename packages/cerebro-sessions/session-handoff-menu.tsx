@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ScrollText } from "lucide-react";
+import { Check, ChevronDown, ScrollText } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -10,31 +10,30 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { useStartFresh } from "./use-sessions";
 
 export interface OpenThread {
   id: string; // thread root comment id
   name: string;
 }
 
-// FIR-1874 point 2: the Send-button fold-out. "Start new session with Handoff"
-// closes a chosen OPEN thread — resolving its root (= closing the session) and
-// storing a handoff on its row — so the next comment starts a fresh session. When
-// several threads are open the user picks which one to hand off. Renders nothing
-// when no thread is open (there is nothing to hand off).
+// FIR-1874 point 2 (Jesper A): the Send-button fold-out arms "Start new session
+// with Handoff". Picking an OPEN thread does NOT close it immediately — it arms
+// the composer (the host shows a banner across the field), and the handoff (the
+// chosen thread is resolved and a summary stored, so the next comment starts a
+// fresh session) only fires when the user presses Send. The X on the banner
+// cancels it before then. When several threads are open the user picks which one
+// to hand off; the armed one shows a check. Renders nothing when no thread is
+// open (there is nothing to hand off).
 export function SessionHandoffMenu({
-  issueId,
   openThreads,
+  armedId,
+  onArm,
 }: {
-  issueId: string;
   openThreads: OpenThread[];
+  armedId?: string | null;
+  onArm: (thread: OpenThread) => void;
 }) {
-  const handoff = useStartFresh(issueId);
   if (openThreads.length === 0) return null;
-
-  async function start(rootCommentId: string) {
-    await handoff.mutateAsync({ root_comment_id: rootCommentId });
-  }
 
   return (
     <DropdownMenu>
@@ -45,7 +44,6 @@ export function SessionHandoffMenu({
             variant="secondary"
             size="icon-sm"
             aria-label="Start new session with Handoff"
-            disabled={handoff.isPending}
           >
             <ChevronDown />
           </Button>
@@ -55,8 +53,12 @@ export function SessionHandoffMenu({
         <DropdownMenuGroup>
           <DropdownMenuLabel>Start new session with Handoff</DropdownMenuLabel>
           {openThreads.map((thread) => (
-            <DropdownMenuItem key={thread.id} onClick={() => void start(thread.id)}>
-              <ScrollText className="h-3.5 w-3.5" />
+            <DropdownMenuItem key={thread.id} onClick={() => onArm(thread)}>
+              {armedId === thread.id ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : (
+                <ScrollText className="h-3.5 w-3.5" />
+              )}
               Hand off: {thread.name}
             </DropdownMenuItem>
           ))}

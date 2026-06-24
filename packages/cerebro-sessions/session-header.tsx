@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight, Pencil, ScrollText } from "lucide-react";
+import { ChevronRight, ScrollText } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { cn } from "@multica/ui/lib/utils";
 import type { Session } from "./types";
@@ -61,8 +61,24 @@ export function SessionHeader({
     await update.mutateAsync({ sessionId: session.id, input: { name } });
   }
 
+  // Jesper (FIR-1874): rename happens inline by double-clicking the name. The
+  // stopPropagation keeps a double-click on a collapsed session's name from also
+  // toggling its fold.
   const title = editing ? null : (
-    <span className="truncate text-sm font-semibold">{session.name}</span>
+    <span
+      className={cn("truncate text-sm font-semibold", canRename && "cursor-text")}
+      onDoubleClick={
+        canRename
+          ? (e) => {
+              e.stopPropagation();
+              startEdit();
+            }
+          : undefined
+      }
+      title={canRename ? "Double-click to rename" : undefined}
+    >
+      {session.name}
+    </span>
   );
 
   return (
@@ -111,16 +127,6 @@ export function SessionHeader({
             >
               <ScrollText className="h-3.5 w-3.5" />
               Handoff
-            </button>
-          ) : null}
-          {canRename ? (
-            <button
-              type="button"
-              onClick={startEdit}
-              className="text-muted-foreground/60 transition-colors hover:text-foreground"
-              aria-label="Rename session"
-            >
-              <Pencil className="h-3.5 w-3.5" />
             </button>
           ) : null}
           <span
