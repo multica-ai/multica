@@ -13,10 +13,10 @@
 -- Indexes mirror the existing created_at ones so the order_at-backed list /
 -- pagination / reply queries keep their plans.
 
-ALTER TABLE channel_message ADD COLUMN order_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE channel_message ADD COLUMN IF NOT EXISTS order_at timestamptz NOT NULL DEFAULT now();
 UPDATE channel_message SET order_at = created_at;
 
-CREATE INDEX idx_channel_message_channel_toplevel_order
+CREATE INDEX IF NOT EXISTS idx_channel_message_channel_toplevel_order
     ON channel_message(channel_id, order_at ASC) WHERE thread_id IS NULL;
-CREATE INDEX idx_channel_message_thread_order
+CREATE INDEX IF NOT EXISTS idx_channel_message_thread_order
     ON channel_message(thread_id, order_at ASC);

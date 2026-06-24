@@ -60,6 +60,6 @@ WHERE id IN (SELECT loser_id FROM tmp_thread_dedup);
 
 DROP TABLE tmp_thread_dedup;
 
-CREATE UNIQUE INDEX idx_channel_thread_root_message_unique
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_thread_root_message_unique
     ON channel_thread(root_message_id)
     WHERE root_message_id IS NOT NULL;
