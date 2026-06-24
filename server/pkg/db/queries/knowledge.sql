@@ -765,7 +765,10 @@ RETURNING *;
 SELECT *
 FROM knowledge_candidate
 WHERE workspace_id = sqlc.arg('workspace_id')
-  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+  AND (
+    (sqlc.narg('status')::text IS NULL AND status <> 'rejected')
+    OR status = sqlc.narg('status')
+  )
   AND (sqlc.narg('source_type')::text IS NULL OR source_type = sqlc.narg('source_type'))
   AND (sqlc.narg('issue_id')::uuid IS NULL OR issue_id = sqlc.narg('issue_id'))
 ORDER BY score DESC, updated_at DESC

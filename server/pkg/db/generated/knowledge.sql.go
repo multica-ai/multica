@@ -1216,7 +1216,10 @@ const listKnowledgeCandidates = `-- name: ListKnowledgeCandidates :many
 SELECT id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at, evidence
 FROM knowledge_candidate
 WHERE workspace_id = $1
-  AND ($2::text IS NULL OR status = $2)
+  AND (
+    ($2::text IS NULL AND status <> 'rejected')
+    OR status = $2
+  )
   AND ($3::text IS NULL OR source_type = $3)
   AND ($4::uuid IS NULL OR issue_id = $4)
 ORDER BY score DESC, updated_at DESC

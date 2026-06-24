@@ -1003,8 +1003,22 @@ func TestKnowledgeCandidateIssueDoneWithoutAgentTaskRejected(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode candidates: %v", err)
 	}
+	if len(resp.Candidates) != 0 {
+		t.Fatalf("default candidate count = %d, want 0", len(resp.Candidates))
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/knowledge/candidates?issue_id="+issueID+"&status=rejected", nil)
+	testHandler.ListKnowledgeCandidates(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListKnowledgeCandidates rejected: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	resp.Candidates = nil
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode rejected candidates: %v", err)
+	}
 	if len(resp.Candidates) != 1 {
-		t.Fatalf("candidate count = %d, want 1", len(resp.Candidates))
+		t.Fatalf("rejected candidate count = %d, want 1", len(resp.Candidates))
 	}
 	candidate := resp.Candidates[0]
 	if candidate.Status != "rejected" || candidate.SignalStrength != "none" {
