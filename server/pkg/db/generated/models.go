@@ -719,8 +719,9 @@ type Squad struct {
 	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
 	ArchivedBy   pgtype.UUID        `json:"archived_by"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
-	Instructions        string             `json:"instructions"`
-	MaxConcurrentTasks  int32              `json:"max_concurrent_tasks"`
+	Instructions string             `json:"instructions"`
+	// Maximum concurrent tasks for this squad. 0 means no limit (same semantics as agent.max_concurrent_tasks).
+	MaxConcurrentTasks int32 `json:"max_concurrent_tasks"`
 }
 
 type SquadMember struct {

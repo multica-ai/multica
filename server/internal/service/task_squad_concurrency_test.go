@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -16,11 +17,10 @@ import (
 // (the first word after the sqlc name comment). Exec always succeeds unless
 // releaseErr is set.
 type squadTestDBTX struct {
-	// QueryRow responses, keyed by sqlc query tag.
-	issue      *db.Issue
-	issueErr   error
-	squad      *db.Squad
-	squadErr   error
+	issue        *db.Issue
+	issueErr     error
+	squad        *db.Squad
+	squadErr     error
 	runningCount int64
 	runningErr   error
 	releaseRows  int64
@@ -39,16 +39,17 @@ func (m *squadTestDBTX) Query(_ context.Context, _ string, _ ...interface{}) (pg
 }
 
 func (m *squadTestDBTX) QueryRow(_ context.Context, sql string, args ...interface{}) pgx.Row {
-	// GetIssue: SELECT * FROM issue WHERE id = $1
-	if m.issue != nil || m.issueErr != nil {
+	// Route by sqlc query name comment embedded in the SQL string.
+	// Each generated query starts with "-- name: QueryName :kind".
+	switch {
+	case strings.Contains(sql, "-- name: GetIssue"):
 		return &issueRow{issue: m.issue, err: m.issueErr}
-	}
-	// GetSquad: SELECT * FROM squad WHERE id = $1
-	if m.squad != nil || m.squadErr != nil {
+	case strings.Contains(sql, "-- name: GetSquad"):
 		return &squadRow{squad: m.squad, err: m.squadErr}
+	default:
+		// CountRunningSquadTasks, CountTodayAgentTasks, etc.
+		return &countRow{count: m.runningCount, err: m.runningErr}
 	}
-	// CountRunningSquadTasks / CountTodayAgentTasks
-	return &countRow{count: m.runningCount, err: m.runningErr}
 }
 
 // issueRow implements pgx.Row for GetIssue.
@@ -61,16 +62,26 @@ func (r *issueRow) Scan(dest ...any) error {
 	if r.err != nil {
 		return r.err
 	}
+	if r.issue == nil {
+		return pgx.ErrNoRows
+	}
+	var uuidIdx int
 	for _, d := range dest {
 		switch v := d.(type) {
 		case *pgtype.UUID:
-			*v = r.issue.ID
-		case *string:
-			*v = r.issue.AssigneeType
-		case *pgtype.Text:
-			if v == &r.issue.AssigneeType {
-				// already handled above as string
+			// GetIssue column order: ID(0), WorkspaceID(1), AssigneeID(7),
+			// CreatorID(9), ParentIssueID(11), ProjectID(19), OriginID(22).
+			// maybeReleaseSquadTask only reads AssigneeID (pos 7).
+			if uuidIdx == 7 {
+				*v = r.issue.AssigneeID
+			} else {
+				*v = r.issue.ID
 			}
+			uuidIdx++
+		case *string:
+			*v = ""
+		case *pgtype.Text:
+			*v = r.issue.AssigneeType
 		}
 	}
 	return nil
@@ -85,6 +96,9 @@ type squadRow struct {
 func (r *squadRow) Scan(dest ...any) error {
 	if r.err != nil {
 		return r.err
+	}
+	if r.squad == nil {
+		return pgx.ErrNoRows
 	}
 	for _, d := range dest {
 		switch v := d.(type) {
@@ -126,17 +140,17 @@ func TestMaybeReleaseSquadTask(t *testing.T) {
 
 	noLimitSquad := &db.Squad{ID: squadID, MaxConcurrentTasks: 0}
 	capOneSquad := &db.Squad{ID: squadID, MaxConcurrentTasks: 1}
-	squadIssue := &db.Issue{ID: issueID, AssigneeType: "squad"}
-	agentIssue := &db.Issue{ID: issueID, AssigneeType: "agent"}
+	squadIssue := &db.Issue{ID: issueID, AssigneeType: pgtype.Text{String: "squad", Valid: true}, AssigneeID: squadID}
+	agentIssue := &db.Issue{ID: issueID, AssigneeType: pgtype.Text{String: "agent", Valid: true}}
 
 	task := db.AgentTaskQueue{ID: taskID, IssueID: issueID}
 	taskNoIssue := db.AgentTaskQueue{ID: taskID, IssueID: pgtype.UUID{}}
 
 	tests := []struct {
-		name    string
-		mock    squadTestDBTX
-		task    db.AgentTaskQueue
-		want    bool
+		name       string
+		mock       squadTestDBTX
+		task       db.AgentTaskQueue
+		want       bool
 		wantReason string
 	}{
 		{
@@ -158,11 +172,21 @@ func TestMaybeReleaseSquadTask(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "under limit (1 running, max=1) → true released",
+			name: "at capacity (1 running, max=1) → false (running count includes just-claimed task)",
 			mock: squadTestDBTX{
 				issue:        squadIssue,
 				squad:        capOneSquad,
 				runningCount: 1,
+			},
+			task: task,
+			want: false,
+		},
+		{
+			name: "over capacity (2 running, max=1) → true released",
+			mock: squadTestDBTX{
+				issue:        squadIssue,
+				squad:        capOneSquad,
+				runningCount: 2,
 				releaseRows:  1,
 			},
 			task:       task,
@@ -185,17 +209,17 @@ func TestMaybeReleaseSquadTask(t *testing.T) {
 				issue:        squadIssue,
 				squad:        capOneSquad,
 				runningCount: 2,
-				releaseRows:  0, // another goroutine already touched the task
+				releaseRows:  0,
 			},
-			task:       task,
-			want:       false,
+			task: task,
+			want: false,
 		},
 		{
 			name: "release DB error → false (fail open)",
 			mock: squadTestDBTX{
 				issue:        squadIssue,
 				squad:        capOneSquad,
-				runningCount: 1,
+				runningCount: 2,
 				releaseErr:   pgx.ErrNoRows,
 			},
 			task: task,
@@ -207,7 +231,7 @@ func TestMaybeReleaseSquadTask(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			mock := tc.mock // copy
+			mock := tc.mock
 			q := db.New(&mock)
 			svc := &TaskService{Queries: q}
 
