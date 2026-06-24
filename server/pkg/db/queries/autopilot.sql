@@ -186,12 +186,51 @@ RETURNING *;
 -- parent autopilot has assignee_type='squad', NULL otherwise. The executing
 -- agent_id on agent_task_queue still records who actually ran the work
 -- (the squad leader); squad_id lets reports group by squad without a join.
+--
+-- planned_at carries the canonical UTC fire time for scheduled triggers
+-- (source='schedule'); it stays NULL for manual / webhook / api sources
+-- which have no canonical occurrence. Combined with the partial unique
+-- index uq_autopilot_run_trigger_planned, this gives dispatch-layer
+-- idempotency: a stale-steal retry at the same plan_time cannot create
+-- a second run for the same (trigger_id, planned_at) pair (MUL-3551).
 INSERT INTO autopilot_run (
-    autopilot_id, trigger_id, source, status, trigger_payload, squad_id
+    autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
-    sqlc.narg('squad_id')
+    sqlc.narg('squad_id'), sqlc.narg('planned_at')
 ) RETURNING *;
+
+-- name: GetAutopilotRunByTriggerAndPlanned :one
+-- Idempotent lookup used by DispatchAutopilotForPlan to detect a
+-- crash-during-dispatch retry: if a row already exists for this
+-- (trigger_id, planned_at), the caller reuses it instead of creating a
+-- duplicate. The partial unique index covers the same key, so a race
+-- between "look up then insert" still resolves to a single row — this
+-- query is just the fast path that lets us skip the INSERT when we
+-- can see the prior row clearly. Returns no rows for the (much more
+-- common) first-time dispatch.
+SELECT * FROM autopilot_run
+WHERE trigger_id = $1
+  AND planned_at = $2
+LIMIT 1;
+
+-- name: RecoverPartialAutopilotRun :exec
+-- Recovers a partial-state autopilot_run from a crashed first attempt
+-- (the runner wrote the run row but died before creating the downstream
+-- issue/task) so that a subsequent DispatchAutopilotForPlan call can
+-- create a fresh run at the same (trigger_id, planned_at).
+--
+-- Setting planned_at = NULL clears the partial-unique slot held by
+-- uq_autopilot_run_trigger_planned, letting the new INSERT proceed.
+-- The row stays in autopilot_run as a FAILED record (with a recovery
+-- reason) so ops still see the abandoned attempt in the run history —
+-- it is not silently deleted.
+UPDATE autopilot_run
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'recovered partial dispatch (crashed before downstream creation)',
+    planned_at = NULL
+WHERE id = $1;
 
 -- name: GetAutopilotRun :one
 SELECT * FROM autopilot_run

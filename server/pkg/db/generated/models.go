@@ -152,6 +152,7 @@ type AutopilotRun struct {
 	Result         []byte             `json:"result"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	SquadID        pgtype.UUID        `json:"squad_id"`
+	PlannedAt      pgtype.Timestamptz `json:"planned_at"`
 }
 
 type AutopilotSubscriber struct {
