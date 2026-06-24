@@ -1,0 +1,86 @@
+{
+  "header": "频道",
+  "empty_prompt": "选择一个频道开始聊天",
+  "input_placeholder": "输入消息，支持 Markdown、图片和 @提及",
+  "send_tooltip": "发送 · {{shortcut}}",
+  "invite_only_notice": "仅受邀成员可在此频道发送消息",
+  "no_messages": "还没有消息，发第一条吧",
+  "no_replies": "还没有回复",
+  "reply_placeholder": "回复…",
+  "link_copied": "链接已复制",
+  "copy_failed": "复制失败",
+  "send_failed": "发送失败",
+  "reply_failed": "回复失败",
+  "create_failed": "创建失败",
+  "add_failed": "添加失败",
+  "remove_failed": "移除失败",
+  "update_failed": "更新失败",
+  "channel_created": "频道已创建",
+  "member_added": "成员已添加",
+  "member_removed": "成员已移除",
+  "settings_updated": "频道设置已更新",
+  "replies_count_other": "{{count}} 条回复",
+  "new_group": "新建分组",
+  "new_channel": "新建频道",
+  "group_dialog": {
+    "title": "新建分组",
+    "description": "为频道创建一个新的分组",
+    "name_placeholder": "分组名称",
+    "cancel": "取消",
+    "create": "创建"
+  },
+  "create_channel_dialog": {
+    "title": "创建频道",
+    "description": "创建一个新的频道来讨论话题",
+    "name_placeholder": "频道名称",
+    "desc_placeholder": "描述（可选）",
+    "open": "公开",
+    "invite": "邀请制",
+    "cancel": "取消",
+    "create": "创建"
+  },
+  "context_menu": {
+    "rename": "重命名",
+    "delete_group": "删除分组",
+    "copy_link": "复制链接",
+    "reply": "回复",
+    "convert_issue": "转换为 Issue",
+    "convert_agent": "由 Agent 转为 Issue"
+  },
+  "panel_header": {
+    "replies": "回复",
+    "members_settings": "成员与设置",
+    "participants": "参与者"
+  },
+  "members": {
+    "channel_nature": "频道性质",
+    "nature_description": "控制成员是否需要被添加后才能进入。",
+    "current_members": "当前成员",
+    "remove": "移除",
+    "add_member": "添加成员",
+    "search_placeholder": "搜索成员",
+    "search_description": "按姓名、邮箱或拼音搜索 Workspace 成员。",
+    "already_added": "已添加",
+    "add": "添加",
+    "no_match": "没有匹配成员",
+    "cannot_remove_admin": "只有管理员或频道 Owner 可以移除成员",
+    "cannot_remove_only_owner": "不能移除唯一 Owner"
+  },
+  "task_status": {
+    "queued": "排队中",
+    "dispatched": "已派发",
+    "waiting_directory": "等待目录",
+    "running": "运行中",
+    "completed": "已完成",
+    "failed": "失败",
+    "cancelled": "已取消"
+  },
+  "task_strip": {
+    "view_history": "查看执行历史",
+    "stop": "停止"
+  },
+  "resize_aria": {
+    "channel_list": "调整频道列表宽度",
+    "side_panel": "调整右侧面板宽度"
+  }
+}

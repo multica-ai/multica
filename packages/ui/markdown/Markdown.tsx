@@ -3,10 +3,14 @@ import ReactMarkdown, { type Components, defaultUrlTransform } from 'react-markd
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
+import { useTranslation } from 'react-i18next'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { FileText, Download } from 'lucide-react'
+import { toJsxRuntime } from 'hast-util-to-jsx-runtime'
+import { jsx, jsxs, Fragment } from 'react/jsx-runtime'
+import { FileText, Download, Check, Copy, Trash2 } from 'lucide-react'
+import { isValidElement, useEffect, useState } from 'react'
 import { cn } from '@multica/ui/lib/utils'
 import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
 import { CodeBlock, InlineCode } from './CodeBlock'
@@ -27,8 +31,14 @@ import './markdown.css'
  *
  * - 'full': Rich rendering with beautiful tables, styled code blocks, proper typography
  *   Best for: Documentation, long-form content, when presentation matters
+ *
+ * - 'editor-parity': Rendering that matches the Tiptap editor's readonly output
+ *   Best for: Wiki/Issue readonly content, comment cards
+ *   Uses lowlight (same engine as Tiptap), CodeBlockHeader, tableWrapper div,
+ *   .rich-text-editor.readonly CSS scope, and full preprocessing pipeline
+ *   (including JSON literals + ==mark== highlight syntax).
  */
-export type RenderMode = 'terminal' | 'minimal' | 'full'
+export type RenderMode = 'terminal' | 'minimal' | 'full' | 'editor-parity'
 
 export interface MarkdownProps {
   children: string
@@ -54,8 +64,10 @@ export interface MarkdownProps {
   /**
    * Custom renderer for mention links (e.g. mention://issue/UUID).
    * When not provided, mentions render as a simple styled span.
+   * The `label` parameter carries the link text (e.g. "MUL-123" from
+   * `[MUL-123](mention://issue/uuid)`), useful for fallback display.
    */
-  renderMention?: (props: { type: string; id: string }) => React.ReactNode
+  renderMention?: (props: { type: string; id: string; label?: string }) => React.ReactNode
   /**
    * CDN hostname for file card detection (e.g. "multica-static.copilothub.ai").
    * When provided, enables file card preprocessing and rendering.
@@ -75,12 +87,109 @@ export interface MarkdownProps {
    * the views-package `<Attachment>` component.
    */
   renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode
+  /**
+   * Optional renderer for Mermaid diagrams. When provided and mode is
+   * 'editor-parity', replaces the default code block for ```mermaid fences
+   * with the caller's component (e.g. <MermaidDiagram>).
+   */
+  renderMermaid?: (props: { chart: string }) => React.ReactNode
+  /**
+   * Optional renderer for HTML block previews. When provided and mode is
+   * 'editor-parity', replaces the default code block for ```html fences
+   * with the caller's component (e.g. <HtmlBlockPreview>).
+   */
+  renderHtmlBlock?: (props: { html: string }) => React.ReactNode
+  /**
+   * Optional callback for link hover events. When provided and mode is
+   * 'editor-parity', the outer wrapper ref is passed so the caller can
+   * attach hover listeners for LinkHoverCard behavior.
+   */
+  onLinkHover?: (wrapperRef: React.RefObject<HTMLDivElement | null>) => void
+  /**
+   * Optional post-processing hook applied after the core preprocessing
+   * pipeline (mention shortcodes → linkify → file cards). The views-package
+   * wrapper uses this to inject editor-parity-specific transforms
+   * (preprocessJsonLiterals + highlightToHtml) without pulling those
+   * upstream-owned functions into `@multica/ui`.
+   *
+   * Runs in the same useMemo as the core pipeline, so the result is
+   * memoized together — no extra render pass.
+   */
+  postprocess?: (content: string) => string
 }
 
-// Sanitization schema — extends GitHub defaults to allow code highlighting classes
-// and Multica's internal mention/slash protocols.
+// ---------------------------------------------------------------------------
+// Lowlight lazy-loader — lowlight + the common language set is a sizable
+// dependency that only editor-parity mode (wiki/issue readonly surfaces)
+// needs. We dynamically import only `lowlight` on demand so the chat
+// (minimal/full) static bundle never pays for it. `hast-util-to-jsx-runtime`
+// and `react/jsx-runtime` are statically imported: the former is small and
+// React-free, the latter MUST be the same React instance the component tree
+// uses (a dynamically-imported `react/jsx-runtime` can resolve to a duplicate
+// React copy under pnpm, producing elements a foreign reconciler won't
+// attach). Mirrors `mermaid-diagram.tsx`'s `getMermaid()` shape.
+// ---------------------------------------------------------------------------
+type HighlightFn = (lang: string | undefined, code: string) => React.ReactNode | null
+
+let highlightFnPromise: Promise<HighlightFn> | null = null
+
+function getHighlightFn(): Promise<HighlightFn> {
+  highlightFnPromise ??= import('lowlight').then((lowlightMod) => {
+    // Same engine + language set as Tiptap's CodeBlockLowlight.
+    const lowlight = lowlightMod.createLowlight(lowlightMod.common)
+    return (lang: string | undefined, code: string): React.ReactNode | null => {
+      try {
+        const tree =
+          lang && lang.length > 0
+            ? lowlight.highlight(lang, code)
+            : lowlight.highlightAuto(code)
+        if (tree.children.length === 0) return null
+        return toJsxRuntime(tree, { jsx, jsxs, Fragment })
+      } catch {
+        // Unknown language or lowlight internal error — plain text fallback.
+        return null
+      }
+    }
+  })
+  return highlightFnPromise
+}
+
+/**
+ * Loads the lowlight highlighter on demand and returns it once ready, or
+ * `null` until then. Callers render plain text as a fallback: content stays
+ * visible while the chunk loads, then upgrades to highlighted spans.
+ *
+ * Only `CodeBlockHighlighted` (editor-parity code blocks) calls this, so chat
+ * (minimal/full) never triggers the lowlight load — it never renders that
+ * component.
+ */
+function useCodeHighlighter(): HighlightFn | null {
+  const [fn, setFn] = useState<HighlightFn | null>(null)
+  useEffect(() => {
+    let alive = true
+    void getHighlightFn().then((h) => {
+      if (alive) setFn(() => h)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+  return fn
+}
+
+// Code fences that the `code` renderer returns as a non-<code> React element
+// (Mermaid diagram, HTML preview iframe). The `pre` renderer below unwraps
+// these so the default <pre><code> envelope doesn't clamp their styles.
+const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/
+
+// ---------------------------------------------------------------------------
+// Sanitization schema — extends GitHub defaults to allow code highlighting classes,
+// Multica's internal mention/slash protocols, and <mark> (text highlight emitted
+// by highlightToHtml from `==text==`).
+// ---------------------------------------------------------------------------
 const sanitizeSchema = {
   ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), 'mark'],
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href ?? []), 'mention', 'slash'],
@@ -117,9 +226,117 @@ function urlTransform(url: string): string {
 }
 
 
-// File path detection regex - matches paths starting with /, ~/, or ./
+// File path detection regex — matches local paths starting with /, ~/, or ./
+// followed by a known source-file extension. Used in the shared link click
+// handler (baseComponents `a` renderer) to distinguish file paths from URLs.
+// In editor-parity mode, the views wrapper injects `onUrlClick` (openLink)
+// which handles internal workspace navigation; this regex only fires for
+// paths that `onUrlClick` does NOT intercept (i.e. non-workspace file paths).
 const FILE_PATH_REGEX =
   /^(?:\/|~\/|\.\/)[\w\-./@]+\.(?:ts|tsx|js|jsx|mjs|cjs|md|json|yaml|yml|py|go|rs|css|scss|less|html|htm|txt|log|sh|bash|zsh|swift|kt|java|c|cpp|h|hpp|rb|php|xml|toml|ini|cfg|conf|env|sql|graphql|vue|svelte|astro|prisma)$/i
+
+// ---------------------------------------------------------------------------
+// CodeBlockHeader — used in editor-parity mode to match Tiptap's code block
+// chrome (language label + copy button + disabled delete button).
+// ---------------------------------------------------------------------------
+
+function CodeBlockHeader({ language, code }: { language?: string; code: string }) {
+  const [copied, setCopied] = useState(false)
+  const { t } = useTranslation('ui')
+
+  const handleCopy = async () => {
+    if (!code) return
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard access can be unavailable in readonly contexts.
+    }
+  }
+
+  return (
+    <div className="code-block-header flex select-none items-center justify-between rounded-t-md border-b border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
+      <span>{language || 'text'}</span>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={handleCopy}
+          className="pointer-events-auto flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-muted hover:text-foreground"
+          title={t(($) => $.copy_code)}
+          aria-label={t(($) => $.copy_code)}
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          <span>{copied ? t(($) => $.copied) : t(($) => $.copy_code)}</span>
+        </button>
+        <button
+          type="button"
+          disabled
+          aria-disabled="true"
+          className="flex h-6 w-6 cursor-default items-center justify-center rounded text-muted-foreground opacity-60"
+          title={t(($) => $.delete_block)}
+          aria-label={t(($) => $.delete_block)}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Extract plain text from a react-markdown AST node's children.
+ * Used by the editor-parity code component to ensure code block / inline code
+ * content is always rendered as plain text.
+ */
+function extractTextFromAst(node: any): string {
+  if (!node?.children) return ''
+  return (node.children as any[])
+    .map((n: any) => {
+      if (n.type === 'text') return n.value as string
+      if (n.children) return extractTextFromAst(n)
+      return ''
+    })
+    .join('')
+    .replace(/\n$/, '')
+}
+
+/**
+ * editor-parity code block that highlights via lowlight once the (lazy-loaded)
+ * highlighter is ready. Rendered by the editor-parity `code` renderer for
+ * ordinary fenced blocks. Lives in its own component so it can subscribe to
+ * the async highlighter with a hook and re-render ONLY itself when lowlight
+ * arrives — keeping the `components` object stable so sibling content (e.g.
+ * MermaidDiagram, which holds its own open-lightbox state) is never re-rendered
+ * or remounted by a code-block highlight upgrade.
+ *
+ * Before the highlighter resolves, the raw text is shown (content stays
+ * visible); once resolved, it upgrades to highlighted spans.
+ */
+function CodeBlockHighlighted({
+  lang,
+  code,
+  className,
+  ...props
+}: {
+  lang?: string
+  code: string
+  className?: string
+} & React.HTMLAttributes<HTMLElement>) {
+  const highlight = useCodeHighlighter()
+  const highlighted = highlight?.(lang, code)
+  if (highlighted) {
+    return (
+      <code className={cn('hljs', lang && `language-${lang}`)}>{highlighted}</code>
+    )
+  }
+  return (
+    <code className={cn('hljs', className)} {...props}>
+      {code}
+    </code>
+  )
+}
 
 /**
  * Create custom components based on render mode
@@ -128,9 +345,11 @@ function createComponents(
   mode: RenderMode,
   onUrlClick?: (url: string) => void,
   onFileClick?: (path: string) => void,
-  renderMention?: (props: { type: string; id: string }) => React.ReactNode,
+  renderMention?: (props: { type: string; id: string; label?: string }) => React.ReactNode,
   renderImage?: (props: { src: string; alt: string }) => React.ReactNode,
   renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode,
+  renderMermaid?: (props: { chart: string }) => React.ReactNode,
+  renderHtmlBlock?: (props: { html: string }) => React.ReactNode,
 ): Partial<Components> {
   const baseComponents: Partial<Components> = {
     // FileCard: intercept <div data-type="fileCard"> from preprocessFileCards
@@ -185,12 +404,19 @@ function createComponents(
         if (mentionMatch?.[1] && mentionMatch[2]) {
           const type = mentionMatch[1]
           const id = mentionMatch[2]
+          // Extract label text from children for fallback display
+          const label =
+            typeof children === 'string'
+              ? children
+              : Array.isArray(children)
+                ? children.join('')
+                : undefined
 
           if (renderMention) {
             // Let the custom renderer opt out for types it doesn't handle
             // by returning null/undefined — we then fall through to the
             // default styled span so nothing ever disappears silently.
-            const rendered = renderMention({ type, id })
+            const rendered = renderMention({ type, id, label })
             if (rendered) return <>{rendered}</>
           }
 
@@ -330,6 +556,99 @@ function createComponents(
     }
   }
 
+  // Editor-parity mode: matches Tiptap's readonly output (lowlight, CodeBlockHeader,
+  // tableWrapper, Mermaid/HTML callbacks). Used by ReadonlyContent via views wrapper.
+  if (mode === 'editor-parity') {
+    return {
+      ...baseComponents,
+      // Code — lowlight highlighting for blocks, plain render for inline.
+      // Mermaid and HTML blocks delegate to callback renderers.
+      code: ({ className, children, node, ...props }) => {
+        const lang = /language-(\w+)/.exec(className || '')?.[1]
+        const isBlock =
+          node?.position &&
+          node.position.start.line !== node.position.end.line
+
+        // Extract plain text from AST node to avoid rendering interactive
+        // elements inside code blocks/inline code.
+        const codeText = extractTextFromAst(node)
+
+        if (isBlock && lang === 'mermaid') {
+          if (renderMermaid) {
+            return <>{renderMermaid({ chart: codeText })}</>
+          }
+          // Fallback: plain code block
+          return <code className={cn('hljs', 'language-mermaid')}>{codeText}</code>
+        }
+        if (isBlock && lang === 'html') {
+          if (renderHtmlBlock) {
+            return <>{renderHtmlBlock({ html: codeText })}</>
+          }
+          // Fallback: plain code block
+          return <code className={cn('hljs', 'language-html')}>{codeText}</code>
+        }
+
+        if (!isBlock && !lang) {
+          // Inline code — always render as plain text
+          return <code {...props}>{codeText || children}</code>
+        }
+
+        const code = codeText || String(children).replace(/\n$/, '')
+
+        // Block code — delegate to CodeBlockHighlighted, which subscribes to
+        // the lazy-loaded lowlight highlighter and re-renders only itself when
+        // it arrives (plain text until then). Same engine as Tiptap.
+        return (
+          <CodeBlockHighlighted lang={lang} code={code} className={className} {...props} />
+        )
+      },
+
+      // Pre — pass through (CSS handles styling via .rich-text-editor pre).
+      // Special-case Mermaid / HtmlBlockPreview returned from the `code`
+      // renderer above so the outer `<pre>` does not wrap them — this is the
+      // standard two-layer pattern used to escape react-markdown's default
+      // `<pre><code>` envelope.
+      pre: ({ node, children }) => {
+        // react-markdown calls `pre` BEFORE invoking the `code` renderer —
+        // `children` is the unrendered `<code>` element from the AST. So we
+        // identify "this block was meant to be unwrapped" by inspecting the
+        // child's className (`language-mermaid`, `language-html`), not by
+        // checking `children.type === MermaidDiagram`, which never matches.
+        //
+        // Match by exact class token: a substring `includes("language-html")`
+        // would also fire on neighboring languages like `language-htmlbars`
+        // and silently strip their <pre> wrapper.
+        if (isValidElement(children)) {
+          const childProps = children.props as { className?: string }
+          if (PRE_UNWRAP_RE.test(childProps.className ?? '')) {
+            return <>{children}</>
+          }
+        }
+        // Extract text content and language for the header bar.
+        const codeEl = (node?.children ?? []).find(
+          (child: any) => child.type === 'element' && child.tagName === 'code'
+        ) as any
+        const codeText = codeEl ? extractTextFromAst(codeEl) : ''
+        const classNames: string[] = codeEl?.properties?.className ?? []
+        const langClass = classNames.find((cls: string) => cls.startsWith('language-'))
+        const language = langClass?.replace('language-', '')
+        return (
+          <div className="code-block-wrapper my-2 overflow-hidden rounded-md border border-border select-text">
+            {codeText && <CodeBlockHeader language={language} code={codeText} />}
+            <pre className="!mt-0 !rounded-t-none !border-0 select-text">{children}</pre>
+          </div>
+        )
+      },
+
+      // Tables — wrap in tableWrapper div for border/radius/scroll (matches Tiptap)
+      table: ({ children }) => (
+        <div className="tableWrapper">
+          <table>{children}</table>
+        </div>
+      ),
+    }
+  }
+
   // Full mode: rich styling
   return {
     ...baseComponents,
@@ -408,12 +727,15 @@ function createComponents(
  * Markdown - Customizable markdown renderer with multiple render modes
  *
  * Features:
- * - Three render modes: terminal, minimal, full
- * - Syntax highlighting via Shiki
+ * - Four render modes: terminal, minimal, full, editor-parity
+ * - Syntax highlighting via Shiki (minimal/full) or lowlight (editor-parity)
  * - GFM support (tables, task lists, strikethrough)
  * - Clickable links and file paths
  * - Memoization for streaming performance
  * - Pluggable mention rendering via renderMention prop
+ * - editor-parity mode: matches Tiptap editor readonly output with
+ *   lowlight, CodeBlockHeader, ==mark== syntax, and callback props
+ *   for Mermaid/HTML/link-hover injection
  */
 export function Markdown({
   children,
@@ -424,28 +746,68 @@ export function Markdown({
   renderMention,
   renderImage,
   renderFileCard,
-  cdnDomain
+  cdnDomain,
+  renderMermaid,
+  renderHtmlBlock,
+  onLinkHover,
+  postprocess,
 }: MarkdownProps): React.JSX.Element {
+  // The `components` object is intentionally free of any lowlight dependency:
+  // editor-parity code blocks subscribe to the lazy highlighter themselves
+  // (CodeBlockHighlighted), so this object stays referentially stable and a
+  // highlight upgrade never re-renders sibling content. Chat (minimal/full)
+  // never renders CodeBlockHighlighted, so it never triggers the lowlight load.
   const components = React.useMemo(
-    () => createComponents(mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard),
-    [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard]
+    () => createComponents(mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard, renderMermaid, renderHtmlBlock),
+    [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard, renderMermaid, renderHtmlBlock]
   )
 
-  // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content
+  const wrapperRef = React.useRef<HTMLDivElement>(null)
+
+  // Callback ref: fires during the commit phase (before effects), so the
+  // views wrapper's useLinkHover — which attaches listeners in its own
+  // useEffect — sees a populated ref.  A plain useEffect here would fire
+  // AFTER effects, leaving the first render's hover listeners bound to null.
+  const setWrapperRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      (wrapperRef as React.MutableRefObject<HTMLDivElement | null>).current = node
+      if (onLinkHover && mode === 'editor-parity' && node) {
+        onLinkHover(wrapperRef)
+      }
+    },
+    [onLinkHover, mode],
+  )
+
+  // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content.
+  // If a `postprocess` hook is provided (by the views wrapper for editor-parity
+  // mode), apply it last — after the core pipeline, so the ordering
+  // mention → link → filecard → postprocess(json + mark) is guaranteed.
   const processedContent = React.useMemo(
     () => {
       let result = preprocessMentionShortcodes(children)
       result = preprocessLinks(result)
       result = preprocessFileCards(result, cdnDomain ?? '')
+      if (postprocess) {
+        result = postprocess(result)
+      }
       return result
     },
-    [children, cdnDomain]
+    [children, cdnDomain, postprocess]
   )
 
+  // editor-parity uses .rich-text-editor.readonly CSS scope (matches Tiptap styles)
+  const wrapperClass = mode === 'editor-parity'
+    ? cn('rich-text-editor readonly text-sm break-words', className)
+    : cn('markdown-content break-words', className)
+
   return (
-    <div className={cn('markdown-content break-words', className)}>
+    <div ref={setWrapperRef} className={wrapperClass}>
       <ReactMarkdown
-        remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
+        remarkPlugins={[
+          [remarkMath, { singleDollarTextMath: false }],
+          remarkBreaks,
+          [remarkGfm, { singleTilde: false }],
+        ]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}
         components={components}
@@ -462,16 +824,5 @@ export function Markdown({
  * Splits content into blocks and memoizes each block separately,
  * so only new/changed blocks re-render during streaming.
  */
-export const MemoizedMarkdown = React.memo(Markdown, (prevProps, nextProps) => {
-  // If id is provided, use it for memoization
-  if (prevProps.id && nextProps.id) {
-    return (
-      prevProps.id === nextProps.id &&
-      prevProps.children === nextProps.children &&
-      prevProps.mode === nextProps.mode
-    )
-  }
-  // Otherwise compare content and mode
-  return prevProps.children === nextProps.children && prevProps.mode === nextProps.mode
-})
+export const MemoizedMarkdown = React.memo(Markdown)
 MemoizedMarkdown.displayName = 'MemoizedMarkdown'

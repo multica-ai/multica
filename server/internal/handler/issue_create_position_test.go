@@ -159,6 +159,7 @@ func TestAutopilotCreateIssuePositionBelowCurrentMinimum(t *testing.T) {
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": autopilotIssueTitle,
+		"manual_options":      []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {

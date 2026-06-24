@@ -86,12 +86,17 @@ export interface ListIssuesParams {
    * majority on the client.
    */
   scheduled?: boolean;
+  date_field?: "created_at" | "updated_at";
+  date_start?: string;
+  date_end?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
   /** When true, only return archived issues. Default: false (excludes archived). */
   archived?: boolean;
   /** When true, include archived issues alongside non-archived ones (no archived_at filter). */
   include_archived?: boolean;
+  /** When true, only return top-level issues (parent_issue_id IS NULL). */
+  top_level_only?: boolean;
 }
 
 export interface IssueActorRef {
@@ -123,10 +128,15 @@ export interface ListGroupedIssuesParams {
   label_ids?: string[];
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
+  date_field?: "created_at" | "updated_at";
+  date_start?: string;
+  date_end?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
   archived?: boolean;
   include_archived?: boolean;
+  /** When true, only return top-level issues (parent_issue_id IS NULL). */
+  top_level_only?: boolean;
 }
 
 /** Raw backend response shape for `GET /api/issues`. */

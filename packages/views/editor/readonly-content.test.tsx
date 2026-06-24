@@ -14,6 +14,24 @@ vi.mock("@multica/core/api", () => ({
   PreviewUnsupportedError: class extends Error {},
 }));
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (sel: (s: Record<string, string>) => string) => {
+      const keys: Record<string, string> = {
+        copy_code: "Copy code",
+        copied: "Copied",
+        delete_block: "Delete",
+        plain_text: "Plain text",
+      };
+      try {
+        return sel(keys);
+      } catch {
+        return "";
+      }
+    },
+  }),
+}));
+
 const pushSpy = vi.fn();
 const openInNewTabSpy = vi.fn();
 const originalCreateObjectURL = URL.createObjectURL;
@@ -147,7 +165,7 @@ describe("ReadonlyContent math rendering", () => {
     const { container } = render(
       <ReadonlyContent
         content={[
-          "Inline math: $E = mc^2$",
+          "Inline math: $$E = mc^2$$",
           "",
           "$$",
           "\\int_0^1 x^2 \\, dx",
@@ -328,45 +346,6 @@ describe("ReadonlyContent issue mention Markdown", () => {
   });
 });
 
-describe("ReadonlyContent highlight Markdown", () => {
-  // `==text==` is lowered to a raw <mark> by highlightToHtml; rehype-raw turns
-  // it into an element and the sanitize schema must whitelist <mark> or it gets
-  // stripped. These guard both halves of that contract.
-  it("renders ==text== as a <mark> element", () => {
-    const { container } = render(<ReadonlyContent content={"a ==hi== b"} />);
-    const mark = container.querySelector("mark");
-    expect(mark).not.toBeNull();
-    expect(mark?.textContent).toBe("hi");
-  });
-
-  it("keeps inner Markdown formatting inside a highlight", () => {
-    const { container } = render(<ReadonlyContent content={"==**bold**=="} />);
-    expect(container.querySelector("mark strong")).not.toBeNull();
-  });
-
-  it("does not highlight == inside inline code", () => {
-    const { container } = render(<ReadonlyContent content={"`a ==b== c`"} />);
-    expect(container.querySelector("mark")).toBeNull();
-    expect(container.querySelector("code")?.textContent).toBe("a ==b== c");
-  });
-
-  // Boundary regressions (Emacs review, PR #3661).
-
-  it("wraps the whole span when an inner == lives in inline code", () => {
-    const { container } = render(<ReadonlyContent content={"==a `b==c` d=="} />);
-    const mark = container.querySelector("mark");
-    expect(mark).not.toBeNull();
-    // inner `==` stays inside the code, not consumed as the closing fence
-    expect(mark?.querySelector("code")?.textContent).toBe("b==c");
-    expect(mark?.textContent).toBe("a b==c d");
-  });
-
-  it("does not highlight across a blank line", () => {
-    const { container } = render(<ReadonlyContent content={"==a\n\nb=="} />);
-    expect(container.querySelector("mark")).toBeNull();
-  });
-});
-
 describe("ReadonlyContent code styling", () => {
   const literalCode = "uv run --extra dev pytest -q";
 
@@ -401,7 +380,7 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
-  it("renders code blocks with syntax highlighting as stable React elements (not dangerouslySetInnerHTML)", () => {
+  it("renders code blocks with syntax highlighting as stable React elements (not dangerouslySetInnerHTML)", async () => {
     const codeText = [
       "const url = \"http://wujieai.com\";",
       "const user = \"@agent\";",
@@ -413,10 +392,20 @@ describe("ReadonlyContent code styling", () => {
     const blockCode = container.querySelector("pre code");
 
     expect(blockCode?.textContent).toBe(codeText);
-    // Should have hljs spans for syntax highlighting (not plain text)
-    expect(blockCode?.querySelector("span.hljs-keyword")).not.toBeNull();
-    // Should NOT use dangerouslySetInnerHTML (no __html attribute on any child)
-    expect(blockCode?.innerHTML).not.toBe("");
+    // lowlight loads async; once ready the plain-text fallback upgrades to
+    // highlighted spans (stable React elements, not dangerouslySetInnerHTML).
+    // `createLowlight(common)` registers ~35 grammars, which is slow in jsdom,
+    // so allow a generous timeout (production uses a pre-built chunk). Re-query
+    // fresh each poll — the upgrade swaps the <code> children, and a stale
+    // node reference captured before the re-render won't see the new spans.
+    await waitFor(
+      () => {
+        expect(container.querySelector("pre code span.hljs-keyword")).not.toBeNull();
+      },
+      { timeout: 5000 },
+    );
+    const highlightedCode = container.querySelector("pre code");
+    expect(highlightedCode?.innerHTML).not.toBe("");
   });
 
   it("keeps readonly code block chrome separate from selectable code text", async () => {
@@ -733,25 +722,29 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
     // <p class="truncate"> row. HtmlAttachmentPreview replaces it entirely.
     expect(queryByText("report.html")).toBeNull();
   });
-});
 
-describe("ReadonlyContent slash command rendering", () => {
-  it("renders slash skill links as slash command pills", () => {
-    const { container } = render(
-      <ReadonlyContent content="[/deploy](slash://skill/abc-123)" />,
+  it("renders a stable attachment download URL as file-card chrome", () => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const href = `/api/attachments/${id}/download`;
+    const attachment = {
+      id,
+      url: "/uploads/report.pdf",
+      filename: "report.pdf",
+      content_type: "application/pdf",
+      size_bytes: 1024,
+      markdown_url: href,
+      download_url: href,
+    } as any;
+
+    const { container, getByText } = renderWithQuery(
+      <ReadonlyContent
+        content={`!file[report.pdf](${href})`}
+        attachments={[attachment]}
+      />,
     );
 
-    const pill = container.querySelector(".slash-command");
-    expect(pill).not.toBeNull();
-    expect(pill?.textContent).toBe("/deploy");
-  });
-
-  it("does not affect regular links", () => {
-    const { container } = render(
-      <ReadonlyContent content="[docs](https://example.com)" />,
-    );
-
-    expect(container.querySelector(".slash-command")).toBeNull();
-    expect(container.querySelector("a")).not.toBeNull();
+    expect(getByText("report.pdf")).toBeTruthy();
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
   });
 });

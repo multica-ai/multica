@@ -493,20 +493,25 @@ export function AgentTranscriptDialog({
                 : t(($) => $.transcript.events, { count: items.length })}
             </MetadataChip>
 
-            {/* Working directory — server-derived display path. Falls back to
-                nothing when older backends omit the field rather than rendering
-                `work_dir` raw and leaking the user's home directory. The
-                absolute `task.work_dir` deliberately never reaches the DOM
-                anywhere — only `relative_work_dir` is safe to render / put in
-                title / copy to clipboard, because the server has already
-                stripped $HOME and the username out of it. The button
-                truncates because real workdir paths are routinely long
-                enough to push every other chip off the row. */}
+            {/* Working directory — server-derived display path. The button
+                only renders when the server has derived `relative_work_dir`
+                (older backends omit it; empty when there is no workdir). The
+                absolute `task.work_dir` deliberately never reaches the DOM —
+                not the label, not the `title`, not any aria attribute — so
+                screen shares and screenshots never leak the user's home dir
+                or account name. The `title` shows the untruncated
+                `relative_work_dir` (`~/...`) so hover reveals the full path
+                the truncated label hides. The clipboard is the one exception:
+                `handleCopyWorkdir` copies the absolute `work_dir` when
+                available — a paste target that actually resolves, since `~/`
+                doesn't expand in a foreign shell. The button truncates
+                because real workdir paths are routinely long enough to push
+                every other chip off the row. */}
             {task.relative_work_dir && (
               <button
                 type="button"
                 onClick={handleCopyWorkdir}
-                title={task.work_dir || task.relative_work_dir}
+                title={task.relative_work_dir}
                 className="inline-flex max-w-[16rem] items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 {copiedWorkdir ? (
@@ -736,6 +741,10 @@ const TranscriptEventRow = ({
   const color = getEventColor(item);
   const label = getEventLabel(item);
   const summary = getEventSummary(item);
+  const date = useMemo(
+    () => (item.created_at ? new Date(item.created_at) : null),
+    [item.created_at],
+  );
 
   const hasDetail =
     (item.type === "tool_use" && item.input && Object.keys(item.input).length > 0) ||
@@ -792,6 +801,17 @@ const TranscriptEventRow = ({
           <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1">
             #{item.seq}
           </span>
+
+          {/* Timestamp */}
+          {date && (
+            <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1" title={date.toLocaleString()}>
+              {date.toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            </span>
+          )}
         </div>
 
         {/* Expanded detail */}

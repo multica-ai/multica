@@ -18,6 +18,7 @@ import (
 // X-Task-ID. The task is best-effort cleaned up via test teardown elsewhere.
 func authRequestWithAgent(t *testing.T, method, path string, body any, agentID string) *http.Response {
 	t.Helper()
+	body = withDefaultIssueProject(method, path, body)
 	var bodyReader io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -175,8 +176,9 @@ func createIssueAssignedToAgent(t *testing.T, title, agentID string) string {
 func createIssue(t *testing.T, title string) string {
 	t.Helper()
 	resp := authRequest(t, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  title,
-		"status": "todo",
+		"title":      title,
+		"status":     "todo",
+		"project_id": testProjectID,
 	})
 	if resp.StatusCode != 201 {
 		body, _ := io.ReadAll(resp.Body)
@@ -624,6 +626,7 @@ func createPlainMember(t *testing.T) testMemberAccount {
 // authRequestWithToken makes an authenticated request using a specific token.
 func authRequestWithToken(t *testing.T, method, path string, body any, token string) *http.Response {
 	t.Helper()
+	body = withDefaultIssueProject(method, path, body)
 	var bodyReader io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)

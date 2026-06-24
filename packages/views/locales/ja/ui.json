@@ -4,5 +4,7 @@
   "pagination_previous": "前のページへ移動",
   "pagination_next": "次のページへ移動",
   "copy_code": "コードをコピー",
+  "copied": "コピー済み",
+  "delete_block": "コードブロックを削除",
   "plain_text": "プレーンテキスト"
 }

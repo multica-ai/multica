@@ -221,6 +221,8 @@ func (d *Daemon) shouldCleanTaskDirForKind(ctx context.Context, taskDir string, 
 		return d.gcDecisionAutopilotRun(ctx, taskDir, meta)
 	case execenv.GCKindQuickCreate:
 		return d.gcDecisionQuickCreate(ctx, taskDir, meta)
+	case execenv.GCKindChannel:
+		return d.gcDecisionChannel(ctx, taskDir, meta)
 	default:
 		// Unknown kind: fall back to mtime-based orphan cleanup so a future
 		// daemon writing a kind we don't recognize doesn't get insta-wiped.
@@ -435,6 +437,83 @@ func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta
 	return gcActionSkip
 }
 
+// gcDecisionChannel reclaims a channel-origin mention task's envRoot only
+// when ALL of these hold:
+//  1. the task itself reached a terminal state (the row still exists);
+//  2. the task has been terminal past GCTTL (so transient bursts don't
+//     reclaim directories a follow-up might resume into);
+//  3. the whole (agent, channel, thread) lane is quiet past GCTTL — no
+//     task activity on the lane newer than now-GCTTL, which covers the
+//     cross-task resume window where task A is terminal but task B on the
+//     same lane is pending/running and about to reuse A's envRoot.
+//
+// Channels are permanent and carry no terminal status of their own, so the
+// lane-liveness check (not the channel record) is what bounds reclaim.
+// Together with the top-level isActiveEnvRoot guard (runTask marks any
+// envRoot it is about to use), this gives three layers of protection
+// against deleting an envRoot a running task depends on.
+//
+// Degradation: a 404 on the task row (hard-deleted / scoped token) falls
+// back to orphan-by-mtime, mirroring the issue and quick-create paths; any
+// lane-liveness query failure is treated as "skip" (don't delete on
+// uncertainty), matching the issue path's stance on transient errors.
+func (d *Daemon) gcDecisionChannel(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+	if strings.TrimSpace(meta.TaskID) == "" {
+		return d.orphanByMTime(taskDir, "empty channel task id")
+	}
+
+	// (1) + (2) own terminal state + own TTL.
+	status, err := d.client.GetTaskGCCheck(ctx, meta.TaskID)
+	if err != nil {
+		if isAccessNotFound(err) {
+			return d.orphanByMTime(taskDir, "channel task not accessible")
+		}
+		return gcActionSkip
+	}
+	if !isAgentTaskTerminal(status.Status) {
+		return gcActionSkip // pending/running — never reclaim
+	}
+	anchor := status.CompletedAt
+	if anchor.IsZero() {
+		anchor = meta.CompletedAt
+	}
+	if anchor.IsZero() {
+		return gcActionSkip // no usable anchor — stay safe
+	}
+	if time.Since(anchor) <= d.cfg.GCTTL {
+		return gcActionSkip // terminal, but not long enough ago
+	}
+
+	// (3) lane liveness: need workspace + channel + agent to ask. These
+	// come from .gc_meta.json; if the meta is incomplete we can't safely
+	// evaluate the lane, so skip rather than risk deleting an envRoot a
+	// live lane would resume into.
+	if meta.WorkspaceID == "" || meta.ChannelID == "" || meta.AgentID == "" {
+		return gcActionSkip
+	}
+	since := time.Now().Add(-d.cfg.GCTTL)
+	lane, err := d.client.GetChannelLaneGCCheck(ctx, meta.WorkspaceID, meta.ChannelID, meta.AgentID, meta.ChannelThreadID, since)
+	if err != nil {
+		// Don't delete on uncertainty — matches issue path's transient-error stance.
+		return gcActionSkip
+	}
+	if lane.Live {
+		return gcActionSkip
+	}
+
+	d.logger.Info("gc: eligible for cleanup",
+		"dir", filepath.Base(taskDir),
+		"kind", "channel",
+		"task", meta.TaskID,
+		"channel", meta.ChannelID,
+		"thread", meta.ChannelThreadID,
+		"status", status.Status,
+		"completed_at", anchor.Format(time.RFC3339),
+		"last_activity", lane.LastActivity.Format(time.RFC3339),
+	)
+	return gcActionClean
+}
+
 // isAgentTaskTerminal reports whether a value of agent_task_queue.status
 // represents a final state. Mirrors the status enum used across the
 // task service — see service/task.go for the canonical list.
@@ -564,7 +643,10 @@ func dirSize(root string) int64 {
 	return total
 }
 
-const gitCmdTimeout = 30 * time.Second
+const (
+	gitCmdTimeout         = 30 * time.Second
+	gitMaintenanceTimeout = 10 * time.Minute
+)
 
 // pruneRepoWorktrees runs `git worktree prune` on all bare repos in the cache.
 func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
@@ -597,17 +679,140 @@ func (d *Daemon) pruneRepoWorktrees(workspacesRoot string) {
 }
 
 func (d *Daemon) pruneWorktree(barePath string) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", barePath, "worktree", "prune")
+	if d.repoCache != nil {
+		if err := d.repoCache.WithRepoLock(barePath, func() error {
+			d.pruneWorktreeLocked(barePath)
+			return nil
+		}); err != nil {
+			d.logger.Warn("gc: repo lock failed", "repo", barePath, "error", err)
+			return
+		}
+		return
+	}
 
-	if out, err := cmd.CombinedOutput(); err != nil {
+	d.pruneWorktreeLocked(barePath)
+}
+
+func (d *Daemon) pruneWorktreeLocked(barePath string) {
+	if out, err := runGitGCCommand(barePath, "worktree", "prune"); err != nil {
 		d.logger.Warn("gc: worktree prune failed",
 			"repo", barePath,
-			"output", strings.TrimSpace(string(out)),
+			"output", out,
 			"error", err,
 		)
 	}
+
+	activeBranches, err := agentWorktreeBranches(barePath)
+	if err != nil {
+		d.logger.Warn("gc: worktree branch scan failed", "repo", barePath, "error", err)
+		return
+	}
+
+	agentBranches, err := listAgentBranches(barePath)
+	if err != nil {
+		d.logger.Warn("gc: agent branch scan failed", "repo", barePath, "error", err)
+		return
+	}
+
+	deleted := 0
+	for _, branch := range agentBranches {
+		if _, ok := activeBranches[branch]; ok {
+			continue
+		}
+		if out, err := runGitGCCommand(barePath, "branch", "-D", "--", branch); err != nil {
+			d.logger.Warn("gc: agent branch delete failed",
+				"repo", barePath,
+				"branch", branch,
+				"output", out,
+				"error", err,
+			)
+			continue
+		}
+		deleted++
+	}
+	if deleted == 0 {
+		return
+	}
+	d.logger.Info("gc: deleted stale agent branches", "repo", barePath, "count", deleted)
+
+	// Heavier maintenance only runs when we actually removed refs, so we don't
+	// turn every GC tick into a full `git gc --prune` on every cached repo. The
+	// prune step gets its own longer timeout because it can take minutes on a
+	// real bare cache; under the shared 30s budget it would be killed mid-run.
+	maintenance := []struct {
+		args    []string
+		timeout time.Duration
+	}{
+		{args: []string{"reflog", "expire", "--expire=30.days", "--all"}, timeout: gitCmdTimeout},
+		{args: []string{"gc", "--prune=30.days"}, timeout: gitMaintenanceTimeout},
+	}
+	for _, step := range maintenance {
+		if out, err := runGitCommand(barePath, step.timeout, step.args...); err != nil {
+			d.logger.Warn("gc: git maintenance failed",
+				"repo", barePath,
+				"command", strings.Join(step.args, " "),
+				"output", out,
+				"error", err,
+			)
+		}
+	}
+}
+
+func runGitGCCommand(barePath string, args ...string) (string, error) {
+	return runGitCommand(barePath, gitCmdTimeout, args...)
+}
+
+func runGitCommand(barePath string, timeout time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	cmdArgs := append([]string{"-C", barePath}, args...)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+func agentWorktreeBranches(barePath string) (map[string]struct{}, error) {
+	out, err := runGitGCCommand(barePath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+
+	branches := make(map[string]struct{})
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "branch refs/heads/") {
+			continue
+		}
+		branch := strings.TrimPrefix(line, "branch refs/heads/")
+		if strings.HasPrefix(branch, "agent/") {
+			branches[branch] = struct{}{}
+		}
+	}
+	return branches, nil
+}
+
+func listAgentBranches(barePath string) ([]string, error) {
+	// Trailing slash narrows the pattern to the `agent/` namespace only. Without
+	// it, `for-each-ref` would also return a branch literally named `agent`,
+	// which `agentWorktreeBranches` ignores — that branch would then be deleted.
+	out, err := runGitGCCommand(barePath, "for-each-ref", "--format=%(refname:short)", "refs/heads/agent/")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+
+	var branches []string
+	for _, line := range strings.Split(out, "\n") {
+		branch := strings.TrimSpace(line)
+		if branch == "" {
+			continue
+		}
+		branches = append(branches, branch)
+	}
+	return branches, nil
 }
 
 // isBareRepo checks if a path looks like a bare git repository.

@@ -21,6 +21,8 @@ export interface IssueFilters {
   // When true, only archived issues are shown — matches the server-side
   // `archived=true` query param that is sent when the toggle is on.
   showArchived?: boolean;
+  /** When true, only show top-level (parent) issues, hiding sub-issues. */
+  topLevelOnly?: boolean;
 }
 
 /**
@@ -33,7 +35,7 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showArchived } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showArchived, topLevelOnly } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
@@ -50,6 +52,8 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
     } else {
       if (issue.archived_at) return false;
     }
+
+    if (topLevelOnly && issue.parent_issue_id) return false;
 
     if (applyAgentRunning && !(runningIssueIds?.has(issue.id) ?? false))
       return false;

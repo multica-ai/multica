@@ -37,6 +37,7 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import { BrowserNotificationSetting } from "./browser-notification-setting";
 
 const channelLabels: Record<NotificationChannel, string> = {
   notification_trigger: "Notification Triggers",
@@ -934,6 +935,10 @@ export function NotificationsTab() {
         <p className="text-sm text-muted-foreground">
           Manage DingTalk and email account linking from <span className="font-medium">Profile → Linked Accounts</span>.
         </p>
+
+        {/* Web-only: the browser permission banners require. Renders nothing on
+            desktop (OS-native delivery) or where the Notification API is absent. */}
+        <BrowserNotificationSetting />
       </section>
     </div>
   );

@@ -405,6 +405,33 @@ describe("IssueActionsMenuItems", () => {
     expect(rows).toHaveLength(2);
   });
 
+  it("labels a local_cli run by its cli_name, never falling back to Unknown Agent", async () => {
+    // local_cli runs carry an empty agent_id (localCLIRunToResponse sets it
+    // to ""), so getAgentName("") would otherwise resolve to "Unknown Agent".
+    // The submenu must use cli_name instead, matching execution-log-section's
+    // naming for the same run kind.
+    mockListTasksByIssue.mockResolvedValue([
+      {
+        id: "run-local",
+        kind: "local_cli",
+        agent_id: "",
+        cli_name: "claude",
+        created_at: "2026-01-01T00:00:00Z",
+        work_dir: "/abs/local-wd",
+        relative_work_dir: "local/workdir",
+        trigger_summary: "Local claude",
+      } as AgentTask,
+    ]);
+
+    renderMenu();
+
+    // cli_name renders; "Unknown Agent" (or the mock's "agent-" for empty id)
+    // must not.
+    expect(await screen.findByText("claude")).toBeInTheDocument();
+    expect(screen.queryByText("Unknown Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("agent-")).not.toBeInTheDocument();
+  });
+
   it("drops tasks without a workdir and shows the unavailable label when none remain", async () => {
     mockListTasksByIssue.mockResolvedValue([
       { id: "t1", agent_id: "a", created_at: "2026-01-01T00:00:00Z" },

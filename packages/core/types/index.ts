@@ -20,6 +20,11 @@ export type {
   AgentRuntime,
   RuntimeDevice,
   CopyAgentRequest,
+  RuntimeProfile,
+  RuntimeProtocolFamily,
+  RuntimeProfileVisibility,
+  CreateRuntimeProfileRequest,
+  UpdateRuntimeProfileRequest,
   CreateAgentRequest,
   AgentTemplate,
   AgentTemplateSummary,
@@ -73,6 +78,8 @@ export type {
   RuntimeModelListStatus,
   RuntimeModelsResult,
   RuntimeLocalSkillStatus,
+  RuntimeLocalSkillImportAction,
+  RuntimeLocalSkillImportConflict,
   RuntimeLocalSkillSummary,
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
@@ -82,8 +89,8 @@ export type {
   IssueUsageSummary,
   RuntimePingStatus,
   RuntimePing,
-
 } from "./agent";
+export { RUNTIME_PROFILE_PROTOCOL_FAMILIES } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation, InviteLink, CreateInviteLinkRequest } from "./workspace";
 export type {
   NotificationChannel,
@@ -125,14 +132,25 @@ export type {
   MobilePushRegistrationResponse,
   UpsertMobilePushRegistrationRequest,
 } from "./mobile-push";
-export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
+export type { Comment, CommentType, CommentAuthorType, CommentTriggerPreview, CommentTriggerPreviewAgent, CommentTriggerSource, Reaction } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type { TimelineEntry, AssigneeFrequencyEntry, MentionFrequencyEntry } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";
-export type { ChatSession, ChatMessage, ChatMessagesPage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
+export { attachmentDownloadPath, attachmentIdFromDownloadURL, contentReferencesAttachment } from "./attachment-url";
+export type {
+  ChatSession,
+  ChatMessage,
+  ChatMessagesPage,
+  ChatPendingTask,
+  PendingChatTaskItem,
+  PendingChatTasksResponse,
+  SendChatMessageResponse,
+  CancelledChatMessage,
+  CancelTaskResponse,
+} from "./chat";
 export type { StorageAdapter } from "./storage";
 export type {
   Project,

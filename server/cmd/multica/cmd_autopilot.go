@@ -181,7 +181,7 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	path := "/api/autopilots"
@@ -226,7 +226,7 @@ func runAutopilotGet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
@@ -284,7 +284,7 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--mode must be create_issue or run_only")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	agentID, err := resolveAgent(ctx, client, agent)
@@ -334,7 +334,7 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
@@ -414,7 +414,7 @@ func runAutopilotDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
@@ -435,7 +435,7 @@ func runAutopilotTrigger(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(30*time.Second))
 	defer cancel()
 
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
@@ -468,7 +468,7 @@ func runAutopilotRuns(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
@@ -554,7 +554,7 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 		body["label"] = v
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
@@ -598,7 +598,7 @@ func runAutopilotTriggerRotateURL(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
@@ -668,7 +668,7 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, or --label")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
@@ -700,7 +700,7 @@ func runAutopilotTriggerDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])

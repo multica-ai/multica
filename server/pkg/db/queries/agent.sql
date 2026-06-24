@@ -438,7 +438,7 @@ WHERE agent_id = $1 AND issue_id = $2
     status = 'completed'
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'parse_error', 'upstream_failure')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'parse_error', 'upstream_failure')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
     )
   )
@@ -469,6 +469,23 @@ WHERE agent_id = $1 AND channel_id = $2
     )
   )
   AND session_id IS NOT NULL
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1;
+
+-- name: GetChannelLaneLastActivity :one
+-- GC lane-liveness check: the most recent task activity timestamp on a
+-- single (agent_id, channel_id, channel_thread_id) context lane, across ALL
+-- task statuses (unlike GetLastChannelTaskSession, which filters to
+-- resumable completed/failed sessions). Any task dispatched on the lane —
+-- including pending/running ones — counts as activity, because a follow-up
+-- task may be about to resume into an older envRoot on this lane. Returns
+-- NULL when the lane has never had a task. The daemon compares this against
+-- (now - GCTTL) to decide whether the lane is quiet enough to reclaim.
+SELECT COALESCE(completed_at, started_at, dispatched_at, created_at) AS last_activity
+FROM agent_task_queue
+WHERE agent_id IS NOT DISTINCT FROM sqlc.narg('agent_id')
+  AND channel_id = $1
+  AND channel_thread_id IS NOT DISTINCT FROM sqlc.narg('channel_thread_id')
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
 LIMIT 1;
 
@@ -640,6 +657,16 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
 -- for the given issue. Used by @mention trigger dedup.
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
+
+-- name: HasPendingTaskForIssueAndAgentExcludingTriggerComment :one
+-- Same as HasPendingTaskForIssueAndAgent, but ignores tasks triggered by the
+-- current comment being edited. Edit preview needs this because save cancels
+-- that comment's old queued/dispatched tasks before re-computing triggers.
+SELECT count(*) > 0 AS has_pending FROM agent_task_queue
+WHERE issue_id = @issue_id
+  AND agent_id = @agent_id
+  AND status IN ('queued', 'dispatched')
+  AND trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid;
 
 -- name: GetLatestTaskIsLeaderForIssueAndAgent :one
 -- Returns the is_leader_task flag of the agent's most recent task on this

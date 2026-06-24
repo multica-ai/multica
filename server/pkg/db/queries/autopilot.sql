@@ -3,10 +3,74 @@
 -- =====================
 
 -- name: ListAutopilots :many
-SELECT * FROM autopilot
-WHERE workspace_id = $1
-  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
-ORDER BY created_at DESC;
+-- List rows carry three derived columns the list UI needs (trigger badges,
+-- next run, last-run outcome) so the page never has to N+1 into the detail
+-- endpoint. trigger_kinds/next_run_at only consider ENABLED triggers — the
+-- columns answer "how does this fire today", not "what is configured".
+-- last_run_status is COALESCEd to '' (never ran) because sqlc cannot infer
+-- nullability through a scalar subquery; the handler maps '' back to omitted.
+SELECT
+  sqlc.embed(a),
+  (
+    SELECT array_agg(DISTINCT t.kind ORDER BY t.kind)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled
+  )::text[] AS trigger_kinds,
+  (
+    SELECT min(t.next_run_at)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled AND t.kind = 'schedule'
+  )::timestamptz AS next_run_at,
+  COALESCE((
+    SELECT r.status
+    FROM autopilot_run r
+    WHERE r.autopilot_id = a.id
+    ORDER BY r.triggered_at DESC
+    LIMIT 1
+  ), '')::text AS last_run_status
+FROM autopilot a
+WHERE a.workspace_id = $1
+  AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status'))
+  AND (
+    sqlc.narg('mine_user_id')::uuid IS NULL
+    OR (
+      a.created_by_type = 'member'
+      AND a.created_by_id = sqlc.narg('mine_user_id')::uuid
+    )
+    OR (
+      a.created_by_type = 'agent'
+      AND EXISTS (
+        SELECT 1
+        FROM agent ag
+        WHERE ag.id = a.created_by_id
+          AND ag.workspace_id = a.workspace_id
+          AND ag.owner_id = sqlc.narg('mine_user_id')::uuid
+      )
+    )
+    OR (
+      a.assignee_type = 'agent'
+      AND EXISTS (
+        SELECT 1
+        FROM agent ag
+        WHERE ag.id = a.assignee_id
+          AND ag.workspace_id = a.workspace_id
+          AND ag.owner_id = sqlc.narg('mine_user_id')::uuid
+      )
+    )
+    OR (
+      a.assignee_type = 'squad'
+      AND EXISTS (
+        SELECT 1
+        FROM squad s
+        JOIN agent ag ON ag.id = s.leader_id
+        WHERE s.id = a.assignee_id
+          AND s.workspace_id = a.workspace_id
+          AND ag.workspace_id = a.workspace_id
+          AND ag.owner_id = sqlc.narg('mine_user_id')::uuid
+      )
+    )
+  )
+ORDER BY a.created_at DESC;
 
 -- name: GetAutopilot :one
 SELECT * FROM autopilot

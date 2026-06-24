@@ -15,6 +15,13 @@ export type IssueGrouping = "status" | "assignee";
 export type SwimlaneGrouping = "parent" | "project" | "assignee";
 export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
+export type IssueDateField = "created_at" | "updated_at";
+
+export interface IssueDateFilter {
+  field: IssueDateField;
+  from: string;
+  to: string;
+}
 
 export const SWIMLANE_GROUPINGS: SwimlaneGrouping[] = ["parent", "project", "assignee"];
 
@@ -70,6 +77,7 @@ export interface IssueViewState {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  dateFilter: IssueDateFilter | null;
   // When true, the list only shows issues that currently have at least one
   // agent task in `running` status. Drives the workspace "agents working"
   // quick filter chip in the issues header. Not persisted across reloads —
@@ -77,6 +85,8 @@ export interface IssueViewState {
   // users return to an empty list with no obvious cause.
   agentRunningFilter: boolean;
   showArchived: boolean;
+  /** When true, only show top-level (parent) issues, hiding sub-issues. */
+  topLevelOnly: boolean;
   sortBy: SortField;
   sortDirection: SortDirection;
   cardProperties: CardProperties;
@@ -104,8 +114,10 @@ export interface IssueViewState {
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
+  setDateFilter: (filter: IssueDateFilter | null) => void;
   toggleAgentRunningFilter: () => void;
   toggleShowArchived: () => void;
+  toggleTopLevelOnly: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
   clearFilters: () => void;
@@ -131,8 +143,10 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
+  dateFilter: null,
   agentRunningFilter: false,
   showArchived: false,
+  topLevelOnly: false,
   sortBy: "position",
   sortDirection: "asc",
   cardProperties: {
@@ -211,10 +225,15 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.labelFilters.filter((id) => id !== labelId)
         : [...state.labelFilters, labelId],
     })),
+  setDateFilter: (filter) => set({ dateFilter: filter }),
   toggleAgentRunningFilter: () =>
     set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
   toggleShowArchived: () =>
     set((state) => ({ showArchived: !state.showArchived })),
+  toggleTopLevelOnly: () =>
+    set((state) => ({
+      topLevelOnly: state.swimlaneGrouping === "parent" ? false : !state.topLevelOnly,
+    })),
   hideStatus: (status) =>
     set((state) => {
       // If no filter active, activate filter with all EXCEPT this one
@@ -241,8 +260,10 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       projectFilters: [],
       includeNoProject: false,
       labelFilters: [],
+      dateFilter: null,
       agentRunningFilter: false,
       showArchived: false,
+      topLevelOnly: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
   setSortDirection: (dir) => set({ sortDirection: dir }),
@@ -259,7 +280,10 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.listCollapsedStatuses.filter((s) => s !== status)
         : [...state.listCollapsedStatuses, status],
     })),
-  setSwimlaneGrouping: (grouping) => set({ swimlaneGrouping: grouping }),
+  setSwimlaneGrouping: (grouping) => set((state) => ({
+    swimlaneGrouping: grouping,
+    topLevelOnly: grouping === "parent" ? false : state.topLevelOnly,
+  })),
   setSwimlaneOrder: (order) =>
     set((state) => ({
       swimlaneOrders: { ...state.swimlaneOrders, [state.swimlaneGrouping]: order },
@@ -285,6 +309,8 @@ export const viewStorePersistOptions = (name: string) => ({
     // state changes second-to-second, and a stored toggle would let users
     // return to an unexplained empty list. Keep it ephemeral. See the
     // field comment on IssueViewState.
+    // `dateFilter` is also intentionally not persisted: relative presets such
+    // as Today would otherwise become stale after a calendar-day rollover.
     viewMode: state.viewMode,
     grouping: state.grouping,
     statusFilters: state.statusFilters,
@@ -296,6 +322,7 @@ export const viewStorePersistOptions = (name: string) => ({
     includeNoProject: state.includeNoProject,
     labelFilters: state.labelFilters,
     showArchived: state.showArchived,
+    topLevelOnly: state.topLevelOnly,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,
@@ -331,7 +358,7 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
   // persisted value isn't a plain object.
   const isRecord = (v: unknown): v is Record<string, unknown> =>
     v !== null && typeof v === "object" && !Array.isArray(v);
-  return {
+  const merged = {
     ...current,
     ...p,
     cardProperties: {
@@ -345,6 +372,13 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
       ? { ...current.collapsedSwimlanes, ...p.collapsedSwimlanes }
       : current.collapsedSwimlanes,
   };
+
+  // Reconcile conflicting state: topLevelOnly must be false when swimlaneGrouping is parent.
+  if (merged.swimlaneGrouping === "parent" && merged.topLevelOnly) {
+    merged.topLevelOnly = false;
+  }
+
+  return merged;
 }
 
 /** Factory: creates a vanilla StoreApi for use with React Context. */

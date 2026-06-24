@@ -20,6 +20,7 @@ import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { CornerDownRight } from "lucide-react";
 
 export interface ChildProgress {
   done: number;
@@ -51,6 +52,7 @@ function ListRowContent({
   const toggle = useIssueSelectionStore((s) => s.toggle);
   const p = useWorkspacePaths();
   const storeProperties = useViewStore((s) => s.cardProperties);
+  const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),
@@ -103,6 +105,9 @@ function ListRowContent({
           <IssueAgentActivityIndicator issueId={issue.id} />
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            {issue.parent_issue_id && swimlaneGrouping !== "parent" && (
+              <CornerDownRight className="size-3.5 text-muted-foreground/70 shrink-0" aria-hidden="true" />
+            )}
             <span className="truncate">{issue.title}</span>
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">

@@ -30,7 +30,7 @@ func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) 
 			return
 		}
 		// Only handle statuses that finalize an autopilot run.
-		if issue.Status != "done" && issue.Status != "in_review" && issue.Status != "cancelled" && issue.Status != "blocked" {
+		if issue.Status != "done" && issue.Status != "in_review" && issue.Status != "cancelled" {
 			return
 		}
 		// Load the full issue from DB to check origin_type.
@@ -67,8 +67,11 @@ func syncRunFromTaskEvent(ctx context.Context, svc *service.AutopilotService, e 
 	if err != nil {
 		return
 	}
-	if !task.AutopilotRunID.Valid {
+	if task.AutopilotRunID.Valid {
+		svc.SyncRunFromTask(ctx, task)
 		return
 	}
-	svc.SyncRunFromTask(ctx, task)
+	if e.Type == protocol.EventTaskFailed {
+		svc.SyncRunFromLinkedIssueTask(ctx, task)
+	}
 }

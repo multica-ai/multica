@@ -32,8 +32,9 @@ func createIssueForTimeline(t *testing.T, title string) string {
 	t.Helper()
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  title,
-		"status": "todo",
+		"title":      title,
+		"status":     "todo",
+		"project_id": testProjectID,
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {
@@ -329,7 +330,7 @@ func TestUpdateCommentPermission_NonAuthorForbidden(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{"title": "update permission non-author"})
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{"title": "update permission non-author", "project_id": testProjectID})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
@@ -385,7 +386,7 @@ func TestUpdateCommentPermission_AdminAllowed(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{"title": "update permission admin"})
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{"title": "update permission admin", "project_id": testProjectID})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
@@ -466,7 +467,7 @@ func TestUpdateCommentPermission_AgentOwnerAllowed(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{"title": "update permission agent owner"})
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{"title": "update permission agent owner", "project_id": testProjectID})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())

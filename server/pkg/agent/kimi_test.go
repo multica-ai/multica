@@ -149,6 +149,85 @@ func TestKimiBackendSetModelFailureFailsTask(t *testing.T) {
 	}
 }
 
+// fakeKimiACPStaleResumeSetModelScript impersonates kimi-cli when a
+// resumed session is gone and the caller picked a model:
+// session/resume echoes the requested sessionId back, then
+// session/set_model rejects the unknown session the way kimi-cli
+// actually does — RequestError.invalid_params (-32602) with
+// {"session_id": "Session not found"} in data
+// (src/kimi_cli/acp/server.py, set_session_model).
+func fakeKimiACPStaleResumeSetModelScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      sid=$(printf '%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"%s"}}\n' "$id" "$sid"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"Invalid params","data":{"session_id":"Session not found"}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKimiBackendClearsSessionIDWhenSetModelSessionNotFound pins the
+// set_model sibling of the resumed-session fix: with a model override,
+// session/set_model runs before session/prompt, so a dead resumed
+// session surfaces there. The Result must carry an empty SessionID so
+// the daemon's fresh-session retry (gated on SessionID == "") fires.
+func TestKimiBackendClearsSessionIDWhenSetModelSessionNotFound(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPStaleResumeSetModelScript()))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_stale",
+		Model:           "kimi-for-coding",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, `could not switch to model "kimi-for-coding"`) {
+			t.Errorf("expected error to name the requested model, got %q", result.Error)
+		}
+		if result.SessionID != "" {
+			t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 // TestKimiBackendInvokesACPSubcommand pins the argv for `kimi`. An
 // earlier fix tried passing `--yolo` to bypass per-tool approval
 // prompts, but the `acp` subcommand in kimi-cli takes no options

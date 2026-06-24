@@ -179,7 +179,7 @@ SELECT
     (COALESCE(NULLIF(u.name, ''), u.email) || '-local-' || lcr.cli_name)::text AS runner_name,
     lcr.cli_name,
     COALESCE(
-        SUM(EXTRACT(EPOCH FROM (lcr.completed_at - lcr.started_at)))::bigint,
+        SUM(COALESCE(lcr.active_ms / 1000, EXTRACT(EPOCH FROM (lcr.completed_at - lcr.started_at))))::bigint,
         0
     )::bigint AS total_seconds,
     COUNT(*)::int AS task_count,
@@ -243,7 +243,7 @@ const listDashboardLocalRunTimeDaily = `-- name: ListDashboardLocalRunTimeDaily 
 SELECT
     DATE(lcr.completed_at) AS date,
     COALESCE(
-        SUM(EXTRACT(EPOCH FROM (lcr.completed_at - lcr.started_at)))::bigint,
+        SUM(COALESCE(lcr.active_ms / 1000, EXTRACT(EPOCH FROM (lcr.completed_at - lcr.started_at))))::bigint,
         0
     )::bigint AS total_seconds,
     COUNT(*)::int AS task_count,

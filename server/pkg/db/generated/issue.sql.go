@@ -272,12 +272,13 @@ WHERE i.workspace_id = $1
   )
   AND ($16::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND ($17::jsonb IS NULL OR i.metadata @> $17::jsonb)
+  AND ($18::bool IS NOT TRUE OR i.parent_issue_id IS NULL)
   AND (
-    $18::uuid IS NULL
+    $19::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $18::uuid
+             AND a.owner_id     = $19::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -285,14 +286,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $18::uuid
+             AND sm.member_id   = $19::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $18::uuid
+             AND a.owner_id     = $19::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -301,7 +302,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $18::uuid
+             AND a.owner_id     = $19::uuid
     ))
   )
 `
@@ -324,6 +325,7 @@ type CountIssuesParams struct {
 	LabelIds          []pgtype.UUID `json:"label_ids"`
 	Scheduled         pgtype.Bool   `json:"scheduled"`
 	MetadataFilter    []byte        `json:"metadata_filter"`
+	TopLevelOnly      pgtype.Bool   `json:"top_level_only"`
 	InvolvesUserID    pgtype.UUID   `json:"involves_user_id"`
 }
 
@@ -347,6 +349,7 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 		arg.LabelIds,
 		arg.Scheduled,
 		arg.MetadataFilter,
+		arg.TopLevelOnly,
 		arg.InvolvesUserID,
 	)
 	var count int64
@@ -1159,12 +1162,13 @@ WHERE i.workspace_id = $1
   )
   AND ($18::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND ($19::jsonb IS NULL OR i.metadata @> $19::jsonb)
+  AND ($20::bool IS NOT TRUE OR i.parent_issue_id IS NULL)
   AND (
-    $20::uuid IS NULL
+    $21::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $20::uuid
+             AND a.owner_id     = $21::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -1172,14 +1176,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $20::uuid
+             AND sm.member_id   = $21::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $20::uuid
+             AND a.owner_id     = $21::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -1188,7 +1192,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $20::uuid
+             AND a.owner_id     = $21::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -1215,6 +1219,7 @@ type ListIssuesParams struct {
 	LabelIds          []pgtype.UUID `json:"label_ids"`
 	Scheduled         pgtype.Bool   `json:"scheduled"`
 	MetadataFilter    []byte        `json:"metadata_filter"`
+	TopLevelOnly      pgtype.Bool   `json:"top_level_only"`
 	InvolvesUserID    pgtype.UUID   `json:"involves_user_id"`
 }
 
@@ -1268,6 +1273,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.LabelIds,
 		arg.Scheduled,
 		arg.MetadataFilter,
+		arg.TopLevelOnly,
 		arg.InvolvesUserID,
 	)
 	if err != nil {
@@ -1336,29 +1342,30 @@ WHERE i.workspace_id = $1
   )
   AND ($11::uuid IS NULL OR i.project_id = $11)
   AND ($12::jsonb IS NULL OR i.metadata @> $12::jsonb)
+  AND ($13::bool IS NOT TRUE OR i.parent_issue_id IS NULL)
   AND (
     (
-      COALESCE(cardinality($13::uuid[]), 0) = 0
-      AND $14::boolean IS NOT TRUE
+      COALESCE(cardinality($14::uuid[]), 0) = 0
+      AND $15::boolean IS NOT TRUE
     )
-    OR ($14::boolean IS TRUE AND i.project_id IS NULL)
-    OR (i.project_id = ANY($13::uuid[]))
+    OR ($15::boolean IS TRUE AND i.project_id IS NULL)
+    OR (i.project_id = ANY($14::uuid[]))
   )
   AND (
-    COALESCE(cardinality($15::uuid[]), 0) = 0
+    COALESCE(cardinality($16::uuid[]), 0) = 0
     OR EXISTS (
       SELECT 1
       FROM issue_to_label itl
       WHERE itl.issue_id = i.id
-        AND itl.label_id = ANY($15::uuid[])
+        AND itl.label_id = ANY($16::uuid[])
     )
   )
   AND (
-    $16::uuid IS NULL
+    $17::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $16::uuid
+             AND a.owner_id     = $17::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -1366,14 +1373,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $16::uuid
+             AND sm.member_id   = $17::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $16::uuid
+             AND a.owner_id     = $17::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -1382,7 +1389,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $16::uuid
+             AND a.owner_id     = $17::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -1401,6 +1408,7 @@ type ListOpenIssuesParams struct {
 	CreatorPairs      []string      `json:"creator_pairs"`
 	ProjectID         pgtype.UUID   `json:"project_id"`
 	MetadataFilter    []byte        `json:"metadata_filter"`
+	TopLevelOnly      pgtype.Bool   `json:"top_level_only"`
 	ProjectIds        []pgtype.UUID `json:"project_ids"`
 	IncludeNoProject  pgtype.Bool   `json:"include_no_project"`
 	LabelIds          []pgtype.UUID `json:"label_ids"`
@@ -1445,6 +1453,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 		arg.CreatorPairs,
 		arg.ProjectID,
 		arg.MetadataFilter,
+		arg.TopLevelOnly,
 		arg.ProjectIds,
 		arg.IncludeNoProject,
 		arg.LabelIds,

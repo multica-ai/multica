@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 )
 
 // newGCTestDaemon creates a minimal Daemon for GC testing with a mock HTTP server.
@@ -654,6 +657,218 @@ func TestIsBareRepo(t *testing.T) {
 	})
 }
 
+func TestPruneWorktree_RemovesOnlyStaleAgentBranches(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+
+	activeWorktree := filepath.Join(t.TempDir(), "active")
+	activeBranch := "agent/live/12345678"
+	staleBranch := "agent/stale/87654321"
+	keepBranch := "main"
+
+	runGitForGC(t, "", "-C", barePath, "worktree", "add", "-b", activeBranch, activeWorktree, "HEAD")
+	runGitForGC(t, "", "-C", barePath, "branch", staleBranch, "HEAD")
+
+	d.pruneWorktree(barePath)
+
+	if gitRefExists(t, barePath, "refs/heads/"+staleBranch) {
+		t.Fatalf("expected stale branch %q to be deleted", staleBranch)
+	}
+	if !gitRefExists(t, barePath, "refs/heads/"+activeBranch) {
+		t.Fatalf("expected active branch %q to be preserved", activeBranch)
+	}
+	if !gitRefExists(t, barePath, "refs/heads/"+keepBranch) {
+		t.Fatalf("expected non-agent branch %q to be preserved", keepBranch)
+	}
+}
+
+// TestPruneWorktree_IgnoresLiteralAgentBranch ensures the GC pattern is scoped
+// to the `agent/` namespace. A repo whose only `agent`-shaped ref is the
+// literal `refs/heads/agent` (no slash) must be left untouched — the
+// `for-each-ref` query is narrowed to `refs/heads/agent/` for that reason.
+func TestPruneWorktree_IgnoresLiteralAgentBranch(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+	runGitForGC(t, "", "-C", barePath, "branch", "agent", "HEAD")
+
+	d.pruneWorktree(barePath)
+
+	if !gitRefExists(t, barePath, "refs/heads/agent") {
+		t.Fatal("expected literal `agent` branch outside the daemon namespace to be preserved")
+	}
+}
+
+// TestPruneWorktree_SkipsMaintenanceWhenNothingDeleted pins the gate that
+// keeps the heavy `gc --prune` step from running on every GC tick. Uses an
+// unreachable loose blob backdated past the prune horizon as a sentinel: it
+// survives when no agent branch was deleted (no maintenance), and disappears
+// once a stale agent branch is reaped (maintenance ran).
+func TestPruneWorktree_SkipsMaintenanceWhenNothingDeleted(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+
+	// Park an active agent worktree so the scan has something to filter, and
+	// to make sure pruneWorktree exercises the full code path.
+	activeWorktree := filepath.Join(t.TempDir(), "active")
+	runGitForGC(t, "", "-C", barePath, "worktree", "add", "-b", "agent/live/12345678", activeWorktree, "HEAD")
+
+	sentinelPath := writeOldLooseBlob(t, barePath, "sentinel-content", 60*24*time.Hour)
+
+	// No stale agent branch → no deletion → no `gc --prune`. The sentinel
+	// blob must survive.
+	d.pruneWorktree(barePath)
+	if _, err := os.Stat(sentinelPath); err != nil {
+		t.Fatalf("expected sentinel blob to survive when nothing was deleted: %v", err)
+	}
+
+	// Introduce a stale agent branch → deletion happens → maintenance runs →
+	// `gc --prune=30.days` reaps the sentinel blob.
+	runGitForGC(t, "", "-C", barePath, "branch", "agent/stale/87654321", "HEAD")
+	d.pruneWorktree(barePath)
+	if _, err := os.Stat(sentinelPath); !os.IsNotExist(err) {
+		t.Fatalf("expected sentinel blob to be pruned after maintenance ran, stat err=%v", err)
+	}
+}
+
+// writeOldLooseBlob writes a dangling loose-object blob to the bare repo and
+// backdates its mtime so `git gc --prune=30.days` will consider it prunable.
+// Returns the absolute path to the loose object on disk.
+func writeOldLooseBlob(t *testing.T, barePath, content string, age time.Duration) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", barePath, "hash-object", "-w", "--stdin")
+	cmd.Stdin = strings.NewReader(content)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("hash-object failed: %v: %s", err, out)
+	}
+	sha := strings.TrimSpace(string(out))
+	if len(sha) < 4 {
+		t.Fatalf("unexpected sha output: %q", sha)
+	}
+	loose := filepath.Join(barePath, "objects", sha[:2], sha[2:])
+	if _, err := os.Stat(loose); err != nil {
+		t.Fatalf("expected loose object at %s: %v", loose, err)
+	}
+	old := time.Now().Add(-age)
+	if err := os.Chtimes(loose, old, old); err != nil {
+		t.Fatalf("chtimes failed: %v", err)
+	}
+	return loose
+}
+
+func TestPruneWorktree_SerializesWithCreateWorktree(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	cache := repocache.New(filepath.Join(d.cfg.WorkspacesRoot, ".repos"), slog.Default())
+	if err := cache.Sync("ws1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("cache sync failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws1", sourceRepo)
+	if barePath == "" {
+		t.Fatal("expected bare repo to be cached")
+	}
+
+	runGitForGC(t, "", "-C", barePath, "branch", "agent/stale/87654321", "HEAD")
+
+	blockingCache := &blockingRepoCache{
+		inner:   cache,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	d.repoCache = blockingCache
+
+	pruneDone := make(chan struct{})
+	go func() {
+		d.pruneWorktree(barePath)
+		close(pruneDone)
+	}()
+
+	select {
+	case <-blockingCache.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pruneWorktree to acquire repo lock")
+	}
+
+	createDone := make(chan error, 1)
+	go func() {
+		_, err := blockingCache.CreateWorktree(repocache.WorktreeParams{
+			WorkspaceID: "ws1",
+			RepoURL:     sourceRepo,
+			WorkDir:     t.TempDir(),
+			AgentName:   "tester",
+			TaskID:      "11111111-1111-1111-1111-111111111111",
+		})
+		createDone <- err
+	}()
+
+	select {
+	case err := <-createDone:
+		t.Fatalf("CreateWorktree should wait for GC lock, returned early with err=%v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(blockingCache.release)
+
+	select {
+	case err := <-createDone:
+		if err != nil {
+			t.Fatalf("CreateWorktree failed after GC lock released: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for CreateWorktree after releasing GC lock")
+	}
+
+	select {
+	case <-pruneDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pruneWorktree to finish")
+	}
+}
+
+type blockingRepoCache struct {
+	inner   *repocache.Cache
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingRepoCache) Lookup(workspaceID, url string) string {
+	return c.inner.Lookup(workspaceID, url)
+}
+
+func (c *blockingRepoCache) Sync(workspaceID string, repos []repocache.RepoInfo) error {
+	return c.inner.Sync(workspaceID, repos)
+}
+
+func (c *blockingRepoCache) WithRepoLock(barePath string, fn func() error) error {
+	return c.inner.WithRepoLock(barePath, func() error {
+		close(c.entered)
+		<-c.release
+		return fn()
+	})
+}
+
+func (c *blockingRepoCache) CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return c.inner.CreateWorktree(params)
+}
+
 // TestShouldCleanTaskDir_KindDispatch covers the four GCMeta kinds across
 // active / terminal / 404 / non-terminal axes. Each entry stands up a mock
 // server returning the expected payload (or 404) and asserts the action.
@@ -832,6 +1047,141 @@ func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
 	}
 }
 
+// channelGCMux builds a test mux that serves the task gc-check endpoint with
+// the given status/completedAt, plus the channel lane gc-check endpoint whose
+// `live` answer is derived from the request's `since` vs lastActivity.
+func channelGCMux(t *testing.T, taskID string, status string, completedAt time.Time, lastActivity time.Time) http.Handler {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/tasks/%s/gc-check", taskID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":       status,
+			"completed_at": completedAt,
+		})
+	})
+	mux.HandleFunc("/api/daemon/channels/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		live := !lastActivity.IsZero() && lastActivity.After(parseSince(t, r))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"live":          live,
+			"last_activity": lastActivity,
+		})
+	})
+	return mux
+}
+
+func parseSince(t *testing.T, r *http.Request) time.Time {
+	t.Helper()
+	s := r.URL.Query().Get("since")
+	tt, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		t.Fatalf("parse since: %v", err)
+	}
+	return tt
+}
+
+func channelMeta(taskID string) *execenv.GCMeta {
+	return &execenv.GCMeta{
+		Kind:      execenv.GCKindChannel,
+		TaskID:    taskID,
+		AgentID:   "11111111-1111-1111-1111-111111111111",
+		ChannelID: "22222222-2222-2222-2222-222222222222",
+		// ChannelThreadID empty → main-timeline lane.
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelTerminalOverTTLLaneQuiet(t *testing.T) {
+	t.Parallel()
+	taskID := "33333333-3333-3333-3333-333333333333"
+	overTTL := time.Now().Add(-10 * 24 * time.Hour)
+	quiet := time.Now().Add(-10 * 24 * time.Hour) // older than now-GCTTL
+
+	d := newGCTestDaemon(t, channelGCMux(t, taskID, "completed", overTTL, quiet))
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-clean", channelMeta(taskID))
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionClean {
+		t.Fatalf("expected clean, got %d", got)
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelRunningSkips(t *testing.T) {
+	t.Parallel()
+	taskID := "44444444-4444-4444-4444-444444444444"
+	overTTL := time.Now().Add(-10 * 24 * time.Hour)
+
+	d := newGCTestDaemon(t, channelGCMux(t, taskID, "running", time.Time{}, overTTL))
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-running", channelMeta(taskID))
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+		t.Fatalf("expected skip for running task, got %d", got)
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelRecentTerminalSkips(t *testing.T) {
+	t.Parallel()
+	taskID := "55555555-5555-5555-5555-555555555555"
+	withinTTL := time.Now().Add(-1 * time.Hour) // terminal but not past GCTTL
+
+	d := newGCTestDaemon(t, channelGCMux(t, taskID, "completed", withinTTL, withinTTL))
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-recent", channelMeta(taskID))
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+		t.Fatalf("expected skip for recent terminal, got %d", got)
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelLaneLiveSkips(t *testing.T) {
+	t.Parallel()
+	taskID := "66666666-6666-6666-6666-666666666666"
+	// Task terminal long ago, but the lane has fresh activity (a follow-up
+	// task resumed/running on the same lane) → must not reclaim.
+	overTTL := time.Now().Add(-10 * 24 * time.Hour)
+	laneFresh := time.Now().Add(-1 * time.Hour)
+
+	d := newGCTestDaemon(t, channelGCMux(t, taskID, "completed", overTTL, laneFresh))
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-lane-live", channelMeta(taskID))
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+		t.Fatalf("expected skip when lane is live, got %d", got)
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelTask404OldOrphan(t *testing.T) {
+	t.Parallel()
+	taskID := "77777777-7777-7777-7777-777777777777"
+	// No task handler registered → 404. An old directory should fall back
+	// to orphan-by-mtime cleanup.
+	mux := http.NewServeMux() // nothing registered → 404 for everything
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-404", channelMeta(taskID))
+	// Backdate the directory past GCOrphanTTL so orphan path reclaims it.
+	if err := os.Chtimes(taskDir, time.Now().Add(-40*24*time.Hour), time.Now().Add(-40*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionOrphan {
+		t.Fatalf("expected gcActionOrphan on task 404 + old dir, got %d", got)
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelMissingLaneKeySkips(t *testing.T) {
+	t.Parallel()
+	taskID := "88888888-8888-8888-8888-888888888888"
+	overTTL := time.Now().Add(-10 * 24 * time.Hour)
+
+	d := newGCTestDaemon(t, channelGCMux(t, taskID, "completed", overTTL, overTTL))
+	meta := channelMeta(taskID)
+	meta.AgentID = "" // incomplete lane key → must skip, not delete
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-nokey", meta)
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+		t.Fatalf("expected skip on incomplete lane key, got %d", got)
+	}
+}
+
 func TestShouldCleanTaskDir_EmptyParentIDFallsBackToOrphanMTime(t *testing.T) {
 	t.Parallel()
 
@@ -898,6 +1248,48 @@ func TestShouldCleanTaskDir_EmptyParentIDFallsBackToOrphanMTime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func createGCGitRepo(t *testing.T) string {
+	t.Helper()
+
+	repoDir := t.TempDir()
+	runGitForGC(t, repoDir, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGitForGC(t, repoDir, "add", "README.md")
+	runGitForGC(t, repoDir, "commit", "-m", "initial commit")
+	return repoDir
+}
+
+func runGitForGC(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	fullArgs := args
+	if dir != "" {
+		fullArgs = append([]string{"-C", dir}, args...)
+	}
+	cmd := exec.Command("git", fullArgs...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %s: %v", strings.Join(fullArgs, " "), out, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func gitRefExists(t *testing.T, repoPath, ref string) bool {
+	t.Helper()
+
+	cmd := exec.Command("git", "-C", repoPath, "show-ref", "--verify", "--quiet", ref)
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return true
 }
 
 // TestShouldCleanTaskDir_ChatHardDeletedFreshMtime locks acceptance #3:
@@ -1001,6 +1393,22 @@ func TestGCMetaForTask(t *testing.T) {
 			task: Task{ID: "t4", WorkspaceID: "ws", QuickCreatePrompt: "do the thing"},
 			want: execenv.GCKindQuickCreate,
 			idOK: func(m execenv.GCMeta) bool { return m.TaskID == "t4" },
+		},
+		{
+			name: "channel task — lane key + task id stamped",
+			task: Task{ID: "t6", WorkspaceID: "ws", AgentID: "a1", ChannelID: "ch1", ChannelThreadID: "th1"},
+			want: execenv.GCKindChannel,
+			idOK: func(m execenv.GCMeta) bool {
+				return m.TaskID == "t6" && m.ChannelID == "ch1" && m.ChannelThreadID == "th1" && m.AgentID == "a1"
+			},
+		},
+		{
+			name: "channel task — main-timeline lane has empty thread id",
+			task: Task{ID: "t7", WorkspaceID: "ws", AgentID: "a1", ChannelID: "ch1"},
+			want: execenv.GCKindChannel,
+			idOK: func(m execenv.GCMeta) bool {
+				return m.TaskID == "t7" && m.ChannelID == "ch1" && m.ChannelThreadID == "" && m.AgentID == "a1"
+			},
 		},
 		{
 			name: "chat wins over issue when both set (defensive ordering)",

@@ -8,14 +8,21 @@ import {
 } from "@multica/ui/markdown";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
+import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ProjectChip } from "../projects/components/project-chip";
-import { AppLink } from "../navigation";
 import {
   Attachment as AttachmentRenderer,
   AttachmentDownloadProvider,
 } from "../editor";
+import { MermaidDiagram } from "../editor/mermaid-diagram";
+import { HtmlBlockPreview } from "../editor/html-block-preview";
+import { useLinkHover, LinkHoverCard } from "../editor/link-hover-card";
+import { openLink } from "../editor/utils/link-handler";
+import { preprocessJsonLiterals } from "../editor/utils/preprocess-json";
+import { highlightToHtml } from "../editor/utils/highlight-markdown";
+import "../editor/styles/index.css";
 
 export type { RenderMode };
 
@@ -30,34 +37,52 @@ export interface MarkdownProps extends MarkdownBaseProps {
   attachments?: AttachmentRecord[];
 }
 
+// ---------------------------------------------------------------------------
+// Mention rendering — shared between all modes
+// ---------------------------------------------------------------------------
+
+function ProjectMentionLink({ projectId, label }: { projectId: string; label?: string }) {
+  const { push, openInNewTab } = useNavigation();
+  const p = useWorkspacePaths();
+  const path = p.projectDetail(projectId);
+  return (
+    <span
+      className="inline align-middle"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          if (openInNewTab) {
+            openInNewTab(path, label);
+          }
+          return;
+        }
+        push(path);
+      }}
+    >
+      <ProjectChip projectId={projectId} fallbackLabel={label} className="cursor-pointer hover:bg-accent transition-colors" />
+    </span>
+  );
+}
+
 /**
  * Default renderMention that delegates to entity chips for issue/project mentions
  * and renders a styled span for other mention types.
  */
-function ProjectMentionCard({ projectId }: { projectId: string }): React.ReactNode {
-  const p = useWorkspacePaths();
-  return (
-    <AppLink href={p.projectDetail(projectId)} className="project-mention not-prose inline-flex">
-      <ProjectChip
-        projectId={projectId}
-        className="cursor-pointer hover:bg-accent transition-colors"
-      />
-    </AppLink>
-  );
-}
-
 function defaultRenderMention({
   type,
   id,
+  label,
 }: {
   type: string;
   id: string;
+  label?: string;
 }): React.ReactNode {
   if (type === "issue") {
-    return <IssueMentionCard issueId={id} />;
+    return <IssueMentionCard issueId={id} fallbackLabel={label} />;
   }
   if (type === "project") {
-    return <ProjectMentionCard projectId={id} />;
+    return <ProjectMentionLink projectId={id} label={label} />;
   }
   return null;
 }
@@ -69,9 +94,6 @@ function renderImage({ src, alt }: { src: string; alt: string }): React.ReactNod
         kind: "url",
         url: src,
         filename: alt,
-        // chat / skill markdown `![]()` is structurally an image. Without
-        // forceKind, empty/descriptive alt strings would route to the
-        // file-card chrome via getPreviewKind autodetect.
         forceKind: "image",
       }}
     />
@@ -92,6 +114,22 @@ function renderFileCard({
   );
 }
 
+// ---------------------------------------------------------------------------
+// editor-parity mode: Mermaid / HTML block renderers
+// ---------------------------------------------------------------------------
+
+function renderMermaid({ chart }: { chart: string }): React.ReactNode {
+  return <MermaidDiagram chart={chart} />;
+}
+
+function renderHtmlBlock({ html }: { html: string }): React.ReactNode {
+  return <HtmlBlockPreview html={html} />;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 /**
  * App-level Markdown wrapper. Injects:
  *   - entity chips for issue/project mentions
@@ -99,10 +137,54 @@ function renderFileCard({
  *   - unified <Attachment> as the image / file-card renderer
  *   - AttachmentDownloadProvider so url → record resolution works inside
  *     the injected <Attachment> components
+ *   - editor-parity mode: MermaidDiagram, HtmlBlockPreview, LinkHoverCard,
+ *     and .rich-text-editor.readonly CSS scope
  */
 export function Markdown(props: MarkdownProps): React.JSX.Element {
   const cdnDomain = useConfigStore((s) => s.cdnDomain);
+  const slug = useWorkspaceSlug();
   const { attachments, ...rest } = props;
+  const isEditorParity = props.mode === "editor-parity";
+
+  // Link hover card — only mounted in editor-parity mode
+  const wrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const hover = useLinkHover(wrapperRef, !isEditorParity);
+
+  // Callback to receive the wrapper ref from MarkdownBase for link-hover
+  const handleLinkHover = React.useCallback(
+    (ref: React.RefObject<HTMLDivElement | null>) => {
+      // Copy the ref so useLinkHover can attach listeners
+      (wrapperRef as React.MutableRefObject<HTMLDivElement | null>).current = ref.current;
+    },
+    [],
+  );
+
+  // onUrlClick — uses openLink for client-side navigation of internal links
+  // (matching original ReadonlyContent's ReadonlyLink behavior)
+  const handleUrlClick = React.useCallback(
+    (href: string) => openLink(href, slug),
+    [slug],
+  );
+
+  // Stable postprocess function: highlightToHtml and preprocessJsonLiterals are
+  // module-level pure functions with no external dependencies, so the callback
+  // never needs to be recreated. Without useCallback, a new lambda is created on
+  // every parent render, busting the processedContent useMemo in MarkdownBase.
+  const handlePostprocess = React.useCallback(
+    (c: string) => highlightToHtml(preprocessJsonLiterals(c)),
+    [],
+  );
+
+  const editorParityProps = isEditorParity
+    ? {
+        renderMermaid,
+        renderHtmlBlock,
+        onLinkHover: handleLinkHover,
+        onUrlClick: handleUrlClick,
+        postprocess: handlePostprocess,
+      }
+    : {};
+
   return (
     <AttachmentDownloadProvider attachments={attachments}>
       <MarkdownBase
@@ -110,11 +192,36 @@ export function Markdown(props: MarkdownProps): React.JSX.Element {
         renderImage={renderImage}
         renderFileCard={renderFileCard}
         cdnDomain={cdnDomain}
+        {...editorParityProps}
         {...rest}
       />
+      {isEditorParity && <LinkHoverCard {...hover} />}
     </AttachmentDownloadProvider>
   );
 }
 
-export const MemoizedMarkdown = React.memo(Markdown);
+export const MemoizedMarkdown = React.memo(Markdown, (prev, next) => {
+  // Standard shallow compare for most props
+  const prevKeys = Object.keys(prev) as (keyof typeof prev)[];
+  const nextKeys = Object.keys(next) as (keyof typeof next)[];
+  if (prevKeys.length !== nextKeys.length) return false;
+  for (const key of nextKeys) {
+    if (key === "attachments") {
+      // Element-wise compare for the attachments array — callers may pass a
+      // fresh array reference on each render (e.g. `issue.attachments || []`)
+      // even when the contents are unchanged.
+      const pa = prev.attachments;
+      const na = next.attachments;
+      if (pa?.length !== na?.length) return false;
+      if (pa && na) {
+        for (let i = 0; i < pa.length; i++) {
+          if (pa[i] !== na[i]) return false;
+        }
+      }
+    } else if (prev[key] !== next[key]) {
+      return false;
+    }
+  }
+  return true;
+});
 MemoizedMarkdown.displayName = "MemoizedMarkdown";

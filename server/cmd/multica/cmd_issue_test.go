@@ -243,6 +243,7 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("allow-duplicate", false, "")
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().StringSlice("attachment-id", nil, "")
 	return cmd
 }
 
@@ -347,6 +348,64 @@ func TestRunIssueCreateRequiresProjectWhenWorkspaceHasMultipleProjects(t *testin
 	}
 	if posted {
 		t.Fatal("runIssueCreate posted /api/issues despite missing project")
+	}
+}
+
+func TestRunIssueCreateSendsExistingAttachmentIDs(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/projects" {
+			json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{{
+					"id":     "11111111-1111-1111-1111-111111111111",
+					"title":  "Only Project",
+					"status": "in_progress",
+				}},
+			})
+			return
+		}
+		if r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         "issue-1",
+			"identifier": "MUL-1",
+			"title":      "With attachments",
+			"status":     "todo",
+			"priority":   "none",
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_QUICK_CREATE_ATTACHMENT_IDS", `["att-env","att-shared"]`)
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "With attachments")
+	_ = cmd.Flags().Set("attachment-id", "att-flag")
+	_ = cmd.Flags().Set("attachment-id", "att-shared")
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	got, ok := body["attachment_ids"].([]any)
+	if !ok {
+		t.Fatalf("attachment_ids = %#v, want JSON array", body["attachment_ids"])
+	}
+	want := []string{"att-flag", "att-shared", "att-env"}
+	if len(got) != len(want) {
+		t.Fatalf("attachment_ids length = %d, want %d (%#v)", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("attachment_ids[%d] = %#v, want %q (all=%#v)", i, got[i], w, got)
+		}
 	}
 }
 
@@ -1898,6 +1957,115 @@ func TestRunIssueCommentAddAgentContextMemberTokenDoesNotCallAPI(t *testing.T) {
 	}
 }
 
+func TestRunIssueCommentAddAgentWorkdirMarkerMissingTokenDoesNotCallAPI(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	workDir := t.TempDir()
+	writeAgentTaskMarkerForTest(t, workDir)
+	chdirForTest(t, workDir)
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_TOKEN", "")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "done")
+	err := runIssueCommentAdd(cmd, []string{"OPE-1"})
+	if err == nil {
+		t.Fatal("runIssueCommentAdd: expected missing token error")
+	}
+	if !strings.Contains(err.Error(), "MULTICA_TOKEN is required in agent execution context") {
+		t.Fatalf("error = %q", err.Error())
+	}
+	if called {
+		t.Fatal("runIssueCommentAdd called API despite missing token in agent workdir marker context")
+	}
+}
+
+func TestRunIssueCommentAddAgentWorkdirMarkerMemberTokenDoesNotCallAPI(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	workDir := t.TempDir()
+	writeAgentTaskMarkerForTest(t, workDir)
+	chdirForTest(t, workDir)
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_TOKEN", "mul_member_token")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "done")
+	err := runIssueCommentAdd(cmd, []string{"OPE-1"})
+	if err == nil {
+		t.Fatal("runIssueCommentAdd: expected task-token error")
+	}
+	if !strings.Contains(err.Error(), "task token (mat_)") {
+		t.Fatalf("error = %q", err.Error())
+	}
+	if called {
+		t.Fatal("runIssueCommentAdd called API despite member token in agent workdir marker context")
+	}
+}
+
+func TestRunIssueCommentAddMemberContextUnaffected(t *testing.T) {
+	var sawComment bool
+	var commentAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/OPE-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "OPE-1",
+			})
+		case "/api/issues/issue-1/comments":
+			sawComment = true
+			commentAuth = r.Header.Get("Authorization")
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":      "comment-1",
+				"content": "done",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	workDir := t.TempDir()
+	chdirForTest(t, workDir)
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_TOKEN", "mul_member_token")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "done")
+	if err := runIssueCommentAdd(cmd, []string{"OPE-1"}); err != nil {
+		t.Fatalf("runIssueCommentAdd member context: %v", err)
+	}
+	if !sawComment {
+		t.Fatal("member comment add did not call comment API")
+	}
+	if commentAuth != "Bearer mul_member_token" {
+		t.Fatalf("Authorization = %q, want member token", commentAuth)
+	}
+}
+
 func TestRunIssueAttachmentRemoveAgentContextMemberTokenDoesNotCallAPI(t *testing.T) {
 	called := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1921,6 +2089,36 @@ func TestRunIssueAttachmentRemoveAgentContextMemberTokenDoesNotCallAPI(t *testin
 	}
 	if called {
 		t.Fatal("runIssueAttachmentRemove called API despite non-task token in agent context")
+	}
+}
+
+func TestRunIssueAttachmentRemoveAgentWorkdirMarkerMemberTokenDoesNotCallAPI(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	workDir := t.TempDir()
+	writeAgentTaskMarkerForTest(t, workDir)
+	chdirForTest(t, workDir)
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_TOKEN", "mul_member_token")
+
+	err := runIssueAttachmentRemove(testCmd(), []string{"OPE-1", "attachment-1"})
+	if err == nil {
+		t.Fatal("runIssueAttachmentRemove: expected task-token error")
+	}
+	if !strings.Contains(err.Error(), "task token (mat_)") {
+		t.Fatalf("error = %q", err.Error())
+	}
+	if called {
+		t.Fatal("runIssueAttachmentRemove called API despite member token in agent workdir marker context")
 	}
 }
 
@@ -2537,5 +2735,102 @@ func TestRewriteAttachmentURLInDesc(t *testing.T) {
 				t.Errorf("count = %d, want %d", gotCount, tc.wantCount)
 			}
 		})
+	}
+}
+
+func TestValidateIssueStatus(t *testing.T) {
+	for _, s := range validIssueStatuses {
+		if err := validateIssueStatus(s); err != nil {
+			t.Errorf("status %q should be valid, got: %v", s, err)
+		}
+	}
+	err := validateIssueStatus("active")
+	if err == nil {
+		t.Fatal("status \"active\" should be rejected")
+	}
+	if !strings.Contains(err.Error(), "backlog") {
+		t.Errorf("error should list valid statuses, got: %v", err)
+	}
+}
+
+func TestValidateIssuePriority(t *testing.T) {
+	expected := map[string]bool{
+		"urgent": true,
+		"high":   true,
+		"medium": true,
+		"low":    true,
+		"none":   true,
+	}
+	for _, p := range validIssuePriorities {
+		if !expected[p] {
+			t.Errorf("unexpected priority in validIssuePriorities: %q", p)
+		}
+		if err := validateIssuePriority(p); err != nil {
+			t.Errorf("priority %q should be valid, got: %v", p, err)
+		}
+	}
+	if len(validIssuePriorities) != len(expected) {
+		t.Errorf("validIssuePriorities has %d entries, expected %d", len(validIssuePriorities), len(expected))
+	}
+	err := validateIssuePriority("P1")
+	if err == nil {
+		t.Fatal("priority \"P1\" should be rejected")
+	}
+	if !strings.Contains(err.Error(), "urgent") {
+		t.Errorf("error should list valid priorities, got: %v", err)
+	}
+}
+
+func TestRunIssueCreateRejectsInvalidStatusBeforeRequest(t *testing.T) {
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Invalid status")
+	_ = cmd.Flags().Set("status", "active")
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueCreate should reject invalid status")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueCreateRejectsInvalidPriorityBeforeRequest(t *testing.T) {
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Invalid priority")
+	_ = cmd.Flags().Set("priority", "P1")
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueCreate should reject invalid priority")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueUpdateRejectsInvalidStatusBeforeRequest(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	_ = cmd.Flags().Set("status", "active")
+	err := runIssueUpdate(cmd, []string{"MUL-1"})
+	if err == nil {
+		t.Fatal("runIssueUpdate should reject invalid status")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueUpdateRejectsInvalidPriorityBeforeRequest(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	_ = cmd.Flags().Set("priority", "P1")
+	err := runIssueUpdate(cmd, []string{"MUL-1"})
+	if err == nil {
+		t.Fatal("runIssueUpdate should reject invalid priority")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
 	}
 }

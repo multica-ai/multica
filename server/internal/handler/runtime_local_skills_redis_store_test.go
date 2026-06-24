@@ -225,15 +225,23 @@ func TestRedisLocalSkillImportStore_PreservesCreatorID(t *testing.T) {
 
 	name := "Review Helper"
 	desc := "Desc"
-	req, err := store.Create(ctx, "runtime-1", "user-42", "review-helper", &name, &desc, true)
+	req, err := store.Create(ctx, LocalSkillImportRequestInput{
+		RuntimeID:     "runtime-1",
+		CreatorID:     "user-42",
+		SkillKey:      "review-helper",
+		Name:          &name,
+		Description:   &desc,
+		Action:        LocalSkillImportActionOverwrite,
+		TargetSkillID: "target-skill-99",
+	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if req.CreatorID != "user-42" {
 		t.Fatalf("creator id lost on create")
 	}
-	if !req.Overwrite {
-		t.Fatalf("overwrite lost on create")
+	if req.Action != LocalSkillImportActionOverwrite {
+		t.Fatalf("action lost on create")
 	}
 
 	got, err := store.Get(ctx, req.ID)
@@ -252,8 +260,46 @@ func TestRedisLocalSkillImportStore_PreservesCreatorID(t *testing.T) {
 	if got.Description == nil || *got.Description != desc {
 		t.Fatalf("description lost: %v", got.Description)
 	}
-	if !got.Overwrite {
-		t.Fatalf("overwrite lost round trip")
+	// The overwrite intent must survive the round trip — it is consumed at
+	// report time, not delivered to the daemon.
+	if got.Action != LocalSkillImportActionOverwrite {
+		t.Fatalf("action lost round trip: %q", got.Action)
+	}
+	if got.TargetSkillID != "target-skill-99" {
+		t.Fatalf("target_skill_id lost round trip: %q", got.TargetSkillID)
+	}
+}
+
+func TestRedisLocalSkillImportStore_PreservesConflict(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisLocalSkillImportStore(rdb)
+
+	req, err := store.Create(ctx, LocalSkillImportRequestInput{
+		RuntimeID: "runtime-1",
+		CreatorID: "user-1",
+		SkillKey:  "review-helper",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	info := LocalSkillImportConflict{ExistingSkillID: "skill-7", ExistingCreatedBy: "user-2", CanOverwrite: false}
+	if err := store.Conflict(ctx, req.ID, info); err != nil {
+		t.Fatalf("conflict: %v", err)
+	}
+
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != RuntimeLocalSkillConflict {
+		t.Fatalf("status = %s, want conflict", got.Status)
+	}
+	if got.Conflict == nil {
+		t.Fatalf("conflict metadata lost round trip")
+	}
+	if got.Conflict.ExistingSkillID != "skill-7" || got.Conflict.ExistingCreatedBy != "user-2" || got.Conflict.CanOverwrite {
+		t.Fatalf("conflict metadata corrupted: %+v", got.Conflict)
 	}
 }
 
@@ -264,7 +310,11 @@ func TestRedisLocalSkillImportStore_PopPendingAcrossInstances(t *testing.T) {
 	nodeA := NewRedisLocalSkillImportStore(rdb)
 	nodeB := NewRedisLocalSkillImportStore(rdb)
 
-	req, err := nodeA.Create(ctx, "runtime-import", "user-1", "review-helper", nil, nil, false)
+	req, err := nodeA.Create(ctx, LocalSkillImportRequestInput{
+		RuntimeID: "runtime-import",
+		CreatorID: "user-1",
+		SkillKey:  "review-helper",
+	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -371,7 +421,11 @@ func TestRedisLocalSkillImportStore_PopPendingBatch(t *testing.T) {
 	// Create 5 pending imports.
 	ids := make([]string, 5)
 	for i := range ids {
-		req, err := store.Create(ctx, "runtime-batch", "user-1", fmt.Sprintf("skill-%d", i), nil, nil, false)
+		req, err := store.Create(ctx, LocalSkillImportRequestInput{
+			RuntimeID: "runtime-batch",
+			CreatorID: "user-1",
+			SkillKey:  fmt.Sprintf("skill-%d", i),
+		})
 		if err != nil {
 			t.Fatalf("create %d: %v", i, err)
 		}

@@ -47,6 +47,13 @@ type AutopilotResponse struct {
 	LastRunAt          *string  `json:"last_run_at"`
 	CreatedAt          string   `json:"created_at"`
 	UpdatedAt          string   `json:"updated_at"`
+
+	// List-endpoint-only derived fields (absent on the detail/create/update
+	// responses and on older servers — clients must treat them as optional).
+	// Enabled triggers only; last_run_status is the most recent run's status.
+	TriggerKinds  []string `json:"trigger_kinds,omitempty"`
+	NextRunAt     *string  `json:"next_run_at,omitempty"`
+	LastRunStatus *string  `json:"last_run_status,omitempty"`
 }
 
 type AutopilotTriggerResponse struct {
@@ -337,10 +344,30 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 	if s := r.URL.Query().Get("status"); s != "" {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
+	var mineUserID pgtype.UUID
+	if rawMine := strings.TrimSpace(r.URL.Query().Get("mine")); rawMine != "" {
+		mine, err := strconv.ParseBool(rawMine)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid mine")
+			return
+		}
+		if mine {
+			userID, ok := requireUserID(w, r)
+			if !ok {
+				return
+			}
+			parsed, ok := parseUUIDOrBadRequest(w, userID, "user id")
+			if !ok {
+				return
+			}
+			mineUserID = parsed
+		}
+	}
 
 	autopilots, err := h.Queries.ListAutopilots(r.Context(), db.ListAutopilotsParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Status:      statusFilter,
+		MineUserID:  mineUserID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list autopilots")
@@ -348,8 +375,17 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := make([]AutopilotResponse, len(autopilots))
-	for i, a := range autopilots {
-		resp[i] = autopilotToResponse(a)
+	for i, row := range autopilots {
+		r := autopilotToResponse(row.Autopilot)
+		r.TriggerKinds = row.TriggerKinds
+		if row.NextRunAt.Valid {
+			r.NextRunAt = timestampToPtr(row.NextRunAt)
+		}
+		if row.LastRunStatus != "" {
+			s := row.LastRunStatus
+			r.LastRunStatus = &s
+		}
+		resp[i] = r
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"autopilots": resp, "total": len(resp)})
 }
@@ -984,9 +1020,9 @@ func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Reque
 			return false
 		}
 		// Private-leader gate: the member configuring the autopilot must have
-		// access to the private leader, same as validateAssigneePair.
+		// dispatch access to the private leader, same as validateAssigneePair.
 		actorType, actorID := h.resolveActor(r, requestUserID(r), util.UUIDToString(workspaceID))
-		if !h.canAccessPrivateAgent(r.Context(), leader, actorType, actorID, util.UUIDToString(workspaceID)) {
+		if !h.canDispatchToPrivateAgent(r.Context(), leader, actorType, actorID, util.UUIDToString(workspaceID)) {
 			writeError(w, http.StatusForbidden, "cannot assign autopilot to squad with private leader")
 			return false
 		}

@@ -210,6 +210,7 @@ func TestChannelInviteOnlyAccess(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = 'channel-outsider@multica.ai'`)
 	})
 
+	// Owner creates an invite-only channel and posts a message into it.
 	rr := httptest.NewRecorder()
 	testHandler.CreateChannel(rr, newRequest(http.MethodPost, "/api/channels", map[string]any{
 		"name": "Private Channel", "access_mode": "invite",
@@ -223,7 +224,13 @@ func TestChannelInviteOnlyAccess(t *testing.T) {
 		t.Fatalf("expected invite mode, got %s", channel.AccessMode)
 	}
 
-	// An outsider (non-member of the channel, plain workspace member) cannot see it.
+	rr = httptest.NewRecorder()
+	testHandler.SendChannelMessage(rr, withURLParam(newRequest(http.MethodPost, "/", map[string]any{"content": "secret"}), "id", channel.ID))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("owner SendChannelMessage: %d (%s)", rr.Code, rr.Body.String())
+	}
+
+	// An outsider (non-member of the channel, plain workspace member).
 	var outsiderID string
 	if err := testPool.QueryRow(ctx,
 		`INSERT INTO "user" (name, email) VALUES ('Outsider', 'channel-outsider@multica.ai') RETURNING id`).Scan(&outsiderID); err != nil {
@@ -234,11 +241,62 @@ func TestChannelInviteOnlyAccess(t *testing.T) {
 		t.Fatalf("add outsider member: %v", err)
 	}
 
+	// Outsider CAN see the invite-only channel in the list (not as a member).
+	rr = httptest.NewRecorder()
+	listReq := newRequest(http.MethodGet, "/api/channels", nil)
+	listReq.Header.Set("X-User-ID", outsiderID)
+	testHandler.ListChannels(rr, listReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("outsider ListChannels: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var listResp struct {
+		Channels []ChannelResponse `json:"channels"`
+	}
+	decodeJSON(t, rr, &listResp)
+	seen := false
+	for _, c := range listResp.Channels {
+		if c.ID == channel.ID {
+			seen = true
+			if c.IsMember {
+				t.Fatalf("outsider should not be marked as member of invite channel")
+			}
+		}
+	}
+	if !seen {
+		t.Fatalf("outsider ListChannels: invite-only channel not visible")
+	}
+
+	// Outsider CAN read the channel detail.
 	rr = httptest.NewRecorder()
 	req := withURLParam(newRequest(http.MethodGet, "/", nil), "id", channel.ID)
 	req.Header.Set("X-User-ID", outsiderID)
 	testHandler.GetChannel(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("outsider GetChannel: expected 200, got %d (%s)", rr.Code, rr.Body.String())
+	}
+
+	// Outsider CAN read the messages.
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodGet, "/", nil), "id", channel.ID)
+	req.Header.Set("X-User-ID", outsiderID)
+	testHandler.ListChannelMessages(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("outsider ListChannelMessages: expected 200, got %d (%s)", rr.Code, rr.Body.String())
+	}
+	var msgs struct {
+		Total int `json:"total"`
+	}
+	decodeJSON(t, rr, &msgs)
+	if msgs.Total != 1 {
+		t.Fatalf("outsider expected 1 message, got %d", msgs.Total)
+	}
+
+	// Outsider CANNOT post — canPost() gate rejects non-members.
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodPost, "/", map[string]any{"content": "intrusion"}), "id", channel.ID)
+	req.Header.Set("X-User-ID", outsiderID)
+	testHandler.SendChannelMessage(rr, req)
 	if rr.Code != http.StatusForbidden {
-		t.Fatalf("outsider GetChannel: expected 403, got %d (%s)", rr.Code, rr.Body.String())
+		t.Fatalf("outsider SendChannelMessage: expected 403, got %d (%s)", rr.Code, rr.Body.String())
 	}
 }

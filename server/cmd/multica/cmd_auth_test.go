@@ -2,12 +2,20 @@ package main
 
 import (
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
+
+func TestMain(m *testing.M) {
+	os.Unsetenv("MULTICA_AGENT_ID")
+	os.Unsetenv("MULTICA_TASK_ID")
+	os.Unsetenv("MULTICA_TOKEN")
+	os.Exit(m.Run())
+}
 
 // testCmd returns a minimal cobra.Command with the --profile persistent flag
 // registered, matching the rootCmd setup used in production.

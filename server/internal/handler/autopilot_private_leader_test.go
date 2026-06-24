@@ -37,6 +37,7 @@ func TestCreateAutopilot_SquadPrivateLeader_PlainMemberBlocked(t *testing.T) {
 		"assignee_type":  "squad",
 		"assignee_id":    squadID,
 		"execution_mode": "create_issue",
+		"manual_options": []string{},
 	})
 	testHandler.CreateAutopilot(w, r)
 	if w.Code != http.StatusForbidden {
@@ -75,6 +76,7 @@ func TestUpdateAutopilot_SquadPrivateLeader_PlainMemberBlocked(t *testing.T) {
 		"title":          "update target ap",
 		"assignee_id":    publicAgentID,
 		"execution_mode": "create_issue",
+		"manual_options": []string{},
 	})
 	testHandler.CreateAutopilot(w, r)
 	if w.Code != http.StatusCreated {
@@ -131,6 +133,7 @@ func TestCreateAutopilot_SquadPrivateLeader_OwnerAllowed(t *testing.T) {
 		"assignee_type":  "squad",
 		"assignee_id":    squadID,
 		"execution_mode": "create_issue",
+		"manual_options": []string{},
 	})
 	testHandler.CreateAutopilot(w, r)
 	if w.Code != http.StatusCreated {
@@ -175,6 +178,7 @@ func TestTriggerAutopilot_SquadPrivateLeader_OwnerCanDispatch(t *testing.T) {
 		"assignee_type":  "squad",
 		"assignee_id":    squadID,
 		"execution_mode": "create_issue",
+		"manual_options": []string{},
 	})
 	testHandler.CreateAutopilot(w, r)
 	if w.Code != http.StatusCreated {
@@ -236,8 +240,8 @@ func TestTriggerAutopilot_SquadPrivateLeader_PlainMemberCreator_Blocked(t *testi
 	var apID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id,
-		                       execution_mode, created_by_type, created_by_id, status)
-		VALUES ($1, 'legacy illegal ap', 'squad', $2, 'create_issue', 'member', $3, 'active')
+		                       execution_mode, created_by_type, created_by_id, status, manual_options)
+		VALUES ($1, 'legacy illegal ap', 'squad', $2, 'create_issue', 'member', $3, 'active', '{}')
 		RETURNING id
 	`, testWorkspaceID, squadID, memberID).Scan(&apID); err != nil {
 		t.Fatalf("create autopilot: %v", err)
@@ -296,8 +300,8 @@ func TestTriggerAutopilot_RunOnly_SquadPrivateLeader_PlainMemberCreator_Blocked(
 	var apID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id,
-		                       execution_mode, created_by_type, created_by_id, status)
-		VALUES ($1, 'legacy run_only illegal ap', 'squad', $2, 'run_only', 'member', $3, 'active')
+		                       execution_mode, created_by_type, created_by_id, status, manual_options)
+		VALUES ($1, 'legacy run_only illegal ap', 'squad', $2, 'run_only', 'member', $3, 'active', '{}')
 		RETURNING id
 	`, testWorkspaceID, squadID, memberID).Scan(&apID); err != nil {
 		t.Fatalf("create autopilot: %v", err)

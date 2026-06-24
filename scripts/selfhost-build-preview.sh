@@ -66,10 +66,31 @@ if [ -z "$profile" ]; then
   profile="multica"
 fi
 
+project_name="${COMPOSE_PROJECT_NAME:-multica_preview_${profile}}"
+
+# Detect existing services for this profile and rebuild them automatically,
+# instead of silently starting a second copy on shifted ports.
+echo "==> Checking if preview '${profile}' is already running..."
+if docker ps --filter "label=com.docker.compose.project=${project_name}" -q 2>/dev/null | grep -q .; then
+  echo "  Preview '${profile}' is already running — stopping it to rebuild."
+fi
+
+# Stop any previous containers for this profile (running or stopped) before
+# allocating ports, so the rebuild reuses the same ports instead of drifting.
+echo "==> Stopping any previous preview containers for '${profile}'..."
+if ! COMPOSE_PROJECT_NAME="$project_name" \
+  docker compose \
+    -p "$project_name" \
+    -f docker-compose.selfhost.yml \
+    -f docker-compose.selfhost.build.yml \
+    down; then
+  echo "❌ Failed to stop previous preview containers. Check docker status and retry." >&2
+  exit 1
+fi
+
 frontend_port="$(next_free_port "$base_frontend_port")"
 backend_port="$(next_free_port "$base_backend_port")"
 
-project_name="${COMPOSE_PROJECT_NAME:-multica_preview_${profile}}"
 if [ "${ISOLATED_DB:-0}" = "1" ]; then
   db_name="${POSTGRES_DB:-multica_preview_${profile}}"
 else
@@ -125,14 +146,6 @@ if [ "$db_exists" != "1" ]; then
     -c "CREATE DATABASE \"$db_name\"" \
     > /dev/null
 fi
-
-echo "==> Stopping any previous preview with the same project name (idempotent rebuild)..."
-COMPOSE_PROJECT_NAME="$project_name" \
-docker compose \
-  -p "$project_name" \
-  -f docker-compose.selfhost.yml \
-  -f docker-compose.selfhost.build.yml \
-  down 2>/dev/null || true
 
 echo "==> Building Multica preview from the current checkout..."
 COMPOSE_PROJECT_NAME="$project_name" \

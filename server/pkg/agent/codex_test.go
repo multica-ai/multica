@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,9 +23,10 @@ func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
 	var messages []Message
 
 	c := &codexClient{
-		cfg:     Config{Logger: slog.Default()},
-		stdin:   fs,
-		pending: make(map[int]*pendingRPC),
+		cfg:         Config{Logger: slog.Default()},
+		stdin:       fs,
+		pending:     make(map[int]*pendingRPC),
+		processDone: make(chan struct{}),
 		onMessage: func(msg Message) {
 			mu.Lock()
 			messages = append(messages, msg)
@@ -498,6 +500,28 @@ func TestCodexRawTurnCompleted(t *testing.T) {
 	}
 }
 
+func TestCodexRawTurnCompletedSubtractsCachedInput(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.onTurnDone = func(aborted bool) {}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-usage","status":"completed","usage":{"input_tokens":1000,"cached_input_tokens":300,"output_tokens":50}}}}`)
+
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.usage.InputTokens != 700 {
+		t.Fatalf("input tokens = %d, want uncached 700", c.usage.InputTokens)
+	}
+	if c.usage.CacheReadTokens != 300 {
+		t.Fatalf("cache read tokens = %d, want 300", c.usage.CacheReadTokens)
+	}
+	if c.usage.OutputTokens != 50 {
+		t.Fatalf("output tokens = %d, want 50", c.usage.OutputTokens)
+	}
+}
+
 func TestCodexRawTurnCompletedDeduplication(t *testing.T) {
 	t.Parallel()
 
@@ -662,6 +686,37 @@ func TestCodexSetTurnErrorFirstWins(t *testing.T) {
 
 	if got := c.getTurnError(); got != "first" {
 		t.Fatalf("expected first-wins semantics, got %q", got)
+	}
+}
+
+func TestParseCodexSessionFileSubtractsCachedInput(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := strings.Join([]string{
+		`{"timestamp":"2026-06-12T17:29:27.587Z","type":"turn_context","payload":{"model":"gpt-5.5"}}`,
+		`{"timestamp":"2026-06-12T17:35:37.479Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":300,"output_tokens":40,"reasoning_output_tokens":10,"total_tokens":1040},"model":"gpt-5.5"}}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	got := parseCodexSessionFile(path)
+	if got == nil {
+		t.Fatal("expected usage")
+	}
+	if got.model != "gpt-5.5" {
+		t.Fatalf("model = %q, want gpt-5.5", got.model)
+	}
+	if got.usage.InputTokens != 700 {
+		t.Fatalf("input tokens = %d, want uncached 700", got.usage.InputTokens)
+	}
+	if got.usage.CacheReadTokens != 300 {
+		t.Fatalf("cache read tokens = %d, want 300", got.usage.CacheReadTokens)
+	}
+	if got.usage.OutputTokens != 50 {
+		t.Fatalf("output tokens = %d, want 50", got.usage.OutputTokens)
 	}
 }
 
@@ -830,6 +885,43 @@ func TestCodexRawItemAgentMessageFinalAnswerFromSubagentIgnored(t *testing.T) {
 	}
 }
 
+// #3339: Only agentMessage with explicit non-final_answer phase (e.g. "progress")
+// should be classified as MessageThinking (and excluded from Result.Output).
+// Messages without phase or with phase="final_answer" contribute to output (MessageText).
+// This maintains backward compatibility for existing Codex versions that don't
+// use phase markers.
+func TestCodexOnlyExplicitProgressPhaseIsClassifiedAsThinking(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var messages []Message
+	c.onMessage = func(msg Message) {
+		messages = append(messages, msg)
+	}
+
+	// Message without phase -> defaults to MessageText (backward compatibility)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-1","text":"normal message without phase"}}}`)
+	if len(messages) != 1 || messages[0].Type != MessageText {
+		t.Fatalf("expected MessageText for message without phase (backward compat), got %+v", messages)
+	}
+
+	// Message with explicit phase="progress" (intermediate) -> MessageThinking
+	messages = nil
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-2","text":"still working on it","phase":"progress"}}}`)
+	if len(messages) != 1 || messages[0].Type != MessageThinking {
+		t.Fatalf("expected MessageThinking for phase=progress message, got %+v", messages)
+	}
+
+	// Message with phase="final_answer" -> MessageText
+	messages = nil
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-3","text":"The bug is fixed","phase":"final_answer"}}}`)
+	if len(messages) != 1 || messages[0].Type != MessageText {
+		t.Fatalf("expected MessageText for phase=final_answer, got %+v", messages)
+	}
+}
+
 func TestCodexCloseAllPending(t *testing.T) {
 	t.Parallel()
 
@@ -857,6 +949,55 @@ func TestCodexCloseAllPending(t *testing.T) {
 	defer c.mu.Unlock()
 	if len(c.pending) != 0 {
 		t.Fatalf("expected empty pending map, got %d", len(c.pending))
+	}
+}
+
+func TestCodexRequestFailsImmediatelyAfterProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.markProcessExited(errCodexProcessExited)
+
+	_, err := c.request(context.Background(), "thread/start", map[string]any{})
+	if !errors.Is(err, errCodexProcessExited) {
+		t.Fatalf("request error = %v, want errCodexProcessExited", err)
+	}
+	if lines := fs.Lines(); len(lines) != 0 {
+		t.Fatalf("request should not write after process exit, wrote %d lines", len(lines))
+	}
+}
+
+func TestCodexRequestPrefersContextCancellationOverProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	processExitMarked := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if len(fs.Lines()) >= 1 {
+				cancel()
+				c.markProcessExited(errCodexProcessExited)
+				processExitMarked <- nil
+				return
+			}
+			if time.Now().After(deadline) {
+				processExitMarked <- fmt.Errorf("timed out waiting for request write")
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	_, err := c.request(ctx, "thread/start", map[string]any{})
+	if markErr := <-processExitMarked; markErr != nil {
+		t.Fatal(markErr)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("request error = %v, want context.Canceled", err)
 	}
 }
 
@@ -1111,6 +1252,81 @@ func TestCodexStartOrResumeThreadPromptPassesPolicyOnResume(t *testing.T) {
 	}
 }
 
+func TestCodexStartOrResumeThreadSetsNameOnFreshThread(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_named"}}`),
+		},
+		{
+			method: "thread/name/set",
+			result: json.RawMessage(`{}`),
+			assertFn: func(t *testing.T, params map[string]any) {
+				if params["threadId"] != "thr_named" {
+					t.Errorf("threadId = %v, want thr_named", params["threadId"])
+				}
+				if params["name"] != "Review GitHub issue #3843" {
+					t.Errorf("name = %v, want semantic title", params["name"])
+				}
+			},
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{ThreadName: "Review GitHub issue #3843"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_named" {
+		t.Errorf("threadID = %q, want thr_named", threadID)
+	}
+	if resumed {
+		t.Error("resumed should be false when no prior session is provided")
+	}
+}
+
+func TestCodexStartOrResumeThreadNameFailureDoesNotBlock(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "thread/start",
+			result: json.RawMessage(`{"thread":{"id":"thr_named"}}`),
+		},
+		{
+			method:  "thread/name/set",
+			errMsg:  "unsupported method",
+			errCode: -32601,
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{ThreadName: "Semantic task title"},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread should continue after name failure: %v", err)
+	}
+	if threadID != "thr_named" {
+		t.Errorf("threadID = %q, want thr_named", threadID)
+	}
+	if resumed {
+		t.Error("resumed should be false when no prior session is provided")
+	}
+}
+
 func TestCodexStartOrResumeThreadPassesServiceTier(t *testing.T) {
 	t.Parallel()
 
@@ -1259,6 +1475,61 @@ func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	}
 	if resumed {
 		t.Error("expected resumed=false after falling back to thread/start")
+	}
+}
+
+func TestCodexStartOrResumeThreadDoesNotFallBackAfterProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	processExitMarked := make(chan error, 1)
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if len(fs.Lines()) >= 1 {
+				c.markProcessExited(errCodexProcessExited)
+				processExitMarked <- nil
+				return
+			}
+			if time.Now().After(deadline) {
+				processExitMarked <- fmt.Errorf("timed out waiting for thread/resume request")
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	threadID, resumed, err := c.startOrResumeThread(
+		ctx,
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_stale"},
+		slog.Default(),
+	)
+	if markErr := <-processExitMarked; markErr != nil {
+		t.Fatal(markErr)
+	}
+	if !errors.Is(err, errCodexProcessExited) {
+		t.Fatalf("startOrResumeThread error = %v, want errCodexProcessExited", err)
+	}
+	if threadID != "" {
+		t.Fatalf("threadID = %q, want empty", threadID)
+	}
+	if resumed {
+		t.Fatal("resumed should be false on process exit")
+	}
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected only thread/resume request, got %d lines: %v", len(lines), lines)
+	}
+	var req struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if req.Method != "thread/resume" {
+		t.Fatalf("request method = %q, want thread/resume", req.Method)
 	}
 }
 
@@ -1441,6 +1712,64 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	}
 }
 
+func TestCodexExecutePassesConfigEnvToAppServerProcess(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	probeFile := filepath.Join(t.TempDir(), "codex-env-probe.txt")
+	fakePath := filepath.Join(t.TempDir(), "codex")
+	script := "#!/bin/sh\n" +
+		`printf 'AIPC_AUTH_MOBILE=%s\n' "${AIPC_AUTH_MOBILE:+present}" > "$CODEX_ENV_PROBE_FILE"` + "\n" +
+		`printf 'AIPC_AUTH_PASSWORD=%s\n' "${AIPC_AUTH_PASSWORD:+present}" >> "$CODEX_ENV_PROBE_FILE"` + "\n" +
+		"exit 2\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"AIPC_AUTH_MOBILE":     "test-mobile",
+			"AIPC_AUTH_PASSWORD":   "test-password",
+			"CODEX_ENV_PROBE_FILE": probeFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new codex backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	data, err := os.ReadFile(probeFile)
+	if err != nil {
+		t.Fatalf("read env probe: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"AIPC_AUTH_MOBILE=present",
+		"AIPC_AUTH_PASSWORD=present",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("env probe missing %q, got:\n%s", want, got)
+		}
+	}
+}
+
 func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -1516,6 +1845,74 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteFailsWhenProcessExitsDuringActiveTurn(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-crash"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-crash","turn":{"id":"turn-crash"}}}'`+"\n"+
+		`echo 'fatal: app-server crashed after turn/start' >&2`+"\n"+
+		`exit 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	if result.Status != "failed" {
+		t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "codex process exited") {
+		t.Fatalf("expected process-exit error, got %q", result.Error)
+	}
+	if !strings.Contains(result.Error, "fatal: app-server crashed after turn/start") {
+		t.Fatalf("expected stderr tail in error, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, "timeout") {
+		t.Fatalf("process exit should fail fast instead of timeout, got %q", result.Error)
+	}
+}
+
+func TestCodexExecuteTimeoutWinsOverProcessExitDuringActiveTurn(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-timeout"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-timeout","turn":{"id":"turn-timeout"}}}'`+"\n"+
+		`read line`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 30 * time.Second,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "codex timed out after") {
+		t.Fatalf("expected timeout error, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, "codex process exited") {
+		t.Fatalf("timeout should win over process EOF, got %q", result.Error)
+	}
+}
+
 func TestCodexExecuteFirstTurnRetryErrorDoesNotSatisfyProgress(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -1566,7 +1963,7 @@ func TestCodexExecuteLegacyFirstTurnMessageSatisfiesProgress(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_started"}}}'`+"\n"+
 		`sleep 0.05`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"legacy alive"}}}'`+"\n"+
-		`sleep 0.07`+"\n"+
+		`sleep 0.02`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_complete"}}}'`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
@@ -1597,21 +1994,28 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousMessages(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-progress","turn":{"id":"turn-progress"}}}'`+"\n"+
 		`sleep 0.05`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-progress","item":{"type":"agentMessage","id":"msg-1","text":"still working"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-progress","item":{"type":"agentMessage","id":"msg-1","text":"still working","phase":"progress"}}}'`+"\n"+
 		`sleep 0.05`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-progress","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"ok"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-progress","item":{"type":"agentMessage","id":"msg-2","text":"done now","phase":"final_answer"}}}'`+"\n"+
 		`sleep 0.05`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-progress","turn":{"id":"turn-progress","status":"completed"}}}'`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
-		SemanticInactivityTimeout: 90 * time.Millisecond,
+		SemanticInactivityTimeout: 500 * time.Millisecond,
 	})
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
 	}
-	if !strings.Contains(result.Output, "still working") {
-		t.Fatalf("expected streamed text in output, got %q", result.Output)
+	// Intermediate progress messages (with phase="progress") must NOT leak into output
+	if strings.Contains(result.Output, "still working") {
+		t.Fatalf("intermediate progress (phase=progress) must not leak into output, got %q", result.Output)
+	}
+	// final_answer messages should appear in output
+	if !strings.Contains(result.Output, "done now") {
+		t.Fatalf("expected final_answer text in output, got %q", result.Output)
 	}
 }
 

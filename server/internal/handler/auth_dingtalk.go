@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	notifyutil "github.com/multica-ai/multica/server/internal/notify"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -204,7 +205,7 @@ func (h *Handler) DingTalkLogin(w http.ResponseWriter, r *http.Request) {
 		if isNew {
 			evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
 			evt.Properties["auth_method"] = "dingtalk"
-			h.Analytics.Capture(evt)
+			obsmetrics.RecordEvent(h.Analytics, h.Metrics, evt)
 		}
 	} else {
 		slog.Error("dingtalk login: failed to query binding", "error", err)
