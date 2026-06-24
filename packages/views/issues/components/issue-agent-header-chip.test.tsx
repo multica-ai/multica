@@ -6,15 +6,11 @@ import type { AgentTask } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
 const mockState = vi.hoisted(() => ({
-  snapshot: [] as unknown[],
+  tasks: [] as unknown[],
   taskMessagesOptions: vi.fn(),
   // Captures the props the chip passes to PopoverTrigger so a test can assert
   // the card is wired to open on hover, not only on click.
   triggerProps: undefined as Record<string, unknown> | undefined,
-}));
-
-vi.mock("@multica/core/hooks", () => ({
-  useWorkspaceId: () => "ws-1",
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
@@ -75,8 +71,9 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useQuery: (opts: { queryKey?: readonly unknown[] }) => {
-      if (opts.queryKey?.[2] === "agent-task-snapshot") {
-        return { data: mockState.snapshot };
+      // Per-issue task list: issueKeys.tasks(issueId) === ["issues","tasks",id]
+      if (opts.queryKey?.[0] === "issues" && opts.queryKey?.[1] === "tasks") {
+        return { data: mockState.tasks };
       }
       return { data: undefined };
     },
@@ -106,13 +103,13 @@ function makeTask(overrides: Partial<AgentTask>): AgentTask {
 beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
-  mockState.snapshot = [];
+  mockState.tasks = [];
   mockState.triggerProps = undefined;
 });
 
 describe("IssueAgentHeaderChip", () => {
   it("shows the active agent name without event count or elapsed time", () => {
-    mockState.snapshot = [makeTask({})];
+    mockState.tasks = [makeTask({})];
 
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
@@ -126,7 +123,7 @@ describe("IssueAgentHeaderChip", () => {
   });
 
   it("keeps the header popover card with active task rows", () => {
-    mockState.snapshot = [makeTask({ id: "task-running" })];
+    mockState.tasks = [makeTask({ id: "task-running" })];
 
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
@@ -138,7 +135,7 @@ describe("IssueAgentHeaderChip", () => {
   });
 
   it("opens the activity card on hover, not only on click", () => {
-    mockState.snapshot = [makeTask({})];
+    mockState.tasks = [makeTask({})];
 
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
@@ -152,7 +149,7 @@ describe("IssueAgentHeaderChip", () => {
   });
 
   it("uses the concise multi-agent working label", () => {
-    mockState.snapshot = [
+    mockState.tasks = [
       makeTask({ id: "task-1", agent_id: "agent-1" }),
       makeTask({ id: "task-2", agent_id: "agent-2" }),
     ];
@@ -168,7 +165,7 @@ describe("IssueAgentHeaderChip", () => {
   });
 
   it("uses the requested Chinese single-agent copy", () => {
-    mockState.snapshot = [makeTask({})];
+    mockState.tasks = [makeTask({})];
 
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />, {
       locale: "zh-Hans",
@@ -177,14 +174,20 @@ describe("IssueAgentHeaderChip", () => {
     expect(screen.getByText("Walt 在工作")).toBeInTheDocument();
   });
 
-  it("does not render for inactive or unrelated tasks", () => {
-    mockState.snapshot = [
+  it("does not render when the issue has only terminal tasks", () => {
+    // The list is issue-scoped by the endpoint, so the chip's only job is to
+    // ignore terminal statuses (those are the execution log's story).
+    mockState.tasks = [
       makeTask({
         id: "task-done",
         status: "completed",
         completed_at: "2026-06-08T08:05:00Z",
       }),
-      makeTask({ id: "task-other", issue_id: "issue-2" }),
+      makeTask({
+        id: "task-cancelled",
+        status: "cancelled",
+        completed_at: "2026-06-08T08:06:00Z",
+      }),
     ];
 
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
