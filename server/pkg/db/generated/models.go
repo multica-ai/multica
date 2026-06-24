@@ -517,6 +517,15 @@ type MulticaProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
+type MulticaRuntimePermission struct {
+	ID        pgtype.UUID        `json:"id"`
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Role      string             `json:"role"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MulticaSkill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -743,6 +752,9 @@ type MulticaWorkflowNodeRun struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 	WorkerAgentTaskID pgtype.UUID        `json:"worker_agent_task_id"`
 	CriticAgentTaskID pgtype.UUID        `json:"critic_agent_task_id"`
+	RuntimeID         pgtype.UUID        `json:"runtime_id"`
+	DeviceID          pgtype.Text        `json:"device_id"`
+	SessionID         pgtype.Text        `json:"session_id"`
 }
 
 type MulticaWorkflowRun struct {

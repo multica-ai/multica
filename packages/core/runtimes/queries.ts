@@ -13,6 +13,8 @@ export const runtimeKeys = {
   usageByHour: (rid: string, days: number, tz: string) =>
     ["runtimes", "usage", "by-hour", rid, days, tz] as const,
   latestVersion: () => ["runtimes", "latestVersion"] as const,
+  permissions: (rid: string) => ["runtimes", "permissions", rid] as const,
+  myPermission: (rid: string) => ["runtimes", "permission", rid] as const,
 };
 
 // `tz` is the viewer's IANA name — all reports follow the viewer's tz.
@@ -74,5 +76,21 @@ export function latestCliVersionOptions() {
       }
     },
     staleTime: 10 * 60 * 1000, // 10 minutes
+  });
+}
+
+export function runtimePermissionsOptions(runtimeId: string) {
+  return queryOptions({
+    queryKey: runtimeKeys.permissions(runtimeId),
+    queryFn: () => api.listRuntimePermissions(runtimeId),
+    staleTime: 30 * 1000,
+  });
+}
+
+export function myRuntimePermissionOptions(runtimeId: string) {
+  return queryOptions({
+    queryKey: runtimeKeys.myPermission(runtimeId),
+    queryFn: () => api.getMyRuntimePermission(runtimeId),
+    staleTime: 30 * 1000,
   });
 }

@@ -148,6 +148,8 @@ export function WorkflowRunPage({ workflowId, runId }: WorkflowRunPageProps) {
               key={nr.id}
               nodeRun={nr}
               maxRetries={3}
+              workflowId={workflowId}
+              runId={runId}
             />
           ))}
         </div>

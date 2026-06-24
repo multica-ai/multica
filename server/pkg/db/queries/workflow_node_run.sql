@@ -98,9 +98,51 @@ UPDATE multica_workflow_node_run SET
 WHERE id = $1
 RETURNING *;
 
+-- name: BindWorkflowNodeRunSession :one
+-- Writes the runtime/device/CSC-session binding for a node run (Design Two).
+-- Idempotent: a re-dispatch overwrites with the latest session so Cloud Web
+-- always attaches to the session currently executing the node.
+UPDATE multica_workflow_node_run SET
+    runtime_id = sqlc.narg('runtime_id'),
+    device_id  = sqlc.narg('device_id'),
+    session_id = sqlc.narg('session_id'),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: GetWorkflowNodeRunBySessionID :one
+-- Resolves the node run bound to a given CSC session id. Used by Cloud Web /
+-- cs-cloud to map an attached session back to its Multica node run.
+SELECT * FROM multica_workflow_node_run
+WHERE session_id = $1
+LIMIT 1;
+
+-- name: TakeoverWorkflowNodeRun :one
+-- Human takeover: pause the node (working -> blocked) WITHOUT marking it
+-- completed. completed_at stays NULL, which is what distinguishes a
+-- paused/taken-over blocked from a rework-exhausted ("stuck") blocked
+-- (the latter sets completed_at via UpdateWorkflowNodeRunStatus).
+UPDATE multica_workflow_node_run SET
+    status = 'blocked',
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: HandbackWorkflowNodeRun :one
+-- Human handback: return control (blocked -> working) so the daemon resumes the
+-- same CSC session. Clears any stale completed_at defensively; worker_output
+-- is preserved (unlike rework, which clears it).
+UPDATE multica_workflow_node_run SET
+    status = 'working',
+    completed_at = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: LinkNodeRunWorkerTask :one
 UPDATE multica_workflow_node_run SET
     worker_agent_task_id = $2,
+    runtime_id = $3,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -108,6 +150,7 @@ RETURNING *;
 -- name: LinkNodeRunCriticTask :one
 UPDATE multica_workflow_node_run SET
     critic_agent_task_id = $2,
+    runtime_id = $3,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

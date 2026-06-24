@@ -7,8 +7,13 @@ import { Badge } from "@multica/ui/components/ui/badge";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useT } from "../../i18n";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useSubmitNodeRun, useReviewNodeRun, useSkipNodeRun } from "@multica/core/workflows/queries";
+import {
+  useSubmitNodeRun,
+  useReviewNodeRun,
+  useSkipNodeRun,
+} from "@multica/core/workflows/queries";
 import type { WorkflowNodeRun, NodeRunStatus } from "@multica/core/types";
+import { NodeRunControlActions } from "./node-run-control-actions";
 
 const STATUS_ACTIVE: Set<NodeRunStatus> = new Set([
   "format_checking", "working", "critic_reviewing",
@@ -59,9 +64,11 @@ function CollapsibleJSON({ data, label }: { data: unknown; label: string }) {
 interface NodeRunCardProps {
   nodeRun: WorkflowNodeRun;
   maxRetries?: number;
+  workflowId?: string;
+  runId?: string;
 }
 
-export function NodeRunCard({ nodeRun, maxRetries = 3 }: NodeRunCardProps) {
+export function NodeRunCard({ nodeRun, maxRetries = 3, workflowId, runId }: NodeRunCardProps) {
   const { t } = useT("workflows");
   const wsId = useWorkspaceId();
   const [reviewComment, setReviewComment] = useState("");
@@ -109,7 +116,7 @@ export function NodeRunCard({ nodeRun, maxRetries = 3 }: NodeRunCardProps) {
       <CollapsibleJSON data={nodeRun.critic_output} label="Critic Output" />
 
       {/* Actions */}
-      <div className="flex items-center gap-1.5 pt-1">
+      <div className="flex items-center gap-1.5 pt-1 flex-wrap">
         {canSubmit && (
           <Button
             size="sm"
@@ -165,6 +172,13 @@ export function NodeRunCard({ nodeRun, maxRetries = 3 }: NodeRunCardProps) {
             {t(($) => $.node_run.skip)}
           </Button>
         )}
+        <NodeRunControlActions
+          nodeRun={nodeRun}
+          workflowId={workflowId}
+          runId={runId}
+          wsId={wsId}
+          size="sm"
+        />
       </div>
     </div>
   );

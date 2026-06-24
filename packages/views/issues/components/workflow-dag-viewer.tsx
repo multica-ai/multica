@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DAGCanvas } from "../../workflows/components";
 import { ReactFlowProvider } from "@xyflow/react";
@@ -18,6 +18,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@multica/ui/components/ui/dialog";
+import { NodeRunControlActions } from "../../workflows/components/node-run-control-actions";
 import { ExecutionLogSection } from "./execution-log-section";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -163,6 +164,27 @@ export function WorkflowDagViewer({
   const totalCount = nodes.length;
   const summary = getRunSummary(nodeRuns);
 
+  // Auto-select the most relevant node on first load so the active task is
+  // surfaced without the user needing to click the DAG.
+  // Priority: running > blocked > first pending.
+  const hasAutoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (hasAutoSelectedRef.current) return;
+    if (selectedNodeId) {
+      hasAutoSelectedRef.current = true;
+      return;
+    }
+    const blockedSet = new Set(["blocked"]);
+    const pendingSet = new Set(["pending"]);
+    const pick =
+      nodeRuns.find((nr) => runningSet.has(nr.status)) ??
+      nodeRuns.find((nr) => blockedSet.has(nr.status)) ??
+      nodeRuns.find((nr) => pendingSet.has(nr.status));
+    if (!pick) return;
+    setSelectedNodeId(pick.workflow_node_id);
+    hasAutoSelectedRef.current = true;
+  }, [nodeRuns, selectedNodeId]);
+
   const handleCancel = async () => {
     if (!runId || !confirm("Cancel this workflow run? All active sub-issues will stop.")) return;
     try {
@@ -301,6 +323,15 @@ export function WorkflowDagViewer({
               <span className="text-[10px] text-muted-foreground">retry {selectedNodeRun.retry_count}</span>
             )}
           </div>
+
+          <NodeRunControlActions
+            nodeRun={selectedNodeRun}
+            workflowId={workflowId}
+            runId={runId ?? undefined}
+            wsId={wsId}
+            size="sm"
+            alwaysShow
+          />
 
           {/* Worker */}
           <div className="space-y-1">

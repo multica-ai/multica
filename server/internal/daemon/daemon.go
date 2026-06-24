@@ -2593,7 +2593,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"timeout", execOpts.Timeout,
 	)
 
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+	// Workflow node-run tasks carry the node_run_id so the daemon can write
+	// back the {runtime, device, session} binding once the CSC session is
+	// known (Design Two). Empty for non-workflow tasks → bind is skipped.
+	binding := nodeRunBinding{
+		nodeRunID: task.WorkflowNodeRunID,
+		runtimeID: task.RuntimeID,
+		deviceID:  d.cfg.DaemonID,
+	}
+
+	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, binding)
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -2605,7 +2614,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, binding)
 		if retryErr != nil {
 			taskLog.Error("fresh session also failed to start", "error", retryErr)
 		} else {
@@ -2786,7 +2795,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
 // server), and waits for the final result.
-func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
+// nodeRunBinding carries the workflow node-run identifiers the daemon writes
+// back once the agent's CSC session_id is first revealed (Design Two). Zero
+// value (empty nodeRunID) for non-workflow tasks — the bind is then skipped.
+// deviceID is the daemon's stable identity: it is the device hosting the CSC
+// subprocess, which is how Cloud Web addresses this runtime's live session.
+type nodeRunBinding struct {
+	nodeRunID string
+	runtimeID string
+	deviceID  string
+}
+
+func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string, binding nodeRunBinding) (agent.Result, int32, error) {
 	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
 	// the agent subprocess (via the ctx passed to backend.Execute) AND the
 	// drain loop with a single cancel. Without this layer the backend would
@@ -2920,6 +2940,19 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 								taskLog.Debug("pin session failed", "error", err)
 							}
 						}()
+						// Workflow node-run: write back the {runtime, device,
+						// session} binding so Cloud Web can attach to this live
+						// CSC session for real-time collaboration (Design Two).
+						if binding.nodeRunID != "" {
+							nrID, rtID, devID := binding.nodeRunID, binding.runtimeID, binding.deviceID
+							go func() {
+								bindCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+								defer cancel()
+								if err := d.client.BindNodeRunSession(bindCtx, nrID, rtID, devID, sid); err != nil {
+									taskLog.Debug("bind node-run session failed", "node_run_id", nrID, "error", err)
+								}
+							}()
+						}
 					}
 				case agent.MessageToolUse:
 					n := toolCount.Add(1)

@@ -120,6 +120,12 @@ import type {
   ListWorkflowRunsResponse,
   MyWorkflowTaskResponse,
   WorkflowAdmin,
+  RuntimePermission,
+  RuntimePermissionListResponse,
+  MyRuntimePermissionResponse,
+  SessionPermissionResponse,
+  CreateRuntimePermissionRequest,
+  UpdateRuntimePermissionRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -187,6 +193,11 @@ import {
   EMPTY_MY_WORKFLOW_TASKS_RESPONSE,
   WorkflowAdminsResponseSchema,
   EMPTY_WORKFLOW_ADMINS_RESPONSE,
+  MyRuntimePermissionSchema,
+  RuntimePermissionListSchema,
+  SessionPermissionSchema,
+  EMPTY_SESSION_PERMISSION,
+  EMPTY_RUNTIME_PERMISSION_LIST_RESPONSE,
   BuiltinPluginListResponseSchema,
   EMPTY_BUILTIN_PLUGIN_LIST,
   ListMergeRequestsResponseSchema,
@@ -907,6 +918,47 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
+    });
+  }
+
+  async getMyRuntimePermission(runtimeId: string): Promise<MyRuntimePermissionResponse> {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/permission`);
+    return parseWithFallback(raw, MyRuntimePermissionSchema, { role: "", can_control: false, can_observe: false }, {
+      endpoint: "GET /api/runtimes/:id/permission",
+    });
+  }
+
+  async listRuntimePermissions(runtimeId: string): Promise<RuntimePermissionListResponse> {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/permissions`);
+    return parseWithFallback(raw, RuntimePermissionListSchema, EMPTY_RUNTIME_PERMISSION_LIST_RESPONSE, {
+      endpoint: "GET /api/runtimes/:id/permissions",
+    });
+  }
+
+  async createRuntimePermission(
+    runtimeId: string,
+    data: CreateRuntimePermissionRequest,
+  ): Promise<RuntimePermission> {
+    return this.fetch(`/api/runtimes/${runtimeId}/permissions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateRuntimePermission(
+    runtimeId: string,
+    userId: string,
+    data: UpdateRuntimePermissionRequest,
+  ): Promise<RuntimePermission> {
+    return this.fetch(`/api/runtimes/${runtimeId}/permissions/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteRuntimePermission(runtimeId: string, userId: string): Promise<void> {
+    await this.fetch(`/api/runtimes/${runtimeId}/permissions/${userId}`, {
+      method: "DELETE",
     });
   }
 
@@ -2024,6 +2076,32 @@ export class ApiClient {
   async skipNodeRun(nodeRunId: string): Promise<WorkflowNodeRun> {
     return this.fetch(`/api/node-runs/${nodeRunId}/skip`, {
       method: "POST",
+    });
+  }
+
+  async getSessionPermission(sessionId: string): Promise<SessionPermissionResponse> {
+    const raw = await this.fetch<unknown>(`/api/sessions/${sessionId}/permission`);
+    return parseWithFallback(raw, SessionPermissionSchema, EMPTY_SESSION_PERMISSION, {
+      endpoint: "GET /api/sessions/:sessionId/permission",
+    });
+  }
+
+  async takeoverNodeRun(nodeRunId: string): Promise<WorkflowNodeRun> {
+    return this.fetch(`/api/node-runs/${nodeRunId}/blocked`, {
+      method: "POST",
+    });
+  }
+
+  async handbackNodeRun(nodeRunId: string): Promise<WorkflowNodeRun> {
+    return this.fetch(`/api/node-runs/${nodeRunId}/working`, {
+      method: "POST",
+    });
+  }
+
+  async finalizeNodeRun(nodeRunId: string, approved: boolean): Promise<WorkflowNodeRun> {
+    return this.fetch(`/api/node-runs/${nodeRunId}/finalize`, {
+      method: "POST",
+      body: JSON.stringify({ approved }),
     });
   }
 

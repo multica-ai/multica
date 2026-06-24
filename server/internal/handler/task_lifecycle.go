@@ -95,6 +95,72 @@ func (h *Handler) PinTaskSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// BindNodeRunSession lets the daemon persist the runtime/device/CSC session
+// binding for a workflow node run, so Cloud Web can locate and attach to the
+// live session for real-time collaboration (Design Two). Idempotent: a
+// re-dispatch overwrites with the latest session. Daemon-authed; the caller
+// must own the node run's workspace.
+type BindNodeRunSessionRequest struct {
+	RuntimeID string `json:"runtime_id,omitempty"`
+	DeviceID  string `json:"device_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
+func (h *Handler) BindNodeRunSession(w http.ResponseWriter, r *http.Request) {
+	nodeRunID := chi.URLParam(r, "nodeRunId")
+	nodeRunUUID, ok := parseUUIDOrBadRequest(w, nodeRunID, "node_run_id")
+	if !ok {
+		return
+	}
+
+	var req BindNodeRunSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.RuntimeID == "" && req.DeviceID == "" && req.SessionID == "" {
+		writeError(w, http.StatusBadRequest, "runtime_id, device_id or session_id required")
+		return
+	}
+
+	// Verify the node run exists and the daemon owns its workspace.
+	nodeRun, err := h.Queries.GetWorkflowNodeRun(r.Context(), nodeRunUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "node run not found")
+		return
+	}
+	run, err := h.Queries.GetWorkflowRun(r.Context(), nodeRun.WorkflowRunID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "node run not found")
+		return
+	}
+	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(run.WorkspaceID)) {
+		return
+	}
+
+	params := db.BindWorkflowNodeRunSessionParams{ID: nodeRunUUID}
+	if req.RuntimeID != "" {
+		rtUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
+		if !ok {
+			return
+		}
+		params.RuntimeID = rtUUID
+	}
+	if req.DeviceID != "" {
+		params.DeviceID = pgtype.Text{String: req.DeviceID, Valid: true}
+	}
+	if req.SessionID != "" {
+		params.SessionID = pgtype.Text{String: req.SessionID, Valid: true}
+	}
+
+	if _, err := h.Queries.BindWorkflowNodeRunSession(r.Context(), params); err != nil {
+		slog.Warn("bind node-run session failed", "node_run_id", nodeRunID, "error", err)
+		writeError(w, http.StatusInternalServerError, "bind session failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // RerunIssueRequest is the optional body of POST /api/issues/{id}/rerun.
 // All fields are optional; an empty body keeps the legacy "rerun the issue's
 // current assignee" behaviour used by the CLI.

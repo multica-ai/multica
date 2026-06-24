@@ -71,7 +71,9 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { workflowStagesOptions } from "@multica/core/workflows/queries";
+import { workflowStagesOptions, workflowNodeRunsOptions } from "@multica/core/workflows/queries";
+import type { WorkflowNodeRun } from "@multica/core/types";
+import { NodeRunControlActions } from "../../workflows/components/node-run-control-actions";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
@@ -1042,6 +1044,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
 
+  // For workflow-generated sub-issues, fetch the node run so control actions
+  // (take over / hand back / open session / finalize) can be surfaced here too.
+  // Older sub-issues may not have workflow_id/workflow_run_id stamped, so fall
+  // back to the parent issue's workflow fields when available.
+  const isWorkflowOrigin = issue?.origin_type === "workflow" && !!issue?.origin_id;
+  const effectiveWorkflowId = issue?.workflow_id ?? parentIssue?.workflow_id;
+  const effectiveWorkflowRunId = issue?.workflow_run_id ?? parentIssue?.workflow_run_id;
+  const { data: nodeRuns = [] } = useQuery({
+    ...workflowNodeRunsOptions(wsId, effectiveWorkflowId ?? "", effectiveWorkflowRunId ?? ""),
+    enabled: isWorkflowOrigin && !!effectiveWorkflowId && !!effectiveWorkflowRunId,
+  });
+  const originNodeRun: WorkflowNodeRun | undefined = useMemo(
+    () => nodeRuns.find((nr) => nr.id === issue?.origin_id),
+    [nodeRuns, issue?.origin_id],
+  );
+
   // Project segment in the breadcrumb. The issue's project_id is the source of
   // truth — same URL renders the same breadcrumb regardless of entry path.
   const issueProjectId = issue?.project_id;
@@ -1840,6 +1858,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             )
           )}
 
+          {originNodeRun && (
+            <div className="mt-3 flex items-center gap-3 rounded-lg border bg-card/50 px-3 py-2">
+              <span className="text-xs text-muted-foreground">
+                {t(($) => $.detail.workflow_node_label)}
+              </span>
+              <NodeRunControlActions
+                nodeRun={originNodeRun}
+                workflowId={issue?.workflow_id ?? undefined}
+                runId={issue?.workflow_run_id ?? undefined}
+                wsId={wsId}
+                size="sm"
+                alwaysShow
+              />
+            </div>
+          )}
+
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
             <ContentEditor
               ref={descEditorRef}
@@ -1875,6 +1909,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
             {descDragOver && <FileDropOverlay />}
           </div>
+
+          {/* Workflow DAG — shown when the issue is assigned to a workflow */}
+          {issue.assignee_type === "workflow" && issue.assignee_id && (
+            <div className="mt-10">
+              <WorkflowDagViewer
+                workflowId={issue.assignee_id}
+                runId={issue.workflow_run_id}
+                wsId={wsId}
+                parentIssueId={issue.id}
+                onRunningChange={setIsWorkflowRunning}
+              />
+            </div>
+          )}
 
           {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (
@@ -1965,19 +2012,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               </div>
             );
           })()}
-
-          {/* Workflow DAG — shown when the issue is assigned to a workflow */}
-          {issue.assignee_type === "workflow" && issue.assignee_id && (
-            <div className="mt-10">
-              <WorkflowDagViewer
-                workflowId={issue.assignee_id}
-                runId={issue.workflow_run_id}
-                wsId={wsId}
-                parentIssueId={issue.id}
-                onRunningChange={setIsWorkflowRunning}
-              />
-            </div>
-          )}
 
           <div className="my-8 border-t" />
 

@@ -140,4 +140,5 @@ const (
 	EventWorkflowNodeRunFailed    = "workflow:node_run_failed"
 	EventWorkflowNodeRunBlocked   = "workflow:node_run_blocked"
 	EventWorkflowNodeRunReviewed  = "workflow:node_run_reviewed"
+	EventWorkflowNodeRunResumed   = "workflow:node_run_resumed"
 )

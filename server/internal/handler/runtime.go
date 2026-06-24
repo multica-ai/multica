@@ -604,3 +604,330 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+// ── Runtime-level permissions (Design Two / L1.4) ─────────────────────────────
+
+// RuntimePermissionRole is the effective role a user has on a runtime.
+// "owner" is implicit via workspace owner/admin status or runtime.owner_id;
+// explicit grants use "admin", "operator", or "viewer".
+type RuntimePermissionRole string
+
+const (
+	RuntimeRoleOwner    RuntimePermissionRole = "owner"
+	RuntimeRoleAdmin    RuntimePermissionRole = "admin"
+	RuntimeRoleOperator RuntimePermissionRole = "operator"
+	RuntimeRoleViewer   RuntimePermissionRole = "viewer"
+)
+
+// RuntimeCapabilities describes what a user may do with a runtime session.
+type RuntimeCapabilities struct {
+	Control bool `json:"control"` // takeover, handback, finalize, reject
+	Observe bool `json:"observe"` // SSE/proxy session observation
+}
+
+// resolveRuntimeRole returns the effective runtime-level role for a member.
+// Priority: workspace owner/admin > runtime owner > explicit grant.
+func resolveRuntimeRole(member db.MulticaMember, rt db.MulticaAgentRuntime, explicitRole string) RuntimePermissionRole {
+	if roleAllowed(member.Role, "owner", "admin") {
+		return RuntimeRoleOwner
+	}
+	if rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID) {
+		return RuntimeRoleOwner
+	}
+	if explicitRole != "" {
+		return RuntimePermissionRole(explicitRole)
+	}
+	return ""
+}
+
+// runtimeCapabilities maps a role to the actions it may perform.
+func runtimeCapabilities(role RuntimePermissionRole) RuntimeCapabilities {
+	switch role {
+	case RuntimeRoleOwner, RuntimeRoleAdmin, RuntimeRoleOperator:
+		return RuntimeCapabilities{Control: true, Observe: true}
+	case RuntimeRoleViewer:
+		return RuntimeCapabilities{Control: false, Observe: true}
+	default:
+		return RuntimeCapabilities{Control: false, Observe: false}
+	}
+}
+
+// canControlRuntime reports whether the member can perform takeover/handback/finalize/reject.
+func canControlRuntime(member db.MulticaMember, rt db.MulticaAgentRuntime, explicitRole string) bool {
+	return runtimeCapabilities(resolveRuntimeRole(member, rt, explicitRole)).Control
+}
+
+// canObserveRuntime reports whether the member may observe SSE/proxy sessions on the runtime.
+// Public runtimes are observable by any workspace member.
+func canObserveRuntime(member db.MulticaMember, rt db.MulticaAgentRuntime, explicitRole string) bool {
+	if rt.Visibility == "public" {
+		return true
+	}
+	return runtimeCapabilities(resolveRuntimeRole(member, rt, explicitRole)).Observe
+}
+
+// requireRuntimePermission loads the runtime, verifies workspace membership,
+// and resolves the effective runtime permission role. It writes 404/403 directly
+// and returns ok=false on any failure.
+func (h *Handler) requireRuntimePermission(w http.ResponseWriter, r *http.Request, runtimeID string) (member db.MulticaMember, rt db.MulticaAgentRuntime, role RuntimePermissionRole, ok bool) {
+	runtimeUUID, parsed := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !parsed {
+		return
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	member, ok = h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	if !ok {
+		return
+	}
+
+	explicitRole := ""
+	perm, err := h.Queries.GetRuntimePermission(r.Context(), db.GetRuntimePermissionParams{
+		RuntimeID: rt.ID,
+		UserID:    member.UserID,
+	})
+	if err == nil {
+		explicitRole = perm.Role
+	}
+
+	role = resolveRuntimeRole(member, rt, explicitRole)
+	return member, rt, role, true
+}
+
+type MyRuntimePermissionResponse struct {
+	Role       string              `json:"role"`
+	CanControl bool                `json:"can_control"`
+	CanObserve bool                `json:"can_observe"`
+}
+
+// GetRuntimePermissionForMe handles GET /api/runtimes/{runtimeId}/permission.
+// It returns the calling user's effective runtime role and capabilities, so the
+// frontend can gate takeover/handback/finalize controls without reimplementing
+// the permission resolution logic.
+func (h *Handler) GetRuntimePermissionForMe(w http.ResponseWriter, r *http.Request) {
+	_, _, role, ok := h.requireRuntimePermission(w, r, chi.URLParam(r, "runtimeId"))
+	if !ok {
+		return
+	}
+
+	caps := runtimeCapabilities(role)
+	writeJSON(w, http.StatusOK, MyRuntimePermissionResponse{
+		Role:       string(role),
+		CanControl: caps.Control,
+		CanObserve: caps.Observe,
+	})
+}
+
+// ── Runtime permission management ─────────────────────────────────────────────
+
+type RuntimePermissionResponse struct {
+	ID        string `json:"id"`
+	RuntimeID string `json:"runtime_id"`
+	UserID    string `json:"user_id"`
+	Role      string `json:"role"`
+	UserName  string `json:"user_name,omitempty"`
+	UserEmail string `json:"user_email,omitempty"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type CreateRuntimePermissionRequest struct {
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+type UpdateRuntimePermissionRequest struct {
+	Role string `json:"role"`
+}
+
+func runtimePermissionToResponse(p db.MulticaRuntimePermission, userName, userEmail string) RuntimePermissionResponse {
+	return RuntimePermissionResponse{
+		ID:        uuidToString(p.ID),
+		RuntimeID: uuidToString(p.RuntimeID),
+		UserID:    uuidToString(p.UserID),
+		Role:      p.Role,
+		UserName:  userName,
+		UserEmail: userEmail,
+		CreatedAt: timestampToString(p.CreatedAt),
+		UpdatedAt: timestampToString(p.UpdatedAt),
+	}
+}
+
+// ListRuntimePermissions handles GET /api/runtimes/{runtimeId}/permissions.
+// Any workspace member can list permissions for a runtime.
+func (h *Handler) ListRuntimePermissions(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+
+	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
+		return
+	}
+
+	rows, err := h.Queries.ListRuntimePermissions(r.Context(), rt.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list permissions")
+		return
+	}
+
+	resp := make([]RuntimePermissionResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = RuntimePermissionResponse{
+			ID:        uuidToString(row.ID),
+			RuntimeID: uuidToString(row.RuntimeID),
+			UserID:    uuidToString(row.UserID),
+			Role:      row.Role,
+			UserName:  row.UserName,
+			UserEmail: row.UserEmail,
+			CreatedAt: timestampToString(row.CreatedAt),
+			UpdatedAt: timestampToString(row.UpdatedAt),
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"permissions": resp})
+}
+
+// CreateRuntimePermission handles POST /api/runtimes/{runtimeId}/permissions.
+// Only runtime owners and admins may grant permissions.
+func (h *Handler) CreateRuntimePermission(w http.ResponseWriter, r *http.Request) {
+	member, rt, role, ok := h.requireRuntimePermission(w, r, chi.URLParam(r, "runtimeId"))
+	if !ok {
+		return
+	}
+	if role != RuntimeRoleOwner && role != RuntimeRoleAdmin {
+		writeError(w, http.StatusForbidden, "only runtime owners and admins can grant permissions")
+		return
+	}
+
+	var req CreateRuntimePermissionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.UserID == "" || req.Role == "" {
+		writeError(w, http.StatusBadRequest, "user_id and role are required")
+		return
+	}
+	if req.Role != string(RuntimeRoleAdmin) && req.Role != string(RuntimeRoleOperator) && req.Role != string(RuntimeRoleViewer) {
+		writeError(w, http.StatusBadRequest, "role must be admin, operator, or viewer")
+		return
+	}
+
+	userUUID, err := util.ParseUUID(req.UserID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user_id")
+		return
+	}
+
+	if uuidToString(member.UserID) == req.UserID {
+		writeError(w, http.StatusBadRequest, "cannot grant permission to yourself")
+		return
+	}
+
+	perm, err := h.Queries.CreateRuntimePermission(r.Context(), db.CreateRuntimePermissionParams{
+		RuntimeID: rt.ID,
+		UserID:    userUUID,
+		Role:      req.Role,
+	})
+	if err != nil {
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "permission already exists for this user")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create permission")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, runtimePermissionToResponse(perm, "", ""))
+}
+
+// UpdateRuntimePermission handles PATCH /api/runtimes/{runtimeId}/permissions/{userId}.
+func (h *Handler) UpdateRuntimePermission(w http.ResponseWriter, r *http.Request) {
+	_, rt, role, ok := h.requireRuntimePermission(w, r, chi.URLParam(r, "runtimeId"))
+	if !ok {
+		return
+	}
+	if role != RuntimeRoleOwner && role != RuntimeRoleAdmin {
+		writeError(w, http.StatusForbidden, "only runtime owners and admins can update permissions")
+		return
+	}
+
+	userID := chi.URLParam(r, "userId")
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user_id")
+		return
+	}
+
+	var req UpdateRuntimePermissionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Role != string(RuntimeRoleAdmin) && req.Role != string(RuntimeRoleOperator) && req.Role != string(RuntimeRoleViewer) {
+		writeError(w, http.StatusBadRequest, "role must be admin, operator, or viewer")
+		return
+	}
+
+	perm, err := h.Queries.UpdateRuntimePermissionRole(r.Context(), db.UpdateRuntimePermissionRoleParams{
+		RuntimeID: rt.ID,
+		UserID:    userUUID,
+		Role:      req.Role,
+	})
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "permission not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update permission")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, runtimePermissionToResponse(perm, "", ""))
+}
+
+// DeleteRuntimePermission handles DELETE /api/runtimes/{runtimeId}/permissions/{userId}.
+func (h *Handler) DeleteRuntimePermission(w http.ResponseWriter, r *http.Request) {
+	member, rt, role, ok := h.requireRuntimePermission(w, r, chi.URLParam(r, "runtimeId"))
+	if !ok {
+		return
+	}
+	if role != RuntimeRoleOwner && role != RuntimeRoleAdmin {
+		writeError(w, http.StatusForbidden, "only runtime owners and admins can revoke permissions")
+		return
+	}
+
+	userID := chi.URLParam(r, "userId")
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user_id")
+		return
+	}
+
+	if uuidToString(member.UserID) == userID && role == RuntimeRoleOwner {
+		writeError(w, http.StatusBadRequest, "runtime owner cannot revoke their own permission; transfer ownership first")
+		return
+	}
+
+	if err := h.Queries.DeleteRuntimePermission(r.Context(), db.DeleteRuntimePermissionParams{
+		RuntimeID: rt.ID,
+		UserID:    userUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete permission")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}

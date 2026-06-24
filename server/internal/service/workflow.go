@@ -68,7 +68,7 @@ var validTransitions = map[string][]string{
 	NodeRunStatusFormatOk:        {NodeRunStatusWorkerAssigned, NodeRunStatusWorking, NodeRunStatusCancelled, NodeRunStatusSkipped},
 	NodeRunStatusFormatFailed:    {},
 	NodeRunStatusWorkerAssigned:  {NodeRunStatusWorking, NodeRunStatusCancelled, NodeRunStatusSkipped},
-	NodeRunStatusWorking:         {NodeRunStatusAwaitingInput, NodeRunStatusAwaitingCritic, NodeRunStatusFailed, NodeRunStatusCancelled},
+	NodeRunStatusWorking:         {NodeRunStatusAwaitingInput, NodeRunStatusAwaitingCritic, NodeRunStatusFailed, NodeRunStatusCancelled, NodeRunStatusBlocked},
 	NodeRunStatusAwaitingInput:   {NodeRunStatusWorking, NodeRunStatusCancelled, NodeRunStatusSkipped},
 	NodeRunStatusAwaitingCritic:  {NodeRunStatusCriticReviewing, NodeRunStatusCancelled, NodeRunStatusSkipped},
 	NodeRunStatusCriticReviewing: {NodeRunStatusCriticApproved, NodeRunStatusCriticRework, NodeRunStatusCancelled},
@@ -76,7 +76,11 @@ var validTransitions = map[string][]string{
 	NodeRunStatusCriticRework:    {NodeRunStatusFormatOk, NodeRunStatusBlocked},
 	NodeRunStatusCompleted:       {},
 	NodeRunStatusFailed:          {},
-	NodeRunStatusBlocked:         {NodeRunStatusFormatOk, NodeRunStatusSkipped},
+	// blocked is reached two ways: rework-exhausted ("stuck", completed_at set)
+	// and human takeover ("paused", completed_at NULL). Both reuse the status;
+	// the extra outgoing edges below serve the takeover lifecycle —
+	// working (handback), completed/failed (finalize while held), cancelled.
+	NodeRunStatusBlocked: {NodeRunStatusFormatOk, NodeRunStatusSkipped, NodeRunStatusWorking, NodeRunStatusCompleted, NodeRunStatusFailed, NodeRunStatusCancelled},
 	NodeRunStatusSkipped:         {},
 	NodeRunStatusCancelled:       {},
 }
@@ -392,7 +396,107 @@ func (s *WorkflowService) TransitionNodeRun(ctx context.Context, nodeRun db.Mult
 	return &updated, nil
 }
 
-// ── Downstream propagation ───────────────────────────────────────────────────
+// ── Human takeover / handback (Design Two) ───────────────────────────────────
+
+// TakeoverNodeRun pauses an actively-running node so a human can intervene in
+// its CSC session (working → blocked). It deliberately does NOT mark the node
+// completed: the dedicated query leaves completed_at NULL, which is what tells
+// a paused/taken-over blocked apart from a rework-exhausted "stuck" blocked
+// (the latter sets completed_at via UpdateWorkflowNodeRunStatus). Because
+// blocked is non-terminal, the run stays active while the human holds control.
+func (s *WorkflowService) TakeoverNodeRun(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun) (*db.MulticaWorkflowNodeRun, error) {
+	if !isValidTransition(nodeRun.Status, NodeRunStatusBlocked) {
+		return nil, fmt.Errorf("invalid transition: %s → %s", nodeRun.Status, NodeRunStatusBlocked)
+	}
+	updated, err := s.Queries.TakeoverWorkflowNodeRun(ctx, nodeRun.ID)
+	if err != nil {
+		return nil, fmt.Errorf("takeover node run: %w", err)
+	}
+	if s.OnNodeStatusChanged != nil {
+		s.OnNodeStatusChanged(ctx, updated)
+	}
+	return &updated, nil
+}
+
+// HandbackNodeRun returns control to the agent (blocked → working) and
+// re-dispatches the worker so the daemon resumes the SAME CSC session the human
+// just drove via Cloud (Design Two). worker_output is preserved (unlike rework).
+// The dispatched task carries the node_run_id; the daemon claim handler resolves
+// the resume session from the node-run's bound session_id. Human-worker nodes
+// have no agent session to resume and are left at working with no dispatch.
+func (s *WorkflowService) HandbackNodeRun(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun) (*db.MulticaWorkflowNodeRun, error) {
+	if nodeRun.Status != NodeRunStatusBlocked {
+		return nil, fmt.Errorf("node run is not blocked (status=%s)", nodeRun.Status)
+	}
+	updated, err := s.Queries.HandbackWorkflowNodeRun(ctx, nodeRun.ID)
+	if err != nil {
+		return nil, fmt.Errorf("handback node run: %w", err)
+	}
+	if s.OnNodeStatusChanged != nil {
+		s.OnNodeStatusChanged(ctx, updated)
+	}
+	// Re-dispatch the worker so execution continues on the bound CSC session.
+	// HandbackWorkflowNodeRun already set status=working, so we dispatch the
+	// task directly without re-transitioning.
+	if err := s.dispatchHandbackResume(ctx, updated); err != nil {
+		return nil, fmt.Errorf("dispatch handback resume: %w", err)
+	}
+	return &updated, nil
+}
+
+// dispatchHandbackResume re-creates the worker agent task after a human hands a
+// taken-over node back (blocked → working). Unlike dispatchWorkerResume it does
+// NOT re-transition status — HandbackNodeRun has already set working — it only
+// re-creates the worker task so the daemon resumes the bound CSC session. Human
+// workers have no agent session to resume, so they are a no-op.
+func (s *WorkflowService) dispatchHandbackResume(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun) error {
+	node, err := s.Queries.GetWorkflowNode(ctx, nodeRun.WorkflowNodeID)
+	if err != nil {
+		return fmt.Errorf("get node: %w", err)
+	}
+	switch node.WorkerType {
+	case "agent", "squad":
+		agentID := node.WorkerID
+		if node.WorkerType == "squad" && node.WorkerID.Valid {
+			if squad, err := s.Queries.GetSquad(ctx, node.WorkerID); err == nil {
+				agentID = squad.LeaderID
+			}
+		}
+		if !agentID.Valid {
+			return nil // no agent bound — nothing to resume
+		}
+		task, err := s.DispatchAgentTask(ctx, nodeRun, "worker")
+		if err != nil {
+			return fmt.Errorf("dispatch agent task: %w", err)
+		}
+		if _, err := s.Queries.LinkNodeRunWorkerTask(ctx, db.LinkNodeRunWorkerTaskParams{
+			ID:                nodeRun.ID,
+			WorkerAgentTaskID: task.ID,
+		}); err != nil {
+			return fmt.Errorf("link worker task: %w", err)
+		}
+		return nil
+	default:
+		return nil // human worker: no agent session to resume
+	}
+}
+
+// FinalizeNodeRun lets a human conclude a taken-over node directly
+// (blocked → completed / failed) instead of handing it back, then propagates
+// downstream exactly like the normal completion path.
+func (s *WorkflowService) FinalizeNodeRun(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun, outcome string) (*db.MulticaWorkflowNodeRun, error) {
+	if outcome != NodeRunStatusCompleted && outcome != NodeRunStatusFailed {
+		return nil, fmt.Errorf("invalid finalize outcome: %s", outcome)
+	}
+	updated, err := s.TransitionNodeRun(ctx, nodeRun, outcome)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.OnNodeRunCompleted(ctx, nodeRun.ID); err != nil {
+		return nil, fmt.Errorf("propagate node completion: %w", err)
+	}
+	return updated, nil
+}
 
 // OnNodeRunCompleted checks downstream nodes after a node run reaches a terminal
 // state. If all upstreams of a downstream node are complete, it advances that
@@ -701,10 +805,12 @@ func (s *WorkflowService) dispatchWorker(ctx context.Context, nodeRun db.Multica
 		if err != nil {
 			return fmt.Errorf("dispatch agent task: %w", err)
 		}
-		// Link the task to the node run.
+		// Link the task to the node run and stamp the runtime so the frontend
+		// can resolve takeover permissions even before the daemon binds a session.
 		if _, err := s.Queries.LinkNodeRunWorkerTask(ctx, db.LinkNodeRunWorkerTaskParams{
 			ID:                nodeRun.ID,
 			WorkerAgentTaskID: task.ID,
+			RuntimeID:         task.RuntimeID,
 		}); err != nil {
 			return fmt.Errorf("link worker task: %w", err)
 		}
@@ -744,6 +850,7 @@ func (s *WorkflowService) dispatchCritic(ctx context.Context, nodeRun db.Multica
 		if _, err := s.Queries.LinkNodeRunCriticTask(ctx, db.LinkNodeRunCriticTaskParams{
 			ID:                nodeRun.ID,
 			CriticAgentTaskID: task.ID,
+			RuntimeID:         task.RuntimeID,
 		}); err != nil {
 			return fmt.Errorf("link critic task: %w", err)
 		}

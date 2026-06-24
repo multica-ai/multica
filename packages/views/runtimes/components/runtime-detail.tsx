@@ -48,6 +48,7 @@ import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
 import { useT } from "../../i18n";
+import { RuntimePermissionsCard } from "./runtime-permissions-card";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
   if (
@@ -207,13 +208,14 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
             <UsageSection runtime={runtime} />
           </div>
 
-          {/* Right rail: serving agents + diagnostics */}
+          {/* Right rail: serving agents + permissions + diagnostics */}
           <div className="space-y-4">
             <ServingAgentsCard
               agents={servingAgents}
               presenceMap={presenceMap}
               agentHref={(id) => paths.agentDetail(id)}
             />
+            <RuntimePermissionsCard runtime={runtime} />
             <DiagnosticsCard
               runtime={runtime}
               cliVersion={cliVersion}
