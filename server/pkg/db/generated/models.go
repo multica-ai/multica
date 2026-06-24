@@ -503,6 +503,20 @@ type LarkInstallation struct {
 	Region             string             `json:"region"`
 }
 
+type LarkIssueCommentMirror struct {
+	CommentID      pgtype.UUID        `json:"comment_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	LarkChatID     string             `json:"lark_chat_id"`
+	Status         string             `json:"status"`
+	Error          pgtype.Text        `json:"error"`
+	ClaimedAt      pgtype.Timestamptz `json:"claimed_at"`
+	SentAt         pgtype.Timestamptz `json:"sent_at"`
+	FailedAt       pgtype.Timestamptz `json:"failed_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type LarkOutboundCardMessage struct {
 	ID                pgtype.UUID        `json:"id"`
 	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`

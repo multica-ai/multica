@@ -24,6 +24,12 @@ type fakePatcherQueries struct {
 	installationErr error
 	agent           db.Agent
 	agentErr        error
+	issue           db.Issue
+	issueErr        error
+	mirrorErr       error
+	mirrorClaims    []db.ClaimLarkIssueCommentMirrorParams
+	mirrorSent      []pgtype.UUID
+	mirrorFailed    []db.MarkLarkIssueCommentMirrorFailedParams
 	card            db.LarkOutboundCardMessage
 	cardErr         error
 	created         []db.CreateLarkOutboundCardMessageParams
@@ -59,6 +65,37 @@ func (f *fakePatcherQueries) UpdateLarkOutboundCardStatus(ctx context.Context, a
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.statusUpdates = append(f.statusUpdates, arg)
+	return nil
+}
+func (f *fakePatcherQueries) GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error) {
+	return f.issue, f.issueErr
+}
+func (f *fakePatcherQueries) ClaimLarkIssueCommentMirror(ctx context.Context, arg db.ClaimLarkIssueCommentMirrorParams) (db.LarkIssueCommentMirror, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.mirrorErr != nil {
+		return db.LarkIssueCommentMirror{}, f.mirrorErr
+	}
+	f.mirrorClaims = append(f.mirrorClaims, arg)
+	return db.LarkIssueCommentMirror{
+		CommentID:      arg.CommentID,
+		IssueID:        arg.IssueID,
+		ChatSessionID:  arg.ChatSessionID,
+		InstallationID: arg.InstallationID,
+		LarkChatID:     arg.LarkChatID,
+		Status:         "claimed",
+	}, nil
+}
+func (f *fakePatcherQueries) MarkLarkIssueCommentMirrorSent(ctx context.Context, commentID pgtype.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mirrorSent = append(f.mirrorSent, commentID)
+	return nil
+}
+func (f *fakePatcherQueries) MarkLarkIssueCommentMirrorFailed(ctx context.Context, arg db.MarkLarkIssueCommentMirrorFailedParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mirrorFailed = append(f.mirrorFailed, arg)
 	return nil
 }
 
@@ -175,6 +212,11 @@ func newTestPatcher(t *testing.T) (*Patcher, *fakePatcherQueries, *fakeAPIClient
 			Status:             string(InstallationActive),
 			AgentID:            uuidFromString(t, "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
 		},
+		issue: db.Issue{
+			ID:         uuidFromString(t, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+			OriginType: pgtype.Text{String: "lark_chat", Valid: true},
+			OriginID:   uuidFromString(t, "cccccccc-cccc-cccc-cccc-cccccccccccc"),
+		},
 		agent:   db.Agent{Name: "TestAgent"},
 		cardErr: pgx.ErrNoRows,
 	}
@@ -184,6 +226,23 @@ func newTestPatcher(t *testing.T) (*Patcher, *fakePatcherQueries, *fakeAPIClient
 		Now:    time.Now,
 	})
 	return p, q, api
+}
+
+func commentCreatedEvent(t *testing.T, commentID, issueID, authorID pgtype.UUID, authorType, content string) events.Event {
+	t.Helper()
+	return events.Event{
+		Type: protocol.EventCommentCreated,
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":          uuidString(commentID),
+				"issue_id":    uuidString(issueID),
+				"author_type": authorType,
+				"author_id":   uuidString(authorID),
+				"content":     content,
+				"type":        "comment",
+			},
+		},
+	}
 }
 
 // TestPatcherSendsPlainTextOnChatDone pins the new behaviour Bohan asked
@@ -294,6 +353,96 @@ func TestPatcherRoutesPlainReplyToText(t *testing.T) {
 	}
 	if len(api.mdCardSent) != 0 {
 		t.Errorf("plain prose must NOT wrap in a markdown card; got %d card sends", len(api.mdCardSent))
+	}
+}
+
+func TestPatcherMirrorsLarkOriginatedIssueAgentComment(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	commentID := uuidFromString(t, "dddddddd-dddd-dddd-dddd-dddddddddddd")
+	issueID := uuidFromString(t, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	agentID := uuidFromString(t, "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+	p.handleEvent(events.Event{
+		Type: protocol.EventCommentCreated,
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":          uuidString(commentID),
+				"issue_id":    uuidString(issueID),
+				"author_type": "agent",
+				"author_id":   uuidString(agentID),
+				"content":     "Done from the specialist agent.",
+				"type":        "comment",
+			},
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one mirrored issue comment; got %d", len(api.textSent))
+	}
+	got := api.textSent[0]
+	if got.ChatID != ChatID(q.binding.LarkChatID) {
+		t.Errorf("chat_id mismatch: got %q want %q", got.ChatID, q.binding.LarkChatID)
+	}
+	if got.Text != "TestAgent:\nDone from the specialist agent." {
+		t.Errorf("mirrored text mismatch: got %q", got.Text)
+	}
+	if len(q.mirrorSent) != 1 || q.mirrorSent[0] != commentID {
+		t.Fatalf("expected comment mirror marked sent once; got %#v", q.mirrorSent)
+	}
+}
+
+func TestPatcherDoesNotMirrorNonLarkIssueComment(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.issue.OriginType = pgtype.Text{}
+	commentID := uuidFromString(t, "dddddddd-dddd-dddd-dddd-dddddddddddd")
+	agentID := uuidFromString(t, "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+	p.handleEvent(commentCreatedEvent(t, commentID, q.issue.ID, agentID, "agent", "Should stay on the issue only."))
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 0 || len(api.mdCardSent) != 0 {
+		t.Fatalf("non-Lark issue comments must not mirror; got text=%d markdown=%d", len(api.textSent), len(api.mdCardSent))
+	}
+	if len(q.mirrorClaims) != 0 {
+		t.Fatalf("non-Lark issue comment must not claim mirror row; got %d claims", len(q.mirrorClaims))
+	}
+}
+
+func TestPatcherDoesNotResendDuplicateMirroredComment(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.mirrorErr = pgx.ErrNoRows
+	commentID := uuidFromString(t, "dddddddd-dddd-dddd-dddd-dddddddddddd")
+	agentID := uuidFromString(t, "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+	p.handleEvent(commentCreatedEvent(t, commentID, q.issue.ID, agentID, "agent", "Already mirrored."))
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 0 || len(api.mdCardSent) != 0 {
+		t.Fatalf("duplicate mirror claim must not resend; got text=%d markdown=%d", len(api.textSent), len(api.mdCardSent))
+	}
+}
+
+func TestPatcherMirrorsMarkdownIssueCommentAsMarkdownCard(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	commentID := uuidFromString(t, "dddddddd-dddd-dddd-dddd-dddddddddddd")
+	agentID := uuidFromString(t, "aaaa1111-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+	p.handleEvent(commentCreatedEvent(t, commentID, q.issue.ID, agentID, "agent", "# Result\n\n- Completed"))
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.mdCardSent) != 1 {
+		t.Fatalf("expected one mirrored markdown card; got %d", len(api.mdCardSent))
+	}
+	if api.mdCardSent[0].Markdown != "TestAgent:\n# Result\n\n- Completed" {
+		t.Errorf("markdown mismatch: got %q", api.mdCardSent[0].Markdown)
+	}
+	if len(api.textSent) != 0 {
+		t.Fatalf("markdown comment must not send text; got %d", len(api.textSent))
 	}
 }
 

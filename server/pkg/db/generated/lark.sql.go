@@ -149,6 +149,53 @@ func (q *Queries) ClaimLarkInboundDedup(ctx context.Context, arg ClaimLarkInboun
 	return i, err
 }
 
+const claimLarkIssueCommentMirror = `-- name: ClaimLarkIssueCommentMirror :one
+
+INSERT INTO lark_issue_comment_mirror (
+    comment_id, issue_id, chat_session_id, installation_id, lark_chat_id, status
+) VALUES (
+    $1, $2, $3, $4, $5, 'claimed'
+)
+ON CONFLICT (comment_id) DO NOTHING
+RETURNING comment_id, issue_id, chat_session_id, installation_id, lark_chat_id, status, error, claimed_at, sent_at, failed_at, updated_at
+`
+
+type ClaimLarkIssueCommentMirrorParams struct {
+	CommentID      pgtype.UUID `json:"comment_id"`
+	IssueID        pgtype.UUID `json:"issue_id"`
+	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	LarkChatID     string      `json:"lark_chat_id"`
+}
+
+// =====================
+// lark_issue_comment_mirror
+// =====================
+func (q *Queries) ClaimLarkIssueCommentMirror(ctx context.Context, arg ClaimLarkIssueCommentMirrorParams) (LarkIssueCommentMirror, error) {
+	row := q.db.QueryRow(ctx, claimLarkIssueCommentMirror,
+		arg.CommentID,
+		arg.IssueID,
+		arg.ChatSessionID,
+		arg.InstallationID,
+		arg.LarkChatID,
+	)
+	var i LarkIssueCommentMirror
+	err := row.Scan(
+		&i.CommentID,
+		&i.IssueID,
+		&i.ChatSessionID,
+		&i.InstallationID,
+		&i.LarkChatID,
+		&i.Status,
+		&i.Error,
+		&i.ClaimedAt,
+		&i.SentAt,
+		&i.FailedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const consumeLarkBindingToken = `-- name: ConsumeLarkBindingToken :one
 UPDATE lark_binding_token
 SET consumed_at = now()
@@ -899,6 +946,39 @@ func (q *Queries) MarkLarkInboundDedupProcessed(ctx context.Context, arg MarkLar
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const markLarkIssueCommentMirrorFailed = `-- name: MarkLarkIssueCommentMirrorFailed :exec
+UPDATE lark_issue_comment_mirror
+SET status = 'failed',
+    error = $2,
+    failed_at = now(),
+    updated_at = now()
+WHERE comment_id = $1
+`
+
+type MarkLarkIssueCommentMirrorFailedParams struct {
+	CommentID pgtype.UUID `json:"comment_id"`
+	Error     pgtype.Text `json:"error"`
+}
+
+func (q *Queries) MarkLarkIssueCommentMirrorFailed(ctx context.Context, arg MarkLarkIssueCommentMirrorFailedParams) error {
+	_, err := q.db.Exec(ctx, markLarkIssueCommentMirrorFailed, arg.CommentID, arg.Error)
+	return err
+}
+
+const markLarkIssueCommentMirrorSent = `-- name: MarkLarkIssueCommentMirrorSent :exec
+UPDATE lark_issue_comment_mirror
+SET status = 'sent',
+    error = NULL,
+    sent_at = now(),
+    updated_at = now()
+WHERE comment_id = $1
+`
+
+func (q *Queries) MarkLarkIssueCommentMirrorSent(ctx context.Context, commentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markLarkIssueCommentMirrorSent, commentID)
+	return err
 }
 
 const purgeExpiredLarkBindingTokens = `-- name: PurgeExpiredLarkBindingTokens :exec
