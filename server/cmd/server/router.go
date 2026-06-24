@@ -696,6 +696,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/local-skills/import", h.InitiateImportLocalSkill)
 					r.Get("/local-skills/import/{requestId}", h.GetLocalSkillImportRequest)
 					r.Delete("/", h.DeleteAgentRuntime)
+
+					// Runtime-level permissions (L1.4)
+					r.Route("/permissions", func(r chi.Router) {
+						r.Get("/", h.ListRuntimePermissions)
+						r.Post("/", h.CreateRuntimePermission)
+						r.Route("/{userId}", func(r chi.Router) {
+							r.Patch("/", h.UpdateRuntimePermission)
+							r.Delete("/", h.DeleteRuntimePermission)
+						})
+					})
 				})
 			})
 
