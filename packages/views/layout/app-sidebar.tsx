@@ -488,7 +488,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <WorkspaceAvatar
                             name={workspace?.name ?? "M"}
                             avatarUrl={workspace?.avatar_url}
-                            size={isNexAIWorkspace ? "lg" : "sm"}
+                            size={isNexAIWorkspace ? "xl" : "sm"}
                             className={isNexAIWorkspace ? "h-12 w-auto object-contain" : undefined}
                           />
                         </span>

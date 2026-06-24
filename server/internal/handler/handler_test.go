@@ -204,6 +204,12 @@ func handlerTestRuntimeID(t *testing.T) string {
 func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string {
 	t.Helper()
 
+	return createHandlerTestAgentOnRuntime(t, name, handlerTestRuntimeID(t), mcpConfig)
+}
+
+func createHandlerTestAgentOnRuntime(t *testing.T, name, runtimeID string, mcpConfig []byte) string {
+	t.Helper()
+
 	var agentID string
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO agent (
@@ -213,7 +219,7 @@ func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string 
 		)
 		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb, $5)
 		RETURNING id
-	`, testWorkspaceID, name, handlerTestRuntimeID(t), testUserID, mcpConfig).Scan(&agentID); err != nil {
+	`, testWorkspaceID, name, runtimeID, testUserID, mcpConfig).Scan(&agentID); err != nil {
 		t.Fatalf("failed to create handler test agent: %v", err)
 	}
 
@@ -222,6 +228,27 @@ func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string 
 	})
 
 	return agentID
+}
+
+func createHandlerTestRuntimeWithProvider(t *testing.T, provider string) string {
+	t.Helper()
+
+	var runtimeID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, 'handler-provider-' || gen_random_uuid()::text, $2, 'local', $3,
+		        'online', $4, '{}'::jsonb, $5, now())
+		RETURNING id
+	`, testWorkspaceID, "Handler "+provider+" Runtime "+t.Name(), provider, provider+" runtime", testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("failed to create handler test runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	return runtimeID
 }
 
 // createHandlerTestTaskForAgent seeds a running agent_task_queue row for the
@@ -1873,6 +1900,42 @@ func TestUpdateAgentRejectsMalformedRuntimeID(t *testing.T) {
 	testHandler.UpdateAgent(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("UpdateAgent: expected 400 for malformed runtime_id, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateAgentRejectsModelRuntimeProviderMismatch(t *testing.T) {
+	codexRuntimeID := createHandlerTestRuntimeWithProvider(t, "codex")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/agents", map[string]any{
+		"name":       "Handler Model Runtime Mismatch Create",
+		"runtime_id": codexRuntimeID,
+		"model":      "claude-haiku-4-5-20251001",
+	})
+	testHandler.CreateAgent(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateAgent: expected 400 for Claude model on Codex runtime, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "not compatible") {
+		t.Fatalf("CreateAgent: expected compatibility error, got %s", w.Body.String())
+	}
+}
+
+func TestUpdateAgentRejectsModelRuntimeProviderMismatch(t *testing.T) {
+	claudeRuntimeID := createHandlerTestRuntimeWithProvider(t, "claude")
+	agentID := createHandlerTestAgentOnRuntime(t, "Handler Model Runtime Mismatch Update", claudeRuntimeID, nil)
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"model": "gpt-5.5",
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateAgent: expected 400 for OpenAI model on Claude runtime, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "not compatible") {
+		t.Fatalf("UpdateAgent: expected compatibility error, got %s", w.Body.String())
 	}
 }
 
