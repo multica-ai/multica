@@ -533,13 +533,22 @@ func (q *Queries) CancelAgentTasksByTriggerComment(ctx context.Context, triggerC
 }
 
 const claimAgentTask = `-- name: ClaimAgentTask :one
+WITH locked_agent AS (
+    SELECT id, max_concurrent_tasks FROM agent WHERE id = $1 FOR UPDATE
+)
 UPDATE agent_task_queue
 SET status = 'dispatched',
     dispatched_at = now(),
     prepare_lease_expires_at = now() + make_interval(secs => $2::double precision)
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
-    WHERE atq.agent_id = $1 AND atq.status = 'queued'
+    CROSS JOIN locked_agent la
+    WHERE atq.agent_id = la.id AND atq.status = 'queued'
+      AND (
+          SELECT count(*) FROM agent_task_queue active
+          WHERE active.agent_id = atq.agent_id
+            AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+      ) < la.max_concurrent_tasks
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -569,15 +578,14 @@ type ClaimAgentTaskParams struct {
 	PrepareLeaseSecs float64     `json:"prepare_lease_secs"`
 }
 
-// Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
-// a task is only claimable when no other task for the same issue AND same agent is
-// already dispatched or running. This allows different agents to work on the same
-// issue in parallel while preventing a single agent from running duplicate tasks.
-// Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
-// Quick-create tasks have no issue / chat / autopilot link, so they serialize on
-// "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
-// otherwise a user mashing the create button could fire concurrent quick-creates
-// whose completion lookup would race over "most recent issue by this agent".
+// Claims the next queued task for an agent, atomically enforcing both
+// max_concurrent_tasks and per-(issue, agent) serialization.
+//
+// The locked_agent CTE takes a row lock on the agent so concurrent claim
+// requests for the same agent serialize the capacity check and task pick.
+// Without this, separate CountRunningTasks + ClaimAgentTask calls can both
+// observe spare capacity and dispatch more tasks than max_concurrent_tasks
+// allows (#4483).
 func (q *Queries) ClaimAgentTask(ctx context.Context, arg ClaimAgentTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, claimAgentTask, arg.AgentID, arg.PrepareLeaseSecs)
 	var i AgentTaskQueue

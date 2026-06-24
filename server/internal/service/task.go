@@ -953,39 +953,21 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 }
 
 // ClaimTask atomically claims the next queued task for an agent,
-// respecting max_concurrent_tasks.
+// respecting max_concurrent_tasks. Capacity and per-(issue, agent)
+// serialization are enforced inside ClaimAgentTask's single SQL statement
+// (agent row lock + active count + task pick) so concurrent claim requests
+// cannot oversubscribe the agent (#4483).
 func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	start := time.Now()
 	var (
-		outcome                                                              = "unknown"
-		getAgentMs, countRunningMs, claimAgentMs, updateStatusMs, dispatchMs int64
+		outcome                                           = "unknown"
+		claimAgentMs, updateStatusMs, dispatchMs        int64
 	)
 	defer func() {
-		s.maybeLogClaimSlow(agentID, outcome, start, getAgentMs, countRunningMs, claimAgentMs, updateStatusMs, dispatchMs)
+		s.maybeLogClaimSlow(agentID, outcome, start, 0, 0, claimAgentMs, updateStatusMs, dispatchMs)
 	}()
 
-	t0 := start
-	agent, err := s.Queries.GetAgent(ctx, agentID)
-	getAgentMs = time.Since(t0).Milliseconds()
-	if err != nil {
-		outcome = "error_get_agent"
-		return nil, fmt.Errorf("agent not found: %w", err)
-	}
-
-	t0 = time.Now()
-	running, err := s.Queries.CountRunningTasks(ctx, agentID)
-	countRunningMs = time.Since(t0).Milliseconds()
-	if err != nil {
-		outcome = "error_count_running"
-		return nil, fmt.Errorf("count running tasks: %w", err)
-	}
-	if running >= int64(agent.MaxConcurrentTasks) {
-		slog.Debug("task claim: no capacity", "agent_id", util.UUIDToString(agentID), "running", running, "max", agent.MaxConcurrentTasks)
-		outcome = "no_capacity"
-		return nil, nil // No capacity
-	}
-
-	t0 = time.Now()
+	t0 := time.Now()
 	task, err := s.Queries.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
 		AgentID:          agentID,
 		PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
@@ -993,9 +975,9 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	claimAgentMs = time.Since(t0).Milliseconds()
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			slog.Debug("task claim: no tasks available", "agent_id", util.UUIDToString(agentID))
-			outcome = "no_tasks"
-			return nil, nil // No tasks available
+			slog.Debug("task claim: no claimable task", "agent_id", util.UUIDToString(agentID))
+			outcome = "no_claim"
+			return nil, nil // No capacity, no queued task, or agent missing
 		}
 		outcome = "error_claim"
 		return nil, fmt.Errorf("claim task: %w", err)

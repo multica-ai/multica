@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -4420,4 +4421,94 @@ func TestClaimTaskByRuntime_CommentResumeDefaultOn(t *testing.T) {
 	if resp.Task.PriorSessionID != priorSession {
 		t.Errorf("prior_session_id = %q, want %q (comment resume is default-on)", resp.Task.PriorSessionID, priorSession)
 	}
+}
+
+// TestClaimTask_ConcurrentRespectsMaxConcurrentTasks is the regression test for
+// #4483: two concurrent claim requests for the same agent must not both succeed
+// when max_concurrent_tasks is 1.
+func TestClaimTask_ConcurrentRespectsMaxConcurrentTasks(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Concurrent claim runtime")
+	agentID, issueID1 := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Concurrent claim agent")
+
+	var issueID2 string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES (
+			$1, 'Concurrent claim issue 2', 'in_progress', 'none', $2, 'member',
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
+			0
+		)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID2); err != nil {
+		t.Fatalf("setup: create second issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID2) })
+
+	createQueuedClaimTaskForTest(t, ctx, agentID, runtimeID, issueID1)
+	createQueuedClaimTaskForTest(t, ctx, agentID, runtimeID, issueID2)
+
+	const contenders = 8
+	type claimResult struct {
+		task *db.AgentTaskQueue
+		err  error
+	}
+	results := make([]claimResult, contenders)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range contenders {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			task, err := testHandler.TaskService.ClaimTask(ctx, parseUUID(agentID))
+			results[i] = claimResult{task: task, err: err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	claims := 0
+	for i, r := range results {
+		if r.err != nil {
+			t.Fatalf("contender %d: %v", i, r.err)
+		}
+		if r.task != nil {
+			claims++
+		}
+	}
+	if claims != 1 {
+		t.Fatalf("expected exactly 1 successful claim with max_concurrent_tasks=1, got %d", claims)
+	}
+
+	var active int64
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE agent_id = $1
+		  AND status IN ('dispatched', 'running', 'waiting_local_directory')
+	`, agentID).Scan(&active); err != nil {
+		t.Fatalf("count active tasks: %v", err)
+	}
+	if active != 1 {
+		t.Fatalf("active task count = %d, want 1", active)
+	}
+}
+
+func createQueuedClaimTaskForTest(t *testing.T, ctx context.Context, agentID, runtimeID, issueID string) {
+	t.Helper()
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create queued task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
 }
