@@ -6,12 +6,12 @@ import { Eye, History, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@multica/ui/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,11 +28,15 @@ import type { InstructionsHistoryItem, InstructionsHistoryScope } from "@multica
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 
-export const instructionsHistoryKey = (workspaceId: string, scope: InstructionsHistoryScope) =>
-  ["workspaces", workspaceId, "instructions-history", scope] as const;
+export const instructionsHistoryKey = (workspaceId: string, templateId: string) =>
+  ["workspaces", workspaceId, "instructions-history", "template", templateId] as const;
 
-interface InstructionsHistorySheetProps {
+interface InstructionsHistoryDialogProps {
   workspaceId: string;
+  /** Template whose instructions history is shown. History is template-owned
+   *  (migration 127), so this is the actual key — `scope` only picks the
+   *  description copy. */
+  templateId: string;
   scope: InstructionsHistoryScope;
   open: boolean;
   currentContent: string;
@@ -40,28 +44,32 @@ interface InstructionsHistorySheetProps {
   onRestore: (content: string) => Promise<void>;
 }
 
-export function InstructionsHistorySheet({
+// Centered modal (was a right-side Sheet). Shows the instructions version
+// history for a config template — list on the left, selected version's
+// content on the right.
+export function InstructionsHistoryDialog({
   workspaceId,
+  templateId,
   scope,
   open,
   currentContent: _currentContent,
   onOpenChange,
   onRestore,
-}: InstructionsHistorySheetProps) {
+}: InstructionsHistoryDialogProps) {
   const { t } = useT("agents");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [restoreCandidate, setRestoreCandidate] = useState<InstructionsHistoryItem | null>(null);
   const [restoring, setRestoring] = useState(false);
 
   const historyQuery = useQuery({
-    queryKey: instructionsHistoryKey(workspaceId, scope),
-    queryFn: () => api.listInstructionsHistory(workspaceId, scope),
+    queryKey: instructionsHistoryKey(workspaceId, templateId),
+    queryFn: () => api.listInstructionsHistory(workspaceId, templateId),
     enabled: open,
   });
 
   const selectedVersion = useQuery({
-    queryKey: [...instructionsHistoryKey(workspaceId, scope), selectedId],
-    queryFn: () => api.getInstructionsHistory(workspaceId, selectedId!, scope),
+    queryKey: [...instructionsHistoryKey(workspaceId, templateId), selectedId],
+    queryFn: () => api.getInstructionsHistory(workspaceId, selectedId!, templateId),
     enabled: open && selectedId !== null,
   });
 
@@ -76,7 +84,7 @@ export function InstructionsHistorySheet({
     try {
       const detail = selectedVersion.data?.id === restoreCandidate.id
         ? selectedVersion.data
-        : await api.getInstructionsHistory(workspaceId, restoreCandidate.id, scope);
+        : await api.getInstructionsHistory(workspaceId, restoreCandidate.id, templateId);
       await onRestore(detail.content);
       setRestoreCandidate(null);
       setSelectedId(detail.id);
@@ -109,22 +117,20 @@ export function InstructionsHistorySheet({
 
   return (
     <>
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="w-[520px] max-w-[calc(100vw-24px)] gap-0 p-0 sm:max-w-none">
-          <SheetHeader className="border-b">
-            <div className="flex items-center gap-2">
-              <History className="h-4 w-4 text-muted-foreground" />
-              <SheetTitle>{t(($) => $.history.title)}</SheetTitle>
-            </div>
-            <SheetDescription>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="flex h-[75vh] max-h-[calc(100vh-2rem)] max-w-4xl select-none flex-col gap-0 p-0 sm:max-w-4xl">
+          <DialogHeader className="flex h-12 shrink-0 flex-row items-center gap-2 border-b px-4">
+            <History className="h-4 w-4 text-muted-foreground" />
+            <DialogTitle className="text-sm">{t(($) => $.history.title)}</DialogTitle>
+            <DialogDescription className="sr-only">
               {scope === "system"
                 ? t(($) => $.history.system_description)
                 : t(($) => $.history.personal_description)}
-            </SheetDescription>
-          </SheetHeader>
+            </DialogDescription>
+          </DialogHeader>
 
-          <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(180px,42%)]">
-            <ScrollArea className="min-h-0 border-b">
+          <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-2">
+            <ScrollArea className="min-h-0 border-r">
               <div className="space-y-2 p-4">
                 {historyQuery.isLoading && (
                   <div className="flex h-28 items-center justify-center">
@@ -220,7 +226,7 @@ export function InstructionsHistorySheet({
                 {selectedVersion.isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
               </div>
               <ScrollArea className="min-h-0 flex-1">
-                <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-muted-foreground">
+                <pre className="select-text whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-muted-foreground">
                   {selectedItem
                     ? selectedContent || (selectedVersion.isLoading ? t(($) => $.history.loading_content) : t(($) => $.history.empty_content))
                     : t(($) => $.history.select_hint)}
@@ -228,8 +234,8 @@ export function InstructionsHistorySheet({
               </ScrollArea>
             </div>
           </div>
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={restoreCandidate !== null} onOpenChange={(v) => { if (!v && !restoring) setRestoreCandidate(null); }}>
         <AlertDialogContent>

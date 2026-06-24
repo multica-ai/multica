@@ -1092,6 +1092,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// internal/handler/agent_env.go.
 					r.Get("/env", h.GetAgentEnv)
 					r.Put("/env", h.UpdateAgentEnv)
+						// Template binding (system/personal template selection).
+						r.Get("/template-binding", h.GetAgentTemplateBinding)
+						r.Put("/template-binding", h.UpdateAgentTemplateBinding)
 				})
 			})
 
@@ -1102,6 +1105,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListAgentTemplates)
 				r.Get("/{slug}", h.GetAgentTemplate)
 			})
+
+				// Agent config templates (system/personal configuration templates).
+				r.Route("/api/agent-config-templates", func(r chi.Router) {
+					r.Get("/", h.ListAgentConfigTemplates)
+					r.Post("/", h.CreateAgentConfigTemplate)
+					// Cross-user roster of every member's default personal
+					// template (replaces the legacy /agent-defaults list which
+					// read member_agent_config). Registered before the
+					// {templateId} param route so chi matches the literal first.
+					r.Get("/defaults", h.ListAllAgentDefaultTemplates)
+					r.Get("/{templateId}", h.GetAgentConfigTemplate)
+					r.Put("/{templateId}", h.UpdateAgentConfigTemplate)
+					r.Delete("/{templateId}", h.DeleteAgentConfigTemplate)
+					r.Post("/{templateId}/duplicate", h.DuplicateAgentConfigTemplate)
+				})
 
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {

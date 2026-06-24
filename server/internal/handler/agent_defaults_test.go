@@ -118,7 +118,7 @@ func TestUpdatePersonalAgentDefaults(t *testing.T) {
 	}
 }
 
-func TestUpdatePersonalAgentDefaults_WritesInstructionsHistoryOnlyForInstructions(t *testing.T) {
+func TestUpdatePersonalAgentDefaults_NoInstructionsHistory(t *testing.T) {
 	testPool.Exec(context.Background(),
 		`DELETE FROM instructions_history WHERE workspace_id = $1`, testWorkspaceID)
 	testPool.Exec(context.Background(),
@@ -141,44 +141,25 @@ func TestUpdatePersonalAgentDefaults_WritesInstructionsHistoryOnlyForInstruction
 		}
 	}
 
+	// Instructions change across saves, but the legacy personal-defaults
+	// endpoint persists member_agent_config only — instructions history is now
+	// template-owned (written by UpdateAgentConfigTemplate).
 	save(map[string]any{
 		"instructions": "first version",
 		"custom_env":   map[string]string{"TOKEN": "secret"},
-	})
-	save(map[string]any{
-		"instructions": "first version",
-		"custom_env":   map[string]string{"TOKEN": "changed"},
 	})
 	save(map[string]any{
 		"instructions": "second version",
 		"custom_env":   map[string]string{"TOKEN": "changed"},
 	})
 
-	member, err := testHandler.Queries.GetMemberByUserAndWorkspace(
-		context.Background(),
-		db.GetMemberByUserAndWorkspaceParams{
-			UserID:      parseUUID(testUserID),
-			WorkspaceID: parseUUID(testWorkspaceID),
-		},
-	)
-	if err != nil {
-		t.Fatalf("load member: %v", err)
+	var count int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM instructions_history WHERE workspace_id = $1`, testWorkspaceID).Scan(&count); err != nil {
+		t.Fatalf("count history: %v", err)
 	}
-
-	rows, err := testHandler.Queries.ListInstructionsHistory(context.Background(), db.ListInstructionsHistoryParams{
-		WorkspaceID: parseUUID(testWorkspaceID),
-		Scope:       "personal",
-		MemberID:    member.ID,
-		Limit:       10,
-	})
-	if err != nil {
-		t.Fatalf("list history: %v", err)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 history rows, got %d", len(rows))
-	}
-	if rows[0].Content != "second version" || rows[1].Content != "first version" {
-		t.Fatalf("unexpected history contents: %#v", []string{rows[0].Content, rows[1].Content})
+	if count != 0 {
+		t.Fatalf("expected no history rows, got %d", count)
 	}
 }
 
@@ -219,9 +200,13 @@ func TestUpdatePersonalAgentDefaults_NoHistoryWhenInstructionsOmitted(t *testing
 func TestInstructionsHistoryEndpoints_Personal(t *testing.T) {
 	testPool.Exec(context.Background(),
 		`DELETE FROM instructions_history WHERE workspace_id = $1`, testWorkspaceID)
+	testPool.Exec(context.Background(),
+		`DELETE FROM agent_config_template WHERE workspace_id = $1`, testWorkspaceID)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
 			`DELETE FROM instructions_history WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_config_template WHERE workspace_id = $1`, testWorkspaceID)
 	})
 
 	member, err := testHandler.Queries.GetMemberByUserAndWorkspace(
@@ -234,10 +219,23 @@ func TestInstructionsHistoryEndpoints_Personal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load member: %v", err)
 	}
+
+	// A personal template owned by the test member — instructions history is
+	// keyed to it.
+	var templateID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_config_template (workspace_id, scope, name, config, is_default, created_by)
+		VALUES ($1, 'personal', 'mine', '{}'::jsonb, false, $2)
+		RETURNING id
+	`, testWorkspaceID, member.ID).Scan(&templateID); err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+
 	inserted, err := testHandler.Queries.InsertInstructionsHistory(context.Background(), db.InsertInstructionsHistoryParams{
 		WorkspaceID: parseUUID(testWorkspaceID),
 		Scope:       "personal",
 		MemberID:    member.ID,
+		TemplateID:  parseUUID(templateID),
 		Content:     "full personal content",
 		ActorID:     member.ID,
 	})
@@ -246,7 +244,7 @@ func TestInstructionsHistoryEndpoints_Personal(t *testing.T) {
 	}
 
 	listW := httptest.NewRecorder()
-	listReq := newRequestWithMemberCtx(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/instructions-history?scope=personal", nil)
+	listReq := newRequestWithMemberCtx(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/instructions-history?template_id="+templateID, nil)
 	listReq = withURLParam(listReq, "id", testWorkspaceID)
 	testHandler.ListInstructionsHistory(listW, listReq)
 	if listW.Code != http.StatusOK {
@@ -268,7 +266,7 @@ func TestInstructionsHistoryEndpoints_Personal(t *testing.T) {
 	}
 
 	detailW := httptest.NewRecorder()
-	detailReq := newRequestWithMemberCtx(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/instructions-history/"+uuidToString(inserted.ID)+"?scope=personal", nil)
+	detailReq := newRequestWithMemberCtx(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/instructions-history/"+uuidToString(inserted.ID)+"?template_id="+templateID, nil)
 	detailReq = withURLParam(detailReq, "id", testWorkspaceID)
 	detailReq = withURLParam(detailReq, "versionId", uuidToString(inserted.ID))
 	testHandler.GetInstructionsHistory(detailW, detailReq)
@@ -284,7 +282,7 @@ func TestInstructionsHistoryEndpoints_Personal(t *testing.T) {
 	}
 }
 
-func TestDuplicateAgentDefaults_WritesInstructionsHistory(t *testing.T) {
+func TestDuplicateAgentDefaults_NoInstructionsHistory(t *testing.T) {
 	testPool.Exec(context.Background(),
 		`DELETE FROM instructions_history WHERE workspace_id = $1`, testWorkspaceID)
 	testPool.Exec(context.Background(),
@@ -337,27 +335,15 @@ func TestDuplicateAgentDefaults_WritesInstructionsHistory(t *testing.T) {
 		t.Fatalf("duplicate expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	member, err := testHandler.Queries.GetMemberByUserAndWorkspace(
-		context.Background(),
-		db.GetMemberByUserAndWorkspaceParams{
-			UserID:      parseUUID(testUserID),
-			WorkspaceID: parseUUID(testWorkspaceID),
-		},
-	)
-	if err != nil {
-		t.Fatalf("load current member: %v", err)
+	// Legacy duplicate persists member_agent_config but no longer writes
+	// instructions history — history is template-owned.
+	var count int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM instructions_history WHERE workspace_id = $1`, testWorkspaceID).Scan(&count); err != nil {
+		t.Fatalf("count history: %v", err)
 	}
-	rows, err := testHandler.Queries.ListInstructionsHistory(context.Background(), db.ListInstructionsHistoryParams{
-		WorkspaceID: parseUUID(testWorkspaceID),
-		Scope:       "personal",
-		MemberID:    member.ID,
-		Limit:       10,
-	})
-	if err != nil {
-		t.Fatalf("list history: %v", err)
-	}
-	if len(rows) != 1 || rows[0].Content != "source instructions" {
-		t.Fatalf("expected duplicated instructions history, got %#v", rows)
+	if count != 0 {
+		t.Fatalf("expected no history rows, got %d", count)
 	}
 }
 
@@ -533,7 +519,7 @@ func TestUpdateWorkspace_KnowledgeCuratorRequiresAdminAndValidSchema(t *testing.
 	}
 }
 
-func TestUpdateWorkspace_AgentDefaultsInstructionsHistory(t *testing.T) {
+func TestUpdateWorkspace_AgentDefaultsNoInstructionsHistory(t *testing.T) {
 	testPool.Exec(context.Background(),
 		`DELETE FROM instructions_history WHERE workspace_id = $1`, testWorkspaceID)
 	t.Cleanup(func() {
@@ -572,20 +558,16 @@ func TestUpdateWorkspace_AgentDefaultsInstructionsHistory(t *testing.T) {
 		},
 	})
 
-	rows, err := testHandler.Queries.ListInstructionsHistory(context.Background(), db.ListInstructionsHistoryParams{
-		WorkspaceID: parseUUID(testWorkspaceID),
-		Scope:       "system",
-		MemberID:    parseUUID(testUserID),
-		Limit:       10,
-	})
-	if err != nil {
-		t.Fatalf("list system history: %v", err)
+	// Workspace-settings updates no longer write instructions history — system
+	// default history is template-owned (written by UpdateAgentConfigTemplate on
+	// the default system template).
+	var count int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM instructions_history WHERE workspace_id = $1`, testWorkspaceID).Scan(&count); err != nil {
+		t.Fatalf("count history: %v", err)
 	}
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 system history rows, got %d", len(rows))
-	}
-	if rows[0].Content != "system second" || rows[1].Content != "system first" {
-		t.Fatalf("unexpected system history contents: %#v", []string{rows[0].Content, rows[1].Content})
+	if count != 0 {
+		t.Fatalf("expected no history rows, got %d", count)
 	}
 }
 
@@ -625,9 +607,13 @@ func TestUpdateWorkspace_AgentDefaultsNoHistoryWhenInstructionsOmitted(t *testin
 func TestInstructionsHistoryEndpoints_SystemRequiresAdmin(t *testing.T) {
 	testPool.Exec(context.Background(),
 		`DELETE FROM instructions_history WHERE workspace_id = $1`, testWorkspaceID)
+	testPool.Exec(context.Background(),
+		`DELETE FROM agent_config_template WHERE workspace_id = $1`, testWorkspaceID)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
 			`DELETE FROM instructions_history WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_config_template WHERE workspace_id = $1`, testWorkspaceID)
 	})
 
 	ownerMember, err := testHandler.Queries.GetMemberByUserAndWorkspace(
@@ -640,9 +626,19 @@ func TestInstructionsHistoryEndpoints_SystemRequiresAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load owner member: %v", err)
 	}
+	// A system template — its instructions history is admin-gated.
+	var systemTemplateID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_config_template (workspace_id, scope, name, config, is_default)
+		VALUES ($1, 'system', 'sys', '{}'::jsonb, false)
+		RETURNING id
+	`, testWorkspaceID).Scan(&systemTemplateID); err != nil {
+		t.Fatalf("create system template: %v", err)
+	}
 	if _, err := testHandler.Queries.InsertInstructionsHistory(context.Background(), db.InsertInstructionsHistoryParams{
 		WorkspaceID: parseUUID(testWorkspaceID),
 		Scope:       "system",
+		TemplateID:  parseUUID(systemTemplateID),
 		Content:     "system content",
 		ActorID:     ownerMember.ID,
 	}); err != nil {
@@ -670,7 +666,7 @@ func TestInstructionsHistoryEndpoints_SystemRequiresAdmin(t *testing.T) {
 		t.Fatalf("failed to create regular member: %v", err)
 	}
 
-	forbiddenReq := newRequestAs(memberUserID, http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/instructions-history?scope=system", nil)
+	forbiddenReq := newRequestAs(memberUserID, http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/instructions-history?template_id="+systemTemplateID, nil)
 	memberRow, err := testHandler.Queries.GetMember(context.Background(), parseUUID(regularMemberID))
 	if err != nil {
 		t.Fatalf("load regular member: %v", err)
@@ -683,7 +679,7 @@ func TestInstructionsHistoryEndpoints_SystemRequiresAdmin(t *testing.T) {
 		t.Fatalf("expected 403 for regular member reading system history, got %d: %s", forbiddenW.Code, forbiddenW.Body.String())
 	}
 
-	allowedReq := newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/instructions-history?scope=system", nil)
+	allowedReq := newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/instructions-history?template_id="+systemTemplateID, nil)
 	allowedReq = withURLParam(allowedReq, "id", testWorkspaceID)
 	allowedW := httptest.NewRecorder()
 	testHandler.ListInstructionsHistory(allowedW, allowedReq)

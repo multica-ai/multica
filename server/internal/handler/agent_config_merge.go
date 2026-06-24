@@ -14,18 +14,24 @@ import (
 // from workspace system defaults, personal (member) defaults, or the agent's
 // own settings. All fields are optional — zero values are skipped during merge.
 type AgentConfigLayer struct {
-	Instructions string            `json:"instructions,omitempty"`
-	CustomEnv    map[string]string `json:"custom_env,omitempty"`
-	CustomArgs   []string          `json:"custom_args,omitempty"`
-	Skills       []string          `json:"skills,omitempty"`
+	Instructions  string            `json:"instructions,omitempty"`
+	CustomEnv     map[string]string `json:"custom_env,omitempty"`
+	CustomArgs    []string          `json:"custom_args,omitempty"`
+	Skills        []string          `json:"skills,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	ThinkingLevel string            `json:"thinking_level,omitempty"`
+	ServiceTier   string            `json:"service_tier,omitempty"`
 }
 
 // MergedAgentConfig is the result of merging multiple AgentConfigLayer values.
 type MergedAgentConfig struct {
-	Instructions string
-	CustomEnv    map[string]string
-	CustomArgs   []string
-	SkillIDs     []string // deduplicated union of skill IDs
+	Instructions  string
+	CustomEnv     map[string]string
+	CustomArgs    []string
+	SkillIDs      []string // deduplicated union of skill IDs
+	Model         string
+	ThinkingLevel string
+	ServiceTier   string
 }
 
 // MergeAgentConfigs merges configuration layers in order (first = lowest
@@ -63,6 +69,17 @@ func MergeAgentConfigs(layers ...AgentConfigLayer) MergedAgentConfig {
 				seen[id] = struct{}{}
 				merged.SkillIDs = append(merged.SkillIDs, id)
 			}
+		}
+
+		// model/thinking_level/service_tier: last non-empty wins
+		if l.Model != "" {
+			merged.Model = l.Model
+		}
+		if l.ThinkingLevel != "" {
+			merged.ThinkingLevel = l.ThinkingLevel
+		}
+		if l.ServiceTier != "" {
+			merged.ServiceTier = l.ServiceTier
 		}
 	}
 

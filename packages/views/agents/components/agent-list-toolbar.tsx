@@ -5,9 +5,10 @@ import {
   ArrowUp,
   ChevronDown,
   Filter,
+  Search,
   X,
 } from "lucide-react";
-import type { AgentAvailability } from "@multica/core/agents";
+import type { AgentAvailability, Workload } from "@multica/core/agents";
 import type { MemberWithUser } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
@@ -19,6 +20,7 @@ import {
   type AgentSortField,
 } from "@multica/core/agents/stores";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -70,11 +72,18 @@ const AVAILABILITY_VALUES: AgentAvailability[] = [
   "offline",
 ];
 
+const WORKLOAD_VALUES: Workload[] = [
+  "working",
+  "queued",
+  "idle",
+];
+
 export function countActiveFilterDimensions(
   filters: AgentListFilters,
 ): number {
   let count = 0;
   if (filters.availability.length > 0) count++;
+  if (filters.workload.length > 0) count++;
   if (filters.runtimes.length > 0) count++;
   if (filters.owners.length > 0) count++;
   if (filters.models.length > 0) count++;
@@ -85,6 +94,8 @@ export function AgentListToolbar({
   scope,
   onScopeChange,
   scopeCounts,
+  search,
+  onSearchChange,
   filters,
   onToggleFilter,
   onClearFilters,
@@ -102,6 +113,11 @@ export function AgentListToolbar({
   onScopeChange: (scope: AgentsScope) => void;
   /** Per-scope totals from the FULL set — scope counts ignore filters. */
   scopeCounts: Record<AgentsScope, number>;
+  /** Free-text query (name / pinyin / description). Ephemeral — kept in page
+   *  state, not the persisted view store, so a stale query never hides agents
+   *  across reloads. */
+  search: string;
+  onSearchChange: (value: string) => void;
   filters: AgentListFilters;
   onToggleFilter: (key: keyof AgentListFilters, value: string) => void;
   onClearFilters: () => void;
@@ -121,17 +137,23 @@ export function AgentListToolbar({
   const { t } = useT("agents");
 
   const activeCount = countActiveFilterDimensions(filters);
-  const hasActiveFilters = activeCount > 0;
+  const hasSearch = search.trim().length > 0;
+  const hasActiveFilters = activeCount > 0 || hasSearch;
 
   // Option lists with counts, derived from the scope's unfiltered rows so
   // toggling one dimension doesn't make the others' options vanish.
   const availabilityCounts = new Map<string, number>();
+  const workloadCounts = new Map<string, number>();
   const runtimeOptions = new Map<string, { name: string; count: number }>();
   for (const row of allRows) {
     if (row.presence) {
       availabilityCounts.set(
         row.presence.availability,
         (availabilityCounts.get(row.presence.availability) ?? 0) + 1,
+      );
+      workloadCounts.set(
+        row.presence.workload,
+        (workloadCounts.get(row.presence.workload) ?? 0) + 1,
       );
     }
     const rt = row.runtime;
@@ -184,11 +206,22 @@ export function AgentListToolbar({
 
   return (
     <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
-      {/* Left: scope buttons + result count. Scope mixes the ownership lens
-          (mine/all) with the archived lifecycle stage; no search box (scope
-          partitions the small set). Button styling and the <md dropdown
-          collapse follow the issues header's scope buttons. */}
+      {/* Left: search + scope buttons + result count. Scope mixes the
+          ownership lens (mine/all) with the archived lifecycle stage. Button
+          styling and the <md dropdown collapse follow the issues header's
+          scope buttons. */}
       <div className="flex min-w-0 items-center gap-2">
+        <div className="relative w-40 shrink-0 md:w-56">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder={t(($) => $.page.search_placeholder)}
+            className="h-8 pl-8 text-sm"
+            aria-label={t(($) => $.page.search_placeholder)}
+          />
+        </div>
+
         <div className="hidden shrink-0 items-center gap-1 md:flex">
           {AGENT_SCOPES.map((s) => (
             <Button
@@ -256,16 +289,16 @@ export function AgentListToolbar({
           <DropdownMenuTrigger
             render={
               <Button
-                variant={hasActiveFilters ? "default" : "outline"}
+                variant={activeCount > 0 ? "default" : "outline"}
                 size="sm"
                 className={
-                  hasActiveFilters
+                  activeCount > 0
                     ? "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:w-auto md:px-2.5"
                     : "h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
                 }
               >
                 <Filter className="size-3.5" />
-                {hasActiveFilters ? (
+                {activeCount > 0 ? (
                   <>
                     <span className="hidden md:inline">
                       {t(($) => $.toolbar.filter_active_count, {
@@ -281,7 +314,7 @@ export function AgentListToolbar({
                     {t(($) => $.toolbar.filter_label)}
                   </span>
                 )}
-                {hasActiveFilters && (
+                {activeCount > 0 && (
                   <span
                     role="button"
                     tabIndex={-1}
@@ -333,6 +366,40 @@ export function AgentListToolbar({
                       />
                       {t(($) => $.availability[value])}
                       {countBadge(availabilityCounts.get(value) ?? 0)}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            {/* Workload */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <span className="flex-1">
+                  {t(($) => $.toolbar.section_workload)}
+                </span>
+                {filters.workload.length > 0 && (
+                  <span className="text-xs font-medium text-primary">
+                    {filters.workload.length}
+                  </span>
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-auto min-w-44">
+                {WORKLOAD_VALUES.map((value) => {
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={value}
+                      checked={filters.workload.includes(value)}
+                      onCheckedChange={() =>
+                        onToggleFilter("workload", value)
+                      }
+                      className={FILTER_ITEM_CLASS}
+                    >
+                      <HoverCheck
+                        checked={filters.workload.includes(value)}
+                      />
+                      {t(($) => $.workload[value])}
+                      {countBadge(workloadCounts.get(value) ?? 0)}
                     </DropdownMenuCheckboxItem>
                   );
                 })}

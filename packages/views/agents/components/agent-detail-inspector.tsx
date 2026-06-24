@@ -60,6 +60,10 @@ import {
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
 import { LarkAgentBindButton } from "../../settings/components/lark-tab";
+import { TemplateSelector } from "./template-selector";
+import { useQuery } from "@tanstack/react-query";
+import { useWorkspaceId } from "@multica/core/hooks";
+import type { AgentTemplateBinding } from "@multica/core/types";
 
 interface InspectorProps {
   agent: Agent;
@@ -252,6 +256,9 @@ export function AgentDetailInspector({
           </PropRow>
         )}
       </Section>
+
+      {/* Config Templates — agent-level template binding */}
+      <TemplateSection agentId={agent.id} canEdit={canEdit} />
 
       {/* Details — read-only (no hover, no chip styling — these aren't clickable) */}
       <Section label={t(($) => $.inspector.section_details)}>
@@ -990,6 +997,29 @@ function PresenceBadge({
         <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
         {t(($) => $.availability[presence.availability])}
       </span>
+    </div>
+  );
+}
+
+/** Wrapper that loads the agent's template binding and renders TemplateSelector. */
+function TemplateSection({ agentId, canEdit }: { agentId: string; canEdit: boolean }) {
+  const workspaceId = useWorkspaceId();
+  const { data: binding } = useQuery({
+    queryKey: ["agent-template-binding", workspaceId, agentId],
+    queryFn: () => api.getAgentTemplateBinding(agentId),
+  });
+
+  const [localBinding, setLocalBinding] = useState<AgentTemplateBinding | undefined>(undefined);
+  const effectiveBinding = localBinding ?? binding;
+
+  return (
+    <div className="border-b px-5 py-4">
+      <TemplateSelector
+        agentId={agentId}
+        binding={effectiveBinding}
+        onBindingChange={setLocalBinding}
+        canEdit={canEdit}
+      />
     </div>
   );
 }

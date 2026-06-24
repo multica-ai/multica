@@ -9,6 +9,7 @@ import {
   Loader2,
   Lock,
   Plus,
+  Search,
   X,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -69,28 +70,21 @@ import {
 } from "@multica/ui/components/ui/list-grid";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from "@multica/ui/components/ui/sheet";
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentRowActions } from "./agent-row-actions";
-import { AgentListToolbar } from "./agent-list-toolbar";
-import {
-  OtherDefaultsDetail,
-  PersonalDefaultsDetail,
-  SystemDefaultsDetail,
-} from "./defaults-detail";
+import { AgentListToolbar, countActiveFilterDimensions } from "./agent-list-toolbar";
+import { OtherDefaultsDetail } from "./defaults-detail";
+import { ConfigTemplateDialog } from "./config-template-dialog";
+import { configTemplateKeys } from "./config-template-keys";
 import { useT } from "../../i18n";
 
 // Column template — single source of truth for header, rows, and skeletons.
@@ -108,6 +102,19 @@ const GRID_COLS =
 
 // Two-line rows; the virtualizer's fixed-size contract.
 const ROW_HEIGHT = 64;
+
+/** Row count for the "default" scope tab — mirrors DefaultsRows. */
+function computeDefaultScopeCount(
+  allDefaults: AgentDefaultsWithUser[],
+  currentUserId: string | null | undefined,
+): number {
+  // System default row is always shown.
+  let count = 1;
+  // Personal row is shown for every signed-in member (even before they save one).
+  if (currentUserId) count += 1;
+  count += allDefaults.filter((d) => d.user_id !== currentUserId).length;
+  return count;
+}
 
 // Single source for hideable column widths: track vars and the grid's
 // min-width derive from the same numbers.
@@ -941,15 +948,18 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
     null,
   );
+  // Free-text search — page-local (not persisted) so a stale query can't hide
+  // agents across reloads. Matches the pre-redesign toolbar: name / pinyin /
+  // description for agents, user_name / pinyin for the defaults scope.
+  const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  type DefaultsSheet =
-    | "personal"
-    | "system"
-    | { configId: string; defaults: AgentDefaultsWithUser }
-    | null;
-  const [defaultsSheet, setDefaultsSheet] = useState<DefaultsSheet>(null);
+  type ConfigDialogScope = "personal" | "system" | null;
+  const [configDialogScope, setConfigDialogScope] =
+    useState<ConfigDialogScope>(null);
+  const [otherDefaults, setOtherDefaults] =
+    useState<AgentDefaultsWithUser | null>(null);
 
   const rawScope = useAgentsViewStore((s) => s.scope);
   const scope = AGENT_SCOPES.includes(rawScope) ? rawScope : "mine";
@@ -967,24 +977,29 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
   const isColVisible = (key: AgentColumnKey) => !hiddenColumns.includes(key);
 
+  // Always fetch — scope tab badges must stay accurate even when another
+  // scope is active (the query used to be gated on scope === "default",
+  // which left the badge at 0 until the user clicked in).
   const { data: allDefaults = [] } = useQuery({
-    queryKey: ["workspaces", wsId, "all-agent-defaults"],
-    queryFn: () => api.listAllAgentDefaults(wsId),
-    enabled: scope === "all" || scope === "default",
+    queryKey: ["workspaces", wsId, "all-agent-default-templates"],
+    queryFn: () => api.listAllAgentDefaultTemplates(),
   });
 
-  const handleDuplicateDefaults = async (configId: string) => {
-    if (!configId) return;
+  const handleDuplicateDefaults = async (templateId: string) => {
+    if (!templateId) return;
     try {
-      await api.duplicateAgentDefaults(wsId, configId);
-      qc.invalidateQueries({
-        queryKey: ["workspaces", wsId, "personal-agent-defaults"],
+      await api.duplicateAgentConfigTemplate(templateId);
+      await qc.invalidateQueries({
+        queryKey: configTemplateKeys.all(wsId),
       });
-      toast.success("Defaults duplicated to your personal config");
-      setDefaultsSheet(null);
+      await qc.invalidateQueries({
+        queryKey: ["workspaces", wsId, "all-agent-default-templates"],
+      });
+      toast.success(t(($) => $.template.duplicated_toast));
+      setOtherDefaults(null);
     } catch (e) {
       toast.error(
-        e instanceof Error ? e.message : "Failed to duplicate defaults",
+        e instanceof Error ? e.message : t(($) => $.template.duplicate_failed_toast),
       );
     }
   };
@@ -1036,7 +1051,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       all++;
       if (currentUser && a.owner_id === currentUser.id) mine++;
     }
-    return { mine, all, default: allDefaults.length, archived };
+    return {
+      mine,
+      all,
+      default: computeDefaultScopeCount(allDefaults, currentUser?.id),
+      archived,
+    };
   }, [agents, currentUser, allDefaults]);
 
   // Rows within the current scope, unfiltered, fully assembled — the
@@ -1081,11 +1101,19 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
   // Visible rows: filters, then sort.
   const rows = useMemo<AgentListRow[]>(() => {
+    const q = search.trim().toLowerCase();
     const filtered = scopeRows.filter((row) => {
       if (
         filters.availability.length > 0 &&
         (!row.presence ||
           !filters.availability.includes(row.presence.availability))
+      ) {
+        return false;
+      }
+      if (
+        filters.workload.length > 0 &&
+        (!row.presence ||
+          !filters.workload.includes(row.presence.workload))
       ) {
         return false;
       }
@@ -1106,6 +1134,16 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         !filters.models.includes(row.agent.model)
       ) {
         return false;
+      }
+      // Free-text search: agent name (substring + pinyin) or description.
+      if (q) {
+        if (
+          !row.agent.name.toLowerCase().includes(q) &&
+          !matchesPinyin(row.agent.name, q) &&
+          !(row.agent.description ?? "").toLowerCase().includes(q)
+        ) {
+          return false;
+        }
       }
       return true;
     });
@@ -1137,15 +1175,44 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       );
     });
     return filtered;
-  }, [scopeRows, filters, sortField, sortDirection]);
+  }, [scopeRows, filters, sortField, sortDirection, search]);
 
   const defaultsRows = useMemo(() => {
+    // Search the defaults list by owner name (substring + pinyin), matching
+    // the pre-redesign behavior. The system + personal rows are fixed, so
+    // only the "others" list narrows.
+    const q = search.trim().toLowerCase();
+    const scoped = q
+      ? allDefaults.filter(
+          (d) =>
+            d.user_name.toLowerCase().includes(q) ||
+            matchesPinyin(d.user_name, q),
+        )
+      : allDefaults;
     const mine = currentUser?.id
-      ? allDefaults.find((d) => d.user_id === currentUser.id) ?? null
+      ? scoped.find((d) => d.user_id === currentUser.id) ?? null
       : null;
-    const others = allDefaults.filter((d) => d.user_id !== currentUser?.id);
+    const others = scoped.filter((d) => d.user_id !== currentUser?.id);
     return { mine, others };
-  }, [allDefaults, currentUser]);
+  }, [allDefaults, currentUser, search]);
+
+  // Empty-state copy — mirrors the pre-redesign NoMatches: surface the query
+  // when search is active, otherwise explain the filter mismatch.
+  const noMatchBody = useMemo(() => {
+    const hasSearch = search.trim().length > 0;
+    const hasFilter = countActiveFilterDimensions(filters) > 0;
+    if (scope === "archived") {
+      return hasSearch
+        ? t(($) => $.no_matches.search_archived, { query: search })
+        : t(($) => $.no_matches.no_archived);
+    }
+    if (hasSearch) {
+      return hasFilter
+        ? t(($) => $.no_matches.search_active_filtered, { query: search })
+        : t(($) => $.no_matches.search_active, { query: search });
+    }
+    return t(($) => $.no_matches.no_filter_match);
+  }, [search, filters, scope, t]);
 
   // Row virtualization — headless math, offsets as padding on the rows
   // wrapper, fixed-height rows. The scroll element is the SINGLE outer
@@ -1238,6 +1305,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             scope={scope}
             onScopeChange={setScope}
             scopeCounts={scopeCounts}
+            search={search}
+            onSearchChange={setSearch}
             filters={filters}
             onToggleFilter={toggleFilter}
             onClearFilters={clearFilters}
@@ -1280,18 +1349,15 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                     currentUserId={currentUser?.id ?? null}
                     mine={defaultsRows.mine}
                     others={defaultsRows.others}
-                    onOpenPersonal={() => setDefaultsSheet("personal")}
-                    onOpenSystem={() => setDefaultsSheet("system")}
-                    onOpenOther={(defaults) =>
-                      setDefaultsSheet({
-                        configId: defaults.id ?? "",
-                        defaults,
-                      })
-                    }
+                    onOpenPersonal={() => setConfigDialogScope("personal")}
+                    onOpenSystem={() => setConfigDialogScope("system")}
+                    onOpenOther={(defaults) => setOtherDefaults(defaults)}
                   />
                 ) : rows.length === 0 ? (
-                  <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
-                    {t(($) => $.no_matches.title)}
+                  <div className="col-span-full flex flex-col items-center gap-2 px-4 py-16 text-center text-muted-foreground">
+                    <Search className="h-8 w-8 text-muted-foreground/40" />
+                    <p className="text-sm">{t(($) => $.no_matches.title)}</p>
+                    <p className="max-w-xs text-xs">{noMatchBody}</p>
                   </div>
                 ) : null}
                 {scope !== "default" && virtualItems.map((vi) => {
@@ -1397,27 +1463,37 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         />
       )}
 
-      <Sheet
-        open={defaultsSheet !== null}
+      <ConfigTemplateDialog
+        open={configDialogScope !== null}
+        scope={configDialogScope ?? "system"}
+        canEdit={
+          configDialogScope === "personal" ||
+          (configDialogScope === "system" && isWorkspaceAdmin)
+        }
         onOpenChange={(open) => {
-          if (!open) setDefaultsSheet(null);
+          if (!open) setConfigDialogScope(null);
+        }}
+      />
+
+      <Dialog
+        open={otherDefaults !== null}
+        onOpenChange={(open) => {
+          if (!open) setOtherDefaults(null);
         }}
       >
-        <SheetContent side="right" className="w-full overflow-y-auto p-0 sm:max-w-3xl">
-          <SheetTitle className="sr-only">{t(($) => $.defaults.sheet_title)}</SheetTitle>
-          <SheetDescription className="sr-only">{t(($) => $.defaults.sheet_desc)}</SheetDescription>
-          {defaultsSheet === "personal" && <PersonalDefaultsDetail />}
-          {defaultsSheet === "system" && (
-            <SystemDefaultsDetail readOnly={!isWorkspaceAdmin} />
-          )}
-          {defaultsSheet !== null && typeof defaultsSheet === "object" && (
+        <DialogContent className="flex h-[75vh] max-h-[calc(100vh-2rem)] max-w-3xl flex-col gap-0 p-0 sm:max-w-3xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>{t(($) => $.defaults.sheet_title)}</DialogTitle>
+            <DialogDescription>{t(($) => $.defaults.sheet_desc)}</DialogDescription>
+          </DialogHeader>
+          {otherDefaults && (
             <OtherDefaultsDetail
-              defaults={defaultsSheet.defaults}
-              onDuplicate={() => handleDuplicateDefaults(defaultsSheet.configId)}
+              defaults={otherDefaults}
+              onDuplicate={() => handleDuplicateDefaults(otherDefaults.id ?? "")}
             />
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

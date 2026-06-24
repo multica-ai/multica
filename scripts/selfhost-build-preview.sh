@@ -148,6 +148,44 @@ if [ "$db_exists" != "1" ]; then
 fi
 
 echo "==> Building Multica preview from the current checkout..."
+# Detect and forward a build-time proxy into Docker so that next build
+# (Google Fonts, etc.) and go mod download can reach the internet.
+# Priority: DOCKER_BUILD_HTTP_PROXY (explicit override) > HTTP_PROXY env var
+#           > macOS system proxy (networksetup) > none.
+# 127.0.0.1/localhost are automatically rewritten to host.docker.internal.
+if [ -z "${DOCKER_BUILD_HTTP_PROXY:-}" ]; then
+  _raw_proxy="${HTTP_PROXY:-${HTTPS_PROXY:-}}"
+  if [ -z "$_raw_proxy" ] && command -v networksetup &>/dev/null; then
+    _svc=$(networksetup -listallnetworkservices 2>/dev/null \
+           | awk 'NR>1 && !/^\*/ && NF{print; exit}')
+    if [ -n "$_svc" ]; then
+      _info=$(networksetup -getwebproxy "$_svc" 2>/dev/null)
+      _enabled=$(printf '%s' "$_info" | awk -F': ' '/Enabled/{print $2}')
+      if [ "$_enabled" = "Yes" ]; then
+        _host=$(printf '%s' "$_info" | awk -F': ' '/Server/{print $2}')
+        _port=$(printf '%s' "$_info" | awk -F': ' '/Port/{print $2}')
+        _raw_proxy="http://${_host}:${_port}"
+      fi
+    fi
+  fi
+  if [ -n "$_raw_proxy" ]; then
+    # Rewrite loopback addresses so the container can reach the host proxy
+    _docker_proxy=$(printf '%s' "$_raw_proxy" \
+      | sed 's|127\.0\.0\.1|host.docker.internal|g; s|localhost|host.docker.internal|g')
+    export DOCKER_BUILD_HTTP_PROXY="$_docker_proxy"
+    export DOCKER_BUILD_HTTPS_PROXY="$_docker_proxy"
+    # *.wujieai.com is a shell glob that Go/Node/pnpm ignore in NO_PROXY —
+    # they match suffixes via a leading dot (.wujieai.com covers all subdomains)
+    # or an exact bare domain. Use both forms so the build-time proxy is bypassed
+    # for the cloud instance and its CDN/asset subdomains.
+    export DOCKER_BUILD_NO_PROXY="localhost,127.0.0.1,host.docker.internal,.wujieai.com,wujieai.com"
+  fi
+fi
+if [ -n "${DOCKER_BUILD_HTTP_PROXY:-}" ]; then
+  echo "  Build proxy: ${DOCKER_BUILD_HTTP_PROXY}"
+else
+  echo "  No build proxy detected — proceeding without proxy."
+fi
 COMPOSE_PROJECT_NAME="$project_name" \
 POSTGRES_DB="$db_name" \
 POSTGRES_USER="$postgres_user" \

@@ -143,9 +143,12 @@ import type {
   WebhookDelivery,
   NotificationPreferenceResponse,
   NotificationPreferences,
-  AgentDefaults,
   AgentDefaultsWithUser,
-  InstructionsHistoryScope,
+  AgentConfigTemplate,
+  CreateAgentConfigTemplateRequest,
+  UpdateAgentConfigTemplateRequest,
+  AgentTemplateBinding,
+  UpdateAgentTemplateBindingRequest,
   InstructionsHistoryDetail,
   ListInstructionsHistoryResponse,
   WikiPage,
@@ -3699,42 +3702,96 @@ export class ApiClient {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
   }
 
-  // Personal Agent Defaults
-  async getPersonalAgentDefaults(workspaceId: string): Promise<AgentDefaults> {
-    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/me`);
+  // --- Agent Config Templates ---
+  // These endpoints resolve the workspace from the X-Workspace-ID header, so
+  // no workspaceId is needed in the URL (unlike /api/workspaces/{id}/...).
+
+  async listAgentConfigTemplates(
+    scope?: "system" | "personal",
+  ): Promise<AgentConfigTemplate[]> {
+    const search = scope ? `?scope=${scope}` : "";
+    return this.fetch(`/api/agent-config-templates${search}`);
   }
 
-  async updatePersonalAgentDefaults(workspaceId: string, config: Record<string, unknown>): Promise<AgentDefaults> {
-    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/me`, {
-      method: "PUT",
-      body: JSON.stringify({ config }),
+  async getAgentConfigTemplate(
+    templateId: string,
+  ): Promise<AgentConfigTemplate> {
+    return this.fetch(`/api/agent-config-templates/${templateId}`);
+  }
+
+  async createAgentConfigTemplate(
+    req: CreateAgentConfigTemplateRequest,
+  ): Promise<AgentConfigTemplate> {
+    return this.fetch("/api/agent-config-templates", {
+      method: "POST",
+      body: JSON.stringify(req),
     });
   }
 
-  async listAllAgentDefaults(workspaceId: string): Promise<AgentDefaultsWithUser[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults`);
+  async updateAgentConfigTemplate(
+    templateId: string,
+    req: UpdateAgentConfigTemplateRequest,
+  ): Promise<AgentConfigTemplate> {
+    return this.fetch(`/api/agent-config-templates/${templateId}`, {
+      method: "PUT",
+      body: JSON.stringify(req),
+    });
   }
 
-  async duplicateAgentDefaults(workspaceId: string, configId: string): Promise<AgentDefaults> {
-    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/duplicate/${configId}`, {
+  async deleteAgentConfigTemplate(
+    templateId: string,
+  ): Promise<void> {
+    return this.fetch(`/api/agent-config-templates/${templateId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Cross-user roster of every member's default personal template.
+  async listAllAgentDefaultTemplates(): Promise<AgentDefaultsWithUser[]> {
+    return this.fetch(`/api/agent-config-templates/defaults`);
+  }
+
+  // Copy another member's default personal template into a new personal
+  // template owned by the current user. Env values are secrets and are copied
+  // as empty key placeholders (server-side), mirroring the legacy contract.
+  async duplicateAgentConfigTemplate(
+    templateId: string,
+  ): Promise<AgentConfigTemplate> {
+    return this.fetch(`/api/agent-config-templates/${templateId}/duplicate`, {
       method: "POST",
+    });
+  }
+
+  async getAgentTemplateBinding(
+    agentId: string,
+  ): Promise<AgentTemplateBinding> {
+    return this.fetch(`/api/agents/${agentId}/template-binding`);
+  }
+
+  async updateAgentTemplateBinding(
+    agentId: string,
+    req: UpdateAgentTemplateBindingRequest,
+  ): Promise<AgentTemplateBinding> {
+    return this.fetch(`/api/agents/${agentId}/template-binding`, {
+      method: "PUT",
+      body: JSON.stringify(req),
     });
   }
 
   async listInstructionsHistory(
     workspaceId: string,
-    scope: InstructionsHistoryScope,
+    templateId: string,
   ): Promise<ListInstructionsHistoryResponse> {
-    const search = new URLSearchParams({ scope });
+    const search = new URLSearchParams({ template_id: templateId });
     return this.fetch(`/api/workspaces/${workspaceId}/instructions-history?${search}`);
   }
 
   async getInstructionsHistory(
     workspaceId: string,
     versionId: string,
-    scope: InstructionsHistoryScope,
+    templateId: string,
   ): Promise<InstructionsHistoryDetail> {
-    const search = new URLSearchParams({ scope });
+    const search = new URLSearchParams({ template_id: templateId });
     return this.fetch(`/api/workspaces/${workspaceId}/instructions-history/${versionId}?${search}`);
   }
 

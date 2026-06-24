@@ -87,7 +87,6 @@ func (h *Handler) UpdatePersonalAgentDefaults(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	nextInstructions, hasInstructions := instructionsFromConfigJSON(configJSON)
 	q := h.Queries
 	commit := func() error { return nil }
 	if h.TxStarter != nil {
@@ -101,19 +100,9 @@ func (h *Handler) UpdatePersonalAgentDefaults(w http.ResponseWriter, r *http.Req
 		commit = func() error { return realTx.Commit(r.Context()) }
 	}
 
-	previousInstructions := ""
-	if existing, err := q.GetMemberAgentConfig(r.Context(), db.GetMemberAgentConfigParams{
-		MemberID:    member.ID,
-		WorkspaceID: parseUUID(workspaceID),
-	}); err == nil {
-		previousInstructions, _ = instructionsFromConfigJSON(existing.Config)
-	} else if !isNotFound(err) {
-		slog.Warn("get member agent config before update failed",
-			append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-		writeError(w, http.StatusInternalServerError, "failed to save agent defaults")
-		return
-	}
-
+	// Instructions history is template-owned (recorded by UpdateAgentConfigTemplate
+	// when the template's instructions change). This legacy endpoint only persists
+	// the member_agent_config fallback store — it no longer writes history.
 	cfg, err := q.UpsertMemberAgentConfig(r.Context(), db.UpsertMemberAgentConfigParams{
 		MemberID:    member.ID,
 		WorkspaceID: parseUUID(workspaceID),
@@ -124,21 +113,6 @@ func (h *Handler) UpdatePersonalAgentDefaults(w http.ResponseWriter, r *http.Req
 			append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to save agent defaults")
 		return
-	}
-
-	if hasInstructions && nextInstructions != previousInstructions {
-		if _, err := q.InsertInstructionsHistory(r.Context(), db.InsertInstructionsHistoryParams{
-			WorkspaceID: parseUUID(workspaceID),
-			Scope:       instructionsHistoryScopePersonal,
-			MemberID:    member.ID,
-			Content:     nextInstructions,
-			ActorID:     member.ID,
-		}); err != nil {
-			slog.Warn("insert personal instructions history failed",
-				append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-			writeError(w, http.StatusInternalServerError, "failed to save agent defaults")
-			return
-		}
 	}
 
 	if err := commit(); err != nil {
@@ -202,10 +176,11 @@ func (h *Handler) ListAllAgentDefaults(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
-// ListInstructionsHistory returns recent instructions versions for the current
-// user's personal defaults or the workspace system defaults.
+// ListInstructionsHistory returns recent instructions versions for a config
+// template. Access follows the template's scope: system templates require
+// owner/admin; personal templates require the template owner.
 func (h *Handler) ListInstructionsHistory(w http.ResponseWriter, r *http.Request) {
-	member, scope, ok := h.instructionsHistoryAccess(w, r)
+	tpl, _, ok := h.instructionsHistoryAccess(w, r)
 	if !ok {
 		return
 	}
@@ -213,13 +188,12 @@ func (h *Handler) ListInstructionsHistory(w http.ResponseWriter, r *http.Request
 
 	rows, err := h.Queries.ListInstructionsHistory(r.Context(), db.ListInstructionsHistoryParams{
 		WorkspaceID: parseUUID(workspaceID),
-		Scope:       scope,
-		MemberID:    historyMemberID(scope, member.ID),
+		TemplateID:  tpl.ID,
 		Limit:       instructionsHistoryLimit(r),
 	})
 	if err != nil {
 		slog.Warn("list instructions history failed",
-			append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "scope", scope)...)
+			append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "template_id", tpl.ID)...)
 		writeError(w, http.StatusInternalServerError, "failed to list instructions history")
 		return
 	}
@@ -237,7 +211,7 @@ func (h *Handler) ListInstructionsHistory(w http.ResponseWriter, r *http.Request
 // GetInstructionsHistory returns a single instructions history version,
 // including the full content snapshot.
 func (h *Handler) GetInstructionsHistory(w http.ResponseWriter, r *http.Request) {
-	member, scope, ok := h.instructionsHistoryAccess(w, r)
+	tpl, _, ok := h.instructionsHistoryAccess(w, r)
 	if !ok {
 		return
 	}
@@ -251,8 +225,7 @@ func (h *Handler) GetInstructionsHistory(w http.ResponseWriter, r *http.Request)
 	row, err := h.Queries.GetInstructionsHistory(r.Context(), db.GetInstructionsHistoryParams{
 		ID:          versionUUID,
 		WorkspaceID: parseUUID(workspaceID),
-		Scope:       scope,
-		MemberID:    historyMemberID(scope, member.ID),
+		TemplateID:  tpl.ID,
 	})
 	if err != nil {
 		if isNotFound(err) {
@@ -260,7 +233,7 @@ func (h *Handler) GetInstructionsHistory(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		slog.Warn("get instructions history failed",
-			append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "scope", scope, "version_id", versionID)...)
+			append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "template_id", tpl.ID, "version_id", versionID)...)
 		writeError(w, http.StatusInternalServerError, "failed to load instructions history")
 		return
 	}
@@ -309,26 +282,49 @@ func instructionsHistoryLimit(r *http.Request) int32 {
 	return limit
 }
 
-func (h *Handler) instructionsHistoryAccess(w http.ResponseWriter, r *http.Request) (db.Member, string, bool) {
-	scope := r.URL.Query().Get("scope")
-	if scope == "" {
-		scope = instructionsHistoryScopePersonal
+// instructionsHistoryAccess resolves the template whose history is requested
+// (via the template_id query param), checks workspace membership, and enforces
+// scope-based access: system templates require owner/admin; personal templates
+// require the template owner.
+func (h *Handler) instructionsHistoryAccess(w http.ResponseWriter, r *http.Request) (db.AgentConfigTemplate, db.Member, bool) {
+	workspaceID := workspaceIDFromURL(r, "id")
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return db.AgentConfigTemplate{}, db.Member{}, false
 	}
-	if scope != instructionsHistoryScopePersonal && scope != instructionsHistoryScopeSystem {
-		writeError(w, http.StatusBadRequest, "invalid scope")
-		return db.Member{}, "", false
+	templateID := r.URL.Query().Get("template_id")
+	tplUUID, ok := parseUUIDOrBadRequest(w, templateID, "template_id")
+	if !ok {
+		return db.AgentConfigTemplate{}, db.Member{}, false
 	}
 
-	workspaceID := workspaceIDFromURL(r, "id")
+	tpl, err := h.Queries.GetAgentConfigTemplateInWorkspace(r.Context(), db.GetAgentConfigTemplateInWorkspaceParams{
+		ID:          tplUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "template not found")
+			return db.AgentConfigTemplate{}, db.Member{}, false
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load template")
+		return db.AgentConfigTemplate{}, db.Member{}, false
+	}
+
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
-		return db.Member{}, "", false
+		return db.AgentConfigTemplate{}, db.Member{}, false
 	}
-	if scope == instructionsHistoryScopeSystem && !roleAllowed(member.Role, "owner", "admin") {
+	if tpl.Scope == instructionsHistoryScopeSystem {
+		if !roleAllowed(member.Role, "owner", "admin") {
+			writeError(w, http.StatusForbidden, "insufficient permissions")
+			return db.AgentConfigTemplate{}, db.Member{}, false
+		}
+	} else if tpl.CreatedBy.Valid && member.ID != tpl.CreatedBy {
 		writeError(w, http.StatusForbidden, "insufficient permissions")
-		return db.Member{}, "", false
+		return db.AgentConfigTemplate{}, db.Member{}, false
 	}
-	return member, scope, true
+	return tpl, member, true
 }
 
 func instructionsHistoryRowToResponse(row db.ListInstructionsHistoryRow, includeContent bool) map[string]any {
@@ -337,6 +333,7 @@ func instructionsHistoryRowToResponse(row db.ListInstructionsHistoryRow, include
 		"workspace_id":     uuidToString(row.WorkspaceID),
 		"scope":            row.Scope,
 		"member_id":        uuidToPtr(row.MemberID),
+		"template_id":      uuidToPtr(row.TemplateID),
 		"actor_id":         uuidToPtr(row.ActorID),
 		"actor_user_id":    uuidToPtr(row.ActorUserID),
 		"actor_name":       textToPtr(row.ActorName),
@@ -357,6 +354,7 @@ func instructionsHistoryDetailToResponse(row db.GetInstructionsHistoryRow) map[s
 		"workspace_id":     uuidToString(row.WorkspaceID),
 		"scope":            row.Scope,
 		"member_id":        uuidToPtr(row.MemberID),
+		"template_id":      uuidToPtr(row.TemplateID),
 		"actor_id":         uuidToPtr(row.ActorID),
 		"actor_user_id":    uuidToPtr(row.ActorUserID),
 		"actor_name":       textToPtr(row.ActorName),
@@ -438,7 +436,6 @@ func (h *Handler) DuplicateAgentDefaults(w http.ResponseWriter, r *http.Request)
 	if err == nil {
 		_ = json.Unmarshal(myCfg.Config, &mine)
 	}
-	previousInstructions := mine.Instructions
 
 	// Merge with append semantics
 	if source.Instructions != "" {
@@ -493,21 +490,6 @@ func (h *Handler) DuplicateAgentDefaults(w http.ResponseWriter, r *http.Request)
 			append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to save merged config")
 		return
-	}
-
-	if mine.Instructions != previousInstructions {
-		if _, err := q.InsertInstructionsHistory(r.Context(), db.InsertInstructionsHistoryParams{
-			WorkspaceID: parseUUID(workspaceID),
-			Scope:       instructionsHistoryScopePersonal,
-			MemberID:    member.ID,
-			Content:     mine.Instructions,
-			ActorID:     member.ID,
-		}); err != nil {
-			slog.Warn("insert duplicated instructions history failed",
-				append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
-			writeError(w, http.StatusInternalServerError, "failed to save merged config")
-			return
-		}
 	}
 
 	if err := commit(); err != nil {
