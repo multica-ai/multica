@@ -785,14 +785,35 @@ func parsePiModels(output string) []Model {
 // pattern message is also matched on its own. These are prose, not
 // `provider model` rows; without skipping them the field splitter coins bogus
 // models like `No/models`. See #3729.
+//
+// A pi fork that lacks `--list-models` (e.g. oh-my-pi moved listing to the
+// `omp models` subcommand) instead exits non-zero with CLI usage text:
+//
+//	Error: unknown flag: --list-models
+//	Run `omp --help` for available flags.
+//
+// The first line is caught by the error: prefix; the second is a usage hint
+// that would otherwise be coined into a `Run/...` model. A real catalog row
+// never contains a backtick-quoted command, a `--help`/`--flag` token, or a
+// `usage:`/`unknown flag` lead-in, so those shapes are filtered too. See #4482.
 func isPiDiscoveryNoise(line string) bool {
 	lower := strings.ToLower(line)
-	if strings.Contains(lower, "no models match pattern") {
+	switch {
+	case strings.Contains(lower, "no models match pattern"):
 		return true
+	case strings.HasPrefix(lower, "warning:"),
+		strings.HasPrefix(lower, "error:"),
+		strings.HasPrefix(lower, "info:"):
+		return true
+	case strings.HasPrefix(lower, "usage:"),
+		strings.Contains(lower, "unknown flag"),
+		strings.Contains(lower, "unknown command"),
+		strings.Contains(lower, "--help"),
+		strings.Contains(line, "`"):
+		return true
+	default:
+		return false
 	}
-	return strings.HasPrefix(lower, "warning:") ||
-		strings.HasPrefix(lower, "error:") ||
-		strings.HasPrefix(lower, "info:")
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,
