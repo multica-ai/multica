@@ -931,6 +931,10 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		if req.Timezone != nil && *req.Timezone != "" {
 			tz = *req.Timezone
 		}
+		if err := service.ValidateCronMinInterval(*req.CronExpression, tz); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		t, err := computeNextRun(*req.CronExpression, tz)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -1211,6 +1215,16 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		tz = *req.Timezone
 	}
 	if prev.Kind == "schedule" && cronExpr != "" {
+		// Only re-validate the interval floor when the expression (or its
+		// timezone) actually changed — an unrelated field update on a trigger
+		// that predates a tightened AUTOPILOT_MIN_TRIGGER_INTERVAL must not
+		// start failing.
+		if req.CronExpression != nil || req.Timezone != nil {
+			if err := service.ValidateCronMinInterval(cronExpr, tz); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		t, err := computeNextRun(cronExpr, tz)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
