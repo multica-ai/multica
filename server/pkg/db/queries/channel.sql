@@ -75,6 +75,21 @@ WHERE recipient_type = 'member'
   AND archived = FALSE
   AND (details->>'thread_root_id') IS NULL;
 
+-- CEREBRO-PATCH(sqlc-channel-unread-smart): FIR-2010 — channel badge that only
+-- counts messages where the viewer was @mentioned (inbox_item.type =
+-- 'mentioned'). Drives the smart channel unread badge: a channel goes red only
+-- on a mention, while other activity surfaces as a bold dot. Thread replies
+-- (details.thread_root_id present) are excluded so they keep their own row.
+-- name: CountUnreadInboxForChannelMentionsOnly :one
+SELECT count(*) FROM inbox_item
+WHERE recipient_type = 'member'
+  AND recipient_id = $1
+  AND issue_id = $2
+  AND type = 'mentioned'
+  AND read = FALSE
+  AND archived = FALSE
+  AND (details->>'thread_root_id') IS NULL;
+
 -- CEREBRO-PATCH(sqlc-channel-dm-promote): JEH-1131 — DM auto-promotion
 -- on third-party mention. The PromoteDMToChannel and
 -- ListChannelParticipantNames queries below are cerebro-only; upstream

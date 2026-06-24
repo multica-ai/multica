@@ -25,23 +25,43 @@ import (
 
 const cerebroInboxThreadSplitFlagKey = "cerebro_inbox_thread_split"
 
+// cerebroChannelUnreadSmartFlagKey gates FIR-2010 chat-specific unread: a
+// channel's badge counts only @mentions (other activity is a bold dot) and the
+// channel is marked read on scroll-past, not on open. DMs are unaffected.
+const cerebroChannelUnreadSmartFlagKey = "cerebro_channel_unread_smart"
+
 // cerebroInboxThreadSplitEnabled reports whether the inbox thread-split feature
 // is on for this workspace+user. Resolution mirrors
 // packages/cerebro-feature-flags/store.ts precedence (locked workspace >
 // personal > unlocked workspace > default) and defaults ON, so a missing row or
 // any lookup failure preserves the shipped behavior.
 func (h *Handler) cerebroInboxThreadSplitEnabled(ctx context.Context, workspaceID pgtype.UUID, requesterUserID string) bool {
+	return h.cerebroResolveFlag(ctx, workspaceID, requesterUserID, cerebroInboxThreadSplitFlagKey, true)
+}
+
+// cerebroChannelUnreadSmartEnabled reports whether FIR-2010 smart channel
+// unread is on for this workspace+user. Defaults OFF, so a missing row or any
+// lookup failure preserves today's behavior (channel counts every message).
+func (h *Handler) cerebroChannelUnreadSmartEnabled(ctx context.Context, workspaceID pgtype.UUID, requesterUserID string) bool {
+	return h.cerebroResolveFlag(ctx, workspaceID, requesterUserID, cerebroChannelUnreadSmartFlagKey, false)
+}
+
+// cerebroResolveFlag resolves a cerebro feature flag for this workspace+user.
+// Precedence mirrors packages/cerebro-feature-flags/store.ts (locked workspace
+// > personal > unlocked workspace > default). On any lookup failure or missing
+// row it returns def, so the shipped behavior is preserved.
+func (h *Handler) cerebroResolveFlag(ctx context.Context, workspaceID pgtype.UUID, requesterUserID, flagKey string, def bool) bool {
 	if h.CerebroQueries == nil {
-		return true
+		return def
 	}
 	var wsEnabled, wsLocked, wsFound bool
 	wsRows, err := h.CerebroQueries.ListCerebroWorkspaceFeatureFlags(ctx, workspaceID)
 	if err != nil {
-		slog.Warn("inbox thread-split flag: workspace lookup failed", "error", err)
-		return true
+		slog.Warn("cerebro flag: workspace lookup failed", "flag", flagKey, "error", err)
+		return def
 	}
 	for _, row := range wsRows {
-		if row.FlagKey == cerebroInboxThreadSplitFlagKey {
+		if row.FlagKey == flagKey {
 			wsEnabled, wsLocked, wsFound = row.Enabled, row.Locked, true
 			break
 		}
@@ -54,21 +74,21 @@ func (h *Handler) cerebroInboxThreadSplitEnabled(ctx context.Context, workspaceI
 			on, gerr := h.CerebroQueries.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
 				WorkspaceID: workspaceID,
 				UserID:      userID,
-				FlagKey:     cerebroInboxThreadSplitFlagKey,
+				FlagKey:     flagKey,
 			})
 			if gerr == nil {
 				return on
 			}
 			if !errors.Is(gerr, pgx.ErrNoRows) {
-				slog.Warn("inbox thread-split flag: personal lookup failed", "error", gerr)
-				return true
+				slog.Warn("cerebro flag: personal lookup failed", "flag", flagKey, "error", gerr)
+				return def
 			}
 		}
 	}
 	if wsFound {
 		return wsEnabled
 	}
-	return true
+	return def
 }
 
 // cerebroChannelUnreadCount drives a channel/DM's unread badge. When the
@@ -94,6 +114,26 @@ func (h *Handler) cerebroChannelUnreadCount(ctx context.Context, workspaceID pgt
 		return 0
 	}
 	return count
+}
+
+// cerebroChannelUnread computes a channel/DM's badge count and whether it has
+// ANY unread activity (FIR-2010). When smart unread is on for a channel (not a
+// DM), the badge counts only @mentions — so the red badge appears only on a
+// mention — while hasActivity stays true for non-mention messages so the UI can
+// still show a bold dot. DMs and the flag-off path keep the all-messages count.
+func (h *Handler) cerebroChannelUnread(ctx context.Context, workspaceID pgtype.UUID, userID, kind string, issueID pgtype.UUID) (count int64, hasActivity bool) {
+	all := h.cerebroChannelUnreadCount(ctx, workspaceID, userID, issueID)
+	if kind == ChannelKindChannel && h.cerebroChannelUnreadSmartEnabled(ctx, workspaceID, userID) {
+		mentions, err := h.Queries.CountUnreadInboxForChannelMentionsOnly(ctx, db.CountUnreadInboxForChannelMentionsOnlyParams{
+			RecipientID: parseUUID(userID),
+			IssueID:     issueID,
+		})
+		if err != nil {
+			mentions = 0
+		}
+		return mentions, all > 0
+	}
+	return all, all > 0
 }
 
 // cerebroMarkChannelRead marks a channel/DM read on open. When the thread-split

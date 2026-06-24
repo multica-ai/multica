@@ -205,6 +205,7 @@ export function ChannelListItem({
   channel,
   preview,
   mentioned = false,
+  smartUnread = false, // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — parent passes the cerebro_channel_unread_smart flag.
   isSelected,
   onClick,
   onArchive,
@@ -215,13 +216,26 @@ export function ChannelListItem({
   preview?: { author: string; text: string } | null;
   /** True when at least one unread inbox row for this channel is a mention. */
   mentioned?: boolean;
+  /** CEREBRO-PATCH(channel-unread-smart): FIR-2010 — smart-unread flag, from the parent. */
+  smartUnread?: boolean;
   isSelected: boolean;
   onClick: () => void;
   onArchive: () => void;
   onUnarchive?: () => void; // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
 }) {
   const display = useChannelDisplay(channel);
-  const unread = channel.unread_count > 0;
+  // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — when smart unread is on, a
+  // channel's unread_count is mention-only: a red stripe/count appears only on
+  // an @mention, and other unread activity shows as a bold dot instead. DMs and
+  // the flag-off path are unchanged (unread_count counts every message).
+  const smartChannel = smartUnread && channel.kind === "channel";
+  const countUnread = channel.unread_count > 0;
+  const hasActivity = smartChannel ? channel.has_unread_activity === true : countUnread;
+  const dotOnly = smartChannel && hasActivity && !countUnread;
+  // `unread` drives the bold title + snippet tone for any activity; `stripe`
+  // drives the brand-blue bar (red state) shown only on a mention/DM message.
+  const unread = hasActivity;
+  const stripe = countUnread;
   const timeAgo = useTimeAgo();
   // CEREBRO-PATCH(channel-empty-row-no-fake-time): FIR-1549 — empty channels/DMs have no message timestamp; updated_at is channel metadata.
   const latestMessageAt = channel.last_message?.created_at;
@@ -231,7 +245,7 @@ export function ChannelListItem({
   return (
     <InboxListItemShell
       isSelected={isSelected}
-      unread={unread}
+      unread={stripe} // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — brand-blue stripe only on a mention/DM; non-mention activity uses a dot.
       onClick={onClick}
       onArchive={onArchive}
       onUnarchive={onUnarchive} // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
@@ -243,6 +257,10 @@ export function ChannelListItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1">
+            {/* CEREBRO-PATCH(channel-unread-smart): FIR-2010 — bold dot for non-mention channel activity (no red count when smart unread is on). */}
+            {dotOnly && (
+              <span aria-hidden className="size-2 shrink-0 rounded-full bg-muted-foreground/70" />
+            )}
             {display.isChannel && (
               <Hash className="size-3.5 shrink-0 text-muted-foreground" />
             )}

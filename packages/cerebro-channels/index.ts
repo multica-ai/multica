@@ -14,6 +14,8 @@ export { useLeaveChannel, useDeleteChannel } from "./leave-delete-mutations";
 // focus-guard effect that left the inbox row stuck as unread when focus
 // flickered on open).
 export { useChannelAutoMarkRead } from "./use-channel-auto-mark-read";
+// FIR-2010 — channel-only mark-read on scroll-past (smart-unread mode); DMs keep mark-on-open.
+export { useChannelScrollMarkRead, shouldMarkChannelReadOnScroll } from "./use-channel-scroll-mark-read";
 // TECH-3352 — per-user "remind me" (snooze) + "mark as unread" for channels/DMs.
 export { useMuteChannel, useUnmuteChannel, useMarkChannelUnread } from "./state-mutations";
 export { CerebroChannelRowActions } from "./channel-row-actions";

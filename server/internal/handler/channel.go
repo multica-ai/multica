@@ -49,24 +49,26 @@ type ChannelLastMessage struct {
 // IssueResponse — the fields that mean something for chat — and adds the
 // participant list and unread count.
 type ChannelResponse struct {
-	ID           string              `json:"id"`
-	WorkspaceID  string              `json:"workspace_id"`
-	Number       int32               `json:"number"`
-	Identifier   string              `json:"identifier"`
-	Kind         string              `json:"kind"`
-	Title        string              `json:"title"`
-	Description  *string             `json:"description"`
-	Status       string              `json:"status"`
-	ProjectID    *string             `json:"project_id"`
-	AssigneeType *string             `json:"assignee_type"`
-	AssigneeID   *string             `json:"assignee_id"`
-	CreatorType  string              `json:"creator_type"`
-	CreatorID    string              `json:"creator_id"`
-	Participants []ChannelMember     `json:"participants"`
-	UnreadCount  int64               `json:"unread_count"`
-	LastMessage  *ChannelLastMessage `json:"last_message"`
-	CreatedAt    string              `json:"created_at"`
-	UpdatedAt    string              `json:"updated_at"`
+	ID           string          `json:"id"`
+	WorkspaceID  string          `json:"workspace_id"`
+	Number       int32           `json:"number"`
+	Identifier   string          `json:"identifier"`
+	Kind         string          `json:"kind"`
+	Title        string          `json:"title"`
+	Description  *string         `json:"description"`
+	Status       string          `json:"status"`
+	ProjectID    *string         `json:"project_id"`
+	AssigneeType *string         `json:"assignee_type"`
+	AssigneeID   *string         `json:"assignee_id"`
+	CreatorType  string          `json:"creator_type"`
+	CreatorID    string          `json:"creator_id"`
+	Participants []ChannelMember `json:"participants"`
+	UnreadCount  int64           `json:"unread_count"`
+	// CEREBRO-PATCH(channel-unread-smart): FIR-2010 — true when the channel has any unread message, even when UnreadCount is mention-only (drives the bold dot).
+	HasUnreadActivity bool                `json:"has_unread_activity"`
+	LastMessage       *ChannelLastMessage `json:"last_message"`
+	CreatedAt         string              `json:"created_at"`
+	UpdatedAt         string              `json:"updated_at"`
 	// CEREBRO-PATCH(channel-state-response): TECH-3352 — per-user snooze target.
 	MutedUntil *string `json:"muted_until"`
 }
@@ -329,12 +331,11 @@ func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 			CreatorType:  row.CreatorType,
 			CreatorID:    uuidToString(row.CreatorID),
 			Participants: h.loadParticipants(r.Context(), row.ID),
-			// CEREBRO-PATCH(inbox-thread-split-unread): FIR-1854 — pass workspace for the thread-split flag.
-			UnreadCount: h.unreadInboxCount(r.Context(), row.WorkspaceID, userID, row.ID),
-			LastMessage: lastMessages[uuidToString(row.ID)],
-			CreatedAt:   timestampToString(row.CreatedAt),
-			UpdatedAt:   timestampToString(row.UpdatedAt),
+			LastMessage:  lastMessages[uuidToString(row.ID)],
+			CreatedAt:    timestampToString(row.CreatedAt),
+			UpdatedAt:    timestampToString(row.UpdatedAt),
 		}
+		h.applyChannelUnread(r.Context(), userID, &channel)    // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — mention-aware unread badge + activity dot.
 		applyChannelState(&channel, mutedStates, unreadStates) // CEREBRO-PATCH(channel-state-apply): TECH-3352
 		resp = append(resp, channel)
 	}
@@ -481,12 +482,11 @@ func (h *Handler) channelToResponse(ctx context.Context, i db.Issue, viewerUserI
 		CreatorType:  i.CreatorType,
 		CreatorID:    uuidToString(i.CreatorID),
 		Participants: h.loadParticipants(ctx, i.ID),
-		// CEREBRO-PATCH(inbox-thread-split-unread): FIR-1854 — pass workspace for the thread-split flag.
-		UnreadCount: h.unreadInboxCount(ctx, i.WorkspaceID, viewerUserID, i.ID),
-		LastMessage: lastMessages[uuidToString(i.ID)],
-		CreatedAt:   timestampToString(i.CreatedAt),
-		UpdatedAt:   timestampToString(i.UpdatedAt),
+		LastMessage:  lastMessages[uuidToString(i.ID)],
+		CreatedAt:    timestampToString(i.CreatedAt),
+		UpdatedAt:    timestampToString(i.UpdatedAt),
 	}
+	h.applyChannelUnread(ctx, viewerUserID, &resp) // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — mention-aware unread badge + activity dot.
 	// CEREBRO-PATCH(channel-state-apply): TECH-3352 — per-user snooze/unread overlay.
 	muted, unreadAt := h.channelStates(ctx, viewerUserID)
 	applyChannelState(&resp, muted, unreadAt)
@@ -508,9 +508,9 @@ func (h *Handler) loadParticipants(ctx context.Context, issueID pgtype.UUID) []C
 	return out
 }
 
-func (h *Handler) unreadInboxCount(ctx context.Context, workspaceID pgtype.UUID, userID string, issueID pgtype.UUID) int64 {
-	// CEREBRO-PATCH(inbox-thread-split-unread): FIR-1854 — exclude thread replies from the channel badge when split is on.
-	return h.cerebroChannelUnreadCount(ctx, workspaceID, userID, issueID)
+// CEREBRO-PATCH(channel-unread-smart): FIR-2010 — fill UnreadCount + HasUnreadActivity (mention-aware) via the cerebro seam; FIR-1854 thread-split still applies inside.
+func (h *Handler) applyChannelUnread(ctx context.Context, userID string, c *ChannelResponse) {
+	c.UnreadCount, c.HasUnreadActivity = h.cerebroChannelUnread(ctx, parseUUID(c.WorkspaceID), userID, c.Kind, parseUUID(c.ID))
 }
 
 // CEREBRO-PATCH(channel-state-apply): TECH-3352 — per-user snooze + manual-
@@ -565,7 +565,7 @@ func (h *Handler) listAllChannels(w http.ResponseWriter, r *http.Request, worksp
 	prefix := h.getIssuePrefix(r.Context(), parseUUID(workspaceID))
 	resp := make([]ChannelResponse, 0, len(rows))
 	for _, row := range rows {
-		resp = append(resp, ChannelResponse{
+		channel := ChannelResponse{
 			ID:           uuidToString(row.ID),
 			WorkspaceID:  uuidToString(row.WorkspaceID),
 			Number:       row.Number,
@@ -580,12 +580,12 @@ func (h *Handler) listAllChannels(w http.ResponseWriter, r *http.Request, worksp
 			CreatorType:  row.CreatorType,
 			CreatorID:    uuidToString(row.CreatorID),
 			Participants: h.loadParticipants(r.Context(), row.ID),
-			// CEREBRO-PATCH(inbox-thread-split-unread): FIR-1854 — pass workspace for the thread-split flag.
-			UnreadCount: h.unreadInboxCount(r.Context(), row.WorkspaceID, userID, row.ID),
-			LastMessage: lastMessages[uuidToString(row.ID)],
-			CreatedAt:   timestampToString(row.CreatedAt),
-			UpdatedAt:   timestampToString(row.UpdatedAt),
-		})
+			LastMessage:  lastMessages[uuidToString(row.ID)],
+			CreatedAt:    timestampToString(row.CreatedAt),
+			UpdatedAt:    timestampToString(row.UpdatedAt),
+		}
+		h.applyChannelUnread(r.Context(), userID, &channel) // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — mention-aware unread badge + activity dot.
+		resp = append(resp, channel)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

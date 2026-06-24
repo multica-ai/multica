@@ -39,6 +39,10 @@ export type CerebroFlagKey =
   // FIR-2010: tagging an agent inside a 1:1 DM opens a reply THREAD in the DM
   // instead of permanently promoting the whole DM to a multi-party channel.
   | "cerebro_dm_reply_threads"
+  // FIR-2010: chat-specific unread — a DM badge counts every message, but a
+  // channel badge only goes red on an @mention (other activity shows as a
+  // bold dot), and a channel is marked read on scrolling past, not on open.
+  | "cerebro_channel_unread_smart"
   | "cerebro_notes"
   // FIR-1590: per-folder access control — "Only you / Selected colleagues /
   // Whole team" on note + document folders. Gates the folder and its contents.
@@ -328,6 +332,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2010: OFF until verified on staging. ON = tagging an agent in a DM
   // opens a reply thread in the DM instead of promoting the DM to a channel.
   cerebro_dm_reply_threads: false,
+  // FIR-2010: OFF until verified on staging. ON = a channel's unread badge only
+  // goes red on an @mention (other activity is a bold dot) and the channel is
+  // marked read on scroll-past; a DM still counts every message and marks on open.
+  cerebro_channel_unread_smart: false,
   // TECH-3421: OFF by default until the Notes UI ships + is QA'd on staging.
   // Gates the Notes feature (private-by-default notes built on artifacts):
   // the Notes nav entry, quick-capture, the notes list/editor surface, and the
@@ -1278,6 +1286,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "On a 1:1 DM, tagging an agent (or member) replies in a thread inside the DM instead of permanently converting the whole DM into a multi-party channel. The DM stays a DM; the mentioned agent is still triggered and answers in the thread. FIR-2010.",
+  },
+  {
+    key: "cerebro_channel_unread_smart",
+    label: "Chat-specific unread (DM counts all, channel only on @mention)",
+    group: "inbox",
+    description:
+      "Make unread behave like Slack/Teams for chat. A DM badge keeps counting every message and marks read on open. A channel badge only turns red when you are @mentioned — other channel activity shows as a bold dot instead of a red count — and a channel is marked read when you scroll past its messages, not just on open. Thread replies keep their own unread. FIR-2010.",
   },
   {
     key: "cerebro_child_done_notify_parent",

@@ -357,6 +357,8 @@ export function InboxPage() {
   // CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options when disabled,
   // and snap any persisted "channels"/"dms" view back to "all" when the user toggles off.
   const channelsEnabled = useFeatureFlag("cerebro_channels");
+  // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — channel badge goes red only on @mention (else bold dot); passed to each channel row.
+  const channelUnreadSmart = useFeatureFlag("cerebro_channel_unread_smart");
   // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — gate the "Pinned" view option.
   const pinnedFilterEnabled = useFeatureFlag("cerebro_inbox_pinned_filter");
   // CEREBRO-PATCH(inbox-archive-to-list): TECH-3535 — on archive, return to the
@@ -935,6 +937,7 @@ export function InboxPage() {
           key={`channel:${channel.id}`}
           channel={channel}
           mentioned={mentionedChannels.has(channel.id)}
+          smartUnread={channelUnreadSmart} // CEREBRO-PATCH(channel-unread-smart): FIR-2010
           preview={preview}
           isSelected={channel.id === selectedKey}
           onClick={() => setSelectedKey("issue", channel.id)}

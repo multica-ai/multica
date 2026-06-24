@@ -59,6 +59,34 @@ func (q *Queries) CountUnreadInboxForChannelExcludingThreads(ctx context.Context
 	return count, err
 }
 
+const countUnreadInboxForChannelMentionsOnly = `-- name: CountUnreadInboxForChannelMentionsOnly :one
+SELECT count(*) FROM inbox_item
+WHERE recipient_type = 'member'
+  AND recipient_id = $1
+  AND issue_id = $2
+  AND type = 'mentioned'
+  AND read = FALSE
+  AND archived = FALSE
+  AND (details->>'thread_root_id') IS NULL
+`
+
+type CountUnreadInboxForChannelMentionsOnlyParams struct {
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// CEREBRO-PATCH(sqlc-channel-unread-smart): FIR-2010 — channel badge that only
+// counts messages where the viewer was @mentioned (inbox_item.type =
+// 'mentioned'). Drives the smart channel unread badge: a channel goes red only
+// on a mention, while other activity surfaces as a bold dot. Thread replies
+// (details.thread_root_id present) are excluded so they keep their own row.
+func (q *Queries) CountUnreadInboxForChannelMentionsOnly(ctx context.Context, arg CountUnreadInboxForChannelMentionsOnlyParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUnreadInboxForChannelMentionsOnly, arg.RecipientID, arg.IssueID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getDMByMembers = `-- name: GetDMByMembers :one
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.kind, i.start_date, i.metadata, i.is_private, i.classification FROM issue i
 WHERE i.workspace_id = $1

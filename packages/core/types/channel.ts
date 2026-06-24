@@ -32,6 +32,10 @@ export interface Channel {
   creator_id: string;
   participants: ChannelMember[];
   unread_count: number;
+  // CEREBRO-PATCH(core-types-channel-unread-smart): FIR-2010 — true when the
+  // channel has any unread message, even when unread_count is mention-only
+  // (smart unread on). Optional: absent on older servers → treated as false.
+  has_unread_activity?: boolean;
   last_message: ChannelLastMessage | null;
   created_at: string;
   updated_at: string;

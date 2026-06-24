@@ -316,6 +316,70 @@ describe("ChannelListItem", () => {
     expect(screen.getByText(/@\s*you/i)).toBeInTheDocument();
   });
 
+  // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — smart unread: a channel
+  // shows the brand stripe only on a mention; other unread activity is a dot.
+  describe("smart unread (FIR-2010)", () => {
+    const stripe = (c: HTMLElement) => c.querySelector(".bg-brand");
+    const dot = (c: HTMLElement) => c.querySelector(".rounded-full.bg-muted-foreground\\/70");
+
+    it("shows a bold dot (no brand stripe) for non-mention channel activity", () => {
+      const { container } = render(
+        <ChannelListItem
+          channel={makeChannel({ kind: "channel", unread_count: 0, has_unread_activity: true })}
+          smartUnread
+          isSelected={false}
+          onClick={() => {}}
+          onArchive={() => {}}
+        />,
+      );
+      expect(dot(container)).not.toBeNull();
+      expect(stripe(container)).toBeNull();
+    });
+
+    it("shows the brand stripe (no dot) when the channel has an unread mention", () => {
+      const { container } = render(
+        <ChannelListItem
+          channel={makeChannel({ kind: "channel", unread_count: 1, has_unread_activity: true })}
+          smartUnread
+          mentioned
+          isSelected={false}
+          onClick={() => {}}
+          onArchive={() => {}}
+        />,
+      );
+      expect(stripe(container)).not.toBeNull();
+      expect(dot(container)).toBeNull();
+    });
+
+    it("keeps a DM counting every message (stripe + count) under smart unread", () => {
+      const { container } = render(
+        <ChannelListItem
+          channel={makeChannel({ kind: "dm", unread_count: 3 })}
+          smartUnread
+          isSelected={false}
+          onClick={() => {}}
+          onArchive={() => {}}
+        />,
+      );
+      expect(stripe(container)).not.toBeNull();
+      expect(dot(container)).toBeNull();
+      expect(screen.getByText("3")).toBeInTheDocument();
+    });
+
+    it("ignores has_unread_activity when the flag is off (no dot)", () => {
+      const { container } = render(
+        <ChannelListItem
+          channel={makeChannel({ kind: "channel", unread_count: 0, has_unread_activity: true })}
+          isSelected={false}
+          onClick={() => {}}
+          onArchive={() => {}}
+        />,
+      );
+      expect(dot(container)).toBeNull();
+      expect(stripe(container)).toBeNull();
+    });
+  });
+
   it("hides the @YOU badge when not mentioned", () => {
     render(
       <ChannelListItem

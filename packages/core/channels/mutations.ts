@@ -39,11 +39,12 @@ export function useMarkChannelRead() {
       const prevDetail = qc.getQueryData<Channel>(channelKeys.detail(wsId, channelId));
       const prevInbox = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
 
+      // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — also clear has_unread_activity so the bold dot disappears optimistically (smart-unread mode).
       qc.setQueryData<Channel[]>(channelKeys.list(wsId), (old) =>
-        old?.map((c) => (c.id === channelId ? { ...c, unread_count: 0 } : c)),
+        old?.map((c) => (c.id === channelId ? { ...c, unread_count: 0, has_unread_activity: false } : c)),
       );
       qc.setQueryData<Channel>(channelKeys.detail(wsId, channelId), (old) =>
-        old ? { ...old, unread_count: 0 } : old,
+        old ? { ...old, unread_count: 0, has_unread_activity: false } : old,
       );
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
         old?.map((item) =>

@@ -21,9 +21,11 @@ import { useArchiveInbox } from "@multica/core/inbox/mutations";
 import {
   useArchiveChannel,
   useChannelAutoMarkRead,
+  useChannelScrollMarkRead, // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — mark channel read on scroll-past.
   useLeaveChannel,
   useDeleteChannel,
 } from "@multica/cerebro-channels";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags"; // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — gate smart-unread mark-read.
 import type { Channel, ChannelMember, InboxItem, TimelineEntry } from "@multica/core/types";
 import { useIssueTimeline } from "../../issues/hooks/use-issue-timeline";
 // CEREBRO-PATCH(channel-composer-unify): FIR-1748 — channels send via the shared MessageComposer, not the issue CommentInput.
@@ -125,7 +127,15 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
   // for new messages that arrive while the conversation is already open.
   // CEREBRO-PATCH(channel-auto-mark-read-hook): TECH-3352 — see cerebro-channels.
   // CEREBRO-PATCH(inbox-thread-split-suppress-automark): FIR-1854 — undefined unread suppresses auto-mark when opened from a thread row.
-  useChannelAutoMarkRead(channelId, suppressAutoMarkRead ? undefined : channel?.unread_count);
+  // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — in smart-unread mode a CHANNEL
+  // is read on scroll-past, not on open, so suppress the open-time read for it;
+  // DMs keep mark-on-open. The scroll-mark hook is mounted below.
+  const smartUnread = useFeatureFlag("cerebro_channel_unread_smart");
+  const smartChannel = smartUnread && channel?.kind === "channel";
+  useChannelAutoMarkRead(
+    channelId,
+    suppressAutoMarkRead || smartChannel ? undefined : channel?.unread_count,
+  );
 
   // CEREBRO-PATCH(channel-typing): TECH-3664 — live "is typing…" for this channel/DM.
   const { typingUserIds, notifyTyping } = useChannelTyping(channelId);
@@ -201,7 +211,19 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
   // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — pin DM/Channel
   // scroll to bottom on open; surface "Ny besked"-pille when scrolled up.
   const scrollRef = useRef<HTMLDivElement>(null);
-  const { hasNewBelow, scrollToBottom } = useStickyBottom(scrollRef);
+  const { isAtBottom, hasNewBelow, scrollToBottom } = useStickyBottom(scrollRef);
+  // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — when smart unread is on, a
+  // channel is marked read once the user scrolls past its messages (reaches the
+  // bottom), rather than on open. Fires for any unread activity (mention or not)
+  // so non-mention messages are cleared too. The signature re-arms it per new
+  // message. DMs are untouched (smartChannel is channel-only).
+  useChannelScrollMarkRead({
+    channelId,
+    hasUnread: channel?.has_unread_activity === true || (channel?.unread_count ?? 0) > 0,
+    atBottom: isAtBottom,
+    enabled: !!smartChannel && !suppressAutoMarkRead,
+    signature: `${channel?.unread_count ?? 0}:${channel?.last_message?.created_at ?? ""}`,
+  });
   // CEREBRO-PATCH(channel-message-search): FIR-407 — server-backed message search (icon toggles the bar below the header).
   const messageSearch = useChannelMessageSearch(channelId, topLevel, scrollRef);
   // CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — keep latest channel messages visible on open and after sending.
