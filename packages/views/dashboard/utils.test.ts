@@ -14,7 +14,6 @@ describe("aggregateDailyCost", () => {
     const result = aggregateDailyCost([
       {
         date: "2026-05-10",
-        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 1_000_000,
         output_tokens: 500_000,
@@ -24,7 +23,6 @@ describe("aggregateDailyCost", () => {
       },
       {
         date: "2026-05-09",
-        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 1_000_000,
         output_tokens: 0,
@@ -47,7 +45,6 @@ describe("aggregateDailyCost", () => {
     const result = aggregateDailyCost([
       {
         date: "2026-05-10",
-        provider: "claude",
         model: "made-up-model",
         input_tokens: 999_999_999,
         output_tokens: 0,
@@ -65,7 +62,6 @@ describe("aggregateAgentTokens", () => {
     const rows = aggregateAgentTokens([
       {
         agent_id: "small-spender",
-        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 100_000,
         output_tokens: 0,
@@ -75,7 +71,6 @@ describe("aggregateAgentTokens", () => {
       },
       {
         agent_id: "big-spender",
-        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 5_000_000,
         output_tokens: 0,
@@ -85,7 +80,6 @@ describe("aggregateAgentTokens", () => {
       },
       {
         agent_id: "big-spender",
-        provider: "claude",
         model: "claude-haiku-4-5",
         input_tokens: 1_000_000,
         output_tokens: 0,
@@ -107,7 +101,6 @@ describe("computeDailyTotals", () => {
     const totals = computeDailyTotals([
       {
         date: "2026-05-10",
-        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 1_000_000,
         output_tokens: 0,
@@ -117,7 +110,6 @@ describe("computeDailyTotals", () => {
       },
       {
         date: "2026-05-09",
-        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 2_000_000,
         output_tokens: 0,

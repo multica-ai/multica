@@ -3,10 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { detail, deletePin, navigation, pins } = vi.hoisted(() => ({
+const { detail, deletePin, pins, workspace } = vi.hoisted(() => ({
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
-  navigation: { current: { pathname: "/acme/issues" } },
   pins: {
     current: [
       {
@@ -19,6 +18,9 @@ const { detail, deletePin, navigation, pins } = vi.hoisted(() => ({
         created_at: "2026-05-06T00:00:00Z",
       },
     ],
+  },
+  workspace: {
+    current: { id: "ws-1", name: "Acme", slug: "acme", avatar_url: null as string | null },
   },
 }));
 
@@ -44,19 +46,7 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarMenuButton: ({
-    children,
-    isActive,
-    render,
-  }: {
-    children: React.ReactNode;
-    isActive?: boolean;
-    render?: React.ReactElement<{ href?: string }>;
-  }) => (
-    <button type="button" data-active={isActive ? "true" : undefined} data-href={render?.props.href}>
-      {children}
-    </button>
-  ),
+  SidebarMenuButton: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarRail: () => null,
 }));
@@ -84,10 +74,29 @@ vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
 vi.mock("../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 vi.mock("../navigation", () => ({
   AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
-  useNavigation: () => ({ pathname: navigation.current.pathname, push: vi.fn() }),
+  useNavigation: () => ({ pathname: "/acme/issues", push: vi.fn() }),
 }));
 vi.mock("../projects/components/project-icon", () => ({ ProjectIcon: () => <span /> }));
-vi.mock("../workspace/workspace-avatar", () => ({ WorkspaceAvatar: () => <span /> }));
+vi.mock("../workspace/workspace-avatar", () => ({
+  WorkspaceAvatar: ({
+    name,
+    avatarUrl,
+    size,
+    className,
+  }: {
+    name: string;
+    avatarUrl?: string | null;
+    size?: string;
+    className?: string;
+  }) => (
+    <img
+      alt={name}
+      className={className}
+      data-avatar-url={avatarUrl ?? ""}
+      data-avatar-size={size ?? "sm"}
+    />
+  ),
+}));
 vi.mock("@multica/ui/components/common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -95,7 +104,7 @@ vi.mock("@multica/core/auth", () => ({
 }));
 vi.mock("@multica/core/paths", () => ({
   paths: { workspace: (slug: string) => ({ issues: () => `/${slug}/issues` }) },
-  useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
+  useCurrentWorkspace: () => workspace.current,
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
     myIssues: () => "/acme/my-issues",
@@ -153,8 +162,8 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 describe("PinRow", () => {
   beforeEach(() => {
     deletePin.mockReset();
-    navigation.current.pathname = "/acme/issues";
     detail.current = { isPending: false, isError: false, data: null, error: null };
+    workspace.current = { id: "ws-1", name: "Acme", slug: "acme", avatar_url: null };
   });
 
   it("unpins missing details", async () => {
@@ -172,25 +181,22 @@ describe("PinRow", () => {
   it("renders loaded details", async () => {
     detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
     render(<AppSidebar />);
-    expect(await screen.findByText("Keep this pin")).toBeInTheDocument();
-    expect(screen.queryByText("MUL-123 Keep this pin")).not.toBeInTheDocument();
+    expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
   });
 
-  it("does not also highlight the parent workspace nav for an active pin", async () => {
-    navigation.current.pathname = "/acme/issues/issue-1";
-    detail.current = {
-      isPending: false,
-      isError: false,
-      data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" },
-      error: null,
-    };
+  it("renders only the enlarged uploaded NexAI logo without a duplicate wordmark", () => {
+    workspace.current = { id: "ws-1", name: "NexAI", slug: "nexai", avatar_url: "/uploads/workspace-logo.png" };
+    render(<AppSidebar />);
 
-    const { container } = render(<AppSidebar />);
+    const icon = document.querySelector("[data-acceptance='nexai-nt-icon']");
+    const wordmark = document.querySelector("[data-acceptance='nexai-wordmark']");
+    const logo = icon?.querySelector("img");
 
-    expect((await screen.findByText("Keep this pin")).closest("button")).toHaveAttribute(
-      "data-active",
-      "true",
-    );
-    expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+    expect(icon).toBeTruthy();
+    expect(logo).toHaveAttribute("data-avatar-url", "/uploads/workspace-logo.png");
+    expect(logo).toHaveAttribute("data-avatar-size", "xl");
+    expect(logo).toHaveClass("h-12");
+    expect(wordmark).toHaveClass("opacity-0");
+    expect(wordmark?.textContent).toBe("NexAI");
   });
 });

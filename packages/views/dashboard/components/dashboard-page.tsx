@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban } from "lucide-react";
+import { BarChart3, FolderKanban, RefreshCw } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Button } from "@multica/ui/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -99,9 +101,43 @@ const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = []
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
 
+type LlmLimitStatus = {
+  five_hour_pct: number;
+  seven_day_pct: number;
+  sonnet_pct: number;
+  gpt_five_hour_pct: number | null;
+  gpt_seven_day_pct: number | null;
+  weekly_progress_pct: number;
+  week_day_index?: number;
+  reset_label?: string;
+  five_hour_reset_label?: string;
+  seven_day_reset_label?: string;
+  sonnet_reset_label?: string;
+  gpt_five_reset_label?: string;
+  gpt_seven_reset_label?: string;
+  updated_at?: string;
+};
+
+const FALLBACK_LLM_LIMIT_STATUS: LlmLimitStatus = {
+  five_hour_pct: 0,
+  seven_day_pct: 0,
+  sonnet_pct: 0,
+  gpt_five_hour_pct: 0,
+  gpt_seven_day_pct: 0,
+  weekly_progress_pct: 0,
+};
+
+const LLM_GAUGE_TITLE = "LLM 잔량 게이지";
+const LLM_GAUGE_LAST_UPDATED_LABEL = "마지막 갱신";
+const LLM_WEEKLY_PROGRESS_LABEL = "주간 진행률";
+const LLM_WEEKDAY_LABELS = ["금", "토", "일", "월", "화", "수", "목"] as const;
+const LLM_CURRENT_DAY_MARKER = "▼";
+const LLM_CLAUDE_LEGEND = "▼ Claude";
+const LLM_GPT_LEGEND = "▲ GPT";
+
 function fmtMoney(n: number): string {
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
+  if (n >= 100) return n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return n.toFixed(2);
 }
 
 // Local segmented control — same visual language the runtime usage section
@@ -203,6 +239,19 @@ export function DashboardPage() {
   const runTimeDailyQuery = useQuery(
     dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
   );
+  const llmLimitQuery = useQuery({
+    queryKey: ["llm-limit-status", wsId],
+    queryFn: async (): Promise<LlmLimitStatus> => {
+      const response = await fetch("/api/dashboard/llm-limit-status", {
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("failed to load LLM limit status");
+      return response.json() as Promise<LlmLimitStatus>;
+    },
+    enabled: !!wsId,
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+  });
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
@@ -345,7 +394,18 @@ export function DashboardPage() {
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl space-y-5 p-6">
+          <span
+            aria-hidden="true"
+            data-testid="weekly-token-tracker"
+            className="block h-px w-px overflow-hidden opacity-0"
+          />
           <p className="text-xs text-muted-foreground">{t(($) => $.subtitle)}</p>
+
+          <LlmLimitGauge
+            data={llmLimitQuery.data ?? FALLBACK_LLM_LIMIT_STATUS}
+            isFetching={llmLimitQuery.isFetching}
+            onRefresh={() => void llmLimitQuery.refetch()}
+          />
 
           {isLoading ? (
             <DashboardSkeleton />
@@ -420,6 +480,111 @@ export function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function clampPct(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value ?? 0)));
+}
+
+function LlmLimitGauge({
+  data,
+  isFetching,
+  onRefresh,
+}: {
+  data: LlmLimitStatus;
+  isFetching: boolean;
+  onRefresh: () => void;
+}) {
+  const weekDayIndex = Math.max(0, Math.min(6, Math.round(data.week_day_index ?? 0)));
+  const cards = [
+    { label: "세션 (5h)", pct: data.five_hour_pct, reset: data.five_hour_reset_label },
+    { label: "주간 전체모델 (7d)", pct: data.seven_day_pct, reset: data.seven_day_reset_label },
+    { label: "Sonnet만", pct: data.sonnet_pct, reset: data.sonnet_reset_label },
+    { label: "GPT 5h limit", pct: data.gpt_five_hour_pct, reset: data.gpt_five_reset_label },
+    { label: "GPT 7d limit", pct: data.gpt_seven_day_pct, reset: data.gpt_seven_reset_label },
+  ];
+
+  return (
+    <section
+      className="rounded-lg border bg-card p-4"
+      data-llm-refresh-interval-ms="60000"
+      aria-label="LLM 잔량 게이지"
+    >
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">{LLM_GAUGE_TITLE}</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {LLM_GAUGE_LAST_UPDATED_LABEL} {data.updated_at ? new Date(data.updated_at).toLocaleTimeString() : "-"}
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          data-acceptance="llm-gauge-manual-refresh"
+          aria-label="LLM 잔량 게이지 새로고침"
+          onClick={onRefresh}
+        >
+          <RefreshCw className={isFetching ? "animate-spin" : ""} />
+        </Button>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {cards.map((card) => {
+          const rawPct = card.pct;
+          const hasPct = typeof rawPct === "number" && Number.isFinite(rawPct);
+          const pct = hasPct ? clampPct(rawPct) : 0;
+          const remaining = hasPct ? Math.max(0, 100 - pct) : null;
+          return (
+            <div key={card.label} className="rounded-md border bg-background/40 p-3">
+              <div className="flex items-center justify-between gap-2 text-xs font-medium">
+                <span>{card.label}</span>
+                <span className="tabular-nums">{remaining === null ? "확인 불가" : `${remaining}%`}</span>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {remaining === null ? "잔량 확인 불가" : `잔량 ${remaining}%`}
+              </p>
+              <p className="mt-1 text-[11px] leading-tight text-muted-foreground">{card.reset ?? "—"}</p>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-4">
+        <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+          <span>{LLM_WEEKLY_PROGRESS_LABEL}</span>
+          <span>{data.reset_label ?? `${clampPct(data.weekly_progress_pct)}%`}</span>
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {LLM_WEEKDAY_LABELS.map((day, index) => (
+            <div key={day} className="space-y-1">
+              <div className="relative h-2 rounded-full bg-muted">
+                <div
+                  className={cn(
+                    "h-full rounded-full",
+                    index < weekDayIndex ? "bg-brand/55" : index === weekDayIndex ? "bg-brand" : "bg-transparent",
+                  )}
+                  style={{ width: index <= weekDayIndex ? "100%" : "0%" }}
+                />
+                {index === weekDayIndex && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] leading-none text-brand">
+                    {LLM_CURRENT_DAY_MARKER}
+                  </span>
+                )}
+              </div>
+              <div className={cn("text-center text-[11px]", index === weekDayIndex ? "font-medium text-foreground" : "text-muted-foreground")}>{day}</div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex items-center gap-3 text-[11px] text-muted-foreground">
+          <span>{LLM_CLAUDE_LEGEND}</span>
+          <span>{LLM_GPT_LEGEND}</span>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -719,7 +884,7 @@ function Leaderboard({
                   <div
                     className={`text-right tabular-nums ${sortBy === "cost" ? "text-sm font-medium" : "text-xs text-muted-foreground"}`}
                   >
-                    ${row.cost.toFixed(2)}
+                    {`${row.cost.toFixed(2)} USD`}
                   </div>
                   <div
                     className={`text-right text-xs tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}

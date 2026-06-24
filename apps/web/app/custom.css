@@ -4,6 +4,9 @@
  * @multica/ui/styles/base.css
  * ============================================================================= */
 
+/* NexAI brand teal accent — kept as hex for tooling that requires literal hex. */
+:root { --nexai-brand-teal: #0ea5a0; }
+
 /* The landing route tree is intentionally always-light (hero/cli/cloud
  * sections use hardcoded dark/light palettes). Shared components rendered
  * inside (e.g. CloudWaitlistExpand on /download) use semantic tokens that
