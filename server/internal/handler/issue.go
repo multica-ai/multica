@@ -2641,7 +2641,15 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// identical issues. The source-thread path covers callers that already hold
 	// a thread id (kept for backwards compatibility).
 	if sourceMessageUUID.Valid {
-		if thread, ok := h.ensureThreadForMessage(r.Context(), sourceChannelUUID, sourceMessageUUID, wsUUID, issue.CreatorID); ok {
+		// Agents live in the agent table, not "user"; channel_thread.created_by
+		// REFERENCES "user"(id), so an agent-created issue's CreatorID would
+		// violate the FK on implicit thread creation. Pass NULL for agent-authored
+		// issues (mirrors the CreateThread handler); members keep their UUID.
+		threadCreator := issue.CreatorID
+		if issue.CreatorType == "agent" {
+			threadCreator = pgtype.UUID{}
+		}
+		if thread, ok := h.ensureThreadForMessage(r.Context(), sourceChannelUUID, sourceMessageUUID, wsUUID, threadCreator); ok {
 			h.linkIssueToExistingThread(r.Context(), &issue, thread)
 		}
 	} else if req.SourceThreadID != nil && strings.TrimSpace(*req.SourceThreadID) != "" {
