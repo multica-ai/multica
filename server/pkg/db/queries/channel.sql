@@ -254,7 +254,7 @@ SELECT * FROM channel_thread WHERE root_message_id = $1;
 -- Atomic find-or-create of the thread anchored at a root message. Closes the
 -- check-then-create race in ReplyToMessage / move-converge: two concurrent
 -- first-replies on the same root can no longer create two thread rows, because
--- the UNIQUE partial index on root_message_id (migration 126) makes the second
+-- the UNIQUE partial index on root_message_id (migration 132) makes the second
 -- INSERT conflict. The no-op DO UPDATE lets RETURNING yield the surviving row
 -- whether it inserted or conflicted, so the caller always gets the canonical
 -- thread. title is set only on insert (kept on conflict).
