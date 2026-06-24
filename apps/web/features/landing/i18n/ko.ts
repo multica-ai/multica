@@ -103,7 +103,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         label: "런타임",
         title: "실행 환경을 한곳에서 관리하세요",
         description:
-          "로컬 데몬과 클라우드 런타임을 한 화면에서 관리합니다. 온라인 상태, 사용량, 활동 패턴을 한눈에 보고, 내 컴퓨터에 설치된 지원 코딩 도구를 자동으로 찾아 등록합니다.",
+          "로컬 데몬과 클라우드 런타임을 한 화면에서 관리합니다. 온라인 상태, 사용량, 활동 패턴을 한눈에 보고, 내 컴퓨터에 설치된 13개 지원 코딩 도구를 자동으로 찾아 등록합니다.",
         cards: [
           {
             title: "하나로 모은 런타임 패널",
@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, Codex, Cursor, Copilot, ForgeCode, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 13개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -139,7 +139,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           title: "CLI 설치하고 내 컴퓨터 연결하기",
           description:
-            "`multica setup`을 실행하면 로그인, 데몬 실행, 지원 코딩 도구 스캔까지 차례대로 안내합니다. 이미 설치된 도구는 자동으로 런타임에 등록됩니다.",
+            "`multica setup`을 실행하면 로그인, 데몬 실행, 13개 지원 코딩 도구(Antigravity, Claude Code, Codex, Cursor, Copilot, ForgeCode, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi) 스캔까지 차례대로 안내합니다. 이미 설치된 도구는 자동으로 런타임에 등록됩니다.",
         },
         {
           title: "첫 에이전트 만들기",
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 11개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, Codex, Cursor, Copilot, ForgeCode, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi 등 13개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",

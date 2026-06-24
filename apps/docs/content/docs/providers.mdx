@@ -1,11 +1,11 @@
 ---
 title: AI coding tools matrix
-description: Multica supports 13 AI coding tools; they implement the same interface, but the capability details diverge significantly.
+description: Multica supports 14 AI coding tools; they implement the same interface, but the capability details diverge significantly.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica ships with built-in support for **13 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
+Multica ships with built-in support for **14 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
 
 For guidance on picking a tool when creating an agent, see [Creating and configuring agents](/agents-create).
 
@@ -26,6 +26,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **OpenClaw** | Open source | ✅ | ✅ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
 | **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
 | **Qoder** | Alibaba | ✅ | ✅ | `.qoder/skills/` | Dynamic discovery |
+| **ForgeCode** | Open source | ✅ (`--cid <id>`) | ❌ | `.forge/skills/` | Static (env vars) |
 
 ## What each tool is for
 
@@ -89,13 +90,17 @@ From Inflection AI, minimalist. **Session resumption is unusual** — the sessio
 
 From Alibaba. An agentic coding CLI. Uses the ACP protocol over stdio (shares a transport with Hermes, Kimi, and Kiro CLI). Session resumption works through ACP `session/resume`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically, and skills are copied into `.qoder/skills/` for native discovery.
 
+### ForgeCode
+
+Open-source CLI coding harness ([forgecode.dev](https://forgecode.dev/)). Unlike the other supported tools, ForgeCode's one-shot mode (`forge -p`) does **not** emit a structured event stream — it renders styled Markdown to stdout with tool calls, reasoning, and prose interleaved. Multica works around this with a two-phase approach: it buffers the live stdout (forwarding only a liveness heartbeat) and, after the run, replays the structured message list from `forge conversation dump <id>` (tool calls, tool results, reasoning, token usage). **Session resumption works** via the pinned `--cid <id>`; the conversation id is reused to continue a prior conversation. **Model selection is unusual**: there is no `--model` flag — the model is set via the `FORGE_SESSION__PROVIDER_ID` / `FORGE_SESSION__MODEL_ID` environment variables, which Multica derives from a `provider/model` value (e.g. `anthropic/claude-sonnet-4-20250514`). MCP config is not consumed. Skills are copied into `.forge/skills/`.
+
 ## Session resumption: who really supports it
 
 The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continue-from-the-previous-context). **Every supported tool resumes sessions** — pass the resume id and the task continues from the previous context. The one quirk is Pi, whose resume id is a session file path on disk rather than a string id (see [Pi](#pi) above).
 
 ## MCP configuration: provider-specific support
 
-**Of the 13 tools, ten consume `mcp_config`: Claude Code, CodeBuddy, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Qoder**. The other three accept the field but **ignore it** — no error, no warning, the config just has no effect.
+**Of the 14 tools, ten consume `mcp_config`: Claude Code, CodeBuddy, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Qoder**. The other four accept the field but **ignore it** — no error, no warning, the config just has no effect.
 
 The runtime paths are provider-specific: Claude Code and CodeBuddy receive it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Cursor writes `.cursor/mcp.json` plus per-task project approvals under `CURSOR_DATA_DIR`; Hermes, Kimi, Kiro CLI, and Qoder receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Multica's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
 
@@ -119,6 +124,7 @@ Each tool uses **its own** skill discovery path. Before a task runs, the Multica
 | OpenCode | `.opencode/skills/` | ✅ Native |
 | Pi | `.pi/skills/` | ✅ Native |
 | Qoder | `.qoder/skills/` | ✅ Native |
+| ForgeCode | `.forge/skills/` | ✅ Native |
 | Antigravity | `.agents/skills/` | ✅ Native (inherits Gemini CLI's workspace layout — see [Antigravity docs](https://antigravity.google/docs/gcli-migration)) |
 | Hermes | `.agent_context/skills/` | ⚠️ Generic fallback |
 | OpenClaw | `.agent_context/skills/` | ⚠️ Generic fallback |
@@ -134,4 +140,4 @@ For creating and using skills, see [Skills](/skills).
 - [Creating and configuring agents](/agents-create) — pick a tool for your agent
 - [Tasks](/tasks) — task lifecycle and session-resumption mechanics
 - [Daemon and runtimes](/daemon-runtimes) — where the tools run and how they connect to Multica
-- [Install an agent runtime](/install-agent-runtime) — installation and authentication for each of the 13 supported tools
+- [Install an agent runtime](/install-agent-runtime) — installation and authentication for each of the 14 supported tools

@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 13 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 14 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 13 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 14 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,9 +31,9 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 13 supported tools
+## The 14 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 13.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 14.
 
 ### Claude Code (Anthropic)
 
@@ -156,6 +156,16 @@ Agentic coding CLI using the ACP protocol over stdio (shares the transport with 
 | Daemon looks for | `qodercli` |
 | Install | See the official CLI docs at [qoder.com/cli](https://qoder.com/cli). |
 | Authentication | Per the vendor's docs. |
+
+### ForgeCode (Open source)
+
+Open-source CLI coding harness ([forgecode.dev](https://forgecode.dev/)). The daemon launches it in one-shot mode as `forge -C <workdir> --cid <conversation-id> -p <prompt>`. Session resumption works by reusing the pinned conversation id. ForgeCode has no `--model` flag — the model is selected via the `FORGE_SESSION__PROVIDER_ID` / `FORGE_SESSION__MODEL_ID` environment variables (set `MULTICA_FORGE_MODEL=provider/model`, e.g. `anthropic/claude-sonnet-4-20250514`). Because ForgeCode's one-shot mode renders Markdown rather than a structured event stream, the daemon replays the structured message list from a post-run `forge conversation dump <id>`. Skills are copied into `.forge/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `forge` |
+| Install | See the official docs at [forgecode.dev](https://forgecode.dev/). |
+| Authentication | Per the vendor's docs (API keys for the configured provider). |
 
 ### Antigravity (Google)
 
