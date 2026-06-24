@@ -733,13 +733,19 @@ func buildResourceRefFromRefFlag(cmd *cobra.Command, resourceType string, existi
 	}
 	rawRef, _ := cmd.Flags().GetString("ref")
 	rawRef = strings.TrimSpace(rawRef)
-	if rawRef != "" {
+	// --ref is the generic JSON resource_ref escape hatch. For github_repo it
+	// does double duty: a JSON object/array ("{...}" / "[...]") is still the
+	// escape hatch, but any other value — including bare scalars like a numeric
+	// tag ("2024") or an all-digit short SHA ("1234567") — is a checkout-ref
+	// shortcut that merges with --url. Only parse JSON when the value is
+	// actually meant as JSON; otherwise json.Unmarshal would accept "2024" as a
+	// number and silently swallow a legitimate checkout ref.
+	if rawRef != "" && (resourceType != "github_repo" || looksLikeJSONPayload(rawRef)) {
 		var ref any
-		if err := json.Unmarshal([]byte(rawRef), &ref); err == nil {
-			return ref, true, nil
-		} else if resourceType != "github_repo" || looksLikeJSONPayload(rawRef) {
+		if err := json.Unmarshal([]byte(rawRef), &ref); err != nil {
 			return nil, false, fmt.Errorf("--ref is not valid JSON: %w", err)
 		}
+		return ref, true, nil
 	}
 	if resourceType != "github_repo" {
 		return nil, false, fmt.Errorf("--ref must be a JSON resource_ref payload for resource type %q", resourceType)

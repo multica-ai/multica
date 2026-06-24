@@ -219,6 +219,52 @@ func TestBuildResourceRefFromRefFlagKeepsJSONEscapeHatch(t *testing.T) {
 			t.Fatalf("error = %q, want JSON guidance", err)
 		}
 	})
+
+	// A github_repo checkout ref that happens to be valid JSON as a bare scalar
+	// (a numeric tag, an all-digit short SHA, true/false/null) must be treated
+	// as a checkout ref, not silently parsed into the JSON escape hatch. Only
+	// "{...}" / "[...]" shaped values are the escape hatch.
+	t.Run("bare scalar github ref is a checkout ref, not JSON", func(t *testing.T) {
+		for _, gitRef := range []string{"2024", "1234567", "true", "null"} {
+			cmd := newProjectResourceUpdateTestCmd()
+			_ = cmd.Flags().Set("url", "https://github.com/multica-ai/multica")
+			_ = cmd.Flags().Set("ref", gitRef)
+
+			ref, has, err := buildResourceRefFromRefFlag(cmd, "github_repo", nil)
+			if err != nil {
+				t.Fatalf("ref %q: unexpected error: %v", gitRef, err)
+			}
+			if !has {
+				t.Fatalf("ref %q: expected has=true", gitRef)
+			}
+			payload, ok := ref.(map[string]any)
+			if !ok {
+				t.Fatalf("ref %q: expected github_repo shortcut map, got %T", gitRef, ref)
+			}
+			if payload["url"] != "https://github.com/multica-ai/multica" {
+				t.Errorf("ref %q: url = %v", gitRef, payload["url"])
+			}
+			if payload["ref"] != gitRef {
+				t.Errorf("ref %q: checkout ref = %v, want %q", gitRef, payload["ref"], gitRef)
+			}
+		}
+	})
+
+	// The checkout-ref shortcut only applies to github_repo: every other
+	// resource type must still reject a non-JSON --ref so the generic escape
+	// hatch stays typed.
+	t.Run("non-json ref rejected for non-github type", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("ref", "develop")
+
+		_, _, err := buildResourceRefFromRefFlag(cmd, "local_directory", nil)
+		if err == nil {
+			t.Fatalf("expected error for non-JSON --ref on local_directory")
+		}
+		if !strings.Contains(err.Error(), "not valid JSON") {
+			t.Fatalf("error = %q, want JSON guidance", err)
+		}
+	})
 }
 
 // TestBuildResourceRefFromFlagsLocalDirectoryMerges covers the same merge
