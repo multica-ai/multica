@@ -351,6 +351,12 @@ sync-install-scripts: ## Verify both install.sh files share required invariants 
 			echo "  FAIL: $$f is missing multica.wujieai.com default"; \
 			errors=$$((errors + 1)); \
 		fi; \
+		if ! grep -q 'link_multica_into_path' "$$f"; then \
+			echo "  FAIL: $$f is missing link_multica_into_path() (immediate-usable invariant)"; \
+			echo "        Both installers must make 'multica' resolvable in the current terminal"; \
+			echo "        right after curl|sh, without requiring the user to source a profile."; \
+			errors=$$((errors + 1)); \
+		fi; \
 	done; \
 	if grep -qE '(github\.com/multica-ai|multica-ai/tap)' $(EMBED_INSTALL); then \
 		echo "  FAIL: $(EMBED_INSTALL) must not reference official GitHub sources (multica-ai)"; \
