@@ -93,5 +93,10 @@
   "resize_aria": {
     "channel_list": "调整频道列表宽度",
     "side_panel": "调整右侧面板宽度"
+  },
+  "move": {
+    "converged": "已收敛为该消息的最新回复",
+    "released": "已释放为主消息",
+    "failed": "移动消息失败"
   }
 }

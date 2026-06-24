@@ -1469,6 +1469,45 @@ func (q *Queries) RemoveChannelMember(ctx context.Context, arg RemoveChannelMemb
 	return err
 }
 
+const reparentChannelMessage = `-- name: ReparentChannelMessage :one
+UPDATE channel_message
+SET thread_id   = $2,
+    reply_to_id = $3,
+    created_at  = now(),
+    updated_at  = now()
+WHERE id = $1
+RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id
+`
+
+type ReparentChannelMessageParams struct {
+	ID        pgtype.UUID `json:"id"`
+	ThreadID  pgtype.UUID `json:"thread_id"`
+	ReplyToID pgtype.UUID `json:"reply_to_id"`
+}
+
+// Moves a message between the top-level timeline (thread_id NULL) and a reply
+// (thread_id set). Converge passes the target thread + reply_to; release passes
+// both NULL. created_at is re-stamped so the message lands as the latest entry
+// in its new location (replies and the timeline are ordered by created_at ASC).
+// Both columns are sqlc.narg so NULL is expressible for the release path.
+func (q *Queries) ReparentChannelMessage(ctx context.Context, arg ReparentChannelMessageParams) (ChannelMessage, error) {
+	row := q.db.QueryRow(ctx, reparentChannelMessage, arg.ID, arg.ThreadID, arg.ReplyToID)
+	var i ChannelMessage
+	err := row.Scan(
+		&i.ID,
+		&i.ThreadID,
+		&i.ChannelID,
+		&i.WorkspaceID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ReplyToID,
+	)
+	return i, err
+}
+
 const touchChannel = `-- name: TouchChannel :exec
 UPDATE channel SET updated_at = now() WHERE id = $1
 `

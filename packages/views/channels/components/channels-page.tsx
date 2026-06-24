@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -16,6 +17,8 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  useDraggable,
+  useDndContext,
   useDroppable,
   useSensor,
   useSensors,
@@ -35,6 +38,7 @@ import {
   ChevronRight,
   FileText,
   FolderPlus,
+  GripVertical,
   Hash,
   Link,
   Loader2,
@@ -142,6 +146,24 @@ interface ChannelsPageProps {
 type SidePanelMode = "replies" | "members";
 
 const UNGROUPED_DROP_ID = "ungrouped-drop-zone";
+// Drop target for the whole channel list body: a group dropped here (or on a
+// non-group) appends to the end of the group order; also a fallback so a
+// channel drag never resolves to "no droppable".
+const CHANNEL_LIST_ROOT_ID = "channel-list-root";
+const GROUP_DRAG_PREFIX = "group:";
+const isGroupDragId = (id: string) => id.startsWith(GROUP_DRAG_PREFIX);
+const groupIdFromDragId = (id: string) => id.slice(GROUP_DRAG_PREFIX.length);
+
+// Message DnD id scheme (converge/release). A main message is draggable +
+// droppable under `msg:<id>` (drag onto another main message to converge it
+// into that thread). A reply is draggable under `reply:<id>` (drop on the main
+// area to release it back to a top-level message). The main list body is a
+// droppable so a reply released onto empty space (not a specific message)
+// still lands as top-level.
+const MSG_DRAG_PREFIX = "msg:";
+const REPLY_DRAG_PREFIX = "reply:";
+const MSG_LIST_DROP_ID = "channel-msg-list";
+const idFromDragId = (id: string, prefix: string) => id.slice(prefix.length);
 
 const SIDE_PANEL_DEFAULT_WIDTH = 360;
 const SIDE_PANEL_MIN_WIDTH = 320;
@@ -231,6 +253,113 @@ function matchesMember(member: MemberWithUser, rawQuery: string): boolean {
   return (
     memberSearchText(member).includes(query) ||
     matchesPinyin(member.name, query)
+  );
+}
+
+// MessageDndProvider wraps the channel main area + reply side panel in a
+// DndContext that powers the "converge"/"release" drag. It is deliberately a
+// SEPARATE DndContext from the channel list's — dnd-kit does not support
+// nested DndContexts, so the channel-list aside (which has its own) stays
+// outside this provider.
+//
+// Long-press (delay 250ms, tolerance 5px) activates the drag: a quick
+// click-drag still selects message text / triggers the context menu, while a
+// deliberate hold-then-move starts a converge/release. Only main messages and
+// replies authored by the user (or managed by them) are practically movable —
+// the backend re-checks author-or-canManage, so the UI does not pre-filter.
+function MessageDndProvider({
+  wsId,
+  channelId,
+  children,
+}: {
+  wsId: string;
+  channelId: string | null;
+  children: ReactNode;
+}) {
+  const { t } = useT("channels");
+  const qc = useQueryClient();
+  const [activeMessage, setActiveMessage] = useState<ChannelMessage | null>(null);
+
+  // Long-press activation. A pointer held roughly still for 250ms starts the
+  // drag; moving more than 5px before then cancels it so native text selection
+  // keeps working on message content.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+  );
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const msg = (event.active.data.current as { message?: ChannelMessage } | undefined)?.message;
+    setActiveMessage(msg ?? null);
+  }, []);
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const activeId = String(event.active.id);
+      const over = event.over ? String(event.over.id) : null;
+      setActiveMessage(null);
+      if (!channelId || !over) return;
+
+      let msgId: string | null = null;
+      let targetId: string | null | undefined;
+
+      if (
+        activeId.startsWith(MSG_DRAG_PREFIX) &&
+        over.startsWith(MSG_DRAG_PREFIX) &&
+        activeId !== over
+      ) {
+        // Converge: main message → latest reply of the hovered main message.
+        msgId = idFromDragId(activeId, MSG_DRAG_PREFIX);
+        targetId = idFromDragId(over, MSG_DRAG_PREFIX);
+      } else if (
+        activeId.startsWith(REPLY_DRAG_PREFIX) &&
+        (over === MSG_LIST_DROP_ID || over.startsWith(MSG_DRAG_PREFIX))
+      ) {
+        // Release: reply → top-level. Dropping on a specific main message or
+        // the list body both release (the active is a reply, not a main
+        // message, so it cannot converge).
+        msgId = idFromDragId(activeId, REPLY_DRAG_PREFIX);
+        targetId = null;
+      }
+
+      if (!msgId) return;
+      api
+        .moveChannelMessage(channelId, msgId, targetId ?? null)
+        .then(() => {
+          // channelKeys.all covers channelMessages + the open messageThread +
+          // the list (unread/last_activity) — one invalidation refreshes
+          // every view the move touched, mirroring the WS handler.
+          qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
+          toast.success(targetId ? t($ => $.move.converged) : t($ => $.move.released));
+        })
+        .catch((err: unknown) => {
+          // Surface the backend's specific reason (409 populated-thread, 403
+          // permission) instead of a generic label.
+          const reason = err instanceof Error && err.message ? err.message : t($ => $.move.failed);
+          toast.error(reason);
+        });
+    },
+    [channelId, qc, wsId, t],
+  );
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      {children}
+      <DragOverlay dropAnimation={null}>
+        {activeMessage && (
+          <div className="max-w-sm rounded-md border bg-card p-2 text-sm shadow-lg ring-1 ring-border">
+            <div className="mb-1 text-xs text-muted-foreground">
+              {activeMessage.author_name ?? activeMessage.author_type}
+            </div>
+            <div className="line-clamp-3 break-words text-foreground/90">{activeMessage.content}</div>
+          </div>
+        )}
+      </DragOverlay>
+    </DndContext>
   );
 }
 
@@ -450,6 +579,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
       >
         <div className="z-10 flex h-6 w-1 shrink-0 rounded-lg bg-border" />
       </div>
+      <MessageDndProvider wsId={wsId} channelId={channelId ?? null}>
       <main className="min-h-0 min-w-0 flex-1">
         {channelId && activeChannel ? (
           <div className="flex h-full min-w-0 flex-col">
@@ -530,6 +660,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
           </div>
         </>
       )}
+      </MessageDndProvider>
 
       <CreateChannelDialog
         open={showCreateDialog}
@@ -596,6 +727,15 @@ function ChannelList({
       api.moveChannelToGroup(args.channelId, args.groupId, args.position),
     onSuccess: invalidateGroupsAndList,
   });
+  // Reordering a group is a one-level operation: it only moves the group
+  // relative to its siblings, never nesting. position is DOUBLE PRECISION so a
+  // midpoint between neighbours orders the dragged group without touching the
+  // others — the channel list query re-sorts server-side on invalidation.
+  const moveGroupMutation = useMutation({
+    mutationFn: (args: { groupId: string; position: number }) =>
+      api.updateChannelGroupPosition(args.groupId, args.position),
+    onSuccess: invalidateGroupsAndList,
+  });
   // Channel deletion is gated by canManage (channel owner or workspace
   // admin/owner) — the row only renders the trigger for those users, mirroring
   // the backend DeleteChannel gate (canManage = wsAdmin || channelOwn). The
@@ -632,8 +772,12 @@ function ChannelList({
       g.channels.sort((a, b) => a.position - b.position);
     }
     ug.sort((a, b) => a.position - b.position);
+    // Empty groups (including a freshly-created one with no channels yet) MUST
+    // render — hiding them made "create group" look like a no-op. A group is a
+    // user-created container that persists until explicitly deleted; the
+    // .filter(channels.length > 0) added in b7a684da8 traded a cosmetic nit
+    // (orphaned header after moving all channels out) for breaking creation.
     const sortedGroups = [...gMap.entries()]
-      .filter(([, g]) => g.channels.length > 0)
       .sort((a, b) => a[1].position - b[1].position);
     return { groups: sortedGroups, ungrouped: ug, groupMap: gMap };
   }, [channels, channelGroups]);
@@ -695,6 +839,53 @@ function ChannelList({
     [channels, groupMap, ungrouped],
   );
 
+  // Compute the position a dragged group should land at, given what it was
+  // dropped over. Groups are one level only — reordering never nests. A drop
+  // onto another group inserts before it. A drop onto a CHANNEL resolves to
+  // that channel's group (so dragging a tall group over a sibling group's
+  // channels reorders relative to that group, not "append to end"); a drop on
+  // the root or the ungrouped zone appends to the end. position is a midpoint
+  // between the dragged group's new neighbours (DOUBLE PRECISION), so only the
+  // dragged group's row changes — the others keep their positions.
+  const resolveGroupDropTarget = useCallback(
+    (overId: string, draggedGroupId: string): { groupId: string; position: number } | null => {
+      const sorted = groups
+        .map(([id, g]) => ({ id, position: g.position }))
+        .sort((a, b) => a.position - b.position);
+      const siblings = sorted.filter((g) => g.id !== draggedGroupId);
+      let targetGroupId: string | null = null;
+      let append = false;
+      if (isGroupDragId(overId)) {
+        targetGroupId = groupIdFromDragId(overId);
+      } else if (overId === CHANNEL_LIST_ROOT_ID || overId === UNGROUPED_DROP_ID) {
+        append = true;
+      } else {
+        // A channel: resolve to its group (ungrouped channel → append).
+        const ch = channels.find((c) => c.id === overId);
+        targetGroupId = ch?.group_id ?? null;
+        if (!targetGroupId) append = true;
+      }
+      let insertIdx: number;
+      if (append) {
+        insertIdx = siblings.length;
+      } else if (targetGroupId) {
+        const idx = siblings.findIndex((g) => g.id === targetGroupId);
+        insertIdx = idx < 0 ? siblings.length : idx;
+      } else {
+        return null;
+      }
+      const prev = siblings[insertIdx - 1];
+      const next = siblings[insertIdx];
+      let position: number;
+      if (prev && next) position = (prev.position + next.position) / 2;
+      else if (prev) position = prev.position + 1;
+      else if (next) position = next.position / 2;
+      else position = 1;
+      return { groupId: draggedGroupId, position };
+    },
+    [groups],
+  );
+
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setActiveId(String(event.active.id));
     setOverGroupId(undefined);
@@ -707,20 +898,44 @@ function ChannelList({
         setOverGroupId(undefined);
         return;
       }
+      // Group reordering uses its own drop logic; don't paint the channel-drop
+      // highlight (it would misread as a channel append target).
+      if (activeId && isGroupDragId(activeId)) return;
       const target = resolveDropTarget(String(over.id));
       setOverGroupId(target ? target.groupId : undefined);
     },
-    [resolveDropTarget],
+    [resolveDropTarget, activeId],
   );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      const draggedId = String(event.active.id);
+      const wasGroup = isGroupDragId(draggedId);
       setActiveId(null);
       setOverGroupId(undefined);
-      const { active, over } = event;
+      const { over } = event;
       if (!over) return;
 
-      const draggedId = String(active.id);
+      if (wasGroup) {
+        // Group reorder (one level): insert before the resolved target group,
+        // or append when dropped on the root / ungrouped. No-op when the drop
+        // resolves to the dragged group's own slot (dropped on itself or one
+        // of its own channels).
+        const draggedGroupId = groupIdFromDragId(draggedId);
+        const target = resolveGroupDropTarget(String(over.id), draggedGroupId);
+        if (!target) return;
+        // Did the pointer land on the dragged group itself, or on a channel
+        // belonging to it? Either way the group isn't moving — skip.
+        const overStr = String(over.id);
+        const overIsOwnGroup = isGroupDragId(overStr) && groupIdFromDragId(overStr) === draggedGroupId;
+        const overOwnChannel = !isGroupDragId(overStr) && overStr !== CHANNEL_LIST_ROOT_ID &&
+          overStr !== UNGROUPED_DROP_ID &&
+          channels.find((c) => c.id === overStr)?.group_id === draggedGroupId;
+        if (overIsOwnGroup || overOwnChannel) return;
+        moveGroupMutation.mutate(target);
+        return;
+      }
+
       const dragged = channels.find((c) => c.id === draggedId);
       if (!dragged) return;
 
@@ -742,7 +957,7 @@ function ChannelList({
         position: target.position,
       });
     },
-    [channels, resolveDropTarget, moveChannelMutation],
+    [channels, resolveDropTarget, resolveGroupDropTarget, moveChannelMutation, moveGroupMutation],
   );
 
   const handleCreateGroup = () => {
@@ -764,7 +979,12 @@ function ChannelList({
     setEditingGroupId(null);
   };
 
-  const activeDragChannel = activeId ? channels.find((c) => c.id === activeId) : null;
+  const activeDragChannel = activeId && !isGroupDragId(activeId)
+    ? channels.find((c) => c.id === activeId) ?? null
+    : null;
+  const activeDragGroup = activeId && isGroupDragId(activeId)
+    ? channelGroups.find((g) => g.id === groupIdFromDragId(activeId)) ?? null
+    : null;
 
   return (
     <div className="flex h-full min-w-0 flex-col border-r bg-muted/30">
@@ -807,7 +1027,7 @@ function ChannelList({
             onDragEnd={handleDragEnd}
           >
             <SortableContext items={allIds} strategy={verticalListSortingStrategy}>
-              <div className="space-y-0.5 p-1.5">
+              <RootDropZone>
                 {groups.map(([gId, g]) => (
                   <ChannelGroupSection
                     key={gId}
@@ -840,13 +1060,20 @@ function ChannelList({
                   isWorkspaceAdmin={isWorkspaceAdmin}
                   onRequestDeleteChannel={setPendingDelete}
                 />
-              </div>
+              </RootDropZone>
             </SortableContext>
             <DragOverlay>
               {activeDragChannel && (
                 <div className="flex h-8 items-center gap-2 rounded-md bg-accent px-2 text-sm shadow-md ring-1 ring-border">
                   <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="truncate">{activeDragChannel.name}</span>
+                </div>
+              )}
+              {activeDragGroup && (
+                <div className="flex h-7 items-center gap-1 rounded-md bg-accent px-1 text-xs font-medium text-muted-foreground shadow-md ring-1 ring-border">
+                  <GripVertical className="h-3 w-3 shrink-0" />
+                  <ChevronRight className="h-3 w-3 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate uppercase">{activeDragGroup.name}</span>
                 </div>
               )}
             </DragOverlay>
@@ -901,6 +1128,14 @@ function ChannelList({
   );
 }
 
+// Root drop zone for the channel list body. A group dropped here (or on a
+// non-group) appends to the end of the group order; it also ensures a channel
+// drag never resolves to "no droppable" when the pointer lands on padding.
+function RootDropZone({ children }: { children: ReactNode }) {
+  const { setNodeRef } = useDroppable({ id: CHANNEL_LIST_ROOT_ID });
+  return <div ref={setNodeRef} className="space-y-0.5 p-1.5">{children}</div>;
+}
+
 function ChannelGroupSection({
   groupId,
   name,
@@ -942,6 +1177,13 @@ function ChannelGroupSection({
 }) {
   const { t } = useT("channels");
   const { setNodeRef } = useDroppable({ id: `group:${groupId}` });
+  // The group header is the drag handle for reordering groups (one level —
+  // never nesting). distance activation (5px) keeps a plain click as a
+  // collapse toggle and a right-click as the context menu, so a drag must be a
+  // deliberate move. Interactive children opt out by stopping pointerdown.
+  const { attributes, listeners, setNodeRef: setDragRef, isDragging: isGroupDragging } = useDraggable({
+    id: `group:${groupId}`,
+  });
 
   return (
     <div
@@ -949,15 +1191,20 @@ function ChannelGroupSection({
       className={cn(
         "rounded-md transition-colors",
         isDropTarget && "bg-primary/10 ring-1 ring-primary/40",
+        isGroupDragging && "opacity-50",
       )}
     >
       <ContextMenu>
         <ContextMenuTrigger>
           <div
-            className="flex h-7 cursor-pointer items-center gap-1 rounded-md px-1 text-xs font-medium text-muted-foreground hover:bg-accent"
+            ref={setDragRef}
+            {...attributes}
+            {...listeners}
+            className="group/section flex h-7 cursor-grab items-center gap-1 rounded-md px-1 text-xs font-medium text-muted-foreground hover:bg-accent active:cursor-grabbing"
             onClick={onToggle}
           >
-            <ChevronRight className={cn("h-3 w-3 transition-transform", !collapsed && "rotate-90")} />
+            <GripVertical className="h-3 w-3 shrink-0 cursor-grab text-muted-foreground/40 opacity-0 transition-opacity group-hover/section:opacity-100" />
+            <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", !collapsed && "rotate-90")} />
             {editing ? (
               <input
                 autoFocus
@@ -970,6 +1217,7 @@ function ChannelGroupSection({
                   if (e.key === "Escape") onRenameCancel();
                 }}
                 onClick={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
               />
             ) : (
               <span className="min-w-0 flex-1 truncate uppercase">{name}</span>
@@ -1198,6 +1446,21 @@ function MessageList({
   const { t } = useT("channels");
   const editorRef = useRef<ContentEditorRef>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The message list body is the release drop target: dragging a reply here
+  // (onto a message or the padding) releases it to a top-level message. Merged
+  // with scrollRef so the droppable covers the whole scrollable area without a
+  // wrapper DOM node. Highlighted while a reply is being dragged to signal the
+  // affordance — a main message dragged here is a no-op (already top-level).
+  const listDrop = useDroppable({ id: MSG_LIST_DROP_ID });
+  const dndCtx = useDndContext();
+  const releaseActive = !!dndCtx.active && String(dndCtx.active.id).startsWith(REPLY_DRAG_PREFIX);
+  const setListRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      scrollRef.current = node;
+      listDrop.setNodeRef(node);
+    },
+    [listDrop],
+  );
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => editorRef.current?.uploadFiles(files),
@@ -1398,7 +1661,7 @@ function MessageList({
   return (
     <>
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto px-4 py-3">
+        <div ref={setListRef} onScroll={handleScroll} className={cn("absolute inset-0 overflow-y-auto px-4 py-3", releaseActive && "ring-2 ring-inset ring-brand/30")}>
           {loadingMore && (
             <div className="flex justify-center py-2">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -1532,13 +1795,41 @@ function MessageRow({
   const { t } = useT("channels");
   const isSystem = message.author_type === "system" || !message.author_id;
   const authorId = message.author_id ?? "";
+  // Draggable (long-press to converge into another thread) + droppable (a
+  // converge target). System activity rows stay non-interactive for DnD by
+  // skipping the listeners, but keep a stable droppable id so a stray drop
+  // resolves cleanly.
+  const dragId = `${MSG_DRAG_PREFIX}${message.id}`;
+  const drag = useDraggable({ id: dragId, data: { message } });
+  const drop = useDroppable({ id: dragId });
+  const dnd = useDndContext();
+  const activeId = dnd.active ? String(dnd.active.id) : null;
+  const overId = dnd.over ? String(dnd.over.id) : null;
+  const isDragging = activeId === dragId;
+  const isConvergeTarget =
+    !isDragging && overId === dragId && activeId != null && activeId.startsWith(MSG_DRAG_PREFIX);
+  const setRowRef = useCallback(
+    (node: HTMLLIElement | null) => {
+      drag.setNodeRef(node);
+      drop.setNodeRef(node);
+    },
+    [drag, drop],
+  );
+  const dragProps = isSystem ? {} : { ...drag.attributes, ...drag.listeners };
   return (
     <ContextMenu>
       <ContextMenuTrigger className="block select-text">
-        <li id={`channel-msg-${message.id}`} className={cn(
-          "group flex items-start gap-3 rounded-md p-2 hover:bg-muted/50",
-          isSystem && "bg-muted/25",
-        )}>
+        <li
+          ref={setRowRef}
+          id={`channel-msg-${message.id}`}
+          {...dragProps}
+          className={cn(
+            "group flex cursor-grab items-start gap-3 rounded-md p-2 hover:bg-muted/50 active:cursor-grabbing",
+            isSystem && "bg-muted/25 cursor-default",
+            isDragging && "opacity-40",
+            isConvergeTarget && "ring-2 ring-brand/50 bg-brand/5",
+          )}
+        >
           {isSystem ? (
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
               <Settings className="h-4 w-4" />
@@ -1569,6 +1860,7 @@ function MessageRow({
               <button
                 data-panel-trigger="channel-side-panel"
                 onClick={() => onOpenReplies(message.id)}
+                onPointerDown={(e) => e.stopPropagation()}
                 className="mt-1 text-xs text-primary hover:underline"
               >
                 {t($ => $.replies_count, { count: message.reply_count ?? 0 })}
@@ -1936,12 +2228,35 @@ function PanelMessage({
   onConvertAgent?: (msg: ChannelMessage) => void;
 }) {
   const { t } = useT("channels");
+  // A reply (non-framed, authored) is draggable to release it back to the
+  // top-level timeline. The framed root is already top-level and system rows
+  // are activity logs, so neither is draggable. Hooks run unconditionally with
+  // a stable id; `disabled` opts the row out without breaking hook order.
+  const msgId = message?.id ?? "panel-msg-none";
+  const canDragReply = !!message && !framed && message.author_type !== "system" && !!message.author_id;
+  const drag = useDraggable({
+    id: `${REPLY_DRAG_PREFIX}${msgId}`,
+    data: { message },
+    disabled: !canDragReply,
+  });
+  const dnd = useDndContext();
+  const isDragging = dnd.active != null && String(dnd.active.id) === `${REPLY_DRAG_PREFIX}${msgId}`;
   if (!message) return null;
   const isSystem = message.author_type === "system" || !message.author_id;
   const authorId = message.author_id ?? "";
 
   const content = (
-    <div id={`channel-reply-${message.id}`} className={cn("flex items-start gap-2", framed && "rounded-md border bg-muted/30 p-2")}>
+    <div
+      ref={drag.setNodeRef}
+      id={`channel-reply-${message.id}`}
+      {...(canDragReply ? { ...drag.attributes, ...drag.listeners } : {})}
+      className={cn(
+        "flex items-start gap-2",
+        framed && "rounded-md border bg-muted/30 p-2",
+        canDragReply && "cursor-grab active:cursor-grabbing",
+        isDragging && "opacity-40",
+      )}
+    >
       {isSystem ? (
         <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
           <Settings className="h-3.5 w-3.5" />

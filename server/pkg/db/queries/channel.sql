@@ -229,6 +229,20 @@ SELECT count(*)::int AS reply_count
 FROM channel_message
 WHERE reply_to_id = $1;
 
+-- name: ReparentChannelMessage :one
+-- Moves a message between the top-level timeline (thread_id NULL) and a reply
+-- (thread_id set). Converge passes the target thread + reply_to; release passes
+-- both NULL. created_at is re-stamped so the message lands as the latest entry
+-- in its new location (replies and the timeline are ordered by created_at ASC).
+-- Both columns are sqlc.narg so NULL is expressible for the release path.
+UPDATE channel_message
+SET thread_id   = sqlc.narg('thread_id'),
+    reply_to_id = sqlc.narg('reply_to_id'),
+    created_at  = now(),
+    updated_at  = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: HasAgentChannelMessageSince :one
 -- Used by channel-origin task completion fallback. If the agent already wrote
 -- a visible channel message during the task, do not synthesize another one from

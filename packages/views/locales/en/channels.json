@@ -94,5 +94,10 @@
   "resize_aria": {
     "channel_list": "Adjust channel list width",
     "side_panel": "Adjust side panel width"
+  },
+  "move": {
+    "converged": "Moved into thread as the latest reply",
+    "released": "Released to the channel timeline",
+    "failed": "Failed to move message"
   }
 }

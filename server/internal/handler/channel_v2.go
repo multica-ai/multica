@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -1153,6 +1154,151 @@ func (h *Handler) DeleteChannelMessage(w http.ResponseWriter, r *http.Request) {
 		"channel_id": uuidToString(cctx.channel.ID),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "message_id": msgID})
+}
+
+// MoveChannelMessage re-parents a message between the top-level timeline and a
+// thread — the backend for the channel "converge"/"release" drag.
+//
+//   target_message_id set    → converge: a top-level message becomes the latest
+//                              reply of the target message's thread. The moved
+//                              message must not already have a thread (replies
+//                              or a linked issue) — collapsing a populated
+//                              thread would orphan its replies/issues, so it is
+//                              refused with 409. The target's thread is created
+//                              on demand if it does not yet exist.
+//   target_message_id null    → release: a reply becomes a new top-level message.
+//
+// Either path re-stamps created_at so the message lands as the latest entry in
+// its new location (both lists order by created_at ASC). Permission mirrors
+// edit/delete: the author or a channel manager may move a message.
+func (h *Handler) MoveChannelMessage(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	cctx, ok := h.loadChannelContext(w, r, wsUUID, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	msgID := chi.URLParam(r, "msgId")
+	msgUUID, ok := parseUUIDOrBadRequest(w, msgID, "message id")
+	if !ok {
+		return
+	}
+	msg, err := h.Queries.GetChannelMessage(r.Context(), msgUUID)
+	if err != nil || uuidToString(msg.ChannelID) != uuidToString(cctx.channel.ID) {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+
+	userID := requestUserID(r)
+	isAuthor := msg.AuthorID.Valid && uuidToString(msg.AuthorID) == userID
+	if !isAuthor && !cctx.canManage() {
+		writeError(w, http.StatusForbidden, "you can only move your own messages")
+		return
+	}
+
+	var req struct {
+		TargetMessageID *string `json:"target_message_id"`
+	}
+	// An empty body is valid for the release path (target_message_id omitted
+	// → nil → release); only a malformed JSON body is a 400.
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	var newThreadID pgtype.UUID
+	var newReplyToID pgtype.UUID
+
+	if req.TargetMessageID != nil && *req.TargetMessageID != "" {
+		// Converge: top-level message → latest reply of the target's thread.
+		targetUUID, ok := parseUUIDOrBadRequest(w, *req.TargetMessageID, "target message id")
+		if !ok {
+			return
+		}
+		if uuidToString(targetUUID) == uuidToString(msgUUID) {
+			writeError(w, http.StatusBadRequest, "cannot converge a message into itself")
+			return
+		}
+		// The moved message must not already anchor a thread (replies or a
+		// linked issue) — collapsing a populated thread would orphan them.
+		// msg.ThreadID only tells us whether *this* row is a reply; a top-level
+		// message anchors its thread via channel_thread.root_message_id, so the
+		// gate must probe the thread table directly.
+		if _, err := h.Queries.GetThreadByRootMessage(r.Context(), msgUUID); err == nil {
+			writeError(w, http.StatusConflict, "message already has a thread; cannot convert to reply")
+			return
+		}
+		target, err := h.Queries.GetChannelMessage(r.Context(), targetUUID)
+		if err != nil || uuidToString(target.ChannelID) != uuidToString(cctx.channel.ID) {
+			writeError(w, http.StatusNotFound, "target message not found")
+			return
+		}
+		if target.ThreadID.Valid {
+			writeError(w, http.StatusBadRequest, "target must be a top-level message")
+			return
+		}
+		// Find or create the target's thread (lazily created on first reply,
+		// mirroring ReplyToMessage). channel_thread.created_by REFERENCES
+		// "user"(id); agents cannot own it, so stamp NULL for agent movers.
+		thread, terr := h.Queries.GetThreadByRootMessage(r.Context(), targetUUID)
+		if terr != nil {
+			actorType, actorID := h.resolveActor(r, userID, workspaceID)
+			threadCreatedBy := pgtype.UUID{}
+			if actorType != "agent" && actorID != "" {
+				if id, perr := parseUUIDErr(actorID); perr == nil {
+					threadCreatedBy = id
+				}
+			}
+			thread, err = h.Queries.CreateChannelThread(r.Context(), db.CreateChannelThreadParams{
+				ChannelID:     cctx.channel.ID,
+				WorkspaceID:   wsUUID,
+				Title:         truncateUTF8(target.Content, 50),
+				CreatedBy:     threadCreatedBy,
+				RootMessageID: targetUUID,
+			})
+			if err != nil {
+				slog.Error("move: create target thread failed",
+					"channel_id", uuidToString(cctx.channel.ID),
+					"root_message_id", uuidToString(targetUUID), "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to create thread")
+				return
+			}
+		}
+		newThreadID = thread.ID
+		newReplyToID = targetUUID
+		// Bump so the thread sorts fresh and its count reflects the new reply.
+		h.Queries.BumpChannelThread(r.Context(), thread.ID)
+	} else {
+		// Release: reply → top-level. Both stay NULL.
+		if !msg.ThreadID.Valid {
+			writeError(w, http.StatusBadRequest, "message is already top-level")
+			return
+		}
+	}
+
+	moved, err := h.Queries.ReparentChannelMessage(r.Context(), db.ReparentChannelMessageParams{
+		ID:        msgUUID,
+		ThreadID:  newThreadID,
+		ReplyToID: newReplyToID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to move message")
+		return
+	}
+	h.Queries.TouchChannel(r.Context(), cctx.channel.ID)
+
+	resp := channelMessageToV2Response(moved, 0)
+	if name := h.resolveChannelActorName(r.Context(), moved.AuthorType, uuidToString(moved.AuthorID)); name != "" {
+		resp.AuthorName = &name
+	}
+	h.publish(protocol.EventChannelMessageUpdated, workspaceID, "member", userID, map[string]any{
+		"message":    resp,
+		"channel_id": uuidToString(cctx.channel.ID),
+	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ---------- Thread Get / Update ----------
