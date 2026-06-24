@@ -68,6 +68,8 @@ interface RuntimesPageProps {
   bootstrapping?: boolean;
   /** Web SaaS-only Cloud Runtime entrypoint. Defaults off for self-hosted builds. */
   cloudRuntimeEnabled?: boolean;
+  /** When true, shows development-only affordances such as the "add computer" button. */
+  isDevMode?: boolean;
 }
 
 // Re-render every 30s so derived health (recently_lost → offline transitions)
@@ -88,6 +90,7 @@ export function RuntimesPage({
   hasLocalMachine,
   bootstrapping,
   cloudRuntimeEnabled = false,
+  isDevMode = false,
 }: RuntimesPageProps = {}) {
   const isLoading = useAuthStore((s) => s.isLoading);
   const wsId = useWorkspaceId();
@@ -194,11 +197,12 @@ export function RuntimesPage({
         onConnectRemote={() => setShowConnectDialog(true)}
         cloudRuntimeEnabled={cloudRuntimeEnabled}
         onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
+        isDevMode={isDevMode}
       />
 
       {showEmpty ? (
         <div className="flex flex-1 items-center justify-center p-6">
-          <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
+          <EmptyState onConnectRemote={() => setShowConnectDialog(true)} isDevMode={isDevMode} />
         </div>
       ) : isMobile ? (
         <div className="flex min-h-0 flex-1 flex-col border-t bg-background">
@@ -287,11 +291,13 @@ function PageHeaderBar({
   onConnectRemote,
   cloudRuntimeEnabled,
   onOpenCloudRuntime,
+  isDevMode,
 }: {
   totalCount: number;
   onConnectRemote: () => void;
   cloudRuntimeEnabled: boolean;
   onOpenCloudRuntime: () => void;
+  isDevMode: boolean;
 }) {
   const { t } = useT("runtimes");
   return (
@@ -317,10 +323,12 @@ function PageHeaderBar({
             {t(($) => $.cloud_runtime.action)}
           </Button>
         )}
-        <Button type="button" size="sm" onClick={onConnectRemote}>
-          <Plus className="h-3 w-3" />
-          {t(($) => $.page.connect_remote)}
-        </Button>
+        {isDevMode && (
+          <Button type="button" size="sm" onClick={onConnectRemote}>
+            <Plus className="h-3 w-3" />
+            {t(($) => $.page.connect_remote)}
+          </Button>
+        )}
       </div>
     </PageHeader>
   );
@@ -695,7 +703,7 @@ function MachineDetail({
 // workspace.
 // ---------------------------------------------------------------------------
 
-function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
+function EmptyState({ onConnectRemote, isDevMode }: { onConnectRemote: () => void; isDevMode: boolean }) {
   const { t } = useT("runtimes");
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
@@ -706,15 +714,17 @@ function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
       <p className="mt-1 max-w-md text-sm text-muted-foreground">
         {t(($) => $.page.empty.hint)}
       </p>
-      <Button
-        type="button"
-        size="sm"
-        onClick={onConnectRemote}
-        className="mt-5"
-      >
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.connect_remote)}
-      </Button>
+      {isDevMode && (
+        <Button
+          type="button"
+          size="sm"
+          onClick={onConnectRemote}
+          className="mt-5"
+        >
+          <Plus className="h-3 w-3" />
+          {t(($) => $.page.connect_remote)}
+        </Button>
+      )}
     </div>
   );
 }
