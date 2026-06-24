@@ -47,6 +47,7 @@
   "context_menu": {
     "rename": "Rename",
     "delete_group": "Delete group",
+    "delete_channel": "Delete channel",
     "copy_link": "Copy link",
     "reply": "Reply",
     "convert_issue": "Convert to Issue",

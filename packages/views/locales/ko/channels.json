@@ -46,6 +46,7 @@
   "context_menu": {
     "rename": "이름 변경",
     "delete_group": "그룹 삭제",
+    "delete_channel": "채널 삭제",
     "copy_link": "링크 복사",
     "reply": "답글",
     "convert_issue": "이슈로 변환",

@@ -763,6 +763,7 @@ function ChannelList({
   const { data: channelGroups = [] } = useQuery(channelGroupsOptions(wsId));
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [editingChannelId, setEditingChannelId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overGroupId, setOverGroupId] = useState<string | null | undefined>(undefined);
@@ -807,6 +808,11 @@ function ChannelList({
   const renameGroupMutation = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => api.updateChannelGroup(id, name),
     onSuccess: invalidateGroupsAndList,
+  });
+  const renameChannelMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.updateChannel(id, { name }),
+    onSuccess: invalidateGroupsAndList,
+    onError: () => toast.error(t($ => $.update_failed)),
   });
   const deleteGroupMutation = useMutation({
     mutationFn: (id: string) => api.deleteChannelGroup(id),
@@ -1066,11 +1072,30 @@ function ChannelList({
     setShowCreateGroupDialog(false);
   };
 
-  const handleRenameSubmit = (groupId: string) => {
+  const handleGroupRenameSubmit = (groupId: string) => {
     if (editingName.trim()) {
       renameGroupMutation.mutate({ id: groupId, name: editingName.trim() });
     }
     setEditingGroupId(null);
+  };
+
+  const handleChannelRenameSubmit = (channelId: string) => {
+    if (editingName.trim()) {
+      renameChannelMutation.mutate({ id: channelId, name: editingName.trim() });
+    }
+    setEditingChannelId(null);
+  };
+
+  const startGroupRename = (groupId: string, name: string) => {
+    setEditingChannelId(null);
+    setEditingGroupId(groupId);
+    setEditingName(name);
+  };
+
+  const startChannelRename = (channel: ChannelSummary) => {
+    setEditingGroupId(null);
+    setEditingChannelId(channel.id);
+    setEditingName(channel.name);
   };
 
   const activeDragChannel = activeId && !isGroupDragId(activeId)
@@ -1136,14 +1161,20 @@ function ChannelList({
                     editing={editingGroupId === gId}
                     editingName={editingName}
                     onToggle={() => setCollapsed((s) => ({ ...s, [gId]: !s[gId] }))}
-                    onStartRename={() => { setEditingGroupId(gId); setEditingName(g.name); }}
+                    onStartRename={() => startGroupRename(gId, g.name)}
                     onRenameChange={setEditingName}
-                    onRenameSubmit={() => handleRenameSubmit(gId)}
+                    onRenameSubmit={() => handleGroupRenameSubmit(gId)}
                     onRenameCancel={() => setEditingGroupId(null)}
                     onDelete={() => setPendingGroupDelete({ id: gId, name: g.name })}
                     onSelect={onSelect}
                     isWorkspaceAdmin={isWorkspaceAdmin}
                     onRequestDeleteChannel={setPendingDelete}
+                    editingChannelId={editingChannelId}
+                    editingChannelName={editingName}
+                    onStartChannelRename={startChannelRename}
+                    onChannelRenameChange={setEditingName}
+                    onChannelRenameSubmit={handleChannelRenameSubmit}
+                    onChannelRenameCancel={() => setEditingChannelId(null)}
                   />
                 ))}
                 <UngroupedDropZone
@@ -1154,6 +1185,12 @@ function ChannelList({
                   onSelect={onSelect}
                   isWorkspaceAdmin={isWorkspaceAdmin}
                   onRequestDeleteChannel={setPendingDelete}
+                  editingChannelId={editingChannelId}
+                  editingChannelName={editingName}
+                  onStartChannelRename={startChannelRename}
+                  onChannelRenameChange={setEditingName}
+                  onChannelRenameSubmit={handleChannelRenameSubmit}
+                  onChannelRenameCancel={() => setEditingChannelId(null)}
                 />
               </RootDropZone>
             </SortableContext>
@@ -1276,6 +1313,12 @@ function ChannelGroupSection({
   onSelect,
   isWorkspaceAdmin,
   onRequestDeleteChannel,
+  editingChannelId,
+  editingChannelName,
+  onStartChannelRename,
+  onChannelRenameChange,
+  onChannelRenameSubmit,
+  onChannelRenameCancel,
 }: {
   groupId: string;
   name: string;
@@ -1295,6 +1338,12 @@ function ChannelGroupSection({
   onSelect: (id: string) => void;
   isWorkspaceAdmin: boolean;
   onRequestDeleteChannel: (channel: ChannelSummary) => void;
+  editingChannelId: string | null;
+  editingChannelName: string;
+  onStartChannelRename: (channel: ChannelSummary) => void;
+  onChannelRenameChange: (v: string) => void;
+  onChannelRenameSubmit: (channelId: string) => void;
+  onChannelRenameCancel: () => void;
 }) {
   const { t } = useT("channels");
   const { setNodeRef } = useDroppable({ id: `group:${groupId}` });
@@ -1362,6 +1411,12 @@ function ChannelGroupSection({
               onSelect={onSelect}
               isWorkspaceAdmin={isWorkspaceAdmin}
               onRequestDelete={onRequestDeleteChannel}
+              editing={editingChannelId === ch.id}
+              editingName={editingChannelName}
+              onStartRename={() => onStartChannelRename(ch)}
+              onRenameChange={onChannelRenameChange}
+              onRenameSubmit={() => onChannelRenameSubmit(ch.id)}
+              onRenameCancel={onChannelRenameCancel}
             />
           ))}
           {channels.length === 0 && isDragging && isDropTarget && (
@@ -1383,6 +1438,12 @@ function UngroupedDropZone({
   onSelect,
   isWorkspaceAdmin,
   onRequestDeleteChannel,
+  editingChannelId,
+  editingChannelName,
+  onStartChannelRename,
+  onChannelRenameChange,
+  onChannelRenameSubmit,
+  onChannelRenameCancel,
 }: {
   channels: ChannelSummary[];
   isDragging: boolean;
@@ -1391,6 +1452,12 @@ function UngroupedDropZone({
   onSelect: (id: string) => void;
   isWorkspaceAdmin: boolean;
   onRequestDeleteChannel: (channel: ChannelSummary) => void;
+  editingChannelId: string | null;
+  editingChannelName: string;
+  onStartChannelRename: (channel: ChannelSummary) => void;
+  onChannelRenameChange: (v: string) => void;
+  onChannelRenameSubmit: (channelId: string) => void;
+  onChannelRenameCancel: () => void;
 }) {
   const { setNodeRef } = useDroppable({ id: UNGROUPED_DROP_ID });
 
@@ -1410,6 +1477,12 @@ function UngroupedDropZone({
           onSelect={onSelect}
           isWorkspaceAdmin={isWorkspaceAdmin}
           onRequestDelete={onRequestDeleteChannel}
+          editing={editingChannelId === ch.id}
+          editingName={editingChannelName}
+          onStartRename={() => onStartChannelRename(ch)}
+          onRenameChange={onChannelRenameChange}
+          onRenameSubmit={() => onChannelRenameSubmit(ch.id)}
+          onRenameCancel={onChannelRenameCancel}
         />
       ))}
       {channels.length === 0 && isDragging && (
@@ -1430,12 +1503,24 @@ function SortableChannelItem({
   onSelect,
   isWorkspaceAdmin,
   onRequestDelete,
+  editing,
+  editingName,
+  onStartRename,
+  onRenameChange,
+  onRenameSubmit,
+  onRenameCancel,
 }: {
   channel: ChannelSummary;
   isActive: boolean;
   onSelect: (id: string) => void;
   isWorkspaceAdmin: boolean;
   onRequestDelete: (channel: ChannelSummary) => void;
+  editing: boolean;
+  editingName: string;
+  onStartRename: () => void;
+  onRenameChange: (v: string) => void;
+  onRenameSubmit: () => void;
+  onRenameCancel: () => void;
 }) {
   const { t } = useT("channels");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -1443,20 +1528,18 @@ function SortableChannelItem({
     data: { label: channel.name },
   });
   const style = { transform: CSS.Transform.toString(transform), transition };
-  // Mirrors the backend DeleteChannel gate (canManage = wsAdmin || channelOwn):
-  // workspace admin/owner, or this user is the channel's owner member.
-  const canDelete = channel.member_role === "owner" || isWorkspaceAdmin;
+  // Mirrors the backend UpdateChannel/DeleteChannel gate (canManage = wsAdmin ||
+  // channelOwn): workspace admin/owner, or this user is the channel's owner member.
+  const canManage = channel.member_role === "owner" || isWorkspaceAdmin;
 
-  return (
+  const row = (
     <div
-      ref={setNodeRef}
-      style={style}
       {...attributes}
       {...listeners}
       aria-label={t($ => $.drag.aria_channel, { name: channel.name })}
-      className={cn("group/item relative", isDragging && "opacity-50")}
     >
       <button
+        type="button"
         onClick={() => onSelect(channel.id)}
         className={cn(
           "flex h-8 w-full items-center gap-2 rounded-md px-2 pr-8 text-left text-sm hover:bg-accent",
@@ -1469,14 +1552,55 @@ function SortableChannelItem({
         ) : (
           <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className={cn("min-w-0 flex-1 truncate", channel.has_unread && !isActive && "font-medium")}>
-          {channel.name}
-        </span>
-        {channel.has_unread && !isActive && (
+        {editing ? (
+          <input
+            autoFocus
+            className="min-w-0 flex-1 rounded bg-background px-1 text-sm outline-none ring-1 ring-ring"
+            value={editingName}
+            onChange={(e) => onRenameChange(e.target.value)}
+            onBlur={onRenameSubmit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onRenameSubmit();
+              if (e.key === "Escape") onRenameCancel();
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className={cn("min-w-0 flex-1 truncate", channel.has_unread && !isActive && "font-medium")}>
+            {channel.name}
+          </span>
+        )}
+        {!editing && channel.has_unread && !isActive && (
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/60" />
         )}
       </button>
-      {canDelete && (
+    </div>
+  );
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn("group/item relative", isDragging && "opacity-50")}
+    >
+      {canManage ? (
+        <ContextMenu>
+          <ContextMenuTrigger className="block">{row}</ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onClick={onStartRename}>{t($ => $.context_menu.rename)}</ContextMenuItem>
+            <ContextMenuItem
+              className="text-destructive"
+              onClick={() => onRequestDelete(channel)}
+            >
+              {t($ => $.context_menu.delete_channel)}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      ) : (
+        row
+      )}
+      {canManage && !editing && (
         <button
           type="button"
           aria-label={t($ => $.delete_channel.aria_label, { name: channel.name })}
@@ -1566,7 +1690,9 @@ function MessageList({
   firstUnreadMessageId?: string | null;
   hasUnread?: boolean;
   onMarkRead?: () => void;
-  onJumpToMessage?: (messageId: string) => void;
+  // Re-anchor the messages query: a message id loads a window around it; null
+  // resets to the latest page (used after send and by "jump to last read").
+  onJumpToMessage?: (messageId: string | null) => void;
 }) {
   const { t } = useT("channels");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -1595,6 +1721,10 @@ function MessageList({
   // Set to true when the current user sends a message so the live-follow
   // effect can scroll to bottom unconditionally (regardless of isNearBottom).
   const pendingSelfScrollRef = useRef(false);
+  // Deep-link (?message=) is for initial entry positioning only. Once the user
+  // sends a message they are on the live timeline — re-enable bottom follow even
+  // if the URL still carries the deep-link param.
+  const liveAtLatestRef = useRef(false);
   const paths = useWorkspacePaths();
   const nav = useNavigation();
   const linkedMessageId = nav.searchParams.get("message")?.trim() || null;
@@ -1637,7 +1767,14 @@ function MessageList({
   // Reset the live-follow baseline on channel switch so the first page of the
   // new channel isn't mistaken for a newly-arrived message (which would yank to
   // the bottom and override the unread-boundary landing).
-  useEffect(() => { prevMsgCount.current = 0; }, [channelId]);
+  useEffect(() => {
+    prevMsgCount.current = 0;
+    liveAtLatestRef.current = false;
+  }, [channelId]);
+
+  useEffect(() => {
+    liveAtLatestRef.current = false;
+  }, [linkedMessageId]);
 
   // Live follow: a new message arriving while the user is already pinned to the
   // bottom keeps them there. Don't yank if they've scrolled up to read history
@@ -1647,7 +1784,7 @@ function MessageList({
   useEffect(() => {
     const prev = prevMsgCount.current;
     prevMsgCount.current = messages.length;
-    if (linkedMessageId) return;
+    const followLatest = !linkedMessageId || liveAtLatestRef.current;
     if (messages.length > prev && prev > 0) {
       const selfSent = pendingSelfScrollRef.current;
       if (selfSent) {
@@ -1660,7 +1797,7 @@ function MessageList({
             pendingSelfScrollRef.current = false;
           }),
         );
-      } else if (isNearBottom()) {
+      } else if (followLatest && isNearBottom()) {
         requestAnimationFrame(() => scrollListToBottom(scrollRef.current));
         pendingSelfScrollRef.current = false;
       } else {
@@ -1795,7 +1932,13 @@ function MessageList({
     // refetch can complete, delivering the new message) before the HTTP response
     // triggers onSuccess. Setting the flag in onMutate ensures it's ready
     // regardless of which path delivers the message to the list.
-    onMutate: () => { pendingSelfScrollRef.current = true; },
+    onMutate: () => {
+      pendingSelfScrollRef.current = true;
+      liveAtLatestRef.current = true;
+      // Deep-link / jump-to-read windows omit the latest page — re-anchor so
+      // the sent message is actually loaded before the live-follow effect runs.
+      onJumpToMessage?.(null);
+    },
     onSuccess: () => {
       editorRef.current?.clearContent();
       setIsEmpty(true);

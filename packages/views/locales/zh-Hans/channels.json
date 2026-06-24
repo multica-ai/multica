@@ -46,6 +46,7 @@
   "context_menu": {
     "rename": "重命名",
     "delete_group": "删除分组",
+    "delete_channel": "删除频道",
     "copy_link": "复制链接",
     "reply": "回复",
     "convert_issue": "转换为 Issue",

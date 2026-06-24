@@ -46,6 +46,7 @@
   "context_menu": {
     "rename": "名前を変更",
     "delete_group": "グループを削除",
+    "delete_channel": "チャンネルを削除",
     "copy_link": "リンクをコピー",
     "reply": "返信",
     "convert_issue": "Issueに変換",
