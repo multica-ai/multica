@@ -125,9 +125,16 @@
 
 **连线规则**：
 - **同 stage 内相邻节点**（sort_order 相邻）：从源节点右边缘中心 → 目标节点左边缘中心，水平线
-- **同 stage 内分支/合并**（非相邻但有 edge）：贝塞尔曲线弧线，从源节点上方/下方绕出再绕入
-- **跨 stage edge**：从源节点底部中心 → 目标节点顶部中心，竖向路径，自动绕过中间内容
+- **同 stage 内分支/合并**（非相邻但有 edge）：二次贝塞尔曲线弧线，从源节点上方/下方绕出再绕入
+- **跨 stage edge**：从源节点底部中心 → 目标节点顶部中心，使用二次贝塞尔曲线 (`Q` 命令) 连接，曲线控制点位于两节点垂直中点偏右 20px，形成自然弧度。曲线自动穿过 stage 过渡带
 - **Worker → Critic 连接**：从 worker 卡片底部 → critic 卡片顶部，短竖线（替代当前虚线 div）
+
+**连线视觉参数**：
+- 线宽 `strokeWidth={1.5}`
+- 颜色 `stroke="currentColor"`，透明度 `opacity="0.35"`，继承所属 stage 色系
+- 箭头使用 `<marker>` 定义，`refX={6} refY={4}`，大小 8×8
+- critic 分支线使用虚线 `strokeDasharray="4 3"`
+- 所有折线转角改为贝塞尔曲线，避免生硬的直角转折
 
 **位置测量**：
 - 复用当前 `StageSwimlane` 中已有的 `useLayoutEffect` + `ResizeObserver` 模式
@@ -158,16 +165,53 @@
 | 属性 | 当前值 | 目标值 |
 |------|--------|--------|
 | 画布 padding | `p-6` (24px) | `p-3` (12px) |
-| stage 间距 | `gap-2` + DataFlowArrow 占用 ~48px | `gap-1` (4px) — 连线直接穿过 |
+| stage 间隔 | `gap-2` + DataFlowArrow 占用 ~48px | 6px 渐变过渡带（无 gap） |
 | 节点卡片最小宽 | 176px | 120px |
 | 节点卡片最小高 | 112px | 72px |
-| 节点横向间距 | `gap-3` (12px) | `gap-2` (8px) |
+| 节点横向间距 | `gap-3` (12px) | `gap-2.5` (10px) |
 | stage 头部高度 | ~60-80px（名称+描述+统计） | ~24px（单行） |
-| stage 内边距 | `px-4 py-4` | `px-3 py-2` |
+| stage 内边距 | `px-4 py-4` | `px-3 py-2.5` |
 | critic 卡片最小高 | 96px | 64px |
 | 容器最大宽 | `max-w-[1440px]` | 无限制（自适应） |
 
-### 9. 色系方案
+### 9. 视觉精炼
+
+**9.1 Stage 过渡带**：相邻 Stage Lane 之间不使用 `gap` 间距，改为 6px 高的渐变过渡条。渐变从上一 stage 的半透明背景色淡出到下一 stage 的半透明背景色：
+
+```css
+background: linear-gradient(
+  to bottom,
+  var(--prev-stage-bg) 0%,
+  var(--next-stage-bg) 100%
+);
+```
+
+过渡带高度 6px，无内边距。连线会自然穿过这个区域。
+
+**9.2 节点选中态**：不采用外发光 `ring` 方案，改用内阴影 + 极淡外阴影：
+
+```css
+/* 选中态 */
+border-primary/55 
+bg-background 
+shadow-[inset_0_0_0_1px_rgba(59,130,246,0.08),0_2px_12px_rgba(15,23,42,0.06)]
+```
+
+效果是卡片看起来"嵌入"画布而非"浮起发光"。
+
+**9.3 空状态**：Stage lane 内无节点时，显示紧凑引导行（高度 ~32px）：
+- 图标（小号） + "No plugins in this stage"
+- 如果 workflow 全局无任何节点，改为引导文案 "Add nodes in the editor"
+
+**9.4 间距节奏锁**：
+| 层级 | 间距值 |
+|------|--------|
+| 画布边缘 | 12px |
+| 节点卡片之间 | 10px |
+| Stage 过渡带 | 6px |
+| Stage 内边距（水平/垂直） | 12px / 10px |
+
+### 10. 色系方案
 
 保持当前 `STAGE_STYLES` 的 6 色循环方案，但简化为半透明变体：
 
@@ -184,7 +228,7 @@ const STAGE_COLORS = [
 
 头部标签色保持原色系用于文字和节点内连线颜色。
 
-### 10. 边界情况
+### 11. 边界情况
 
 - **空 stages**：StageLane 渲染紧凑空状态提示（高度 ~40px）
 - **0 个 stage**：画布显示居中空状态文案
