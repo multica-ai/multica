@@ -143,7 +143,6 @@ import type {
   WebhookDelivery,
   NotificationPreferenceResponse,
   NotificationPreferences,
-  AgentDefaults,
   AgentDefaultsWithUser,
   AgentConfigTemplate,
   CreateAgentConfigTemplateRequest,
@@ -3220,28 +3219,6 @@ export class ApiClient {
     await this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, { method: "DELETE" });
   }
 
-  // Personal Agent Defaults
-  async getPersonalAgentDefaults(workspaceId: string): Promise<AgentDefaults> {
-    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/me`);
-  }
-
-  async updatePersonalAgentDefaults(workspaceId: string, config: Record<string, unknown>): Promise<AgentDefaults> {
-    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/me`, {
-      method: "PUT",
-      body: JSON.stringify({ config }),
-    });
-  }
-
-  async listAllAgentDefaults(workspaceId: string): Promise<AgentDefaultsWithUser[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults`);
-  }
-
-  async duplicateAgentDefaults(workspaceId: string, configId: string): Promise<AgentDefaults> {
-    return this.fetch(`/api/workspaces/${workspaceId}/agent-defaults/duplicate/${configId}`, {
-      method: "POST",
-    });
-  }
-
   // --- Agent Config Templates ---
   // These endpoints resolve the workspace from the X-Workspace-ID header, so
   // no workspaceId is needed in the URL (unlike /api/workspaces/{id}/...).
@@ -3286,9 +3263,7 @@ export class ApiClient {
     });
   }
 
-  // Cross-user roster of every member's default personal template. Replaces the
-  // legacy listAllAgentDefaults (which read member_agent_config) now that the
-  // default personal config IS the default personal template.
+  // Cross-user roster of every member's default personal template.
   async listAllAgentDefaultTemplates(): Promise<AgentDefaultsWithUser[]> {
     return this.fetch(`/api/agent-config-templates/defaults`);
   }
