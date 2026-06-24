@@ -229,6 +229,10 @@ export type CerebroFlagKey =
   // an inbox ask or a deny — even when CEREBRO_APPROVAL_GATE_ENABLED is true on
   // the server. Defaults ON so existing workspaces keep their current behaviour.
   | "cerebro_approval_gate"
+  // FIR-1914: append each agent's concrete firtal_registry data-source access
+  // summary to the system prompt so the model knows the tool IS its data access
+  // instead of guessing it lacks a database. Defaults ON.
+  | "cerebro_registry_access_hint"
   // TECH-3176: per-type on/off for agent wakeup scheduling. Each trigger type
   // is independently gated at create-time and at fire/dispatch-time so an admin
   // can disable a wakeup kind without touching the others.
@@ -555,6 +559,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // disable enforcement for their workspace without a server restart. Off = all
   // tool calls are allowed through for this workspace regardless of policy rows.
   cerebro_approval_gate: true,
+  // FIR-1914: firtal_registry per-agent access summary in the system prompt.
+  cerebro_registry_access_hint: true,
   // TECH-3176: agent wakeup trigger types. All default ON — wakeup scheduling
   // ships enabled; an admin turns a type off to stop new creates and any
   // pending fires of that type for the workspace.
@@ -1356,6 +1362,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "When on, the server enforces the per-tool Allow / Ask / Block policy for every agent tool call — tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off lets all tool calls through for this workspace without an inbox ask, even when the server gate is active. Requires the server's CEREBRO_APPROVAL_GATE_ENABLED flag to have any effect. FIR-2563.",
+  },
+  // FIR-1914: firtal_registry per-agent access summary in the system prompt.
+  {
+    key: "cerebro_registry_access_hint",
+    label: "Registry access summary in prompt",
+    group: "permissions",
+    description:
+      "When on, each agent with the firtal_registry tool gets a line in its system prompt stating how many Data Registry data sources it is permitted to query (derived from its own allowlist), so the model knows the tool IS its data access instead of guessing it has no database. Off keeps the plain tool list. Defaults on. FIR-1914.",
   },
   // TECH-3176: agent wakeup scheduling — one toggle per trigger type.
   {

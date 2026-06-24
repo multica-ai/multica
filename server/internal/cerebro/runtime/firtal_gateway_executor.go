@@ -1222,7 +1222,7 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 	tools []Tool,
 	pruneOn bool,
 ) (GatewayCompletion, error) {
-	history := withRegistryToolUsageHint(initialMessages, tools)
+	history := withRegistryToolUsageHint(ctx, initialMessages, tools)
 	toolDefs := toolsToGatewayToolDefs(tools)
 
 	var acc GatewayCompletion
@@ -1628,7 +1628,7 @@ func withToolUsageHint(messages []GatewayMessage) []GatewayMessage {
 	return out
 }
 
-func withRegistryToolUsageHint(messages []GatewayMessage, tools []Tool) []GatewayMessage {
+func withRegistryToolUsageHint(ctx context.Context, messages []GatewayMessage, tools []Tool) []GatewayMessage {
 	if len(messages) == 0 || messages[0].Role != "system" || len(tools) == 0 {
 		return messages
 	}
@@ -1638,6 +1638,15 @@ func withRegistryToolUsageHint(messages []GatewayMessage, tools []Tool) []Gatewa
 	}
 	hint := "\n\nYou have the following tools available: " + strings.Join(names, ", ") + "." +
 		" Use them to accomplish the task. Post your final answer as a comment when asked."
+	// FIR-1914: the bare name list let agents overlook that firtal_registry IS
+	// their data access. Append this agent's concrete, permission-derived
+	// registry access summary so the model does not guess it lacks a database.
+	for _, tool := range tools {
+		if reg, ok := tool.(*FirtalRegistryTool); ok {
+			hint += reg.AccessSummaryForPrompt(ctx)
+			break
+		}
+	}
 	out := append([]GatewayMessage(nil), messages...)
 	out[0].Content = strings.TrimRight(out[0].Content, "\n") + hint
 	return out

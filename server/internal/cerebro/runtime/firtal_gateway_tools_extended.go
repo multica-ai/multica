@@ -425,6 +425,75 @@ func (t *FirtalRegistryTool) Name() string { return "firtal_registry" }
 func (t *FirtalRegistryTool) Description() string {
 	return "Query the Firtal Data Registry. Use action=list_data_sources to discover available data sources, action=get_schema with data_source_id to fetch a single source's schema and parameters, action=execute with data_source_id plus optional parameters, filter_group, pagination, and aggregation to run a query, and action=list_apps to look up registered apps and their owners (optionally filtered by github_repo, e.g. firtal-group/firtal-cerebro) — returns each app's owner_email, owner_member_id and deploy_model for deploy reviews, and action=update_app to upsert an app's deploy/metadata record (pass a fields object with at least name; matched by platform + platform_external_id)."
 }
+
+// flagRegistryAccessHint gates the per-agent firtal_registry access line
+// (FIR-1914). Defaults ON; an explicit per-workspace override = false disables
+// it without a redeploy (cerebro feature-flag rule).
+const flagRegistryAccessHint = "cerebro_registry_access_hint"
+
+// AccessSummaryForPrompt returns a per-agent line, derived from THIS agent's
+// firtal_registry grant config, that the prompt builder appends so the model
+// knows the tool IS its data access instead of guessing it lacks a database
+// (FIR-1914). It reads the same per-agent allowlist that enforces access at
+// call time, so the surfaced summary can never disagree with what the agent is
+// actually permitted to query, and it updates automatically when the grant
+// changes. Cost is a single agent_tool_grant read; no registry API call. It
+// fails safe to "" — a disabled flag or a config-load error must never break
+// prompt assembly.
+func (t *FirtalRegistryTool) AccessSummaryForPrompt(ctx context.Context) string {
+	if !t.accessHintEnabled(ctx) {
+		return ""
+	}
+	cfg, err := t.loadGrantConfig(ctx)
+	if err != nil {
+		return ""
+	}
+	return registryAccessSummary(cfg)
+}
+
+// accessHintEnabled reads the cerebro_registry_access_hint workspace flag.
+// Defaults ON (mirrors workspaceApprovalGateEnabled): a missing override row or
+// a DB error keeps the hint on, so the fix is live everywhere unless an admin
+// explicitly turns it off for a workspace.
+func (t *FirtalRegistryTool) accessHintEnabled(ctx context.Context) bool {
+	if t.cerebro == nil {
+		return true
+	}
+	enabled, err := t.cerebro.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+		WorkspaceID: t.tctx.WorkspaceID,
+		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
+		FlagKey:     flagRegistryAccessHint,
+	})
+	if err != nil {
+		return true // no override or DB error → default ON
+	}
+	return enabled
+}
+
+// registryAccessSummary renders the dynamic access line from a grant config.
+// Pure function (no ctx/DB) so it is unit-testable. Deny-by-default: an agent
+// with neither allowed_data_sources_all nor any allowed_data_sources gets ""
+// (we never claim access the allowlist does not grant). The line deliberately
+// counts sources rather than naming them: the names live in the registry
+// service (the allowlist stores ids only), so listing them would cost a
+// registry API call on every prompt build — the count plus the explicit nudge
+// to call list_data_sources fixes the misunderstanding without that cost.
+func registryAccessSummary(cfg firtalRegistryGrantConfig) string {
+	const base = " This tool IS your access to Firtal business data (orders, products, P/L, payments, and more) — never answer that you lack a database or data access without first calling firtal_registry with action=list_data_sources."
+	switch {
+	case cfg.AllowedAll:
+		return "\n\nYour firtal_registry access: you are permitted to query ALL data sources in the Firtal Data Registry." + base
+	case len(cfg.AllowedDataSources) > 0:
+		noun := "data source"
+		if len(cfg.AllowedDataSources) != 1 {
+			noun += "s"
+		}
+		return fmt.Sprintf("\n\nYour firtal_registry access: you are permitted to query %d %s in the Firtal Data Registry. Call action=list_data_sources to see exactly which ones (the result is already filtered to your permissions), then get_schema/execute to query them.%s",
+			len(cfg.AllowedDataSources), noun, base)
+	default:
+		return ""
+	}
+}
 func (t *FirtalRegistryTool) InputSchema() map[string]any {
 	return map[string]any{
 		"type":     "object",
