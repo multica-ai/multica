@@ -287,18 +287,9 @@ func TestLarkOutcomeReplierOfflineSwallowsAPIError(t *testing.T) {
 	rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc"}, DispatchResult{Outcome: OutcomeAgentOffline})
 }
 
-// TestNoopReplierIsHandledByHub verifies that NewHub installs a noop
-// replier by default — so the inbound pipeline runs even when the
-// caller never calls SetOutcomeReplier (e.g. in deployments that
-// only run the inbound dispatcher pre-outbound-wiring). This guards
-// the "no nil replier crash" contract on hub.handleEvent.
-func TestNoopReplierIsHandledByHub(t *testing.T) {
-	t.Parallel()
-	hub := NewHub(nil, nil, nil, HubConfig{})
-	if hub.replier == nil {
-		t.Fatal("Hub.replier must default to noop, not nil")
-	}
-}
+// The "NewHub installs a noop replier by default" contract now lives on
+// FeishuRuntime — see TestFeishuRuntimeDefaultsToNoopReplier in
+// feishu_runtime_test.go.
 
 // TestLarkOutcomeReplierIssueCreatedSendsConfirmation pins the
 // recovered /issue confirmation path. Before the plain-text refactor

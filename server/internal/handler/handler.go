@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -149,18 +150,23 @@ type Handler struct {
 	// UI consults IsConfigured() to decide whether to surface install
 	// entry points.
 	LarkAPIClient lark.APIClient
-	// LarkHub owns the per-installation supervisor goroutines that
-	// hold the §4.4 WS lease and run the EventConnector. Nil only
-	// when the master at-rest key (MULTICA_LARK_SECRET_KEY) is unset.
-	// The router constructs the Hub but does NOT call Run on it; the
-	// process owner (main.go) starts it under a long-running context
-	// and joins via WaitWithTimeout (bounded wait, fenced by
-	// ShutdownTimeout) during graceful shutdown so the lease renewer
-	// can yield cleanly when the DB is healthy without blocking
-	// process exit indefinitely if the pool is frozen — at worst the
-	// next replica waits the full TTL.
-	LarkHub *lark.Hub
-	cfg     Config
+	// ChannelSupervisor owns the per-installation supervisor goroutines
+	// that hold the §4.4 WS lease and drive each channel.Channel
+	// (MUL-3620 generalized the Feishu-only Hub into this channel-agnostic
+	// engine). Nil only when the master at-rest key
+	// (MULTICA_LARK_SECRET_KEY) is unset. The router constructs it but
+	// does NOT call Run; the process owner (main.go) starts it under a
+	// long-running context and joins via WaitWithTimeout (bounded, fenced
+	// by ShutdownTimeout) during graceful shutdown so the lease renewer
+	// yields cleanly when the DB is healthy without blocking process exit
+	// if the pool is frozen — at worst the next replica waits the full TTL.
+	ChannelSupervisor *engine.Supervisor
+	// LarkRuntime is the Feishu inbound runtime (Dispatcher + detached
+	// outbound replier). main.go calls Drain on it during shutdown, after
+	// the Supervisor has stopped delivering events, to flush debounced run
+	// triggers and join in-flight reply goroutines. Nil when Lark is off.
+	LarkRuntime *lark.FeishuRuntime
+	cfg         Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
