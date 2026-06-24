@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -94,6 +93,7 @@ type profileRegisterFixture struct {
 	daemon       *Daemon
 	server       *httptest.Server
 	sentRuntimes []map[string]any
+	sentFailures []map[string]any
 }
 
 func newProfileRegisterFixture(t *testing.T, profiles []RuntimeProfile, profilesStatus int) *profileRegisterFixture {
@@ -103,10 +103,12 @@ func newProfileRegisterFixture(t *testing.T, profiles []RuntimeProfile, profiles
 		switch {
 		case r.URL.Path == "/api/daemon/register":
 			var body struct {
-				Runtimes []map[string]any `json:"runtimes"`
+				Runtimes       []map[string]any `json:"runtimes"`
+				FailedProfiles []map[string]any `json:"failed_profiles"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			fx.sentRuntimes = body.Runtimes
+			fx.sentFailures = body.FailedProfiles
 			// Echo back a Runtime row per requested runtime, threading
 			// profile_id so the caller can populate runtimeIndex from it.
 			var resp RegisterResponse
@@ -140,7 +142,7 @@ func newProfileRegisterFixture(t *testing.T, profiles []RuntimeProfile, profiles
 	}))
 	t.Cleanup(srv.Close)
 	d := freshDaemon(srv.URL)
-	d.profileCommandPaths = make(map[string]string)
+	d.profileLaunchSpecs = make(map[string]profileLaunchSpec)
 	fx.daemon = d
 	fx.server = srv
 	return fx
@@ -161,6 +163,7 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 		DisplayName:    "Company Codex",
 		ProtocolFamily: "codex",
 		CommandName:    "company-codex",
+		FixedArgs:      []string{"--model", "composer-2.5"},
 		Visibility:     "workspace",
 		Enabled:        true,
 	}}
@@ -190,8 +193,12 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	}
 
 	// The resolved command path must be recorded keyed by profile_id.
-	if got := d.profileCommandPaths["prof-1"]; got != "/opt/bin/company-codex" {
-		t.Errorf("profileCommandPaths[prof-1] = %q, want /opt/bin/company-codex", got)
+	got := d.profileLaunchSpecs["prof-1"]
+	if got.path != "/opt/bin/company-codex" {
+		t.Errorf("profileLaunchSpecs[prof-1].path = %q, want /opt/bin/company-codex", got.path)
+	}
+	if strings.Join(got.fixedArgs, " ") != "--model composer-2.5" {
+		t.Errorf("profileLaunchSpecs[prof-1].fixedArgs = %v, want [--model composer-2.5]", got.fixedArgs)
 	}
 
 	// The response runtime carries the profile_id back.
@@ -200,11 +207,9 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	}
 }
 
-// TestRegisterRuntimes_SkipsProfileNotOnPath verifies a profile whose command
-// is missing on this host is skipped, and that a host with no built-in agents
-// and no resolvable profiles fails registration with the documented sentinel
-// (the drift-refresh path keys off ErrNoRuntimesToRegister to take the
-// convergence-to-zero branch instead of treating it as a hard error).
+// TestRegisterRuntimes_ReportsProfileNotOnPath verifies a profile whose command
+// is missing on this host is reported to the server as a failed profile so the
+// UI can show an actionable registration error.
 func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{}) // nothing resolves
@@ -222,14 +227,68 @@ func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{}
 
 	_, sig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
-	if !errors.Is(err, ErrNoRuntimesToRegister) {
-		t.Fatalf("expected ErrNoRuntimesToRegister, got %v", err)
+	if err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 	if sig == "" {
 		t.Errorf("profileSig must still be returned even when registration short-circuits, so the drift path can cache the converged-empty signature")
 	}
-	if _, ok := d.profileCommandPaths["prof-1"]; ok {
-		t.Errorf("profileCommandPaths should not record an unresolved profile")
+	if _, ok := d.profileLaunchSpecs["prof-1"]; ok {
+		t.Errorf("profileLaunchSpecs should not record an unresolved profile")
+	}
+	if len(fx.sentRuntimes) != 0 {
+		t.Fatalf("sent runtimes = %+v, want none", fx.sentRuntimes)
+	}
+	if len(fx.sentFailures) != 1 || fx.sentFailures[0]["profile_id"] != "prof-1" {
+		t.Fatalf("sent failures = %+v, want prof-1", fx.sentFailures)
+	}
+}
+
+// TestRegisterRuntimes_SkipsUnsupportedProfileFamily verifies historical
+// profiles whose protocol_family is no longer supported are not registered as
+// online runtimes even when their command still resolves locally.
+func TestRegisterRuntimes_SkipsUnsupportedProfileFamily(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{"gemini": "/usr/bin/gemini"})
+
+	profiles := []RuntimeProfile{{
+		ID:             "prof-gemini",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "Old Gemini",
+		ProtocolFamily: "gemini",
+		CommandName:    "gemini",
+		Enabled:        true,
+	}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{}
+
+	_, sig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if sig == "" {
+		t.Errorf("profileSig must still be returned for unsupported historical profiles")
+	}
+	if _, ok := d.profileLaunchSpecs["prof-gemini"]; ok {
+		t.Errorf("profileLaunchSpecs should not record an unsupported profile")
+	}
+	if len(fx.sentRuntimes) != 0 {
+		t.Fatalf("sent runtimes = %+v, want none", fx.sentRuntimes)
+	}
+	if len(fx.sentFailures) != 1 {
+		t.Fatalf("sent failures = %+v, want one unsupported profile failure", fx.sentFailures)
+	}
+	failure := fx.sentFailures[0]
+	if failure["profile_id"] != "prof-gemini" {
+		t.Errorf("failure profile_id = %v, want prof-gemini", failure["profile_id"])
+	}
+	if failure["command_name"] != "gemini" {
+		t.Errorf("failure command_name = %v, want gemini", failure["command_name"])
+	}
+	reason, _ := failure["reason"].(string)
+	if !strings.Contains(reason, "unsupported protocol_family: gemini") {
+		t.Errorf("failure reason = %q, want unsupported protocol_family: gemini", reason)
 	}
 }
 
@@ -283,8 +342,8 @@ func TestRegisterRuntimes_PrefersCommandPathOverride(t *testing.T) {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 
-	if got := d.profileCommandPaths["prof-1"]; got != "/opt/custom/company-codex" {
-		t.Errorf("profileCommandPaths[prof-1] = %q, want the override /opt/custom/company-codex", got)
+	if got := d.profileLaunchSpecs["prof-1"].path; got != "/opt/custom/company-codex" {
+		t.Errorf("profileLaunchSpecs[prof-1].path = %q, want the override /opt/custom/company-codex", got)
 	}
 	if len(fx.sentRuntimes) != 1 || fx.sentRuntimes[0]["profile_id"] != "prof-1" {
 		t.Fatalf("expected the profile runtime to register, got %+v", fx.sentRuntimes)
@@ -317,8 +376,8 @@ func TestRegisterRuntimes_OverrideNotExecutableFallsBackToPath(t *testing.T) {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 
-	if got := d.profileCommandPaths["prof-1"]; got != "/usr/bin/company-codex" {
-		t.Errorf("profileCommandPaths[prof-1] = %q, want the PATH fallback /usr/bin/company-codex", got)
+	if got := d.profileLaunchSpecs["prof-1"].path; got != "/usr/bin/company-codex" {
+		t.Errorf("profileLaunchSpecs[prof-1].path = %q, want the PATH fallback /usr/bin/company-codex", got)
 	}
 }
 
@@ -331,29 +390,32 @@ func stubProfilePathExecutable(t *testing.T, executable map[string]bool) {
 	profilePathExecutable = func(path string) bool { return executable[path] }
 	t.Cleanup(func() { profilePathExecutable = orig })
 }
+
 // bookkeeping that runTask relies on to override the launch path.
 func TestCustomCommandPathForRuntime(t *testing.T) {
 	d := freshDaemon("")
-	d.profileCommandPaths = map[string]string{"prof-1": "/opt/bin/company-codex"}
+	d.profileLaunchSpecs = map[string]profileLaunchSpec{
+		"prof-1": {path: "/opt/bin/company-codex", fixedArgs: []string{"--model", "composer-2.5"}},
+	}
 	// rt-custom is a custom-profile runtime; rt-builtin is a normal one.
 	d.runtimeIndex["rt-custom"] = Runtime{ID: "rt-custom", Provider: "codex", ProfileID: "prof-1"}
 	d.runtimeIndex["rt-builtin"] = Runtime{ID: "rt-builtin", Provider: "claude"}
 
-	if path, ok := d.customCommandPathForRuntime("rt-custom"); !ok || path != "/opt/bin/company-codex" {
-		t.Errorf("custom runtime: got (%q, %v), want (/opt/bin/company-codex, true)", path, ok)
+	if spec, ok := d.customProfileLaunchForRuntime("rt-custom"); !ok || spec.path != "/opt/bin/company-codex" || strings.Join(spec.fixedArgs, " ") != "--model composer-2.5" {
+		t.Errorf("custom runtime: got (%+v, %v), want profile launch spec", spec, ok)
 	}
-	if path, ok := d.customCommandPathForRuntime("rt-builtin"); ok || path != "" {
-		t.Errorf("built-in runtime: got (%q, %v), want (\"\", false)", path, ok)
+	if spec, ok := d.customProfileLaunchForRuntime("rt-builtin"); ok || spec.path != "" {
+		t.Errorf("built-in runtime: got (%+v, %v), want empty false", spec, ok)
 	}
-	if path, ok := d.customCommandPathForRuntime("rt-unknown"); ok || path != "" {
-		t.Errorf("unknown runtime: got (%q, %v), want (\"\", false)", path, ok)
+	if spec, ok := d.customProfileLaunchForRuntime("rt-unknown"); ok || spec.path != "" {
+		t.Errorf("unknown runtime: got (%+v, %v), want empty false", spec, ok)
 	}
 	// A custom runtime whose profile path was never resolved on this host
-	// (profile_id not in profileCommandPaths) must report not-custom so
+	// (profile_id not in profileLaunchSpecs) must report not-custom so
 	// runTask falls back to its normal provider lookup rather than launching
 	// an empty path.
 	d.runtimeIndex["rt-unresolved"] = Runtime{ID: "rt-unresolved", Provider: "codex", ProfileID: "prof-missing"}
-	if path, ok := d.customCommandPathForRuntime("rt-unresolved"); ok || path != "" {
-		t.Errorf("unresolved profile: got (%q, %v), want (\"\", false)", path, ok)
+	if spec, ok := d.customProfileLaunchForRuntime("rt-unresolved"); ok || spec.path != "" {
+		t.Errorf("unresolved profile: got (%+v, %v), want empty false", spec, ok)
 	}
 }

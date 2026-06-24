@@ -7,6 +7,7 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import { docsHrefForLocale, useLocale } from "../i18n";
+import { formatStarCount, useGithubStars } from "../utils/use-github-stars";
 import { GitHubMark, githubUrl, headerButtonClassName } from "./shared";
 
 export function LandingHeader({
@@ -16,6 +17,8 @@ export function LandingHeader({
 }) {
   const { t, locale } = useLocale();
   const user = useAuthStore((s) => s.user);
+  const stars = useGithubStars();
+  const starsLabel = stars != null ? formatStarCount(stars) : null;
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const docsHref = docsHrefForLocale(locale);
   const navLinks = [
@@ -99,6 +102,7 @@ export function LandingHeader({
           >
             <GitHubMark className="size-3.5" />
             {t.header.github}
+            {starsLabel ? <GitHubStarsBadge label={starsLabel} /> : null}
           </Link>
           <Link
             href={ctaHref}
@@ -145,11 +149,26 @@ export function LandingHeader({
             >
               <GitHubMark className="size-3.5" />
               {t.header.github}
+              {starsLabel ? <GitHubStarsBadge label={starsLabel} /> : null}
             </Link>
           </div>
         </div>
       ) : null}
     </header>
+  );
+}
+
+/** Star-count segment appended to the header's GitHub button — a faint
+ *  divider and the compact count (e.g. "37.6k"). No star glyph: in the GitHub
+ *  button context the number reads as the star count on its own. Inherits the
+ *  button's text color so it adapts to both the dark and light header
+ *  variants. */
+function GitHubStarsBadge({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 tabular-nums">
+      <span aria-hidden className="h-3 w-px bg-current opacity-25" />
+      {label}
+    </span>
   );
 }
 

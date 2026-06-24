@@ -288,7 +288,7 @@ export function IssuesPage() {
             )}
           </div>
         )}
-        {viewMode === "list" && <BatchActionToolbar />}
+        {viewMode === "list" && <BatchActionToolbar issues={issues} />}
       </ViewStoreProvider>
     </div>
   );

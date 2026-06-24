@@ -206,6 +206,7 @@ func preserveMaskedGatewayToken(incoming any, persistedRuntimeConfig []byte) {
 type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
+	Ref         string `json:"ref,omitempty"`
 }
 
 // DeterministicToolData is the wire shape for a workspace-authored deterministic
@@ -260,6 +261,7 @@ type AgentTaskResponse struct {
 	DeterministicTools []DeterministicToolData `json:"deterministic_tools,omitempty"` // workspace-authored sandboxed tools for the agent tool plane
 	ProjectID          string                  `json:"project_id,omitempty"`          // issue's project, when present
 	ProjectTitle       string                  `json:"project_title,omitempty"`       // for surfacing in agent context
+	ProjectDescription string                  `json:"project_description,omitempty"` // durable project-level context injected into the brief
 	ProjectResources   []ProjectResourceData   `json:"project_resources,omitempty"`   // resources attached to the project
 	CreatedAt          string                  `json:"created_at"`
 	PriorSessionID     string                  `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
@@ -295,6 +297,7 @@ type AgentTaskResponse struct {
 	AutopilotTriggerPayload  json.RawMessage      `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
 	QuickCreatePrompt        string               `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
 	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
+	HandoffNote              string               `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the run's opening prompt + issue_context.md (omitempty so old daemons ignore it)
 	SquadID                  string               `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName                string               `json:"squad_name,omitempty"`                  // display name for the picker squad
 	ParentIssueID            string               `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
@@ -351,15 +354,16 @@ type ChatAttachmentMeta struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID            string                   `json:"id"`
-	Name          string                   `json:"name"`
-	Instructions  string                   `json:"instructions"`
-	Skills        []service.AgentSkillData `json:"skills,omitempty"`
-	CustomEnv     map[string]string        `json:"custom_env,omitempty"`
-	CustomArgs    []string                 `json:"custom_args,omitempty"`
-	McpConfig     json.RawMessage          `json:"mcp_config,omitempty"`
-	Model         string                   `json:"model,omitempty"`
-	ThinkingLevel string                   `json:"thinking_level,omitempty"`
+	ID            string                      `json:"id"`
+	Name          string                      `json:"name"`
+	Instructions  string                      `json:"instructions"`
+	Skills        []service.AgentSkillData    `json:"skills,omitempty"`
+	SkillRefs     []service.AgentSkillRefData `json:"skill_refs,omitempty"`
+	CustomEnv     map[string]string           `json:"custom_env,omitempty"`
+	CustomArgs    []string                    `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage             `json:"mcp_config,omitempty"`
+	Model         string                      `json:"model,omitempty"`
+	ThinkingLevel string                      `json:"thinking_level,omitempty"`
 	// RuntimeConfig is the agent's saved runtime_config JSON as-is. The
 	// daemon decodes it per-provider — e.g. the openclaw backend reads
 	// `mode` + `gateway.*` to choose between embedded and gateway routing
@@ -387,6 +391,10 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.WorkDir.Valid {
 		workDir = t.WorkDir.String
 	}
+	handoffNote := ""
+	if t.HandoffNote.Valid {
+		handoffNote = t.HandoffNote.String
+	}
 	return AgentTaskResponse{
 		ID:               uuidToString(t.ID),
 		AgentID:          uuidToString(t.AgentID),
@@ -407,6 +415,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
+		HandoffNote:      handoffNote,
 		WorkDir:          workDir,
 		RelativeWorkDir:  relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		// Surface task source so the UI can distinguish issue-linked tasks

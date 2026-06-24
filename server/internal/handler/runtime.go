@@ -32,7 +32,7 @@ type AgentRuntimeResponse struct {
 	// Visibility is "private" (default — only the owner / workspace admins
 	// can bind agents) or "public" (any workspace member can). See migration
 	// 083 and canUseRuntimeForAgent.
-	Visibility string  `json:"visibility"`
+	Visibility string `json:"visibility"`
 	// ProfileID is set when this runtime is an instance of a custom
 	// runtime_profile (MUL-3284); null for built-in runtimes.
 	ProfileID  *string `json:"profile_id"`
@@ -568,6 +568,14 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := uuidToString(member.UserID)
 
+	if rt.ProfileID.Valid {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "cannot delete a custom runtime instance directly; delete its runtime profile instead.",
+			"code":  "runtime_profile_instance_delete_unsupported",
+		})
+		return
+	}
+
 	// Check if any active (non-archived) agents are bound to this runtime.
 	// Surface them on the 409 so the dialog can render the cascade plan
 	// directly from this response — saves a second round-trip when the
@@ -745,6 +753,14 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 		return
 	}
 	userID := uuidToString(member.UserID)
+
+	if rt.ProfileID.Valid {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "cannot delete a custom runtime instance directly; delete its runtime profile instead.",
+			"code":  "runtime_profile_instance_delete_unsupported",
+		})
+		return
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {

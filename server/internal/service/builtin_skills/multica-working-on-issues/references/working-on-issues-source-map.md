@@ -104,12 +104,26 @@ Net: a bare title prefix (`MUL-2759: ...`) or a branch ref links only;
 | `shouldEnqueueAgentTask` returns false for `backlog` (parking lot) | `server/internal/handler/issue.go:2644-2648` | new citation |
 | Backlog → non-backlog (not done/cancelled) enqueues on update | `server/internal/handler/issue.go:2537-2540` | `:2523` |
 | Same contract in batch update | `server/internal/handler/issue.go:3021-3024` | new citation |
-| Child → `done` posts a system comment on the parent | `server/internal/handler/issue_child_done.go:51` (`notifyParentOfChildDone`; doc comment at `:15`) | func def `:51` |
+| Child → `done` notifies + wakes the parent, gated by the stage barrier | `server/internal/handler/issue_child_done.go:66` (`notifyParentOfChildDone`; doc comment at `:15`; barrier gate at `:115`) | func def `:51` |
 
 Creation with `--status todo` (or any non-backlog status) on an agent-assigned
 issue fires the agent immediately; `--status backlog` parks it with the assignee
 set but no trigger. Promoting `backlog → todo` later fires it then (update path,
 line 2537).
+
+## Sub-issue stages (barrier wake)
+
+| Behavior | File:line |
+|---|---|
+| `issue.stage` column (nullable, `>= 1`) | `server/migrations/123_issue_stage.up.sql` |
+| Stage barrier: notify+wake fire only when the lowest unfinished stage is all-terminal; unstaged set = one implicit stage | `server/internal/handler/issue_child_done.go:231` (`stageBarrierClosed`) |
+| Per-stage summary + next stage for the wake comment | `server/internal/handler/issue_child_done.go:254` (`stageProgressSummary`) |
+| `--stage` on `issue create` / `issue update` | `server/cmd/multica/cmd_issue.go:328,350` |
+| `multica issue children <id>` (sub-issues grouped by stage) | `server/cmd/multica/cmd_issue.go:114,678`; route `GET /api/issues/{id}/children` → `ListChildIssues` |
+
+Advancement is agent-driven: the server only detects the closed barrier and
+wakes the parent assignee. Promoting the next stage's `backlog` sub-issues to
+`todo` is the woken agent's decision, not a server side effect.
 
 ## Metadata CLI
 

@@ -21,7 +21,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflagdispatch"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -31,6 +34,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
 
 var defaultOrigins = []string{
@@ -106,6 +110,7 @@ type RouterOptions struct {
 	BusinessMetrics *obsmetrics.BusinessMetrics
 	DaemonHub       *daemonws.Hub
 	DaemonWakeup    service.TaskWakeupNotifier
+	FeatureFlags    *featureflag.Service
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
@@ -156,6 +161,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	h.Metrics = opts.BusinessMetrics
+	if opts.FeatureFlags != nil {
+		h.DaemonFeatureFlags = featureflagdispatch.NewEvaluator(opts.FeatureFlags)
+	}
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
 	if opts.BusinessMetrics != nil {
@@ -182,13 +190,39 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.WebhookIPRateLimiter = handler.NewRedisWebhookIPRateLimiter(rdb, handler.DefaultWebhookIPRateLimit())
 	}
 
+	// Channel engine (MUL-3620): the platform-agnostic inbound runtime.
+	// Built UNCONDITIONALLY — it drives any channel.Channel, not just
+	// Feishu, so it must not depend on the Lark master key (a future
+	// Slack-only deployment has no Lark key). Platform adapters register a
+	// Factory + ResolverSet into it below; the Supervisor enumerates active
+	// installations across ALL channel types and routes each to its
+	// registered platform's Factory. With no platform registered the store
+	// still lists any active installation rows, but Registry.Build returns
+	// ErrUnknownType for them, so the supervisor logs and backs off without
+	// opening a connection (the normal state is simply that no rows exist
+	// for an unregistered platform). The Router is the single shared inbound
+	// handler injected into every Channel.
+	channelRegistry := channel.NewRegistry()
+	channelRouter := engine.NewRouter(h.IssueService, h.TaskService, queries, engine.RouterConfig{Logger: slog.Default()})
+	// Debounce the per-session run trigger so a burst of messages collapses
+	// into one agent run instead of one per message (MUL-2968).
+	channelRouter.EnableRunBatching(engine.DefaultChatRunBatchWindow)
+	h.ChannelRouter = channelRouter
+	h.ChannelSupervisor = engine.NewSupervisor(
+		lark.NewChannelInstallationStore(queries),
+		channelRegistry,
+		channelRouter.Handle,
+		engine.Config{},
+	)
+
 	// Lark integration. Only wired when MULTICA_LARK_SECRET_KEY is set:
 	// the InstallationService refuses to fall back to plaintext storage
 	// for app_secret, and the BindingTokenService cannot mint usable
 	// tokens without it either. When the key is absent the Lark
 	// handlers return 503 with a clear message; the rest of the server
 	// continues to start so self-host deployments that have not opted
-	// in to Lark are unaffected.
+	// in to Lark are unaffected. Feishu registers its Factory + ResolverSet
+	// into the channel engine above.
 	if larkKey, err := secretbox.LoadKey("MULTICA_LARK_SECRET_KEY"); err == nil {
 		box, err := secretbox.New(larkKey)
 		if err != nil {
@@ -224,65 +258,39 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Logger:  slog.Default(),
 				})
 				h.LarkAPIClient = larkClient
-				patcher := lark.NewPatcher(queries, installSvc, larkClient, lark.PatcherConfig{})
+
+				// Channel-backed store: routes the lark package's DB seams
+				// onto the channel_* tables (MUL-3515). Interface-wired
+				// consumers (patcher, typing indicator, dispatcher, hub,
+				// backfills) take it directly; the constructor-based services
+				// wrap *db.Queries internally, so they keep taking queries.
+				cs := lark.NewChannelStore(queries)
+				patcher := lark.NewPatcher(cs, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
 
 				// Typing indicator: shows a "processing" reaction on the user's
 				// message while the agent is working, then removes it before the
 				// reply is sent. Best-effort; failures are logged only.
-				typingIndicator := lark.NewTypingIndicatorManager(larkClient, installSvc, queries, slog.Default())
+				typingIndicator := lark.NewTypingIndicatorManager(larkClient, installSvc, cs, slog.Default())
 				patcher.SetTypingIndicatorManager(typingIndicator)
 
-				// Inbound pipeline: lark_inbound_audit logger,
-				// channel-aware ChatSessionService, and the
-				// Dispatcher that orders identity / dedup / append /
-				// /issue / enqueue per §4.3. The Dispatcher depends
-				// on the same IssueService + TaskService that back
-				// HTTP, so /issue-created issues share counter, dup
+				// Inbound pipeline seams: lark_inbound_audit logger and the
+				// channel-aware ChatSessionService. They back the Feishu
+				// ResolverSet that the channel-agnostic engine.Router runs
+				// through, sharing the same IssueService + TaskService that
+				// back HTTP, so /issue-created issues share counter, dup
 				// guard, project boundary, broadcast, analytics and
 				// agent-enqueue with the rest of the product.
 				auditLogger := lark.NewAuditLogger(queries)
 				chatSvc := lark.NewChatSessionService(queries, pool)
-				dispatcher := &lark.Dispatcher{
-					Queries:      queries,
-					Chat:         chatSvc,
-					Audit:        auditLogger,
-					IssueService: h.IssueService,
-					TaskService:  h.TaskService,
-					Logger:       slog.Default(),
-				}
-				// Debounce the per-session run trigger so a burst of
-				// messages (e.g. "forward a transcript, then type a note")
-				// collapses into one agent run instead of one per message.
-				// MUL-2968.
-				dispatcher.EnableRunBatching(lark.DefaultChatRunBatchWindow)
 
-				// WS Hub: lease + supervisor goroutines per installation.
-				// The WSLongConnConnector talks Lark's long-conn protocol
-				// over gorilla/websocket. The connector wraps every read
-				// with a ctx-cancel watchdog so lease loss / shutdown
-				// breaks the blocking ReadMessage in bounded time — the
-				// invariant §4.4 leans on. If the endpoint fetcher fails
-				// to initialize (bad MULTICA_LARK_CALLBACK_BASE_URL or
-				// similar config error), buildLarkConnectorFactory logs
-				// and falls back to the NoopConnector so the lease /
-				// supervisor lifecycle still runs against real DB rows —
-				// inbound messages will be silently dropped until the
-				// config is fixed, with the boot log labelling the mode
-				// "noop" so operators can spot it.
-				connectorFactory, connectorLabel := buildLarkConnectorFactory(installSvc, larkClient)
-				h.LarkHub = lark.NewHub(queries, connectorFactory, dispatcher, lark.HubConfig{})
-				h.LarkHub.SetTypingIndicatorManager(typingIndicator)
-
-				// OutcomeReplier wires the outbound side of the
-				// EventEmitter contract: NeedsBinding / AgentOffline /
-				// AgentArchived translate to a Lark-side reply card.
-				// Requires the real APIClient (the stub returns
-				// ErrAPIClientNotConfigured on every send) and the
-				// binding token service. When either is missing, the
-				// Hub falls back to the noop replier and the outcomes
-				// get logged but not delivered — clearly visible in
-				// boot output so operators understand the gap.
+				// OutcomeReplier wires the outbound side: NeedsBinding /
+				// AgentOffline / AgentArchived / issue-created translate to a
+				// Lark-side reply card. Requires the real APIClient and the
+				// binding token service; otherwise it falls back to the noop
+				// replier (outcomes logged, not delivered). We only register
+				// it on the ResolverSet when it can actually deliver, so a
+				// pre-outbound deployment pays no reply-goroutine cost.
 				replier := lark.NewLarkOutcomeReplier(lark.OutcomeReplierConfig{
 					APIClient:   larkClient,
 					BindingSvc:  h.LarkBindingTokens,
@@ -291,12 +299,36 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					PublicURL:   signupConfig.PublicURL,
 					Logger:      slog.Default(),
 				})
-				h.LarkHub.SetOutcomeReplier(replier)
-				// The agent-offline / agent-archived notice is now decided
-				// at debounce-flush time rather than synchronously from
-				// Handle, so the dispatcher drives that reply itself through
-				// the same replier. MUL-2968.
-				dispatcher.FlushReply = replier.Reply
+				var resolverReplier lark.OutcomeReplier
+				if larkClient.IsConfigured() {
+					resolverReplier = replier
+				}
+
+				// Feishu adapter (MUL-3620): the WSLongConnConnector talks
+				// Lark's long-conn protocol over gorilla/websocket and wraps
+				// every read with a ctx-cancel watchdog so lease loss /
+				// shutdown breaks the blocking ReadMessage in bounded time —
+				// the invariant §4.4 leans on. If the endpoint fetcher fails
+				// to initialize (bad MULTICA_LARK_CALLBACK_BASE_URL or
+				// similar), buildLarkConnector logs and falls back to the
+				// NoopConnector so the lease / supervisor lifecycle still runs
+				// against real DB rows — inbound messages are silently dropped
+				// until the config is fixed, with the boot log labelling the
+				// mode "noop".
+				//
+				// Registering the Factory (connect/send) + ResolverSet
+				// (inbound pipeline seams) is all it takes to add the platform
+				// to the engine — no engine edit.
+				connector, connectorLabel := buildLarkConnector(installSvc, larkClient)
+				lark.RegisterFeishu(channelRegistry, lark.FeishuChannelDeps{
+					Connector:   connector,
+					APIClient:   larkClient,
+					Credentials: installSvc,
+					Logger:      slog.Default(),
+				})
+				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
+					cs, chatSvc, auditLogger, resolverReplier, typingIndicator,
+				))
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
 
 				// One-shot union_id backfill for installations created
@@ -306,7 +338,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// bot_union_id during the device-flow finalize, so this
 				// is bridge code — it will simply find no rows to update
 				// on a fresh deployment and exit. MUL-2671.
-				go lark.BackfillBotUnionIDs(context.Background(), queries, larkClient, installSvc, slog.Default())
+				go lark.BackfillBotUnionIDs(context.Background(), cs, larkClient, installSvc, slog.Default())
 
 				// Upgrade repair for deployments that ran the whole
 				// integration against Lark international via the deployment-
@@ -316,7 +348,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// operator clears the override. No-op on mainland / fresh
 				// deployments. Off the hot startup path like the union_id
 				// backfill. MUL-3083.
-				go lark.BackfillRegionFromLegacyOverride(context.Background(), queries,
+				go lark.BackfillRegionFromLegacyOverride(context.Background(), cs,
 					strings.TrimSpace(os.Getenv("MULTICA_LARK_HTTP_BASE_URL")),
 					strings.TrimSpace(os.Getenv("MULTICA_LARK_CALLBACK_BASE_URL")),
 					slog.Default())
@@ -503,6 +535,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/workspaces/{workspaceId}/runtime-profiles", h.DaemonListRuntimeProfiles)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
+		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/prepare-lease", h.ExtendTaskPrepareLease)
+		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/skill-bundles/resolve", h.ResolveTaskSkillBundles)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/update/{updateId}/result", h.ReportUpdateResult)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
@@ -712,6 +746,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListIssues)
 				r.Post("/", h.CreateIssue)
 				r.Post("/quick-create", h.QuickCreateIssue)
+				r.Post("/preview-trigger", h.PreviewIssueTrigger)
 				r.Post("/batch-update", h.BatchUpdateIssues)
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
@@ -1020,11 +1055,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	return r, h
 }
 
-// buildLarkConnectorFactory wires the real WS long-conn connector
-// that talks to /callback/ws/endpoint directly with app_id/app_secret.
-// The connector wraps every read with a ctx-cancel watchdog so lease
-// loss / shutdown breaks the blocking ReadMessage in bounded time —
-// the invariant §4.4 leans on.
+// buildLarkConnector wires the real WS long-conn connector that talks
+// to /callback/ws/endpoint directly with app_id/app_secret. The
+// connector wraps every read with a ctx-cancel watchdog so lease loss /
+// shutdown breaks the blocking ReadMessage in bounded time — the
+// invariant §4.4 leans on. A single connector instance serves every
+// installation; its Run is parameterized by the installation, so the
+// feishuChannel hands it the per-installation row.
 //
 // If the endpoint fetcher fails to initialize (typically a malformed
 // MULTICA_LARK_CALLBACK_BASE_URL), we log and fall back to the
@@ -1033,20 +1070,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 // the config is fixed; the boot log labels the mode "noop" so the
 // degraded state is visible.
 //
-// Returns the factory plus a short label for the boot log: "ws" in
-// the healthy case, "noop" in the fallback case.
-func buildLarkConnectorFactory(installSvc *lark.InstallationService, apiClient lark.APIClient) (lark.ConnectorFactory, string) {
+// Returns the connector plus a short label for the boot log:
+// "ws-long-conn" in the healthy case, "noop" in the fallback case.
+func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.APIClient) (lark.EventConnector, string) {
 	endpointFetcher, err := lark.NewHTTPConnectionTokenFetcher(lark.HTTPConnectionTokenConfig{
 		BaseURL: strings.TrimSpace(os.Getenv("MULTICA_LARK_CALLBACK_BASE_URL")),
 		Logger:  slog.Default(),
 	})
 	if err != nil {
 		slog.Error("lark ws: endpoint fetcher init failed; falling back to noop", "error", err)
-		return lark.NoopConnectorFactory(slog.Default()), "noop"
+		return lark.NewNoopConnector(slog.Default()), "noop"
 	}
 	decoder := lark.NewLarkJSONFrameDecoder()
 	dialer := lark.NewGorillaDialer()
-	credsProvider := lark.CredentialsProviderFunc(func(ctx context.Context, inst db.LarkInstallation) (lark.InstallationCredentials, error) {
+	if proxyURL := strings.TrimSpace(os.Getenv("MULTICA_LARK_WS_PROXY_URL")); proxyURL != "" {
+		dialer.ProxyURL = proxyURL
+	}
+	credsProvider := lark.CredentialsProviderFunc(func(ctx context.Context, inst lark.Installation) (lark.InstallationCredentials, error) {
 		secret, err := installSvc.DecryptAppSecret(inst)
 		if err != nil {
 			return lark.InstallationCredentials{}, err
@@ -1080,11 +1120,9 @@ func buildLarkConnectorFactory(installSvc *lark.InstallationService, apiClient l
 	})
 	if err != nil {
 		slog.Error("lark ws: connector init failed; falling back to noop", "error", err)
-		return lark.NoopConnectorFactory(slog.Default()), "noop"
+		return lark.NewNoopConnector(slog.Default()), "noop"
 	}
-	return func(_ db.LarkInstallation) (lark.EventConnector, error) {
-		return conn, nil
-	}, "ws-long-conn"
+	return conn, "ws-long-conn"
 }
 
 // membershipChecker implements realtime.MembershipChecker using database queries.

@@ -442,6 +442,28 @@ func newDownloadRequest(t *testing.T, attachmentID, workspaceID string) (*http.R
 	return req, httptest.NewRecorder()
 }
 
+func requireAttachmentPreviewCSP(t *testing.T, header http.Header) {
+	t.Helper()
+	csp := header.Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("Content-Security-Policy header is missing")
+	}
+	for _, directive := range []string{
+		"default-src 'none'",
+		"frame-ancestors 'self'",
+		"object-src 'none'",
+		"base-uri 'none'",
+		"form-action 'none'",
+	} {
+		if !strings.Contains(csp, directive) {
+			t.Fatalf("Content-Security-Policy missing %q; got %q", directive, csp)
+		}
+	}
+	if strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Fatalf("Content-Security-Policy still blocks same-origin previews: %q", csp)
+	}
+}
+
 func newDownloadRouter() http.Handler {
 	// Mirrors the production router after MUL-3130: the download
 	// route is registered under Auth-only with no
@@ -697,6 +719,7 @@ func TestDownloadAttachment_AutoInternalEndpointProxies(t *testing.T) {
 	id := seedAttachmentURL(t, "http://rustfs:9000/test-bucket/"+key, "report.txt", "text/plain", int64(len(body)))
 
 	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	testHandler.DownloadAttachment(w, req)
 
 	if w.Code != http.StatusOK {
@@ -717,6 +740,7 @@ func TestDownloadAttachment_AutoInternalEndpointProxies(t *testing.T) {
 	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
 	}
+	requireAttachmentPreviewCSP(t, w.Header())
 	if len(store.presignCalls) != 0 {
 		t.Fatalf("internal endpoint should not presign, calls=%v", store.presignCalls)
 	}
@@ -795,6 +819,7 @@ func TestDownloadAttachment_ExplicitProxyStreamsPublicEndpoint(t *testing.T) {
 	if got := w.Header().Get("Content-Disposition"); got != `inline; filename="image.png"` {
 		t.Fatalf("Content-Disposition = %q", got)
 	}
+	requireAttachmentPreviewCSP(t, w.Header())
 	if len(store.presignCalls) != 0 {
 		t.Fatalf("forced proxy should not presign, calls=%v", store.presignCalls)
 	}
@@ -833,6 +858,7 @@ func TestGetAttachmentContent_HappyPath_Markdown(t *testing.T) {
 	id := seedPreviewAttachment(t, store, "preview-md-key.md", "preview.md", "text/markdown", body)
 
 	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	testHandler.GetAttachmentContent(w, req)
 
 	if w.Code != http.StatusOK {
@@ -850,6 +876,7 @@ func TestGetAttachmentContent_HappyPath_Markdown(t *testing.T) {
 	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
 	}
+	requireAttachmentPreviewCSP(t, w.Header())
 }
 
 // Even when http.DetectContentType returned "text/plain" instead of "text/markdown"

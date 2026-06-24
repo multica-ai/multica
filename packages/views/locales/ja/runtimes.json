@@ -107,6 +107,7 @@
     "visibility_toast_failed": "公開範囲を更新できませんでした",
     "delete_dialog": {
       "self_heal_notice": "このランタイムは実行中のローカルデーモンに管理されています。削除自体は成功しますが、デーモンプロセスを停止しない限り、数秒以内に新しいランタイムとして再登録されます。完全に削除するには先にデーモンを停止してください。",
+      "profile_backed_notice": "このランタイムはカスタムランタイムプロファイルから登録されています。ここで削除しても現在のランタイムインスタンスだけが削除され、プロファイルが残っている間は実行中のデーモンが再登録できます。完全に削除するには、Custom runtimes からカスタムランタイムプロファイルを削除してください。",
       "light": {
         "title": "ランタイムを削除しますか?",
         "description": "「{{name}}」を削除してもよろしいですか? この操作は元に戻せません。",
@@ -258,6 +259,7 @@
     "badge_registering": "登録中",
     "pending_health": "Daemon に登録中",
     "pending_health_warning": "Daemon 同期待ち",
+    "pending_health_error": "登録エラー",
     "pending_cli_unknown": "待機中"
   },
   "profiles": {
@@ -304,11 +306,17 @@
       "display_name_label": "表示名",
       "display_name_placeholder": "マイカスタム Claude",
       "command_name_label": "コマンド",
-      "command_name_placeholder": "claude",
+      "command_name_placeholder": "agent --model composer-2.5",
       "description_label": "説明",
       "description_placeholder": "任意 — このランタイムの用途",
       "error_display_name_required": "表示名は必須です。",
       "error_command_required": "コマンドは必須です。",
+      "error_command_unclosed_quote": "保存する前に引用符を閉じてください。",
+      "error_command_trailing_escape": "保存する前に末尾のバックスラッシュを補完するか削除してください。",
+      "error_command_shell_syntax": "シェルのパイプ、リダイレクト、制御演算子はサポートされていません。必要な場合はラッパースクリプトを使用してください。",
+      "error_command_shell_expansion": "シェル変数やコマンド展開はサポートされていません。絶対パスまたはラッパースクリプトを使用してください。",
+      "command_preview_executable": "実行ファイル:",
+      "command_preview_args": "引数:",
       "back": "戻る",
       "cancel": "キャンセル",
       "next": "次へ",

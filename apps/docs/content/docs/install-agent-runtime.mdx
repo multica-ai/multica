@@ -88,16 +88,6 @@ Model routing goes through your GitHub account entitlement — the tool doesn't 
 | Authentication | Browser-based GitHub login through the CLI. |
 | Notes | Requires an active GitHub Copilot subscription on the signed-in account. |
 
-### Gemini (Google)
-
-Supports the Gemini 2.5 and 3 series. No session resumption, no MCP — suitable for one-shot tasks.
-
-| | |
-|---|---|
-| Daemon looks for | `gemini` |
-| Install | Follow the official guide at [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli). The standard route is the npm package `@google/gemini-cli`. |
-| Authentication | `gemini` will prompt for a Google account login, or set `GEMINI_API_KEY`. |
-
 ### OpenCode (SST)
 
 Open-source CLI agent. Dynamically discovers available models from its own configuration file — good fit for users who want to bring their own model catalog. Consumes the agent's `mcp_config` field through `OPENCODE_CONFIG_CONTENT`.
@@ -156,6 +146,26 @@ Minimalist. **Session resumption is unusual** — the resume id is the path to a
 |---|---|
 | Daemon looks for | `pi` |
 | Install | See Inflection's CLI docs at [pi.ai](https://pi.ai/). |
+| Authentication | Per the vendor's docs. |
+
+### CodeBuddy (Tencent)
+
+A Claude Code–compatible CLI agent. Multica drives it with the same stream-json protocol as Claude Code: session resumption works via `--resume`, MCP config is passed through `--mcp-config`, and skills land in `.claude/skills/`. Models are discovered dynamically.
+
+| | |
+|---|---|
+| Daemon looks for | `codebuddy` |
+| Install | See the official CLI docs at [codebuddy.ai/cli](https://www.codebuddy.ai/cli). |
+| Authentication | Per the vendor's docs. |
+
+### Qoder (Alibaba)
+
+Agentic coding CLI using the ACP protocol over stdio (shares the transport with Hermes, Kimi, and Kiro CLI). Session resumption works through ACP `session/resume`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically, and skills are copied into `.qoder/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `qodercli` |
+| Install | See the official CLI docs at [qoder.com/cli](https://qoder.com/cli). |
 | Authentication | Per the vendor's docs. |
 
 ### Antigravity (Google)

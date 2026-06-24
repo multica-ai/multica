@@ -27,7 +27,7 @@ import (
 // are logged and swallowed; the next inbound message for the same
 // user retries the reply on its own.
 type OutcomeReplier interface {
-	Reply(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, res DispatchResult)
+	Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult)
 }
 
 // OutcomeReplierQueries is the narrow subset of *db.Queries the
@@ -44,7 +44,7 @@ type noopReplier struct {
 	log *slog.Logger
 }
 
-func (n *noopReplier) Reply(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, res DispatchResult) {
+func (n *noopReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
 	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived:
 		n.log.Warn("lark outcome replier: outbound reply skipped (replier not wired)",
@@ -145,7 +145,7 @@ func NewLarkOutcomeReplier(cfg OutcomeReplierConfig) OutcomeReplier {
 // Reply implements OutcomeReplier. Reads carefully — the switch is
 // the SOURCE OF TRUTH for which outcomes generate a reply, and a
 // missing branch silently drops the user-visible side effect.
-func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, res DispatchResult) {
+func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
 	case OutcomeNeedsBinding:
 		if err := r.sendBindingPrompt(ctx, inst, res); err != nil {
@@ -196,7 +196,7 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst db.LarkInstallation
 	}
 }
 
-func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst db.LarkInstallation, res DispatchResult) error {
+func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Installation, res DispatchResult) error {
 	if res.SenderOpenID == "" {
 		return errors.New("missing sender open_id")
 	}
@@ -226,7 +226,7 @@ func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst db.Lark
 // after MUL-2671's plain-text refactor. The link to Multica is
 // included on its own line so Lark's auto-linker turns it into a
 // tappable URL.
-func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, res DispatchResult) error {
+func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
 	}
@@ -235,14 +235,33 @@ func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst db.LarkI
 		return err
 	}
 	text := issueCreatedText(res, r.publicURL)
-	if _, err := r.client.SendTextMessage(ctx, SendTextParams{
-		InstallationID: creds,
-		ChatID:         msg.ChatID,
-		Text:           text,
-	}); err != nil {
-		return fmt.Errorf("send issue-created text: %w", err)
+	// Share the Patcher's classified fallback: a thread reply that
+	// fails because the topic cannot receive it (recalled trigger,
+	// topics disabled, aggregated message) falls back to a chat-level
+	// send so the confirmation is not lost; transport/5xx/rate-limit
+	// failures stay failures rather than leaking into the group chat.
+	return sendWithThreadFallback(r.log, "send issue-created text", inboundReplyTarget(msg), func(t ReplyTarget) error {
+		_, err := r.client.SendTextMessage(ctx, SendTextParams{
+			InstallationID: creds,
+			ChatID:         msg.ChatID,
+			Text:           text,
+			ReplyTarget:    t,
+		})
+		return err
+	})
+}
+
+// inboundReplyTarget threads an outbound reply off the inbound trigger
+// message when that message lived inside a Lark topic (话题). It mirrors
+// threadReplyTarget (used by the event-driven Patcher) but reads the
+// live InboundMessage the replier already holds, so it needs no DB
+// round-trip. An empty thread_id yields the zero ReplyTarget — a
+// chat-level send, i.e. the unchanged behavior for non-thread messages.
+func inboundReplyTarget(msg InboundMessage) ReplyTarget {
+	if msg.ThreadID != "" && msg.MessageID != "" {
+		return ReplyTarget{MessageID: msg.MessageID, InThread: true}
 	}
-	return nil
+	return ReplyTarget{}
 }
 
 // issueCreatedText composes the user-facing confirmation. Identifier
@@ -269,7 +288,7 @@ func issueCreatedText(res DispatchResult, publicURL string) string {
 	return line + "\n" + strings.TrimRight(publicURL, "/") + "/issues/" + identifier
 }
 
-func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, body string) error {
+func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installation, msg InboundMessage, body string) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
 	}
@@ -285,17 +304,21 @@ func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst db.LarkIns
 	if err != nil {
 		return fmt.Errorf("render notice card: %w", err)
 	}
-	if _, err := r.client.SendInteractiveCard(ctx, SendCardParams{
-		InstallationID: creds,
-		ChatID:         msg.ChatID,
-		CardJSON:       cardJSON,
-	}); err != nil {
-		return fmt.Errorf("send notice card: %w", err)
-	}
-	return nil
+	// Same classified fallback as sendIssueCreated: only thread-reply
+	// failures that mean the topic cannot receive the message fall back
+	// to a chat-level send; ambiguous/transport failures stay failures.
+	return sendWithThreadFallback(r.log, "send notice card", inboundReplyTarget(msg), func(t ReplyTarget) error {
+		_, err := r.client.SendInteractiveCard(ctx, SendCardParams{
+			InstallationID: creds,
+			ChatID:         msg.ChatID,
+			CardJSON:       cardJSON,
+			ReplyTarget:    t,
+		})
+		return err
+	})
 }
 
-func (r *LarkOutcomeReplier) installationCredentials(inst db.LarkInstallation) (InstallationCredentials, error) {
+func (r *LarkOutcomeReplier) installationCredentials(inst Installation) (InstallationCredentials, error) {
 	secret, err := r.credentials.DecryptAppSecret(inst)
 	if err != nil {
 		return InstallationCredentials{}, fmt.Errorf("decrypt app_secret: %w", err)

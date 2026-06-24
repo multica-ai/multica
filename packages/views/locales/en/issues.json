@@ -22,6 +22,10 @@
     "low": "Low",
     "none": "No priority"
   },
+  "stage": {
+    "none": "No stage",
+    "value": "Stage {{n}}"
+  },
   "scope": {
     "all_label": "All",
     "all_description": "All issues in this workspace",
@@ -196,6 +200,7 @@
     "pull_request_card_show_less": "Show less",
     "prop_status": "Status",
     "prop_priority": "Priority",
+    "prop_stage": "Stage",
     "prop_assignee": "Assignee",
     "prop_start_date": "Start date",
     "prop_due_date": "Due date",
@@ -366,6 +371,7 @@
     "trigger_autopilot": "Autopilot run",
     "trigger_comment": "Comment trigger",
     "trigger_initial": "Initial run",
+    "trigger_handoff_prefix": "Handoff: ",
     "status_queued": "Queued",
     "status_dispatched": "Starting",
     "status_waiting_local_directory": "Waiting for local directory",
@@ -485,9 +491,6 @@
     "row_backlog_label": "Backlog",
     "row_backlog_hint": "keeps the agent paused",
     "row_todo_label": "Todo",
-    "row_todo_hint": "starts the agent",
-    "dont_show_again": "Don't show this again",
-    "keep_in_backlog": "Keep in Backlog",
-    "move_to_todo": "Move to Todo"
+    "row_todo_hint": "starts the agent"
   }
 }

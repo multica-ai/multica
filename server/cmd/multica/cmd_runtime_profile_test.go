@@ -155,8 +155,8 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	if gotBody["protocol_family"] != "codex" || gotBody["command_name"] != "company-codex" || gotBody["display_name"] != "Company Codex" {
 		t.Errorf("unexpected body: %#v", gotBody)
 	}
-	// fixed_args is intentionally NOT exposed by the CLI in v1 (the daemon does
-	// not yet wire it into the launch command), so it must never be sent.
+	// fixed_args is intentionally NOT exposed by the CLI create path yet; the
+	// UI owns command-line parsing until this CLI grows an argv-aware parser.
 	if _, present := gotBody["fixed_args"]; present {
 		t.Errorf("fixed_args must not be sent by the CLI, got %#v", gotBody["fixed_args"])
 	}

@@ -166,6 +166,58 @@ func TestEnrichMergeForward(t *testing.T) {
 	}
 }
 
+func TestEnrichFreshSessionStripsCommandAndSetsFlag(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	in := InboundMessage{
+		MessageType: "text",
+		Body:        "/new rebuild the plan",
+		CommandBody: "/new rebuild the plan",
+	}
+
+	out := enrich(t, fake, in, InboundEnricherConfig{})
+
+	if !out.ForceFreshSession {
+		t.Fatalf("ForceFreshSession should be true for /new")
+	}
+	if out.Body != "rebuild the plan" {
+		t.Fatalf("Body should have directive stripped; got %q", out.Body)
+	}
+	if out.CommandBody != "/new rebuild the plan" {
+		t.Fatalf("CommandBody should remain the original command source; got %q", out.CommandBody)
+	}
+}
+
+func TestEnrichFreshSessionPreservesQuotedContext(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.byID["om_parent"] = []LarkMessage{
+		textMsg("om_parent", "ou_a", "old context", "1000"),
+	}
+	in := InboundMessage{
+		MessageType: "text",
+		MessageID:   "om_child",
+		Body:        "/new handle this independently",
+		CommandBody: "/new handle this independently",
+		ParentID:    "om_parent",
+	}
+
+	out := enrich(t, fake, in, InboundEnricherConfig{})
+
+	if !out.ForceFreshSession {
+		t.Fatalf("ForceFreshSession should be true for /new")
+	}
+	if !strings.Contains(out.Body, `<quoted_message message_id="om_parent"`) {
+		t.Fatalf("quoted context should be preserved; body=%q", out.Body)
+	}
+	if !strings.HasSuffix(out.Body, "handle this independently") {
+		t.Fatalf("directive should be stripped from user prose; body=%q", out.Body)
+	}
+	if strings.Contains(out.Body, "/new") {
+		t.Fatalf("stored/enriched body should not include the directive; body=%q", out.Body)
+	}
+}
+
 // TestEnrichMergeForwardSortsByCreateTime ensures children are ordered
 // chronologically regardless of the order Lark returns them.
 func TestEnrichMergeForwardSortsByCreateTime(t *testing.T) {

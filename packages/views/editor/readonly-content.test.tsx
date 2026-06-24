@@ -276,6 +276,24 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
+  it("copies the whole fenced code block from the readonly toolbar", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const source = ["pnpm install", "pnpm test"].join("\n");
+    const { getByRole } = render(
+      <ReadonlyContent content={["```bash", source, "```"].join("\n")} />,
+    );
+
+    fireEvent.click(getByRole("button", { name: "Copy code" }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(source);
+    });
+  });
+
   it("keeps editor code literal by disabling font ligatures", () => {
     const codeCss = readFileSync("editor/styles/code.css", "utf8");
 

@@ -22,6 +22,10 @@
     "low": "낮음",
     "none": "우선순위 없음"
   },
+  "stage": {
+    "none": "단계 없음",
+    "value": "{{n}}단계"
+  },
   "scope": {
     "all_label": "전체",
     "all_description": "이 워크스페이스의 모든 이슈",
@@ -196,6 +200,7 @@
     "pull_request_card_show_less": "간단히 보기",
     "prop_status": "상태",
     "prop_priority": "우선순위",
+    "prop_stage": "단계",
     "prop_assignee": "담당자",
     "prop_start_date": "시작일",
     "prop_due_date": "마감일",
@@ -365,6 +370,7 @@
     "trigger_autopilot": "오토파일럿 실행",
     "trigger_comment": "댓글 트리거",
     "trigger_initial": "초기 실행",
+    "trigger_handoff_prefix": "인계: ",
     "status_queued": "대기 중",
     "status_dispatched": "시작 중",
     "status_waiting_local_directory": "로컬 디렉터리 대기 중",
@@ -484,9 +490,6 @@
     "row_backlog_label": "백로그",
     "row_backlog_hint": "에이전트를 대기 상태로 유지",
     "row_todo_label": "할 일",
-    "row_todo_hint": "에이전트 시작",
-    "dont_show_again": "다시 보지 않기",
-    "keep_in_backlog": "백로그에 두기",
-    "move_to_todo": "할 일로 이동"
+    "row_todo_hint": "에이전트 시작"
   }
 }

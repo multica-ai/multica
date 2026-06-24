@@ -26,6 +26,12 @@ type stubAPIClientWithRecorder struct {
 	sendErr        error
 	textErr        error
 	bindingErr     error
+	// threadSendErr, when non-nil, is returned by SendInteractiveCard /
+	// SendTextMessage only when the call carries a thread ReplyTarget.
+	// Used to exercise the shared classified fallback on the immediate
+	// replies. The attempt is still recorded so tests can count the
+	// thread attempt plus any chat-level fallback.
+	threadSendErr error
 }
 
 func (s *stubAPIClientWithRecorder) IsConfigured() bool { return s.configured }
@@ -33,10 +39,13 @@ func (s *stubAPIClientWithRecorder) IsConfigured() bool { return s.configured }
 func (s *stubAPIClientWithRecorder) SendInteractiveCard(ctx context.Context, p SendCardParams) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.interactiveOut = append(s.interactiveOut, p)
+	if s.threadSendErr != nil && p.ReplyTarget.IsSet() {
+		return "", s.threadSendErr
+	}
 	if s.sendErr != nil {
 		return "", s.sendErr
 	}
-	s.interactiveOut = append(s.interactiveOut, p)
 	return "lark-msg-id", nil
 }
 
@@ -47,10 +56,13 @@ func (s *stubAPIClientWithRecorder) PatchInteractiveCard(ctx context.Context, p 
 func (s *stubAPIClientWithRecorder) SendTextMessage(ctx context.Context, p SendTextParams) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.textOut = append(s.textOut, p)
+	if s.threadSendErr != nil && p.ReplyTarget.IsSet() {
+		return "", s.threadSendErr
+	}
 	if s.textErr != nil {
 		return "", s.textErr
 	}
-	s.textOut = append(s.textOut, p)
 	return "lark-text-msg-id", nil
 }
 
@@ -91,7 +103,7 @@ func (s *stubAPIClientWithRecorder) DeleteMessageReaction(ctx context.Context, p
 // stubCredentialsResolver returns a fixed plaintext secret.
 type stubCredentialsResolver struct{ secret string }
 
-func (s stubCredentialsResolver) DecryptAppSecret(inst db.LarkInstallation) (string, error) {
+func (s stubCredentialsResolver) DecryptAppSecret(inst Installation) (string, error) {
 	if s.secret == "" {
 		return "", errors.New("no secret configured")
 	}
@@ -186,7 +198,7 @@ func TestLarkOutcomeReplierAgentOfflineSendsCard(t *testing.T) {
 		PublicURL:   "https://multica.test",
 		Logger:      log,
 	})
-	inst := db.LarkInstallation{AppID: "cli_x"}
+	inst := Installation{AppID: "cli_x"}
 	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
 	msg := InboundMessage{ChatID: "oc_chat_1", SenderOpenID: "ou_user_1"}
 	rep.Reply(context.Background(), inst, msg, DispatchResult{Outcome: OutcomeAgentOffline})
@@ -222,7 +234,7 @@ func TestLarkOutcomeReplierAgentArchivedSendsCard(t *testing.T) {
 		Logger:      log,
 	})
 	msg := InboundMessage{ChatID: "oc_chat_arch"}
-	rep.Reply(context.Background(), db.LarkInstallation{}, msg, DispatchResult{Outcome: OutcomeAgentArchived})
+	rep.Reply(context.Background(), Installation{}, msg, DispatchResult{Outcome: OutcomeAgentArchived})
 	if len(stub.interactiveOut) != 1 {
 		t.Fatalf("expected one SendInteractiveCard call, got %d", len(stub.interactiveOut))
 	}
@@ -247,8 +259,8 @@ func TestLarkOutcomeReplierIngestedAndDroppedAreSilent(t *testing.T) {
 		Logger:      log,
 	})
 	msg := InboundMessage{ChatID: "oc_x"}
-	rep.Reply(context.Background(), db.LarkInstallation{}, msg, DispatchResult{Outcome: OutcomeIngested})
-	rep.Reply(context.Background(), db.LarkInstallation{}, msg, DispatchResult{Outcome: OutcomeDropped, DropReason: DropReasonDuplicate})
+	rep.Reply(context.Background(), Installation{}, msg, DispatchResult{Outcome: OutcomeIngested})
+	rep.Reply(context.Background(), Installation{}, msg, DispatchResult{Outcome: OutcomeDropped, DropReason: DropReasonDuplicate})
 	if len(stub.interactiveOut) != 0 || len(stub.bindingCalls) != 0 {
 		t.Errorf("Ingested/Dropped should not trigger any APIClient call; got interactive=%d binding=%d",
 			len(stub.interactiveOut), len(stub.bindingCalls))
@@ -272,21 +284,13 @@ func TestLarkOutcomeReplierOfflineSwallowsAPIError(t *testing.T) {
 		Logger:      log,
 	})
 	// Should NOT panic.
-	rep.Reply(context.Background(), db.LarkInstallation{}, InboundMessage{ChatID: "oc"}, DispatchResult{Outcome: OutcomeAgentOffline})
+	rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc"}, DispatchResult{Outcome: OutcomeAgentOffline})
 }
 
-// TestNoopReplierIsHandledByHub verifies that NewHub installs a noop
-// replier by default — so the inbound pipeline runs even when the
-// caller never calls SetOutcomeReplier (e.g. in deployments that
-// only run the inbound dispatcher pre-outbound-wiring). This guards
-// the "no nil replier crash" contract on hub.handleEvent.
-func TestNoopReplierIsHandledByHub(t *testing.T) {
-	t.Parallel()
-	hub := NewHub(nil, nil, nil, HubConfig{})
-	if hub.replier == nil {
-		t.Fatal("Hub.replier must default to noop, not nil")
-	}
-}
+// The legacy "install a noop replier by default" safety is now split: the
+// engine Router skips reply scheduling entirely when no OutboundReplier is
+// registered (boot registers one only when larkClient.IsConfigured()), and
+// NewLarkOutcomeReplier still falls back to its own noop when unconfigured.
 
 // TestLarkOutcomeReplierIssueCreatedSendsConfirmation pins the
 // recovered /issue confirmation path. Before the plain-text refactor
@@ -310,7 +314,7 @@ func TestLarkOutcomeReplierIssueCreatedSendsConfirmation(t *testing.T) {
 		Logger:      log,
 	})
 
-	inst := db.LarkInstallation{AppID: "cli_x"}
+	inst := Installation{AppID: "cli_x"}
 	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
 	msg := InboundMessage{ChatID: "oc_chat_42", SenderOpenID: "ou_user"}
 	rep.Reply(context.Background(), inst, msg, DispatchResult{
@@ -364,7 +368,7 @@ func TestLarkOutcomeReplierOutcomeIngestedSilentWithoutIssue(t *testing.T) {
 		Logger:      log,
 	})
 
-	rep.Reply(context.Background(), db.LarkInstallation{}, InboundMessage{ChatID: "oc"},
+	rep.Reply(context.Background(), Installation{}, InboundMessage{ChatID: "oc"},
 		DispatchResult{Outcome: OutcomeIngested}) // no IssueID
 
 	stub.mu.Lock()
@@ -372,6 +376,140 @@ func TestLarkOutcomeReplierOutcomeIngestedSilentWithoutIssue(t *testing.T) {
 	if len(stub.textOut) != 0 || len(stub.interactiveOut) != 0 {
 		t.Errorf("plain chat ingest must be silent at the replier; got text=%d cards=%d",
 			len(stub.textOut), len(stub.interactiveOut))
+	}
+}
+
+// threadedInboundMsg builds an inbound message that originated inside a
+// Lark topic, so the replier targets the thread (and can fall back).
+func threadedInboundMsg(chatID ChatID) InboundMessage {
+	return InboundMessage{ChatID: chatID, MessageID: "om_trigger", ThreadID: "omt_topic", SenderOpenID: "ou_user"}
+}
+
+// TestLarkOutcomeReplierIssueCreatedThreadFallback verifies the /issue
+// confirmation reuses the Patcher's classified fallback: a thread reply
+// rejected with a "topic cannot receive this" Lark error retries once at
+// the chat level so the confirmation is not lost.
+func TestLarkOutcomeReplierIssueCreatedThreadFallback(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true, threadSendErr: errThreadReplyClassified}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		PublicURL:   "https://multica.test",
+		Logger:      log,
+	})
+
+	rep.Reply(context.Background(), Installation{AppID: "cli_x"}, threadedInboundMsg("oc_chat_42"), DispatchResult{
+		Outcome:         OutcomeIngested,
+		IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
+		IssueNumber:     42,
+		IssueIdentifier: "MUL-42",
+		IssueTitle:      "fix login bug",
+	})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.textOut) != 2 {
+		t.Fatalf("expected thread attempt + chat-level fallback (2 sends); got %d", len(stub.textOut))
+	}
+	if !stub.textOut[0].ReplyTarget.IsSet() {
+		t.Errorf("first attempt should be the thread reply; got %+v", stub.textOut[0].ReplyTarget)
+	}
+	if stub.textOut[1].ReplyTarget.IsSet() {
+		t.Errorf("fallback attempt must be chat-level; got %+v", stub.textOut[1].ReplyTarget)
+	}
+}
+
+// TestLarkOutcomeReplierIssueCreatedNoFallbackOnAmbiguous verifies the
+// /issue confirmation does NOT retry at chat level on an ambiguous
+// transport failure, so the confirmation cannot be duplicated.
+func TestLarkOutcomeReplierIssueCreatedNoFallbackOnAmbiguous(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true, threadSendErr: errThreadReplyTransport}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		PublicURL:   "https://multica.test",
+		Logger:      log,
+	})
+
+	rep.Reply(context.Background(), Installation{AppID: "cli_x"}, threadedInboundMsg("oc_chat_42"), DispatchResult{
+		Outcome:         OutcomeIngested,
+		IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
+		IssueNumber:     42,
+		IssueIdentifier: "MUL-42",
+	})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.textOut) != 1 {
+		t.Fatalf("expected a single thread attempt with no fallback; got %d sends", len(stub.textOut))
+	}
+	if !stub.textOut[0].ReplyTarget.IsSet() {
+		t.Errorf("the single attempt should be the thread reply; got %+v", stub.textOut[0].ReplyTarget)
+	}
+}
+
+// TestLarkOutcomeReplierNoticeThreadFallback verifies the offline /
+// archived notice card shares the same classified fallback.
+func TestLarkOutcomeReplierNoticeThreadFallback(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true, threadSendErr: errThreadReplyClassified}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{agent: db.Agent{Name: "Trump"}},
+		PublicURL:   "https://multica.test",
+		Logger:      log,
+	})
+
+	rep.Reply(context.Background(), Installation{AppID: "cli_x"}, threadedInboundMsg("oc_chat_1"), DispatchResult{Outcome: OutcomeAgentOffline})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.interactiveOut) != 2 {
+		t.Fatalf("expected thread attempt + chat-level fallback (2 cards); got %d", len(stub.interactiveOut))
+	}
+	if !stub.interactiveOut[0].ReplyTarget.IsSet() {
+		t.Errorf("first attempt should be the thread reply; got %+v", stub.interactiveOut[0].ReplyTarget)
+	}
+	if stub.interactiveOut[1].ReplyTarget.IsSet() {
+		t.Errorf("fallback attempt must be chat-level; got %+v", stub.interactiveOut[1].ReplyTarget)
+	}
+}
+
+// TestLarkOutcomeReplierNoticeNoFallbackOnAmbiguous verifies the notice
+// card is not retried at chat level on an ambiguous transport failure.
+func TestLarkOutcomeReplierNoticeNoFallbackOnAmbiguous(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	stub := &stubAPIClientWithRecorder{configured: true, threadSendErr: errThreadReplyTransport}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		PublicURL:   "https://multica.test",
+		Logger:      log,
+	})
+
+	rep.Reply(context.Background(), Installation{}, threadedInboundMsg("oc_chat_arch"), DispatchResult{Outcome: OutcomeAgentArchived})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.interactiveOut) != 1 {
+		t.Fatalf("expected a single thread attempt with no fallback; got %d cards", len(stub.interactiveOut))
+	}
+	if !stub.interactiveOut[0].ReplyTarget.IsSet() {
+		t.Errorf("the single attempt should be the thread reply; got %+v", stub.interactiveOut[0].ReplyTarget)
 	}
 }
 

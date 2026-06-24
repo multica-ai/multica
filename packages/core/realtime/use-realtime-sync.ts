@@ -42,7 +42,7 @@ import {
   type SystemNotificationPayload,
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
-import { chatKeys } from "../chat/queries";
+import { chatKeys, mergeTaskMessagesBySeq } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
@@ -517,6 +517,15 @@ export function useRealtimeSync(
         // open composer's chips (e.g. an agent finishing its run becomes
         // triggerable again mid-typing).
         qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreviewAll() });
+        // Issue-trigger previews (assign/status/create/batch) are deliberately
+        // NOT invalidated here. Unlike comment triggers, the assign source
+        // (create / assignee change) cancels existing tasks before enqueuing, so
+        // a task event can never change its verdict; only the status source's
+        // pending dedup could, and that preview is advisory — the write path
+        // re-evaluates authoritatively, so a rare stale label is harmless.
+        // Refetching every mounted preview on every workspace task event caused
+        // visible flicker, so the preview now refetches only on input change
+        // (signature), mirroring its query design (MUL-3375).
       },
     };
 
@@ -572,11 +581,14 @@ export function useRealtimeSync(
     // Instead, both mutations and WS handlers use dedup checks to be idempotent.
 
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
-      const { issue } = p as IssueUpdatedPayload;
+      const payload = p as IssueUpdatedPayload;
+      const { issue } = payload;
       if (!issue?.id) return;
       const wsId = getCurrentWsId();
       if (wsId) {
-        onIssueUpdated(qc, wsId, issue);
+        onIssueUpdated(qc, wsId, issue, {
+          assigneeChanged: payload.assignee_changed,
+        });
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);
         }
@@ -816,11 +828,8 @@ export function useRealtimeSync(
     const unsubTaskMessage = ws.on("task:message", (p) => {
       const payload = p as TaskMessagePayload;
       qc.setQueryData<TaskMessagePayload[]>(
-        ["task-messages", payload.task_id],
-        (old = []) => {
-          if (old.some((m) => m.seq === payload.seq)) return old;
-          return [...old, payload].sort((a, b) => a.seq - b.seq);
-        },
+        chatKeys.taskMessages(payload.task_id),
+        (old = []) => mergeTaskMessagesBySeq(old, [payload]),
       );
       chatWsLogger.debug("task:message (global)", {
         task_id: payload.task_id,

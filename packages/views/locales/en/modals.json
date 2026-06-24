@@ -50,8 +50,26 @@
     "toast_failed": "Failed to add sub-issue",
     "toast_success": "Added {{identifier}} as sub-issue"
   },
-  "backlog_hint": {
-    "toast_status_failed": "Failed to update status"
+  "run_confirm": {
+    "title_assign": "Assign and start?",
+    "title_status": "Start working now?",
+    "checking": "Checking…",
+    "will_start_named": "Once assigned, {{name}} will start working on this issue right away.",
+    "will_start_named_squad": "Once assigned, {{name}}'s leader will review it and start assigning the work.",
+    "will_start": "This will start work on {{count}} issues right away.",
+    "will_start_squad": "This hands {{count}} issues to the squad's leader to review and assign.",
+    "nothing_assign": "Assigned — won't start working while in Backlog.",
+    "nothing_status": "Won't start working.",
+    "note_label": "Handoff note (optional)",
+    "note_placeholder": "Tell them what matters — scope, focus, or what to avoid…",
+    "note_unsupported": "Their runtime is too old to receive this handoff note; it may not be read.",
+    "start": "Start",
+    "dont_start": "Don't start yet",
+    "apply": "Apply",
+    "toast_failed": "Action failed",
+    "create_will_start": "{{name}} will start working right after creation.",
+    "create_will_start_squad": "{{name}}'s leader will review it and start assigning work right after creation.",
+    "create_parked": "Assigned — won't start working in Backlog."
   },
   "create_squad": {
     "title": "Create Squad",
@@ -90,6 +108,7 @@
     "icon_tooltip": "Choose icon",
     "title_placeholder": "Project title",
     "description_placeholder": "Add description...",
+    "description_hint": "Shared with agents as context for every task in this project.",
     "lead": "Lead",
     "no_lead": "No lead",
     "lead_placeholder": "Assign lead...",

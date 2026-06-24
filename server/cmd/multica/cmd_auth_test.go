@@ -128,6 +128,50 @@ func TestResolveCallbackBinding(t *testing.T) {
 	}
 }
 
+func TestBrowserLoginInstructionsSSHRemoteHint(t *testing.T) {
+	const loginURL = "https://multica.ai/login?cli_callback=http%3A%2F%2Flocalhost%3A43689%2Fcallback"
+
+	got := browserLoginInstructions(loginURL, "localhost", 43689, true)
+	if !strings.Contains(got, "ssh -L 43689:127.0.0.1:43689 <user>@<remote-host>") {
+		t.Fatalf("remote SSH instructions missing tunnel command:\n%s", got)
+	}
+	if !strings.Contains(got, loginURL) {
+		t.Fatalf("instructions missing login URL:\n%s", got)
+	}
+
+	got = browserLoginInstructions(loginURL, "localhost", 43689, false)
+	if strings.Contains(got, "ssh -L") {
+		t.Fatalf("local instructions should not include SSH tunnel command:\n%s", got)
+	}
+
+	got = browserLoginInstructions(loginURL, "192.168.1.25", 43689, true)
+	if strings.Contains(got, "ssh -L") {
+		t.Fatalf("non-loopback callback should not include SSH tunnel command:\n%s", got)
+	}
+}
+
+func TestCallbackHostFlagValueReadsParentSetupFlag(t *testing.T) {
+	var got string
+	setup := &cobra.Command{Use: "setup"}
+	setup.Flags().String(callbackHostFlag, "", "")
+	cloud := &cobra.Command{
+		Use: "cloud",
+		Run: func(cmd *cobra.Command, args []string) {
+			got = callbackHostFlagValue(cmd)
+		},
+	}
+	cloud.Flags().String(callbackHostFlag, "", "")
+	setup.AddCommand(cloud)
+	setup.SetArgs([]string{"--callback-host", "10.0.0.5", "cloud"})
+
+	if err := setup.Execute(); err != nil {
+		t.Fatalf("execute setup cloud: %v", err)
+	}
+	if got != "10.0.0.5" {
+		t.Fatalf("callback host = %q, want parent flag value", got)
+	}
+}
+
 // TestLoginTokenFlagWiring asserts the production loginCmd flag is registered
 // the way #1994 needs it to be: a String flag (not Bool) with a NoOptDefVal
 // so `--token` (no value) keeps its legacy prompt-mode behavior. This is the

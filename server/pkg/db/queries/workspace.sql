@@ -33,6 +33,13 @@ UPDATE workspace SET
 WHERE id = $1
 RETURNING *;
 
+-- name: ListWorkspacesWithRepos :many
+-- Workspaces with a non-empty repo registry, to route a webhook to the repo's
+-- owning workspace. ORDER BY id keeps the resolver's tie-break stable on replay.
+SELECT id, repos FROM workspace
+WHERE repos IS NOT NULL AND repos <> '[]'::jsonb
+ORDER BY id;
+
 -- name: IncrementIssueCounter :one
 UPDATE workspace SET issue_counter = issue_counter + 1
 WHERE id = $1

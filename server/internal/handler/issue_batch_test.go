@@ -121,6 +121,41 @@ func TestBatchUpdateValidUpdatesPersistAndCount(t *testing.T) {
 	}
 }
 
+// TestBatchUpdateStageOnly — regression for the stage barrier feature: a
+// batch update whose only field is `stage` must count as a mutation (hasMutation
+// includes "stage") and actually persist, not silently return {"updated": 0}.
+func TestBatchUpdateStageOnly(t *testing.T) {
+	a := createTestIssue(t, "BU-stage A", "todo", "low")
+	t.Cleanup(func() { deleteTestIssue(t, a) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{a},
+		"updates":   map[string]any{"stage": 2},
+	})
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Updated int `json:"updated"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Updated != 1 {
+		t.Fatalf("expected updated=1 for a stage-only batch update, got %d", resp.Updated)
+	}
+
+	gw := httptest.NewRecorder()
+	gr := newRequest("GET", "/api/issues/"+a, nil)
+	gr = withURLParam(gr, "id", a)
+	testHandler.GetIssue(gw, gr)
+	var got IssueResponse
+	json.NewDecoder(gw.Body).Decode(&got)
+	if got.Stage == nil || *got.Stage != 2 {
+		t.Errorf("expected stage=2 to persist, got %v", got.Stage)
+	}
+}
+
 // createTestIssue is a small helper to keep the table-driven cases clean.
 // Returns the new issue's id; caller is responsible for cleanup.
 func createTestIssue(t *testing.T, title, status, priority string) string {

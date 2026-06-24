@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -158,5 +159,62 @@ func TestListLarkInstallations_NotConfigured_HardCodedInstallSupportedFalse(t *t
 	}
 	if resp.InstallSupported {
 		t.Fatalf("install_supported must be false in the early-return branch even with a non-nil APIClient")
+	}
+}
+
+// TestListActiveLarkInstallations_SkipsOrphans pins the MUL-3515 hub-boot
+// guard: ListActiveChannelInstallations is JOINed to live workspace + agent,
+// so an active channel_installation whose workspace or agent has been deleted
+// (channel_* has no FK cascade) is never returned — otherwise the Hub would
+// keep opening a WebSocket for a bot whose owner is gone. It also stays
+// channel_type='feishu'-scoped. Runs against the real test DB.
+func TestListActiveLarkInstallations_SkipsOrphans(t *testing.T) {
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "LarkActiveScopeAgent", []byte("[]"))
+
+	const (
+		liveApp   = "cli_active_live"
+		orphanApp = "cli_active_orphan"
+		slackApp  = "cli_active_slack"
+		// Deliberately non-existent workspace/agent so the JOIN drops the row.
+		orphanWS = "5d0a0000-0000-4000-8000-000000000001"
+		orphanAg = "5d0a0000-0000-4000-8000-000000000002"
+	)
+	clean := func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM channel_installation WHERE config->>'app_id' = ANY($1)`,
+			[]string{liveApp, orphanApp, slackApp})
+	}
+	clean()
+	t.Cleanup(clean)
+
+	seed := func(ws, ag, channelType, app string) {
+		if _, err := testPool.Exec(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
+VALUES ($1, $2, $3, jsonb_build_object('app_id', $4::text), $5, 'active')
+`, ws, ag, channelType, app, testUserID); err != nil {
+			t.Fatalf("seed %s installation: %v", app, err)
+		}
+	}
+	seed(testWorkspaceID, agentID, "feishu", liveApp) // live workspace + agent -> listed
+	seed(orphanWS, orphanAg, "feishu", orphanApp)     // deleted workspace + agent -> dropped
+	seed(testWorkspaceID, agentID, "slack", slackApp) // wrong channel_type -> dropped
+
+	active, err := lark.NewChannelStore(testHandler.Queries).ListActiveLarkInstallations(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveLarkInstallations: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, inst := range active {
+		seen[inst.AppID] = true
+	}
+	if !seen[liveApp] {
+		t.Fatal("expected the live-workspace/agent Feishu installation to be listed")
+	}
+	if seen[orphanApp] {
+		t.Fatal("orphaned installation (deleted workspace/agent) must not be listed — the hub would connect a dead bot")
+	}
+	if seen[slackApp] {
+		t.Fatal("non-Feishu installation must not be listed by the Feishu hub")
 	}
 }
