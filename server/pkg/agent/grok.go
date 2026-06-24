@@ -20,11 +20,15 @@ import (
 // duplicate them would break the daemon↔Grok JSON-RPC transport contract.
 // `--always-approve` is daemon-owned so headless ACP always auto-approves
 // tool executions — the daemon cannot answer grok's interactive permission
-// prompts, and without this grok aborts the turn with stopReason=cancelled.
+// prompts. `--no-plan` disables plan mode: grok-build is a planning agent
+// (agentType "grok-build-plan") that, on a substantive task, enters plan mode
+// and stops to ask a clarifying question before editing — which a headless
+// daemon can't answer, so the turn ends as stopReason=cancelled with no output.
 var grokBlockedArgs = map[string]blockedArgMode{
 	"agent":            blockedStandalone,
 	"stdio":            blockedStandalone,
 	"--always-approve": blockedStandalone,
+	"--no-plan":        blockedStandalone,
 }
 
 // grokBackend implements Backend by spawning `grok agent stdio` and
@@ -105,13 +109,16 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	// `--always-approve` (grok's global auto-approve-all-tools flag, the analog
-	// of qoder's `--yolo` / hermes' HERMES_YOLO_MODE) precedes the `agent stdio`
-	// subcommand. The daemon is headless and cannot answer grok's mid-turn
-	// tool-permission prompts, so without it grok runs for a few seconds and
-	// then aborts the turn with stopReason=cancelled.
+	// Global flags precede the `agent stdio` subcommand. Both are required for
+	// headless task execution and mirror how the other autonomous backends run:
+	//   --always-approve  auto-approve every tool execution (no interactive
+	//                     permission prompt the daemon can't answer).
+	//   --no-plan         disable plan mode; grok-build is a planning agent that
+	//                     otherwise stops mid-task to ask a clarifying question,
+	//                     which a headless daemon can't answer — the turn then
+	//                     ends as stopReason=cancelled with no output.
 	grokArgs := append(
-		[]string{"--always-approve", "agent", "stdio"},
+		[]string{"--always-approve", "--no-plan", "agent", "stdio"},
 		filterCustomArgs(opts.CustomArgs, grokBlockedArgs, b.cfg.Logger)...,
 	)
 	cmd := exec.CommandContext(runCtx, execPath, grokArgs...)
