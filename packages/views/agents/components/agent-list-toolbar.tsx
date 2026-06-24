@@ -5,6 +5,7 @@ import {
   ArrowUp,
   ChevronDown,
   Filter,
+  Search,
   X,
 } from "lucide-react";
 import type { AgentAvailability, Workload } from "@multica/core/agents";
@@ -19,6 +20,7 @@ import {
   type AgentSortField,
 } from "@multica/core/agents/stores";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -92,6 +94,8 @@ export function AgentListToolbar({
   scope,
   onScopeChange,
   scopeCounts,
+  search,
+  onSearchChange,
   filters,
   onToggleFilter,
   onClearFilters,
@@ -109,6 +113,11 @@ export function AgentListToolbar({
   onScopeChange: (scope: AgentsScope) => void;
   /** Per-scope totals from the FULL set — scope counts ignore filters. */
   scopeCounts: Record<AgentsScope, number>;
+  /** Free-text query (name / pinyin / description). Ephemeral — kept in page
+   *  state, not the persisted view store, so a stale query never hides agents
+   *  across reloads. */
+  search: string;
+  onSearchChange: (value: string) => void;
   filters: AgentListFilters;
   onToggleFilter: (key: keyof AgentListFilters, value: string) => void;
   onClearFilters: () => void;
@@ -128,7 +137,8 @@ export function AgentListToolbar({
   const { t } = useT("agents");
 
   const activeCount = countActiveFilterDimensions(filters);
-  const hasActiveFilters = activeCount > 0;
+  const hasSearch = search.trim().length > 0;
+  const hasActiveFilters = activeCount > 0 || hasSearch;
 
   // Option lists with counts, derived from the scope's unfiltered rows so
   // toggling one dimension doesn't make the others' options vanish.
@@ -196,11 +206,22 @@ export function AgentListToolbar({
 
   return (
     <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
-      {/* Left: scope buttons + result count. Scope mixes the ownership lens
-          (mine/all) with the archived lifecycle stage; no search box (scope
-          partitions the small set). Button styling and the <md dropdown
-          collapse follow the issues header's scope buttons. */}
+      {/* Left: search + scope buttons + result count. Scope mixes the
+          ownership lens (mine/all) with the archived lifecycle stage. Button
+          styling and the <md dropdown collapse follow the issues header's
+          scope buttons. */}
       <div className="flex min-w-0 items-center gap-2">
+        <div className="relative w-40 shrink-0 md:w-56">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder={t(($) => $.page.search_placeholder)}
+            className="h-8 pl-8 text-sm"
+            aria-label={t(($) => $.page.search_placeholder)}
+          />
+        </div>
+
         <div className="hidden shrink-0 items-center gap-1 md:flex">
           {AGENT_SCOPES.map((s) => (
             <Button
@@ -268,16 +289,16 @@ export function AgentListToolbar({
           <DropdownMenuTrigger
             render={
               <Button
-                variant={hasActiveFilters ? "default" : "outline"}
+                variant={activeCount > 0 ? "default" : "outline"}
                 size="sm"
                 className={
-                  hasActiveFilters
+                  activeCount > 0
                     ? "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:w-auto md:px-2.5"
                     : "h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
                 }
               >
                 <Filter className="size-3.5" />
-                {hasActiveFilters ? (
+                {activeCount > 0 ? (
                   <>
                     <span className="hidden md:inline">
                       {t(($) => $.toolbar.filter_active_count, {
@@ -293,7 +314,7 @@ export function AgentListToolbar({
                     {t(($) => $.toolbar.filter_label)}
                   </span>
                 )}
-                {hasActiveFilters && (
+                {activeCount > 0 && (
                   <span
                     role="button"
                     tabIndex={-1}

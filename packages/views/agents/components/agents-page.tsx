@@ -9,6 +9,7 @@ import {
   Loader2,
   Lock,
   Plus,
+  Search,
   X,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -75,11 +76,12 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentRowActions } from "./agent-row-actions";
-import { AgentListToolbar } from "./agent-list-toolbar";
+import { AgentListToolbar, countActiveFilterDimensions } from "./agent-list-toolbar";
 import { OtherDefaultsDetail } from "./defaults-detail";
 import { ConfigTemplateDialog } from "./config-template-dialog";
 import { configTemplateKeys } from "./config-template-keys";
@@ -933,6 +935,10 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
     null,
   );
+  // Free-text search — page-local (not persisted) so a stale query can't hide
+  // agents across reloads. Matches the pre-redesign toolbar: name / pinyin /
+  // description for agents, user_name / pinyin for the defaults scope.
+  const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -1075,6 +1081,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
   // Visible rows: filters, then sort.
   const rows = useMemo<AgentListRow[]>(() => {
+    const q = search.trim().toLowerCase();
     const filtered = scopeRows.filter((row) => {
       if (
         filters.availability.length > 0 &&
@@ -1108,6 +1115,16 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       ) {
         return false;
       }
+      // Free-text search: agent name (substring + pinyin) or description.
+      if (q) {
+        if (
+          !row.agent.name.toLowerCase().includes(q) &&
+          !matchesPinyin(row.agent.name, q) &&
+          !(row.agent.description ?? "").toLowerCase().includes(q)
+        ) {
+          return false;
+        }
+      }
       return true;
     });
 
@@ -1138,15 +1155,44 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       );
     });
     return filtered;
-  }, [scopeRows, filters, sortField, sortDirection]);
+  }, [scopeRows, filters, sortField, sortDirection, search]);
 
   const defaultsRows = useMemo(() => {
+    // Search the defaults list by owner name (substring + pinyin), matching
+    // the pre-redesign behavior. The system + personal rows are fixed, so
+    // only the "others" list narrows.
+    const q = search.trim().toLowerCase();
+    const scoped = q
+      ? allDefaults.filter(
+          (d) =>
+            d.user_name.toLowerCase().includes(q) ||
+            matchesPinyin(d.user_name, q),
+        )
+      : allDefaults;
     const mine = currentUser?.id
-      ? allDefaults.find((d) => d.user_id === currentUser.id) ?? null
+      ? scoped.find((d) => d.user_id === currentUser.id) ?? null
       : null;
-    const others = allDefaults.filter((d) => d.user_id !== currentUser?.id);
+    const others = scoped.filter((d) => d.user_id !== currentUser?.id);
     return { mine, others };
-  }, [allDefaults, currentUser]);
+  }, [allDefaults, currentUser, search]);
+
+  // Empty-state copy — mirrors the pre-redesign NoMatches: surface the query
+  // when search is active, otherwise explain the filter mismatch.
+  const noMatchBody = useMemo(() => {
+    const hasSearch = search.trim().length > 0;
+    const hasFilter = countActiveFilterDimensions(filters) > 0;
+    if (scope === "archived") {
+      return hasSearch
+        ? t(($) => $.no_matches.search_archived, { query: search })
+        : t(($) => $.no_matches.no_archived);
+    }
+    if (hasSearch) {
+      return hasFilter
+        ? t(($) => $.no_matches.search_active_filtered, { query: search })
+        : t(($) => $.no_matches.search_active, { query: search });
+    }
+    return t(($) => $.no_matches.no_filter_match);
+  }, [search, filters, scope, t]);
 
   // Row virtualization — headless math, offsets as padding on the rows
   // wrapper, fixed-height rows. The scroll element is the SINGLE outer
@@ -1239,6 +1285,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
             scope={scope}
             onScopeChange={setScope}
             scopeCounts={scopeCounts}
+            search={search}
+            onSearchChange={setSearch}
             filters={filters}
             onToggleFilter={toggleFilter}
             onClearFilters={clearFilters}
@@ -1286,8 +1334,10 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                     onOpenOther={(defaults) => setOtherDefaults(defaults)}
                   />
                 ) : rows.length === 0 ? (
-                  <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
-                    {t(($) => $.no_matches.title)}
+                  <div className="col-span-full flex flex-col items-center gap-2 px-4 py-16 text-center text-muted-foreground">
+                    <Search className="h-8 w-8 text-muted-foreground/40" />
+                    <p className="text-sm">{t(($) => $.no_matches.title)}</p>
+                    <p className="max-w-xs text-xs">{noMatchBody}</p>
                   </div>
                 ) : null}
                 {scope !== "default" && virtualItems.map((vi) => {
