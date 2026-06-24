@@ -46,81 +46,6 @@ func (q *Queries) AdvanceTriggerNextRun(ctx context.Context, arg AdvanceTriggerN
 	return err
 }
 
-const claimDueScheduleTriggers = `-- name: ClaimDueScheduleTriggers :many
-
-UPDATE autopilot_trigger t
-SET next_run_at = NULL
-FROM autopilot a
-WHERE t.autopilot_id = a.id
-  AND t.kind = 'schedule'
-  AND t.enabled = true
-  AND t.next_run_at IS NOT NULL
-  AND t.next_run_at <= now()
-  AND a.status = 'active'
-RETURNING t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, a.workspace_id AS autopilot_workspace_id
-`
-
-type ClaimDueScheduleTriggersRow struct {
-	ID                   pgtype.UUID        `json:"id"`
-	AutopilotID          pgtype.UUID        `json:"autopilot_id"`
-	Kind                 string             `json:"kind"`
-	Enabled              bool               `json:"enabled"`
-	CronExpression       pgtype.Text        `json:"cron_expression"`
-	Timezone             pgtype.Text        `json:"timezone"`
-	NextRunAt            pgtype.Timestamptz `json:"next_run_at"`
-	WebhookToken         pgtype.Text        `json:"webhook_token"`
-	Label                pgtype.Text        `json:"label"`
-	LastFiredAt          pgtype.Timestamptz `json:"last_fired_at"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-	Provider             string             `json:"provider"`
-	SigningSecret        pgtype.Text        `json:"signing_secret"`
-	EventFilters         []byte             `json:"event_filters"`
-	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
-}
-
-// =====================
-// Scheduler Queries
-// =====================
-// Atomically claim all due schedule triggers to prevent concurrent execution.
-// Joins the autopilot table to ensure only active autopilots are fired.
-func (q *Queries) ClaimDueScheduleTriggers(ctx context.Context) ([]ClaimDueScheduleTriggersRow, error) {
-	rows, err := q.db.Query(ctx, claimDueScheduleTriggers)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ClaimDueScheduleTriggersRow{}
-	for rows.Next() {
-		var i ClaimDueScheduleTriggersRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.AutopilotID,
-			&i.Kind,
-			&i.Enabled,
-			&i.CronExpression,
-			&i.Timezone,
-			&i.NextRunAt,
-			&i.WebhookToken,
-			&i.Label,
-			&i.LastFiredAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Provider,
-			&i.SigningSecret,
-			&i.EventFilters,
-			&i.AutopilotWorkspaceID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
@@ -877,69 +802,54 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 	return items, nil
 }
 
-const recoverLostTriggers = `-- name: RecoverLostTriggers :many
+const listSchedulableAutopilotTriggers = `-- name: ListSchedulableAutopilotTriggers :many
 
-SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, a.workspace_id AS autopilot_workspace_id
+SELECT t.id, t.autopilot_id, t.cron_expression, t.timezone, t.created_at
 FROM autopilot_trigger t
-JOIN autopilot a ON t.autopilot_id = a.id
+JOIN autopilot a ON a.id = t.autopilot_id
 WHERE t.kind = 'schedule'
-  AND t.enabled = true
-  AND t.next_run_at IS NULL
-  AND t.cron_expression IS NOT NULL
+  AND t.enabled = TRUE
   AND a.status = 'active'
+  AND t.cron_expression IS NOT NULL
+  AND t.cron_expression <> ''
+ORDER BY t.id
 `
 
-type RecoverLostTriggersRow struct {
-	ID                   pgtype.UUID        `json:"id"`
-	AutopilotID          pgtype.UUID        `json:"autopilot_id"`
-	Kind                 string             `json:"kind"`
-	Enabled              bool               `json:"enabled"`
-	CronExpression       pgtype.Text        `json:"cron_expression"`
-	Timezone             pgtype.Text        `json:"timezone"`
-	NextRunAt            pgtype.Timestamptz `json:"next_run_at"`
-	WebhookToken         pgtype.Text        `json:"webhook_token"`
-	Label                pgtype.Text        `json:"label"`
-	LastFiredAt          pgtype.Timestamptz `json:"last_fired_at"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-	Provider             string             `json:"provider"`
-	SigningSecret        pgtype.Text        `json:"signing_secret"`
-	EventFilters         []byte             `json:"event_filters"`
-	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
+type ListSchedulableAutopilotTriggersRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
+	CronExpression pgtype.Text        `json:"cron_expression"`
+	Timezone       pgtype.Text        `json:"timezone"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 // =====================
-// Scheduler Recovery
+// Scheduler Queries
 // =====================
-// Finds schedule triggers that were claimed (next_run_at = NULL) but never
-// advanced — typically due to a scheduler crash. Returns them so the scheduler
-// can recompute next_run_at.
-func (q *Queries) RecoverLostTriggers(ctx context.Context) ([]RecoverLostTriggersRow, error) {
-	rows, err := q.db.Query(ctx, recoverLostTriggers)
+// Lists every schedule trigger the autopilot_schedule_dispatch JobSpec
+// should consider this tick. Returns just the columns the scheduler's
+// scope provider + PlansForScope hook need; the full trigger row is
+// re-loaded by the handler so a trigger update between scope-list and
+// handler-run sees the latest enabled / cron values.
+//
+// Filters out webhook / api triggers, disabled triggers, paused/archived
+// autopilots, and any trigger missing its cron expression. ORDER BY id
+// keeps the per-tick scope list stable across replicas.
+func (q *Queries) ListSchedulableAutopilotTriggers(ctx context.Context) ([]ListSchedulableAutopilotTriggersRow, error) {
+	rows, err := q.db.Query(ctx, listSchedulableAutopilotTriggers)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []RecoverLostTriggersRow{}
+	items := []ListSchedulableAutopilotTriggersRow{}
 	for rows.Next() {
-		var i RecoverLostTriggersRow
+		var i ListSchedulableAutopilotTriggersRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.AutopilotID,
-			&i.Kind,
-			&i.Enabled,
 			&i.CronExpression,
 			&i.Timezone,
-			&i.NextRunAt,
-			&i.WebhookToken,
-			&i.Label,
-			&i.LastFiredAt,
 			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Provider,
-			&i.SigningSecret,
-			&i.EventFilters,
-			&i.AutopilotWorkspaceID,
 		); err != nil {
 			return nil, err
 		}

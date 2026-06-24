@@ -156,7 +156,7 @@ func TestManagerPlansForScopeHookDrivesPlans(t *testing.T) {
 
 	// Tick 1: no prior plan, hook returns all 4 plans, MaxPlansPerTick
 	// truncates to {t0, t1}.
-	if err := mgr.runOnce(ctx); err != nil {
+	if err := mgr.RunOnce(ctx); err != nil {
 		t.Fatalf("runOnce tick 1: %v", err)
 	}
 	if hookCalls.Load() == 0 {
@@ -189,7 +189,7 @@ func TestManagerPlansForScopeHookDrivesPlans(t *testing.T) {
 	// latest plan_time (t1, picked by latestPlan ORDER BY plan_time
 	// DESC).
 	hookCalls.Store(0)
-	if err := mgr.runOnce(ctx); err != nil {
+	if err := mgr.RunOnce(ctx); err != nil {
 		t.Fatalf("runOnce tick 2: %v", err)
 	}
 	if hookCalls.Load() == 0 {
@@ -238,7 +238,7 @@ func TestManagerPlansForScopeHookEmptyIsNoOp(t *testing.T) {
 	if err := mgr.Register(*job); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if err := mgr.runOnce(context.Background()); err != nil {
+	if err := mgr.RunOnce(context.Background()); err != nil {
 		t.Fatalf("runOnce: %v", err)
 	}
 	if hookCalls.Load() == 0 {

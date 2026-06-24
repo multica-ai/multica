@@ -291,19 +291,25 @@ RETURNING *;
 -- Scheduler Queries
 -- =====================
 
--- name: ClaimDueScheduleTriggers :many
--- Atomically claim all due schedule triggers to prevent concurrent execution.
--- Joins the autopilot table to ensure only active autopilots are fired.
-UPDATE autopilot_trigger t
-SET next_run_at = NULL
-FROM autopilot a
-WHERE t.autopilot_id = a.id
-  AND t.kind = 'schedule'
-  AND t.enabled = true
-  AND t.next_run_at IS NOT NULL
-  AND t.next_run_at <= now()
+-- name: ListSchedulableAutopilotTriggers :many
+-- Lists every schedule trigger the autopilot_schedule_dispatch JobSpec
+-- should consider this tick. Returns just the columns the scheduler's
+-- scope provider + PlansForScope hook need; the full trigger row is
+-- re-loaded by the handler so a trigger update between scope-list and
+-- handler-run sees the latest enabled / cron values.
+--
+-- Filters out webhook / api triggers, disabled triggers, paused/archived
+-- autopilots, and any trigger missing its cron expression. ORDER BY id
+-- keeps the per-tick scope list stable across replicas.
+SELECT t.id, t.autopilot_id, t.cron_expression, t.timezone, t.created_at
+FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.kind = 'schedule'
+  AND t.enabled = TRUE
   AND a.status = 'active'
-RETURNING t.*, a.workspace_id AS autopilot_workspace_id;
+  AND t.cron_expression IS NOT NULL
+  AND t.cron_expression <> ''
+ORDER BY t.id;
 
 -- =====================
 -- Task Queue (run_only mode)
@@ -330,23 +336,6 @@ UPDATE autopilot_run
 SET status = 'failed', completed_at = now(), failure_reason = 'linked issue was deleted'
 WHERE issue_id = $1
   AND status IN ('issue_created', 'running');
-
--- =====================
--- Scheduler Recovery
--- =====================
-
--- name: RecoverLostTriggers :many
--- Finds schedule triggers that were claimed (next_run_at = NULL) but never
--- advanced — typically due to a scheduler crash. Returns them so the scheduler
--- can recompute next_run_at.
-SELECT t.*, a.workspace_id AS autopilot_workspace_id
-FROM autopilot_trigger t
-JOIN autopilot a ON t.autopilot_id = a.id
-WHERE t.kind = 'schedule'
-  AND t.enabled = true
-  AND t.next_run_at IS NULL
-  AND t.cron_expression IS NOT NULL
-  AND a.status = 'active';
 
 -- =====================
 -- Failure-rate auto-pause

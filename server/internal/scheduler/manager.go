@@ -99,7 +99,7 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	// First tick immediately so a fresh start does not wait a full
 	// interval; backoff to TickInterval thereafter.
-	if err := m.runOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := m.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		m.logger.Warn("scheduler tick error", "error", err)
 	}
 
@@ -111,15 +111,17 @@ func (m *Manager) Run(ctx context.Context) error {
 			m.logger.Info("scheduler stopped", "reason", ctx.Err())
 			return ctx.Err()
 		case <-t.C:
-			if err := m.runOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			if err := m.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				m.logger.Warn("scheduler tick error", "error", err)
 			}
 		}
 	}
 }
 
-// runOnce executes a single tick across every registered job.
-func (m *Manager) runOnce(ctx context.Context) error {
+// RunOnce executes a single tick across every registered job. Exposed
+// for tests, one-shot CLIs, and any caller that wants to drive the
+// scheduler without owning a goroutine.
+func (m *Manager) RunOnce(ctx context.Context) error {
 	now, err := dbNow(ctx, m.pool)
 	if err != nil {
 		return err

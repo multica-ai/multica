@@ -347,7 +347,6 @@ func main() {
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
-	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 
@@ -378,11 +377,19 @@ func main() {
 	schedulerMgr := scheduler.NewManager(pool, scheduler.Options{})
 	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
 		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
-	} else {
-		go func() {
-			_ = schedulerMgr.Run(sweepCtx)
-		}()
 	}
+	// MUL-3551: scheduled-Autopilot dispatch runs on the same DB-backed
+	// scheduler. The job owns its plan_times via PlansForScope (each
+	// trigger has its own cron expression, so the Cadence planner does
+	// not fit). Crash recovery, occurrence-level idempotency, lease
+	// theft, and retry are all reused from the manager + sys_cron_executions
+	// — there is no separate goroutine for scheduled Autopilot anymore.
+	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
+		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
+	}
+	go func() {
+		_ = schedulerMgr.Run(sweepCtx)
+	}()
 
 	if metricsServer != nil {
 		go func() {
