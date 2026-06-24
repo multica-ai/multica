@@ -12,17 +12,15 @@ export { StageNodeDag } from "./stage-node-dag";
 export type { StageNodeDagProps } from "./stage-node-dag";
 export { NodeDetailPanel } from "./node-detail-panel";
 export { StageCreateDialog } from "./stage-create-dialog";
+
+// Panorama (flow canvas) components
+export { StageLane } from "./stage-lane";
+export type { StageLaneProps } from "./stage-lane";
+export { CompactNodeCard } from "./compact-node-card";
+export type { CompactNodeCardProps } from "./compact-node-card";
 export { CriticBadge } from "./critic-badge";
 export type { CriticBadgeProps } from "./critic-badge";
-
-export { PluginCard } from "./plugin-card";
-export type { PluginCardProps } from "./plugin-card";
-export { StageSwimlane } from "./stage-swimlane";
-export type { StageSwimlaneProps } from "./stage-swimlane";
-export { DataFlowArrow } from "./data-flow-arrow";
-export type { DataFlowArrowProps } from "./data-flow-arrow";
-export { ArchitectureDetailPanel } from "./architecture-detail-panel";
-export type { ArchitectureDetailPanelData, ArchitectureDetailPanelProps } from "./architecture-detail-panel";
-
 export { PanoramaSvgOverlay } from "./panorama-svg-overlay";
 export type { PanoramaSvgOverlayProps, EdgePath } from "./panorama-svg-overlay";
+export { ArchitectureDetailPanel } from "./architecture-detail-panel";
+export type { ArchitectureDetailPanelData, ArchitectureDetailPanelProps } from "./architecture-detail-panel";

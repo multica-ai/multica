@@ -152,11 +152,6 @@ describe("WorkflowPanoramaPage", () => {
     expect(screen.getByTestId("compact-node-card-n3")).toBeTruthy();
   });
 
-  it("no longer renders DataFlowArrow between stages", () => {
-    renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
-    expect(screen.queryByTestId("data-flow-arrow")).toBeNull();
-  });
-
   it("renders stage transition gradient between stages", () => {
     renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
     expect(screen.queryAllByTestId("stage-transition-gradient").length).toBeGreaterThan(0);

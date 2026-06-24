@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
-import { computeEdgePaths, type EdgePath } from "./panorama-svg-overlay";
+import { computeEdgePaths } from "./panorama-svg-overlay";
 import type { WorkflowEdge, WorkflowNode } from "@multica/core/types";
 
 const MOCK_NODES: WorkflowNode[] = [

@@ -38,15 +38,6 @@ type PanoramaSelection = {
   focus: "worker" | "critic";
 };
 
-const STAGE_BG_COLORS = [
-  "from-slate-50/40",
-  "from-stone-50/40",
-  "from-blue-50/40",
-  "from-rose-50/40",
-  "from-violet-50/40",
-  "from-amber-50/40",
-] as const;
-
 // Stage transition gradient lookup (6-color cycle -> all pairwise transitions)
 const STAGE_TRANSITION_GRADIENTS = [
   "bg-gradient-to-b from-slate-50/40 to-stone-50/40",
@@ -119,7 +110,7 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
 
   // ── Node/critic position measurement for SVG overlay ──
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const nodeElementMap = useRef(new Map<string, HTMLDivElement>());
+  const nodeElementMap = useRef(new Map<string, HTMLButtonElement>());
   const criticElementMap = useRef(new Map<string, HTMLButtonElement>());
   const [nodePositions, setNodePositions] = useState(new Map<string, DOMRect>());
   const [criticPositions, setCriticPositions] = useState(new Map<string, DOMRect>());
@@ -163,7 +154,7 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
 
   // ── Create callback refs for nodes and critics ──
   const nodeElementRefs = useMemo(() => {
-    const map = new Map<string, (el: HTMLDivElement | null) => void>();
+    const map = new Map<string, (el: HTMLButtonElement | null) => void>();
     for (const node of nodes) {
       map.set(node.id, (el) => {
         if (el) nodeElementMap.current.set(node.id, el);

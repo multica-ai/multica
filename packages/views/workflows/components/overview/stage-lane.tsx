@@ -14,7 +14,7 @@ export interface StageLaneProps {
   pluginLookup: Map<string, BuiltinPlugin | null>;
   onCardClick: (nodeId: string, focus: "worker" | "critic") => void;
   selectedCard?: { nodeId: string; focus: "worker" | "critic" } | null;
-  nodeElementRefs: Map<string, (el: HTMLDivElement | null) => void>;
+  nodeElementRefs: Map<string, (el: HTMLButtonElement | null) => void>;
   criticElementRefs: Map<string, (el: HTMLButtonElement | null) => void>;
 }
 
