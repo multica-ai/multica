@@ -362,7 +362,27 @@ func CleanupRuntimeConfig(workDir, provider string) error {
 
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
 // about the Multica runtime environment and available CLI tools.
+//
+// Two paths live here, gated by the `runtime_brief_slim` feature flag:
+//
+//   - When the flag is OFF (default in production, the safe state per the
+//     standard "off = legacy" convention): the legacy verbose brief
+//     below ships unchanged. This is the same byte-for-byte content the
+//     daemon has emitted for ~2 years (modulo MUL-3555's fold-aware
+//     `--full` note, MUL-2538's parent-notification removal, etc.).
+//   - When the flag is ON (currently enabled in staging YAML only): the
+//     post-MUL-3560 slim brief is rendered instead by
+//     `buildMetaSkillContentSlim` (runtime_config_sections.go). Slim
+//     applies kind-driven section gating + per-section prose compression
+//     for ~-7k chars on a typical comment-triggered task.
+//
+// Production stays on the legacy brief until staging telemetry confirms
+// the slim brief does not regress agent behaviour. See MUL-3560 + the
+// `runtime_brief_slim` flag documentation in runtime_config_flag.go.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
+	if useSlimBrief() {
+		return buildMetaSkillContentSlim(provider, ctx)
+	}
 	var b strings.Builder
 
 	b.WriteString("# Multica Agent Runtime\n\n")
