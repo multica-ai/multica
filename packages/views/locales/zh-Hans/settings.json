@@ -334,6 +334,28 @@
       "checking": "检查中..."
     }
   },
+  "workspace_env": {
+    "section_title": "全局环境变量",
+    "intro": "会注入到该工作区内每个智能体进程。同名的智能体专属变量优先生效。",
+    "not_revealed_title_other": "已配置 {{count}} 个全局变量",
+    "not_revealed_empty": "尚未配置全局环境变量。",
+    "not_revealed_hint": "值会保持隐藏，直到你主动显示。每次显示和编辑都会记录到工作区审计日志。",
+    "reveal_action": "显示并编辑",
+    "revealing": "显示中...",
+    "reveal_failed_toast": "加载全局环境变量失败",
+    "duplicate_keys_toast": "环境变量 key 重复",
+    "saved_toast": "已保存全局环境变量",
+    "save_failed_toast": "保存全局环境变量失败",
+    "add": "添加",
+    "save": "保存",
+    "unsaved_changes": "未保存的更改",
+    "key_placeholder": "KEY",
+    "value_placeholder": "value",
+    "show_value_aria": "显示值",
+    "hide_value_aria": "隐藏值",
+    "remove_aria": "移除变量",
+    "empty_editable": "尚未配置全局环境变量。添加一个后会在每个智能体启动时注入。"
+  },
   "members": {
     "section_title": "成员（{{count}}）",
     "invite_title": "邀请成员",

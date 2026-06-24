@@ -49,13 +49,6 @@ type WorkspaceResponse struct {
 }
 
 func workspaceToResponse(w db.Workspace) WorkspaceResponse {
-	var settings any
-	if w.Settings != nil {
-		json.Unmarshal(w.Settings, &settings)
-	}
-	if settings == nil {
-		settings = map[string]any{}
-	}
 	var repos any
 	if w.Repos != nil {
 		json.Unmarshal(w.Repos, &repos)
@@ -69,7 +62,7 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Slug:        w.Slug,
 		Description: textToPtr(w.Description),
 		Context:     textToPtr(w.Context),
-		Settings:    settings,
+		Settings:    redactWorkspaceSettings(w.Settings),
 		Repos:       repos,
 		IssuePrefix: w.IssuePrefix,
 		AvatarURL:   textToPtr(w.AvatarUrl),
@@ -323,6 +316,11 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Settings != nil {
 		s, _ := json.Marshal(req.Settings)
+		if current, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
+			if preserved, perr := encodeWorkspaceSettingsWithGlobalEnv(s, unmarshalWorkspaceGlobalEnv(current.Settings)); perr == nil {
+				s = preserved
+			}
+		}
 		params.Settings = s
 	}
 	if req.Repos != nil {

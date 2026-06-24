@@ -21,6 +21,7 @@ import type {
   TimelineEntry,
   User,
   WebhookDelivery,
+  WorkspaceEnvResponse,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
@@ -189,6 +190,16 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_server_url: "",
   daemon_app_url: "",
   workspace_creation_disabled: false,
+};
+
+export const WorkspaceEnvResponseSchema = z.object({
+  workspace_id: z.string(),
+  global_env: z.record(z.string(), z.string()).default({}),
+}).loose();
+
+export const EMPTY_WORKSPACE_ENV_RESPONSE: WorkspaceEnvResponse = {
+  workspace_id: "",
+  global_env: {},
 };
 
 export const CommentSchema = z.object({

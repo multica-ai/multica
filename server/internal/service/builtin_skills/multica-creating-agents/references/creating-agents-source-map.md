@@ -75,21 +75,34 @@ only.
 | Agent actors denied | 80–84 | `if actorType == "agent"` → 403 "agents may not access env management endpoints" (MUL-2600 impersonation guard) |
 | Owner/admin only | 86 | `requireWorkspaceRole(..., "owner", "admin")` |
 
+## Workspace env endpoint — `server/internal/handler/workspace_env.go`
+
+| Contract | Line | Behavior |
+|---|---|---|
+| `GET /api/workspaces/{id}/env` | 105–134 | owner/admin plaintext reveal; writes `workspace_env_revealed` activity with keys/count only |
+| `PUT /api/workspaces/{id}/env` | 137–213 | owner/admin full-map update; honours `****` preservation via the shared env merge helper and writes `workspace_env_updated` activity |
+| Redacted workspace settings | 72–83 | generic workspace responses replace `settings.global_env` with `has_values`/`key_count` metadata |
+| Settings preservation | `workspace.go` 316–322 | generic workspace settings updates preserve the stored `global_env`; only the `/env` endpoint mutates it |
+
 ## Routes — `server/cmd/server/router.go`
 
 | Contract | Line | Behavior |
 |---|---|---|
-| `GET /env` | 603 | `h.GetAgentEnv` (plaintext read, gated) |
-| `PUT /env` | 604 | `h.UpdateAgentEnv` (full-map overwrite, gated) |
+| Workspace `GET /env` | 695 | `h.GetWorkspaceEnv` (plaintext global env read, gated) |
+| Workspace `PUT /env` | 696 | `h.UpdateWorkspaceEnv` (full-map global env overwrite, gated) |
+| Agent `GET /env` | 978 | `h.GetAgentEnv` (plaintext read, gated) |
+| Agent `PUT /env` | 979 | `h.UpdateAgentEnv` (full-map overwrite, gated) |
 
 ## Claim-time injection — `server/internal/handler/daemon.go`
 
 | Contract | Line | Behavior |
 |---|---|---|
-| Fresh agent re-read on claim | 1109–1111 | `GetAgent(task.AgentID)` — claim uses persisted fields, not create output |
-| Workspace skills FIRST | 1115 | `skills := h.TaskService.LoadAgentSkills(...)` |
-| Built-ins appended | 1116 | `skills = append(skills, h.TaskService.BuiltinSkills()...)` |
-| Runtime payload | 1130–1143 | `TaskAgentData` carries `Instructions`, `Skills`, `CustomEnv`, `CustomArgs`, `Model`, `ThinkingLevel`, `McpConfig` (1130–1131, 1140) — confirms these are runtime-consumed; `description`, `visibility`, and `max_concurrent_tasks` are absent (not runtime-prompt fields) |
+| Workspace global env read | 1215–1218 | reads `workspace.settings.global_env` at claim time so each task gets the current workspace-level env |
+| Fresh agent re-read on claim | 1225 | `GetAgent(task.AgentID)` — claim uses persisted fields, not create output |
+| Workspace skills FIRST | 1229 | `skills := h.TaskService.LoadAgentSkills(...)` |
+| Built-ins appended | 1233 | `skills = append(skills, h.TaskService.BuiltinSkills()...)` |
+| Runtime env merge | `agent.go` 373–430, `daemon.go` 1263 | workspace env + agent `custom_env` are merged into `TaskAgentData.CustomEnv`; agent keys win and blocked internal keys are filtered |
+| Runtime payload | 1258–1268 | `TaskAgentData` carries `Instructions`, `Skills`, merged `CustomEnv`, `CustomArgs`, `Model`, `ThinkingLevel`, `McpConfig` — confirms these are runtime-consumed; `description`, `visibility`, and `max_concurrent_tasks` are absent (not runtime-prompt fields) |
 
 ## Skill loading — `server/internal/service/task.go`
 

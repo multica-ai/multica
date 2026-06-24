@@ -376,5 +376,28 @@
         "description": "Create and work on issues"
       }
     }
+  },
+  "workspace_env": {
+    "section_title": "Global environment",
+    "intro": "Injected into every agent process in this workspace. Agent-specific variables with the same key take precedence.",
+    "not_revealed_title_one": "{{count}} global variable configured",
+    "not_revealed_title_other": "{{count}} global variables configured",
+    "not_revealed_empty": "No global environment variables configured.",
+    "not_revealed_hint": "Values stay masked until you reveal them. Every reveal and edit is recorded in the workspace audit log.",
+    "reveal_action": "Reveal & edit",
+    "revealing": "Revealing...",
+    "reveal_failed_toast": "Failed to load global environment variables",
+    "duplicate_keys_toast": "Duplicate environment variable keys",
+    "saved_toast": "Global environment variables saved",
+    "save_failed_toast": "Failed to save global environment variables",
+    "add": "Add",
+    "save": "Save",
+    "unsaved_changes": "Unsaved changes",
+    "key_placeholder": "KEY",
+    "value_placeholder": "value",
+    "show_value_aria": "Show value",
+    "hide_value_aria": "Hide value",
+    "remove_aria": "Remove variable",
+    "empty_editable": "No global environment variables configured. Add one to inject it into every agent at launch."
   }
 }

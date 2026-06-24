@@ -334,6 +334,28 @@
       "checking": "確認中…"
     }
   },
+  "workspace_env": {
+    "section_title": "グローバル環境変数",
+    "intro": "このワークスペース内のすべてのエージェントプロセスに注入されます。同じキーのエージェント固有変数が優先されます。",
+    "not_revealed_title_other": "{{count}} 個のグローバル変数が設定されています",
+    "not_revealed_empty": "グローバル環境変数は設定されていません。",
+    "not_revealed_hint": "値は表示するまで伏せられます。表示と編集はすべてワークスペース監査ログに記録されます。",
+    "reveal_action": "表示して編集",
+    "revealing": "表示中...",
+    "reveal_failed_toast": "グローバル環境変数を読み込めませんでした",
+    "duplicate_keys_toast": "環境変数キーが重複しています",
+    "saved_toast": "グローバル環境変数を保存しました",
+    "save_failed_toast": "グローバル環境変数を保存できませんでした",
+    "add": "追加",
+    "save": "保存",
+    "unsaved_changes": "未保存の変更",
+    "key_placeholder": "KEY",
+    "value_placeholder": "value",
+    "show_value_aria": "値を表示",
+    "hide_value_aria": "値を隠す",
+    "remove_aria": "変数を削除",
+    "empty_editable": "グローバル環境変数は設定されていません。追加すると各エージェントの起動時に注入されます。"
+  },
   "members": {
     "section_title": "メンバー（{{count}}）",
     "invite_title": "メンバーを招待",
