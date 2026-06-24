@@ -58,6 +58,13 @@
     "cancel": "취소",
     "confirm": "삭제"
   },
+  "delete_group": {
+    "aria_label": "그룹 {{name}} 삭제",
+    "title": "그룹 삭제",
+    "description": "그룹 \"{{name}}\"을(를) 삭제하시겠습니까? 그룹의 채널은 미분류로 이동하며 삭제되지 않습니다.",
+    "cancel": "취소",
+    "confirm": "삭제"
+  },
   "panel_header": {
     "replies": "답글",
     "members_settings": "멤버 & 설정",
@@ -98,5 +105,16 @@
     "converged": "해당 메시지의 최신 답장으로 이동했습니다",
     "released": "타임라인으로 이동했습니다",
     "failed": "메시지 이동에 실패했습니다"
+  },
+  "drag": {
+    "instructions": "메시지를 길게 눌러 드래그하세요. 다른 메시지에 놓으면 해당 메시지의 최신 답장으로 통합되고, 메시지 목록에 놓으면 답장을 타임라인으로 해제합니다.",
+    "picked_up": "선택함: {{preview}}",
+    "dropped": "놓았습니다.",
+    "dropped_over": "{{target}}에 놓았습니다.",
+    "cancelled": "드래그가 취소되었습니다.",
+    "aria_message": "메시지: {{preview}}",
+    "aria_reply": "답장: {{preview}}",
+    "aria_group": "채널 그룹: {{name}}",
+    "aria_channel": "채널: {{name}}"
   }
 }

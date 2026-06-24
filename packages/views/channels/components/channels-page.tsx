@@ -22,6 +22,7 @@ import {
   useDroppable,
   useSensor,
   useSensors,
+  type Announcements,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
@@ -165,6 +166,26 @@ const REPLY_DRAG_PREFIX = "reply:";
 const MSG_LIST_DROP_ID = "channel-msg-list";
 const idFromDragId = (id: string, prefix: string) => id.slice(prefix.length);
 
+// previewOf returns a short, screen-reader-safe preview of a message for the
+// drag announcements / aria-labels (a full message can be long). Splitting on
+// code points (Array.from) keeps emoji / surrogate pairs intact.
+function previewOf(content: string | undefined | null): string | undefined {
+  if (!content) return undefined;
+  const s = content.trim().replace(/\s+/g, " ");
+  if (!s) return undefined;
+  const chars = Array.from(s);
+  return chars.length > 60 ? `${chars.slice(0, 60).join("")}…` : s;
+}
+
+// dragLabel extracts a screen-reader label from a dnd-kit active/over data
+// payload. Channel messages/replies store { message }; groups/channels store
+// { label }. Returns undefined so a missing label yields no announcement.
+type DragData = { message?: { content?: string }; label?: string } | undefined;
+function dragLabel(data: unknown): string | undefined {
+  const d = data as DragData;
+  return d?.label ?? previewOf(d?.message?.content);
+}
+
 const SIDE_PANEL_DEFAULT_WIDTH = 360;
 const SIDE_PANEL_MIN_WIDTH = 320;
 const SIDE_PANEL_MAX_WIDTH = 520;
@@ -221,14 +242,34 @@ function scrollToElement(container: HTMLElement | null, target: HTMLElement) {
 }
 
 // Scroll the message list to its very bottom by setting scrollTop directly.
-// Replaces bottomRef.scrollIntoView for the follow-new-messages path: that API
-// can mis-fire inside the nested scrollable layout (the page layout also scrolls),
-// and a smooth animation it starts gets cancelled by the WS-driven message
-// refetch that follows a send. Setting scrollTop synchronously on commit is
-// reliable and immediate.
+// Instant and reliable — used for incoming messages and initial page loads.
 function scrollListToBottom(container: HTMLElement | null) {
   if (!container) return;
   container.scrollTop = container.scrollHeight;
+}
+
+// Animated smooth scroll to bottom using a rAF loop. Unlike native
+// scrollTo({behavior:'smooth'}), this can't be cancelled by WS-driven
+// refetches/re-renders, and the onDone callback lets the caller keep the
+// self-sent flag true for the entire animation duration so the "jump to last
+// read" indicator doesn't flash mid-scroll.
+function animateScrollToBottom(container: HTMLElement | null, onDone?: () => void) {
+  if (!container) { onDone?.(); return; }
+  const el = container;
+  const start = el.scrollTop;
+  const end = el.scrollHeight;
+  const distance = end - start;
+  if (distance <= 0) { onDone?.(); return; }
+  const duration = Math.min(Math.max(distance / 2, 150), 400);
+  let startTime: number | undefined;
+  function step(now: number) {
+    if (startTime === undefined) startTime = now;
+    const t = Math.min((now - startTime) / duration, 1);
+    el.scrollTop = start + distance * (1 - Math.pow(1 - t, 3));
+    if (t < 1) requestAnimationFrame(step);
+    else onDone?.();
+  }
+  requestAnimationFrame(step);
 }
 
 function formatTime(ts?: string): string {
@@ -285,6 +326,31 @@ function MessageDndProvider({
   // keeps working on message content.
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+  );
+
+  // Localized, pointer-honest screen-reader support. The default dnd-kit
+  // announcements read active.id ("msg:<uuid>") and promise keyboard drag
+  // ("press the space bar") that this long-press pointer interaction does not
+  // support — so override both: announcements read a message preview, and the
+  // instructions describe the real long-press interaction.
+  const announcements = useMemo<Announcements>(
+    () => ({
+      onDragStart: ({ active }) => {
+        const preview = dragLabel(active.data.current);
+        return preview ? t($ => $.drag.picked_up, { preview }) : undefined;
+      },
+      onDragOver: () => undefined,
+      onDragEnd: ({ over }) => {
+        const target = over ? dragLabel(over.data.current) : undefined;
+        return target ? t($ => $.drag.dropped_over, { target }) : t($ => $.drag.dropped);
+      },
+      onDragCancel: () => t($ => $.drag.cancelled),
+    }),
+    [t],
+  );
+  const screenReaderInstructions = useMemo(
+    () => ({ draggable: t($ => $.drag.instructions) }),
+    [t],
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
@@ -347,6 +413,7 @@ function MessageDndProvider({
       collisionDetection={closestCenter}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
+      accessibility={{ announcements, screenReaderInstructions }}
     >
       {children}
       <DragOverlay dropAnimation={null}>
@@ -706,6 +773,29 @@ function ChannelList({
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
 
+  // Localized, pointer-honest screen-reader support for the channel/group list
+  // drag (mirrors the message DndContext): announcements read a group/channel
+  // name instead of the bare id, and instructions describe the real interaction.
+  const announcements = useMemo<Announcements>(
+    () => ({
+      onDragStart: ({ active }) => {
+        const preview = dragLabel(active.data.current);
+        return preview ? t($ => $.drag.picked_up, { preview }) : undefined;
+      },
+      onDragOver: () => undefined,
+      onDragEnd: ({ over }) => {
+        const target = over ? dragLabel(over.data.current) : undefined;
+        return target ? t($ => $.drag.dropped_over, { target }) : t($ => $.drag.dropped);
+      },
+      onDragCancel: () => t($ => $.drag.cancelled),
+    }),
+    [t],
+  );
+  const screenReaderInstructions = useMemo(
+    () => ({ draggable: t($ => $.drag.instructions) }),
+    [t],
+  );
+
   const invalidateGroupsAndList = () => {
     qc.invalidateQueries({ queryKey: channelKeys.groups(wsId) });
     qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
@@ -741,6 +831,10 @@ function ChannelList({
   // the backend DeleteChannel gate (canManage = wsAdmin || channelOwn). The
   // AlertDialog confirms before the irreversible delete.
   const [pendingDelete, setPendingDelete] = useState<ChannelSummary | null>(null);
+  // Group deletion is non-destructive to channels (they fall back to Ungrouped
+  // via channel.group_id ON DELETE SET NULL), but it scatters them out of the
+  // group — confirm before applying, mirroring the channel-delete dialog.
+  const [pendingGroupDelete, setPendingGroupDelete] = useState<{ id: string; name: string } | null>(null);
   const deleteChannelMutation = useMutation({
     mutationFn: (id: string) => api.deleteChannel(id),
     onSuccess: (_data, id) => {
@@ -1025,6 +1119,7 @@ function ChannelList({
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
+            accessibility={{ announcements, screenReaderInstructions }}
           >
             <SortableContext items={allIds} strategy={verticalListSortingStrategy}>
               <RootDropZone>
@@ -1045,7 +1140,7 @@ function ChannelList({
                     onRenameChange={setEditingName}
                     onRenameSubmit={() => handleRenameSubmit(gId)}
                     onRenameCancel={() => setEditingGroupId(null)}
-                    onDelete={() => deleteGroupMutation.mutate(gId)}
+                    onDelete={() => setPendingGroupDelete({ id: gId, name: g.name })}
                     onSelect={onSelect}
                     isWorkspaceAdmin={isWorkspaceAdmin}
                     onRequestDeleteChannel={setPendingDelete}
@@ -1124,6 +1219,32 @@ function ChannelList({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={!!pendingGroupDelete} onOpenChange={(v) => !v && setPendingGroupDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t($ => $.delete_group.title)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t($ => $.delete_group.description, { name: pendingGroupDelete?.name ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteGroupMutation.isPending}>
+              {t($ => $.delete_group.cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingGroupDelete) deleteGroupMutation.mutate(pendingGroupDelete.id);
+                setPendingGroupDelete(null);
+              }}
+              disabled={deleteGroupMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t($ => $.delete_group.confirm)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1183,6 +1304,7 @@ function ChannelGroupSection({
   // deliberate move. Interactive children opt out by stopping pointerdown.
   const { attributes, listeners, setNodeRef: setDragRef, isDragging: isGroupDragging } = useDraggable({
     id: `group:${groupId}`,
+    data: { label: name },
   });
 
   return (
@@ -1200,6 +1322,7 @@ function ChannelGroupSection({
             ref={setDragRef}
             {...attributes}
             {...listeners}
+            aria-label={t($ => $.drag.aria_group, { name })}
             className="group/section flex h-7 cursor-grab items-center gap-1 rounded-md px-1 text-xs font-medium text-muted-foreground hover:bg-accent active:cursor-grabbing"
             onClick={onToggle}
           >
@@ -1317,6 +1440,7 @@ function SortableChannelItem({
   const { t } = useT("channels");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: channel.id,
+    data: { label: channel.name },
   });
   const style = { transform: CSS.Transform.toString(transform), transition };
   // Mirrors the backend DeleteChannel gate (canManage = wsAdmin || channelOwn):
@@ -1329,6 +1453,7 @@ function SortableChannelItem({
       style={style}
       {...attributes}
       {...listeners}
+      aria-label={t($ => $.drag.aria_channel, { name: channel.name })}
       className={cn("group/item relative", isDragging && "opacity-50")}
     >
       <button
@@ -1467,6 +1592,9 @@ function MessageList({
   });
   const [isEmpty, setIsEmpty] = useState(true);
   const prevMsgCount = useRef(messages.length);
+  // Set to true when the current user sends a message so the live-follow
+  // effect can scroll to bottom unconditionally (regardless of isNearBottom).
+  const pendingSelfScrollRef = useRef(false);
   const paths = useWorkspacePaths();
   const nav = useNavigation();
   const linkedMessageId = nav.searchParams.get("message")?.trim() || null;
@@ -1514,12 +1642,30 @@ function MessageList({
   // Live follow: a new message arriving while the user is already pinned to the
   // bottom keeps them there. Don't yank if they've scrolled up to read history
   // or are parked at the unread boundary.
+  // Exception: if the user just sent a message themselves (pendingSelfScrollRef),
+  // always scroll to bottom so their own message is immediately visible.
   useEffect(() => {
     const prev = prevMsgCount.current;
     prevMsgCount.current = messages.length;
     if (linkedMessageId) return;
-    if (messages.length > prev && prev > 0 && isNearBottom()) {
-      requestAnimationFrame(() => scrollListToBottom(scrollRef.current));
+    if (messages.length > prev && prev > 0) {
+      const selfSent = pendingSelfScrollRef.current;
+      if (selfSent) {
+        // Keep the flag true during the entire animation so updateJumpVisibility
+        // suppresses the "jump to last read" indicator (the channel-list refetch
+        // may set hasUnread=true before the messages refetch lands, and the
+        // scroll may not have reached the bottom yet).
+        requestAnimationFrame(() =>
+          animateScrollToBottom(scrollRef.current, () => {
+            pendingSelfScrollRef.current = false;
+          }),
+        );
+      } else if (isNearBottom()) {
+        requestAnimationFrame(() => scrollListToBottom(scrollRef.current));
+        pendingSelfScrollRef.current = false;
+      } else {
+        pendingSelfScrollRef.current = false;
+      }
     }
   }, [messages.length, linkedMessageId, isNearBottom]);
 
@@ -1539,14 +1685,24 @@ function MessageList({
   // of view (scrolled past it) or above the loaded window (many unread).
   const updateJumpVisibility = useCallback(() => {
     if (!hasUnread || !firstUnreadMessageId) { setShowJumpToLastRead(false); return; }
+    // Suppress during self-sent scroll: the channel-list refetch may set
+    // hasUnread=true before the messages refetch lands (!firstUnreadInPage),
+    // and the smooth scroll may not have reached the bottom yet. The flag
+    // stays true for the entire animation (cleared in animateScrollToBottom's
+    // onDone callback).
+    if (pendingSelfScrollRef.current) { setShowJumpToLastRead(false); return; }
     if (!firstUnreadInPage) { setShowJumpToLastRead(true); return; }
+    // At the bottom: the user has seen all messages and onMarkRead is about to
+    // fire. Suppress the indicator so it doesn't flash during the brief window
+    // between the scroll-to-bottom and hasUnread clearing.
+    if (isNearBottom()) { setShowJumpToLastRead(false); return; }
     const el = document.getElementById(`channel-msg-${firstUnreadMessageId}`);
     const container = scrollRef.current;
     if (!el || !container) { setShowJumpToLastRead(false); return; }
     const c = container.getBoundingClientRect();
     const e = el.getBoundingClientRect();
     setShowJumpToLastRead(e.bottom < c.top || e.top > c.bottom);
-  }, [hasUnread, firstUnreadMessageId, firstUnreadInPage]);
+  }, [hasUnread, firstUnreadMessageId, firstUnreadInPage, isNearBottom]);
 
   useEffect(() => {
     updateJumpVisibility();
@@ -1633,13 +1789,23 @@ function MessageList({
 
   const sendMutation = useMutation({
     mutationFn: (content: string) => api.sendChannelMessage(channelId, { content }),
+    // Set the self-sent flag before the HTTP request starts — not in onSuccess.
+    // If the message triggers an agent task, the server emits a task:queued WS
+    // event that invalidates channelMessages. That event can arrive (and its
+    // refetch can complete, delivering the new message) before the HTTP response
+    // triggers onSuccess. Setting the flag in onMutate ensures it's ready
+    // regardless of which path delivers the message to the list.
+    onMutate: () => { pendingSelfScrollRef.current = true; },
     onSuccess: () => {
       editorRef.current?.clearContent();
       setIsEmpty(true);
       qc.invalidateQueries({ queryKey: channelKeys.channelMessages(wsId, channelId) });
       qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
     },
-    onError: () => toast.error(t($ => $.send_failed)),
+    onError: () => {
+      pendingSelfScrollRef.current = false;
+      toast.error(t($ => $.send_failed));
+    },
   });
 
   const openModal = useModalStore((s) => s.open);
@@ -1822,6 +1988,9 @@ function MessageRow({
         <li
           ref={setRowRef}
           id={`channel-msg-${message.id}`}
+          aria-label={
+            isSystem ? undefined : t($ => $.drag.aria_message, { preview: previewOf(message.content) ?? "" })
+          }
           {...dragProps}
           className={cn(
             "group flex cursor-grab items-start gap-3 rounded-md p-2 hover:bg-muted/50 active:cursor-grabbing",
@@ -1991,7 +2160,7 @@ function ChannelLinkedIssuesStrip({ issues }: { issues: ChannelMessage["issues"]
           // doesn't capture the right-click — the native menu must surface for
           // "Copy link" to work on the chip's href.
           onContextMenu={(e) => e.stopPropagation()}
-          className="inline-flex items-center gap-1 rounded-md border bg-muted/30 px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+          className="inline-flex items-center gap-1 rounded-md border bg-muted/30 px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
         >
           <FileText className="h-3 w-3" />
           <span className="font-medium text-foreground">{issue.identifier ?? `#${issue.number}`}</span>
@@ -2249,6 +2418,7 @@ function PanelMessage({
     <div
       ref={drag.setNodeRef}
       id={`channel-reply-${message.id}`}
+      aria-label={canDragReply ? t($ => $.drag.aria_reply, { preview: previewOf(message.content) ?? "" }) : undefined}
       {...(canDragReply ? { ...drag.attributes, ...drag.listeners } : {})}
       className={cn(
         "flex items-start gap-2",

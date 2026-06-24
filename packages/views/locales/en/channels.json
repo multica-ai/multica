@@ -59,6 +59,13 @@
     "cancel": "Cancel",
     "confirm": "Delete"
   },
+  "delete_group": {
+    "aria_label": "Delete group {{name}}",
+    "title": "Delete group",
+    "description": "Delete group \"{{name}}\"? Its channels move to Ungrouped — they are not deleted.",
+    "cancel": "Cancel",
+    "confirm": "Delete"
+  },
   "panel_header": {
     "replies": "Replies",
     "members_settings": "Members & Settings",
@@ -99,5 +106,16 @@
     "converged": "Moved into thread as the latest reply",
     "released": "Released to the channel timeline",
     "failed": "Failed to move message"
+  },
+  "drag": {
+    "instructions": "Long-press a message to drag it. Drop onto another message to converge it as that message's latest reply, or onto the message list to release a reply back to the timeline.",
+    "picked_up": "Picked up: {{preview}}",
+    "dropped": "Dropped.",
+    "dropped_over": "Dropped over {{target}}.",
+    "cancelled": "Drag cancelled.",
+    "aria_message": "Message: {{preview}}",
+    "aria_reply": "Reply: {{preview}}",
+    "aria_group": "Channel group: {{name}}",
+    "aria_channel": "Channel: {{name}}"
   }
 }

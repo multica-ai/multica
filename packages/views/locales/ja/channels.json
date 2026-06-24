@@ -58,6 +58,13 @@
     "cancel": "キャンセル",
     "confirm": "削除"
   },
+  "delete_group": {
+    "aria_label": "グループ {{name}} を削除",
+    "title": "グループを削除",
+    "description": "グループ「{{name}}」を削除しますか？グループ内のチャンネルは「グループなし」に移動し、削除されません。",
+    "cancel": "キャンセル",
+    "confirm": "削除"
+  },
   "panel_header": {
     "replies": "返信",
     "members_settings": "メンバーと設定",
@@ -98,5 +105,16 @@
     "converged": "そのメッセージの最新返信に移動しました",
     "released": "タイムラインに移動しました",
     "failed": "メッセージの移動に失敗しました"
+  },
+  "drag": {
+    "instructions": "メッセージを長押ししてドラッグします。別のメッセージにドロップするとそのメッセージの最新返信として統合し、メッセージリストにドロップすると返信をタイムラインに解放します。",
+    "picked_up": "取得しました: {{preview}}",
+    "dropped": "ドロップしました。",
+    "dropped_over": "{{target}}にドロップしました。",
+    "cancelled": "ドラッグをキャンセルしました。",
+    "aria_message": "メッセージ: {{preview}}",
+    "aria_reply": "返信: {{preview}}",
+    "aria_group": "チャネルグループ: {{name}}",
+    "aria_channel": "チャネル: {{name}}"
   }
 }

@@ -49,12 +49,19 @@
     "copy_link": "复制链接",
     "reply": "回复",
     "convert_issue": "转换为 Issue",
-    "convert_agent": "由 Agent 转为 Issue"
+    "convert_agent": "由智能体转为 Issue"
   },
   "delete_channel": {
     "aria_label": "删除频道 {{name}}",
     "title": "删除频道",
     "description": "确定删除频道「{{name}}」吗？此操作不可撤销，频道内的所有消息和线程都将被删除。",
+    "cancel": "取消",
+    "confirm": "删除"
+  },
+  "delete_group": {
+    "aria_label": "删除分组 {{name}}",
+    "title": "删除分组",
+    "description": "确定删除分组「{{name}}」吗？分组内的频道将移至未分组，不会被删除。",
     "cancel": "取消",
     "confirm": "删除"
   },
@@ -98,5 +105,16 @@
     "converged": "已收敛为该消息的最新回复",
     "released": "已释放为主消息",
     "failed": "移动消息失败"
+  },
+  "drag": {
+    "instructions": "长按消息可拖动。拖到另一条消息上可将其收敛为该消息的最新回复；拖到主消息列表可将回复释放为主消息。",
+    "picked_up": "已拾取：{{preview}}",
+    "dropped": "已放置。",
+    "dropped_over": "已放置到「{{target}}」。",
+    "cancelled": "已取消拖拽。",
+    "aria_message": "消息：{{preview}}",
+    "aria_reply": "回复：{{preview}}",
+    "aria_group": "频道分组：{{name}}",
+    "aria_channel": "频道：{{name}}"
   }
 }
