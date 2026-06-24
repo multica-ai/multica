@@ -341,6 +341,7 @@ func main() {
 		BusinessMetrics:    businessMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
+		FeatureFlags:       flags,
 		HeartbeatScheduler: heartbeatScheduler,
 	})
 
