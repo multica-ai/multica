@@ -266,6 +266,7 @@ type ChannelMessage struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	ReplyToID   pgtype.UUID        `json:"reply_to_id"`
+	OrderAt     pgtype.Timestamptz `json:"order_at"`
 }
 
 type ChannelThread struct {

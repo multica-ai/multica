@@ -116,7 +116,7 @@ func (q *Queries) CreateChannelGroup(ctx context.Context, arg CreateChannelGroup
 const createChannelMessage = `-- name: CreateChannelMessage :one
 INSERT INTO channel_message (thread_id, channel_id, workspace_id, author_type, author_id, content)
 VALUES ($1, $2, $3, $4, $6, $5)
-RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id
+RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id, order_at
 `
 
 type CreateChannelMessageParams struct {
@@ -149,6 +149,7 @@ func (q *Queries) CreateChannelMessage(ctx context.Context, arg CreateChannelMes
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ReplyToID,
+		&i.OrderAt,
 	)
 	return i, err
 }
@@ -156,7 +157,7 @@ func (q *Queries) CreateChannelMessage(ctx context.Context, arg CreateChannelMes
 const createChannelMessageReply = `-- name: CreateChannelMessageReply :one
 INSERT INTO channel_message (thread_id, channel_id, workspace_id, author_type, author_id, content, reply_to_id)
 VALUES ($1, $2, $3, $4, $7, $5, $6)
-RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id
+RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id, order_at
 `
 
 type CreateChannelMessageReplyParams struct {
@@ -192,6 +193,7 @@ func (q *Queries) CreateChannelMessageReply(ctx context.Context, arg CreateChann
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ReplyToID,
+		&i.OrderAt,
 	)
 	return i, err
 }
@@ -199,7 +201,7 @@ func (q *Queries) CreateChannelMessageReply(ctx context.Context, arg CreateChann
 const createChannelMessageTopLevel = `-- name: CreateChannelMessageTopLevel :one
 INSERT INTO channel_message (channel_id, workspace_id, author_type, author_id, content)
 VALUES ($1, $2, $3, $5, $4)
-RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id
+RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id, order_at
 `
 
 type CreateChannelMessageTopLevelParams struct {
@@ -231,6 +233,7 @@ func (q *Queries) CreateChannelMessageTopLevel(ctx context.Context, arg CreateCh
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ReplyToID,
+		&i.OrderAt,
 	)
 	return i, err
 }
@@ -358,6 +361,24 @@ func (q *Queries) DeleteChannelThread(ctx context.Context, id pgtype.UUID) error
 	return err
 }
 
+const deleteChannelThreadIfEmptyAndNoIssue = `-- name: DeleteChannelThreadIfEmptyAndNoIssue :exec
+DELETE FROM channel_thread t
+WHERE t.id = $1
+  AND NOT EXISTS (SELECT 1 FROM channel_message m WHERE m.thread_id = t.id)
+  AND NOT EXISTS (SELECT 1 FROM issue i WHERE i.source_thread_id = t.id)
+`
+
+// Removes a thread only when it has zero messages (no replies) and no linked
+// issue — the terminal state after releasing the last reply of a thread that
+// never produced an issue. channel_message.thread_id ON DELETE CASCADE makes
+// deleting a thread with replies catastrophic, so the NOT EXISTS guards are
+// load-bearing. A thread still linked to an issue is preserved (the issue's
+// source_thread_id back-reference must stay valid).
+func (q *Queries) DeleteChannelThreadIfEmptyAndNoIssue(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChannelThreadIfEmptyAndNoIssue, id)
+	return err
+}
+
 const getChannel = `-- name: GetChannel :one
 SELECT id, workspace_id, name, slug, description, access_mode, is_locked, is_archived, created_by, created_at, updated_at, group_id, position FROM channel WHERE id = $1 AND workspace_id = $2
 `
@@ -390,7 +411,7 @@ func (q *Queries) GetChannel(ctx context.Context, arg GetChannelParams) (Channel
 
 const getChannelContext = `-- name: GetChannelContext :many
 
-SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id, m.order_at,
     u.name AS author_name,
     u.avatar_url AS author_avatar_url
 FROM channel_message m
@@ -416,6 +437,7 @@ type GetChannelContextRow struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	ReplyToID       pgtype.UUID        `json:"reply_to_id"`
+	OrderAt         pgtype.Timestamptz `json:"order_at"`
 	AuthorName      pgtype.Text        `json:"author_name"`
 	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
 }
@@ -442,6 +464,7 @@ func (q *Queries) GetChannelContext(ctx context.Context, arg GetChannelContextPa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ReplyToID,
+			&i.OrderAt,
 			&i.AuthorName,
 			&i.AuthorAvatarUrl,
 		); err != nil {
@@ -478,7 +501,7 @@ func (q *Queries) GetChannelMember(ctx context.Context, arg GetChannelMemberPara
 }
 
 const getChannelMessage = `-- name: GetChannelMessage :one
-SELECT id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id FROM channel_message WHERE id = $1
+SELECT id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id, order_at FROM channel_message WHERE id = $1
 `
 
 func (q *Queries) GetChannelMessage(ctx context.Context, id pgtype.UUID) (ChannelMessage, error) {
@@ -495,12 +518,13 @@ func (q *Queries) GetChannelMessage(ctx context.Context, id pgtype.UUID) (Channe
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ReplyToID,
+		&i.OrderAt,
 	)
 	return i, err
 }
 
 const getChannelMessageForContext = `-- name: GetChannelMessageForContext :one
-SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id, m.order_at,
     u.name AS author_name,
     u.avatar_url AS author_avatar_url
 FROM channel_message m
@@ -524,6 +548,7 @@ type GetChannelMessageForContextRow struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	ReplyToID       pgtype.UUID        `json:"reply_to_id"`
+	OrderAt         pgtype.Timestamptz `json:"order_at"`
 	AuthorName      pgtype.Text        `json:"author_name"`
 	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
 }
@@ -543,6 +568,7 @@ func (q *Queries) GetChannelMessageForContext(ctx context.Context, arg GetChanne
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ReplyToID,
+		&i.OrderAt,
 		&i.AuthorName,
 		&i.AuthorAvatarUrl,
 	)
@@ -761,7 +787,7 @@ root AS (
     SELECT COALESCE(reply_to_id, id) AS root_message_id
     FROM trigger
 )
-SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id, m.order_at,
     u.name AS author_name,
     u.avatar_url AS author_avatar_url
 FROM channel_message m
@@ -787,6 +813,7 @@ type ListChannelMessageRepliesForContextRow struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	ReplyToID       pgtype.UUID        `json:"reply_to_id"`
+	OrderAt         pgtype.Timestamptz `json:"order_at"`
 	AuthorName      pgtype.Text        `json:"author_name"`
 	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
 }
@@ -814,6 +841,7 @@ func (q *Queries) ListChannelMessageRepliesForContext(ctx context.Context, arg L
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ReplyToID,
+			&i.OrderAt,
 			&i.AuthorName,
 			&i.AuthorAvatarUrl,
 		); err != nil {
@@ -829,11 +857,11 @@ func (q *Queries) ListChannelMessageRepliesForContext(ctx context.Context, arg L
 
 const listChannelMessages = `-- name: ListChannelMessages :many
 
-SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id, m.order_at,
     COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
 FROM channel_message m
 WHERE m.channel_id = $1 AND m.thread_id IS NULL
-ORDER BY m.created_at ASC
+ORDER BY m.order_at ASC
 `
 
 type ListChannelMessagesRow struct {
@@ -847,11 +875,15 @@ type ListChannelMessagesRow struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	ReplyToID   pgtype.UUID        `json:"reply_to_id"`
+	OrderAt     pgtype.Timestamptz `json:"order_at"`
 	ReplyCount  int32              `json:"reply_count"`
 }
 
 // ============ Messages (V2 — top-level flat messages) ============
 // Lists top-level channel messages (thread_id IS NULL), with reply_count.
+// Ordered by order_at (display position), NOT created_at: order_at is the only
+// column the converge/release move re-stamps, so a moved message lands as the
+// latest entry without disturbing created_at (which drives unread state).
 func (q *Queries) ListChannelMessages(ctx context.Context, channelID pgtype.UUID) ([]ListChannelMessagesRow, error) {
 	rows, err := q.db.Query(ctx, listChannelMessages, channelID)
 	if err != nil {
@@ -872,6 +904,7 @@ func (q *Queries) ListChannelMessages(ctx context.Context, channelID pgtype.UUID
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ReplyToID,
+			&i.OrderAt,
 			&i.ReplyCount,
 		); err != nil {
 			return nil, err
@@ -885,17 +918,17 @@ func (q *Queries) ListChannelMessages(ctx context.Context, channelID pgtype.UUID
 }
 
 const listChannelMessagesAfter = `-- name: ListChannelMessagesAfter :many
-SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id, m.order_at,
     COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
 FROM channel_message m
-WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.created_at > $2
-ORDER BY m.created_at ASC
+WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.order_at > $2
+ORDER BY m.order_at ASC
 LIMIT $3
 `
 
 type ListChannelMessagesAfterParams struct {
 	ChannelID pgtype.UUID        `json:"channel_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	OrderAt   pgtype.Timestamptz `json:"order_at"`
 	Limit     int32              `json:"limit"`
 }
 
@@ -910,14 +943,15 @@ type ListChannelMessagesAfterRow struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	ReplyToID   pgtype.UUID        `json:"reply_to_id"`
+	OrderAt     pgtype.Timestamptz `json:"order_at"`
 	ReplyCount  int32              `json:"reply_count"`
 }
 
-// Lists top-level channel messages strictly newer than a timestamp (created_at > $2),
+// Lists top-level channel messages strictly newer than a timestamp (order_at > $2),
 // in ASC order. Used by the ?around=<id> deep-link to load context above the target
-// message. The older side reuses ListChannelMessagesPaginated (created_at < $2).
+// message. The older side reuses ListChannelMessagesPaginated (order_at < $2).
 func (q *Queries) ListChannelMessagesAfter(ctx context.Context, arg ListChannelMessagesAfterParams) ([]ListChannelMessagesAfterRow, error) {
-	rows, err := q.db.Query(ctx, listChannelMessagesAfter, arg.ChannelID, arg.CreatedAt, arg.Limit)
+	rows, err := q.db.Query(ctx, listChannelMessagesAfter, arg.ChannelID, arg.OrderAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -936,6 +970,7 @@ func (q *Queries) ListChannelMessagesAfter(ctx context.Context, arg ListChannelM
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ReplyToID,
+			&i.OrderAt,
 			&i.ReplyCount,
 		); err != nil {
 			return nil, err
@@ -949,11 +984,11 @@ func (q *Queries) ListChannelMessagesAfter(ctx context.Context, arg ListChannelM
 }
 
 const listChannelMessagesLatest = `-- name: ListChannelMessagesLatest :many
-SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id, m.order_at,
     COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
 FROM channel_message m
 WHERE m.channel_id = $1 AND m.thread_id IS NULL
-ORDER BY m.created_at DESC
+ORDER BY m.order_at DESC
 LIMIT $2
 `
 
@@ -973,6 +1008,7 @@ type ListChannelMessagesLatestRow struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	ReplyToID   pgtype.UUID        `json:"reply_to_id"`
+	OrderAt     pgtype.Timestamptz `json:"order_at"`
 	ReplyCount  int32              `json:"reply_count"`
 }
 
@@ -998,6 +1034,7 @@ func (q *Queries) ListChannelMessagesLatest(ctx context.Context, arg ListChannel
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ReplyToID,
+			&i.OrderAt,
 			&i.ReplyCount,
 		); err != nil {
 			return nil, err
@@ -1011,17 +1048,17 @@ func (q *Queries) ListChannelMessagesLatest(ctx context.Context, arg ListChannel
 }
 
 const listChannelMessagesPaginated = `-- name: ListChannelMessagesPaginated :many
-SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id, m.order_at,
     COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
 FROM channel_message m
-WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.created_at < $2
-ORDER BY m.created_at DESC
+WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.order_at < $2
+ORDER BY m.order_at DESC
 LIMIT $3
 `
 
 type ListChannelMessagesPaginatedParams struct {
 	ChannelID pgtype.UUID        `json:"channel_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	OrderAt   pgtype.Timestamptz `json:"order_at"`
 	Limit     int32              `json:"limit"`
 }
 
@@ -1036,12 +1073,13 @@ type ListChannelMessagesPaginatedRow struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	ReplyToID   pgtype.UUID        `json:"reply_to_id"`
+	OrderAt     pgtype.Timestamptz `json:"order_at"`
 	ReplyCount  int32              `json:"reply_count"`
 }
 
 // Lists top-level channel messages with cursor-based pagination (before a timestamp).
 func (q *Queries) ListChannelMessagesPaginated(ctx context.Context, arg ListChannelMessagesPaginatedParams) ([]ListChannelMessagesPaginatedRow, error) {
-	rows, err := q.db.Query(ctx, listChannelMessagesPaginated, arg.ChannelID, arg.CreatedAt, arg.Limit)
+	rows, err := q.db.Query(ctx, listChannelMessagesPaginated, arg.ChannelID, arg.OrderAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1060,6 +1098,7 @@ func (q *Queries) ListChannelMessagesPaginated(ctx context.Context, arg ListChan
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ReplyToID,
+			&i.OrderAt,
 			&i.ReplyCount,
 		); err != nil {
 			return nil, err
@@ -1306,13 +1345,14 @@ func (q *Queries) ListIssuesByChannelMessages(ctx context.Context, dollar_1 []pg
 }
 
 const listMessageReplies = `-- name: ListMessageReplies :many
-SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id FROM channel_message m
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id, m.order_at FROM channel_message m
 JOIN channel_thread t ON t.id = m.thread_id
 WHERE t.root_message_id = $1
-ORDER BY m.created_at ASC
+ORDER BY m.order_at ASC
 `
 
-// Lists all replies (thread messages) for a given root message.
+// Lists all replies (thread messages) for a given root message, ordered by
+// order_at so a reply converged into this thread lands as the latest reply.
 func (q *Queries) ListMessageReplies(ctx context.Context, rootMessageID pgtype.UUID) ([]ChannelMessage, error) {
 	rows, err := q.db.Query(ctx, listMessageReplies, rootMessageID)
 	if err != nil {
@@ -1333,6 +1373,7 @@ func (q *Queries) ListMessageReplies(ctx context.Context, rootMessageID pgtype.U
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ReplyToID,
+			&i.OrderAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1389,7 +1430,7 @@ func (q *Queries) ListThreadIssues(ctx context.Context, sourceThreadID pgtype.UU
 
 const listThreadMessages = `-- name: ListThreadMessages :many
 
-SELECT id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id FROM channel_message
+SELECT id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id, order_at FROM channel_message
 WHERE thread_id = $1
 ORDER BY created_at ASC
 `
@@ -1415,6 +1456,7 @@ func (q *Queries) ListThreadMessages(ctx context.Context, threadID pgtype.UUID) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ReplyToID,
+			&i.OrderAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1455,6 +1497,42 @@ func (q *Queries) MoveChannelToGroup(ctx context.Context, arg MoveChannelToGroup
 	return err
 }
 
+const refreshChannelThreadStats = `-- name: RefreshChannelThreadStats :one
+UPDATE channel_thread t SET
+    message_count = sub.cnt,
+    last_message_at = CASE WHEN sub.cnt > 0 THEN sub.last ELSE t.last_message_at END,
+    updated_at = now()
+FROM (
+    SELECT count(*)::int AS cnt, max(order_at) AS last
+    FROM channel_message WHERE thread_id = $1
+) sub
+WHERE t.id = $1
+RETURNING t.id, t.channel_id, t.workspace_id, t.title, t.created_by, t.message_count, t.last_message_at, t.created_at, t.updated_at, t.root_message_id
+`
+
+// Recomputes a thread's reply count and last_message_at from its actual
+// messages. Used by the release move after a reply leaves the thread, so the
+// denormalized counter and last-activity stay correct (and ListChannelThreads
+// ordering by last_message_at DESC does not go stale). Returns the updated
+// thread so the caller can decide whether to clean it up.
+func (q *Queries) RefreshChannelThreadStats(ctx context.Context, id pgtype.UUID) (ChannelThread, error) {
+	row := q.db.QueryRow(ctx, refreshChannelThreadStats, id)
+	var i ChannelThread
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.CreatedBy,
+		&i.MessageCount,
+		&i.LastMessageAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RootMessageID,
+	)
+	return i, err
+}
+
 const removeChannelMember = `-- name: RemoveChannelMember :exec
 DELETE FROM channel_member WHERE channel_id = $1 AND user_id = $2
 `
@@ -1473,10 +1551,10 @@ const reparentChannelMessage = `-- name: ReparentChannelMessage :one
 UPDATE channel_message
 SET thread_id   = $2,
     reply_to_id = $3,
-    created_at  = now(),
+    order_at    = now(),
     updated_at  = now()
 WHERE id = $1
-RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id
+RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id, order_at
 `
 
 type ReparentChannelMessageParams struct {
@@ -1487,9 +1565,11 @@ type ReparentChannelMessageParams struct {
 
 // Moves a message between the top-level timeline (thread_id NULL) and a reply
 // (thread_id set). Converge passes the target thread + reply_to; release passes
-// both NULL. created_at is re-stamped so the message lands as the latest entry
-// in its new location (replies and the timeline are ordered by created_at ASC).
-// Both columns are sqlc.narg so NULL is expressible for the release path.
+// both NULL. order_at is re-stamped so the message lands as the latest entry in
+// its new location (replies and the timeline order by order_at ASC); created_at
+// is deliberately LEFT UNTOUCHED so the unread model (created_at > last_read_at)
+// is not corrupted by a mere re-location. Both columns are sqlc.narg so NULL is
+// expressible for the release path.
 func (q *Queries) ReparentChannelMessage(ctx context.Context, arg ReparentChannelMessageParams) (ChannelMessage, error) {
 	row := q.db.QueryRow(ctx, reparentChannelMessage, arg.ID, arg.ThreadID, arg.ReplyToID)
 	var i ChannelMessage
@@ -1504,6 +1584,7 @@ func (q *Queries) ReparentChannelMessage(ctx context.Context, arg ReparentChanne
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ReplyToID,
+		&i.OrderAt,
 	)
 	return i, err
 }
@@ -1609,7 +1690,7 @@ func (q *Queries) UpdateChannelGroupPosition(ctx context.Context, arg UpdateChan
 const updateChannelMessage = `-- name: UpdateChannelMessage :one
 UPDATE channel_message SET content = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id
+RETURNING id, thread_id, channel_id, workspace_id, author_type, author_id, content, created_at, updated_at, reply_to_id, order_at
 `
 
 type UpdateChannelMessageParams struct {
@@ -1631,6 +1712,7 @@ func (q *Queries) UpdateChannelMessage(ctx context.Context, arg UpdateChannelMes
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ReplyToID,
+		&i.OrderAt,
 	)
 	return i, err
 }
@@ -1687,6 +1769,53 @@ func (q *Queries) UpsertChannelMember(ctx context.Context, arg UpsertChannelMemb
 		&i.Role,
 		&i.LastReadAt,
 		&i.JoinedAt,
+	)
+	return i, err
+}
+
+const upsertChannelThreadByRoot = `-- name: UpsertChannelThreadByRoot :one
+INSERT INTO channel_thread (channel_id, workspace_id, title, created_by, root_message_id)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (root_message_id) WHERE root_message_id IS NOT NULL
+DO UPDATE SET root_message_id = EXCLUDED.root_message_id
+RETURNING id, channel_id, workspace_id, title, created_by, message_count, last_message_at, created_at, updated_at, root_message_id
+`
+
+type UpsertChannelThreadByRootParams struct {
+	ChannelID     pgtype.UUID `json:"channel_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Title         string      `json:"title"`
+	CreatedBy     pgtype.UUID `json:"created_by"`
+	RootMessageID pgtype.UUID `json:"root_message_id"`
+}
+
+// Atomic find-or-create of the thread anchored at a root message. Closes the
+// check-then-create race in ReplyToMessage / move-converge: two concurrent
+// first-replies on the same root can no longer create two thread rows, because
+// the UNIQUE partial index on root_message_id (migration 126) makes the second
+// INSERT conflict. The no-op DO UPDATE lets RETURNING yield the surviving row
+// whether it inserted or conflicted, so the caller always gets the canonical
+// thread. title is set only on insert (kept on conflict).
+func (q *Queries) UpsertChannelThreadByRoot(ctx context.Context, arg UpsertChannelThreadByRootParams) (ChannelThread, error) {
+	row := q.db.QueryRow(ctx, upsertChannelThreadByRoot,
+		arg.ChannelID,
+		arg.WorkspaceID,
+		arg.Title,
+		arg.CreatedBy,
+		arg.RootMessageID,
+	)
+	var i ChannelThread
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.CreatedBy,
+		&i.MessageCount,
+		&i.LastMessageAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RootMessageID,
 	)
 	return i, err
 }

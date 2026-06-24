@@ -73,27 +73,42 @@ func (h *Handler) linkIssueToExistingThread(ctx context.Context, issue *db.Issue
 	h.linkIssueToThreadActivity(ctx, issue, thread)
 }
 
-// ensureThreadForMessage returns the thread anchored at the given message,
-// creating one implicitly when the message has no thread yet — the same
-// invariant ConvertMessageToIssue upholds so every issue-producing message
-// has a thread to link against. createdBy is the user to attribute the implicit
-// thread to. channel_thread.created_by REFERENCES "user"(id), so callers MUST
-// pass a zero UUID (NULL) when the creator is an agent — agents live in the
-// agent table and would otherwise violate the FK. ok=false on any
+// ensureThreadForMessage returns the thread that an issue converted from this
+// message should be linked against, creating one implicitly when the message
+// has no thread yet — so every issue-producing message has a thread to link
+// against (the OPE-1943 invariant).
+//
+// If the source message is itself a REPLY, it already belongs to a thread
+// (msg.ThreadID): reuse that thread rather than creating a new one rooted at
+// the reply. A reply is never a thread root, so the previous
+// GetThreadByRootMessage(replyID) lookup always missed and spun up an orphan
+// thread rooted at the reply — making the linked-issue chip unreachable on the
+// channel timeline and the "created from thread" activity invisible. (H2.)
+//
+// For a top-level message with no thread yet, the find-or-create is atomic via
+// UpsertChannelThreadByRoot so two concurrent converts cannot produce two
+// threads rooted at one message. createdBy is the user to attribute the
+// implicit thread to. channel_thread.created_by REFERENCES "user"(id), so
+// callers MUST pass a zero UUID (NULL) when the creator is an agent — agents
+// live in the agent table and would otherwise violate the FK. ok=false on any
 // lookup/creation failure (best-effort).
 func (h *Handler) ensureThreadForMessage(ctx context.Context, channelID, messageID, workspaceID, createdBy pgtype.UUID) (db.ChannelThread, bool) {
 	msg, err := h.Queries.GetChannelMessage(ctx, messageID)
 	if err != nil || uuidToString(msg.ChannelID) != uuidToString(channelID) {
 		return db.ChannelThread{}, false
 	}
-	if thread, err := h.Queries.GetThreadByRootMessage(ctx, messageID); err == nil {
-		return thread, true
+	// A reply already belongs to a thread — reuse it instead of orphaning one
+	// at the reply. This is the fix for converting a reply to an issue.
+	if msg.ThreadID.Valid {
+		if thread, err := h.Queries.GetChannelThread(ctx, msg.ThreadID); err == nil {
+			return thread, true
+		}
 	}
-	title := truncateUTF8(msg.Content, 50)
-	thread, err := h.Queries.CreateChannelThread(ctx, db.CreateChannelThreadParams{
+	// Top-level message: atomic find-or-create a thread rooted at it.
+	thread, err := h.Queries.UpsertChannelThreadByRoot(ctx, db.UpsertChannelThreadByRootParams{
 		ChannelID:     channelID,
 		WorkspaceID:   workspaceID,
-		Title:         title,
+		Title:         truncateUTF8(msg.Content, 50),
 		CreatedBy:     createdBy,
 		RootMessageID: messageID,
 	})

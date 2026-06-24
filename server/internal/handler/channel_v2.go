@@ -228,9 +228,18 @@ func (h *Handler) attachChannelAgentTasks(ctx context.Context, messages []Channe
 		agentIDs[uuidToString(task.AgentID)] = task.AgentID
 	}
 	agents := make(map[string]db.Agent, len(agentIDs))
-	for id, uuid := range agentIDs {
-		if agent, err := h.Queries.GetAgent(ctx, uuid); err == nil {
-			agents[id] = agent
+	// Batch-fetch the distinct agents in one round-trip rather than one GetAgent
+	// per agent — a channel where several agents have mention-task strips would
+	// otherwise issue N round-trips on every message-list render.
+	if len(agentIDs) > 0 {
+		ids := make([]pgtype.UUID, 0, len(agentIDs))
+		for _, uuid := range agentIDs {
+			ids = append(ids, uuid)
+		}
+		if rows, err := h.Queries.GetAgentsByIDs(ctx, ids); err == nil {
+			for _, a := range rows {
+				agents[uuidToString(a.ID)] = a
+			}
 		}
 	}
 	byMessage := make(map[string][]ChannelAgentTaskResponse)
@@ -439,7 +448,7 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		messages, err := h.Queries.ListChannelMessagesPaginated(r.Context(), db.ListChannelMessagesPaginatedParams{
 			ChannelID: cctx.channel.ID,
-			CreatedAt: pgtype.Timestamptz{Time: beforeTime, Valid: true},
+			OrderAt:   pgtype.Timestamptz{Time: beforeTime, Valid: true},
 			Limit:     limit + 1,
 		})
 		if err != nil {
@@ -510,12 +519,12 @@ func (h *Handler) loadAroundWindow(ctx context.Context, cctx channelContext, tar
 		half = 1
 	}
 
-	// Older side: created_at < target, DESC. Request half+1 to detect whether
+	// Older side: order_at < target, DESC. Request half+1 to detect whether
 	// older history exists beyond what we return (mirrors the latest/before
 	// branches' limit+1 trick).
 	older, err := h.Queries.ListChannelMessagesPaginated(ctx, db.ListChannelMessagesPaginatedParams{
 		ChannelID: cctx.channel.ID,
-		CreatedAt: target.CreatedAt,
+		OrderAt:   target.OrderAt,
 		Limit:     half + 1,
 	})
 	if err != nil {
@@ -526,10 +535,10 @@ func (h *Handler) loadAroundWindow(ctx context.Context, cctx channelContext, tar
 		older = older[:half]
 	}
 
-	// Newer side: created_at > target, ASC.
+	// Newer side: order_at > target, ASC.
 	newer, err := h.Queries.ListChannelMessagesAfter(ctx, db.ListChannelMessagesAfterParams{
 		ChannelID: cctx.channel.ID,
-		CreatedAt: target.CreatedAt,
+		OrderAt:   target.OrderAt,
 		Limit:     half,
 	})
 	if err != nil {
@@ -674,25 +683,32 @@ func (h *Handler) ReplyToMessage(w http.ResponseWriter, r *http.Request) {
 		threadCreatedBy = pgtype.UUID{}
 	}
 
-	// Find or create thread for this message.
-	thread, err := h.Queries.GetThreadByRootMessage(r.Context(), msgUUID)
+	// Find or create the thread for this message atomically. Two concurrent
+	// first-replies on the same root previously both missed GetThreadByRootMessage
+	// and each created a thread — UpsertChannelThreadByRoot's ON CONFLICT (on the
+	// UNIQUE root_message_id index) now guarantees a single thread per root, and
+	// returns the surviving row whether it inserted or conflicted.
+	wasMissing := false
+	if _, gerr := h.Queries.GetThreadByRootMessage(r.Context(), msgUUID); gerr != nil {
+		wasMissing = true
+	}
+	thread, err := h.Queries.UpsertChannelThreadByRoot(r.Context(), db.UpsertChannelThreadByRootParams{
+		ChannelID:     cctx.channel.ID,
+		WorkspaceID:   wsUUID,
+		Title:         truncateUTF8(targetMsg.Content, 50),
+		CreatedBy:     threadCreatedBy,
+		RootMessageID: msgUUID,
+	})
 	if err != nil {
-		// Thread doesn't exist yet — create one.
-		title := truncateUTF8(targetMsg.Content, 50)
-		thread, err = h.Queries.CreateChannelThread(r.Context(), db.CreateChannelThreadParams{
-			ChannelID:     cctx.channel.ID,
-			WorkspaceID:   wsUUID,
-			Title:         title,
-			CreatedBy:     threadCreatedBy,
-			RootMessageID: msgUUID,
-		})
-		if err != nil {
-			slog.Error("reply: create channel thread failed",
-				"channel_id", uuidToString(cctx.channel.ID),
-				"root_message_id", msgID, "author_id", actorID, "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to create reply thread")
-			return
-		}
+		slog.Error("reply: upsert channel thread failed",
+			"channel_id", uuidToString(cctx.channel.ID),
+			"root_message_id", msgID, "author_id", actorID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create reply thread")
+		return
+	}
+	if wasMissing {
+		// Only announce a freshly-created thread; a concurrent creator already
+		// announced this one (the row is the canonical survivor either way).
 		h.publish(protocol.EventChannelThreadCreated, workspaceID, actorType, actorID, map[string]any{
 			"thread":     channelThreadToResponse(thread),
 			"channel_id": uuidToString(cctx.channel.ID),
@@ -788,6 +804,15 @@ func (h *Handler) GetMessageThread(w http.ResponseWriter, r *http.Request) {
 	replyResp = h.attachChannelAgentTasks(r.Context(), replyResp)
 	rootResp = h.attachChannelAuthorNames(r.Context(), rootResp)
 	replyResp = h.attachChannelAuthorNames(r.Context(), replyResp)
+	// Attach linked issues to root + replies in one batched query (no N+1) so
+	// the reply panel shows the same linked-issue chips as the top-level list —
+	// without this, opening a thread made the chip disappear. Issues attach to
+	// the thread root (issue.source_thread_id → thread → root_message_id), so
+	// they land on rootResp; replies get none, matching the timeline behavior.
+	combined := append([]ChannelMessageV2Response{rootResp[0]}, replyResp...)
+	combined = h.attachChannelMessageIssues(r.Context(), wsUUID, combined)
+	rootResp[0] = combined[0]
+	replyResp = combined[1:]
 	writeJSON(w, http.StatusOK, map[string]any{
 		"root_message": rootResp[0],
 		"replies":      replyResp,
@@ -829,142 +854,6 @@ func (h *Handler) RemoveChannelMember(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"removed": true, "channel_id": uuidToString(cctx.channel.ID), "user_id": targetID})
 }
 
-// ConvertMessageToIssue converts a channel message into an issue.
-// If the message does not already have a thread, one is created implicitly so
-// that the spec invariant "Issue is produced from a thread" always holds.
-func (h *Handler) ConvertMessageToIssue(w http.ResponseWriter, r *http.Request) {
-	workspaceID := h.resolveWorkspaceID(r)
-	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
-	if !ok {
-		return
-	}
-	cctx, ok := h.loadChannelContext(w, r, wsUUID, chi.URLParam(r, "id"))
-	if !ok {
-		return
-	}
-	msgID := chi.URLParam(r, "msgId")
-	msgUUID, ok := parseUUIDOrBadRequest(w, msgID, "message id")
-	if !ok {
-		return
-	}
-
-	// Get the message.
-	msg, err := h.Queries.GetChannelMessage(r.Context(), msgUUID)
-	if err != nil || uuidToString(msg.ChannelID) != uuidToString(cctx.channel.ID) {
-		writeError(w, http.StatusNotFound, "message not found")
-		return
-	}
-
-	// Parse optional overrides from request body.
-	var req struct {
-		Title       *string `json:"title"`
-		Description *string `json:"description"`
-		ProjectID   *string `json:"project_id"`
-	}
-	json.NewDecoder(r.Body).Decode(&req)
-
-	// Auto-fill title from message content.
-	title := truncateUTF8(msg.Content, 80)
-	if req.Title != nil && *req.Title != "" {
-		title = *req.Title
-	}
-
-	// Description: full message content + source annotation.
-	description := msg.Content + "\n\n---\n_来源：频道消息_"
-	if req.Description != nil && *req.Description != "" {
-		description = *req.Description
-	}
-
-	// Determine the creator user ID.
-	userID, ok := requireUserID(w, r)
-	if !ok {
-		return
-	}
-	userUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
-	if !ok {
-		return
-	}
-
-	// Use transaction to safely create the issue with a number.
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to begin transaction")
-		return
-	}
-	defer tx.Rollback(r.Context())
-	qtx := h.Queries.WithTx(tx)
-
-	issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
-		return
-	}
-
-	var projectID pgtype.UUID
-	if req.ProjectID != nil && *req.ProjectID != "" {
-		if pid, perr := parseUUIDErr(*req.ProjectID); perr == nil {
-			projectID = pid
-		}
-	}
-
-	issue, err := qtx.CreateIssue(r.Context(), db.CreateIssueParams{
-		WorkspaceID: wsUUID,
-		Title:       title,
-		Description: pgtype.Text{String: description, Valid: true},
-		Status:      "todo",
-		Priority:    "none",
-		CreatorType: "member",
-		CreatorID:   userUUID,
-		Number:      issueNumber,
-		ProjectID:   projectID,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create issue")
-		return
-	}
-
-	// Ensure thread exists: if no thread yet, create one implicitly.
-	thread, terr := qtx.GetThreadByRootMessage(r.Context(), msgUUID)
-	if terr != nil {
-		// No thread yet — create one anchored to this message.
-		threadTitle := truncateUTF8(msg.Content, 50)
-		thread, err = qtx.CreateChannelThread(r.Context(), db.CreateChannelThreadParams{
-			ChannelID:     cctx.channel.ID,
-			WorkspaceID:   wsUUID,
-			Title:         threadTitle,
-			CreatedBy:     userUUID,
-			RootMessageID: msgUUID,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create thread for issue")
-			return
-		}
-	}
-
-	// Link the issue to the source channel and thread.
-	qtx.LinkIssueSource(r.Context(), db.LinkIssueSourceParams{
-		ID:              issue.ID,
-		SourceChannelID: cctx.channel.ID,
-		SourceThreadID:  thread.ID,
-	})
-
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit")
-		return
-	}
-
-	// Post "created from thread" system activity (best-effort, outside tx).
-	issue.SourceChannelID = cctx.channel.ID
-	issue.SourceThreadID = thread.ID
-	h.linkIssueToThreadActivity(r.Context(), &issue, thread)
-
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"issue_id":     uuidToString(issue.ID),
-		"issue_number": issue.Number,
-		"title":        issue.Title,
-		"thread_id":    uuidToString(thread.ID),
-	})
-}
 
 // GetChannelContext returns channel info, members, and recent messages for agent injection.
 func (h *Handler) GetChannelContext(w http.ResponseWriter, r *http.Request) {
@@ -1159,18 +1048,22 @@ func (h *Handler) DeleteChannelMessage(w http.ResponseWriter, r *http.Request) {
 // MoveChannelMessage re-parents a message between the top-level timeline and a
 // thread — the backend for the channel "converge"/"release" drag.
 //
-//   target_message_id set    → converge: a top-level message becomes the latest
-//                              reply of the target message's thread. The moved
-//                              message must not already have a thread (replies
-//                              or a linked issue) — collapsing a populated
-//                              thread would orphan its replies/issues, so it is
-//                              refused with 409. The target's thread is created
-//                              on demand if it does not yet exist.
-//   target_message_id null    → release: a reply becomes a new top-level message.
+//	target_message_id set  → converge: a top-level message becomes the latest
+//	                         reply of the target message's thread. The moved
+//	                         message must not already have a thread (replies or
+//	                         a linked issue) — collapsing a populated thread
+//	                         would orphan its replies/issues, so it is refused
+//	                         with 409. The target's thread is created on demand
+//	                         if it does not yet exist (atomically, via upsert).
+//	target_message_id null → release: a reply becomes a new top-level message.
 //
-// Either path re-stamps created_at so the message lands as the latest entry in
-// its new location (both lists order by created_at ASC). Permission mirrors
-// edit/delete: the author or a channel manager may move a message.
+// Either path re-stamps order_at (NOT created_at) so the message lands as the
+// latest entry in its new location without polluting the unread model, which
+// keys on created_at. Permission mirrors edit/delete: the author or a channel
+// manager may move a message. The structural mutation (find/create target
+// thread, reparent, bump target) runs in one transaction; the source thread's
+// denormalized counter is refreshed afterwards (best-effort, post-commit) so a
+// counter-maintenance failure never aborts the move itself.
 func (h *Handler) MoveChannelMessage(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
@@ -1209,8 +1102,28 @@ func (h *Handler) MoveChannelMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var newThreadID pgtype.UUID
-	var newReplyToID pgtype.UUID
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	authorType := actorType
+	if authorType != "agent" {
+		authorType = "member"
+	}
+	// channel_thread.created_by REFERENCES "user"(id); agents cannot own it, so
+	// stamp NULL for agent movers (they still author the moved message).
+	threadCreatedBy := pgtype.UUID{}
+	if actorType != "agent" && actorID != "" {
+		if id, perr := parseUUIDErr(actorID); perr == nil {
+			threadCreatedBy = id
+		}
+	}
+
+	var (
+		newThreadID    pgtype.UUID // set on converge (the target's thread)
+		newReplyToID   pgtype.UUID // set on converge (the target message)
+		targetThreadID pgtype.UUID // bumped after reparent on converge
+		sourceThreadID pgtype.UUID // refreshed on release (the thread losing a reply)
+		convergeTarget  pgtype.UUID // converge: the target message id (for upsert)
+		convergeContent string       // converge: the target content (for thread title)
+	)
 
 	if req.TargetMessageID != nil && *req.TargetMessageID != "" {
 		// Converge: top-level message → latest reply of the target's thread.
@@ -1240,61 +1153,101 @@ func (h *Handler) MoveChannelMessage(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "target must be a top-level message")
 			return
 		}
-		// Find or create the target's thread (lazily created on first reply,
-		// mirroring ReplyToMessage). channel_thread.created_by REFERENCES
-		// "user"(id); agents cannot own it, so stamp NULL for agent movers.
-		thread, terr := h.Queries.GetThreadByRootMessage(r.Context(), targetUUID)
-		if terr != nil {
-			actorType, actorID := h.resolveActor(r, userID, workspaceID)
-			threadCreatedBy := pgtype.UUID{}
-			if actorType != "agent" && actorID != "" {
-				if id, perr := parseUUIDErr(actorID); perr == nil {
-					threadCreatedBy = id
-				}
-			}
-			thread, err = h.Queries.CreateChannelThread(r.Context(), db.CreateChannelThreadParams{
-				ChannelID:     cctx.channel.ID,
-				WorkspaceID:   wsUUID,
-				Title:         truncateUTF8(target.Content, 50),
-				CreatedBy:     threadCreatedBy,
-				RootMessageID: targetUUID,
-			})
-			if err != nil {
-				slog.Error("move: create target thread failed",
-					"channel_id", uuidToString(cctx.channel.ID),
-					"root_message_id", uuidToString(targetUUID), "error", err)
-				writeError(w, http.StatusInternalServerError, "failed to create thread")
-				return
-			}
-		}
-		newThreadID = thread.ID
 		newReplyToID = targetUUID
-		// Bump so the thread sorts fresh and its count reflects the new reply.
-		h.Queries.BumpChannelThread(r.Context(), thread.ID)
+		convergeTarget = targetUUID
+		convergeContent = target.Content
+		// sourceThreadID stays zero on converge — there is no thread to refresh.
 	} else {
-		// Release: reply → top-level. Both stay NULL.
+		// Release: reply → top-level.
 		if !msg.ThreadID.Valid {
 			writeError(w, http.StatusBadRequest, "message is already top-level")
 			return
 		}
+		sourceThreadID = msg.ThreadID
 	}
 
-	moved, err := h.Queries.ReparentChannelMessage(r.Context(), db.ReparentChannelMessageParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to begin transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if req.TargetMessageID != nil && *req.TargetMessageID != "" {
+		// Atomic find-or-create of the target's thread (closes the race where
+		// two concurrent first-converges/replies on the same root each created a
+		// thread). Title is set only on insert; an existing thread keeps its title.
+		thread, err := qtx.UpsertChannelThreadByRoot(r.Context(), db.UpsertChannelThreadByRootParams{
+			ChannelID:     cctx.channel.ID,
+			WorkspaceID:   wsUUID,
+			Title:         truncateUTF8(convergeContent, 50),
+			CreatedBy:     threadCreatedBy,
+			RootMessageID: convergeTarget,
+		})
+		if err != nil {
+			slog.Error("move: upsert target thread failed",
+				"channel_id", uuidToString(cctx.channel.ID),
+				"root_message_id", uuidToString(convergeTarget), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to create thread")
+			return
+		}
+		newThreadID = thread.ID
+		targetThreadID = thread.ID
+	}
+
+	moved, err := qtx.ReparentChannelMessage(r.Context(), db.ReparentChannelMessageParams{
 		ID:        msgUUID,
 		ThreadID:  newThreadID,
 		ReplyToID: newReplyToID,
 	})
 	if err != nil {
+		slog.Error("move: reparent message failed",
+			"channel_id", uuidToString(cctx.channel.ID),
+			"message_id", msgID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to move message")
 		return
 	}
-	h.Queries.TouchChannel(r.Context(), cctx.channel.ID)
+	// converge: the target thread gained a reply — bump its count/last_activity
+	// so it sorts fresh and its reply_count is correct.
+	if targetThreadID.Valid {
+		if err := qtx.BumpChannelThread(r.Context(), targetThreadID); err != nil {
+			slog.Warn("move: bump target thread failed",
+				"channel_id", uuidToString(cctx.channel.ID),
+				"thread_id", uuidToString(targetThreadID), "error", err)
+		}
+	}
+	if err := qtx.TouchChannel(r.Context(), cctx.channel.ID); err != nil {
+		slog.Warn("move: touch channel failed", "channel_id", uuidToString(cctx.channel.ID), "error", err)
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+
+	// release: the source thread lost a reply. Recompute its denormalized counter
+	// + last_activity, and drop it if it is now empty and issue-free (so a thread
+	// whose last reply was released does not linger with a stale count). Run
+	// best-effort post-commit — a counter error must not abort the move, which
+	// already succeeded. channel_message.thread_id is ON DELETE CASCADE, so
+	// DeleteChannelThreadIfEmptyAndNoIssue's NOT EXISTS guards are load-bearing.
+	if sourceThreadID.Valid {
+		if _, rerr := h.Queries.RefreshChannelThreadStats(r.Context(), sourceThreadID); rerr != nil {
+			slog.Warn("move: refresh source thread stats failed",
+				"thread_id", uuidToString(sourceThreadID), "error", rerr)
+		}
+		if derr := h.Queries.DeleteChannelThreadIfEmptyAndNoIssue(r.Context(), sourceThreadID); derr != nil {
+			slog.Warn("move: cleanup empty source thread failed",
+				"thread_id", uuidToString(sourceThreadID), "error", derr)
+		}
+	}
 
 	resp := channelMessageToV2Response(moved, 0)
 	if name := h.resolveChannelActorName(r.Context(), moved.AuthorType, uuidToString(moved.AuthorID)); name != "" {
 		resp.AuthorName = &name
 	}
-	h.publish(protocol.EventChannelMessageUpdated, workspaceID, "member", userID, map[string]any{
+	h.publish(protocol.EventChannelMessageUpdated, workspaceID, actorType, actorID, map[string]any{
 		"message":    resp,
 		"channel_id": uuidToString(cctx.channel.ID),
 	})

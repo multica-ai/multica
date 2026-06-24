@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_channel_thread_root_message_unique;

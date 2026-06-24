@@ -25,6 +25,12 @@ ORDER BY created_at ASC;
 SELECT * FROM agent
 WHERE id = $1;
 
+-- name: GetAgentsByIDs :many
+-- Batch fetch agents by id (used to enrich channel message agent-task strips
+-- in one round-trip instead of one GetAgent per distinct agent).
+SELECT * FROM agent
+WHERE id = ANY($1::uuid[]);
+
 -- name: GetAgentInWorkspace :one
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2;

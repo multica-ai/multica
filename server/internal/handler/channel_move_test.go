@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // TestMoveChannelMessage_ConvergeAndRelease exercises the converge/release
@@ -151,6 +152,108 @@ func TestMoveChannelMessage_RefusesPopulatedThread(t *testing.T) {
 	testHandler.MoveChannelMessage(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("converge into self: expected 400, got %d (%s)", rr.Code, rr.Body.String())
+	}
+}
+
+// TestMoveChannelMessage_PreservesCreatedAt (H1): converging a message must
+// bump only order_at (so it sorts as the latest reply) and leave created_at
+// untouched — the unread model (has_unread / first_unread / last_activity in
+// ListChannels) keys on created_at, so a mere re-location must not re-stamp
+// it. Before the fix, created_at was set to now() and the moved message
+// falsely read as unread for every member whose last_read_at < now().
+func TestMoveChannelMessage_PreservesCreatedAt(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM channel WHERE workspace_id = $1`, testWorkspaceID)
+	})
+
+	ch := createV2Channel(t, "Move CreatedAt Channel")
+	msgA := sendV2Message(t, ch.ID, "will be converged — created_at must not move")
+	msgB := sendV2Message(t, ch.ID, "thread target")
+
+	rr := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPatch, "/", map[string]any{
+		"target_message_id": msgB.ID,
+	}), "id", ch.ID)
+	req = withURLParam(req, "msgId", msgA.ID)
+	testHandler.MoveChannelMessage(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("converge MoveChannelMessage: %d (%s)", rr.Code, rr.Body.String())
+	}
+
+	// created_at must equal its original send time; order_at must be bumped
+	// strictly past it (they were equal at send).
+	var createdAt, orderAt time.Time
+	if err := testPool.QueryRow(ctx,
+		`SELECT created_at, order_at FROM channel_message WHERE id = $1`, msgA.ID).
+		Scan(&createdAt, &orderAt); err != nil {
+		t.Fatalf("scan moved message: %v", err)
+	}
+	if !orderAt.After(createdAt) {
+		t.Fatalf("expected order_at > created_at (created_at preserved, order_at bumped to latest); got created_at=%v order_at=%v", createdAt, orderAt)
+	}
+}
+
+// TestMoveChannelMessage_ReleaseCleansUpSourceThread (M4): releasing the last
+// reply of a thread drops the now-empty, issue-free thread (its stale count /
+// last_activity would otherwise linger and mis-order the thread list); a thread
+// still linked to an issue is preserved (the issue's source_thread_id
+// back-reference must stay valid).
+func TestMoveChannelMessage_ReleaseCleansUpSourceThread(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM channel WHERE workspace_id = $1`, testWorkspaceID)
+	})
+
+	ch := createV2Channel(t, "Move Cleanup Channel")
+
+	// Empty + issue-free → deleted after the last reply is released.
+	msgB := sendV2Message(t, ch.ID, "target with one reply")
+	reply := replyV2Message(t, ch.ID, msgB.ID, "the only reply")
+	releaseMove := func(msgID string) {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/", map[string]any{"target_message_id": nil}), "id", ch.ID)
+		req = withURLParam(req, "msgId", msgID)
+		testHandler.MoveChannelMessage(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("release MoveChannelMessage: %d (%s)", rr.Code, rr.Body.String())
+		}
+	}
+	releaseMove(reply.ID)
+	if th := getV2Thread(t, ch.ID, msgB.ID); th.Thread != nil {
+		t.Fatalf("empty issue-free thread should be deleted after releasing its last reply")
+	}
+
+	// Issue-linked → preserved even when its last reply is released.
+	msgC := sendV2Message(t, ch.ID, "target with reply + linked issue")
+	reply2 := replyV2Message(t, ch.ID, msgC.ID, "only reply, but thread is linked to an issue")
+	var threadID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM channel_thread WHERE root_message_id = $1`, msgC.ID).Scan(&threadID); err != nil {
+		t.Fatalf("find thread for C: %v", err)
+	}
+	var issueNum int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COALESCE(max(number), 0) + 1 FROM issue WHERE workspace_id = $1`, testWorkspaceID).
+		Scan(&issueNum); err != nil {
+		t.Fatalf("next issue number: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue (workspace_id, number, title, status, priority, creator_type, creator_id, source_thread_id)
+		VALUES ($1, $2, 'linked', 'todo', 'none', 'member', $3, $4)`,
+		testWorkspaceID, issueNum, testUserID, threadID); err != nil {
+		t.Fatalf("insert linked issue: %v", err)
+	}
+	releaseMove(reply2.ID)
+	if th := getV2Thread(t, ch.ID, msgC.ID); th.Thread == nil {
+		t.Fatalf("issue-linked thread must NOT be deleted when its last reply is released")
 	}
 }
 

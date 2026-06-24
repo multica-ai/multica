@@ -404,110 +404,12 @@ func TestV2AgentReplyAutoCreatesThreadWithNullCreator(t *testing.T) {
 	}
 }
 
-// TestV2ConvertMessageToIssueNoThread verifies that ConvertMessageToIssue
-// creates a thread when none exists, fulfilling "Issue from thread" invariant.
-func TestV2ConvertMessageToIssueNoThread(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("no database")
-	}
-	ctx := context.Background()
-
-	var projectID string
-	if err := testPool.QueryRow(ctx,
-		`INSERT INTO project (workspace_id, title) VALUES ($1, 'Convert test') RETURNING id`,
-		testWorkspaceID).Scan(&projectID); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND project_id = $2`, testWorkspaceID, projectID)
-		testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
-		testPool.Exec(ctx, `DELETE FROM channel WHERE workspace_id = $1`, testWorkspaceID)
-	})
-
-	// Channel + message (no thread yet).
-	rr := httptest.NewRecorder()
-	testHandler.CreateChannel(rr, newRequest(http.MethodPost, "/api/channels", map[string]any{
-		"name": "Convert Test Channel",
-	}))
-	var channel ChannelResponse
-	decodeJSON(t, rr, &channel)
-
-	rr = httptest.NewRecorder()
-	req := withURLParam(newRequest(http.MethodPost, "/", map[string]any{
-		"content": "We should implement feature X",
-	}), "id", channel.ID)
-	testHandler.SendChannelMessage(rr, req)
-	var msg ChannelMessageV2Response
-	decodeJSON(t, rr, &msg)
-
-	// Convert message to issue.
-	rr = httptest.NewRecorder()
-	req = withURLParam(newRequest(http.MethodPost, "/", map[string]any{
-		"project_id": projectID,
-	}), "id", channel.ID)
-	req = withURLParam(req, "msgId", msg.ID)
-	testHandler.ConvertMessageToIssue(rr, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("ConvertMessageToIssue: %d (%s)", rr.Code, rr.Body.String())
-	}
-	var issueResp struct {
-		IssueID     string `json:"issue_id"`
-		IssueNumber int32  `json:"issue_number"`
-		Title       string `json:"title"`
-		ThreadID    string `json:"thread_id"`
-	}
-	decodeJSON(t, rr, &issueResp)
-	if issueResp.ThreadID == "" {
-		t.Fatal("expected thread_id in response — thread should be created implicitly")
-	}
-	if issueResp.IssueID == "" {
-		t.Fatal("expected issue_id in response")
-	}
-
-	// Verify thread has system "created from thread" message.
-	rr = httptest.NewRecorder()
-	req = withURLParam(newRequest(http.MethodGet, "/", nil), "id", channel.ID)
-	req = withURLParam(req, "msgId", msg.ID)
-	testHandler.GetMessageThread(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GetMessageThread after convert: %d (%s)", rr.Code, rr.Body.String())
-	}
-	var threadResp struct {
-		Replies []ChannelMessageResponse `json:"replies"`
-		Thread  *ChannelThreadResponse   `json:"thread"`
-	}
-	decodeJSON(t, rr, &threadResp)
-	if threadResp.Thread == nil {
-		t.Fatal("expected thread to exist after convert")
-	}
-	foundSystem := false
-	for _, reply := range threadResp.Replies {
-		if reply.AuthorType == "system" {
-			foundSystem = true
-		}
-	}
-	if !foundSystem {
-		t.Fatal("expected system 'created from thread' message in thread after convert")
-	}
-
-	// GetIssue should enrich the "from channel discussion" badge with the
-	// source channel's display name and the originating message id (the thread
-	// root) so the UI can name the channel and deep-link back to the message.
-	rr = httptest.NewRecorder()
-	req = withURLParam(newRequest(http.MethodGet, "/", nil), "id", issueResp.IssueID)
-	testHandler.GetIssue(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("GetIssue after convert: %d (%s)", rr.Code, rr.Body.String())
-	}
-	var detail IssueResponse
-	decodeJSON(t, rr, &detail)
-	if detail.SourceChannelName == nil || *detail.SourceChannelName != channel.Name {
-		t.Fatalf("expected source_channel_name %q, got %v", channel.Name, detail.SourceChannelName)
-	}
-	if detail.SourceMessageID == nil || *detail.SourceMessageID != msg.ID {
-		t.Fatalf("expected source_message_id %q, got %v", msg.ID, detail.SourceMessageID)
-	}
-}
+// TestV2ConvertMessageToIssueNoThread was removed alongside the dead
+// ConvertMessageToIssue handler (OPE-3457): manual message→issue conversion now
+// flows through CreateIssue with source_channel_id/source_message_id, which
+// reuses ensureThreadForMessage + linkIssueToExistingThread — the same
+// helpers the agent quick-create completion path uses. That live path is
+// covered by the CreateIssue / quick-create tests.
 
 // TestV2IssueReflowToChannelTimeline verifies that issue status changes
 // produce a top-level system message in the channel main timeline.
