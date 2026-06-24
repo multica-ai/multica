@@ -114,7 +114,11 @@ export function entryMatchesSection(
 ): boolean {
   switch (section.kind) {
     case "all":
-      return true;
+      // FIR-1731 — the "All messages" box can now carry the same filter builder
+      // as a "filter" box. With no conditions sectionFilters() is empty, so this
+      // still shows everything; muting + the Favorites float are applied later
+      // in selectSectionEntries and are unaffected.
+      return sectionFilters(section).every((c) => conditionMatches(c, entry, ctx));
     case "unread":
       return entryIsUnread(entry);
     case "pinned":
@@ -155,7 +159,35 @@ export function sectionFilters(section: InboxSectionConfig): FilterCondition[] {
   return seeded;
 }
 
+/**
+ * FIR-1731 — a condition with no value chosen yet (a "kind" chip without a kind,
+ * a "project" chip without a project) carries no real predicate. Negating such a
+ * no-op must stay a no-op rather than flip into "hide everything".
+ */
+function isIncompleteCondition(cond: FilterCondition): boolean {
+  if (cond.field === "kind") return !cond.entryKind;
+  if (cond.field === "project") return !cond.projectId;
+  return false;
+}
+
+/**
+ * FIR-1731 — wrap the raw predicate with optional negation. The non-negated path
+ * is byte-for-byte the old behaviour; `negate: true` matches rows that do NOT
+ * satisfy the predicate (e.g. "exclude project X", "not unread"), applied
+ * uniformly to every field.
+ */
 function conditionMatches(
+  cond: FilterCondition,
+  entry: DynInboxEntry,
+  ctx: SectionFilterContext,
+): boolean {
+  const matched = conditionPredicate(cond, entry, ctx);
+  if (!cond.negate) return matched;
+  if (isIncompleteCondition(cond)) return true;
+  return !matched;
+}
+
+function conditionPredicate(
   cond: FilterCondition,
   entry: DynInboxEntry,
   ctx: SectionFilterContext,

@@ -257,6 +257,68 @@ describe("section-filter", () => {
     // Falls back to no-match when the tree is unavailable.
     expect(entryMatchesSection(child, withSubs, ctx)).toBe(false);
   });
+
+  it("FIR-1731 — negate inverts a condition (exclude a project)", () => {
+    const inP1 = notifEntry(1, { project_id: "p1" });
+    const inP2 = notifEntry(1, { project_id: "p2" });
+    // The core use case: "show everything EXCEPT project p1".
+    const excludeP1 = {
+      id: "s",
+      kind: "filter" as const,
+      filters: [{ field: "project" as const, projectId: "p1", negate: true }],
+    };
+    expect(entryMatchesSection(inP1, excludeP1, ctx)).toBe(false);
+    expect(entryMatchesSection(inP2, excludeP1, ctx)).toBe(true);
+  });
+
+  it("FIR-1731 — negate works across boolean and kind fields", () => {
+    const read = notifEntry(1, { read: true });
+    const unread = notifEntry(1, { read: false });
+    // "not unread" behaves like "read".
+    const notUnread = { id: "s", kind: "filter" as const, filters: [{ field: "unread" as const, negate: true }] };
+    expect(entryMatchesSection(read, notUnread, ctx)).toBe(true);
+    expect(entryMatchesSection(unread, notUnread, ctx)).toBe(false);
+
+    // "not issue" excludes notif rows, keeps channels.
+    const notIssue = {
+      id: "s",
+      kind: "filter" as const,
+      filters: [{ field: "kind" as const, entryKind: "issue" as const, negate: true }],
+    };
+    expect(entryMatchesSection(notifEntry(1), notIssue, ctx)).toBe(false);
+    expect(entryMatchesSection(channelEntry(1), notIssue, ctx)).toBe(true);
+  });
+
+  it("FIR-1731 — negate on an incomplete condition stays a no-op", () => {
+    // A negated condition with no value chosen must not hide everything.
+    const noKind = {
+      id: "s",
+      kind: "filter" as const,
+      filters: [{ field: "kind" as const, negate: true }],
+    };
+    expect(entryMatchesSection(notifEntry(1), noKind, ctx)).toBe(true);
+    const noProject = {
+      id: "s",
+      kind: "filter" as const,
+      filters: [{ field: "project" as const, negate: true }],
+    };
+    expect(entryMatchesSection(notifEntry(1, { project_id: "p1" }), noProject, ctx)).toBe(true);
+  });
+
+  it("FIR-1731 — the All messages box honours the filter builder", () => {
+    const inP1 = notifEntry(1, { project_id: "p1" });
+    const inP2 = notifEntry(1, { project_id: "p2" });
+    // No filters → still shows everything (unchanged default).
+    expect(entryMatchesSection(inP1, { id: "s", kind: "all" }, ctx)).toBe(true);
+    // With a negated project filter the All box excludes that project.
+    const allExcludeP1 = {
+      id: "s",
+      kind: "all" as const,
+      filters: [{ field: "project" as const, projectId: "p1", negate: true }],
+    };
+    expect(entryMatchesSection(inP1, allExcludeP1, ctx)).toBe(false);
+    expect(entryMatchesSection(inP2, allExcludeP1, ctx)).toBe(true);
+  });
 });
 
 describe("layout", () => {

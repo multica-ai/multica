@@ -365,7 +365,9 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
                     Reset name
                   </DropdownMenuItem>
                 )}
-                {section.kind === "filter" && (
+                {/* FIR-1731 — the "All messages" box can also carry a filter
+                    (incl. negation), so it gets the same "Edit filter" entry. */}
+                {(section.kind === "filter" || section.kind === "all") && (
                   <DropdownMenuItem onClick={() => setEditFilter(true)}>
                     <Filter className="mr-2 size-3.5" /> Edit filter
                   </DropdownMenuItem>
@@ -583,7 +585,7 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
           always reachable. */}
       {props.searchSlot}
 
-      {!isCollapsed && section.kind === "filter" && editFilter && (
+      {!isCollapsed && (section.kind === "filter" || section.kind === "all") && editFilter && (
         <div className="border-b border-border/60">
           <FilterBuilder
             filters={sectionFilters(section)}

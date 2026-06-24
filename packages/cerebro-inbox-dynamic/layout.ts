@@ -30,6 +30,11 @@ export interface FilterCondition {
   includeSubprojects?: boolean;
   /** Required when field === "kind". */
   entryKind?: EntryKindFilter;
+  // FIR-1731 — negate this condition: match rows that do NOT satisfy the
+  // predicate (e.g. "exclude project X", "not unread"). Optional and defaults
+  // to false, so layouts saved before negation existed parse unchanged. Applies
+  // uniformly to every field; see conditionMatches in section-filter.ts.
+  negate?: boolean;
 }
 
 /** What a section pulls from the merged inbox feed. */

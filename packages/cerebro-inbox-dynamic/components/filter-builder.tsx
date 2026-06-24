@@ -125,6 +125,10 @@ export function FilterBuilder({ filters, projects, onChange }: FilterBuilderProp
 
   const removeAt = (index: number) => onChange(filters.filter((_, i) => i !== index));
 
+  // FIR-1731 — flip a condition between "is" (include) and "is not" (exclude).
+  const toggleNegate = (index: number) =>
+    onChange(filters.map((c, i) => (i === index ? { ...c, negate: !c.negate } : c)));
+
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
       {filters.length === 0 && (
@@ -134,8 +138,25 @@ export function FilterBuilder({ filters, projects, onChange }: FilterBuilderProp
       {filters.map((cond, i) => (
         <span
           key={`${cond.field}:${cond.projectId ?? cond.entryKind ?? ""}:${i}`}
-          className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] text-foreground"
+          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-foreground ${
+            cond.negate ? "border-destructive/50 bg-destructive/10" : "border-border bg-muted"
+          }`}
         >
+          {/* FIR-1731 — is / is not toggle: switches this condition between
+              include and exclude (negation). */}
+          <button
+            type="button"
+            onClick={() => toggleNegate(i)}
+            className="rounded-full text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
+            title={
+              cond.negate
+                ? "Excluding matching rows — click to include"
+                : "Including matching rows — click to exclude"
+            }
+            aria-label={cond.negate ? "Set condition to include" : "Set condition to exclude"}
+          >
+            {cond.negate ? "is not" : "is"}
+          </button>
           {cond.field === "project" ? (
             <button
               type="button"
