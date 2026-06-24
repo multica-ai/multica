@@ -56,14 +56,14 @@ func seedInitialRunWithUsage(t *testing.T, issueID, workspaceID, model string, c
 	var runtimeID string
 	if err := sessTestPool.QueryRow(ctx,
 		`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider)
-		 VALUES ($1::uuid, 'ctx-test-runtime', 'local', 'codex') RETURNING id::text`,
+		 VALUES ($1::uuid, 'ctx-test-runtime-'||gen_random_uuid(), 'local', 'codex') RETURNING id::text`,
 		workspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("create runtime: %v", err)
 	}
 	var agentID string
 	if err := sessTestPool.QueryRow(ctx,
 		`INSERT INTO agent (workspace_id, name, runtime_mode)
-		 VALUES ($1::uuid, 'ctx-test-agent', 'local') RETURNING id::text`,
+		 VALUES ($1::uuid, 'ctx-test-agent-'||gen_random_uuid(), 'local') RETURNING id::text`,
 		workspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -207,14 +207,14 @@ func seedTaskWithUsage(t *testing.T, issueID, workspaceID, triggerCommentID, mod
 	var runtimeID string
 	if err := sessTestPool.QueryRow(ctx,
 		`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider)
-		 VALUES ($1::uuid, 'ctx-test-runtime', 'local', 'codex') RETURNING id::text`,
+		 VALUES ($1::uuid, 'ctx-test-runtime-'||gen_random_uuid(), 'local', 'codex') RETURNING id::text`,
 		workspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("create runtime: %v", err)
 	}
 	var agentID string
 	if err := sessTestPool.QueryRow(ctx,
 		`INSERT INTO agent (workspace_id, name, runtime_mode)
-		 VALUES ($1::uuid, 'ctx-test-agent', 'local') RETURNING id::text`,
+		 VALUES ($1::uuid, 'ctx-test-agent-'||gen_random_uuid(), 'local') RETURNING id::text`,
 		workspaceID).Scan(&agentID); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}

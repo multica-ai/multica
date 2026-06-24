@@ -11,9 +11,11 @@
 // labelled content-size estimate so the bar is never blank or misleadingly
 // exact.
 
+import { useState } from "react";
 import { ArrowRightLeft } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { estimateSessionContextFraction } from "./context-estimate";
+import { SessionUsageSheet } from "./session-usage-sheet";
 import { useContextUsage, useStartFresh } from "./use-sessions";
 import type { TimelineGroup } from "./grouping";
 
@@ -43,6 +45,8 @@ export function SessionContextBar({
 }) {
   const { data } = useContextUsage(issueId, sessionId);
   const startFresh = useStartFresh(issueId);
+  // FIR-1931: clicking the bar opens the per-session cost/token/cache sheet.
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   let fraction: number;
   let approximate: boolean;
@@ -97,19 +101,30 @@ export function SessionContextBar({
 
   return (
     <div className="mb-2 space-y-1.5">
-      <div className="flex items-center justify-between gap-2 text-[11px]">
-        <span className={`font-medium ${usedText}`}>
-          {approximate ? "~" : ""}
-          {usedPct}% context used
-        </span>
-        <span className="text-muted-foreground">
-          {leftPct}% left
-          {detail ? ` · ${detail}` : approximate ? " · estimate" : ""}
-        </span>
-      </div>
-      <div className="h-1 w-full overflow-hidden rounded-full bg-border">
-        <div className={`h-full ${fill} transition-all`} style={{ width: `${pct * 100}%` }} />
-      </div>
+      {/* FIR-1931: the label + fill row is a button that opens the per-session
+          cost/token/cache sheet. The Handoff button stays a separate sibling
+          below, so the two clickable affordances never nest. */}
+      <button
+        type="button"
+        onClick={() => setSheetOpen(true)}
+        aria-label="Show context and cost by session"
+        className="block w-full space-y-1.5 text-left rounded-sm transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        <div className="flex items-center justify-between gap-2 text-[11px]">
+          <span className={`font-medium ${usedText}`}>
+            {approximate ? "~" : ""}
+            {usedPct}% context used
+          </span>
+          <span className="text-muted-foreground">
+            {leftPct}% left
+            {detail ? ` · ${detail}` : approximate ? " · estimate" : ""}
+          </span>
+        </div>
+        <div className="h-1 w-full overflow-hidden rounded-full bg-border">
+          <div className={`h-full ${fill} transition-all`} style={{ width: `${pct * 100}%` }} />
+        </div>
+      </button>
+      <SessionUsageSheet issueId={issueId} open={sheetOpen} onOpenChange={setSheetOpen} />
       {recommendHandoff ? (
         <div className="flex items-center justify-between gap-2 pt-0.5">
           <span className="text-[11px] text-muted-foreground">

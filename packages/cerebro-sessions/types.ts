@@ -55,3 +55,34 @@ export interface ContextUsage {
   // (FIR-1931): a heavy issue must never display an impossible 6986k / 1000k.
   approximate: boolean;
 }
+
+// FIR-1931: one row of the per-session usage breakdown the context bar opens in a
+// sheet — summed cost/tokens/cache for a session (= a thread) plus its current
+// context fullness. Built from data we already have (task_usage + footprint).
+export interface SessionUsageRow {
+  session_id: string;
+  title: string;
+  created_at: string;
+  run_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_cents: number;
+  model: string;
+  used_percent: number;
+  context_tokens: number;
+  max_context_tokens: number;
+  cache_share_percent: number;
+  approximate: boolean;
+}
+
+// The whole breakdown: one row per session + the issue totals.
+export interface UsageBreakdown {
+  sessions: SessionUsageRow[];
+  total_cost_cents: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+}

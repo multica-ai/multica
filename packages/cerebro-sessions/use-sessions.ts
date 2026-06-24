@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getContextUsage, listSessions, startFresh, updateSession } from "./api";
+import { getContextUsage, getUsageBreakdown, listSessions, startFresh, updateSession } from "./api";
 import type { HandoffActionInput } from "./types";
 
 const key = (issueId: string) => ["cerebro-sessions", issueId] as const;
@@ -21,6 +21,16 @@ export function useContextUsage(issueId: string, sessionId?: string, enabled = t
   return useQuery({
     queryKey: ["cerebro-session-context-usage", issueId, sessionId ?? ""],
     queryFn: () => getContextUsage(issueId, sessionId),
+    enabled,
+  });
+}
+
+// FIR-1931: per-session cost/token/cache breakdown for the sheet the context bar
+// opens. `enabled` lets the caller fetch only when the sheet is actually open.
+export function useUsageBreakdown(issueId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["cerebro-session-usage-breakdown", issueId],
+    queryFn: () => getUsageBreakdown(issueId),
     enabled,
   });
 }

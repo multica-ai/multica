@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { api, parseWithFallback } from "@multica/core/api";
-import type { ContextUsage, HandoffActionInput, HandoffBrief, Session } from "./types";
+import type {
+  ContextUsage,
+  HandoffActionInput,
+  HandoffBrief,
+  Session,
+  UsageBreakdown,
+} from "./types";
 
 const base = (issueId: string) => `/api/cerebro/issues/${issueId}/sessions`;
 
@@ -46,6 +52,53 @@ export async function getContextUsage(issueId: string, sessionId?: string): Prom
   return parseWithFallback(raw, ContextUsageSchema, CONTEXT_USAGE_FALLBACK, {
     endpoint: path,
   }) as ContextUsage;
+}
+
+// FIR-1931: per-session usage breakdown shown in the sheet the context bar opens.
+// Every field defaults so an older/newer server shape downgrades to empty rather
+// than throwing into the sheet (CLAUDE.md "API Response Compatibility").
+const SessionUsageRowSchema = z.object({
+  session_id: z.string().default(""),
+  title: z.string().default(""),
+  created_at: z.string().default(""),
+  run_count: z.number().default(0),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  cost_cents: z.number().default(0),
+  model: z.string().default(""),
+  used_percent: z.number().default(0),
+  context_tokens: z.number().default(0),
+  max_context_tokens: z.number().default(0),
+  cache_share_percent: z.number().default(0),
+  approximate: z.boolean().default(false),
+}).loose();
+
+const UsageBreakdownSchema = z.object({
+  sessions: z.array(SessionUsageRowSchema).default([]),
+  total_cost_cents: z.number().default(0),
+  total_input_tokens: z.number().default(0),
+  total_output_tokens: z.number().default(0),
+  total_cache_read_tokens: z.number().default(0),
+  total_cache_write_tokens: z.number().default(0),
+}).loose();
+
+export const USAGE_BREAKDOWN_FALLBACK: UsageBreakdown = {
+  sessions: [],
+  total_cost_cents: 0,
+  total_input_tokens: 0,
+  total_output_tokens: 0,
+  total_cache_read_tokens: 0,
+  total_cache_write_tokens: 0,
+};
+
+export async function getUsageBreakdown(issueId: string): Promise<UsageBreakdown> {
+  const path = `${base(issueId)}/usage-breakdown`;
+  const raw = await api.cerebroRequest<unknown>(path);
+  return parseWithFallback(raw, UsageBreakdownSchema, USAGE_BREAKDOWN_FALLBACK, {
+    endpoint: path,
+  }) as UsageBreakdown;
 }
 
 export function listSessions(issueId: string): Promise<Session[]> {

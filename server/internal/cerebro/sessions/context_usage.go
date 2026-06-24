@@ -93,23 +93,64 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Latest run TRIGGERED inside this thread (trigger comment is the root or a
-	// reply to it) that has recorded token usage. cf.* is the last-turn footprint
-	// (the size of the prompt the model last read); when present it is the
-	// authoritative numerator. The task_usage SUMs are the fallback for runtimes
-	// that report no footprint yet.
-	// Thread membership is depth-independent: a session is the root thread and
-	// EVERY comment beneath it, at any nesting. The earlier check only matched
-	// the root + its DIRECT replies (`parent_id = $2`), which silently dropped a
-	// run whose trigger sat at depth ≥2 — and the parent-must-equal-trigger rule
-	// (handler/comment.go) lands an agent's reply at depth 2 the moment it is
-	// triggered by a depth-1 comment, so a follow-up triggered there fell out of
-	// the session. The recursive CTE walks the whole thread subtree so the
-	// "latest run in this session" is correct regardless of how deep the back-
-	// and-forth nested (FIR-1931). The $3 (isFirst) branch additionally lets the
-	// oldest session adopt a cold-start run with no trigger comment; since it is
-	// the oldest run, ORDER BY created_at DESC means any real session-1 run still
-	// wins — the orphan only surfaces when session 1 has no run of its own.
+	u, found2, err := h.latestRunUsage(r.Context(), issue.ID, rootID, isFirst)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read context usage")
+		return
+	}
+	if !found2 {
+		writeJSON(w, http.StatusOK, resp) // no run with usage yet — has_data stays false
+		return
+	}
+
+	resp.HasData = true
+	resp.Model = u.model
+	resp.InputTokens = u.input
+	resp.CacheReadTokens = u.cacheRead
+	resp.CacheWriteTokens = u.cacheWrite
+	resp.OutputTokens = u.output
+	resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent, resp.Approximate = u.derive()
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// runUsage holds one run's token components: the cumulative task_usage sums plus
+// the last-turn footprint (zero when the runtime reported none).
+type runUsage struct {
+	input, cacheRead, cacheWrite, output int64
+	footprintInput, footprintCacheRead   int64
+	model                                string
+}
+
+// derive turns a run's components into the displayed context figures: prefer the
+// exact last-turn footprint, else fall back to the cumulative sum (approximate,
+// clamped to the window — FIR-1931 Fix C).
+func (u runUsage) derive() (contextTokens, maxContext int64, usedPercent, cacheSharePercent int, approximate bool) {
+	if u.footprintInput > 0 {
+		return computeContextFootprint(u.footprintInput, u.footprintCacheRead, u.model)
+	}
+	return computeContextUsage(u.input, u.cacheRead, u.cacheWrite, u.model)
+}
+
+// latestRunUsage returns the most recent run with recorded usage that belongs to
+// the session rooted at rootID (its trigger comment is the root or any reply
+// beneath it, at any depth). cf.* is the last-turn footprint (the size of the
+// prompt the model last read); when present it is the authoritative numerator,
+// and the task_usage SUMs are the fallback for runtimes that report no footprint.
+//
+// Thread membership is depth-independent: a session is the root thread and EVERY
+// comment beneath it, at any nesting. An earlier check only matched the root +
+// its DIRECT replies (`parent_id = $2`), which silently dropped a run whose
+// trigger sat at depth ≥2 — and the parent-must-equal-trigger rule
+// (handler/comment.go) lands an agent's reply at depth 2 the moment it is
+// triggered by a depth-1 comment, so a follow-up triggered there fell out of the
+// session. The recursive CTE walks the whole thread subtree so the "latest run in
+// this session" is correct regardless of how deep the back-and-forth nested
+// (FIR-1931). The isFirst branch additionally lets the oldest session adopt a
+// cold-start run with no trigger comment; since it is the oldest run, ORDER BY
+// created_at DESC means any real session-1 run still wins — the orphan only
+// surfaces when session 1 has no run of its own. found=false when the session has
+// no run with usage yet.
+func (h *Handler) latestRunUsage(ctx context.Context, issueID, rootID pgtype.UUID, isFirst bool) (runUsage, bool, error) {
 	const q = `
 		WITH RECURSIVE thread(id) AS (
 			SELECT $2::uuid
@@ -133,33 +174,18 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 		ORDER BY t.created_at DESC
 		LIMIT 1`
 
-	var input, cacheRead, cacheWrite, output int64
-	var footprintInput, footprintCacheRead int64
+	var u runUsage
 	var model pgtype.Text
-	err = h.pool.QueryRow(r.Context(), q, issue.ID, rootID, isFirst).Scan(&input, &cacheRead, &cacheWrite, &output, &model, &footprintInput, &footprintCacheRead)
+	err := h.pool.QueryRow(ctx, q, issueID, rootID, isFirst).
+		Scan(&u.input, &u.cacheRead, &u.cacheWrite, &u.output, &model, &u.footprintInput, &u.footprintCacheRead)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			writeJSON(w, http.StatusOK, resp) // no run with usage yet — has_data stays false
-			return
+			return runUsage{}, false, nil
 		}
-		writeError(w, http.StatusInternalServerError, "failed to read context usage")
-		return
+		return runUsage{}, false, err
 	}
-
-	resp.HasData = true
-	resp.Model = model.String
-	resp.InputTokens = input
-	resp.CacheReadTokens = cacheRead
-	resp.CacheWriteTokens = cacheWrite
-	resp.OutputTokens = output
-	if footprintInput > 0 {
-		resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent, resp.Approximate =
-			computeContextFootprint(footprintInput, footprintCacheRead, model.String)
-	} else {
-		resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent, resp.Approximate =
-			computeContextUsage(input, cacheRead, cacheWrite, model.String)
-	}
-	writeJSON(w, http.StatusOK, resp)
+	u.model = model.String
+	return u, true, nil
 }
 
 // computeContextFootprint is the FIR-1856 path for runtimes that report a

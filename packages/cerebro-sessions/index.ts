@@ -8,6 +8,7 @@ export * from "./session-handoff-menu";
 export * from "./context-hairline";
 export * from "./active-context-hairline";
 export * from "./context-bar";
+export * from "./session-usage-sheet";
 export * from "./use-sessions";
 export * from "./run-log-line";
 export * from "./run-prompt-disclosure";
