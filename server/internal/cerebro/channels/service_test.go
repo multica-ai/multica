@@ -237,6 +237,51 @@ func TestPromoteDMOnMention_AgentMention(t *testing.T) {
 	}
 }
 
+// TestPromoteDMOnMention_NoPromoteWhenDMReplyThreadsOn verifies FIR-2010: with
+// the cerebro_dm_reply_threads workspace flag ON, tagging a third-party agent
+// in a DM does NOT promote the DM to a channel — the DM stays 1:1 and the
+// mention instead surfaces as a reply thread (the agent enqueue happens on the
+// upstream path, independent of promotion).
+func TestPromoteDMOnMention_NoPromoteWhenDMReplyThreadsOn(t *testing.T) {
+	ctx := context.Background()
+	memberA := createTestUserAndMember(t, "alice-flagon")
+	memberB := createTestUserAndMember(t, "bob-flagon")
+	agentID := createTestAgent(t, "bot-flagon")
+	dm := createTestDM(t, memberA, memberB)
+
+	cq := cerebrodb.New(testPool)
+	if err := cq.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: testWorkspaceID,
+		FlagKey:     "cerebro_dm_reply_threads",
+		Enabled:     true,
+		Locked:      false,
+	}); err != nil {
+		t.Fatalf("failed to set workspace flag: %v", err)
+	}
+	defer func() {
+		_ = cq.DeleteCerebroWorkspaceFeatureFlag(ctx, cerebrodb.DeleteCerebroWorkspaceFeatureFlagParams{
+			WorkspaceID: testWorkspaceID,
+			FlagKey:     "cerebro_dm_reply_threads",
+		})
+	}()
+
+	comment := db.Comment{
+		ID:         parseUUID("1a1a1a1a-1a1a-1a1a-1a1a-1a1a1a1a1a1a"),
+		IssueID:    dm.ID,
+		AuthorType: "member",
+		AuthorID:   memberA,
+		Content:    mentionAgent(agentID),
+		Type:       "comment",
+	}
+
+	testSvc.PromoteDMOnMention(ctx, dm, comment, nil, uuidString(testWorkspaceID), "member", uuidString(memberA))
+
+	after := loadIssue(t, dm.ID)
+	if after.Kind != "dm" {
+		t.Fatalf("expected kind=dm to remain with dm-reply-threads on, got %q", after.Kind)
+	}
+}
+
 // TestPromoteDMOnMention_NoOpOnExistingMember ensures mentioning a member
 // who is already a participant of the DM does NOT promote — the conversation
 // is still 1:1, just with the peer's name pinged for emphasis.

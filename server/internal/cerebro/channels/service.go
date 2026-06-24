@@ -490,6 +490,57 @@ func (s *Service) MaybeUnarchiveForUser(
 // semantically the entity joined the channel because they were mentioned.
 const SubscriberReasonMentionPromote = "mentioned"
 
+// dmReplyThreadsFlagKey gates FIR-2010 DM-reply-threads. Kept in sync with
+// packages/cerebro-feature-flags/registry.ts.
+const dmReplyThreadsFlagKey = "cerebro_dm_reply_threads"
+
+// dmReplyThreadsEnabled reports whether DM-reply-threads is on for this
+// workspace+actor. Resolution mirrors packages/cerebro-feature-flags/store.ts
+// precedence (locked workspace > personal > unlocked workspace > default) and
+// defaults OFF, so a missing row or any lookup failure preserves the legacy
+// promote-on-mention behavior. The personal override is consulted only when the
+// actor is a member with a parseable id.
+func (s *Service) dmReplyThreadsEnabled(ctx context.Context, workspaceID pgtype.UUID, actorType, actorID string) bool {
+	if s.CerebroQueries == nil {
+		return false
+	}
+	var wsEnabled, wsLocked, wsFound bool
+	wsRows, err := s.CerebroQueries.ListCerebroWorkspaceFeatureFlags(ctx, workspaceID)
+	if err != nil {
+		slog.Warn("dm-reply-threads flag: workspace lookup failed", "error", err)
+		return false
+	}
+	for _, row := range wsRows {
+		if row.FlagKey == dmReplyThreadsFlagKey {
+			wsEnabled, wsLocked, wsFound = row.Enabled, row.Locked, true
+			break
+		}
+	}
+	if wsFound && wsLocked {
+		return wsEnabled
+	}
+	if actorType == "member" && actorID != "" {
+		if userID, perr := util.ParseUUID(actorID); perr == nil {
+			on, gerr := s.CerebroQueries.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+				WorkspaceID: workspaceID,
+				UserID:      userID,
+				FlagKey:     dmReplyThreadsFlagKey,
+			})
+			if gerr == nil {
+				return on
+			}
+			if !errors.Is(gerr, pgx.ErrNoRows) {
+				slog.Warn("dm-reply-threads flag: personal lookup failed", "error", gerr)
+				return false
+			}
+		}
+	}
+	if wsFound {
+		return wsEnabled
+	}
+	return false
+}
+
 // PromoteDMOnMention promotes a DM to a multi-party channel when a comment
 // mentions a member or agent that is not already a participant (JEH-1131).
 // Once promoted, the DM peer's "is this still a DM" semantics no longer
@@ -519,6 +570,15 @@ func (s *Service) PromoteDMOnMention(
 		return
 	}
 	if s.Bus == nil {
+		return
+	}
+	// FIR-2010: when DM-reply-threads is on, tagging an agent (or member) in a
+	// DM must NOT promote the DM to a channel. The DM stays 1:1; the mentioned
+	// agent has already been enqueued upstream (the enqueue path runs before
+	// this call and is independent of promotion), and its answer lands as a
+	// reply thread inside the DM. Resolved per workspace+actor so it can roll
+	// out to one user first; default OFF preserves the legacy promote behavior.
+	if s.dmReplyThreadsEnabled(ctx, issue.WorkspaceID, actorType, actorID) {
 		return
 	}
 
