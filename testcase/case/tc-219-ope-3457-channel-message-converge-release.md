@@ -33,7 +33,7 @@
 - `MessageRow`：`useDraggable(msg:id)` + `useDroppable(msg:id)`，拖拽时 dim、成为 converge 目标时高亮。
 - `PanelMessage`（非 framed 回复）：`useDraggable(reply:id)`。
 - 主列表容器：`useDroppable(MSG_LIST_DROP_ID)`，回复拖拽时 ring 高亮提示释放。
-- i18n：`channels.move.{converged,released,failed}`（en + zh-Hans，parity 测试通过）。
+- i18n：`channels.move.{converged,released,failed}`（en + zh-Hans + ja + ko，parity 测试通过）。
 
 ## 受影响文件
 
@@ -44,7 +44,7 @@
 - `server/cmd/server/router.go` — `PATCH /messages/{msgId}/move` 路由。
 - `packages/core/api/client.ts` — `moveChannelMessage` 方法。
 - `packages/views/channels/components/channels-page.tsx` — `MessageDndProvider`、MessageRow/PanelMessage/主列表 droppable。
-- `packages/views/locales/{en,zh-Hans}/channels.json` — `move` 文案。
+- `packages/views/locales/{en,zh-Hans,ja,ko}/channels.json` — `move` 文案。
 
 ## Commit SHA
 
