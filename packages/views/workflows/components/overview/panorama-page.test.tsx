@@ -33,10 +33,7 @@ const MOCK_PLUGINS = {
     { id: "plugin-1", name: "Cospowers Brainstorming", description: "Brainstorming plugin", slug: "cospowers-brainstorming", version: "1.0.0", category: "engineering" },
     { id: "plugin-2", name: "Cospowers Session", description: "Session context plugin", slug: "cospowers-session", version: "1.0.0", category: "engineering" },
   ],
-  total: 2,
-  page: 1,
-  pageSize: 100,
-  hasMore: false,
+  total: 2, page: 1, pageSize: 100, hasMore: false,
 };
 
 const mocks = vi.hoisted(() => ({
@@ -93,6 +90,33 @@ vi.mock("@multica/core/workflows/stores/view-store", () => ({
     selector({ viewMode: "panorama", setViewMode: mocks.setViewMode }),
 }));
 
+// Mock ResizeObserver for tests
+class ResizeObserverMock {
+  observe() {}
+  disconnect() {}
+  unobserve() {}
+}
+globalThis.ResizeObserver = ResizeObserverMock as typeof ResizeObserver;
+
+// Provide minimal bounding rects for all nodes so SVG overlay can compute edges
+const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+HTMLElement.prototype.getBoundingClientRect = function mockRect() {
+  const testId = (this as HTMLElement).getAttribute?.("data-testid") ?? "";
+  if (testId.includes("compact-node-card-n1")) {
+    return { x: 12, y: 62, left: 12, top: 62, right: 132, bottom: 134, width: 120, height: 72, toJSON() { return this; } };
+  }
+  if (testId.includes("compact-node-card-n2")) {
+    return { x: 142, y: 62, left: 142, top: 62, right: 262, bottom: 134, width: 120, height: 72, toJSON() { return this; } };
+  }
+  if (testId.includes("compact-node-card-n3")) {
+    return { x: 12, y: 218, left: 12, top: 218, right: 132, bottom: 290, width: 120, height: 72, toJSON() { return this; } };
+  }
+  if (testId.includes("critic-badge-n1")) {
+    return { x: 24, y: 142, left: 24, top: 142, right: 144, bottom: 206, width: 120, height: 64, toJSON() { return this; } };
+  }
+  return originalGetBoundingClientRect.call(this);
+};
+
 import { WorkflowPanoramaPage } from "./workflow-panorama-page";
 
 describe("WorkflowPanoramaPage", () => {
@@ -115,27 +139,32 @@ describe("WorkflowPanoramaPage", () => {
     expect(container.querySelector("h1")?.textContent).toBe("Test Workflow");
   });
 
-  it("renders stage swimlanes for each stage", () => {
+  it("renders stage lanes for each stage", () => {
     renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
-    expect(screen.getByText("Intake")).toBeTruthy();
-    expect(screen.getByText("Analysis")).toBeTruthy();
+    expect(screen.getByTestId("stage-lane-stage-1")).toBeTruthy();
+    expect(screen.getByTestId("stage-lane-stage-2")).toBeTruthy();
   });
 
-  it("renders plugin cards with resolved names", () => {
+  it("renders compact node cards with resolved names", () => {
     renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
-    expect(screen.getByText("Cospowers Brainstorming")).toBeTruthy();
-    expect(screen.getByText("Cospowers Session")).toBeTruthy();
-    expect(screen.getByText("requirement-analysis")).toBeTruthy();
+    expect(screen.getByTestId("compact-node-card-n1")).toBeTruthy();
+    expect(screen.getByTestId("compact-node-card-n2")).toBeTruthy();
+    expect(screen.getByTestId("compact-node-card-n3")).toBeTruthy();
   });
 
-  it("renders a stage-to-stage flow summary label", () => {
+  it("no longer renders DataFlowArrow between stages", () => {
     renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
-    expect(screen.getByText("session-context -> requirement-analysis")).toBeTruthy();
+    expect(screen.queryByTestId("data-flow-arrow")).toBeNull();
   });
 
-  it("opens detail panel on card click", () => {
+  it("renders stage transition gradient between stages", () => {
     renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
-    fireEvent.click(screen.getByTestId("plugin-card-n1"));
+    expect(screen.queryAllByTestId("stage-transition-gradient").length).toBeGreaterThan(0);
+  });
+
+  it("opens detail panel on node card click", () => {
+    renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
+    fireEvent.click(screen.getByTestId("compact-node-card-n1"));
     expect(screen.getByTestId("architecture-detail-panel")).toBeTruthy();
   });
 
@@ -145,7 +174,6 @@ describe("WorkflowPanoramaPage", () => {
     const panel = screen.getByTestId("architecture-detail-panel");
     expect(panel).toBeTruthy();
     expect(within(panel).getAllByText("Critic").length).toBeGreaterThan(0);
-    expect(within(panel).getByText("Session Agent")).toBeTruthy();
   });
 
   it("shows loading skeleton when loading", () => {

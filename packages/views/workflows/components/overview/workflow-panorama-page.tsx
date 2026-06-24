@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, type ReactNode } from "react";
+import { useState, useMemo, useLayoutEffect, useRef, useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -16,18 +16,17 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { PageHeader } from "../../../layout/page-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
-import { AlertCircle, ArrowLeft } from "lucide-react";
+import { AlertCircle, ArrowLeft, PanelsTopLeft } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import { useT } from "../../../i18n";
-import { StageSwimlane } from "./stage-swimlane";
-import { DataFlowArrow } from "./data-flow-arrow";
+import { StageLane } from "./stage-lane";
+import { PanoramaSvgOverlay } from "./panorama-svg-overlay";
 import {
   ArchitectureDetailPanel,
   type ArchitectureDetailPanelData,
 } from "./architecture-detail-panel";
 import type { Agent } from "@multica/core/types";
 import type { BuiltinPlugin } from "@multica/core/api/schemas";
-import { PanelsTopLeft } from "lucide-react";
 
 export interface WorkflowPanoramaPageProps {
   workflowId: string;
@@ -39,13 +38,31 @@ type PanoramaSelection = {
   focus: "worker" | "critic";
 };
 
-/** Loading skeleton for panorama view. */
+const STAGE_BG_COLORS = [
+  "from-slate-50/40",
+  "from-stone-50/40",
+  "from-blue-50/40",
+  "from-rose-50/40",
+  "from-violet-50/40",
+  "from-amber-50/40",
+] as const;
+
+// Stage transition gradient lookup (6-color cycle -> all pairwise transitions)
+const STAGE_TRANSITION_GRADIENTS = [
+  "bg-gradient-to-b from-slate-50/40 to-stone-50/40",
+  "bg-gradient-to-b from-stone-50/40 to-blue-50/40",
+  "bg-gradient-to-b from-blue-50/40 to-rose-50/40",
+  "bg-gradient-to-b from-rose-50/40 to-violet-50/40",
+  "bg-gradient-to-b from-violet-50/40 to-amber-50/40",
+  "bg-gradient-to-b from-amber-50/40 to-slate-50/40",
+] as const;
+
 function PanoramaSkeleton() {
   return (
-    <div className="flex flex-col gap-4 p-6" data-testid="panorama-skeleton">
+    <div className="flex flex-col gap-4 p-3" data-testid="panorama-skeleton">
       <Skeleton className="h-8 w-64" />
       {Array.from({ length: 3 }).map((_, i) => (
-        <Skeleton key={i} className="h-32 w-full rounded-lg" />
+        <Skeleton key={i} className="h-24 w-full" />
       ))}
     </div>
   );
@@ -89,22 +106,87 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
   // ── Derived lookups ──
   const agentLookup = useMemo(() => {
     const map = new Map<string, Agent | null>();
-    for (const a of agents) {
-      map.set(a.id, a);
-    }
+    for (const a of agents) map.set(a.id, a);
     return map;
   }, [agents]);
 
   const pluginLookup = useMemo(() => {
     const map = new Map<string, BuiltinPlugin | null>();
     const items = pluginsData?.items ?? [];
-    for (const p of items) {
-      map.set(p.id, p);
-    }
+    for (const p of items) map.set(p.id, p);
     return map;
   }, [pluginsData]);
 
-  // Build detail panel data for selected node
+  // ── Node/critic position measurement for SVG overlay ──
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const nodeElementMap = useRef(new Map<string, HTMLDivElement>());
+  const criticElementMap = useRef(new Map<string, HTMLButtonElement>());
+  const [nodePositions, setNodePositions] = useState(new Map<string, DOMRect>());
+  const [criticPositions, setCriticPositions] = useState(new Map<string, DOMRect>());
+
+  const measurePositions = useCallback(() => {
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    if (!containerRect) return;
+
+    const nextNodePos = new Map<string, DOMRect>();
+    nodeElementMap.current.forEach((el, id) => {
+      const rect = el.getBoundingClientRect();
+      // Convert viewport-relative to container-relative coordinates
+      nextNodePos.set(id, new DOMRect(
+        rect.left - containerRect.left + (containerRef.current?.scrollLeft ?? 0),
+        rect.top - containerRect.top + (containerRef.current?.scrollTop ?? 0),
+        rect.width,
+        rect.height,
+      ));
+    });
+    setNodePositions(nextNodePos);
+
+    const nextCriticPos = new Map<string, DOMRect>();
+    criticElementMap.current.forEach((el, id) => {
+      const rect = el.getBoundingClientRect();
+      nextCriticPos.set(id, new DOMRect(
+        rect.left - containerRect.left + (containerRef.current?.scrollLeft ?? 0),
+        rect.top - containerRect.top + (containerRef.current?.scrollTop ?? 0),
+        rect.width,
+        rect.height,
+      ));
+    });
+    setCriticPositions(nextCriticPos);
+  }, []);
+
+  useLayoutEffect(() => {
+    measurePositions();
+    const observer = new ResizeObserver(() => measurePositions());
+    if (containerRef.current) observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [nodes, stages, measurePositions]);
+
+  // ── Create callback refs for nodes and critics ──
+  const nodeElementRefs = useMemo(() => {
+    const map = new Map<string, (el: HTMLDivElement | null) => void>();
+    for (const node of nodes) {
+      map.set(node.id, (el) => {
+        if (el) nodeElementMap.current.set(node.id, el);
+        else nodeElementMap.current.delete(node.id);
+      });
+    }
+    return map;
+  }, [nodes]);
+
+  const criticElementRefs = useMemo(() => {
+    const map = new Map<string, (el: HTMLButtonElement | null) => void>();
+    for (const node of nodes) {
+      if (node.critic_id || node.critic_api_url) {
+        map.set(node.id, (el) => {
+          if (el) criticElementMap.current.set(node.id, el);
+          else criticElementMap.current.delete(node.id);
+        });
+      }
+    }
+    return map;
+  }, [nodes]);
+
+  // ── Build detail panel data ──
   const selectedPanelData: ArchitectureDetailPanelData | null = useMemo(() => {
     if (!selectedCard) return null;
     const node = nodes.find((n) => n.id === selectedCard.nodeId);
@@ -131,21 +213,25 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
     setSelectedCard({ nodeId, focus });
   };
 
-  const handleDetailClose = () => {
-    setSelectedCard(null);
-  };
+  const handleDetailClose = () => setSelectedCard(null);
+  const handleOpenInEditor = () => setViewMode("editor");
 
-  const handleOpenInEditor = () => {
-    setViewMode("editor");
-  };
+  // ── Group nodes by stage ──
+  const nodesByStage = useMemo(() => {
+    const map = new Map<string, typeof nodes>();
+    for (const node of nodes) {
+      const sid = node.stage_id ?? "__unassigned__";
+      if (!map.has(sid)) map.set(sid, []);
+      map.get(sid)!.push(node);
+    }
+    return map;
+  }, [nodes]);
 
   // ── Loading ──
   if (isLoading) {
     return (
       <div className="flex flex-col h-full">
-        <PageHeader>
-          <Skeleton className="h-4 w-48" />
-        </PageHeader>
+        <PageHeader><Skeleton className="h-4 w-48" /></PageHeader>
         <PanoramaSkeleton />
       </div>
     );
@@ -155,9 +241,7 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
   if (workflowError || !workflow) {
     return (
       <div className="flex flex-col h-full">
-        <PageHeader>
-          <Skeleton className="h-4 w-48" />
-        </PageHeader>
+        <PageHeader><Skeleton className="h-4 w-48" /></PageHeader>
         <div className="flex h-full items-center justify-center p-6">
           <Alert variant="destructive" className="max-w-md">
             <AlertCircle className="h-4 w-4" />
@@ -167,19 +251,11 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
                 {t(($) => $.detail.not_found)}
               </p>
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigation.push(wsPaths.workflows())}
-                >
+                <Button variant="outline" size="sm" onClick={() => navigation.push(wsPaths.workflows())}>
                   <ArrowLeft className="mr-2 h-4 w-4" />
                   {t(($) => $.detail.back_to_workflows)}
                 </Button>
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => workflowRefetch()}
-                >
+                <Button variant="default" size="sm" onClick={() => workflowRefetch()}>
                   {t(($) => $.overview.error_retry)}
                 </Button>
               </div>
@@ -210,36 +286,48 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
         {viewToggle && <div className="flex items-center gap-1">{viewToggle}</div>}
       </PageHeader>
 
-      <div className="flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.08),_transparent_38%)] p-6">
-        <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-2">
-        {sortedStages.map((stage, idx) => (
-          <div key={stage.id}>
-            <StageSwimlane
-              stage={stage}
-              nodes={nodes}
-              edges={edges}
-              agentLookup={agentLookup}
-              pluginLookup={pluginLookup}
-              onCardClick={handleCardClick}
-              selectedCard={selectedCard}
-            />
-            {idx < sortedStages.length - 1 && (
-              <DataFlowArrow
-                edges={edges}
-                nodes={nodes}
-                sourceStageId={stage.id}
-                targetStageId={sortedStages[idx + 1]!.id}
-              />
-            )}
-          </div>
-        ))}
+      <div
+        ref={containerRef}
+        className="flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.08),_transparent_38%)] p-3 relative"
+      >
+        <PanoramaSvgOverlay
+          edges={edges}
+          nodes={nodes}
+          nodePositions={nodePositions}
+          criticPositions={criticPositions}
+        />
 
-        {sortedStages.length === 0 && (
+        {sortedStages.length === 0 ? (
           <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
             {t(($) => $.overview.stage_canvas.empty_title)}
           </div>
+        ) : (
+          sortedStages.map((stage, idx) => {
+            const currColorIdx = Math.abs(stage.sort_order) % 6;
+            const gradientClass = STAGE_TRANSITION_GRADIENTS[currColorIdx] ?? STAGE_TRANSITION_GRADIENTS[0];
+
+            return (
+              <div key={stage.id}>
+                <StageLane
+                  stage={stage}
+                  nodeIds={nodesByStage.get(stage.id) ?? []}
+                  agentLookup={agentLookup}
+                  pluginLookup={pluginLookup}
+                  onCardClick={handleCardClick}
+                  selectedCard={selectedCard}
+                  nodeElementRefs={nodeElementRefs}
+                  criticElementRefs={criticElementRefs}
+                />
+                {idx < sortedStages.length - 1 && (
+                  <div
+                    data-testid="stage-transition-gradient"
+                    className={`h-[6px] ${gradientClass}`}
+                  />
+                )}
+              </div>
+            );
+          })
         )}
-        </div>
       </div>
 
       {selectedPanelData && (
