@@ -157,6 +157,12 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 				"agy print mode timed out after %s waiting for the agent response; a long-running command likely outlived --print-timeout",
 				antigravityPrintTimeout(timeout),
 			)
+		} else if providerErr := antigravityProviderError(logPath); finalStatus == "completed" && providerErr != "" {
+			// agy can also surface terminal model/provider failures only in the
+			// per-run log while exiting 0 with empty stdout. Without promoting
+			// that marker, the daemon records a failed turn as a blank success.
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("agy provider error: %s", providerErr)
 		}
 		if finalError != "" {
 			finalError = withAgentStderr(finalError, "agy", stderrBuf.Tail())
@@ -201,6 +207,8 @@ var antigravityConversationIDRe = regexp.MustCompile(
 // after 100 polls (printed=3)`
 var antigravityPrintTimeoutRe = regexp.MustCompile(`Print mode: timed out after \d+ polls`)
 
+var antigravityProviderErrorRe = regexp.MustCompile(`agent executor error:\s*(.+)`)
+
 // antigravityPrintTimedOut reports whether the per-run log shows agy hit its own
 // print-mode timeout. Best-effort: returns false if the log is missing or the
 // marker format changes upstream, in which case the run is classified by its
@@ -214,6 +222,23 @@ func antigravityPrintTimedOut(logPath string) bool {
 		return false
 	}
 	return antigravityPrintTimeoutRe.Match(data)
+}
+
+// antigravityProviderError extracts terminal upstream/model errors that agy logs
+// but does not necessarily print to stdout or reflect in its exit code.
+func antigravityProviderError(logPath string) string {
+	if logPath == "" {
+		return ""
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return ""
+	}
+	matches := antigravityProviderErrorRe.FindAllSubmatch(data, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(string(matches[len(matches)-1][1]))
 }
 
 // readAntigravityConversationID scans the per-run log file for the
