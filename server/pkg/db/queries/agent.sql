@@ -561,6 +561,11 @@ RETURNING *;
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');
 
+-- name: GetAgentForClaimUpdate :one
+SELECT * FROM agent
+WHERE id = $1
+FOR UPDATE;
+
 -- name: HasActiveTaskForIssue :one
 -- Returns true if there is any queued, dispatched, waiting_local_directory,
 -- or running task for the issue.
