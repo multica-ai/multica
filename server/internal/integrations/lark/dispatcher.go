@@ -189,18 +189,25 @@ type ChatTaskEnqueuer interface {
 //     commit and Mark" window. See lark_inbound_message_dedup comment
 //     in 109_lark_integration.up.sql for the full invariant set.
 type DispatcherQueries interface {
-	GetLarkInstallationByAppID(ctx context.Context, appID string) (db.LarkInstallation, error)
-	GetLarkUserBindingByOpenID(ctx context.Context, arg db.GetLarkUserBindingByOpenIDParams) (db.LarkUserBinding, error)
+	GetLarkInstallationByAppID(ctx context.Context, appID string) (Installation, error)
+	GetLarkUserBindingByOpenID(ctx context.Context, arg GetUserBindingByOpenIDParams) (UserBinding, error)
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
-	ClaimLarkInboundDedup(ctx context.Context, arg db.ClaimLarkInboundDedupParams) (db.LarkInboundMessageDedup, error)
-	MarkLarkInboundDedupProcessed(ctx context.Context, arg db.MarkLarkInboundDedupProcessedParams) (int64, error)
-	ReleaseLarkInboundDedup(ctx context.Context, arg db.ReleaseLarkInboundDedupParams) (int64, error)
+	ClaimLarkInboundDedup(ctx context.Context, arg ClaimInboundDedupParams) (InboundMessageDedup, error)
+	MarkLarkInboundDedupProcessed(ctx context.Context, arg MarkInboundDedupProcessedParams) (int64, error)
+	ReleaseLarkInboundDedup(ctx context.Context, arg ReleaseInboundDedupParams) (int64, error)
 	// GetWorkspace is needed to read IssuePrefix so the /issue
 	// confirmation message can render the workspace-qualified key
 	// ("MUL-42"). A lookup failure is non-fatal — we degrade to
 	// emitting just the issue number — so callers handle the error
 	// inline rather than aborting the whole dispatch.
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+
+	// IsWorkspaceMember re-checks current membership in the inbound
+	// identity step. With the lark_user_binding -> member foreign key
+	// removed (MUL-3515 §4), a binding row no longer proves the bound
+	// user is still a workspace member, so the dispatcher verifies it
+	// explicitly instead of trusting the row's existence.
+	IsWorkspaceMember(ctx context.Context, workspaceID, userID pgtype.UUID) (bool, error)
 }
 
 // Dispatcher is the single per-message entry point on the inbound
@@ -240,7 +247,7 @@ type Dispatcher struct {
 // FlushReplyFunc matches OutcomeReplier.Reply so the production replier can
 // be injected directly. It is invoked from the debounced flush goroutine
 // to deliver the agent-offline / agent-archived notice.
-type FlushReplyFunc func(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, res DispatchResult)
+type FlushReplyFunc func(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult)
 
 // chatRunFlushTimeout bounds the detached flush (session reload +
 // EnqueueChatTask + offline/archived notice). The flush runs on its own
@@ -339,7 +346,7 @@ func (d *Dispatcher) Handle(ctx context.Context, msg InboundMessage) (DispatchRe
 	var claimToken pgtype.UUID
 	claimed := false
 	if msg.MessageID != "" {
-		claim, err := d.Queries.ClaimLarkInboundDedup(ctx, db.ClaimLarkInboundDedupParams{
+		claim, err := d.Queries.ClaimLarkInboundDedup(ctx, ClaimInboundDedupParams{
 			InstallationID: inst.ID,
 			MessageID:      msg.MessageID,
 		})
@@ -415,7 +422,7 @@ const (
 //   - Post-AppendUserMessage error (issue create, session reload,
 //     task enqueue) → chat_message already committed but the
 //     in-tx Mark also already committed → finalizeNone.
-func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, inst db.LarkInstallation, claimToken pgtype.UUID) (DispatchResult, dedupFinalize, error) {
+func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, inst Installation, claimToken pgtype.UUID) (DispatchResult, dedupFinalize, error) {
 	// 3. Group-mention filter (group chats only). We do this BEFORE
 	//    identity check so that an unbound user's idle group chatter
 	//    never produces an "you need to bind" reply card spam — the
@@ -424,12 +431,14 @@ func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, ins
 		return d.drop(ctx, msg, inst.ID, DropReasonNotAddressedInGroup), finalizeMark, nil
 	}
 
-	// 4. Identity check. A row in lark_user_binding means the open_id
-	//    maps to a current workspace member (the composite FK to
-	//    member cascades the binding away on membership revocation).
-	binding, err := d.Queries.GetLarkUserBindingByOpenID(ctx, db.GetLarkUserBindingByOpenIDParams{
+	// 4. Identity check. A row in lark_user_binding maps the open_id to
+	//    a Multica user. Its mere existence USED to prove current
+	//    workspace membership (a composite FK to member cascaded the
+	//    binding away on revocation); MUL-3515 §4 removed that FK, so
+	//    step 4b re-checks membership explicitly below.
+	binding, err := d.Queries.GetLarkUserBindingByOpenID(ctx, GetUserBindingByOpenIDParams{
 		InstallationID: inst.ID,
-		LarkOpenID:     string(msg.SenderOpenID),
+		ChannelUserID:  string(msg.SenderOpenID),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -449,6 +458,22 @@ func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, ins
 			}, finalizeMark, nil
 		}
 		return DispatchResult{}, finalizeRelease, fmt.Errorf("load user binding: %w", err)
+	}
+
+	// 4b. Re-check workspace membership. With the binding->member FK gone
+	//     (MUL-3515 §4), a stale binding can outlive the user's
+	//     membership, so the row from step 4 is necessary but no longer
+	//     sufficient. A former member's leftover binding must not leak
+	//     content into a chat_session (§4.3); we drop + audit it the same
+	//     way as the group-mention filter (durable audit row →
+	//     finalizeMark), with the non_workspace_member reason that used
+	//     to be unreachable while the FK guaranteed it could not happen.
+	isMember, err := d.Queries.IsWorkspaceMember(ctx, inst.WorkspaceID, binding.MulticaUserID)
+	if err != nil {
+		return DispatchResult{}, finalizeRelease, fmt.Errorf("check workspace membership: %w", err)
+	}
+	if !isMember {
+		return d.drop(ctx, msg, inst.ID, DropReasonNonWorkspaceMember), finalizeMark, nil
 	}
 
 	// 5. Resolve the chat_session. For group chats, the session
@@ -575,7 +600,7 @@ func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, ins
 // it inline when batching is disabled). The flush closure captures this
 // message's installation + InboundMessage so the offline/archived notice,
 // if any, targets the right chat; the latest message in a window wins.
-func (d *Dispatcher) scheduleRun(inst db.LarkInstallation, msg InboundMessage, sessionID pgtype.UUID, initiatorUserID pgtype.UUID) {
+func (d *Dispatcher) scheduleRun(inst Installation, msg InboundMessage, sessionID pgtype.UUID, initiatorUserID pgtype.UUID) {
 	flush := func() { d.flushChatRun(inst, msg, sessionID, initiatorUserID) }
 	if d.batcher == nil {
 		// Batching disabled (unit tests / degenerate config): trigger the
@@ -596,7 +621,7 @@ func (d *Dispatcher) scheduleRun(inst db.LarkInstallation, msg InboundMessage, s
 // returned to a caller (the message is already ACKed and durable), so they
 // are logged: a failed enqueue leaves the message in the session to be
 // picked up by the next message's run.
-func (d *Dispatcher) flushChatRun(inst db.LarkInstallation, msg InboundMessage, sessionID pgtype.UUID, initiatorUserID pgtype.UUID) {
+func (d *Dispatcher) flushChatRun(inst Installation, msg InboundMessage, sessionID pgtype.UUID, initiatorUserID pgtype.UUID) {
 	ctx, cancel := context.WithTimeout(context.Background(), chatRunFlushTimeout)
 	defer cancel()
 
@@ -628,7 +653,7 @@ func (d *Dispatcher) flushChatRun(inst db.LarkInstallation, msg InboundMessage, 
 }
 
 // emitFlushReply delivers an offline/archived notice for a flushed run.
-func (d *Dispatcher) emitFlushReply(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, sessionID pgtype.UUID, outcome Outcome) {
+func (d *Dispatcher) emitFlushReply(ctx context.Context, inst Installation, msg InboundMessage, sessionID pgtype.UUID, outcome Outcome) {
 	if d.FlushReply == nil {
 		return
 	}
@@ -659,13 +684,13 @@ func keyForSession(sessionID pgtype.UUID) string {
 func (d *Dispatcher) applyFinalize(ctx context.Context, installationID pgtype.UUID, messageID string, claimToken pgtype.UUID, action dedupFinalize) {
 	switch action {
 	case finalizeMark:
-		_, _ = d.Queries.MarkLarkInboundDedupProcessed(ctx, db.MarkLarkInboundDedupProcessedParams{
+		_, _ = d.Queries.MarkLarkInboundDedupProcessed(ctx, MarkInboundDedupProcessedParams{
 			InstallationID: installationID,
 			MessageID:      messageID,
 			ClaimToken:     claimToken,
 		})
 	case finalizeRelease:
-		_, _ = d.Queries.ReleaseLarkInboundDedup(ctx, db.ReleaseLarkInboundDedupParams{
+		_, _ = d.Queries.ReleaseLarkInboundDedup(ctx, ReleaseInboundDedupParams{
 			InstallationID: installationID,
 			MessageID:      messageID,
 			ClaimToken:     claimToken,
@@ -694,7 +719,7 @@ func (d *Dispatcher) drop(ctx context.Context, msg InboundMessage, instID pgtype
 
 func (d *Dispatcher) createIssueFromCommand(
 	ctx context.Context,
-	inst db.LarkInstallation,
+	inst Installation,
 	creatorUserID pgtype.UUID,
 	sessionID pgtype.UUID,
 	cmd IssueCommand,

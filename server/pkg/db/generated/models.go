@@ -180,6 +180,88 @@ type AutopilotTrigger struct {
 	EventFilters   []byte             `json:"event_filters"`
 }
 
+type ChannelBindingToken struct {
+	TokenHash      string             `json:"token_hash"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ChannelType    string             `json:"channel_type"`
+	ChannelUserID  string             `json:"channel_user_id"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChannelChatSessionBinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ChannelType    string             `json:"channel_type"`
+	ChannelChatID  string             `json:"channel_chat_id"`
+	ChatType       string             `json:"chat_type"`
+	LastMessageID  pgtype.Text        `json:"last_message_id"`
+	LastThreadID   pgtype.Text        `json:"last_thread_id"`
+	Config         []byte             `json:"config"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChannelInboundAudit struct {
+	ID               pgtype.UUID        `json:"id"`
+	InstallationID   pgtype.UUID        `json:"installation_id"`
+	ChannelType      string             `json:"channel_type"`
+	ChannelChatID    pgtype.Text        `json:"channel_chat_id"`
+	EventType        string             `json:"event_type"`
+	ChannelEventID   pgtype.Text        `json:"channel_event_id"`
+	ChannelMessageID pgtype.Text        `json:"channel_message_id"`
+	DropReason       string             `json:"drop_reason"`
+	ReceivedAt       pgtype.Timestamptz `json:"received_at"`
+}
+
+type ChannelInboundMessageDedup struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	MessageID      string             `json:"message_id"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	ClaimToken     pgtype.UUID        `json:"claim_token"`
+}
+
+type ChannelInstallation struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	ChannelType      string             `json:"channel_type"`
+	Config           []byte             `json:"config"`
+	Status           string             `json:"status"`
+	WsLeaseToken     pgtype.Text        `json:"ws_lease_token"`
+	WsLeaseExpiresAt pgtype.Timestamptz `json:"ws_lease_expires_at"`
+	InstallerUserID  pgtype.UUID        `json:"installer_user_id"`
+	InstalledAt      pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ChannelOutboundCardMessage struct {
+	ID                   pgtype.UUID        `json:"id"`
+	ChatSessionID        pgtype.UUID        `json:"chat_session_id"`
+	TaskID               pgtype.UUID        `json:"task_id"`
+	ChannelType          string             `json:"channel_type"`
+	ChannelChatID        string             `json:"channel_chat_id"`
+	ChannelCardMessageID string             `json:"channel_card_message_id"`
+	Status               string             `json:"status"`
+	LastPatchedAt        pgtype.Timestamptz `json:"last_patched_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChannelUserBinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	MulticaUserID  pgtype.UUID        `json:"multica_user_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ChannelType    string             `json:"channel_type"`
+	ChannelUserID  string             `json:"channel_user_id"`
+	Config         []byte             `json:"config"`
+	BoundAt        pgtype.Timestamptz `json:"bound_at"`
+}
+
 type ChatMessage struct {
 	ID            pgtype.UUID        `json:"id"`
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`

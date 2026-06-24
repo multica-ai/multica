@@ -66,15 +66,17 @@ type TxStarter interface {
 //     failure (rolled-back tx → no chat_message → next replay
 //     re-processes).
 type chatSessionService struct {
-	queries   *db.Queries
+	queries   *ChannelStore
 	txStarter TxStarter
 }
 
 // NewChatSessionService constructs a ChatSessionService backed by the
 // supplied queries and tx starter. The tx starter is required;
 // without it, AppendUserMessage cannot run dedup + insert atomically.
+// queries is wrapped in a ChannelStore so the lark_* calls resolve to
+// channel_* rows (MUL-3515).
 func NewChatSessionService(queries *db.Queries, tx TxStarter) ChatSessionService {
-	return &chatSessionService{queries: queries, txStarter: tx}
+	return &chatSessionService{queries: NewChannelStore(queries), txStarter: tx}
 }
 
 // EnsureChatSession returns the chat_session.id bound to the given
@@ -93,9 +95,9 @@ func NewChatSessionService(queries *db.Queries, tx TxStarter) ChatSessionService
 // returns its chat_session_id.
 func (s *chatSessionService) EnsureChatSession(ctx context.Context, p EnsureChatSessionParams) (pgtype.UUID, error) {
 	// Fast path: existing binding.
-	existing, err := s.queries.GetLarkChatSessionBinding(ctx, db.GetLarkChatSessionBindingParams{
+	existing, err := s.queries.GetLarkChatSessionBinding(ctx, GetChatSessionBindingParams{
 		InstallationID: p.InstallationID,
-		LarkChatID:     string(p.ChatID),
+		ChannelChatID:  string(p.ChatID),
 	})
 	if err == nil {
 		return existing.ChatSessionID, nil
@@ -113,9 +115,9 @@ func (s *chatSessionService) EnsureChatSession(ctx context.Context, p EnsureChat
 	// Lost the race: another goroutine created the binding between our
 	// lookup and our insert. Re-read and return the winner's session.
 	if isUniqueViolation(err) {
-		existing, lookupErr := s.queries.GetLarkChatSessionBinding(ctx, db.GetLarkChatSessionBindingParams{
+		existing, lookupErr := s.queries.GetLarkChatSessionBinding(ctx, GetChatSessionBindingParams{
 			InstallationID: p.InstallationID,
-			LarkChatID:     string(p.ChatID),
+			ChannelChatID:  string(p.ChatID),
 		})
 		if lookupErr == nil {
 			return existing.ChatSessionID, nil
@@ -143,11 +145,11 @@ func (s *chatSessionService) createSessionAndBinding(ctx context.Context, p Ensu
 		return pgtype.UUID{}, fmt.Errorf("create chat session: %w", err)
 	}
 
-	if _, err := qtx.CreateLarkChatSessionBinding(ctx, db.CreateLarkChatSessionBindingParams{
+	if _, err := qtx.CreateLarkChatSessionBinding(ctx, CreateChatSessionBindingParams{
 		ChatSessionID:  session.ID,
 		InstallationID: p.InstallationID,
-		LarkChatID:     string(p.ChatID),
-		LarkChatType:   string(p.ChatType),
+		ChannelChatID:  string(p.ChatID),
+		ChatType:       string(p.ChatType),
 	}); err != nil {
 		return pgtype.UUID{}, err
 	}
@@ -245,10 +247,10 @@ func (s *chatSessionService) AppendUserMessage(ctx context.Context, p AppendUser
 	// chat-level send path. Skipped when there is no Lark message_id
 	// (defensive: every real inbound carries one).
 	if p.LarkMessageID != "" {
-		if err := qtx.UpdateLarkChatSessionBindingReplyTarget(ctx, db.UpdateLarkChatSessionBindingReplyTargetParams{
-			ChatSessionID:     p.ChatSessionID,
-			LastLarkMessageID: textOrNull(p.LarkMessageID),
-			LastLarkThreadID:  textOrNull(p.LarkThreadID),
+		if err := qtx.UpdateLarkChatSessionBindingReplyTarget(ctx, UpdateChatSessionBindingReplyTargetParams{
+			ChatSessionID: p.ChatSessionID,
+			LastMessageID: textOrNull(p.LarkMessageID),
+			LastThreadID:  textOrNull(p.LarkThreadID),
 		}); err != nil {
 			return AppendResult{}, fmt.Errorf("update reply target: %w", err)
 		}
@@ -263,7 +265,7 @@ func (s *chatSessionService) AppendUserMessage(ctx context.Context, p AppendUser
 	// while another worker also wrote one.
 	markedInTx := false
 	if p.ClaimToken.Valid && p.LarkMessageID != "" {
-		rows, err := qtx.MarkLarkInboundDedupProcessed(ctx, db.MarkLarkInboundDedupProcessedParams{
+		rows, err := qtx.MarkLarkInboundDedupProcessed(ctx, MarkInboundDedupProcessedParams{
 			InstallationID: p.InstallationID,
 			MessageID:      p.LarkMessageID,
 			ClaimToken:     p.ClaimToken,

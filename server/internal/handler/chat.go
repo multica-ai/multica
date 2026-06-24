@@ -348,6 +348,14 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// channel_chat_session_binding used to carry a chat_session FK with
+	// ON DELETE CASCADE; MUL-3515 §4 dropped every channel_* foreign key, so
+	// prune the binding here in the same tx that deletes its chat_session.
+	if err := qtx.DeleteChannelChatSessionBindingBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session binding")
+		return
+	}
+
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,
 		WorkspaceID: session.WorkspaceID,

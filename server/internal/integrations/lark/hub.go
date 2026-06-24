@@ -15,16 +15,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // HubQueries is the narrow subset of *db.Queries the Hub needs for
 // installation enumeration and lease management. *db.Queries satisfies
 // it directly; tests substitute a fake.
 type HubQueries interface {
-	ListActiveLarkInstallations(ctx context.Context) ([]db.LarkInstallation, error)
-	AcquireLarkWSLease(ctx context.Context, arg db.AcquireLarkWSLeaseParams) (db.LarkInstallation, error)
-	ReleaseLarkWSLease(ctx context.Context, arg db.ReleaseLarkWSLeaseParams) error
+	ListActiveLarkInstallations(ctx context.Context) ([]Installation, error)
+	AcquireLarkWSLease(ctx context.Context, arg AcquireWSLeaseParams) (Installation, error)
+	ReleaseLarkWSLease(ctx context.Context, arg ReleaseWSLeaseParams) error
 }
 
 // EventEmitter is the per-message callback the Hub hands to an
@@ -78,14 +77,14 @@ type EventEmitter func(ctx context.Context, msg InboundMessage) (DispatchResult,
 // The connector MUST NOT bypass the Dispatcher by writing to the DB
 // directly; emit is the only ingress path.
 type EventConnector interface {
-	Run(ctx context.Context, inst db.LarkInstallation, emit EventEmitter) error
+	Run(ctx context.Context, inst Installation, emit EventEmitter) error
 }
 
 // ConnectorFactory builds an EventConnector for a specific installation
 // row. The factory exists so the Hub doesn't need to know about Lark
 // SDK construction (auth, app credentials decryption) — call sites
 // inject a factory configured with their APIClient + secretbox box.
-type ConnectorFactory func(inst db.LarkInstallation) (EventConnector, error)
+type ConnectorFactory func(inst Installation) (EventConnector, error)
 
 // HubConfig tunes the Hub's lifecycle loops. All fields have sensible
 // production defaults via withDefaults; tests typically set Now and
@@ -431,7 +430,7 @@ func (h *Hub) sweep(ctx context.Context) {
 // cancel — the deleted entry's goroutine releases its lease as part of
 // teardown, and the new supervisor's acquireLease takes over on its
 // own clock.
-func (h *Hub) maybeRestartOnRotation(id string, row db.LarkInstallation) {
+func (h *Hub) maybeRestartOnRotation(id string, row Installation) {
 	want := installationFingerprint(row)
 	h.mu.Lock()
 	entry, ok := h.supervisors[id]
@@ -448,7 +447,7 @@ func (h *Hub) maybeRestartOnRotation(id string, row db.LarkInstallation) {
 	h.mu.Unlock()
 }
 
-func (h *Hub) startSupervisor(parent context.Context, inst db.LarkInstallation) {
+func (h *Hub) startSupervisor(parent context.Context, inst Installation) {
 	id := uuidString(inst.ID)
 	h.mu.Lock()
 	if h.stopped {
@@ -499,7 +498,7 @@ func leaseToken(nodeID string, gen uint64) string {
 // different bot identity), and a SHA-256 of the encrypted app_secret
 // blob so a re-encrypt at rest also triggers a restart. The plaintext
 // secret is never extracted; the encrypted ciphertext is fine to hash.
-func installationFingerprint(inst db.LarkInstallation) string {
+func installationFingerprint(inst Installation) string {
 	sum := sha256.Sum256(inst.AppSecretEncrypted)
 	// region is part of the fingerprint: if a re-install corrects the
 	// cloud (e.g. a row mis-detected as feishu is re-scanned as lark),
@@ -512,7 +511,7 @@ func installationFingerprint(inst db.LarkInstallation) string {
 // acquire lease → spin up connector → renew lease while connector is
 // running → on connector exit, back off → repeat. Returns (and the
 // goroutine ends) when ctx is cancelled.
-func (h *Hub) supervise(ctx context.Context, inst db.LarkInstallation, id string, gen uint64) {
+func (h *Hub) supervise(ctx context.Context, inst Installation, id string, gen uint64) {
 	defer h.wg.Done()
 	defer func() {
 		// Only clear the supervisors map entry if it still belongs to
@@ -642,7 +641,7 @@ func (h *Hub) supervise(ctx context.Context, inst db.LarkInstallation, id string
 // lease row.
 func (h *Hub) acquireLease(ctx context.Context, instID pgtype.UUID, token string) (bool, error) {
 	expires := h.cfg.Now().Add(h.cfg.LeaseTTL)
-	_, err := h.queries.AcquireLarkWSLease(ctx, db.AcquireLarkWSLeaseParams{
+	_, err := h.queries.AcquireLarkWSLease(ctx, AcquireWSLeaseParams{
 		ID:           instID,
 		NewToken:     pgtype.Text{String: token, Valid: true},
 		NewExpiresAt: pgtype.Timestamptz{Time: expires, Valid: true},
@@ -727,7 +726,7 @@ func (h *Hub) renewLeaseUntil(ctx context.Context, cancelRun context.CancelFunc,
 func (h *Hub) releaseLease(instID pgtype.UUID, token string) {
 	ctx, cancel := context.WithTimeout(context.Background(), h.cfg.LeaseReleaseTimeout)
 	defer cancel()
-	if err := h.queries.ReleaseLarkWSLease(ctx, db.ReleaseLarkWSLeaseParams{
+	if err := h.queries.ReleaseLarkWSLease(ctx, ReleaseWSLeaseParams{
 		ID:           instID,
 		CurrentToken: pgtype.Text{String: token, Valid: true},
 	}); err != nil {
@@ -761,7 +760,7 @@ func (h *Hub) releaseLease(instID pgtype.UUID, token string) {
 // reply is detached. Each reply runs in its own goroutine under a
 // fresh context bounded by ReplyTimeout (strictly under 3s). Hub.Wait
 // joins on replyWg so shutdown still drains in-flight replies.
-func (h *Hub) handleEvent(ctx context.Context, inst db.LarkInstallation, log *slog.Logger, msg InboundMessage) (DispatchResult, error) {
+func (h *Hub) handleEvent(ctx context.Context, inst Installation, log *slog.Logger, msg InboundMessage) (DispatchResult, error) {
 	if h.dispatcher == nil {
 		log.Warn("lark hub: dispatcher not configured; dropping event",
 			"event_id", msg.EventID,
@@ -806,7 +805,7 @@ func (h *Hub) handleEvent(ctx context.Context, inst db.LarkInstallation, log *sl
 // can happen mid-reply on a normal reconnect cycle. Inheriting would
 // kill the outbound reply for no reason — the binding card / offline
 // notice is still wanted. ReplyTimeout is the only guard we need.
-func (h *Hub) scheduleReply(inst db.LarkInstallation, msg InboundMessage, res DispatchResult, log *slog.Logger) {
+func (h *Hub) scheduleReply(inst Installation, msg InboundMessage, res DispatchResult, log *slog.Logger) {
 	r := h.replier
 	if r == nil {
 		return
