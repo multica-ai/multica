@@ -3135,6 +3135,15 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 	return reused
 }
 
+// skillBundleResolveBatchSize bounds how many skill bundles the daemon resolves
+// per request when filling cache misses. A single request for every miss makes
+// a slow or jittery link time out on the whole-body read, failing the task
+// before it starts and caching nothing (#4505). Small batches keep each request
+// within the client timeout and let completed batches persist, so an agent
+// bound to many skills still converges. Sized below the empirically-observed
+// "~6 skills fit, ~15 time out" threshold from the report.
+const skillBundleResolveBatchSize = 4
+
 func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 	if task == nil || task.Agent == nil || len(task.Agent.SkillRefs) == 0 {
 		return nil
@@ -3159,8 +3168,20 @@ func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 		}
 	}
 
-	if len(misses) > 0 {
-		bundles, err := d.client.ResolveSkillBundles(ctx, task.RuntimeID, task.ID, misses)
+	// Resolve cache misses in bounded batches, persisting each batch as it
+	// lands. Fetching every miss in one request makes a slow link time out
+	// reading the whole body, so the task fails and nothing is cached — the
+	// next dispatch re-fetches everything and fails identically (#4505).
+	// Batching keeps each request small enough to finish within the client
+	// timeout, and a completed batch stays cached even if a later one fails, so
+	// progress accumulates across dispatches instead of restarting from zero.
+	for start := 0; start < len(misses); start += skillBundleResolveBatchSize {
+		end := start + skillBundleResolveBatchSize
+		if end > len(misses) {
+			end = len(misses)
+		}
+		batch := misses[start:end]
+		bundles, err := d.client.ResolveSkillBundles(ctx, task.RuntimeID, task.ID, batch)
 		if err != nil {
 			return fmt.Errorf("resolve skill bundles: %w", err)
 		}
