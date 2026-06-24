@@ -1181,38 +1181,6 @@ type CerebroWorkspaceDefaultGroup struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type CerebroWorkspaceGrant struct {
-	ID                    pgtype.UUID        `json:"id"`
-	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
-	SubjectType           string             `json:"subject_type"`
-	SubjectID             pgtype.UUID        `json:"subject_id"`
-	ResourcePattern       string             `json:"resource_pattern"`
-	Capability            string             `json:"capability"`
-	ClassificationCeiling pgtype.Text        `json:"classification_ceiling"`
-	TimeWindowStart       pgtype.Timestamptz `json:"time_window_start"`
-	TimeWindowEnd         pgtype.Timestamptz `json:"time_window_end"`
-	ApprovalRequired      bool               `json:"approval_required"`
-	Status                string             `json:"status"`
-	GrantedByType         pgtype.Text        `json:"granted_by_type"`
-	GrantedByID           pgtype.UUID        `json:"granted_by_id"`
-	GrantedAt             pgtype.Timestamptz `json:"granted_at"`
-	RevokedByID           pgtype.UUID        `json:"revoked_by_id"`
-	RevokedAt             pgtype.Timestamptz `json:"revoked_at"`
-	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
-}
-
-type CerebroWorkspaceGrantAudit struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	GrantID     pgtype.UUID        `json:"grant_id"`
-	Action      string             `json:"action"`
-	ActorType   pgtype.Text        `json:"actor_type"`
-	ActorID     pgtype.UUID        `json:"actor_id"`
-	Surface     string             `json:"surface"`
-	Diff        []byte             `json:"diff"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
 type CerebroWorkspaceSetting struct {
 	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
 	DisplayCurrency          string             `json:"display_currency"`

@@ -173,7 +173,7 @@ there is no workspace/runtime/agent/user authoring of these capabilities, only g
 
 | Gate | Where | Protects | Default | Backed by |
 |---|---|---|---|---|
-| **Credentials** `enforce` | `credentials/service.go:95`; chain `cerebro_credentials_policy.go:248` | attach/read/reveal/rotate/revoke a secret | **deny-by-default for agents** | the **grant resolver** (`permissions/resolver.go` → `cerebro_workspace_grant`) + owner check + (dying) Persona |
+| **Credentials** `enforce` | `credentials/service.go:95`; chain `cerebro_credentials_policy.go:248` | attach/read/reveal/rotate/revoke a secret | **deny-by-default for agents** | the **grant resolver** (`permissions/resolver.go`, now a deny-by-default floor — `cerebro_workspace_grant` dropped, FIR-1512) + owner check + tool-policy chain |
 | **web_fetch host policy** | `webfetchpolicy/policy.go:73,156`; gate `firtal_gateway_tools_extended.go:830` | which hosts `web_fetch` reaches | allow-list `{firtal.com, docs.anthropic.com}` | `cerebro_web_fetch_policy` table |
 | **firtal_registry scope** | `firtal_gateway_tools_extended.go:630,545` `loadGrantConfig` | data-source/app/write scope | **deny-by-default** (`allow_write` not implied by read) | per-agent `agent_tool_grant.config_json` |
 | **agentvault** | `agentvault/resolver.go:50` `AllowedVaults` | which secret boxes the agent token is scoped to | empty → no brokering | per-agent `Access[]` list; flag `cerebro_agent_vault` (off) |
@@ -187,7 +187,7 @@ there is no workspace/runtime/agent/user authoring of these capabilities, only g
 | **daemon repo allowlist** | `daemon/daemon.go:885` `workspaceRepoAllowed` | repo URL in the daemon's in-memory allowlist | not present → false | in-memory list |
 | **autopilot webhook scope** | `handler/autopilot_webhook.go:663` | autopilot webhook event filter | missing → **fail closed** | trigger config |
 | **wakeup self-limits** | `wakeup/service.go:465` | max wakeups/issue + min interval | limit-based (anti-flood, not access) | workspace settings |
-| **the capability engine** (grant resolver + permgate, FIR-2193) — **a usable function, documented in §5.2** | `permissions/resolver.go:115` `Can` + `permgate/permgate.go` | credentials + repo grants + the approval inbox | **deny-by-default** (no grant → Deny) | `cerebro_workspace_grant` (engine store; empty in practice — see §5.2) |
+| **the capability engine** (grant resolver + permgate, FIR-2193) — **documented in §5.2** | `permissions/resolver.go` `Can` + `permgate/permgate.go` | credentials + repo grants + the approval inbox | **deny-by-default** (resolves against an empty grant set → Deny) | no table — `cerebro_workspace_grant` dropped (FIR-1512 Step A, see §5.2) |
 
 ### 4.4 Not access control — do NOT fold these into the model
 
@@ -224,20 +224,25 @@ Still inert and tracked for a later sweep: the `agent.persona_sandbox` / `agent_
 DB columns + the frontend persona-sandbox tab. The persona Go package is reduced to `spawner.go`
 (`ResolveSpawnSubject`, used by the daemon — keep).
 
-### 5.2 The capability engine — a documented, usable function (KEEP, do not blind-drop)
+### 5.2 The capability engine — deny-by-default floor + approval seam (engine-flip Step A done)
 `permissions.Resolver` (`permissions/resolver.go`, FIR-2193) + `permgate`
-(`permgate/permgate.go`) are a **live, usable capability + approval engine** — not dead Persona
-cruft. Use it as follows:
+(`permgate/permgate.go`) are the **deny-by-default security floor + approval engine**. As of the
+FIR-1512 engine-flip Step A the resolver no longer reads any grant table: every grant-authoring
+surface was removed (Spor 1 #1688, #1768), the `cerebro_workspace_grant` table is dropped
+(migration `9102_cerebro_drop_workspace_grant`), and `Can` resolves against an **empty grant
+set**. Use it as follows:
 
-- **What it answers:** `Can(actor, capability, resource) → Allow | Deny | NeedsApproval`,
-  **deny-by-default** (no matching grant → Deny). `capability == ""` is always Deny.
-- **Subject layering** (most-specific layer wins and shadows the layers below it, per-capability):
-  `workspace_default < project < role < group < actor` (`resolver.go` Pass 1).
-- **Grant shape** (`cerebro_workspace_grant`): `(subject_type, subject_id, capability,
-  resource_pattern, status, approval_required, …)`.
-  - `capabilityMatches`: `*` = any · exact (`credential.reveal`) · prefix (`credential.*`).
-    An **empty** capability pattern matches nothing (so a blank grant grants nothing).
-  - `resourceMatches`: empty or `*` = any · exact · `prefix/*`.
+- **What it answers:** `Can(actor, capability, resource) → Deny`, always — **deny-by-default**
+  with no grant able to exist (`capability == ""` returns the capability-required deny). This is
+  byte-for-byte the verdict the prior algorithm produced against the already-empty table; only
+  the synchronous table read (and the table) are gone. The grant-evaluation machinery
+  (subject layering, `capabilityMatches`, `resourceMatches`, time-windows) was removed with it —
+  it only ever processed grant rows that can no longer exist.
+- **It is the FLOOR, not the allow source.** Each call site supplies its own allow authority on
+  top of this deny floor: credentials add an upstream **owner-allow** check (`ChainPolicyChecker(owner, multica)`)
+  and the tighten-only tool-policy chain; the approval gate uses the tool-policy chain via
+  `EvaluateDecision`. Removing the floor itself (engine-flip option B) is a separate, larger
+  decision and is intentionally NOT part of Step A.
 - **permgate** is the enforcement seam that turns a `NeedsApproval` verdict into a real entry in
   the approval inbox and blocks the action until a human approves / rejects / it expires
   (cross-process, by polling the approval row). Consulted by: the credentials policy, the daemon
@@ -253,11 +258,11 @@ cruft. Use it as follows:
   - **Repo grants** — `repo.checkout/read/push`, but only when the `repo_grants_enabled`
     workspace setting is ON. Default OFF ⇒ repo checkout is `Base=Allow` via the tool-policy
     chain (`CheckDaemonRepoCapability`), **not** this engine.
-- **Current data state (Firtal, verified 2026-06-22):** the grant table holds only 2 inert
-  `workspace_default` rows (empty capability ⇒ match nothing) and **zero** credential/repo
+- **Current data state (Firtal):** the `cerebro_workspace_grant` table is **dropped** (FIR-1512
+  Step A). It previously held only inert `workspace_default` rows and **zero** credential/repo
   grants. Secrets live in **Infisical + agent vault**, and credentials are **owner-only** in
-  practice. So the engine currently grants nothing beyond owner access — but it is available and
-  load-bearing in code, so it cannot be deleted ad-hoc (see §5.3).
+  practice. The engine grants nothing beyond owner access; the resolver remains as the
+  deny-by-default floor the call sites layer their allow authority on (see §5.3).
 
 ### 5.3 Consolidation path — via the engine-flip (FIR-1512), never a blind drop
 The end state moves credential (and other) grant authority off `cerebro_workspace_grant` and
@@ -278,11 +283,13 @@ resolver + permgate are wired into the live credential / approval / repo paths, 
      `cerebro_persona_permissions` settings flags — **done** (FIR-1777): the operator grant
      control plane is fully removed (handler package deleted, routes unmounted, `manage_grants`
      dropped from the platform catalog + permguard inventory).
-   - Remaining: the `cerebro_grant_audit` FK. The only live reader of `cerebro_workspace_grant`
-     is now the credentials resolver (§5.2), owner-scoped and empty in practice.
-4. **Then** drop `cerebro_workspace_grant` (+ `_audit`) and reduce the resolver. `approval_required`
-   / `time_window_*` / `classification_ceiling` carry no live enforcement — drop them in the
-   consolidation unless a concrete need surfaces. This step is irreversible (prod DB) and gated.
+   - Reader decoupling — **done** (FIR-1512 Step A): the credentials resolver and permgate no
+     longer read the table; `Can` resolves against an empty grant set (deny-by-default).
+4. Drop `cerebro_workspace_grant` (+ `_audit`) and reduce the resolver — **Step A built**
+   (migration `9102_cerebro_drop_workspace_grant`, grant-evaluation machinery removed,
+   `approval_required` / `time_window_*` / `classification_ceiling` gone with the table since
+   they carried no live enforcement). The migration applies to **staging** with `main`; the
+   **prod DROP is irreversible and gated on explicit approval** — it does not auto-promote.
 
 ---
 
