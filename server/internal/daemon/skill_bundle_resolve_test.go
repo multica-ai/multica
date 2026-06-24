@@ -31,16 +31,17 @@ func TestSkillBundleResolveTimeout(t *testing.T) {
 	}
 }
 
-// makeResolvableSkillBundle builds a self-consistent bundle whose hash/size
-// match its content, so validateSkillBundle accepts it and skillRefFromBundle
-// yields the ref the agent would carry for it.
-func makeResolvableSkillBundle(id string) SkillData {
+// makeResolvableSkillBundleWith builds a self-consistent bundle from explicit
+// content, so validateSkillBundle accepts it and skillRefFromBundle yields the
+// ref the agent would carry. Varying content changes the hash, which lets tests
+// model a skill edited between claim and prepare.
+func makeResolvableSkillBundleWith(id, content, fileContent string) SkillData {
 	b := SkillData{
 		ID:      id,
 		Source:  "workspace",
 		Name:    id,
-		Content: "content-of-" + id,
-		Files:   []SkillFileData{{Path: "rules.md", Content: "rules-" + id}},
+		Content: content,
+		Files:   []SkillFileData{{Path: "rules.md", Content: fileContent}},
 	}
 	ref := skillRefFromBundle(b)
 	b.Hash = ref.Hash
@@ -48,6 +49,12 @@ func makeResolvableSkillBundle(id string) SkillData {
 	b.Files[0].SHA256 = ref.Files[0].SHA256
 	b.Files[0].SizeBytes = ref.Files[0].SizeBytes
 	return b
+}
+
+// makeResolvableSkillBundle is makeResolvableSkillBundleWith with default
+// content derived from the id.
+func makeResolvableSkillBundle(id string) SkillData {
+	return makeResolvableSkillBundleWith(id, "content-of-"+id, "rules-"+id)
 }
 
 // TestEnsureTaskSkillBundles_CachesEachSuccessAcrossDispatches is the core
@@ -161,5 +168,62 @@ func TestEnsureTaskSkillBundles_CachesEachSuccessAcrossDispatches(t *testing.T) 
 		if task.Agent.Skills[i].ID != id {
 			t.Errorf("dispatch 2: skill[%d].ID = %q, want %q", i, task.Agent.Skills[i].ID, id)
 		}
+	}
+}
+
+// TestEnsureTaskSkillBundles_AcceptsServerSideSkillUpdate guards the resolve
+// endpoint's contract: when a skill is edited between claim and prepare, the
+// server returns the *current* bundle and hash even though the daemon asked
+// with the stale claim-time hash (see ResolveTaskSkillBundles). The daemon must
+// accept it — validating the bundle for self-consistency, not against the
+// requested hash — and cache it under its new hash. Pinning to the requested
+// hash would reject a legitimate update and fail the task.
+func TestEnsureTaskSkillBundles_AcceptsServerSideSkillUpdate(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	current := makeResolvableSkillBundleWith("skill-1", "v2-content", "v2-rules")
+	currentRef := skillRefFromBundle(current)
+	staleRef := skillRefFromBundle(makeResolvableSkillBundleWith("skill-1", "v1-content", "v1-rules"))
+	if staleRef.Hash == currentRef.Hash {
+		t.Fatal("test setup: stale and current hash must differ")
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Skills []SkillRefData `json:"skills"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if len(req.Skills) != 1 || req.Skills[0].Hash != staleRef.Hash {
+			t.Errorf("expected the stale ref to be sent, got %+v", req.Skills)
+		}
+		// Server ignores the requested (stale) hash and returns the current bundle.
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"bundles": []SkillData{current}})
+	}))
+	defer srv.Close()
+
+	d := &Daemon{
+		client:     NewClient(srv.URL),
+		skillCache: NewSkillBundleCache(t.TempDir()),
+	}
+	task := &Task{
+		ID:          "task-1",
+		RuntimeID:   "rt-1",
+		WorkspaceID: "ws-1",
+		Agent:       &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{staleRef}},
+	}
+
+	if err := d.ensureTaskSkillBundles(context.Background(), task); err != nil {
+		t.Fatalf("expected success when server returns an updated bundle, got %v", err)
+	}
+	if len(task.Agent.Skills) != 1 || task.Agent.Skills[0].Hash != currentRef.Hash {
+		t.Fatalf("expected the resolved skill to be the updated bundle (hash %s), got %+v", currentRef.Hash, task.Agent.Skills)
+	}
+	if _, ok := d.skillCache.Load("ws-1", currentRef); !ok {
+		t.Error("updated bundle should be cached under its own (new) hash")
 	}
 }

@@ -3256,10 +3256,20 @@ func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRe
 	if err != nil {
 		return SkillData{}, err
 	}
-	if !validateSkillBundle(ref, bundle) {
+	// The resolve endpoint serves the agent's *current* bundle and hash, which
+	// may differ from the claim-time ref when the skill was edited between
+	// claim and prepare (see ResolveTaskSkillBundles). So confirm only that the
+	// server returned the skill we asked for (source/id), then validate the
+	// bundle for self-consistency against a ref derived from itself — pinning
+	// it to the possibly-stale requested hash would reject a legitimate update.
+	if bundle.Source != ref.Source || bundle.ID != ref.ID {
+		return SkillData{}, fmt.Errorf("resolve skill bundle returned wrong skill: requested source=%s id=%s, got source=%s id=%s", ref.Source, ref.ID, bundle.Source, bundle.ID)
+	}
+	bundleRef := skillRefFromBundle(bundle)
+	if !validateSkillBundle(bundleRef, bundle) {
 		return SkillData{}, fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
 	}
-	if err := d.skillCache.WithRefLock(task.WorkspaceID, ref, func() error {
+	if err := d.skillCache.WithRefLock(task.WorkspaceID, bundleRef, func() error {
 		return d.skillCache.Store(task.WorkspaceID, bundle)
 	}); err != nil {
 		return SkillData{}, fmt.Errorf("store skill bundle cache: %w", err)
