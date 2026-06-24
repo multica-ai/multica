@@ -40,4 +40,4 @@ images:
     newTag: "7bb8171c"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "592bc10c"
+    newTag: "7bb8171c"
