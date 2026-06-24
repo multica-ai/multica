@@ -142,6 +142,7 @@ RETURNING *;
 -- name: LinkNodeRunWorkerTask :one
 UPDATE multica_workflow_node_run SET
     worker_agent_task_id = $2,
+    runtime_id = $3,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -149,6 +150,7 @@ RETURNING *;
 -- name: LinkNodeRunCriticTask :one
 UPDATE multica_workflow_node_run SET
     critic_agent_task_id = $2,
+    runtime_id = $3,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

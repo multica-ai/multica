@@ -805,10 +805,12 @@ func (s *WorkflowService) dispatchWorker(ctx context.Context, nodeRun db.Multica
 		if err != nil {
 			return fmt.Errorf("dispatch agent task: %w", err)
 		}
-		// Link the task to the node run.
+		// Link the task to the node run and stamp the runtime so the frontend
+		// can resolve takeover permissions even before the daemon binds a session.
 		if _, err := s.Queries.LinkNodeRunWorkerTask(ctx, db.LinkNodeRunWorkerTaskParams{
 			ID:                nodeRun.ID,
 			WorkerAgentTaskID: task.ID,
+			RuntimeID:         task.RuntimeID,
 		}); err != nil {
 			return fmt.Errorf("link worker task: %w", err)
 		}
@@ -848,6 +850,7 @@ func (s *WorkflowService) dispatchCritic(ctx context.Context, nodeRun db.Multica
 		if _, err := s.Queries.LinkNodeRunCriticTask(ctx, db.LinkNodeRunCriticTaskParams{
 			ID:                nodeRun.ID,
 			CriticAgentTaskID: task.ID,
+			RuntimeID:         task.RuntimeID,
 		}); err != nil {
 			return fmt.Errorf("link critic task: %w", err)
 		}

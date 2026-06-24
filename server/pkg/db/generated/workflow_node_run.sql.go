@@ -509,6 +509,7 @@ func (q *Queries) LinkNodeRunAgentTask(ctx context.Context, arg LinkNodeRunAgent
 const linkNodeRunCriticTask = `-- name: LinkNodeRunCriticTask :one
 UPDATE multica_workflow_node_run SET
     critic_agent_task_id = $2,
+    runtime_id = $3,
     updated_at = now()
 WHERE id = $1
 RETURNING id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id, runtime_id, device_id, session_id
@@ -517,10 +518,11 @@ RETURNING id, workflow_run_id, workflow_node_id, node_title, status, retry_count
 type LinkNodeRunCriticTaskParams struct {
 	ID                pgtype.UUID `json:"id"`
 	CriticAgentTaskID pgtype.UUID `json:"critic_agent_task_id"`
+	RuntimeID         pgtype.UUID `json:"runtime_id"`
 }
 
 func (q *Queries) LinkNodeRunCriticTask(ctx context.Context, arg LinkNodeRunCriticTaskParams) (MulticaWorkflowNodeRun, error) {
-	row := q.db.QueryRow(ctx, linkNodeRunCriticTask, arg.ID, arg.CriticAgentTaskID)
+	row := q.db.QueryRow(ctx, linkNodeRunCriticTask, arg.ID, arg.CriticAgentTaskID, arg.RuntimeID)
 	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
@@ -553,6 +555,7 @@ func (q *Queries) LinkNodeRunCriticTask(ctx context.Context, arg LinkNodeRunCrit
 const linkNodeRunWorkerTask = `-- name: LinkNodeRunWorkerTask :one
 UPDATE multica_workflow_node_run SET
     worker_agent_task_id = $2,
+    runtime_id = $3,
     updated_at = now()
 WHERE id = $1
 RETURNING id, workflow_run_id, workflow_node_id, node_title, status, retry_count, worker_type, worker_id, worker_output, critic_type, critic_id, critic_output, critic_comment, agent_task_id, started_at, completed_at, created_at, updated_at, worker_agent_task_id, critic_agent_task_id, runtime_id, device_id, session_id
@@ -561,10 +564,11 @@ RETURNING id, workflow_run_id, workflow_node_id, node_title, status, retry_count
 type LinkNodeRunWorkerTaskParams struct {
 	ID                pgtype.UUID `json:"id"`
 	WorkerAgentTaskID pgtype.UUID `json:"worker_agent_task_id"`
+	RuntimeID         pgtype.UUID `json:"runtime_id"`
 }
 
 func (q *Queries) LinkNodeRunWorkerTask(ctx context.Context, arg LinkNodeRunWorkerTaskParams) (MulticaWorkflowNodeRun, error) {
-	row := q.db.QueryRow(ctx, linkNodeRunWorkerTask, arg.ID, arg.WorkerAgentTaskID)
+	row := q.db.QueryRow(ctx, linkNodeRunWorkerTask, arg.ID, arg.WorkerAgentTaskID, arg.RuntimeID)
 	var i MulticaWorkflowNodeRun
 	err := row.Scan(
 		&i.ID,
