@@ -88,7 +88,7 @@ func TestResolveSelfHostServerURL(t *testing.T) {
 
 	t.Run("env var honored when flag absent", func(t *testing.T) {
 		t.Setenv("MULTICA_SERVER_URL", "https://api.internal.co")
-		serverURL, userProvided := resolveSelfHostServerURL(newCmd())
+		serverURL, userProvided := resolveSelfHostServerURL(newCmd(), cli.CLIConfig{})
 		if serverURL != "https://api.internal.co" {
 			t.Fatalf("server_url: want env value, got %q", serverURL)
 		}
@@ -103,7 +103,7 @@ func TestResolveSelfHostServerURL(t *testing.T) {
 		if err := cmd.Flags().Set("server-url", "https://flag.example"); err != nil {
 			t.Fatalf("set flag: %v", err)
 		}
-		serverURL, userProvided := resolveSelfHostServerURL(cmd)
+		serverURL, userProvided := resolveSelfHostServerURL(cmd, cli.CLIConfig{})
 		if serverURL != "https://flag.example" {
 			t.Fatalf("server_url: want flag value, got %q", serverURL)
 		}
@@ -118,7 +118,7 @@ func TestResolveSelfHostServerURL(t *testing.T) {
 		if err := cmd.Flags().Set("port", "9090"); err != nil {
 			t.Fatalf("set flag: %v", err)
 		}
-		serverURL, userProvided := resolveSelfHostServerURL(cmd)
+		serverURL, userProvided := resolveSelfHostServerURL(cmd, cli.CLIConfig{})
 		if serverURL != "http://localhost:9090" {
 			t.Fatalf("server_url: want localhost default, got %q", serverURL)
 		}
@@ -127,12 +127,55 @@ func TestResolveSelfHostServerURL(t *testing.T) {
 		}
 	})
 
+	// Re-running `setup self-host` after `config set` (or an earlier setup)
+	// must keep the configured remote server instead of probing localhost.
+	t.Run("falls back to existing config server_url when no flag, env, or --port", func(t *testing.T) {
+		t.Setenv("MULTICA_SERVER_URL", "")
+		existing := cli.CLIConfig{ServerURL: "https://multica-prod-alb.marmot-cloud.com"}
+		serverURL, userProvided := resolveSelfHostServerURL(newCmd(), existing)
+		if serverURL != "https://multica-prod-alb.marmot-cloud.com" {
+			t.Fatalf("server_url: want existing config value, got %q", serverURL)
+		}
+		if !userProvided {
+			t.Fatalf("userProvided: want true for config-sourced URL")
+		}
+	})
+
+	t.Run("explicit --port overrides existing config server_url", func(t *testing.T) {
+		t.Setenv("MULTICA_SERVER_URL", "")
+		existing := cli.CLIConfig{ServerURL: "https://api.internal.co"}
+		cmd := newCmd()
+		if err := cmd.Flags().Set("port", "9090"); err != nil {
+			t.Fatalf("set flag: %v", err)
+		}
+		serverURL, userProvided := resolveSelfHostServerURL(cmd, existing)
+		if serverURL != "http://localhost:9090" {
+			t.Fatalf("server_url: want localhost from --port, got %q", serverURL)
+		}
+		if userProvided {
+			t.Fatalf("userProvided: want false for localhost fallback")
+		}
+	})
+
+	t.Run("flag wins over existing config", func(t *testing.T) {
+		t.Setenv("MULTICA_SERVER_URL", "")
+		existing := cli.CLIConfig{ServerURL: "https://config.example"}
+		cmd := newCmd()
+		if err := cmd.Flags().Set("server-url", "https://flag.example"); err != nil {
+			t.Fatalf("set flag: %v", err)
+		}
+		serverURL, _ := resolveSelfHostServerURL(cmd, existing)
+		if serverURL != "https://flag.example" {
+			t.Fatalf("server_url: want flag value, got %q", serverURL)
+		}
+	})
+
 	// MULTICA_SERVER_URL is documented as a ws:// daemon address; the probe and
 	// stored config need an http(s) base, so the ws/wss + /ws form must be
 	// normalized just like every other command does.
 	t.Run("normalizes the documented ws:// daemon form", func(t *testing.T) {
 		t.Setenv("MULTICA_SERVER_URL", "wss://api.internal.co/ws")
-		serverURL, userProvided := resolveSelfHostServerURL(newCmd())
+		serverURL, userProvided := resolveSelfHostServerURL(newCmd(), cli.CLIConfig{})
 		if serverURL != "https://api.internal.co" {
 			t.Fatalf("server_url: want normalized https base, got %q", serverURL)
 		}
@@ -198,6 +241,30 @@ func TestSetupHelpShowsCallbackHostFlag(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "--callback-host") {
 		t.Fatalf("setup help should show --%s, got:\n%s", callbackHostFlag, out.String())
+	}
+}
+
+// TestFormatURLChange covers the setup overwrite prompt: a changed value is
+// shown as "old -> new" so the passed --server-url/--app-url is visibly
+// received, while an unchanged value renders plain.
+func TestFormatURLChange(t *testing.T) {
+	cases := []struct {
+		name   string
+		oldVal string
+		newVal string
+		want   string
+	}{
+		{"changed", "http://localhost:8080", "https://api.internal.co", "http://localhost:8080  ->  https://api.internal.co"},
+		{"unchanged", "https://api.internal.co", "https://api.internal.co", "https://api.internal.co"},
+		{"empty new keeps old", "http://localhost:8080", "", "http://localhost:8080"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := formatURLChange(tc.oldVal, tc.newVal); got != tc.want {
+				t.Errorf("formatURLChange(%q, %q) = %q, want %q", tc.oldVal, tc.newVal, got, tc.want)
+			}
+		})
 	}
 }
 
