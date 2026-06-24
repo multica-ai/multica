@@ -96,6 +96,34 @@
     "diagnostics_title": "诊断",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "可见性",
+    "permissions_title": "权限",
+    "permissions_count_other": "{{count}} 项授权",
+    "permissions_empty": "还没有显式授权。所有者和管理员始终拥有完整权限。",
+    "permission_select_member": "选择成员…",
+    "permission_no_eligible_members": "没有可选择的成员",
+    "permission_role": {
+      "admin": "管理员",
+      "operator": "操作员",
+      "viewer": "观察者"
+    },
+    "permission_add_button": "添加",
+    "permission_adding": "添加中…",
+    "permission_added": "已添加权限",
+    "permission_add_failed": "添加权限失败",
+    "permission_your_role": "你在此运行时的角色：{{role}}",
+    "permission_change_role": "修改角色",
+    "permission_remove_action": "撤销",
+    "permission_updated": "权限已更新",
+    "permission_update_failed": "更新权限失败",
+    "permission_removed": "权限已撤销",
+    "permission_remove_failed": "撤销权限失败",
+    "permission_remove_dialog": {
+      "title": "撤销权限",
+      "description": "该成员将失去运行时级角色，是否继续？",
+      "cancel": "取消",
+      "confirm": "撤销",
+      "removing": "撤销中…"
+    },
     "visibility_label": {
       "private": "私有",
       "public": "公开"

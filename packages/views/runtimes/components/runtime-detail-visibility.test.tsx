@@ -81,6 +81,9 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
     isPending: false,
   }),
   useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false }),
+  useCreateRuntimePermission: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateRuntimePermission: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteRuntimePermission: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 // Stubbing ProviderLogo / UsageSection / UpdateSection avoids dragging in
@@ -89,6 +92,7 @@ vi.mock("./provider-logo", () => ({ ProviderLogo: () => null }));
 vi.mock("./update-section", () => ({ UpdateSection: () => null }));
 vi.mock("./usage-section", () => ({ UsageSection: () => null }));
 vi.mock("./shared", () => ({ HealthBadge: () => null }));
+vi.mock("./runtime-permissions-card", () => ({ RuntimePermissionsCard: () => null }));
 vi.mock("../../agents/presence", () => ({
   availabilityConfig: { offline: { dotClass: "", textClass: "" } },
   workloadConfig: { idle: { icon: () => null, textClass: "" } },

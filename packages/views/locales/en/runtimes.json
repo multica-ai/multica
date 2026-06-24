@@ -101,6 +101,35 @@
     "diagnostics_title": "Diagnostics",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibility",
+    "permissions_title": "Permissions",
+    "permissions_count_one": "{{count}} grant",
+    "permissions_count_other": "{{count}} grants",
+    "permissions_empty": "No explicit permissions yet. Owners and admins always have full access.",
+    "permission_select_member": "Select member…",
+    "permission_no_eligible_members": "No eligible members",
+    "permission_role": {
+      "admin": "Admin",
+      "operator": "Operator",
+      "viewer": "Viewer"
+    },
+    "permission_add_button": "Add",
+    "permission_adding": "Adding…",
+    "permission_added": "Permission added",
+    "permission_add_failed": "Failed to add permission",
+    "permission_your_role": "Your role on this runtime: {{role}}",
+    "permission_change_role": "Change role",
+    "permission_remove_action": "Revoke",
+    "permission_updated": "Permission updated",
+    "permission_update_failed": "Failed to update permission",
+    "permission_removed": "Permission revoked",
+    "permission_remove_failed": "Failed to revoke permission",
+    "permission_remove_dialog": {
+      "title": "Revoke Permission",
+      "description": "This member will lose their runtime-level role. Continue?",
+      "cancel": "Cancel",
+      "confirm": "Revoke",
+      "removing": "Revoking…"
+    },
     "visibility_label": {
       "private": "Private",
       "public": "Public"
