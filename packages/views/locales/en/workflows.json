@@ -221,6 +221,10 @@
     "toast_finalize_approved": "Node approved",
     "toast_finalize_rejected": "Node rejected",
     "toast_finalize_failed": "Failed to finalize node",
+    "no_control_permission": "You don't have permission to control this node.",
+    "take_over_wrong_status": "Only working nodes can be taken over.",
+    "hand_back_wrong_status": "Only blocked nodes can be handed back.",
+    "finalize_wrong_status": "Only blocked nodes can be finalized.",
     "review_comment_placeholder": "Add a comment with your review..."
   },
   "overview": {

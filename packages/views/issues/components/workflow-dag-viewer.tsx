@@ -330,6 +330,7 @@ export function WorkflowDagViewer({
             runId={runId ?? undefined}
             wsId={wsId}
             size="sm"
+            alwaysShow
           />
 
           {/* Worker */}

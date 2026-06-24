@@ -26,6 +26,12 @@ interface NodeRunControlActionsProps {
   runId?: string;
   wsId: string;
   size?: "sm" | "default";
+  /**
+   * When true, the buttons are always rendered regardless of the current
+   * node-run status or the user's permission. Clicking a button that cannot
+   * be performed toasts an error instead of hiding the affordance.
+   */
+  alwaysShow?: boolean;
 }
 
 export function NodeRunControlActions({
@@ -34,6 +40,7 @@ export function NodeRunControlActions({
   runId,
   wsId,
   size = "sm",
+  alwaysShow = false,
 }: NodeRunControlActionsProps) {
   const { t } = useT("workflows");
 
@@ -69,8 +76,68 @@ export function NodeRunControlActions({
   const controlDecision = useNodeRunControlPermission(!!canControl, wsId);
 
   const status = nodeRun.status;
-  const canTakeover = status === "working" && controlDecision.allowed;
-  const canHandbackOrFinalize = status === "blocked" && controlDecision.allowed;
+  const isWorking = status === "working";
+  const isBlocked = status === "blocked";
+
+  const anyControlPending =
+    takeoverMutation.isPending || handbackMutation.isPending || finalizeMutation.isPending;
+
+  const buttonClass = size === "sm" ? "h-7 text-xs" : "h-8 text-sm";
+  const iconClass = "h-3.5 w-3.5";
+
+  const handleTakeover = () => {
+    if (!controlDecision.allowed) {
+      toast.error(t(($) => $.node_run.no_control_permission));
+      return;
+    }
+    if (!isWorking) {
+      toast.error(t(($) => $.node_run.take_over_wrong_status));
+      return;
+    }
+    takeoverMutation.mutate(controlVars, {
+      onSuccess: () => toast.success(t(($) => $.node_run.toast_takeover_success)),
+      onError: (err) =>
+        toast.error(err instanceof Error ? err.message : t(($) => $.node_run.toast_takeover_failed)),
+    });
+  };
+
+  const handleHandback = () => {
+    if (!controlDecision.allowed) {
+      toast.error(t(($) => $.node_run.no_control_permission));
+      return;
+    }
+    if (!isBlocked) {
+      toast.error(t(($) => $.node_run.hand_back_wrong_status));
+      return;
+    }
+    handbackMutation.mutate(controlVars, {
+      onSuccess: () => toast.success(t(($) => $.node_run.toast_handback_success)),
+      onError: (err) =>
+        toast.error(err instanceof Error ? err.message : t(($) => $.node_run.toast_handback_failed)),
+    });
+  };
+
+  const handleFinalize = (approved: boolean) => {
+    if (!controlDecision.allowed) {
+      toast.error(t(($) => $.node_run.no_control_permission));
+      return;
+    }
+    if (!isBlocked) {
+      toast.error(t(($) => $.node_run.finalize_wrong_status));
+      return;
+    }
+    finalizeMutation.mutate(
+      { ...controlVars, approved },
+      {
+        onSuccess: () =>
+          toast.success(
+            approved ? t(($) => $.node_run.toast_finalize_approved) : t(($) => $.node_run.toast_finalize_rejected),
+          ),
+        onError: (err) =>
+          toast.error(err instanceof Error ? err.message : t(($) => $.node_run.toast_finalize_failed)),
+      },
+    );
+  };
 
   const controlVars = {
     nodeRunId: nodeRun.id,
@@ -79,102 +146,126 @@ export function NodeRunControlActions({
     runId,
   };
 
-  const anyControlPending =
-    takeoverMutation.isPending || handbackMutation.isPending || finalizeMutation.isPending;
-
-  if (!canTakeover && !canHandbackOrFinalize) {
-    return null;
+  // Compact mode: only render when the actions are meaningful, like on the
+  // workflow editor/run page.
+  if (!alwaysShow) {
+    const canTakeover = isWorking && controlDecision.allowed;
+    const canHandbackOrFinalize = isBlocked && controlDecision.allowed;
+    if (!canTakeover && !canHandbackOrFinalize) {
+      return null;
+    }
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {canTakeover && (
+          <Button
+            size={size}
+            variant="outline"
+            className={buttonClass}
+            onClick={handleTakeover}
+            disabled={anyControlPending}
+          >
+            <Hand className={iconClass + " mr-1"} />
+            {takeoverMutation.isPending ? t(($) => $.node_run.taking_over) : t(($) => $.node_run.take_over)}
+          </Button>
+        )}
+        {canHandbackOrFinalize && (
+          <>
+            <Button
+              size={size}
+              variant="outline"
+              className={buttonClass}
+              onClick={handleOpenSession}
+            >
+              <MessageSquare className={iconClass + " mr-1"} />
+              {t(($) => $.node_run.open_session)}
+            </Button>
+            <Button
+              size={size}
+              variant="outline"
+              className={buttonClass}
+              onClick={handleHandback}
+              disabled={anyControlPending}
+            >
+              <Play className={iconClass + " mr-1"} />
+              {handbackMutation.isPending ? t(($) => $.node_run.handing_back) : t(($) => $.node_run.hand_back)}
+            </Button>
+            <Button
+              size={size}
+              className={buttonClass}
+              onClick={() => handleFinalize(true)}
+              disabled={anyControlPending}
+            >
+              <CheckCircle className={iconClass + " mr-1"} />
+              {finalizeMutation.isPending ? t(($) => $.node_run.finalizing) : t(($) => $.node_run.finalize_approve)}
+            </Button>
+            <Button
+              size={size}
+              variant="outline"
+              className={buttonClass}
+              onClick={() => handleFinalize(false)}
+              disabled={anyControlPending}
+            >
+              <XCircle className={iconClass + " mr-1"} />
+              {finalizeMutation.isPending ? t(($) => $.node_run.finalizing) : t(($) => $.node_run.finalize_reject)}
+            </Button>
+          </>
+        )}
+      </div>
+    );
   }
 
-  const buttonClass = size === "sm" ? "h-7 text-xs" : "h-8 text-sm";
-  const iconClass = "h-3.5 w-3.5";
-
+  // Always-visible mode: used on issue detail pages. Buttons stay on screen so
+  // users can discover them; invalid clicks surface an explanatory toast.
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
-      {canTakeover && (
-        <Button
-          size={size}
-          variant="outline"
-          className={buttonClass}
-          onClick={() =>
-            takeoverMutation.mutate(controlVars, {
-              onSuccess: () => toast.success(t(($) => $.node_run.toast_takeover_success)),
-              onError: (err) =>
-                toast.error(err instanceof Error ? err.message : t(($) => $.node_run.toast_takeover_failed)),
-            })
-          }
-          disabled={anyControlPending}
-        >
-          <Hand className={iconClass + " mr-1"} />
-          {takeoverMutation.isPending ? t(($) => $.node_run.taking_over) : t(($) => $.node_run.take_over)}
-        </Button>
-      )}
-      {canHandbackOrFinalize && (
-        <>
-          <Button
-            size={size}
-            variant="outline"
-            className={buttonClass}
-            onClick={handleOpenSession}
-          >
-            <MessageSquare className={iconClass + " mr-1"} />
-            {t(($) => $.node_run.open_session)}
-          </Button>
-          <Button
-            size={size}
-            variant="outline"
-            className={buttonClass}
-            onClick={() =>
-              handbackMutation.mutate(controlVars, {
-                onSuccess: () => toast.success(t(($) => $.node_run.toast_handback_success)),
-                onError: (err) =>
-                  toast.error(err instanceof Error ? err.message : t(($) => $.node_run.toast_handback_failed)),
-              })
-            }
-            disabled={anyControlPending}
-          >
-            <Play className={iconClass + " mr-1"} />
-            {handbackMutation.isPending ? t(($) => $.node_run.handing_back) : t(($) => $.node_run.hand_back)}
-          </Button>
-          <Button
-            size={size}
-            className={buttonClass}
-            onClick={() =>
-              finalizeMutation.mutate(
-                { ...controlVars, approved: true },
-                {
-                  onSuccess: () => toast.success(t(($) => $.node_run.toast_finalize_approved)),
-                  onError: (err) =>
-                    toast.error(err instanceof Error ? err.message : t(($) => $.node_run.toast_finalize_failed)),
-                },
-              )
-            }
-            disabled={anyControlPending}
-          >
-            <CheckCircle className={iconClass + " mr-1"} />
-            {finalizeMutation.isPending ? t(($) => $.node_run.finalizing) : t(($) => $.node_run.finalize_approve)}
-          </Button>
-          <Button
-            size={size}
-            variant="outline"
-            className={buttonClass}
-            onClick={() =>
-              finalizeMutation.mutate(
-                { ...controlVars, approved: false },
-                {
-                  onSuccess: () => toast.success(t(($) => $.node_run.toast_finalize_rejected)),
-                  onError: (err) =>
-                    toast.error(err instanceof Error ? err.message : t(($) => $.node_run.toast_finalize_failed)),
-                },
-              )
-            }
-            disabled={anyControlPending}
-          >
-            <XCircle className={iconClass + " mr-1"} />
-            {finalizeMutation.isPending ? t(($) => $.node_run.finalizing) : t(($) => $.node_run.finalize_reject)}
-          </Button>
-        </>
-      )}
+      <Button
+        size={size}
+        variant="outline"
+        className={buttonClass}
+        onClick={handleTakeover}
+        disabled={anyControlPending}
+      >
+        <Hand className={iconClass + " mr-1"} />
+        {takeoverMutation.isPending ? t(($) => $.node_run.taking_over) : t(($) => $.node_run.take_over)}
+      </Button>
+      <Button
+        size={size}
+        variant="outline"
+        className={buttonClass}
+        onClick={handleOpenSession}
+      >
+        <MessageSquare className={iconClass + " mr-1"} />
+        {t(($) => $.node_run.open_session)}
+      </Button>
+      <Button
+        size={size}
+        variant="outline"
+        className={buttonClass}
+        onClick={handleHandback}
+        disabled={anyControlPending}
+      >
+        <Play className={iconClass + " mr-1"} />
+        {handbackMutation.isPending ? t(($) => $.node_run.handing_back) : t(($) => $.node_run.hand_back)}
+      </Button>
+      <Button
+        size={size}
+        className={buttonClass}
+        onClick={() => handleFinalize(true)}
+        disabled={anyControlPending}
+      >
+        <CheckCircle className={iconClass + " mr-1"} />
+        {finalizeMutation.isPending ? t(($) => $.node_run.finalizing) : t(($) => $.node_run.finalize_approve)}
+      </Button>
+      <Button
+        size={size}
+        variant="outline"
+        className={buttonClass}
+        onClick={() => handleFinalize(false)}
+        disabled={anyControlPending}
+      >
+        <XCircle className={iconClass + " mr-1"} />
+        {finalizeMutation.isPending ? t(($) => $.node_run.finalizing) : t(($) => $.node_run.finalize_reject)}
+      </Button>
     </div>
   );
 }

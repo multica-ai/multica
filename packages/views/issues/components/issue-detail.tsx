@@ -1869,6 +1869,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 runId={issue?.workflow_run_id ?? undefined}
                 wsId={wsId}
                 size="sm"
+                alwaysShow
               />
             </div>
           )}
