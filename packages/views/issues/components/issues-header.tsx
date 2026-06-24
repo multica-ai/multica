@@ -614,6 +614,11 @@ function RelativeAmountInput({
       inputMode="numeric"
       value={text}
       aria-invalid={!isValid}
+      // CEREBRO-PATCH(my-issues-date-builder): FIR-1871 — the field lives inside a
+      // Base UI menu (DropdownMenuSubContent) whose typeahead/roving-focus swallows
+      // printable keystrokes, so digits never reach the input while Backspace does.
+      // Stop the keydown here so the menu never sees it and typing works on mobile.
+      onKeyDown={(e) => e.stopPropagation()}
       onChange={(e) => {
         const next = e.target.value;
         setText(next);
