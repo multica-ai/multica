@@ -134,6 +134,8 @@ export function TemplateSelector({
     [workspaceId, agentId, onBindingChange, queryClient, t, canEdit],
   );
 
+  const isLoading = loadingSystem || loadingPersonal;
+
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
