@@ -1156,6 +1156,18 @@ SELECT
             WHERE m.channel_id = c.id AND m.created_at > cm.last_read_at
         )
     )::boolean AS has_unread,
+    -- First top-level message newer than the member's last_read_at, so the
+    -- client can land at the read/unread boundary ("jump to last read") on
+    -- entry. Replies are excluded — the flat timeline only renders top-level
+    -- messages. NULL when the user is not a member or has no unread.
+    (
+        SELECT m.id FROM channel_message m
+        WHERE m.channel_id = c.id
+          AND m.thread_id IS NULL
+          AND m.created_at > cm.last_read_at
+        ORDER BY m.created_at ASC, m.id ASC
+        LIMIT 1
+    ) AS first_unread_message_id,
     cg.name AS group_name,
     COALESCE(cg.position, 0)::float8 AS group_position
 FROM channel c
@@ -1172,26 +1184,27 @@ type ListChannelsParams struct {
 }
 
 type ListChannelsRow struct {
-	ID               pgtype.UUID        `json:"id"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	Name             string             `json:"name"`
-	Slug             string             `json:"slug"`
-	Description      string             `json:"description"`
-	AccessMode       string             `json:"access_mode"`
-	IsLocked         bool               `json:"is_locked"`
-	IsArchived       bool               `json:"is_archived"`
-	CreatedBy        pgtype.UUID        `json:"created_by"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	GroupID          pgtype.UUID        `json:"group_id"`
-	Position         float64            `json:"position"`
-	MemberRole       pgtype.Text        `json:"member_role"`
-	MemberLastReadAt pgtype.Timestamptz `json:"member_last_read_at"`
-	IsMember         bool               `json:"is_member"`
-	LastActivityAt   pgtype.Timestamptz `json:"last_activity_at"`
-	HasUnread        bool               `json:"has_unread"`
-	GroupName        pgtype.Text        `json:"group_name"`
-	GroupPosition    float64            `json:"group_position"`
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	Name                 string             `json:"name"`
+	Slug                 string             `json:"slug"`
+	Description          string             `json:"description"`
+	AccessMode           string             `json:"access_mode"`
+	IsLocked             bool               `json:"is_locked"`
+	IsArchived           bool               `json:"is_archived"`
+	CreatedBy            pgtype.UUID        `json:"created_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	GroupID              pgtype.UUID        `json:"group_id"`
+	Position             float64            `json:"position"`
+	MemberRole           pgtype.Text        `json:"member_role"`
+	MemberLastReadAt     pgtype.Timestamptz `json:"member_last_read_at"`
+	IsMember             bool               `json:"is_member"`
+	LastActivityAt       pgtype.Timestamptz `json:"last_activity_at"`
+	HasUnread            bool               `json:"has_unread"`
+	FirstUnreadMessageID pgtype.UUID        `json:"first_unread_message_id"`
+	GroupName            pgtype.Text        `json:"group_name"`
+	GroupPosition        float64            `json:"group_position"`
 }
 
 // ============ Channels ============
@@ -1228,6 +1241,7 @@ func (q *Queries) ListChannels(ctx context.Context, arg ListChannelsParams) ([]L
 			&i.IsMember,
 			&i.LastActivityAt,
 			&i.HasUnread,
+			&i.FirstUnreadMessageID,
 			&i.GroupName,
 			&i.GroupPosition,
 		); err != nil {

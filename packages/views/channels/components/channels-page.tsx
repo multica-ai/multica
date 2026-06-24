@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -29,6 +30,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  ArrowUp,
   Bot,
   ChevronRight,
   FileText,
@@ -44,6 +46,7 @@ import {
   Send,
   Settings,
   Square,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -90,6 +93,16 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@multica/ui/components/ui/context-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import {
   Tooltip,
   TooltipContent,
@@ -241,7 +254,13 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
   // the first page loads a window centered on it (the target may be older than
   // the latest page), and also drives the scroll-to-and-highlight on render.
   const linkedMessageId = nav.searchParams.get("message")?.trim() || null;
-  const { data: msgData, isLoading: loadingMessages, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery(channelMessagesOptions(wsId, channelId ?? null, linkedMessageId));
+  // Anchor for the first messages page. A deep-link takes priority; otherwise
+  // null (latest). The "jump to last read" button re-anchors to the first
+  // unread message so a window around it loads. Reset on channel switch or
+  // deep-link change so a stale anchor from another channel never leaks in.
+  const [anchorMessageId, setAnchorMessageId] = useState<string | null>(linkedMessageId);
+  useEffect(() => { setAnchorMessageId(linkedMessageId); }, [linkedMessageId, channelId]);
+  const { data: msgData, isLoading: loadingMessages, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery(channelMessagesOptions(wsId, channelId ?? null, anchorMessageId));
   const messages = msgData?.messages ?? [];
   const highlight = msgData?.highlight ?? null;
   const { data: members = [] } = useQuery(channelMembersOptions(wsId, channelId ?? null));
@@ -267,26 +286,29 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
     return members.map((m) => m.user_id);
   }, [activeChannel?.access_mode, workspaceMembers, members]);
 
-  const canManageChannel =
-    activeChannel?.member_role === "owner" ||
+  // Workspace-level admin/owner — the per-channel half of canManage (the
+  // other half is channel member_role === "owner"). Shared with the channel
+  // list so each row can decide whether to show its delete affordance.
+  const isWorkspaceAdmin =
     currentWorkspaceMember?.role === "owner" ||
     currentWorkspaceMember?.role === "admin";
+  const canManageChannel = activeChannel?.member_role === "owner" || isWorkspaceAdmin;
 
   const threadQuery = useQuery(
     messageThreadOptions(wsId, channelId ?? null, replyMessageId),
   );
 
-  // Auto mark-as-read whenever the user is viewing a channel that carries
-  // unread activity. has_unread comes from the list query; WS handlers
-  // invalidate it when a new message lands, so a message arriving while the
-  // user watches re-fires this effect and is instantly cleared.
-  const markRead = useMarkChannelRead();
+  // Unread is cleared on catch-up, not on entry: landing at the read/unread
+  // boundary first (see MessageList) so the user can resume where they left off
+  // — clearing it on entry would erase the boundary before they see it. The
+  // list query's has_unread drives the boundary; MessageList fires onMarkRead
+  // once the user scrolls to the bottom (and when a live message lands while
+  // they're already watching at the bottom).
+  const markReadMutate = useMarkChannelRead().mutate;
   const activeHasUnread = activeChannel?.has_unread ?? false;
-  useEffect(() => {
-    if (!channelId || !activeHasUnread) return;
-    markRead.mutate(channelId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
-  }, [channelId, activeHasUnread]);
+  const handleMarkRead = useCallback(() => {
+    if (channelId) markReadMutate(channelId);
+  }, [channelId, markReadMutate]);
 
   const closeSidePanel = useCallback(() => {
     setSidePanel(null);
@@ -409,6 +431,12 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
           loading={loadingChannels}
           onCreate={() => setShowCreateDialog(true)}
           onSelect={(id) => nav.push(paths.channelDetail(id))}
+          onDelete={(id) => {
+            // If the active channel is removed, drop the stale id from the URL
+            // so the main area returns to the empty state instead of a 404.
+            if (id === channelId) nav.push(paths.channels());
+          }}
+          isWorkspaceAdmin={isWorkspaceAdmin}
           wsId={wsId}
         />
       </aside>
@@ -443,6 +471,10 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
               loadingMore={isFetchingNextPage}
               canPost={activeChannel.access_mode === "open" || activeChannel.is_member}
               highlight={highlight}
+              firstUnreadMessageId={activeChannel.first_unread_message_id ?? null}
+              hasUnread={activeHasUnread}
+              onMarkRead={handleMarkRead}
+              onJumpToMessage={setAnchorMessageId}
             />
           </div>
         ) : (
@@ -515,6 +547,8 @@ function ChannelList({
   loading,
   onCreate,
   onSelect,
+  onDelete,
+  isWorkspaceAdmin,
   wsId,
 }: {
   channels: ChannelSummary[];
@@ -522,6 +556,8 @@ function ChannelList({
   loading: boolean;
   onCreate: () => void;
   onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+  isWorkspaceAdmin: boolean;
   wsId: string;
 }) {
   const { t } = useT("channels");
@@ -559,6 +595,21 @@ function ChannelList({
     mutationFn: (args: { channelId: string; groupId: string | null; position: number }) =>
       api.moveChannelToGroup(args.channelId, args.groupId, args.position),
     onSuccess: invalidateGroupsAndList,
+  });
+  // Channel deletion is gated by canManage (channel owner or workspace
+  // admin/owner) — the row only renders the trigger for those users, mirroring
+  // the backend DeleteChannel gate (canManage = wsAdmin || channelOwn). The
+  // AlertDialog confirms before the irreversible delete.
+  const [pendingDelete, setPendingDelete] = useState<ChannelSummary | null>(null);
+  const deleteChannelMutation = useMutation({
+    mutationFn: (id: string) => api.deleteChannel(id),
+    onSuccess: (_data, id) => {
+      invalidateGroupsAndList();
+      toast.success(t($ => $.channel_deleted));
+      onDelete(id);
+      setPendingDelete(null);
+    },
+    onError: () => toast.error(t($ => $.delete_failed)),
   });
 
   const { groups, ungrouped, groupMap } = useMemo(() => {
@@ -776,6 +827,8 @@ function ChannelList({
                     onRenameCancel={() => setEditingGroupId(null)}
                     onDelete={() => deleteGroupMutation.mutate(gId)}
                     onSelect={onSelect}
+                    isWorkspaceAdmin={isWorkspaceAdmin}
+                    onRequestDeleteChannel={setPendingDelete}
                   />
                 ))}
                 <UngroupedDropZone
@@ -784,6 +837,8 @@ function ChannelList({
                   isDropTarget={overGroupId === null}
                   activeChannelId={activeChannelId}
                   onSelect={onSelect}
+                  isWorkspaceAdmin={isWorkspaceAdmin}
+                  onRequestDeleteChannel={setPendingDelete}
                 />
               </div>
             </SortableContext>
@@ -820,6 +875,28 @@ function ChannelList({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <AlertDialog open={!!pendingDelete} onOpenChange={(v) => !v && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t($ => $.delete_channel.title)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t($ => $.delete_channel.description, { name: pendingDelete?.name ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteChannelMutation.isPending}>
+              {t($ => $.delete_channel.cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => pendingDelete && deleteChannelMutation.mutate(pendingDelete.id)}
+              disabled={deleteChannelMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t($ => $.delete_channel.confirm)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -841,6 +918,8 @@ function ChannelGroupSection({
   onRenameCancel,
   onDelete,
   onSelect,
+  isWorkspaceAdmin,
+  onRequestDeleteChannel,
 }: {
   groupId: string;
   name: string;
@@ -858,6 +937,8 @@ function ChannelGroupSection({
   onRenameCancel: () => void;
   onDelete: () => void;
   onSelect: (id: string) => void;
+  isWorkspaceAdmin: boolean;
+  onRequestDeleteChannel: (channel: ChannelSummary) => void;
 }) {
   const { t } = useT("channels");
   const { setNodeRef } = useDroppable({ id: `group:${groupId}` });
@@ -908,6 +989,8 @@ function ChannelGroupSection({
               channel={ch}
               isActive={ch.id === activeChannelId}
               onSelect={onSelect}
+              isWorkspaceAdmin={isWorkspaceAdmin}
+              onRequestDelete={onRequestDeleteChannel}
             />
           ))}
           {channels.length === 0 && isDragging && isDropTarget && (
@@ -927,12 +1010,16 @@ function UngroupedDropZone({
   isDropTarget,
   activeChannelId,
   onSelect,
+  isWorkspaceAdmin,
+  onRequestDeleteChannel,
 }: {
   channels: ChannelSummary[];
   isDragging: boolean;
   isDropTarget: boolean;
   activeChannelId: string | null;
   onSelect: (id: string) => void;
+  isWorkspaceAdmin: boolean;
+  onRequestDeleteChannel: (channel: ChannelSummary) => void;
 }) {
   const { setNodeRef } = useDroppable({ id: UNGROUPED_DROP_ID });
 
@@ -950,6 +1037,8 @@ function UngroupedDropZone({
           channel={ch}
           isActive={ch.id === activeChannelId}
           onSelect={onSelect}
+          isWorkspaceAdmin={isWorkspaceAdmin}
+          onRequestDelete={onRequestDeleteChannel}
         />
       ))}
       {channels.length === 0 && isDragging && (
@@ -968,15 +1057,23 @@ function SortableChannelItem({
   channel,
   isActive,
   onSelect,
+  isWorkspaceAdmin,
+  onRequestDelete,
 }: {
   channel: ChannelSummary;
   isActive: boolean;
   onSelect: (id: string) => void;
+  isWorkspaceAdmin: boolean;
+  onRequestDelete: (channel: ChannelSummary) => void;
 }) {
+  const { t } = useT("channels");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: channel.id,
   });
   const style = { transform: CSS.Transform.toString(transform), transition };
+  // Mirrors the backend DeleteChannel gate (canManage = wsAdmin || channelOwn):
+  // workspace admin/owner, or this user is the channel's owner member.
+  const canDelete = channel.member_role === "owner" || isWorkspaceAdmin;
 
   return (
     <div
@@ -984,12 +1081,12 @@ function SortableChannelItem({
       style={style}
       {...attributes}
       {...listeners}
-      className={cn(isDragging && "opacity-50")}
+      className={cn("group/item relative", isDragging && "opacity-50")}
     >
       <button
         onClick={() => onSelect(channel.id)}
         className={cn(
-          "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent",
+          "flex h-8 w-full items-center gap-2 rounded-md px-2 pr-8 text-left text-sm hover:bg-accent",
           isActive && "bg-accent font-medium",
           channel.group_id && "pl-5",
         )}
@@ -1006,6 +1103,20 @@ function SortableChannelItem({
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/60" />
         )}
       </button>
+      {canDelete && (
+        <button
+          type="button"
+          aria-label={t($ => $.delete_channel.aria_label, { name: channel.name })}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRequestDelete(channel);
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover/item:opacity-100"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      )}
     </div>
   );
 }
@@ -1060,6 +1171,10 @@ function MessageList({
   loadingMore,
   canPost = true,
   highlight = null,
+  firstUnreadMessageId = null,
+  hasUnread = false,
+  onMarkRead,
+  onJumpToMessage,
 }: {
   messages: ChannelMessage[];
   loading: boolean;
@@ -1073,6 +1188,12 @@ function MessageList({
   loadingMore?: boolean;
   canPost?: boolean;
   highlight?: ListChannelMessagesResponse["highlight"] | null;
+  // First top-level message newer than the user's last_read_at (the read/unread
+  // boundary). Drives the "jump to last read" landing + divider.
+  firstUnreadMessageId?: string | null;
+  hasUnread?: boolean;
+  onMarkRead?: () => void;
+  onJumpToMessage?: (messageId: string) => void;
 }) {
   const { t } = useT("channels");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -1088,29 +1209,108 @@ function MessageList({
   const linkedMessageId = nav.searchParams.get("message")?.trim() || null;
   const didScrollToLinked = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (messages.length > prevMsgCount.current) {
-      const isNewMessage = messages.length - prevMsgCount.current <= 2;
-      if (isNewMessage && !linkedMessageId) {
-        scrollListToBottom(scrollRef.current);
-      }
-    } else if (prevMsgCount.current === 0 && messages.length > 0 && !linkedMessageId) {
-      // Defer one frame so the browser has painted the message elements before
-      // we read scrollHeight — on an initial load layout isn't settled on the
-      // commit.
-      requestAnimationFrame(() => scrollListToBottom(scrollRef.current));
-    }
-    prevMsgCount.current = messages.length;
-  }, [messages.length, linkedMessageId]);
+  // Whether the first-unread message is in the loaded page. False when there
+  // are more unreads than one page — the boundary then sits above the window
+  // and the "jump to last read" control re-anchors the query around it.
+  const firstUnreadInPage = !!firstUnreadMessageId && messages.some((m) => m.id === firstUnreadMessageId);
+  const [showJumpToLastRead, setShowJumpToLastRead] = useState(false);
 
-  // Scroll to bottom when entering a channel (including first visit).
-  // Only scroll when messages are already loaded to avoid scrolling an
-  // empty container; the effect above handles the initial-load case.
+  const isNearBottom = useCallback((threshold = 120) => {
+    const el = scrollRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  }, []);
+
+  const landAt = useCallback((messageId: string | null) => {
+    requestAnimationFrame(() => {
+      const el = messageId ? document.getElementById(`channel-msg-${messageId}`) : null;
+      if (el) scrollToElement(scrollRef.current, el);
+      else scrollListToBottom(scrollRef.current);
+    });
+  }, []);
+
+  // Entry: land at the read/unread boundary when resuming an unread channel
+  // (so the user picks up where they left off), otherwise at the latest
+  // message. Runs once per (channel, deep-link) — the guard keeps the boundary
+  // scroll from re-firing as messages stream in.
+  const entryKey = `${channelId}:${linkedMessageId ?? ""}`;
+  const didEntry = useRef<string | null>(null);
   useEffect(() => {
-    if (messages.length > 0 && !linkedMessageId) {
+    if (messages.length === 0 || didEntry.current === entryKey) return;
+    if (linkedMessageId) { didEntry.current = entryKey; return; } // deep-link effect handles it
+    didEntry.current = entryKey;
+    const target = hasUnread && firstUnreadInPage ? firstUnreadMessageId : null;
+    landAt(target);
+  }, [entryKey, messages.length, linkedMessageId, hasUnread, firstUnreadInPage, firstUnreadMessageId, landAt]);
+
+  // Reset the live-follow baseline on channel switch so the first page of the
+  // new channel isn't mistaken for a newly-arrived message (which would yank to
+  // the bottom and override the unread-boundary landing).
+  useEffect(() => { prevMsgCount.current = 0; }, [channelId]);
+
+  // Live follow: a new message arriving while the user is already pinned to the
+  // bottom keeps them there. Don't yank if they've scrolled up to read history
+  // or are parked at the unread boundary.
+  useEffect(() => {
+    const prev = prevMsgCount.current;
+    prevMsgCount.current = messages.length;
+    if (linkedMessageId) return;
+    if (messages.length > prev && prev > 0 && isNearBottom()) {
       requestAnimationFrame(() => scrollListToBottom(scrollRef.current));
     }
-  }, [channelId]);
+  }, [messages.length, linkedMessageId, isNearBottom]);
+
+  // Catch-up: clear unread once the user reaches the bottom (seen all new
+  // messages). Also fires when a live message lands while already at the
+  // bottom — the live-follow effect above keeps them pinned, so this clears it.
+  // Skip when the unread boundary sits above the loaded window (many unread):
+  // the user landed at the latest but hasn't seen the boundary yet, so the
+  // "jump to last read" control must stay until they actually scroll back to it.
+  useEffect(() => {
+    if (!hasUnread || !onMarkRead || messages.length === 0) return;
+    if (firstUnreadMessageId && !firstUnreadInPage) return;
+    if (isNearBottom()) onMarkRead();
+  }, [messages.length, hasUnread, onMarkRead, firstUnreadMessageId, firstUnreadInPage, isNearBottom]);
+
+  // Floating "jump to last read" control: show when the unread boundary is out
+  // of view (scrolled past it) or above the loaded window (many unread).
+  const updateJumpVisibility = useCallback(() => {
+    if (!hasUnread || !firstUnreadMessageId) { setShowJumpToLastRead(false); return; }
+    if (!firstUnreadInPage) { setShowJumpToLastRead(true); return; }
+    const el = document.getElementById(`channel-msg-${firstUnreadMessageId}`);
+    const container = scrollRef.current;
+    if (!el || !container) { setShowJumpToLastRead(false); return; }
+    const c = container.getBoundingClientRect();
+    const e = el.getBoundingClientRect();
+    setShowJumpToLastRead(e.bottom < c.top || e.top > c.bottom);
+  }, [hasUnread, firstUnreadMessageId, firstUnreadInPage]);
+
+  useEffect(() => {
+    updateJumpVisibility();
+  }, [messages.length, hasUnread, firstUnreadMessageId, firstUnreadInPage, updateJumpVisibility]);
+
+  const pendingJumpRef = useRef<string | null>(null);
+  const handleJumpToLastRead = useCallback(() => {
+    if (!firstUnreadMessageId) return;
+    if (firstUnreadInPage) {
+      const el = document.getElementById(`channel-msg-${firstUnreadMessageId}`);
+      if (el) { scrollToElement(scrollRef.current, el); return; }
+    }
+    // Boundary is older than the loaded window — re-anchor the query around it,
+    // then scroll to it once the new page arrives (effect below).
+    pendingJumpRef.current = firstUnreadMessageId;
+    onJumpToMessage?.(firstUnreadMessageId);
+  }, [firstUnreadMessageId, firstUnreadInPage, onJumpToMessage]);
+
+  // After a "jump to last read" re-anchor, scroll to the boundary once it loads.
+  useEffect(() => {
+    const target = pendingJumpRef.current;
+    if (!target || !firstUnreadInPage) return;
+    const el = document.getElementById(`channel-msg-${target}`);
+    if (!el) return;
+    pendingJumpRef.current = null;
+    requestAnimationFrame(() => scrollToElement(scrollRef.current, el));
+  }, [messages.length, firstUnreadInPage]);
 
   useEffect(() => {
     if (messages.length === 0) return;
@@ -1150,11 +1350,14 @@ function MessageList({
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
-    if (!el || !hasMore || loadingMore) return;
-    if (el.scrollTop < 80) {
+    if (!el) return;
+    if (hasMore && !loadingMore && el.scrollTop < 80) {
       loadMore?.();
     }
-  }, [hasMore, loadMore, loadingMore]);
+    const boundaryAboveWindow = !!(firstUnreadMessageId && !firstUnreadInPage);
+    if (hasUnread && onMarkRead && !boundaryAboveWindow && isNearBottom()) onMarkRead();
+    updateJumpVisibility();
+  }, [hasMore, loadingMore, loadMore, hasUnread, onMarkRead, firstUnreadMessageId, firstUnreadInPage, isNearBottom, updateJumpVisibility]);
 
   const handleCopyLink = useCallback(async (msg: ChannelMessage) => {
     const url = nav.getShareableUrl(paths.channelDetail(channelId, { messageId: msg.id }));
@@ -1194,41 +1397,61 @@ function MessageList({
 
   return (
     <>
-      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        {loadingMore && (
-          <div className="flex justify-center py-2">
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-          </div>
-        )}
-        {messages.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            {t($ => $.no_messages)}
-          </div>
-        ) : (
-          <ul className="space-y-3">
-            {messages.map((msg) => (
-              <MessageRow
-                key={msg.id}
-                message={msg}
-                onOpenReplies={onOpenReplies}
-                onCopyLink={handleCopyLink}
-                onConvertManual={(m) =>
-                  openModal("create-issue", {
-                    description: m.content,
-                    source_channel_id: channelId,
-                    source_message_id: m.id,
-                  })
-                }
-                onConvertAgent={(m) =>
-                  openModal("quick-create-issue", {
-                    prompt: m.content,
-                    source_channel_id: channelId,
-                    source_message_id: m.id,
-                  })
-                }
-              />
-            ))}
-          </ul>
+      <div className="relative min-h-0 flex-1">
+        <div ref={scrollRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto px-4 py-3">
+          {loadingMore && (
+            <div className="flex justify-center py-2">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          )}
+          {messages.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {t($ => $.no_messages)}
+            </div>
+          ) : (
+            <ul className="space-y-3">
+              {messages.map((msg) => (
+                <Fragment key={msg.id}>
+                  {hasUnread && firstUnreadMessageId === msg.id && (
+                    <li className="flex items-center gap-3 py-1" aria-label={t($ => $.new_messages)}>
+                      <span className="h-px flex-1 bg-brand/40" />
+                      <span className="text-xs font-medium text-brand">{t($ => $.new_messages)}</span>
+                      <span className="h-px flex-1 bg-brand/40" />
+                    </li>
+                  )}
+                  <MessageRow
+                    message={msg}
+                    onOpenReplies={onOpenReplies}
+                    onCopyLink={handleCopyLink}
+                    onConvertManual={(m) =>
+                      openModal("create-issue", {
+                        description: m.content,
+                        source_channel_id: channelId,
+                        source_message_id: m.id,
+                      })
+                    }
+                    onConvertAgent={(m) =>
+                      openModal("quick-create-issue", {
+                        prompt: m.content,
+                        source_channel_id: channelId,
+                        source_message_id: m.id,
+                      })
+                    }
+                  />
+                </Fragment>
+              ))}
+            </ul>
+          )}
+        </div>
+        {showJumpToLastRead && hasUnread && firstUnreadMessageId && (
+          <button
+            type="button"
+            onClick={handleJumpToLastRead}
+            className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border bg-card px-3 py-1.5 text-xs font-medium shadow-md ring-1 ring-border transition-colors hover:bg-accent"
+          >
+            <ArrowUp className="h-3.5 w-3.5" />
+            {t($ => $.jump_to_last_read)}
+          </button>
         )}
       </div>
       {canPost ? (

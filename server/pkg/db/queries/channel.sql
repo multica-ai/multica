@@ -25,6 +25,18 @@ SELECT
             WHERE m.channel_id = c.id AND m.created_at > cm.last_read_at
         )
     )::boolean AS has_unread,
+    -- First top-level message newer than the member's last_read_at, so the
+    -- client can land at the read/unread boundary ("jump to last read") on
+    -- entry. Replies are excluded — the flat timeline only renders top-level
+    -- messages. NULL when the user is not a member or has no unread.
+    (
+        SELECT m.id FROM channel_message m
+        WHERE m.channel_id = c.id
+          AND m.thread_id IS NULL
+          AND m.created_at > cm.last_read_at
+        ORDER BY m.created_at ASC, m.id ASC
+        LIMIT 1
+    ) AS first_unread_message_id,
     cg.name AS group_name,
     COALESCE(cg.position, 0)::float8 AS group_position
 FROM channel c

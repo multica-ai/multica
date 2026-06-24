@@ -19,6 +19,10 @@
   "member_added": "メンバーを追加しました",
   "member_removed": "メンバーを削除しました",
   "settings_updated": "チャンネル設定を更新しました",
+  "new_messages": "新着メッセージ",
+  "jump_to_last_read": "最後に読んだ位置へ",
+  "channel_deleted": "チャンネルを削除しました",
+  "delete_failed": "削除に失敗しました",
   "replies_count_other": "返信 {{count}}件",
   "new_group": "新しいグループ",
   "new_channel": "新しいチャンネル",
@@ -46,6 +50,13 @@
     "reply": "返信",
     "convert_issue": "Issueに変換",
     "convert_agent": "AgentがIssueに変換"
+  },
+  "delete_channel": {
+    "aria_label": "チャンネル {{name}} を削除",
+    "title": "チャンネルを削除",
+    "description": "チャンネル「{{name}}」を削除しますか？この操作は取り消せません。チャンネル内のすべてのメッセージとスレッドが削除されます。",
+    "cancel": "キャンセル",
+    "confirm": "削除"
   },
   "panel_header": {
     "replies": "返信",

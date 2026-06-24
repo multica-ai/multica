@@ -19,6 +19,10 @@
   "member_added": "Member added",
   "member_removed": "Member removed",
   "settings_updated": "Channel settings updated",
+  "new_messages": "New messages",
+  "jump_to_last_read": "Jump to last read",
+  "channel_deleted": "Channel deleted",
+  "delete_failed": "Failed to delete",
   "replies_count_one": "{{count}} reply",
   "replies_count_other": "{{count}} replies",
   "new_group": "New group",
@@ -47,6 +51,13 @@
     "reply": "Reply",
     "convert_issue": "Convert to Issue",
     "convert_agent": "Convert to Issue by Agent"
+  },
+  "delete_channel": {
+    "aria_label": "Delete channel {{name}}",
+    "title": "Delete channel",
+    "description": "Delete channel \"{{name}}\"? This cannot be undone — all messages and threads in it will be removed.",
+    "cancel": "Cancel",
+    "confirm": "Delete"
   },
   "panel_header": {
     "replies": "Replies",

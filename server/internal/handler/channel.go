@@ -34,7 +34,11 @@ type ChannelResponse struct {
 	IsMember       bool    `json:"is_member"`
 	MemberRole     *string `json:"member_role,omitempty"`
 	HasUnread      bool    `json:"has_unread"`
-	LastActivityAt string  `json:"last_activity_at,omitempty"`
+	// First top-level message newer than the member's last_read_at. Drives the
+	// "jump to last read" landing point on channel entry. Nil when not a member
+	// or fully read.
+	FirstUnreadMessageID *string `json:"first_unread_message_id,omitempty"`
+	LastActivityAt       string  `json:"last_activity_at,omitempty"`
 	// Group context (only set on list).
 	GroupID       *string `json:"group_id,omitempty"`
 	GroupName     *string `json:"group_name,omitempty"`
@@ -82,10 +86,11 @@ func channelListRowToResponse(c db.ListChannelsRow) ChannelResponse {
 		CreatedBy:      uuidToPtr(c.CreatedBy),
 		CreatedAt:      timestampToString(c.CreatedAt),
 		UpdatedAt:      timestampToString(c.UpdatedAt),
-		IsMember:       c.IsMember,
-		MemberRole:     textToPtr(c.MemberRole),
-		HasUnread:      c.HasUnread,
-		LastActivityAt: timestampToString(c.LastActivityAt),
+		IsMember:            c.IsMember,
+		MemberRole:          textToPtr(c.MemberRole),
+		HasUnread:           c.HasUnread,
+		FirstUnreadMessageID: uuidToPtr(c.FirstUnreadMessageID),
+		LastActivityAt:      timestampToString(c.LastActivityAt),
 		GroupID:        uuidToPtr(c.GroupID),
 		GroupName:      textToPtr(c.GroupName),
 		GroupPosition:  c.GroupPosition,

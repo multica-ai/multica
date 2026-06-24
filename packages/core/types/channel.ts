@@ -15,6 +15,10 @@ export interface ChannelSummary {
   is_member: boolean;
   member_role?: string;
   has_unread: boolean;
+  // First top-level message newer than the member's last_read_at. Drives the
+  // "jump to last read" landing point on channel entry. Null when the user is
+  // not a member or has no unread.
+  first_unread_message_id?: string | null;
   last_activity_at?: string;
   group_id?: string | null;
   group_name?: string | null;

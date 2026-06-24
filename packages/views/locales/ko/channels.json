@@ -19,6 +19,10 @@
   "member_added": "멤버가 추가되었습니다",
   "member_removed": "멤버가 제거되었습니다",
   "settings_updated": "채널 설정이 업데이트되었습니다",
+  "new_messages": "새 메시지",
+  "jump_to_last_read": "마지막으로 읽은 위치로",
+  "channel_deleted": "채널이 삭제되었습니다",
+  "delete_failed": "삭제 실패",
   "replies_count_other": "답글 {{count}}개",
   "new_group": "새 그룹",
   "new_channel": "새 채널",
@@ -46,6 +50,13 @@
     "reply": "답글",
     "convert_issue": "이슈로 변환",
     "convert_agent": "Agent가 이슈로 변환"
+  },
+  "delete_channel": {
+    "aria_label": "채널 {{name}} 삭제",
+    "title": "채널 삭제",
+    "description": "채널 \"{{name}}\"을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없으며 채널의 모든 메시지와 스레드가 삭제됩니다.",
+    "cancel": "취소",
+    "confirm": "삭제"
   },
   "panel_header": {
     "replies": "답글",
