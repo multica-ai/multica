@@ -232,6 +232,59 @@ func TestCodexHandleServerRequestUnknownReturnsError(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(agent-codex-cache-accounting-test): FIR-1113 cover cumulative Codex events without double-counting cached input.
+func TestCodexExtractUsageFromMapUsesCumulativeSnapshotAndNormalizesCachedInput(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	usageEvent := map[string]any{
+		"usage": map[string]any{
+			"input_tokens":        float64(1000),
+			"output_tokens":       float64(40),
+			"cached_input_tokens": float64(800),
+		},
+	}
+
+	c.extractUsageFromMap(usageEvent)
+	c.extractUsageFromMap(usageEvent)
+
+	c.usageMu.Lock()
+	got := c.usage
+	c.usageMu.Unlock()
+
+	if got.InputTokens != 200 {
+		t.Fatalf("InputTokens after duplicate cumulative events = %d, want 200 non-cached tokens", got.InputTokens)
+	}
+	if got.OutputTokens != 40 {
+		t.Fatalf("OutputTokens after duplicate cumulative events = %d, want 40", got.OutputTokens)
+	}
+	if got.CacheReadTokens != 800 {
+		t.Fatalf("CacheReadTokens after duplicate cumulative events = %d, want 800", got.CacheReadTokens)
+	}
+
+	c.extractUsageFromMap(map[string]any{
+		"usage": map[string]any{
+			"input_tokens":            float64(1200),
+			"output_tokens":           float64(55),
+			"cache_read_input_tokens": float64(900),
+		},
+	})
+
+	c.usageMu.Lock()
+	got = c.usage
+	c.usageMu.Unlock()
+
+	if got.InputTokens != 300 {
+		t.Fatalf("InputTokens after later cumulative event = %d, want 300 non-cached tokens", got.InputTokens)
+	}
+	if got.OutputTokens != 55 {
+		t.Fatalf("OutputTokens after later cumulative event = %d, want 55", got.OutputTokens)
+	}
+	if got.CacheReadTokens != 900 {
+		t.Fatalf("CacheReadTokens after later cumulative event = %d, want 900", got.CacheReadTokens)
+	}
+}
+
 func TestCodexLegacyEventTaskStarted(t *testing.T) {
 	t.Parallel()
 

@@ -862,6 +862,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			if model == "" {
 				model = "unknown"
 			}
+			c.logExtremeUsage(model, u) // CEREBRO-PATCH(agent-codex-cache-accounting): FIR-1113 warn on extreme per-task usage after normalization.
 			usageMap = map[string]TokenUsage{model: u}
 		}
 
@@ -1648,11 +1649,50 @@ func (c *codexClient) extractUsageFromMap(data map[string]any) {
 	c.usageMu.Lock()
 	defer c.usageMu.Unlock()
 
-	// Try various key conventions.
-	c.usage.InputTokens += codexInt64(usageMap, "input_tokens", "input", "prompt_tokens")
-	c.usage.OutputTokens += codexInt64(usageMap, "output_tokens", "output", "completion_tokens")
-	c.usage.CacheReadTokens += codexInt64(usageMap, "cache_read_tokens", "cache_read_input_tokens")
-	c.usage.CacheWriteTokens += codexInt64(usageMap, "cache_write_tokens", "cache_creation_input_tokens")
+	rawInput := codexInt64(usageMap, "input_tokens", "input", "prompt_tokens")
+	rawOutput := codexInt64(usageMap, "output_tokens", "output", "completion_tokens")
+	rawCacheRead := codexInt64(usageMap, "cache_read_tokens", "cache_read_input_tokens", "cached_input_tokens")
+	rawCacheWrite := codexInt64(usageMap, "cache_write_tokens", "cache_creation_input_tokens")
+	if rawInput == 0 && rawOutput == 0 && rawCacheRead == 0 && rawCacheWrite == 0 {
+		return
+	}
+
+	c.usage = normalizeCodexTokenUsage(rawInput, rawOutput, rawCacheRead, rawCacheWrite)
+}
+
+// CEREBRO-PATCH(agent-codex-cache-accounting): FIR-1113 normalize Codex usage so InputTokens excludes cached tokens like Anthropic rows.
+func normalizeCodexTokenUsage(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) TokenUsage {
+	nonCachedInputTokens := inputTokens
+	if cacheReadTokens > 0 {
+		nonCachedInputTokens -= cacheReadTokens
+		if nonCachedInputTokens < 0 {
+			nonCachedInputTokens = 0
+		}
+	}
+	return TokenUsage{
+		InputTokens:      nonCachedInputTokens,
+		OutputTokens:     outputTokens,
+		CacheReadTokens:  cacheReadTokens,
+		CacheWriteTokens: cacheWriteTokens,
+	}
+}
+
+const codexExtremeTaskTokenThreshold = 10_000_000
+
+// CEREBRO-PATCH(agent-codex-cache-accounting): FIR-1113 surface anomalous single-task usage instead of silently storing extreme rows.
+func (c *codexClient) logExtremeUsage(model string, usage TokenUsage) {
+	total := usage.InputTokens + usage.OutputTokens + usage.CacheReadTokens + usage.CacheWriteTokens
+	if total < codexExtremeTaskTokenThreshold {
+		return
+	}
+	c.cfg.Logger.Warn("codex usage unusually high for single task",
+		"model", model,
+		"input_tokens", usage.InputTokens,
+		"output_tokens", usage.OutputTokens,
+		"cache_read_tokens", usage.CacheReadTokens,
+		"cache_write_tokens", usage.CacheWriteTokens,
+		"total_tokens", total,
+		"threshold_tokens", codexExtremeTaskTokenThreshold)
 }
 
 // codexInt64 returns the first non-zero int64 value from the map for the given keys.
@@ -1811,11 +1851,12 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 				if cachedTokens == 0 {
 					cachedTokens = usage.CacheReadInputTokens
 				}
-				result.usage = TokenUsage{
-					InputTokens:     usage.InputTokens,
-					OutputTokens:    usage.OutputTokens + usage.ReasoningOutputTokens,
-					CacheReadTokens: cachedTokens,
-				}
+				result.usage = normalizeCodexTokenUsage(
+					usage.InputTokens,
+					usage.OutputTokens+usage.ReasoningOutputTokens,
+					cachedTokens,
+					0,
+				)
 				// CEREBRO-PATCH(agent-context-footprint): FIR-1856 record the last turn's prompt size for the context-window indicator; total_token_usage above is the lifetime sum kept for cost.
 				if last := evt.Payload.Info.LastTokenUsage; last != nil {
 					result.usage.ContextInputTokens = last.InputTokens

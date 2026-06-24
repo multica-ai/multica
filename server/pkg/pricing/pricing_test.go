@@ -64,6 +64,15 @@ func TestComputeCents_KnownModels(t *testing.T) {
 			want:  3500,
 		},
 		{
+			// CEREBRO-PATCH(agent-codex-cache-accounting-test): FIR-1113 Codex ingestion stores input_tokens as non-cached input.
+			// The 800k cached tokens are therefore charged only at the cache-read
+			// rate, not once as full input and again as cache.
+			name:  "gpt-5.5 — normalized Codex cached input is charged once",
+			model: "gpt-5.5",
+			usage: Usage{InputTokens: 200_000, OutputTokens: 100_000, CacheReadTokens: 800_000},
+			want:  440,
+		},
+		{
 			// Empty usage → 0, no NaN, no panic.
 			name:  "zero usage",
 			model: "claude-opus-4-7",
