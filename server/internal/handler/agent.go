@@ -723,6 +723,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		agents, err = h.Queries.ListAgents(r.Context(), parseUUID(workspaceID))
 	}
 	if err != nil {
+		slog.Error("failed to list agents", "workspace_id", workspaceID, "owner_filter", ownerFilter, "include_archived", includeArchived, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list agents")
 		return
 	}

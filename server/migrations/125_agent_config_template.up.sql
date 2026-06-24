@@ -28,12 +28,6 @@ CREATE UNIQUE INDEX idx_act_default_personal ON agent_config_template(workspace_
 ALTER TABLE agent ADD COLUMN system_template_id UUID REFERENCES agent_config_template(id) ON DELETE SET NULL;
 ALTER TABLE agent ADD COLUMN personal_template_id UUID REFERENCES agent_config_template(id) ON DELETE SET NULL;
 
--- Skip flags: when true, the agent skips that template layer entirely
--- (no template, no default, no legacy fallback). Useful for agents that
--- want full manual control over their configuration.
-ALTER TABLE agent ADD COLUMN skip_system_template BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE agent ADD COLUMN skip_personal_template BOOLEAN NOT NULL DEFAULT false;
-
 -- Migrate existing workspace.agent_defaults → system default templates
 INSERT INTO agent_config_template (workspace_id, scope, name, description, config, is_default, created_at, updated_at)
 SELECT
