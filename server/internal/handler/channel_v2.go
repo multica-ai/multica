@@ -662,20 +662,27 @@ func (h *Handler) ReplyToMessage(w http.ResponseWriter, r *http.Request) {
 	if authorType != "agent" {
 		authorType = "member"
 	}
+	// channel_thread.created_by REFERENCES "user"(id); agents live in the
+	// agent table, so stamping an agent UUID here violates the FK and the
+	// reply fails with a generic "failed to create reply thread" (this is the
+	// @-mention-then-agent-replies path). Mirror the CreateThread handler:
+	// agents get a NULL created_by; members keep their user UUID. authorID is
+	// still used below for the reply message's author_id, which is NOT a FK.
+	threadCreatedBy := authorID
+	if authorType == "agent" {
+		threadCreatedBy = pgtype.UUID{}
+	}
 
 	// Find or create thread for this message.
 	thread, err := h.Queries.GetThreadByRootMessage(r.Context(), msgUUID)
 	if err != nil {
 		// Thread doesn't exist yet — create one.
-		title := targetMsg.Content
-		if len(title) > 50 {
-			title = title[:50]
-		}
+		title := truncateUTF8(targetMsg.Content, 50)
 		thread, err = h.Queries.CreateChannelThread(r.Context(), db.CreateChannelThreadParams{
 			ChannelID:     cctx.channel.ID,
 			WorkspaceID:   wsUUID,
 			Title:         title,
-			CreatedBy:     authorID,
+			CreatedBy:     threadCreatedBy,
 			RootMessageID: msgUUID,
 		})
 		if err != nil {
@@ -856,10 +863,7 @@ func (h *Handler) ConvertMessageToIssue(w http.ResponseWriter, r *http.Request) 
 	json.NewDecoder(r.Body).Decode(&req)
 
 	// Auto-fill title from message content.
-	title := msg.Content
-	if len(title) > 80 {
-		title = title[:80]
-	}
+	title := truncateUTF8(msg.Content, 80)
 	if req.Title != nil && *req.Title != "" {
 		title = *req.Title
 	}
@@ -922,10 +926,7 @@ func (h *Handler) ConvertMessageToIssue(w http.ResponseWriter, r *http.Request) 
 	thread, terr := qtx.GetThreadByRootMessage(r.Context(), msgUUID)
 	if terr != nil {
 		// No thread yet — create one anchored to this message.
-		threadTitle := msg.Content
-		if len(threadTitle) > 50 {
-			threadTitle = threadTitle[:50]
-		}
+		threadTitle := truncateUTF8(msg.Content, 50)
 		thread, err = qtx.CreateChannelThread(r.Context(), db.CreateChannelThreadParams{
 			ChannelID:     cctx.channel.ID,
 			WorkspaceID:   wsUUID,

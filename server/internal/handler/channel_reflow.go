@@ -76,8 +76,11 @@ func (h *Handler) linkIssueToExistingThread(ctx context.Context, issue *db.Issue
 // ensureThreadForMessage returns the thread anchored at the given message,
 // creating one implicitly when the message has no thread yet — the same
 // invariant ConvertMessageToIssue upholds so every issue-producing message
-// has a thread to link against. createdBy is the user/system to attribute the
-// implicit thread to. ok=false on any lookup/creation failure (best-effort).
+// has a thread to link against. createdBy is the user to attribute the implicit
+// thread to. channel_thread.created_by REFERENCES "user"(id), so callers MUST
+// pass a zero UUID (NULL) when the creator is an agent — agents live in the
+// agent table and would otherwise violate the FK. ok=false on any
+// lookup/creation failure (best-effort).
 func (h *Handler) ensureThreadForMessage(ctx context.Context, channelID, messageID, workspaceID, createdBy pgtype.UUID) (db.ChannelThread, bool) {
 	msg, err := h.Queries.GetChannelMessage(ctx, messageID)
 	if err != nil || uuidToString(msg.ChannelID) != uuidToString(channelID) {
@@ -86,10 +89,7 @@ func (h *Handler) ensureThreadForMessage(ctx context.Context, channelID, message
 	if thread, err := h.Queries.GetThreadByRootMessage(ctx, messageID); err == nil {
 		return thread, true
 	}
-	title := msg.Content
-	if len(title) > 50 {
-		title = title[:50]
-	}
+	title := truncateUTF8(msg.Content, 50)
 	thread, err := h.Queries.CreateChannelThread(ctx, db.CreateChannelThreadParams{
 		ChannelID:     channelID,
 		WorkspaceID:   workspaceID,

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -127,6 +128,26 @@ func channelSlugWithSuffix(base string, attempt int) string {
 		return base
 	}
 	return base + "-" + strconv.Itoa(attempt)
+}
+
+// truncateUTF8 returns the longest prefix of s that is at most maxBytes long
+// AND ends on a UTF-8 rune boundary. A plain s[:maxBytes] can split a
+// multi-byte rune (e.g. the lead byte of a CJK character), producing an
+// invalid UTF-8 byte sequence that PostgreSQL rejects on INSERT with
+// SQLSTATE 22021 — which surfaces as a generic "failed to create reply
+// thread" and makes the message unreplyable. Callers deriving a thread
+// title from arbitrary message content must use this instead of byte slicing.
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	end := maxBytes
+	// Walk back past any continuation bytes so we cut before, not inside,
+	// the rune that straddles the maxBytes boundary.
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end]
 }
 
 // ---------- access control ----------
