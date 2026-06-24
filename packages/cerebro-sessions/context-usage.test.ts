@@ -58,4 +58,21 @@ describe("context-usage api compatibility", () => {
     expect(res.context_tokens).toBe(124000);
     expect(res.max_context_tokens).toBe(200000);
   });
+
+  // FIR-1931 Fix C: the bar reads `approximate` to decide whether to prefix "~".
+  it("passes the approximate flag through and defaults it to false", async () => {
+    mockCerebroRequest.mockResolvedValueOnce({
+      has_data: true,
+      used_percent: 100,
+      context_tokens: 1000000,
+      max_context_tokens: 1000000,
+      approximate: true,
+    });
+    const res = await getContextUsage("issue-1");
+    expect(res.approximate).toBe(true);
+
+    mockCerebroRequest.mockResolvedValueOnce({ has_data: true, used_percent: 40 });
+    const res2 = await getContextUsage("issue-1");
+    expect(res2.approximate).toBe(false); // missing → defaulted, not undefined
+  });
 });

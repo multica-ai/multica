@@ -49,6 +49,11 @@ type contextUsageResponse struct {
 	MaxContextTokens  int64 `json:"max_context_tokens"`
 	UsedPercent       int   `json:"used_percent"`
 	CacheSharePercent int   `json:"cache_share_percent"`
+	// Approximate is true when no last-turn footprint existed and we fell back to
+	// the cumulative task_usage sum, which over-counts a warm-cache run. The bar
+	// must then prefix "~" and the token figure is clamped to the window so a
+	// heavy issue never displays an impossible figure like 6986k / 1000k tokens.
+	Approximate bool `json:"approximate"`
 }
 
 // ContextUsage serves GET /api/cerebro/issues/{issueId}/sessions/context-usage.
@@ -148,10 +153,10 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	resp.CacheWriteTokens = cacheWrite
 	resp.OutputTokens = output
 	if footprintInput > 0 {
-		resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent =
+		resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent, resp.Approximate =
 			computeContextFootprint(footprintInput, footprintCacheRead, model.String)
 	} else {
-		resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent =
+		resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent, resp.Approximate =
 			computeContextUsage(input, cacheRead, cacheWrite, model.String)
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -162,7 +167,7 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 // the model last read — for OpenAI accounting it already includes the cached
 // tokens, so it IS the window occupancy and must not have cacheRead added on
 // top. `footprintCacheRead` is the cached subset, used only for the display.
-func computeContextFootprint(footprintInput, footprintCacheRead int64, model string) (contextTokens, maxContext int64, usedPercent, cacheSharePercent int) {
+func computeContextFootprint(footprintInput, footprintCacheRead int64, model string) (contextTokens, maxContext int64, usedPercent, cacheSharePercent int, approximate bool) {
 	contextTokens = footprintInput
 	maxContext = contextWindowForModel(model)
 	if maxContext > 0 {
@@ -171,7 +176,8 @@ func computeContextFootprint(footprintInput, footprintCacheRead int64, model str
 	if contextTokens > 0 {
 		cacheSharePercent = clampPercent(int(footprintCacheRead * 100 / contextTokens))
 	}
-	return contextTokens, maxContext, usedPercent, cacheSharePercent
+	// An exact last-turn measure — never approximate.
+	return contextTokens, maxContext, usedPercent, cacheSharePercent, false
 }
 
 // computeContextUsage is the pure core of the measurement: from a run's raw
@@ -179,16 +185,26 @@ func computeContextFootprint(footprintInput, footprintCacheRead int64, model str
 // fullness percent and cache share. The prompt the model actually read is
 // input + cache_read + cache_write — NOT `input` alone, which is a tiny slice
 // once prompt caching is warm.
-func computeContextUsage(input, cacheRead, cacheWrite int64, model string) (contextTokens, maxContext int64, usedPercent, cacheSharePercent int) {
-	contextTokens = input + cacheRead + cacheWrite
+func computeContextUsage(input, cacheRead, cacheWrite int64, model string) (contextTokens, maxContext int64, usedPercent, cacheSharePercent int, approximate bool) {
+	raw := input + cacheRead + cacheWrite
 	maxContext = contextWindowForModel(model)
+	// The cumulative task_usage sum over a whole run is never an exact last-turn
+	// measure; on a long warm-cache run it sums cache_read across every turn and
+	// can exceed the window many times over. Mark it approximate so the bar
+	// prefixes "~", and clamp the displayed token figure to the window so a heavy
+	// issue never shows an impossible count like 6986k / 1000k tokens.
+	approximate = true
+	contextTokens = raw
+	if maxContext > 0 && contextTokens > maxContext {
+		contextTokens = maxContext
+	}
 	if maxContext > 0 {
-		usedPercent = clampPercent(int(contextTokens * 100 / maxContext))
+		usedPercent = clampPercent(int(raw * 100 / maxContext))
 	}
-	if contextTokens > 0 {
-		cacheSharePercent = clampPercent(int(cacheRead * 100 / contextTokens))
+	if raw > 0 {
+		cacheSharePercent = clampPercent(int(cacheRead * 100 / raw))
 	}
-	return contextTokens, maxContext, usedPercent, cacheSharePercent
+	return contextTokens, maxContext, usedPercent, cacheSharePercent, approximate
 }
 
 func clampPercent(p int) int {

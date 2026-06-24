@@ -277,3 +277,66 @@ func TestContextUsage_PrefersFootprintOverCumulative(t *testing.T) {
 		t.Errorf("cache_share_percent = %d, want 90", after.CacheSharePercent)
 	}
 }
+
+// TestContextUsage_ClampsOverWindowCumulative proves FIR-1931 Fix C: a heavy run
+// with NO last-turn footprint, whose cumulative cache_read alone is several times
+// the window, must report a token figure clamped to the window (never 6986k /
+// 1000k) and flag approximate=true so the bar prefixes "~".
+func TestContextUsage_ClampsOverWindowCumulative(t *testing.T) {
+	if sessTestPool == nil {
+		t.Skip("no test DB")
+	}
+	issueID, workspaceID := seedIssue(t)
+	h := NewHandler(sessTestPool, db.New(sessTestPool))
+
+	rootID := seedRootComment(t, issueID, workspaceID)
+	// 7M cumulative cache_read on the 1M opus-4-8 window, no footprint recorded.
+	seedTaskWithUsage(t, issueID, workspaceID, rootID, "claude-opus-4-8", 0, 7_000_000)
+
+	var resp contextUsageResponse
+	if err := json.Unmarshal(callContextUsage(h, issueID, workspaceID).Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.HasData {
+		t.Fatalf("has_data = false, want true")
+	}
+	if resp.ContextTokens != 1_000_000 {
+		t.Errorf("context_tokens = %d, want 1000000 (clamped to window, not 7000000)", resp.ContextTokens)
+	}
+	if resp.UsedPercent != 100 {
+		t.Errorf("used_percent = %d, want 100", resp.UsedPercent)
+	}
+	if !resp.Approximate {
+		t.Errorf("approximate = false, want true for the cumulative fallback")
+	}
+}
+
+// TestContextUsage_FootprintIsNotApproximate proves the companion of Fix C: a run
+// WITH a recorded last-turn footprint reports its exact figure and approximate is
+// false, so the bar shows the precise count with no "~".
+func TestContextUsage_FootprintIsNotApproximate(t *testing.T) {
+	if sessTestPool == nil {
+		t.Skip("no test DB")
+	}
+	issueID, workspaceID := seedIssue(t)
+	h := NewHandler(sessTestPool, db.New(sessTestPool))
+
+	rootID := seedRootComment(t, issueID, workspaceID)
+	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "claude-opus-4-8", 1_955_000, 1_700_000)
+	if _, err := sessTestPool.Exec(context.Background(),
+		`INSERT INTO cerebro_task_context_footprint (task_id, model, input_tokens, cache_read_tokens)
+		 VALUES ($1::uuid, 'claude-opus-4-8', 300000, 0)`, taskID); err != nil {
+		t.Fatalf("insert footprint: %v", err)
+	}
+
+	var resp contextUsageResponse
+	if err := json.Unmarshal(callContextUsage(h, issueID, workspaceID).Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ContextTokens != 300_000 {
+		t.Errorf("context_tokens = %d, want 300000", resp.ContextTokens)
+	}
+	if resp.Approximate {
+		t.Errorf("approximate = true, want false for the last-turn footprint")
+	}
+}

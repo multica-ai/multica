@@ -38,7 +38,7 @@ func TestComputeContextUsage_CountsCachedPrompt(t *testing.T) {
 	// claude-opus-4-8[1m] with only 8k fresh input but 409.2k served from cache.
 	// The old formula counted `input` alone → 0% used and a nonsense 100% cache
 	// share. The whole prompt is input + cache_read + cache_write.
-	ctx, maxCtx, used, cacheShare := computeContextUsage(8_000, 409_200, 0, "claude-opus-4-8[1m]")
+	ctx, maxCtx, used, cacheShare, approximate := computeContextUsage(8_000, 409_200, 0, "claude-opus-4-8[1m]")
 	if ctx != 417_200 {
 		t.Errorf("context tokens = %d, want 417200", ctx)
 	}
@@ -51,12 +51,36 @@ func TestComputeContextUsage_CountsCachedPrompt(t *testing.T) {
 	if cacheShare != 98 { // 409200 / 417200 = 98%, not a clamped 100
 		t.Errorf("cache share = %d, want 98", cacheShare)
 	}
+	if !approximate { // the cumulative fallback is always approximate (FIR-1931 Fix C)
+		t.Errorf("approximate = false, want true for the cumulative fallback")
+	}
 }
 
 func TestComputeContextUsage_NoTokens(t *testing.T) {
-	ctx, _, used, cacheShare := computeContextUsage(0, 0, 0, "claude-opus-4-8")
+	ctx, _, used, cacheShare, _ := computeContextUsage(0, 0, 0, "claude-opus-4-8")
 	if ctx != 0 || used != 0 || cacheShare != 0 {
 		t.Errorf("zero usage = (%d,%d,%d), want all zero", ctx, used, cacheShare)
+	}
+}
+
+// TestComputeContextUsage_ClampsTokensToWindow proves the FIR-1931 Fix C display
+// bug is gone: a long warm-cache run whose cumulative cache_read alone is several
+// times the window must never report a token figure larger than the window. The
+// percent already clamped to 100, but the raw token count (6986k) leaked into the
+// bar as "6986k / 1000k". It is now clamped and flagged approximate.
+func TestComputeContextUsage_ClampsTokensToWindow(t *testing.T) {
+	ctx, maxCtx, used, _, approximate := computeContextUsage(0, 6_986_000, 0, "claude-opus-4-8")
+	if maxCtx != 1_000_000 {
+		t.Fatalf("max context = %d, want 1000000", maxCtx)
+	}
+	if ctx != 1_000_000 {
+		t.Errorf("context tokens = %d, want 1000000 (clamped to the window, not 6986000)", ctx)
+	}
+	if used != 100 {
+		t.Errorf("used percent = %d, want 100", used)
+	}
+	if !approximate {
+		t.Errorf("approximate = false, want true for the over-window cumulative fallback")
 	}
 }
 
@@ -66,7 +90,7 @@ func TestComputeContextFootprint_LastTurnNotLifetimeSum(t *testing.T) {
 	// footprint instead, a gpt-5.5 session whose final prompt is 110k (100k of it
 	// cached) reads ~40% — not 100%. footprintInput already includes the cached
 	// tokens (OpenAI accounting), so cacheRead must NOT be added on top.
-	ctx, maxCtx, used, cacheShare := computeContextFootprint(110_000, 100_000, "gpt-5.5")
+	ctx, maxCtx, used, cacheShare, approximate := computeContextFootprint(110_000, 100_000, "gpt-5.5")
 	if ctx != 110_000 {
 		t.Errorf("context tokens = %d, want 110000 (no double-count of cached)", ctx)
 	}
@@ -78,6 +102,9 @@ func TestComputeContextFootprint_LastTurnNotLifetimeSum(t *testing.T) {
 	}
 	if cacheShare != 90 { // 100000 / 110000 = 90%
 		t.Errorf("cache share = %d, want 90", cacheShare)
+	}
+	if approximate { // an exact last-turn footprint is never approximate
+		t.Errorf("approximate = true, want false for the last-turn footprint")
 	}
 }
 

@@ -49,7 +49,11 @@ export function SessionContextBar({
   let detail = "";
   if (data?.has_data && data.max_context_tokens > 0) {
     fraction = data.used_percent / 100;
-    approximate = false;
+    // FIR-1931 Fix C: a run with no last-turn footprint falls back to the
+    // cumulative sum, which the server clamps to the window and flags as
+    // approximate. Carry that through so the bar prefixes "~" instead of
+    // implying the over-counted figure is exact.
+    approximate = data.approximate === true;
     const cache =
       data.cache_share_percent > 0 ? ` · ${data.cache_share_percent}% from cache` : "";
     const model = data.model ? ` · ${data.model}` : "";

@@ -50,4 +50,8 @@ export interface ContextUsage {
   max_context_tokens: number;
   used_percent: number;
   cache_share_percent: number;
+  // True when the server fell back to the cumulative task_usage sum (no last-turn
+  // footprint). The figure is then clamped to the window and the bar prefixes "~"
+  // (FIR-1931): a heavy issue must never display an impossible 6986k / 1000k.
+  approximate: boolean;
 }

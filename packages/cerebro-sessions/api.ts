@@ -19,6 +19,7 @@ const ContextUsageSchema = z.object({
   max_context_tokens: z.number().default(0),
   used_percent: z.number().default(0),
   cache_share_percent: z.number().default(0),
+  approximate: z.boolean().default(false),
 }).loose();
 
 export const CONTEXT_USAGE_FALLBACK: ContextUsage = {
@@ -33,6 +34,7 @@ export const CONTEXT_USAGE_FALLBACK: ContextUsage = {
   max_context_tokens: 0,
   used_percent: 0,
   cache_share_percent: 0,
+  approximate: false,
 };
 
 export async function getContextUsage(issueId: string, sessionId?: string): Promise<ContextUsage> {
