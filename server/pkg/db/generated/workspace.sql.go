@@ -129,6 +129,32 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 	return issue_counter, err
 }
 
+const listAllWorkspaceIDs = `-- name: ListAllWorkspaceIDs :many
+SELECT id
+FROM workspace
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListAllWorkspaceIDs(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAllWorkspaceIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,

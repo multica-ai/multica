@@ -1,0 +1,1 @@
+export { KnowledgePage } from "./components";

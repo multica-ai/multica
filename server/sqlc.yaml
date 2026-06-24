@@ -10,3 +10,9 @@ sql:
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_empty_slices: true
+        overrides:
+          - db_type: "vector"
+            go_type:
+              import: "github.com/pgvector/pgvector-go"
+              package: "pgvector"
+              type: "Vector"

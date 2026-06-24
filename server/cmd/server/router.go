@@ -143,17 +143,43 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
 
 	signupConfig := handler.Config{
-		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
-		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
-		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
-		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
-		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
-		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
-		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
-		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
-		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
-		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		AllowSignup:                         os.Getenv("ALLOW_SIGNUP") != "false",
+		AllowedEmails:                       splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
+		AllowedEmailDomains:                 splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		DisableWorkspaceCreation:            os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
+		PublicURL:                           strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+		TrustedProxies:                      parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
+		CloudRuntimeFleetURL:                cloudRuntimeFleetURLFromEnv(),
+		CloudRuntimeFleetTimeout:            envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
+		AttachmentDownloadMode:              os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
+		AttachmentDownloadURLTTL:            envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		KnowledgeCuratorProvider:            os.Getenv("KNOWLEDGE_CURATOR_PROVIDER"),
+		KnowledgeCuratorChatBaseURL:         os.Getenv("KNOWLEDGE_CURATOR_CHAT_BASE_URL"),
+		KnowledgeCuratorChatAPIKey:          os.Getenv("KNOWLEDGE_CURATOR_CHAT_API_KEY"),
+		KnowledgeCuratorChatModel:           os.Getenv("KNOWLEDGE_CURATOR_CHAT_MODEL"),
+		KnowledgeCuratorEmbeddingProvider:   os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_PROVIDER"),
+		KnowledgeCuratorEmbeddingBaseURL:    os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_BASE_URL"),
+		KnowledgeCuratorEmbeddingAPIKey:     os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_API_KEY"),
+		KnowledgeCuratorEmbeddingModel:      os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_MODEL"),
+		KnowledgeCuratorEmbeddingDimensions: envKnowledgeEmbeddingDimensions("KNOWLEDGE_CURATOR_EMBEDDING_DIMENSIONS"),
+		KnowledgeCuratorTimeout:             envDuration("KNOWLEDGE_CURATOR_TIMEOUT", 60*time.Second),
 	}
+
+	// Workspace secrets at-rest encryption. Uses the same secretbox
+	// infrastructure as Lark (AES-256-GCM). When unset, workspace secret
+	// endpoints return 503.
+	if workspaceSecretKey, err := secretbox.LoadKey("MULTICA_WORKSPACE_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(workspaceSecretKey)
+		if err != nil {
+			slog.Error("workspace secret: secretbox.New failed; workspace secrets disabled", "error", err)
+		} else {
+			signupConfig.WorkspaceSecretBox = box
+			slog.Info("workspace secret encryption enabled")
+		}
+	} else {
+		slog.Info("workspace secret encryption disabled (MULTICA_WORKSPACE_SECRET_KEY not set)")
+	}
+
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	h.Metrics = opts.BusinessMetrics
 	h.TaskService.Metrics = opts.BusinessMetrics
@@ -551,6 +577,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)
 		r.Get("/chat-sessions/{sessionId}/gc-check", h.GetChatSessionGCCheck)
 		r.Get("/autopilot-runs/{runId}/gc-check", h.GetAutopilotRunGCCheck)
+
+		// Curator draft task endpoints for local daemon execution.
+		r.Post("/runtimes/{runtimeId}/curator-drafts/claim", h.ClaimCuratorDraftTask)
+		r.Post("/runtimes/{runtimeId}/curator-drafts/{taskId}/complete", h.CompleteCuratorDraftTask)
+		r.Post("/runtimes/{runtimeId}/curator-drafts/{taskId}/fail", h.FailCuratorDraftTask)
 		r.Get("/tasks/{taskId}/gc-check", h.GetTaskGCCheck)
 		r.Get("/channels/{channelId}/gc-check", h.GetChannelLaneGCCheck)
 
@@ -636,6 +667,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/instructions-history", h.ListInstructionsHistory)
 					r.Get("/instructions-history/{versionId}", h.GetInstructionsHistory)
 					r.Get("/github/installations", h.ListGitHubInstallations)
+					r.Get("/secrets", h.ListWorkspaceSecretNames)
 					// Custom runtime profiles — listing/reading is member-visible
 					// (the Runtime page renders for everyone; create/edit/delete
 					// are admin-gated below).
@@ -654,6 +686,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					r.Put("/secrets/{name}", h.UpsertWorkspaceSecret)
+					r.Delete("/secrets/{name}", h.DeleteWorkspaceSecret)
 					// Custom runtime profile mutations (admin-only).
 					r.Post("/runtime-profiles", h.CreateRuntimeProfile)
 					r.Patch("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
@@ -815,6 +849,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/metadata/{key}", h.SetIssueMetadataKey)
 					r.Delete("/metadata/{key}", h.DeleteIssueMetadataKey)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
+					r.Get("/knowledge-injections", h.ListKnowledgeInjectionsByIssue)
 				})
 			})
 
@@ -868,6 +903,42 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/", h.UpdateWikiPage)
 					r.Delete("/", h.DeleteWikiPage)
 					r.Get("/activity", h.ListWikiPageActivities)
+				})
+			})
+
+			// Knowledge base
+			r.Route("/api/knowledge", func(r chi.Router) {
+				r.Get("/", h.ListKnowledge)
+				r.Post("/", h.CreateKnowledge)
+				r.Post("/search", h.SearchKnowledge)
+				r.Get("/analytics", h.GetKnowledgeAnalytics)
+				r.Get("/effect", h.GetKnowledgeEffect)
+				r.Get("/effect/summary", h.GetKnowledgeEffectSummary)
+				r.Post("/curator/probe", h.ProbeKnowledgeCuratorEndpoint)
+				r.Post("/drafts/from-issue", h.CreateKnowledgeDraftFromIssue)
+				r.Get("/candidates", h.ListKnowledgeCandidates)
+				r.Post("/candidates/evaluate", h.EvaluateKnowledgeCandidate)
+				r.Post("/candidates/{id}/draft", h.CreateKnowledgeDraftFromCandidate)
+				r.Get("/governance-findings", h.ListKnowledgeGovernanceFindings)
+				r.Post("/governance-findings/{id}/draft", h.CreateKnowledgeDraftFromGovernanceFinding)
+				r.Post("/governance-findings/{id}/{action}", h.ResolveKnowledgeGovernanceFinding)
+				r.Get("/curator-drafts/{taskId}", h.GetCuratorDraftStatus)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetKnowledge)
+					r.Patch("/", h.UpdateKnowledge)
+					r.Delete("/", h.DeleteKnowledge)
+					r.Get("/sources", h.GetKnowledgeSources)
+					r.Get("/analytics", h.GetKnowledgeAnalytics)
+					r.Post("/feedback", h.CreateKnowledgeFeedback)
+					r.Post("/review", h.ReviewKnowledge)
+					r.Post("/publish", h.PublishKnowledge)
+					r.Post("/archive", h.ArchiveKnowledge)
+					r.Post("/deprecate", h.DeprecateKnowledge)
+					r.Post("/restore", h.RestoreKnowledge)
+					r.Post("/embedding/regenerate", h.RegenerateKnowledgeEmbedding)
+					r.Post("/governance/dismiss", h.DismissKnowledgeGovernance)
+					r.Post("/publish/wiki", h.PublishKnowledgeToWiki)
+					r.Post("/publish/skill", h.PublishKnowledgeToSkill)
 				})
 			})
 

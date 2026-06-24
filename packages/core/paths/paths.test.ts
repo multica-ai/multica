@@ -22,6 +22,8 @@ describe("paths.workspace(slug)", () => {
     expect(ws.inbox()).toBe("/acme/inbox");
     expect(ws.myIssues()).toBe("/acme/my-issues");
     expect(ws.wiki()).toBe("/acme/wiki");
+    expect(ws.knowledge()).toBe("/acme/knowledge");
+    expect(ws.knowledgeDetail("kno_123")).toBe("/acme/knowledge/kno_123");
     expect(ws.runtimes()).toBe("/acme/runtimes");
     expect(ws.skills()).toBe("/acme/skills");
     expect(ws.skillDetail("skl_123")).toBe("/acme/skills/skl_123");

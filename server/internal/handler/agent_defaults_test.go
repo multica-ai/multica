@@ -467,6 +467,72 @@ func TestUpdateWorkspace_AgentDefaultsRequiresAdmin(t *testing.T) {
 	}
 }
 
+func TestUpdateWorkspace_KnowledgeCuratorRequiresAdminAndValidSchema(t *testing.T) {
+	var memberUserID string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO "user" (name, email) VALUES ('Curator Settings Test', 'curator-settings-test@multica.ai')
+		RETURNING id
+	`).Scan(&memberUserID)
+	if err != nil {
+		t.Fatalf("failed to create test user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id = $1`, memberUserID)
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberUserID)
+	})
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+	`, testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("failed to create test member: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPatch, "/api/workspaces/"+testWorkspaceID, map[string]any{
+		"settings": map[string]any{
+			"knowledge_curator": map[string]any{"enabled": true, "provider": "test"},
+		},
+	})
+	req.Header.Set("X-User-ID", memberUserID)
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.UpdateWorkspace(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin setting knowledge_curator, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest(http.MethodPatch, "/api/workspaces/"+testWorkspaceID, map[string]any{
+		"settings": map[string]any{
+			"knowledge_curator": map[string]any{"enabled": "yes"},
+		},
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.UpdateWorkspace(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid knowledge_curator schema, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest(http.MethodPatch, "/api/workspaces/"+testWorkspaceID, map[string]any{
+		"settings": map[string]any{
+			"knowledge_curator": map[string]any{
+				"enabled":         true,
+				"provider":        "test",
+				"model":           "curator-model",
+				"embedding_model": "embedding-model",
+				"runtime_mode":    "external",
+				"base_url":        "https://api.example.com/v1",
+			},
+			"other": "value",
+		},
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.UpdateWorkspace(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for owner setting knowledge_curator, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestUpdateWorkspace_AgentDefaultsInstructionsHistory(t *testing.T) {
 	testPool.Exec(context.Background(),
 		`DELETE FROM instructions_history WHERE workspace_id = $1`, testWorkspaceID)

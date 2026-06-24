@@ -1344,6 +1344,11 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		"creator_id":     uuidToString(issue.CreatorID),
 		"source":         "github_pr_merged",
 	})
+
+	// Trigger knowledge candidate evaluation when a PR merge auto-advances
+	// an issue to "done". This is the same evaluation the HTTP issue-done
+	// path performs, but the webhook path previously skipped it.
+	h.evaluateKnowledgeCandidateForPRMerge(ctx, updated)
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

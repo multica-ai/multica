@@ -750,3 +750,28 @@ func (c *Client) GetInteraction(ctx context.Context, taskID, interactionID strin
 	}
 	return resp, nil
 }
+
+// ClaimCuratorDraft claims the next queued curator draft task for a runtime.
+func (c *Client) ClaimCuratorDraft(ctx context.Context, runtimeID string) (*CuratorDraftTask, error) {
+	var resp struct {
+		Task *CuratorDraftTask `json:"task"`
+	}
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/curator-drafts/claim", runtimeID), map[string]any{}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Task, nil
+}
+
+// CompleteCuratorDraft reports a completed curator draft back to the server.
+func (c *Client) CompleteCuratorDraft(ctx context.Context, runtimeID, taskID string, draft map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/curator-drafts/%s/complete", runtimeID, taskID), map[string]any{
+		"draft": draft,
+	}, nil)
+}
+
+// FailCuratorDraft reports a failed curator draft back to the server.
+func (c *Client) FailCuratorDraft(ctx context.Context, runtimeID, taskID, errMsg string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/curator-drafts/%s/fail", runtimeID, taskID), map[string]any{
+		"error": errMsg,
+	}, nil)
+}

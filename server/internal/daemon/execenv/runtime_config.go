@@ -145,6 +145,41 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 	}
 }
 
+func writeRelevantKnowledgeSection(b *strings.Builder, items []KnowledgeContextForEnv) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString("## Relevant Knowledge\n\n")
+	b.WriteString("The server selected these reviewed knowledge items for this task. Apply them only when relevant. When you use one in your work or final comment, cite its ID, for example `Used knowledge: KNO-123`.\n\n")
+	for _, item := range items {
+		title := strings.TrimSpace(item.Title)
+		if title == "" {
+			title = "Untitled knowledge"
+		}
+		fmt.Fprintf(b, "- `%s` — **%s**", item.ID, title)
+		if item.Score > 0 {
+			fmt.Fprintf(b, " (score %.2f)", item.Score)
+		}
+		b.WriteString("\n")
+		if value := strings.TrimSpace(item.Summary); value != "" {
+			fmt.Fprintf(b, "  - Summary: %s\n", value)
+		}
+		if value := strings.TrimSpace(item.RecommendedAction); value != "" {
+			fmt.Fprintf(b, "  - Recommended action: %s\n", value)
+		}
+		if value := strings.TrimSpace(item.AntiPatterns); value != "" {
+			fmt.Fprintf(b, "  - Avoid: %s\n", value)
+		}
+		if value := strings.TrimSpace(item.SourceIssue); value != "" {
+			fmt.Fprintf(b, "  - Source issue: %s\n", value)
+		}
+		if value := strings.TrimSpace(item.Reason); value != "" {
+			fmt.Fprintf(b, "  - Reason: %s\n", value)
+		}
+	}
+	b.WriteString("\n")
+}
+
 // InjectRuntimeConfig writes the meta skill content into the runtime-specific
 // config file so the agent discovers its environment through its native mechanism.
 //
@@ -590,6 +625,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
+	writeRelevantKnowledgeSection(&b, ctx.KnowledgeContext)
+
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")
 
@@ -601,6 +638,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `multica --help`, `multica <command> --help`, or `multica <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
 		b.WriteString("### Core\n")
 		b.WriteString("- `multica issue get <id> --output json` — Get full issue details.\n")
+		b.WriteString("- `multica knowledge search \"<query>\" --issue <issue-id> --limit 5 --output json` — Search reviewed workspace knowledge for reusable experience when the injected Relevant Knowledge is missing or not enough. Cite used items by ID, for example `Used knowledge: KNO-123`.\n")
 		b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] --output json` — List comments on an issue. Default returns the full flat timeline (server cap 2000). On busy issues prefer the thread-aware reads: `--thread <comment-id>` returns one conversation (root + every reply); `--thread <id> --tail N` caps replies to the N most recent (root is always included, even at `--tail 0`); `--recent N` returns the N most recently active threads. `--before` / `--before-id` walks older replies under `--thread --tail` (stderr label: `Next reply cursor`) or older threads under `--recent` (stderr label: `Next thread cursor`). `--since` is for incremental polling and may combine with `--thread` (with or without `--tail`) or `--recent`.\n")
 		b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. For agent-authored long descriptions, prefer `--description-file <path>` — flags after a HEREDOC terminator can be silently swallowed (#4182).\n")
 		b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent. For agent-authored long descriptions, prefer `--description-file <path>` over stdin (#4182).\n")
