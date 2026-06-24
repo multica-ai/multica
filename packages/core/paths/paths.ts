@@ -39,6 +39,8 @@ function workspaceScoped(slug: string) {
     myIssues: () => `${ws}/my-issues`,
     wiki: () => `${ws}/wiki`,
     wikiPage: (id: string) => `${ws}/wiki/${encode(id)}`,
+    knowledge: () => `${ws}/knowledge`,
+    knowledgeDetail: (id: string) => `${ws}/knowledge/${encode(id)}`,
     channels: () => `${ws}/channels`,
     channelDetail: (id: string, opts?: { messageId?: string }) => {
       const path = `${ws}/channels/${encode(id)}`;

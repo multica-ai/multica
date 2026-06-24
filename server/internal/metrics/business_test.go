@@ -33,20 +33,24 @@ func TestBusinessMetricsLifecycleCountersAndGauge(t *testing.T) {
 	if got := testutil.ToFloat64(m.taskTerminal.WithLabelValues("issue", "local", "completed")); got != 1 {
 		t.Fatalf("terminal counter = %v, want 1", got)
 	}
-	if got := testutil.CollectAndCount(m.taskInProgress); got != 1 {
-		t.Fatalf("in_progress series count = %d, want 1 despite 100 task ids", got)
+	// Prewarm creates series for all known source×runtimeMode combos (8×3=24).
+	if got := testutil.CollectAndCount(m.taskInProgress); got != 24 {
+		t.Fatalf("in_progress series count = %d, want 24 (prewarmed)", got)
 	}
 	if got := testutil.ToFloat64(m.taskInProgress.WithLabelValues("issue", "local")); got != 99 {
 		t.Fatalf("in_progress gauge = %v, want 99", got)
 	}
-	if got := testutil.CollectAndCount(m.taskQueueWait); got != 1 {
-		t.Fatalf("queue wait series count = %d, want 1", got)
+	// Prewarm creates 8×3=24 queue_wait series.
+	if got := testutil.CollectAndCount(m.taskQueueWait); got != 24 {
+		t.Fatalf("queue wait series count = %d, want 24 (prewarmed)", got)
 	}
-	if got := testutil.CollectAndCount(m.taskRunSeconds); got != 1 {
-		t.Fatalf("run seconds series count = %d, want 1", got)
+	// Prewarm creates 8×3×5=120 run_seconds series.
+	if got := testutil.CollectAndCount(m.taskRunSeconds); got != 120 {
+		t.Fatalf("run seconds series count = %d, want 120 (prewarmed)", got)
 	}
-	if got := testutil.CollectAndCount(m.taskTotalSeconds); got != 1 {
-		t.Fatalf("total seconds series count = %d, want 1", got)
+	// Prewarm creates 8×3×5=120 total_seconds series.
+	if got := testutil.CollectAndCount(m.taskTotalSeconds); got != 120 {
+		t.Fatalf("total seconds series count = %d, want 120 (prewarmed)", got)
 	}
 }
 

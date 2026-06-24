@@ -25,6 +25,7 @@
     "./my-issues": "./my-issues/index.ts",
     "./skills": "./skills/index.ts",
     "./wiki": "./wiki/index.ts",
+    "./knowledge": "./knowledge/index.ts",
     "./channels": "./channels/index.ts",
     "./agents": "./agents/index.ts",
     "./members": "./members/index.ts",

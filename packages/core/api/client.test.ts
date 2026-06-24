@@ -103,6 +103,39 @@ describe("ApiClient", () => {
     );
   });
 
+  it("regenerates knowledge embeddings through the detail schema endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          item: { id: "k1", title: "Knowledge item" },
+          embedding_status: {
+            status: "generated",
+            provider: "siliconflow",
+            model: "BAAI/bge-m3",
+            dimension: 1536,
+            attempted_at: "2026-06-23T08:00:00Z",
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const detail = await client.regenerateKnowledgeEmbedding("k1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/knowledge/k1/embedding/regenerate",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(detail.item.id).toBe("k1");
+    expect(detail.embedding_status?.status).toBe("generated");
+    expect(detail.embedding_status?.model).toBe("BAAI/bge-m3");
+  });
+
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ autopilots: [], runs: [], total: 0 }), {

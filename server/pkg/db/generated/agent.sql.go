@@ -1759,6 +1759,44 @@ func (q *Queries) GetLastChannelTaskSession(ctx context.Context, arg GetLastChan
 	return i, err
 }
 
+const getLastTaskOutcomeForIssueAndAgent = `-- name: GetLastTaskOutcomeForIssueAndAgent :one
+SELECT result, error, failure_reason, status FROM agent_task_queue
+WHERE agent_id = $1
+  AND issue_id = $2
+  AND id <> $3
+  AND status IN ('completed', 'failed')
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1
+`
+
+type GetLastTaskOutcomeForIssueAndAgentParams struct {
+	AgentID       pgtype.UUID `json:"agent_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	CurrentTaskID pgtype.UUID `json:"current_task_id"`
+}
+
+type GetLastTaskOutcomeForIssueAndAgentRow struct {
+	Result        []byte      `json:"result"`
+	Error         pgtype.Text `json:"error"`
+	FailureReason pgtype.Text `json:"failure_reason"`
+	Status        string      `json:"status"`
+}
+
+// Returns the latest completed/failed prior task for claim-time RAG query
+// building. The current task is excluded because ClaimTask marks it
+// dispatched before the response is assembled.
+func (q *Queries) GetLastTaskOutcomeForIssueAndAgent(ctx context.Context, arg GetLastTaskOutcomeForIssueAndAgentParams) (GetLastTaskOutcomeForIssueAndAgentRow, error) {
+	row := q.db.QueryRow(ctx, getLastTaskOutcomeForIssueAndAgent, arg.AgentID, arg.IssueID, arg.CurrentTaskID)
+	var i GetLastTaskOutcomeForIssueAndAgentRow
+	err := row.Scan(
+		&i.Result,
+		&i.Error,
+		&i.FailureReason,
+		&i.Status,
+	)
+	return i, err
+}
+
 const getLastTaskSession = `-- name: GetLastTaskSession :one
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2
