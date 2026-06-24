@@ -71,7 +71,9 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { workflowStagesOptions } from "@multica/core/workflows/queries";
+import { workflowStagesOptions, workflowNodeRunsOptions } from "@multica/core/workflows/queries";
+import type { WorkflowNodeRun } from "@multica/core/types";
+import { NodeRunControlActions } from "../../workflows/components/node-run-control-actions";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
@@ -840,6 +842,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Track workflow run state from the DAG viewer (source of truth for running status).
   const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
+
+  // For workflow-generated sub-issues, fetch the node run so control actions
+  // (take over / hand back / open session / finalize) can be surfaced here too.
+  const isWorkflowOrigin = issue?.origin_type === "workflow" && !!issue?.origin_id;
+  const { data: nodeRuns = [] } = useQuery({
+    ...workflowNodeRunsOptions(wsId, issue?.workflow_id ?? "", issue?.workflow_run_id ?? ""),
+    enabled: isWorkflowOrigin && !!issue?.workflow_id && !!issue?.workflow_run_id,
+  });
+  const originNodeRun: WorkflowNodeRun | undefined = useMemo(
+    () => nodeRuns.find((nr) => nr.id === issue?.origin_id),
+    [nodeRuns, issue?.origin_id],
+  );
 
   // Fire `onDelete` once when the issue transitions from loaded to missing.
   // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
@@ -1838,6 +1852,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 })()}
               </>,
             )
+          )}
+
+          {originNodeRun && (
+            <div className="mt-3 flex items-center gap-3 rounded-lg border bg-card/50 px-3 py-2">
+              <span className="text-xs text-muted-foreground">
+                {t(($) => $.detail.workflow_node_label)}
+              </span>
+              <NodeRunControlActions
+                nodeRun={originNodeRun}
+                workflowId={issue?.workflow_id ?? undefined}
+                runId={issue?.workflow_run_id ?? undefined}
+                wsId={wsId}
+                size="sm"
+              />
+            </div>
           )}
 
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">

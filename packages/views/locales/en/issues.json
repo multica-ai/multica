@@ -170,6 +170,7 @@
     "desc_placeholder": "Add description...",
     "sub_issues_label": "Sub-issues",
     "sub_issue_of": "Sub-issue of",
+    "workflow_node_label": "Workflow task",
     "add_sub_issues": "Add sub-issues",
     "add_sub_issue_tooltip": "Add sub-issue",
     "add_sub_issue_aria": "Add sub-issue",
