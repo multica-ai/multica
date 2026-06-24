@@ -23,3 +23,6 @@ export { DataFlowArrow } from "./data-flow-arrow";
 export type { DataFlowArrowProps } from "./data-flow-arrow";
 export { ArchitectureDetailPanel } from "./architecture-detail-panel";
 export type { ArchitectureDetailPanelData, ArchitectureDetailPanelProps } from "./architecture-detail-panel";
+
+export { PanoramaSvgOverlay } from "./panorama-svg-overlay";
+export type { PanoramaSvgOverlayProps, EdgePath } from "./panorama-svg-overlay";
