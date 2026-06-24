@@ -108,17 +108,29 @@ func TestPercentBucketSeparator(t *testing.T) {
 // either side drifts, both tests fail and one must be brought back in
 // sync. This is the single source of truth for "same user, same bucket"
 // across the backend and the frontend.
+//
+// The non-ASCII cases (CJK, accented, emoji) exist on purpose: Go hashes
+// the UTF-8 byte representation of a string, and the TS side must do the
+// same. A regression that swaps charCodeAt for UTF-8 decoding on either
+// side would only be caught by these inputs.
 func TestPercentBucketCrossLanguageGolden(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		key, id string
 		want    int
 	}{
+		// ASCII baseline.
 		{"billing_new_invoice", "user-42", 97},
 		{"feature_a", "user-1", 50},
 		{"checkout_algo", "u-7f8a", 11},
 		{"ws_rollout", "workspace-1", 62},
 		{"empty_id_flag", "", 83},
+		// Non-ASCII: enforces UTF-8 parity with TextEncoder on the TS side.
+		{"flag", "é", 53},
+		{"flag", "🦄", 82},
+		{"实验", "user-1", 90},
+		{"flag", "用户-1", 95},
+		{"checkout_算法", "user-100", 79},
 	}
 	for _, tc := range cases {
 		got := bucketFor(tc.key, tc.id)

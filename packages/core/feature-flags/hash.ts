@@ -8,10 +8,24 @@
  * bucket for the same user. Cross-language equality is exercised by golden
  * tests on both sides; see hash.test.ts and hash_test.go.
  *
+ * The hash operates on the UTF-8 encoding of each input. Go's `[]byte(s)`
+ * conversion is also UTF-8, so the two implementations agree even when
+ * flag keys or identifiers contain non-ASCII characters (Chinese flag
+ * names, user IDs that include accented characters, emoji, ...). Using
+ * `charCodeAt` directly would have hashed UTF-16 code units instead and
+ * silently diverged from Go for any non-ASCII input.
+ *
  * FNV-1a is used because it is cheap, dependency-free, and well-distributed
  * enough for sub-100 bucketing. It is NOT cryptographic; do not use it for
  * anything beyond bucketing.
  */
+
+// One shared TextEncoder per module. TextEncoder is part of the WHATWG
+// Encoding spec and ships in every evergreen browser, in Node 11+, and in
+// React Native (Hermes) >= 0.74. We deliberately do not lazy-init it so
+// failures show up at import time, not the first time a flag is read.
+const utf8 = new TextEncoder();
+
 function fnv1a(parts: ReadonlyArray<string>): number {
   // 32-bit FNV-1a: offset basis 0x811c9dc5, prime 0x01000193.
   let hash = 0x811c9dc5;
@@ -25,9 +39,13 @@ function fnv1a(parts: ReadonlyArray<string>): number {
       hash ^= 0;
       hash = Math.imul(hash, 0x01000193);
     }
-    const s = parts[p]!;
-    for (let i = 0; i < s.length; i++) {
-      hash ^= s.charCodeAt(i);
+    // Encode the part as UTF-8 to match Go's `[]byte(string)`. Using
+    // charCodeAt would hash UTF-16 code units instead and diverge from
+    // Go for any non-ASCII input (Chinese keys, accented user IDs,
+    // emoji, ...). See the package doc above.
+    const bytes = utf8.encode(parts[p]!);
+    for (let i = 0; i < bytes.length; i++) {
+      hash ^= bytes[i]!;
       // Multiply by FNV prime mod 2^32. Math.imul keeps the result in a
       // 32-bit integer without slipping into float territory.
       hash = Math.imul(hash, 0x01000193);

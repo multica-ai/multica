@@ -27,13 +27,25 @@ describe("feature-flags hash", () => {
   // The shared golden table is the single source of truth for "same user,
   // same bucket" across backend and frontend; if either side drifts, both
   // tests fail and one must be brought back in sync.
+  //
+  // The non-ASCII cases (CJK, accented, emoji) exist on purpose: Go hashes
+  // the UTF-8 byte representation of a string. The TS side must do the
+  // same. A regression that swaps UTF-8 encoding for charCodeAt would
+  // only be caught by these inputs.
   it("cross-language golden: bucket values match the Go side exactly", () => {
     const cases: ReadonlyArray<[string, string, number]> = [
+      // ASCII baseline.
       ["billing_new_invoice", "user-42", 97],
       ["feature_a", "user-1", 50],
       ["checkout_algo", "u-7f8a", 11],
       ["ws_rollout", "workspace-1", 62],
       ["empty_id_flag", "", 83],
+      // Non-ASCII: enforces UTF-8 parity (TextEncoder on the TS side).
+      ["flag", "é", 53],
+      ["flag", "🦄", 82],
+      ["实验", "user-1", 90],
+      ["flag", "用户-1", 95],
+      ["checkout_算法", "user-100", 79],
     ];
     for (const [key, id, want] of cases) {
       expect(bucketFor(key, id)).toBe(want);
