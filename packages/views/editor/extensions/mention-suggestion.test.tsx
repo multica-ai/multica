@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workspaceKeys } from "@multica/core/workspace/queries";
@@ -207,61 +207,6 @@ describe("createMentionSuggestion", () => {
     expect(
       ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Enter" }) }),
     ).toBe(true);
-  });
-
-  // MUL-3607: groupItems() re-buckets the list (current → recent → search →
-  // users → issues), so a server "search" result that arrives at the END of
-  // the data array is rendered NEAR THE TOP. Keyboard nav, Enter, and clicks
-  // must follow the rendered order — otherwise the highlighted row and the
-  // committed item drift apart and you mention the neighbour of who you picked.
-  // (The invariant is type-agnostic; issue rows are used here because they
-  // render without workspace/avatar context. The chat @bohan case is the same
-  // bug — a person sitting below a hoisted search result.)
-  it("commits the highlighted row, not its neighbour, when groups reorder the list", () => {
-    const command = vi.fn<(item: MentionItem) => void>();
-    const ref = createRef<MentionListRef>();
-
-    // A plain issue (issues bucket) plus a server-style search hit (search
-    // bucket). Data order is [MUL-2, MUL-1] but groupItems hoists the search
-    // row, so the RENDERED order is [MUL-1, MUL-2].
-    const items: MentionItem[] = [
-      { id: "i-plain", label: "MUL-2", type: "issue" },
-      { id: "i-search", label: "MUL-1", type: "issue", group: "search" },
-    ];
-
-    render(
-      <I18nWrapper>
-        <MentionList ref={ref} items={items} query="" command={command} includeProjectSearch />
-      </I18nWrapper>,
-    );
-
-    const highlightedLabel = () => {
-      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
-      return buttons.find((b) => b.classList.contains("bg-accent"))?.textContent ?? "";
-    };
-
-    const press = (key: string) =>
-      act(() => {
-        ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key }) });
-      });
-
-    // First rendered row is the hoisted search result. Enter must commit it,
-    // not the issue that sits first in the data array.
-    const firstHighlighted = highlightedLabel();
-    expect(firstHighlighted).toBe("MUL-1");
-    press("Enter");
-    expect(command).toHaveBeenCalledTimes(1);
-    expect(command.mock.calls[0]?.[0]?.label).toBe(firstHighlighted);
-
-    command.mockClear();
-
-    // Arrow down one row, then Enter — still commits exactly the highlighted row.
-    press("ArrowDown");
-    const secondHighlighted = highlightedLabel();
-    expect(secondHighlighted).toBe("MUL-2");
-    press("Enter");
-    expect(command).toHaveBeenCalledTimes(1);
-    expect(command.mock.calls[0]?.[0]?.label).toBe(secondHighlighted);
   });
 
   it("hides personal agents owned by someone else from a regular member", () => {

@@ -232,24 +232,9 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       return mergeMentionItems(items, currentServerItems).slice(0, MAX_ITEMS);
     }, [items, normalizedQuery, searchedQuery, serverItems]);
 
-    // Keyboard navigation and selection must index the SAME order the popup
-    // renders. groupItems() re-buckets displayItems (current → recent → search
-    // → users → issues), so a later-in-data item — e.g. an async server
-    // "search" result appended to the end of displayItems — is hoisted into an
-    // earlier bucket. Indexing the pre-group displayItems then drifts from the
-    // rendered rows: the highlighted row and the committed item point at
-    // different entries (you mention the neighbour of who you picked).
-    // orderedItems is the flattened render order and is the single index space
-    // for selectedIndex, arrow keys, Enter, and clicks.
-    const groups = useMemo(() => groupItems(displayItems), [displayItems]);
-    const orderedItems = useMemo(
-      () => groups.flatMap((group) => group.items),
-      [groups],
-    );
-
     useEffect(() => {
       setSelectedIndex(0);
-    }, [orderedItems]);
+    }, [displayItems]);
 
     useEffect(() => {
       itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
@@ -257,13 +242,13 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
 
     const selectItem = useCallback(
       (index: number) => {
-        const item = orderedItems[index];
+        const item = displayItems[index];
         if (!item) return;
         const wsId = getCurrentWsId();
         if (wsId) recordMentionUsage(wsId, item);
         command(item);
       },
-      [orderedItems, command],
+      [displayItems, command],
     );
 
     useImperativeHandle(ref, () => ({
@@ -272,19 +257,19 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
         // those keys belong to the IME (Enter commits composition, etc).
         if (isImeComposing(event)) return false;
         if (event.key === "ArrowUp") {
-          if (orderedItems.length === 0) return true;
+          if (displayItems.length === 0) return true;
           setSelectedIndex(
-            (i) => (i + orderedItems.length - 1) % orderedItems.length,
+            (i) => (i + displayItems.length - 1) % displayItems.length,
           );
           return true;
         }
         if (event.key === "ArrowDown") {
-          if (orderedItems.length === 0) return true;
-          setSelectedIndex((i) => (i + 1) % orderedItems.length);
+          if (displayItems.length === 0) return true;
+          setSelectedIndex((i) => (i + 1) % displayItems.length);
           return true;
         }
         if (event.key === "Enter") {
-          if (orderedItems.length === 0) return true;
+          if (displayItems.length === 0) return true;
           selectItem(selectedIndex);
           return true;
         }
@@ -292,7 +277,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       },
     }));
 
-    if (orderedItems.length === 0) {
+    if (displayItems.length === 0) {
       const isWaitingForServer =
         normalizedQuery !== "" &&
         (isSearching || searchedQuery !== normalizedQuery);
@@ -306,7 +291,8 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       );
     }
 
-    const hasContextGroups = orderedItems.some((item) => item.group === "current" || item.group === "recent");
+    const groups = groupItems(displayItems);
+    const hasContextGroups = displayItems.some((item) => item.group === "current" || item.group === "recent");
     const contextLayout = hasContextGroups;
     const groupLabel = (label: string): string => {
       if (label === "Current") return t(($) => $.mention.group_current);
