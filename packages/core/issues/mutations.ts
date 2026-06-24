@@ -333,6 +333,9 @@ export function useUpdateIssue() {
       ) {
         qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       }
+      if (Object.prototype.hasOwnProperty.call(vars, "project_id")) {
+        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      }
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
       // to resolve text-preview Eye gates, and unlike other mutations this
@@ -522,6 +525,11 @@ export function useBatchUpdateIssues() {
         Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")
       ) {
         qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")
+      ) {
+        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
       }
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {
