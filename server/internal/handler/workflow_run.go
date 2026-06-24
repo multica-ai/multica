@@ -452,12 +452,46 @@ func (h *Handler) loadNodeRunForWorkspace(w http.ResponseWriter, r *http.Request
 	return nodeRun, run, workspaceID, true
 }
 
+// requireRuntimeControlForNodeRun verifies the caller has the "control"
+// capability on the runtime bound to the node run. Used to gate takeover,
+// handback, and finalize actions (L1.4).
+func (h *Handler) requireRuntimeControlForNodeRun(w http.ResponseWriter, r *http.Request, nodeRun db.MulticaWorkflowNodeRun) bool {
+	if !nodeRun.RuntimeID.Valid {
+		writeError(w, http.StatusBadRequest, "node run is not bound to a runtime")
+		return false
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), nodeRun.RuntimeID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load runtime")
+		return false
+	}
+
+	member, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	if !ok {
+		return false
+	}
+
+	explicitRole := ""
+	perm, err := h.Queries.GetRuntimePermission(r.Context(), db.GetRuntimePermissionParams{
+		RuntimeID: rt.ID,
+		UserID:    member.UserID,
+	})
+	if err == nil {
+		explicitRole = perm.Role
+	}
+
+	role := resolveRuntimeRole(member, rt, explicitRole)
+	if !runtimeCapabilities(role).Control {
+		writeError(w, http.StatusForbidden, "insufficient runtime permission")
+		return false
+	}
+	return true
+}
+
 // TakeoverNodeRun pauses a running node so a human can intervene in its CSC
 // session (working → blocked). Node-level control only — the CSC session
 // actions (message/interrupt/permission) flow through Cloud Web, not here.
-//
-// NOTE: runtime-level takeover permission (beyond workspace membership) is
-// deferred (task L1.4 / plan module A5); for now workspace access gates this.
 func (h *Handler) TakeoverNodeRun(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -465,6 +499,9 @@ func (h *Handler) TakeoverNodeRun(w http.ResponseWriter, r *http.Request) {
 	}
 	nodeRun, run, workspaceID, ok := h.loadNodeRunForWorkspace(w, r)
 	if !ok {
+		return
+	}
+	if !h.requireRuntimeControlForNodeRun(w, r, nodeRun) {
 		return
 	}
 
@@ -491,6 +528,9 @@ func (h *Handler) HandbackNodeRun(w http.ResponseWriter, r *http.Request) {
 	}
 	nodeRun, run, workspaceID, ok := h.loadNodeRunForWorkspace(w, r)
 	if !ok {
+		return
+	}
+	if !h.requireRuntimeControlForNodeRun(w, r, nodeRun) {
 		return
 	}
 
@@ -530,6 +570,9 @@ func (h *Handler) FinalizeNodeRun(w http.ResponseWriter, r *http.Request) {
 
 	nodeRun, run, workspaceID, ok := h.loadNodeRunForWorkspace(w, r)
 	if !ok {
+		return
+	}
+	if !h.requireRuntimeControlForNodeRun(w, r, nodeRun) {
 		return
 	}
 
