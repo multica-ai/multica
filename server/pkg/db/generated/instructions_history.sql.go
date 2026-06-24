@@ -17,6 +17,7 @@ SELECT
     ih.workspace_id,
     ih.scope,
     ih.member_id,
+    ih.template_id,
     ih.content,
     ih.actor_id,
     ih.restored_from,
@@ -29,19 +30,13 @@ LEFT JOIN member actor_member ON actor_member.id = ih.actor_id
 LEFT JOIN "user" u ON u.id = actor_member.user_id
 WHERE ih.id = $1
   AND ih.workspace_id = $2
-  AND ih.scope = $3
-  AND (
-      (ih.scope = 'personal' AND ih.member_id = $4)
-      OR
-      (ih.scope = 'system' AND ih.member_id IS NULL)
-  )
+  AND ih.template_id = $3
 `
 
 type GetInstructionsHistoryParams struct {
 	ID          pgtype.UUID `json:"id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Scope       string      `json:"scope"`
-	MemberID    pgtype.UUID `json:"member_id"`
+	TemplateID  pgtype.UUID `json:"template_id"`
 }
 
 type GetInstructionsHistoryRow struct {
@@ -49,6 +44,7 @@ type GetInstructionsHistoryRow struct {
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
 	Scope          string             `json:"scope"`
 	MemberID       pgtype.UUID        `json:"member_id"`
+	TemplateID     pgtype.UUID        `json:"template_id"`
 	Content        string             `json:"content"`
 	ActorID        pgtype.UUID        `json:"actor_id"`
 	RestoredFrom   pgtype.UUID        `json:"restored_from"`
@@ -59,18 +55,14 @@ type GetInstructionsHistoryRow struct {
 }
 
 func (q *Queries) GetInstructionsHistory(ctx context.Context, arg GetInstructionsHistoryParams) (GetInstructionsHistoryRow, error) {
-	row := q.db.QueryRow(ctx, getInstructionsHistory,
-		arg.ID,
-		arg.WorkspaceID,
-		arg.Scope,
-		arg.MemberID,
-	)
+	row := q.db.QueryRow(ctx, getInstructionsHistory, arg.ID, arg.WorkspaceID, arg.TemplateID)
 	var i GetInstructionsHistoryRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
 		&i.Scope,
 		&i.MemberID,
+		&i.TemplateID,
 		&i.Content,
 		&i.ActorID,
 		&i.RestoredFrom,
@@ -87,6 +79,7 @@ INSERT INTO instructions_history (
     workspace_id,
     scope,
     member_id,
+    template_id,
     content,
     actor_id,
     restored_from
@@ -96,15 +89,17 @@ INSERT INTO instructions_history (
     $3,
     $4,
     $5,
-    $6
+    $6,
+    $7
 )
-RETURNING id, workspace_id, scope, member_id, content, actor_id, restored_from, created_at
+RETURNING id, workspace_id, scope, member_id, content, actor_id, restored_from, created_at, template_id
 `
 
 type InsertInstructionsHistoryParams struct {
 	WorkspaceID  pgtype.UUID `json:"workspace_id"`
 	Scope        string      `json:"scope"`
 	MemberID     pgtype.UUID `json:"member_id"`
+	TemplateID   pgtype.UUID `json:"template_id"`
 	Content      string      `json:"content"`
 	ActorID      pgtype.UUID `json:"actor_id"`
 	RestoredFrom pgtype.UUID `json:"restored_from"`
@@ -115,6 +110,7 @@ func (q *Queries) InsertInstructionsHistory(ctx context.Context, arg InsertInstr
 		arg.WorkspaceID,
 		arg.Scope,
 		arg.MemberID,
+		arg.TemplateID,
 		arg.Content,
 		arg.ActorID,
 		arg.RestoredFrom,
@@ -129,6 +125,7 @@ func (q *Queries) InsertInstructionsHistory(ctx context.Context, arg InsertInstr
 		&i.ActorID,
 		&i.RestoredFrom,
 		&i.CreatedAt,
+		&i.TemplateID,
 	)
 	return i, err
 }
@@ -139,6 +136,7 @@ SELECT
     ih.workspace_id,
     ih.scope,
     ih.member_id,
+    ih.template_id,
     ih.content,
     ih.actor_id,
     ih.restored_from,
@@ -150,20 +148,14 @@ FROM instructions_history ih
 LEFT JOIN member actor_member ON actor_member.id = ih.actor_id
 LEFT JOIN "user" u ON u.id = actor_member.user_id
 WHERE ih.workspace_id = $1
-  AND ih.scope = $2
-  AND (
-      (ih.scope = 'personal' AND ih.member_id = $3)
-      OR
-      (ih.scope = 'system' AND ih.member_id IS NULL)
-  )
+  AND ih.template_id = $2
 ORDER BY ih.created_at DESC
-LIMIT $4
+LIMIT $3
 `
 
 type ListInstructionsHistoryParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Scope       string      `json:"scope"`
-	MemberID    pgtype.UUID `json:"member_id"`
+	TemplateID  pgtype.UUID `json:"template_id"`
 	Limit       int32       `json:"limit"`
 }
 
@@ -172,6 +164,7 @@ type ListInstructionsHistoryRow struct {
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
 	Scope          string             `json:"scope"`
 	MemberID       pgtype.UUID        `json:"member_id"`
+	TemplateID     pgtype.UUID        `json:"template_id"`
 	Content        string             `json:"content"`
 	ActorID        pgtype.UUID        `json:"actor_id"`
 	RestoredFrom   pgtype.UUID        `json:"restored_from"`
@@ -182,12 +175,7 @@ type ListInstructionsHistoryRow struct {
 }
 
 func (q *Queries) ListInstructionsHistory(ctx context.Context, arg ListInstructionsHistoryParams) ([]ListInstructionsHistoryRow, error) {
-	rows, err := q.db.Query(ctx, listInstructionsHistory,
-		arg.WorkspaceID,
-		arg.Scope,
-		arg.MemberID,
-		arg.Limit,
-	)
+	rows, err := q.db.Query(ctx, listInstructionsHistory, arg.WorkspaceID, arg.TemplateID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -200,6 +188,7 @@ func (q *Queries) ListInstructionsHistory(ctx context.Context, arg ListInstructi
 			&i.WorkspaceID,
 			&i.Scope,
 			&i.MemberID,
+			&i.TemplateID,
 			&i.Content,
 			&i.ActorID,
 			&i.RestoredFrom,

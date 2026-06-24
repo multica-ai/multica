@@ -3243,9 +3243,10 @@ export class ApiClient {
   }
 
   // --- Agent Config Templates ---
+  // These endpoints resolve the workspace from the X-Workspace-ID header, so
+  // no workspaceId is needed in the URL (unlike /api/workspaces/{id}/...).
 
   async listAgentConfigTemplates(
-    workspaceId: string,
     scope?: "system" | "personal",
   ): Promise<AgentConfigTemplate[]> {
     const search = scope ? `?scope=${scope}` : "";
@@ -3253,14 +3254,12 @@ export class ApiClient {
   }
 
   async getAgentConfigTemplate(
-    workspaceId: string,
     templateId: string,
   ): Promise<AgentConfigTemplate> {
     return this.fetch(`/api/agent-config-templates/${templateId}`);
   }
 
   async createAgentConfigTemplate(
-    workspaceId: string,
     req: CreateAgentConfigTemplateRequest,
   ): Promise<AgentConfigTemplate> {
     return this.fetch("/api/agent-config-templates", {
@@ -3270,7 +3269,6 @@ export class ApiClient {
   }
 
   async updateAgentConfigTemplate(
-    workspaceId: string,
     templateId: string,
     req: UpdateAgentConfigTemplateRequest,
   ): Promise<AgentConfigTemplate> {
@@ -3281,7 +3279,6 @@ export class ApiClient {
   }
 
   async deleteAgentConfigTemplate(
-    workspaceId: string,
     templateId: string,
   ): Promise<void> {
     return this.fetch(`/api/agent-config-templates/${templateId}`, {
@@ -3289,15 +3286,31 @@ export class ApiClient {
     });
   }
 
+  // Cross-user roster of every member's default personal template. Replaces the
+  // legacy listAllAgentDefaults (which read member_agent_config) now that the
+  // default personal config IS the default personal template.
+  async listAllAgentDefaultTemplates(): Promise<AgentDefaultsWithUser[]> {
+    return this.fetch(`/api/agent-config-templates/defaults`);
+  }
+
+  // Copy another member's default personal template into a new personal
+  // template owned by the current user. Env values are secrets and are copied
+  // as empty key placeholders (server-side), mirroring the legacy contract.
+  async duplicateAgentConfigTemplate(
+    templateId: string,
+  ): Promise<AgentConfigTemplate> {
+    return this.fetch(`/api/agent-config-templates/${templateId}/duplicate`, {
+      method: "POST",
+    });
+  }
+
   async getAgentTemplateBinding(
-    workspaceId: string,
     agentId: string,
   ): Promise<AgentTemplateBinding> {
     return this.fetch(`/api/agents/${agentId}/template-binding`);
   }
 
   async updateAgentTemplateBinding(
-    workspaceId: string,
     agentId: string,
     req: UpdateAgentTemplateBindingRequest,
   ): Promise<AgentTemplateBinding> {

@@ -35,19 +35,16 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
-import {
-  skillListOptions,
-  workspaceKeys,
-} from "@multica/core/workspace/queries";
-import type { AgentDefaults, AgentDefaultsWithUser, Workspace } from "@multica/core/types";
+import { skillListOptions } from "@multica/core/workspace/queries";
+import type { AgentDefaultsWithUser, AgentConfigTemplate } from "@multica/core/types";
 import { ContentEditor } from "../../editor/content-editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 import {
-  InstructionsHistorySheet,
+  InstructionsHistoryDialog,
   instructionsHistoryKey,
-} from "./instructions-history-sheet";
+} from "./instructions-history-dialog";
+import { configTemplateKeys } from "./config-template-keys";
 
 // ─── Types & helpers ────────────────────────────────────────────────────────
 
@@ -96,19 +93,6 @@ function argsToEntries(args: string[]): ArgEntry[] {
 
 function entriesToArgs(entries: ArgEntry[]): string[] {
   return entries.flatMap((e) => e.value.trim().split(/\s+/)).filter(Boolean);
-}
-
-const personalDefaultsKey = (wsId: string) =>
-  ["workspaces", wsId, "personal-agent-defaults"] as const;
-
-function updateWorkspaceInList(
-  workspaces: Workspace[] | undefined,
-  updated: Workspace,
-): Workspace[] | undefined {
-  if (!workspaces) return workspaces;
-  return workspaces.map((workspace) =>
-    workspace.id === updated.id ? updated : workspace,
-  );
 }
 
 // ─── Tab definitions ────────────────────────────────────────────────────────
@@ -642,7 +626,7 @@ function DefaultsSkillsTab({
 
 // ─── Main form shell (tab bar + unsaved-changes guard) ──────────────────────
 
-function DefaultsForm({
+export function DefaultsForm({
   config,
   readOnly,
   saving,
@@ -781,7 +765,7 @@ function DefaultsForm({
       )}
 
       {historyScope && onRestoreInstructions && (
-        <InstructionsHistorySheet
+        <InstructionsHistoryDialog
           workspaceId={wsId}
           scope={historyScope}
           open={historyOpen}
@@ -794,22 +778,31 @@ function DefaultsForm({
   );
 }
 
-// ─── Personal Defaults Detail ───────────────────────────────────────────────
+// ─── Template config editor ─────────────────────────────────────────────────
+// Edits a single config template through the same structured DefaultsForm the
+// legacy defaults used — no raw JSON. The default template of a scope IS that
+// scope's default config (per migration 125 + resolveAgentConfig), so editing
+// the default template also records an instructions version. The History
+// affordance therefore shows only for the default template (history is
+// scope-based and tracks the default config, not plain templates).
 
-export function PersonalDefaultsDetail() {
+export function TemplateConfigEditor({
+  template,
+  scope,
+  readOnly,
+}: {
+  template: AgentConfigTemplate;
+  scope: "system" | "personal";
+  readOnly: boolean;
+}) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const [saving, setSaving] = useState(false);
 
-  const { data: personalDefaults, isLoading } = useQuery({
-    queryKey: personalDefaultsKey(wsId),
-    queryFn: () => api.getPersonalAgentDefaults(wsId),
-  });
-
   const config = useMemo(
-    () => (personalDefaults?.config ?? {}) as AgentDefaultsConfig,
-    [personalDefaults?.config],
+    () => (template.config ?? {}) as AgentDefaultsConfig,
+    [template.config],
   );
 
   const getSavedToast = useCallback((field: keyof AgentDefaultsConfig) => {
@@ -847,12 +840,18 @@ export function PersonalDefaultsDetail() {
   ) => {
     setSaving(true);
     try {
-      const updated = await api.updatePersonalAgentDefaults(wsId, newConfig as Record<string, unknown>);
-      qc.setQueryData<AgentDefaults>(personalDefaultsKey(wsId), updated);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: personalDefaultsKey(wsId) }),
-        qc.invalidateQueries({ queryKey: instructionsHistoryKey(wsId, "personal") }),
-      ]);
+      await api.updateAgentConfigTemplate(template.id, {
+        config: newConfig as Record<string, unknown>,
+      });
+      const invalidations: Promise<unknown>[] = [
+        qc.invalidateQueries({ queryKey: configTemplateKeys.all(wsId) }),
+      ];
+      if (template.is_default) {
+        invalidations.push(
+          qc.invalidateQueries({ queryKey: instructionsHistoryKey(wsId, scope) }),
+        );
+      }
+      await Promise.all(invalidations);
       if (options?.showSavedToast !== false) {
         toast.success(getSavedToast(field));
       }
@@ -865,145 +864,43 @@ export function PersonalDefaultsDetail() {
     } finally {
       setSaving(false);
     }
-  }, [wsId, qc, getSavedToast, getSaveFailedToast]);
+  }, [wsId, qc, template.id, template.is_default, scope, getSavedToast, getSaveFailedToast]);
 
   const handleSaveField = useCallback(async (field: keyof AgentDefaultsConfig, value: unknown) => {
-    const newConfig = { ...config, [field]: value };
-    await saveConfig(newConfig, field);
+    await saveConfig({ ...config, [field]: value }, field);
   }, [config, saveConfig]);
 
   const handleRestoreInstructions = useCallback(async (instructions: string) => {
     await saveConfig({ ...config, instructions }, "instructions", { showSavedToast: false });
   }, [config, saveConfig]);
 
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+  const historyScope = !readOnly && template.is_default ? scope : undefined;
 
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-500/10">
-          <Sliders className="h-4 w-4 text-blue-500" />
+        <div
+          className={`flex h-7 w-7 items-center justify-center rounded-md ${
+            scope === "system" ? "bg-amber-500/10" : "bg-blue-500/10"
+          }`}
+        >
+          {scope === "system" ? (
+            <Settings2 className="h-4 w-4 text-amber-500" />
+          ) : (
+            <Sliders className="h-4 w-4 text-blue-500" />
+          )}
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold">{t(($) => $.defaults.personal_title)}</h2>
+          <h2 className="truncate text-sm font-semibold">{template.name}</h2>
         </div>
       </div>
       <DefaultsForm
         config={config}
-        readOnly={false}
-        saving={saving}
-        historyScope="personal"
-        onRestoreInstructions={handleRestoreInstructions}
-        onSaveField={handleSaveField}
-      />
-    </div>
-  );
-}
-
-// ─── System Defaults Detail ─────────────────────────────────────────────────
-
-export function SystemDefaultsDetail({ readOnly = false }: { readOnly?: boolean } = {}) {
-  const { t } = useT("agents");
-  const workspace = useCurrentWorkspace();
-  const qc = useQueryClient();
-  const [saving, setSaving] = useState(false);
-
-  const agentDefaults = useMemo(
-    () => (workspace?.settings?.agent_defaults ?? {}) as AgentDefaultsConfig,
-    [workspace?.settings?.agent_defaults],
-  );
-
-  const getSavedToast = useCallback((field: keyof AgentDefaultsConfig) => {
-    switch (field) {
-      case "instructions":
-        return t(($) => $.tab_body.instructions.saved_toast);
-      case "custom_args":
-        return t(($) => $.tab_body.custom_args.saved_toast);
-      case "skills":
-        return t(($) => $.tab_body.skills.saved_toast);
-      case "custom_env":
-      default:
-        return t(($) => $.tab_body.env.saved_toast);
-    }
-  }, [t]);
-
-  const getSaveFailedToast = useCallback((field: keyof AgentDefaultsConfig) => {
-    switch (field) {
-      case "instructions":
-        return t(($) => $.tab_body.instructions.save_failed_toast);
-      case "custom_args":
-        return t(($) => $.tab_body.custom_args.save_failed_toast);
-      case "skills":
-        return t(($) => $.tab_body.skills.save_failed_toast);
-      case "custom_env":
-      default:
-        return t(($) => $.tab_body.env.save_failed_toast);
-    }
-  }, [t]);
-
-  const saveDefaults = useCallback(async (
-    newDefaults: AgentDefaultsConfig,
-    field: keyof AgentDefaultsConfig,
-    options?: { showSavedToast?: boolean },
-  ) => {
-    if (!workspace) return;
-    setSaving(true);
-    try {
-      const newSettings = { ...workspace.settings, agent_defaults: newDefaults };
-      const updated = await api.updateWorkspace(workspace.id, { settings: newSettings });
-      qc.setQueryData<Workspace[]>(workspaceKeys.list(), (workspaces) =>
-        updateWorkspaceInList(workspaces, updated),
-      );
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: workspaceKeys.list() }),
-        qc.invalidateQueries({ queryKey: instructionsHistoryKey(workspace.id, "system") }),
-      ]);
-      if (options?.showSavedToast !== false) {
-        toast.success(getSavedToast(field));
-      }
-    } catch (e) {
-      const msg = e instanceof ApiError ? e.message
-        : e instanceof Error ? e.message
-        : getSaveFailedToast(field);
-      toast.error(msg);
-      throw e;
-    } finally {
-      setSaving(false);
-    }
-  }, [workspace, qc, getSavedToast, getSaveFailedToast]);
-
-  const handleSaveField = useCallback(async (field: keyof AgentDefaultsConfig, value: unknown) => {
-    await saveDefaults({ ...agentDefaults, [field]: value }, field);
-  }, [agentDefaults, saveDefaults]);
-
-  const handleRestoreInstructions = useCallback(async (instructions: string) => {
-    await saveDefaults({ ...agentDefaults, instructions }, "instructions", { showSavedToast: false });
-  }, [agentDefaults, saveDefaults]);
-
-  return (
-    <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-amber-500/10">
-          <Settings2 className="h-4 w-4 text-amber-500" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-semibold">{t(($) => $.defaults.system_title)}</h2>
-        </div>
-      </div>
-      <DefaultsForm
-        config={agentDefaults}
         readOnly={readOnly}
         saving={saving}
-        historyScope={readOnly ? undefined : "system"}
-        onRestoreInstructions={readOnly ? undefined : handleRestoreInstructions}
+        historyScope={historyScope}
+        onRestoreInstructions={historyScope ? handleRestoreInstructions : undefined}
         onSaveField={handleSaveField}
       />
     </div>

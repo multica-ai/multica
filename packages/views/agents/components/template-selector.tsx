@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import type { AgentConfigTemplate, AgentTemplateBinding } from "@multica/core/types";
+import type { AgentTemplateBinding } from "@multica/core/types";
 import { Label } from "@multica/ui/components/ui/label";
 import {
   Select,
@@ -15,7 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
-import { configTemplateKeys } from "./config-template-manager";
+import { configTemplateKeys } from "./config-template-keys";
+import { useT } from "../../i18n";
 
 // ─── Template selector for agent detail ──────────────────────────────────────
 
@@ -30,17 +31,18 @@ export function TemplateSelector({
   binding,
   onBindingChange,
 }: TemplateSelectorProps) {
+  const { t } = useT("agents");
   const workspaceId = useWorkspaceId();
   const queryClient = useQueryClient();
 
   const { data: systemTemplates, isLoading: loadingSystem } = useQuery({
     queryKey: configTemplateKeys.list(workspaceId, "system"),
-    queryFn: () => api.listAgentConfigTemplates(workspaceId, "system"),
+    queryFn: () => api.listAgentConfigTemplates("system"),
   });
 
   const { data: personalTemplates, isLoading: loadingPersonal } = useQuery({
     queryKey: configTemplateKeys.list(workspaceId, "personal"),
-    queryFn: () => api.listAgentConfigTemplates(workspaceId, "personal"),
+    queryFn: () => api.listAgentConfigTemplates("personal"),
   });
 
   // Determine current system value
@@ -60,7 +62,7 @@ export function TemplateSelector({
       const isSkip = value === "__skip__";
       const isDefault = value === "__default__";
 
-      api.updateAgentTemplateBinding(workspaceId, agentId, {
+      api.updateAgentTemplateBinding(agentId, {
         system_template_id: isDefault ? null : isSkip ? null : value,
         personal_template_id: undefined, // no change
         skip_system_template: isSkip ? true : isDefault ? false : false,
@@ -69,14 +71,14 @@ export function TemplateSelector({
         queryClient.invalidateQueries({
           queryKey: configTemplateKeys.all(workspaceId),
         });
-        toast.success(isSkip ? "已跳过系统模板" : "系统模板已更新");
+        toast.success(isSkip ? t(($) => $.template.skipped_system) : t(($) => $.template.updated_system));
       }).catch((err) => {
-        toast.error("更新失败", {
-          description: err instanceof Error ? err.message : "未知错误",
+        toast.error(t(($) => $.template.update_failed), {
+          description: err instanceof Error ? err.message : String(err),
         });
       });
     },
-    [workspaceId, agentId, onBindingChange, queryClient],
+    [workspaceId, agentId, onBindingChange, queryClient, t],
   );
 
   const handlePersonalChange = useCallback(
@@ -86,7 +88,7 @@ export function TemplateSelector({
       const isSkip = value === "__skip__";
       const isDefault = value === "__default__";
 
-      api.updateAgentTemplateBinding(workspaceId, agentId, {
+      api.updateAgentTemplateBinding(agentId, {
         system_template_id: undefined, // no change
         personal_template_id: isDefault ? null : isSkip ? null : value,
         skip_personal_template: isSkip ? true : isDefault ? false : false,
@@ -95,14 +97,14 @@ export function TemplateSelector({
         queryClient.invalidateQueries({
           queryKey: configTemplateKeys.all(workspaceId),
         });
-        toast.success(isSkip ? "已跳过个人模板" : "个人模板已更新");
+        toast.success(isSkip ? t(($) => $.template.skipped_personal) : t(($) => $.template.updated_personal));
       }).catch((err) => {
-        toast.error("更新失败", {
-          description: err instanceof Error ? err.message : "未知错误",
+        toast.error(t(($) => $.template.update_failed), {
+          description: err instanceof Error ? err.message : String(err),
         });
       });
     },
-    [workspaceId, agentId, onBindingChange, queryClient],
+    [workspaceId, agentId, onBindingChange, queryClient, t],
   );
 
   const isLoading = loadingSystem || loadingPersonal;
@@ -111,7 +113,7 @@ export function TemplateSelector({
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
-        加载模板...
+        {t(($) => $.template.loading)}
       </div>
     );
   }
@@ -120,13 +122,13 @@ export function TemplateSelector({
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <Settings2 className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium">配置模板</span>
+        <span className="text-sm font-medium">{t(($) => $.template.section_title)}</span>
       </div>
 
       <div className="space-y-3">
         {/* System template selector */}
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">系统模板</Label>
+          <Label className="text-xs text-muted-foreground">{t(($) => $.template.system_label)}</Label>
           <Select
             value={systemValue}
             onValueChange={handleSystemChange}
@@ -135,12 +137,12 @@ export function TemplateSelector({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__default__">跟随默认</SelectItem>
-              <SelectItem value="__skip__">不使用模板</SelectItem>
+              <SelectItem value="__default__">{t(($) => $.template.follow_default)}</SelectItem>
+              <SelectItem value="__skip__">{t(($) => $.template.skip)}</SelectItem>
               {systemTemplates?.map((tpl) => (
                 <SelectItem key={tpl.id} value={tpl.id}>
                   {tpl.name}
-                  {tpl.is_default && " (默认)"}
+                  {tpl.is_default && ` (${t(($) => $.template.default_badge)})`}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -149,7 +151,7 @@ export function TemplateSelector({
 
         {/* Personal template selector */}
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">个人模板</Label>
+          <Label className="text-xs text-muted-foreground">{t(($) => $.template.personal_label)}</Label>
           <Select
             value={personalValue}
             onValueChange={handlePersonalChange}
@@ -158,12 +160,12 @@ export function TemplateSelector({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__default__">跟随默认</SelectItem>
-              <SelectItem value="__skip__">不使用模板</SelectItem>
+              <SelectItem value="__default__">{t(($) => $.template.follow_default)}</SelectItem>
+              <SelectItem value="__skip__">{t(($) => $.template.skip)}</SelectItem>
               {personalTemplates?.map((tpl) => (
                 <SelectItem key={tpl.id} value={tpl.id}>
                   {tpl.name}
-                  {tpl.is_default && " (默认)"}
+                  {tpl.is_default && ` (${t(($) => $.template.default_badge)})`}
                 </SelectItem>
               ))}
             </SelectContent>

@@ -43,7 +43,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
-import { availabilityConfig, workloadConfig } from "../presence";
+import { availabilityConfig } from "../presence";
 import { useT } from "../../i18n";
 import type { AgentListRow } from "./agents-page";
 
@@ -365,7 +365,6 @@ export function AgentListToolbar({
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-auto min-w-44">
                 {WORKLOAD_VALUES.map((value) => {
-                  const visual = workloadConfig[value];
                   return (
                     <DropdownMenuCheckboxItem
                       key={value}

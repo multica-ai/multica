@@ -528,6 +528,7 @@ type InstructionsHistory struct {
 	ActorID      pgtype.UUID        `json:"actor_id"`
 	RestoredFrom pgtype.UUID        `json:"restored_from"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	TemplateID   pgtype.UUID        `json:"template_id"`
 }
 
 type Issue struct {

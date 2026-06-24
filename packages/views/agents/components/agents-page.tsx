@@ -69,12 +69,6 @@ import {
 } from "@multica/ui/components/ui/list-grid";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from "@multica/ui/components/ui/sheet";
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -86,12 +80,9 @@ import { availabilityConfig } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentRowActions } from "./agent-row-actions";
 import { AgentListToolbar } from "./agent-list-toolbar";
-import {
-  OtherDefaultsDetail,
-  PersonalDefaultsDetail,
-  SystemDefaultsDetail,
-} from "./defaults-detail";
-import { ConfigTemplateManager } from "./config-template-manager";
+import { OtherDefaultsDetail } from "./defaults-detail";
+import { ConfigTemplateDialog } from "./config-template-dialog";
+import { configTemplateKeys } from "./config-template-keys";
 import { useT } from "../../i18n";
 
 // Column template — single source of truth for header, rows, and skeletons.
@@ -945,12 +936,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  type DefaultsSheet =
-    | "personal"
-    | "system"
-    | { configId: string; defaults: AgentDefaultsWithUser }
-    | null;
-  const [defaultsSheet, setDefaultsSheet] = useState<DefaultsSheet>(null);
+  type ConfigDialogScope = "personal" | "system" | null;
+  const [configDialogScope, setConfigDialogScope] =
+    useState<ConfigDialogScope>(null);
+  const [otherDefaults, setOtherDefaults] =
+    useState<AgentDefaultsWithUser | null>(null);
 
   const rawScope = useAgentsViewStore((s) => s.scope);
   const scope = AGENT_SCOPES.includes(rawScope) ? rawScope : "mine";
@@ -969,23 +959,26 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const isColVisible = (key: AgentColumnKey) => !hiddenColumns.includes(key);
 
   const { data: allDefaults = [] } = useQuery({
-    queryKey: ["workspaces", wsId, "all-agent-defaults"],
-    queryFn: () => api.listAllAgentDefaults(wsId),
+    queryKey: ["workspaces", wsId, "all-agent-default-templates"],
+    queryFn: () => api.listAllAgentDefaultTemplates(),
     enabled: scope === "all" || scope === "default",
   });
 
-  const handleDuplicateDefaults = async (configId: string) => {
-    if (!configId) return;
+  const handleDuplicateDefaults = async (templateId: string) => {
+    if (!templateId) return;
     try {
-      await api.duplicateAgentDefaults(wsId, configId);
-      qc.invalidateQueries({
-        queryKey: ["workspaces", wsId, "personal-agent-defaults"],
+      await api.duplicateAgentConfigTemplate(templateId);
+      await qc.invalidateQueries({
+        queryKey: configTemplateKeys.all(wsId),
       });
-      toast.success("Defaults duplicated to your personal config");
-      setDefaultsSheet(null);
+      await qc.invalidateQueries({
+        queryKey: ["workspaces", wsId, "all-agent-default-templates"],
+      });
+      toast.success(t(($) => $.template.duplicated_toast));
+      setOtherDefaults(null);
     } catch (e) {
       toast.error(
-        e instanceof Error ? e.message : "Failed to duplicate defaults",
+        e instanceof Error ? e.message : t(($) => $.template.duplicate_failed_toast),
       );
     }
   };
@@ -1288,14 +1281,9 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                     currentUserId={currentUser?.id ?? null}
                     mine={defaultsRows.mine}
                     others={defaultsRows.others}
-                    onOpenPersonal={() => setDefaultsSheet("personal")}
-                    onOpenSystem={() => setDefaultsSheet("system")}
-                    onOpenOther={(defaults) =>
-                      setDefaultsSheet({
-                        configId: defaults.id ?? "",
-                        defaults,
-                      })
-                    }
+                    onOpenPersonal={() => setConfigDialogScope("personal")}
+                    onOpenSystem={() => setConfigDialogScope("system")}
+                    onOpenOther={(defaults) => setOtherDefaults(defaults)}
                   />
                 ) : rows.length === 0 ? (
                   <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
@@ -1405,49 +1393,37 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         />
       )}
 
-      <Sheet
-        open={defaultsSheet !== null}
+      <ConfigTemplateDialog
+        open={configDialogScope !== null}
+        scope={configDialogScope ?? "system"}
+        canEdit={
+          configDialogScope === "personal" ||
+          (configDialogScope === "system" && isWorkspaceAdmin)
+        }
         onOpenChange={(open) => {
-          if (!open) setDefaultsSheet(null);
+          if (!open) setConfigDialogScope(null);
+        }}
+      />
+
+      <Dialog
+        open={otherDefaults !== null}
+        onOpenChange={(open) => {
+          if (!open) setOtherDefaults(null);
         }}
       >
-        <SheetContent side="right" className="w-full overflow-y-auto p-0 sm:max-w-3xl">
-          <SheetTitle className="sr-only">{t(($) => $.defaults.sheet_title)}</SheetTitle>
-          <SheetDescription className="sr-only">{t(($) => $.defaults.sheet_desc)}</SheetDescription>
-          {defaultsSheet === "personal" && (
-            <>
-              <PersonalDefaultsDetail />
-              <div className="border-t px-5 py-4">
-                <ConfigTemplateManager
-                  scope="personal"
-                  title="个人配置模板"
-                  description="创建和管理个人配置模板，可快速应用到新 Agent"
-                />
-              </div>
-            </>
-          )}
-          {defaultsSheet === "system" && (
-            <>
-              <SystemDefaultsDetail readOnly={!isWorkspaceAdmin} />
-              {isWorkspaceAdmin && (
-                <div className="border-t px-5 py-4">
-                  <ConfigTemplateManager
-                    scope="system"
-                    title="系统配置模板"
-                    description="创建和管理系统配置模板，团队成员可选择使用"
-                  />
-                </div>
-              )}
-            </>
-          )}
-          {defaultsSheet !== null && typeof defaultsSheet === "object" && (
+        <DialogContent className="flex h-[75vh] max-h-[calc(100vh-2rem)] max-w-3xl flex-col gap-0 p-0 sm:max-w-3xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>{t(($) => $.defaults.sheet_title)}</DialogTitle>
+            <DialogDescription>{t(($) => $.defaults.sheet_desc)}</DialogDescription>
+          </DialogHeader>
+          {otherDefaults && (
             <OtherDefaultsDetail
-              defaults={defaultsSheet.defaults}
-              onDuplicate={() => handleDuplicateDefaults(defaultsSheet.configId)}
+              defaults={otherDefaults}
+              onDuplicate={() => handleDuplicateDefaults(otherDefaults.id ?? "")}
             />
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

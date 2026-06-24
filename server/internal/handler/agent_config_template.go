@@ -311,7 +311,36 @@ func (h *Handler) UpdateAgentConfigTemplate(w http.ResponseWriter, r *http.Reque
 		defaultBool = pgtype.Bool{Bool: *req.IsDefault, Valid: true}
 	}
 
-	updated, err := h.Queries.UpdateAgentConfigTemplate(r.Context(), db.UpdateAgentConfigTemplateParams{
+	// Each template carries its own instructions history. When a template's
+	// instructions change, record a version keyed by that template — the
+	// template-keyed replacement for the legacy scope/member history.
+	previousInstructions, _ := instructionsFromConfigJSON(tpl.Config)
+	nextInstructions, hasInstructions := instructionsFromConfigJSON(configBytes)
+
+	// Resolve the acting member once (outside the tx): needed for the history
+	// actor_id, and for personal scope the history member_id is the template
+	// owner (== actor, since only the creator can edit a personal template).
+	var actorMemberID pgtype.UUID
+	if userID := requestUserID(r); userID != "" {
+		if member, merr := h.getWorkspaceMember(r.Context(), userID, workspaceID); merr == nil {
+			actorMemberID = member.ID
+		}
+	}
+
+	q := h.Queries
+	commit := func() error { return nil }
+	if h.TxStarter != nil {
+		realTx, err := h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update template")
+			return
+		}
+		defer realTx.Rollback(r.Context())
+		q = h.Queries.WithTx(realTx)
+		commit = func() error { return realTx.Commit(r.Context()) }
+	}
+
+	updated, err := q.UpdateAgentConfigTemplate(r.Context(), db.UpdateAgentConfigTemplateParams{
 		ID:          tplUUID,
 		Name:        nameText,
 		Description: descText,
@@ -325,6 +354,29 @@ func (h *Handler) UpdateAgentConfigTemplate(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		slog.Error("update agent config template failed", "template_id", templateID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to update template")
+		return
+	}
+
+	// Record an instructions version when the template's instructions changed.
+	// Every template (default or not) carries its own history.
+	if hasInstructions && nextInstructions != previousInstructions {
+		memberID := historyMemberID(updated.Scope, updated.CreatedBy)
+		if _, err := q.InsertInstructionsHistory(r.Context(), db.InsertInstructionsHistoryParams{
+			WorkspaceID: wsUUID,
+			Scope:       updated.Scope,
+			MemberID:    memberID,
+			TemplateID: updated.ID,
+			Content:    nextInstructions,
+			ActorID:    actorMemberID,
+		}); err != nil {
+			slog.Error("insert instructions history for template failed", "template_id", templateID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to update template")
+			return
+		}
+	}
+
+	if err := commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update template")
 		return
 	}
@@ -686,4 +738,134 @@ func (h *Handler) resolveAgentConfig(ctx context.Context, agent db.Agent) (Merge
 		mcpConfig = agent.McpConfig
 	}
 	return merged, mcpConfig
+}
+
+// ListAllAgentDefaultTemplates returns every member's default personal
+// template for the workspace — the template-model replacement for the legacy
+// ListAllAgentDefaults roster (which read member_agent_config). Env values are
+// masked to "***" (keys are safe to share). Member-visible: any workspace
+// member can browse others' default configs for reference / duplication.
+func (h *Handler) ListAllAgentDefaultTemplates(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	if userID := requestUserID(r); userID != "" {
+		if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+			writeError(w, http.StatusForbidden, "workspace membership required")
+			return
+		}
+	}
+
+	rows, err := h.Queries.ListAllDefaultPersonalTemplates(r.Context(), wsUUID)
+	if err != nil {
+		slog.Error("list default personal templates failed", "workspace_id", workspaceID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list default configs")
+		return
+	}
+
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		var cfg agentDefaultsConfig
+		if err := json.Unmarshal(row.Config, &cfg); err != nil {
+			cfg = agentDefaultsConfig{}
+		}
+		// Mask custom_env values — only expose keys (mirrors ListAllAgentDefaults).
+		maskedEnv := make(map[string]string, len(cfg.CustomEnv))
+		for k := range cfg.CustomEnv {
+			maskedEnv[k] = "***"
+		}
+		maskedCfg := agentDefaultsConfig{
+			Instructions: cfg.Instructions,
+			CustomEnv:    maskedEnv,
+			CustomArgs:   cfg.CustomArgs,
+			Skills:       cfg.Skills,
+		}
+		items = append(items, map[string]any{
+			"id":              uuidToString(row.ID),
+			"config":          maskedCfg,
+			"user_id":         uuidToString(row.UserID),
+			"user_name":       row.UserName,
+			"user_avatar_url": row.UserAvatarUrl.String,
+			"created_at":      timestampToString(row.CreatedAt),
+			"updated_at":      timestampToString(row.UpdatedAt),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, items)
+}
+
+// DuplicateAgentConfigTemplate copies another member's default personal
+// template into a new personal template owned by the current user. Env values
+// are secrets and are NOT copied — only the keys are (as empty placeholders the
+// user fills in), mirroring the legacy DuplicateAgentDefaults contract.
+func (h *Handler) DuplicateAgentConfigTemplate(w http.ResponseWriter, r *http.Request) {
+	member, ok := ctxMember(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "user not authenticated")
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	templateID := chi.URLParam(r, "templateId")
+	srcUUID, ok := parseUUIDOrBadRequest(w, templateID, "template_id")
+	if !ok {
+		return
+	}
+
+	src, err := h.Queries.GetAgentConfigTemplateInWorkspace(r.Context(), db.GetAgentConfigTemplateInWorkspaceParams{
+		ID:          srcUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "template not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load source template")
+		return
+	}
+
+	var srcCfg agentDefaultsConfig
+	if err := json.Unmarshal(src.Config, &srcCfg); err != nil {
+		srcCfg = agentDefaultsConfig{}
+	}
+	// Copy env keys only — values are the owner's secrets.
+	envCopy := make(map[string]string, len(srcCfg.CustomEnv))
+	for k := range srcCfg.CustomEnv {
+		envCopy[k] = ""
+	}
+	copyCfg := agentDefaultsConfig{
+		Instructions: srcCfg.Instructions,
+		CustomEnv:    envCopy,
+		CustomArgs:   srcCfg.CustomArgs,
+		Skills:       srcCfg.Skills,
+	}
+	copyJSON, err := json.Marshal(copyCfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to copy template config")
+		return
+	}
+
+	dup, err := h.Queries.CreateAgentConfigTemplate(r.Context(), db.CreateAgentConfigTemplateParams{
+		WorkspaceID: wsUUID,
+		Scope:       "personal",
+		Name:        src.Name + " (copy)",
+		Description: src.Description,
+		Config:      copyJSON,
+		IsDefault:   false,
+		CreatedBy:   member.ID,
+	})
+	if err != nil {
+		slog.Error("duplicate agent config template failed", "source_template_id", templateID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to duplicate template")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, configTemplateToResponse(dup))
 }

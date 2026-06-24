@@ -350,6 +350,68 @@ func (q *Queries) ListAgentConfigTemplatesByCreator(ctx context.Context, arg Lis
 	return items, nil
 }
 
+const listAllDefaultPersonalTemplates = `-- name: ListAllDefaultPersonalTemplates :many
+SELECT
+    t.id,
+    t.workspace_id,
+    t.config,
+    t.created_at,
+    t.updated_at,
+    m.user_id,
+    u.name AS user_name,
+    u.avatar_url AS user_avatar_url
+FROM agent_config_template t
+JOIN member m ON m.id = t.created_by
+JOIN "user" u ON u.id = m.user_id
+WHERE t.workspace_id = $1
+  AND t.scope = 'personal'
+  AND t.is_default = true
+ORDER BY u.name ASC
+`
+
+type ListAllDefaultPersonalTemplatesRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Config        []byte             `json:"config"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	UserID        pgtype.UUID        `json:"user_id"`
+	UserName      string             `json:"user_name"`
+	UserAvatarUrl pgtype.Text        `json:"user_avatar_url"`
+}
+
+// Every member's default personal template (one per member who has one),
+// joined to user for the cross-user "defaults" roster. Mirrors the shape of
+// ListMemberAgentConfigs so the handler can reuse the same masking/response.
+func (q *Queries) ListAllDefaultPersonalTemplates(ctx context.Context, workspaceID pgtype.UUID) ([]ListAllDefaultPersonalTemplatesRow, error) {
+	rows, err := q.db.Query(ctx, listAllDefaultPersonalTemplates, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllDefaultPersonalTemplatesRow{}
+	for rows.Next() {
+		var i ListAllDefaultPersonalTemplatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UserID,
+			&i.UserName,
+			&i.UserAvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateAgentConfigTemplate = `-- name: UpdateAgentConfigTemplate :one
 UPDATE agent_config_template SET
     name = COALESCE($2, name),

@@ -1006,7 +1006,7 @@ function TemplateSection({ agentId }: { agentId: string }) {
   const workspaceId = useWorkspaceId();
   const { data: binding } = useQuery({
     queryKey: ["agent-template-binding", workspaceId, agentId],
-    queryFn: () => api.getAgentTemplateBinding(workspaceId, agentId),
+    queryFn: () => api.getAgentTemplateBinding(agentId),
   });
 
   const [localBinding, setLocalBinding] = useState<AgentTemplateBinding | undefined>(undefined);

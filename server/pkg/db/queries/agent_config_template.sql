@@ -65,6 +65,27 @@ UPDATE agent SET personal_template_id = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: ListAllDefaultPersonalTemplates :many
+-- Every member's default personal template (one per member who has one),
+-- joined to user for the cross-user "defaults" roster. Mirrors the shape of
+-- ListMemberAgentConfigs so the handler can reuse the same masking/response.
+SELECT
+    t.id,
+    t.workspace_id,
+    t.config,
+    t.created_at,
+    t.updated_at,
+    m.user_id,
+    u.name AS user_name,
+    u.avatar_url AS user_avatar_url
+FROM agent_config_template t
+JOIN member m ON m.id = t.created_by
+JOIN "user" u ON u.id = m.user_id
+WHERE t.workspace_id = $1
+  AND t.scope = 'personal'
+  AND t.is_default = true
+ORDER BY u.name ASC;
+
 -- name: ListAgentConfigTemplatesByCreator :many
 SELECT * FROM agent_config_template
 WHERE workspace_id = $1 AND created_by = $2
