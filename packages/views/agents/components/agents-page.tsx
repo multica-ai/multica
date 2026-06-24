@@ -103,6 +103,19 @@ const GRID_COLS =
 // Two-line rows; the virtualizer's fixed-size contract.
 const ROW_HEIGHT = 64;
 
+/** Row count for the "default" scope tab — mirrors DefaultsRows. */
+function computeDefaultScopeCount(
+  allDefaults: AgentDefaultsWithUser[],
+  currentUserId: string | null | undefined,
+): number {
+  // System default row is always shown.
+  let count = 1;
+  // Personal row is shown for every signed-in member (even before they save one).
+  if (currentUserId) count += 1;
+  count += allDefaults.filter((d) => d.user_id !== currentUserId).length;
+  return count;
+}
+
 // Single source for hideable column widths: track vars and the grid's
 // min-width derive from the same numbers.
 const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
@@ -964,10 +977,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
   const isColVisible = (key: AgentColumnKey) => !hiddenColumns.includes(key);
 
+  // Always fetch — scope tab badges must stay accurate even when another
+  // scope is active (the query used to be gated on scope === "default",
+  // which left the badge at 0 until the user clicked in).
   const { data: allDefaults = [] } = useQuery({
     queryKey: ["workspaces", wsId, "all-agent-default-templates"],
     queryFn: () => api.listAllAgentDefaultTemplates(),
-    enabled: scope === "all" || scope === "default",
   });
 
   const handleDuplicateDefaults = async (templateId: string) => {
@@ -1036,7 +1051,12 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       all++;
       if (currentUser && a.owner_id === currentUser.id) mine++;
     }
-    return { mine, all, default: allDefaults.length, archived };
+    return {
+      mine,
+      all,
+      default: computeDefaultScopeCount(allDefaults, currentUser?.id),
+      archived,
+    };
   }, [agents, currentUser, allDefaults]);
 
   // Rows within the current scope, unfiltered, fully assembled — the
