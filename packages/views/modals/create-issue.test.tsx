@@ -184,14 +184,35 @@ vi.mock("@multica/core/api", async () => {
 vi.mock("../editor", () => {
   const ContentEditor = forwardRef(({ defaultValue, onUpdate, onUploadFile, placeholder, attachments }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
+    const uploadingRef = useRef(0);
     const [value, setValue] = useState(defaultValue || "");
+    const appendAttachment = (result: any) => {
+      const next = [
+        valueRef.current,
+        `!file[${result.filename}](${result.url})`,
+      ].filter(Boolean).join("\n");
+      valueRef.current = next;
+      setValue(next);
+      onUpdate?.(next);
+    };
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => {
         valueRef.current = "";
         setValue("");
       },
-      uploadFile: (file: File) => onUploadFile?.(file),
+      uploadFile: (file: File) => {
+        if (!onUploadFile) return;
+        uploadingRef.current += 1;
+        void onUploadFile(file)
+          .then((result: any) => {
+            if (result) appendAttachment(result);
+          })
+          .finally(() => {
+            uploadingRef.current = Math.max(0, uploadingRef.current - 1);
+          });
+      },
+      hasActiveUploads: () => uploadingRef.current > 0,
     }));
     return (
       <>
@@ -322,8 +343,18 @@ vi.mock("@multica/ui/components/ui/switch", () => ({
 }));
 
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
-  FileUploadButton: ({ onSelect }: { onSelect: (file: File) => void }) => (
-    <button type="button" onClick={() => onSelect(new File(["test"], "test.txt"))}>
+  FileUploadButton: ({
+    onSelect,
+    disabled,
+  }: {
+    onSelect: (file: File) => void;
+    disabled?: boolean;
+  }) => (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onSelect(new File(["test"], "test.txt", { type: "text/plain" }))}
+    >
       Upload file
     </button>
   ),
@@ -606,6 +637,58 @@ describe("CreateIssueModal", () => {
 
     await waitFor(() => {
       expect(mockSetDraft).toHaveBeenCalledWith({ attachments: [referenced] });
+    });
+  });
+
+  it("waits for manual attachment uploads before creating the issue", async () => {
+    const user = userEvent.setup();
+    let resolveUpload: (value: unknown) => void = () => {};
+    mockUploadWithToast.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveUpload = resolve;
+      }),
+    );
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Attach logs");
+    await user.click(screen.getByRole("button", { name: "Upload file" }));
+
+    const createButton = screen.getByRole("button", { name: "Create Issue" });
+    expect(createButton).toBeDisabled();
+
+    await user.click(createButton);
+    expect(mockCreateIssue).not.toHaveBeenCalled();
+
+    resolveUpload({
+      id: "att-1",
+      workspace_id: "ws-test",
+      issue_id: null,
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "member",
+      uploader_id: "user-1",
+      filename: "test.txt",
+      url: "https://cdn.example.test/test.txt",
+      download_url: "https://cdn.example.test/test.txt?download=1",
+      content_type: "text/plain",
+      size_bytes: 4,
+      created_at: "2026-05-19T00:00:00Z",
+      link: "https://cdn.example.test/test.txt",
+    });
+
+    await waitFor(() => expect(createButton).not.toBeDisabled());
+    await user.click(createButton);
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Attach logs",
+          description: "!file[test.txt](https://cdn.example.test/test.txt)",
+          attachment_ids: ["att-1"],
+        }),
+      );
     });
   });
 
