@@ -294,6 +294,31 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.29",
+        date: "2026-06-24",
+        title: "Feishu Channel Upgrade, Feature Rollout Controls, and More Reliable Autopilots",
+        changes: [],
+        features: [
+          "Feishu conversations now run on a new unified collaboration channel, making message handling more stable and consistent and laying the groundwork for more chat platforms",
+          "New feature rollout controls cover both the app and the daemon, so teams can open up risky changes gradually and to a limited audience",
+          "When agents read long Issue discussions, resolved threads now fold down to their key conclusion to keep the context focused",
+          "Feishu users can start a fresh conversation with the `/new` command, and Feishu WebSocket connections can use a configured proxy",
+        ],
+        improvements: [
+          "Scheduled autopilots are more dependable: even with missed schedules, retries, or several runners working at once, they settle on the intended single run",
+          "Agent runtime briefings can switch to a slimmer version that drops redundant detail, with the full version still available as a fallback",
+          "Runtime provider docs now match the current provider list, with Qoder, CodeBuddy, and Antigravity guidance added and the outdated Gemini CLI runtime removed",
+          "The branch or version pinned in a project's repository settings now takes effect during local agent work, so agents no longer end up on the wrong branch",
+        ],
+        fixes: [
+          "Sub-Issues now stay in stable creation order inside a parent Issue",
+          "Attachment previews now open correctly inside Issues",
+          "The @mention picker now selects the highlighted person or Issue even when search results reorder",
+          "Cancelled chat drafts stay deleted after you navigate away and come back",
+          "Autopilot cold starts, the agent status in the Issue header, and Antigravity provider errors now report more accurately",
+        ],
+      },
+      {
         version: "0.3.28",
         date: "2026-06-23",
         title: "Staged Sub-Issues and Qoder Runtime Support",
