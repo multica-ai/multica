@@ -221,8 +221,8 @@ Persona-the-service was gated entirely behind `MULTICA_PERSONA_URL`/`_TOKEN`, **
   separate service" plans are archived under [`docs/archive/persona/`](../archive/persona/) — do not act on them.
 
 Still inert and tracked for a later sweep: the `agent.persona_sandbox` / `agent_runtime.persona_sandbox`
-DB columns + the frontend persona-sandbox tab. The persona Go package is reduced to `spawner.go`
-(`ResolveSpawnSubject`, used by the daemon — keep).
+DB columns + the frontend persona-sandbox tab. The old persona Go package was renamed to `spawn`,
+reduced to `server/internal/cerebro/spawn/spawn.go` (`ResolveSpawnSubject`, used by the daemon — keep).
 
 ### 5.2 The capability engine — deny-by-default floor + approval seam (engine-flip Step A done)
 `permissions.Resolver` (`permissions/resolver.go`, FIR-2193) + `permgate`
@@ -291,6 +291,43 @@ resolver + permgate are wired into the live credential / approval / repo paths, 
    they carried no live enforcement). The migration applies to **staging** with `main`; the
    **prod DROP is irreversible and gated on explicit approval** — it does not auto-promote.
 
+### 5.4 Credentials are ONE permission type — and the parallel store NOT to wire in
+
+A credential follows the same rule as everything else: **the permission to use a credential is a
+permission type in the unified tool-policy chain, and nowhere else.** There is exactly one place a
+credential *permission* is authored and enforced. Do not add a second — and the section below names
+the specific second model you will find in the code and must NOT cement.
+
+- **The credential permission type (the one true model).** A credential permission is a
+  `cerebro_tool_policy` row like any other tool: ToolKey
+  `credential.<attach|read_redacted|reveal|rotate|revoke>`, ResourcePattern
+  `cerebro-credential:<uuid>` (id scope, most specific) or `cerebro-credential-type:<type>` (type
+  fallback) — the convention pinned in `cerebro_credentials_policy.go` (`multicaCredentialPolicy.Check`,
+  FIR-1609 Phase 7). The chain is **already** consulted there: always-on as a tighten-only **cap**,
+  and — flag `cerebro_credential_chain_grant` (default OFF) — as an **explicit-Allow grant source**.
+  This is the model credentials converge on. The deny-by-default floor (`cerebro_workspace_grant`,
+  §5.2–5.3) is the *retiring* step underneath it, not a second model.
+
+- **The secret itself lives in Agent Vault — that is storage, not a permission model.**
+  `cerebro_agentvault_agent_access` (TECH-3196, flag `cerebro_agent_vault`) is *where credentials
+  live and are used*: at task claim the server mints a vault-scoped token and injects proxy env so
+  the agent uses the secret without ever holding it. This is storage + runtime brokering, **not** a
+  second place to express "who may use this credential" — do not confuse the vault-access table for
+  a permission interface.
+
+- **`cerebro_credential_policy` is a PARALLEL authoring store — do NOT wire it into enforcement.**
+  The `credentialpolicy` package + `cerebro_credential_policy` table (FIR-1479, migration 9096,
+  handler `agent_credential_grant_cerebro.go`, endpoint `/api/agents/{id}/credential-grants`, flag
+  `cerebro_credentials_per_actor`, default OFF) back the per-actor credentials column in the
+  Permissions UI as **authoring + display only**. `multicaCredentialPolicy.Check` does **not** read
+  it; the capabilities card itself calls the value "advisory display, never an access decision." It
+  is a SECOND, separate model for the exact thing the tool-policy chain already models above — a
+  parallel path, not the target. **Do not "make it real" by connecting it to `Check`.** The correct
+  move is to author the per-actor credentials column onto the tool-policy chain credential rows
+  (one model) and retire `cerebro_credential_policy`. Reading the display-only column as an
+  "enforcement gap to be wired in" is the specific mistake this section exists to prevent — it cost
+  a full review cycle on FIR-1739.
+
 ---
 
 ## 6. Target architecture — converge on the 5 interfaces
@@ -305,7 +342,9 @@ The end state we are building toward (FIR-1496):
    gets a row in one of the 5 interfaces. Gates that must stay code-owned (registry exclusion,
    last-owner guard, signup) are documented as such so "code-only" reads as a deliberate choice,
    not a missing feature.
-3. **Credentials onto the chain** (Base=Deny), retiring the grant resolver for credentials.
+3. **Credentials onto the chain** (Base=Deny), retiring the grant resolver for credentials. The
+   separate `cerebro_credential_policy` authoring store (FIR-1479) folds onto the chain credential
+   rows and is retired — it is never wired into `Check` as a parallel enforcement path (§5.4).
 4. **Persona service removed** (§5.1, done); the **capability engine** (§5.2) is a documented,
    usable function that consolidates onto the chain via the engine-flip (FIR-1512, §5.3) — never
    an ad-hoc drop.
