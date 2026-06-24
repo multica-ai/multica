@@ -118,7 +118,7 @@ export function InstructionsHistoryDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex h-[75vh] max-h-[calc(100vh-2rem)] max-w-4xl flex-col gap-0 p-0 sm:max-w-4xl">
+        <DialogContent className="flex h-[75vh] max-h-[calc(100vh-2rem)] max-w-4xl select-none flex-col gap-0 p-0 sm:max-w-4xl">
           <DialogHeader className="flex h-12 shrink-0 flex-row items-center gap-2 border-b px-4">
             <History className="h-4 w-4 text-muted-foreground" />
             <DialogTitle className="text-sm">{t(($) => $.history.title)}</DialogTitle>
@@ -226,7 +226,7 @@ export function InstructionsHistoryDialog({
                 {selectedVersion.isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
               </div>
               <ScrollArea className="min-h-0 flex-1">
-                <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-muted-foreground">
+                <pre className="select-text whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-muted-foreground">
                   {selectedItem
                     ? selectedContent || (selectedVersion.isLoading ? t(($) => $.history.loading_content) : t(($) => $.history.empty_content))
                     : t(($) => $.history.select_hint)}

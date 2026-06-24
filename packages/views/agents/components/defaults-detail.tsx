@@ -173,14 +173,14 @@ function DefaultsInstructionsTab({
       </p>
 
       {readOnly ? (
-        <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-muted/50 px-4 py-3">
+        <div className="flex-1 min-h-0 select-text overflow-y-auto rounded-md border bg-muted/50 px-4 py-3">
           <pre className="whitespace-pre-wrap font-mono text-sm text-muted-foreground">
             {value || t(($) => $.tab_body.instructions.placeholder)}
           </pre>
         </div>
       ) : (
         <>
-          <div className="flex-1 min-h-0 overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input">
+          <div className="flex-1 min-h-0 select-text overflow-y-auto rounded-md border bg-background px-4 py-3 transition-colors focus-within:border-input">
             <ContentEditor
               key={`defaults-instructions-${initialValue}`}
               defaultValue={initialValue}

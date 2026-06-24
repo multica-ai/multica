@@ -161,7 +161,7 @@ export function ConfigTemplateDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex h-[80vh] max-h-[calc(100vh-2rem)] max-w-5xl flex-col gap-0 p-0 sm:max-w-5xl">
+        <DialogContent className="flex h-[80vh] max-h-[calc(100vh-2rem)] max-w-5xl select-none flex-col gap-0 p-0 sm:max-w-5xl">
           <DialogHeader className="flex h-12 shrink-0 flex-row items-center justify-between gap-2 border-b px-4 pr-12">
             <DialogTitle className="text-sm">
               {scope === "system"
