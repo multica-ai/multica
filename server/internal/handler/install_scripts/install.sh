@@ -299,9 +299,21 @@ download_and_install() {
 # curl|sh runs in a subshell that cannot mutate the parent's PATH, so to make
 # `multica` resolvable in the current terminal we place a symlink in a
 # directory that is already on the user's PATH.
+# Prefer user-owned dirs ($HOME/.local/bin, $HOME/bin) so we don't drop a
+# symlink into a package-manager dir like /opt/homebrew/bin. A dir only
+# qualifies if it is already on PATH (else the current shell can't resolve it).
 find_writable_path_dir() {
-    local dir
+    local candidate dir
     local IFS=':'
+    for candidate in "$HOME/.local/bin" "$HOME/bin"; do
+        [ -n "$candidate" ] || continue
+        [ -d "$candidate" ] || continue
+        [ -w "$candidate" ] || continue
+        [ "$candidate" = "$INSTALL_DIR" ] && continue
+        case ":$PATH:" in
+            *":${candidate}:"*) printf '%s\n' "$candidate"; return 0 ;;
+        esac
+    done
     for dir in $PATH; do
         [ -n "$dir" ] || continue
         [ -d "$dir" ] || continue
@@ -325,7 +337,11 @@ link_multica_into_path() {
     local dir
     dir=$(find_writable_path_dir) || true
     if [ -n "$dir" ]; then
-        if ln -sf "$target" "$dir/multica" 2>/dev/null; then
+        # Refuse to clobber an existing 'multica' that is not already our
+        # symlink (e.g. a Homebrew or manual install living in that dir).
+        if [ -e "$dir/multica" ] && { [ ! -L "$dir/multica" ] || [ "$(readlink "$dir/multica" 2>/dev/null)" != "$target" ]; }; then
+            warn "$dir already contains a 'multica' that is not ours; not overwriting it."
+        elif ln -sf "$target" "$dir/multica" 2>/dev/null; then
             if command -v multica >/dev/null 2>&1; then
                 ok "Linked multica -> $dir/multica (usable in this terminal now)"
                 return 0
