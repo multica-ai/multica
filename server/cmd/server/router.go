@@ -1041,6 +1041,9 @@ func buildLarkConnectorFactory(installSvc *lark.InstallationService, apiClient l
 	}
 	decoder := lark.NewLarkJSONFrameDecoder()
 	dialer := lark.NewGorillaDialer()
+	if proxyURL := strings.TrimSpace(os.Getenv("MULTICA_LARK_WS_PROXY_URL")); proxyURL != "" {
+		dialer.ProxyURL = proxyURL
+	}
 	credsProvider := lark.CredentialsProviderFunc(func(ctx context.Context, inst lark.Installation) (lark.InstallationCredentials, error) {
 		secret, err := installSvc.DecryptAppSecret(inst)
 		if err != nil {
