@@ -118,7 +118,7 @@ export function entryMatchesSection(
       // as a "filter" box. With no conditions sectionFilters() is empty, so this
       // still shows everything; muting + the Favorites float are applied later
       // in selectSectionEntries and are unaffected.
-      return sectionFilters(section).every((c) => conditionMatches(c, entry, ctx));
+      return matchesFilters(section, entry, ctx);
     case "unread":
       return entryIsUnread(entry);
     case "pinned":
@@ -128,9 +128,10 @@ export function entryMatchesSection(
     case "project":
       return !!section.projectId && entryProjectId(entry) === section.projectId;
     case "filter":
-      // TECH-3413 #5 — AND of every condition in the filter builder. An empty
-      // filter shows everything (the user stacks conditions to narrow it).
-      return sectionFilters(section).every((c) => conditionMatches(c, entry, ctx));
+      // TECH-3413 #5 — the filter builder. Conditions combine with AND ("all",
+      // default) or OR ("any", FIR-1731). An empty filter shows everything (the
+      // user stacks conditions to narrow it).
+      return matchesFilters(section, entry, ctx);
     case "act_now":
     case "running":
     case "reminders":
@@ -157,6 +158,26 @@ export function sectionFilters(section: InboxSectionConfig): FilterCondition[] {
   if (section.filterPinned) seeded.push({ field: "pinned" });
   if (section.projectId) seeded.push({ field: "project", projectId: section.projectId });
   return seeded;
+}
+
+/**
+ * FIR-1731 — combine the filter-builder conditions for a section. Incomplete
+ * conditions (a "kind"/"project" chip with no value chosen yet) carry no real
+ * predicate, so they are dropped first — that keeps them a no-op in BOTH modes
+ * (in "any"/OR an un-filtered "kind" chip would otherwise match everything). An
+ * empty (or all-incomplete) filter shows everything. With conditions present,
+ * "all" requires every condition (AND, the default) and "any" requires at least
+ * one (OR).
+ */
+function matchesFilters(
+  section: InboxSectionConfig,
+  entry: DynInboxEntry,
+  ctx: SectionFilterContext,
+): boolean {
+  const conds = sectionFilters(section).filter((c) => !isIncompleteCondition(c));
+  if (conds.length === 0) return true;
+  const test = (c: FilterCondition) => conditionMatches(c, entry, ctx);
+  return (section.match ?? "all") === "any" ? conds.some(test) : conds.every(test);
 }
 
 /**

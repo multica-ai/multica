@@ -5,8 +5,8 @@
 // All copy is English.
 "use client";
 
-import { useState } from "react";
-import { Plus, X, FolderOpen, Check } from "lucide-react";
+import { Fragment, useState } from "react";
+import { Plus, X, FolderOpen, Check, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -30,12 +30,16 @@ import {
   CommandItem,
 } from "@multica/ui/components/ui/command";
 import type { Project } from "@multica/core/types";
-import type { FilterCondition, FilterField, EntryKindFilter } from "../layout";
+import type { FilterCondition, FilterField, EntryKindFilter, FilterMatchMode } from "../layout";
 
 export interface FilterBuilderProps {
   filters: FilterCondition[];
   projects: Project[];
   onChange: (next: FilterCondition[]) => void;
+  // FIR-1731 — how conditions combine: "all" (AND) or "any" (OR). Defaults to
+  // "all". onMatchChange persists the choice on the section config.
+  match?: FilterMatchMode;
+  onMatchChange: (next: FilterMatchMode) => void;
 }
 
 // Pure-boolean predicates — toggled on/off from the "+ Condition" menu.
@@ -87,8 +91,16 @@ function conditionLabel(cond: FilterCondition, projects: Project[]): string {
   }
 }
 
-export function FilterBuilder({ filters, projects, onChange }: FilterBuilderProps) {
+export function FilterBuilder({
+  filters,
+  projects,
+  onChange,
+  match = "all",
+  onMatchChange,
+}: FilterBuilderProps) {
   const [projectOpen, setProjectOpen] = useState(false);
+  // FIR-1731 — the word shown between chips and in the mode toggle.
+  const connector = match === "any" ? "or" : "and";
 
   const hasField = (field: FilterField) => filters.some((c) => c.field === field);
 
@@ -135,28 +147,77 @@ export function FilterBuilder({ filters, projects, onChange }: FilterBuilderProp
         <span className="text-[11px] text-muted-foreground">No filters — showing everything.</span>
       )}
 
-      {filters.map((cond, i) => (
-        <span
-          key={`${cond.field}:${cond.projectId ?? cond.entryKind ?? ""}:${i}`}
-          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-foreground ${
-            cond.negate ? "border-destructive/50 bg-destructive/10" : "border-border bg-muted"
-          }`}
-        >
-          {/* FIR-1731 — is / is not toggle: switches this condition between
-              include and exclude (negation). */}
-          <button
-            type="button"
-            onClick={() => toggleNegate(i)}
-            className="rounded-full text-[10px] font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
-            title={
-              cond.negate
-                ? "Excluding matching rows — click to include"
-                : "Including matching rows — click to exclude"
+      {/* FIR-1731 — Match all / Match any: the global AND/OR toggle. Only shown
+          with 2+ conditions, since it changes nothing for a single condition. */}
+      {filters.length >= 2 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-accent"
+                title="Choose whether rows must match all conditions or any one of them"
+              />
             }
-            aria-label={cond.negate ? "Set condition to include" : "Set condition to exclude"}
           >
-            {cond.negate ? "is not" : "is"}
-          </button>
+            {match === "any" ? "Match any" : "Match all"}
+            <ChevronDown className="size-3" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuItem onClick={() => onMatchChange("all")}>
+              Match all — every condition (and) {match === "any" ? "" : "✓"}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onMatchChange("any")}>
+              Match any — at least one (or) {match === "any" ? "✓" : ""}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
+      {filters.map((cond, i) => (
+        <Fragment key={`${cond.field}:${cond.projectId ?? cond.entryKind ?? ""}:${i}`}>
+          {/* FIR-1731 — the active connector word between chips, so the and/or
+              relationship is visible, not just implied. */}
+          {i > 0 && (
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {connector}
+            </span>
+          )}
+          <span
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-foreground ${
+              cond.negate ? "border-destructive/50 bg-destructive/10" : "border-border bg-muted"
+            }`}
+          >
+          {/* FIR-1731 — is / is not selector: an explicit dropdown so it is
+              obvious the condition can be flipped between include and exclude
+              (negation), instead of a tiny text label that read as static. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ${
+                    cond.negate
+                      ? "bg-destructive/20 text-destructive"
+                      : "bg-foreground/10 text-foreground"
+                  }`}
+                  title="Include or exclude rows matching this condition"
+                  aria-label={cond.negate ? "Condition set to exclude" : "Condition set to include"}
+                />
+              }
+            >
+              {cond.negate ? "is not" : "is"}
+              <ChevronDown className="size-2.5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44">
+              <DropdownMenuItem onClick={() => !cond.negate || toggleNegate(i)}>
+                is — include matching {cond.negate ? "" : "✓"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => cond.negate || toggleNegate(i)}>
+                is not — exclude matching {cond.negate ? "✓" : ""}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {cond.field === "project" ? (
             <button
               type="button"
@@ -181,7 +242,8 @@ export function FilterBuilder({ filters, projects, onChange }: FilterBuilderProp
           >
             <X className="size-3" />
           </button>
-        </span>
+          </span>
+        </Fragment>
       ))}
 
       {/* + Condition — booleans and the single "type" narrow. */}

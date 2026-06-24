@@ -591,6 +591,8 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
             filters={sectionFilters(section)}
             projects={projects}
             onChange={(filters) => props.onChange({ ...section, filters })}
+            match={section.match ?? "all"}
+            onMatchChange={(match) => props.onChange({ ...section, match })}
           />
           <div className="flex justify-end px-3 pb-2">
             <button

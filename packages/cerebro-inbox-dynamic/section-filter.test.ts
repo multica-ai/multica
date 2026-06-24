@@ -319,6 +319,50 @@ describe("section-filter", () => {
     expect(entryMatchesSection(inP1, allExcludeP1, ctx)).toBe(false);
     expect(entryMatchesSection(inP2, allExcludeP1, ctx)).toBe(true);
   });
+
+  it("FIR-1731 — match 'any' ORs the conditions; default 'all' ANDs them", () => {
+    const unreadOnly = notifEntry(1, { read: false, issue_id: "other" });
+    const pinnedOnly = notifEntry(1, { read: true, issue_id: "pinned-iss" });
+    const neither = notifEntry(1, { read: true, issue_id: "other" });
+    const conds = [{ field: "unread" as const }, { field: "pinned" as const }];
+
+    // Default (no match / "all") = AND: needs both.
+    const andCfg = { id: "s", kind: "filter" as const, filters: conds };
+    expect(entryMatchesSection(unreadOnly, andCfg, ctx)).toBe(false);
+    expect(entryMatchesSection(pinnedOnly, andCfg, ctx)).toBe(false);
+
+    // "any" = OR: either condition is enough, but neither still fails.
+    const orCfg = { id: "s", kind: "filter" as const, match: "any" as const, filters: conds };
+    expect(entryMatchesSection(unreadOnly, orCfg, ctx)).toBe(true);
+    expect(entryMatchesSection(pinnedOnly, orCfg, ctx)).toBe(true);
+    expect(entryMatchesSection(neither, orCfg, ctx)).toBe(false);
+  });
+
+  it("FIR-1731 — 'any' mode also applies to the All messages box", () => {
+    const inP1 = notifEntry(1, { project_id: "p1", read: true });
+    const unreadP2 = notifEntry(1, { project_id: "p2", read: false });
+    const orAll = {
+      id: "s",
+      kind: "all" as const,
+      match: "any" as const,
+      filters: [{ field: "project" as const, projectId: "p1" }, { field: "unread" as const }],
+    };
+    expect(entryMatchesSection(inP1, orAll, ctx)).toBe(true);
+    expect(entryMatchesSection(unreadP2, orAll, ctx)).toBe(true);
+    expect(entryMatchesSection(notifEntry(1, { project_id: "p2", read: true }), orAll, ctx)).toBe(false);
+  });
+
+  it("FIR-1731 — an incomplete condition stays a no-op in 'any' mode (no match-all)", () => {
+    // An un-chosen "kind" chip must not OR-in everything.
+    const orWithIncomplete = {
+      id: "s",
+      kind: "filter" as const,
+      match: "any" as const,
+      filters: [{ field: "kind" as const }, { field: "unread" as const }],
+    };
+    expect(entryMatchesSection(notifEntry(1, { read: false }), orWithIncomplete, ctx)).toBe(true);
+    expect(entryMatchesSection(notifEntry(1, { read: true }), orWithIncomplete, ctx)).toBe(false);
+  });
 });
 
 describe("layout", () => {

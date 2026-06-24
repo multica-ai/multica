@@ -22,6 +22,9 @@ export type FilterField =
 /** TECH-3502 #3 — narrow a "kind" condition to one row type. */
 export type EntryKindFilter = "issue" | "chat" | "channel";
 
+/** FIR-1731 — combine filter-builder conditions with AND ("all") or OR ("any"). */
+export type FilterMatchMode = "all" | "any";
+
 export interface FilterCondition {
   field: FilterField;
   /** Required when field === "project". */
@@ -151,6 +154,11 @@ export interface InboxSectionConfig {
   // source of truth. Empty array = show everything. The legacy booleans are
   // kept only as a migration seed (see `sectionFilters` in section-filter.ts).
   filters?: FilterCondition[];
+  // FIR-1731 — how the filter-builder conditions combine: "all" = AND (every
+  // condition must match, the default and the old behaviour), "any" = OR (at
+  // least one must match). Applies to the "filter" and "all" box kinds. Optional
+  // and defaults to "all", so layouts saved before this existed parse unchanged.
+  match?: FilterMatchMode;
   /** TECH-3494 — for the "team" (Chat) section: total rows to show across
    *  channels + people + agents. 0 = all. undefined defaults to 10. */
   teamLimit?: number;
