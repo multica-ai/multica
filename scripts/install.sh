@@ -248,11 +248,12 @@ install_cli_binary() {
     fail "Installed the CLI but failed to write the managed install marker."
   fi
 
-  if ! echo "$PATH" | tr ':' '\n' | grep -q "^$CLI_BIN_DIR$"; then
-    export PATH="$CLI_BIN_DIR:$PATH"
-    add_to_path "$CLI_BIN_DIR"
-    print_current_shell_path_hint
-  fi
+  # Persist CLI_BIN_DIR on PATH for future terminals (idempotent).
+  add_to_path "$CLI_BIN_DIR"
+  # Make 'multica' usable in THIS terminal immediately. curl|sh runs in a
+  # subshell that cannot mutate the parent's PATH, so we symlink the managed
+  # binary into a directory already on PATH instead of relying on `source`.
+  link_multica_into_path
 
   rm -rf "$tmp_dir"
   ok "Multica CLI installed to $CLI_BIN_PATH"
@@ -276,21 +277,73 @@ add_to_path() {
   done
 }
 
-print_current_shell_path_hint() {
-  local shell_name shell_rc
-  shell_name="${SHELL##*/}"
-  case "$shell_name" in
-    zsh) shell_rc="$HOME/.zshrc" ;;
-    bash) shell_rc="$HOME/.bashrc" ;;
-    *) shell_rc="" ;;
-  esac
+# Find the first directory that is already on PATH and writable by us.
+# Used so a `curl | sh` subshell can make `multica` resolvable in the parent
+# shell without asking the user to `source` anything (a subshell cannot mutate
+# the parent's PATH env var).
+find_writable_path_dir() {
+  local dir
+  local IFS=':'
+  for dir in $PATH; do
+    [ -n "$dir" ] || continue
+    [ -d "$dir" ] || continue
+    [ -w "$dir" ] || continue
+    # Skip the managed dir itself — it is precisely what is missing from PATH.
+    [ "$dir" = "$CLI_BIN_DIR" ] && continue
+    printf '%s\n' "$dir"
+    return 0
+  done
+  return 1
+}
 
-  warn "This installer runs in a child shell, so your current terminal may not see the new PATH immediately."
-  if [ -n "$shell_rc" ]; then
-    warn "For this terminal, run: source \"$shell_rc\""
-  else
-    warn "For this terminal, run: export PATH=\"$CLI_BIN_DIR:\$PATH\""
+# Make `multica` usable in the CURRENT terminal immediately after install.
+# curl|sh runs in a subshell; exporting PATH here only affects the subshell.
+# Instead we symlink the managed binary into a directory already on PATH.
+link_multica_into_path() {
+  local target="$CLI_BIN_PATH"
+
+  # Already resolvable (reinstall, or CLI_BIN_DIR already on PATH)?
+  if command -v multica >/dev/null 2>&1; then
+    return 0
   fi
+
+  local dir
+  dir=$(find_writable_path_dir) || true
+  if [ -n "$dir" ]; then
+    if ln -sf "$target" "$dir/multica" 2>/dev/null; then
+      if command -v multica >/dev/null 2>&1; then
+        ok "Linked multica -> $dir/multica (usable in this terminal now)"
+        return 0
+      fi
+    fi
+  fi
+
+  # No writable PATH dir without sudo: offer a system-wide symlink.
+  if [ -d /usr/local/bin ] && command -v sudo >/dev/null 2>&1; then
+    printf "\n"
+    warn "No writable directory found on your PATH."
+    warn "Install a symlink into /usr/local/bin so 'multica' works immediately?"
+    printf "    This will run: sudo ln -sf %s /usr/local/bin/multica\n" "$target"
+    printf "    Proceed? [y/N] "
+    local reply
+    read -r reply </dev/tty 2>/dev/null || reply=""
+    case "$reply" in
+      y|Y|yes|YES)
+        if sudo ln -sf "$target" /usr/local/bin/multica; then
+          if command -v multica >/dev/null 2>&1; then
+            ok "Linked multica -> /usr/local/bin/multica (usable in this terminal now)"
+            return 0
+          fi
+        fi
+        ;;
+    esac
+  fi
+
+  # Last resort: same-shell usability is physically impossible here (subshell
+  # can't mutate parent PATH and no writable PATH dir exists). add_to_path has
+  # already persisted the entry for future terminals.
+  warn "Could not make 'multica' available in this terminal automatically."
+  warn "Open a new terminal, or run: export PATH=\"$CLI_BIN_DIR:\$PATH\""
 }
 
 get_selfhost_ref() {
@@ -431,7 +484,10 @@ install_cli() {
 
   # Verify
   if [ ! -x "$CLI_BIN_PATH" ]; then
-    fail "CLI installed but 'multica' not found on PATH. You may need to restart your shell."
+    fail "CLI install failed: binary not present at $CLI_BIN_PATH."
+  fi
+  if ! command -v multica >/dev/null 2>&1; then
+    warn "CLI installed at $CLI_BIN_PATH but not resolvable as 'multica' in this shell."
   fi
 }
 

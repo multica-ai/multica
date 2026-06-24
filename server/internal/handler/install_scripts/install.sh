@@ -295,46 +295,103 @@ download_and_install() {
     ok "Installed ${INSTALL_DIR}/${binary_name}"
 }
 
+# --- Find a writable directory already on PATH ---
+# curl|sh runs in a subshell that cannot mutate the parent's PATH, so to make
+# `multica` resolvable in the current terminal we place a symlink in a
+# directory that is already on the user's PATH.
+find_writable_path_dir() {
+    local dir
+    local IFS=':'
+    for dir in $PATH; do
+        [ -n "$dir" ] || continue
+        [ -d "$dir" ] || continue
+        [ -w "$dir" ] || continue
+        [ "$dir" = "$INSTALL_DIR" ] && continue
+        printf '%s\n' "$dir"
+        return 0
+    done
+    return 1
+}
+
+# --- Make multica usable in the current terminal immediately ---
+link_multica_into_path() {
+    local target="$INSTALL_DIR/multica"
+
+    # Already resolvable (reinstall, or INSTALL_DIR already on PATH)?
+    if command -v multica >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local dir
+    dir=$(find_writable_path_dir) || true
+    if [ -n "$dir" ]; then
+        if ln -sf "$target" "$dir/multica" 2>/dev/null; then
+            if command -v multica >/dev/null 2>&1; then
+                ok "Linked multica -> $dir/multica (usable in this terminal now)"
+                return 0
+            fi
+        fi
+    fi
+
+    # No writable PATH dir without sudo: offer a system-wide symlink.
+    if [ -d /usr/local/bin ] && command -v sudo >/dev/null 2>&1; then
+        printf "\n"
+        warn "No writable directory found on your PATH."
+        warn "Install a symlink into /usr/local/bin so 'multica' works immediately?"
+        printf "    This will run: sudo ln -sf %s /usr/local/bin/multica\n" "$target"
+        printf "    Proceed? [y/N] "
+        local reply
+        read -r reply </dev/tty 2>/dev/null || reply=""
+        case "$reply" in
+            y|Y|yes|YES)
+                if sudo ln -sf "$target" /usr/local/bin/multica; then
+                    if command -v multica >/dev/null 2>&1; then
+                        ok "Linked multica -> /usr/local/bin/multica (usable in this terminal now)"
+                        return 0
+                    fi
+                fi
+                ;;
+        esac
+    fi
+
+    # Last resort: same-shell usability is physically impossible here.
+    warn "Could not make 'multica' available in this terminal automatically."
+    warn "Open a new terminal, or run: export PATH=\"$INSTALL_DIR:\$PATH\""
+}
+
 # --- Configure PATH ---
 configure_path() {
     local shell_profile=""
     local path_entry="export PATH=\"${INSTALL_DIR}:\$PATH\""
 
-    # Check if already in PATH
+    # Persist INSTALL_DIR on PATH for future terminals (idempotent).
     case ":$PATH:" in
         *":${INSTALL_DIR}:"*)
-            return 0
+            # Already on PATH — nothing to persist; still link below for current shell.
+            ;;
+        *)
+            # Detect shell profile
+            if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "$SHELL" 2>/dev/null)" = "zsh" ]; then
+                shell_profile="$HOME/.zshrc"
+            elif [ -n "${BASH_VERSION:-}" ] || [ "$(basename "$SHELL" 2>/dev/null)" = "bash" ]; then
+                if [ -f "$HOME/.bashrc" ]; then
+                    shell_profile="$HOME/.bashrc"
+                elif [ -f "$HOME/.bash_profile" ]; then
+                    shell_profile="$HOME/.bash_profile"
+                fi
+            fi
+
+            if [ -n "$shell_profile" ] && [ -f "$shell_profile" ]; then
+                if ! grep -q "\.multica/bin" "$shell_profile" 2>/dev/null; then
+                    printf '\n# Multica CLI\n%s\n' "$path_entry" >> "$shell_profile"
+                    info "Added ${INSTALL_DIR} to PATH in ${shell_profile}"
+                fi
+            fi
             ;;
     esac
 
-    # Detect shell profile
-    if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "$SHELL" 2>/dev/null)" = "zsh" ]; then
-        shell_profile="$HOME/.zshrc"
-    elif [ -n "${BASH_VERSION:-}" ] || [ "$(basename "$SHELL" 2>/dev/null)" = "bash" ]; then
-        if [ -f "$HOME/.bashrc" ]; then
-            shell_profile="$HOME/.bashrc"
-        elif [ -f "$HOME/.bash_profile" ]; then
-            shell_profile="$HOME/.bash_profile"
-        fi
-    fi
-
-    if [ -n "$shell_profile" ] && [ -f "$shell_profile" ]; then
-        if ! grep -q "\.multica/bin" "$shell_profile" 2>/dev/null; then
-            printf '\n# Multica CLI\n%s\n' "$path_entry" >> "$shell_profile"
-            info "Added ${INSTALL_DIR} to PATH in ${shell_profile}"
-        fi
-    fi
-
-    # Also export for current session
-    export PATH="${INSTALL_DIR}:$PATH"
-
-    if ! command -v multica >/dev/null 2>&1; then
-        warn "${INSTALL_DIR} is not in your PATH."
-        warn "Add the following to your shell profile:"
-        echo ""
-        echo "  $path_entry"
-        echo ""
-    fi
+    # Make 'multica' usable in THIS terminal immediately.
+    link_multica_into_path
 }
 
 # --- Configure server URL ---
@@ -414,7 +471,14 @@ main() {
     # --restart: update binary & restart daemon, no full install
     if [ "$RESTART_ONLY" = "true" ]; then
         if [ ! -x "$multica_bin" ]; then
-            die "Multica CLI not found at ${multica_bin}. Run without --restart for full install."
+            # Fall back to whatever 'multica' resolves to on PATH (e.g. a
+            # Homebrew or GitHub Releases install that lives outside INSTALL_DIR).
+            if command -v multica >/dev/null 2>&1; then
+                multica_bin="$(command -v multica)"
+                info "Using multica at ${multica_bin} (resolved via PATH)"
+            else
+                die "Multica CLI not found at ${INSTALL_DIR}/multica and not on PATH. Run without --restart for full install."
+            fi
         fi
         info "Updating CLI binary to latest version..."
         check_deps
