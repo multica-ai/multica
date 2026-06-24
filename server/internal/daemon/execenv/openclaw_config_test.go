@@ -252,7 +252,7 @@ func TestPrepareOpenclawConfigKeyMissingTreatedAsEmpty(t *testing.T) {
 		// Pre-2026.6 single-agent installs with no per-agent overrides resolve
 		// to an empty registry once the config-path probe reports missing.
 		// (2026.6.x registry-population is covered by
-		// TestPrepareOpenclawConfigNewSchemaFallsBackToRegistry.)
+		// TestPrepareOpenclawConfigNewSchemaOmitsAgentsList.)
 		"agents list --json": {stdout: "null"},
 	})
 
