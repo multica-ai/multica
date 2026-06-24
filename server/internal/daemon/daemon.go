@@ -1020,6 +1020,18 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 				"workspace_id", workspaceID, "profile_id", profile.ID, "display_name", profile.DisplayName)
 			continue
 		}
+		if !agent.IsSupportedType(profile.ProtocolFamily) {
+			reason := "unsupported protocol_family: " + profile.ProtocolFamily
+			d.logger.Warn("skip custom runtime profile: unsupported protocol_family",
+				"workspace_id", workspaceID, "profile_id", profile.ID,
+				"display_name", profile.DisplayName, "protocol_family", profile.ProtocolFamily)
+			*failedProfiles = append(*failedProfiles, map[string]string{
+				"profile_id":   profile.ID,
+				"command_name": profile.CommandName,
+				"reason":       reason,
+			})
+			continue
+		}
 		// Resolve the executable to launch for this profile. A per-machine
 		// path override (MUL-3284, `multica runtime profile set-path`) wins
 		// over the PATH lookup when it is set AND points at a real
@@ -3464,7 +3476,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// In local_directory mode the workdir is the user's own repo, reuse is
 	// already disabled above (see localAssignment == nil), and the brief
 	// would otherwise live on inside the user's repository — a subsequent
-	// manual `claude` / `codex` / `gemini` run in that directory would pick
+	// manual `claude` / `codex` run in that directory would pick
 	// up stale Multica instructions (issue id, trigger comment id, reply
 	// rules) and start acting on the previous task's context. Excise the
 	// marker block on the way out instead.
@@ -3478,7 +3490,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// into the user's repo. Without this pass the user's tree
 			// accumulates one directory layer per task — see MUL-2784.
 			// CleanupRuntimeConfig handles the runtime brief inside
-			// CLAUDE.md / AGENTS.md / GEMINI.md; CleanupSidecars handles
+			// CLAUDE.md / AGENTS.md; CleanupSidecars handles
 			// every other file Prepare placed under WorkDir. Together
 			// they round-trip the workdir to its exact pre-task bytes.
 			if cerr := execenv.CleanupSidecars(env.RootDir); cerr != nil {

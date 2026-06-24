@@ -1823,7 +1823,7 @@ func TestDefaultArgsForProvider(t *testing.T) {
 	if got := defaultArgsForProvider(cfg, "codex"); strings.Join(got, " ") != "--sandbox workspace-write" {
 		t.Fatalf("unexpected codex args: %#v", got)
 	}
-	if got := defaultArgsForProvider(cfg, "gemini"); got != nil {
+	if got := defaultArgsForProvider(cfg, "unsupported"); got != nil {
 		t.Fatalf("expected nil for unsupported provider, got %#v", got)
 	}
 }

@@ -101,8 +101,6 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		models := codexStaticModels()
 		annotateCodexThinking(ctx, models, executablePath)
 		return models, nil
-	case "gemini":
-		return geminiStaticModels(), nil
 	case "antigravity":
 		// agy 1.0.6 added a `--model` flag plus an `agy models` catalog
 		// command (MUL-3125). Enumerate it on demand like the other
@@ -204,8 +202,6 @@ func acceptedModelIDsForProvider(providerType string) (map[string]bool, bool) {
 		return modelIDSet(claudeStaticModels()), true
 	case providerType == "codex":
 		return modelIDSet(codexStaticModels()), true
-	case providerType == "gemini":
-		return modelIDSet(geminiStaticModels()), true
 	default:
 		return nil, false
 	}
@@ -225,8 +221,7 @@ func isRuntimeSpecificModelID(model string) bool {
 	}
 	return modelHasKnownPrefix(model) ||
 		modelIDSet(claudeStaticModels())[model] ||
-		modelIDSet(codexStaticModels())[model] ||
-		modelIDSet(geminiStaticModels())[model]
+		modelIDSet(codexStaticModels())[model]
 }
 
 func modelHasKnownPrefix(model string) bool {
@@ -305,31 +300,6 @@ func codexStaticModels() []Model {
 		{ID: "gpt-5", Label: "GPT-5", Provider: "openai"},
 		{ID: "o3", Label: "o3", Provider: "openai"},
 		{ID: "o3-mini", Label: "o3-mini", Provider: "openai"},
-	}
-}
-
-// geminiStaticModels lists the values we pass via `gemini -m`. Gemini
-// CLI has no `models list` subcommand, so dynamic discovery isn't
-// possible; the next best thing is to expose the CLI's own aliases
-// (auto / pro / flash / flash-lite and the `auto-gemini-*` family)
-// alongside a few explicit version pins. Aliases track whatever the
-// installed CLI considers current (see `resolveModel` in the CLI's
-// packages/core/src/config/models.ts), so new Gemini releases light
-// up without a Multica redeploy. Default is `auto` to match Google's
-// recommendation — the CLI picks Pro vs Flash per task and falls back
-// when quota is exhausted.
-func geminiStaticModels() []Model {
-	return []Model{
-		{ID: "auto", Label: "Auto (Gemini 3)", Provider: "google", Default: true},
-		{ID: "auto-gemini-2.5", Label: "Auto (Gemini 2.5)", Provider: "google"},
-		{ID: "pro", Label: "Pro", Provider: "google"},
-		{ID: "flash", Label: "Flash", Provider: "google"},
-		{ID: "flash-lite", Label: "Flash Lite", Provider: "google"},
-		{ID: "gemini-3-pro-preview", Label: "Gemini 3 Pro (preview)", Provider: "google"},
-		{ID: "gemini-3-flash-preview", Label: "Gemini 3 Flash (preview)", Provider: "google"},
-		{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", Provider: "google"},
-		{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", Provider: "google"},
-		{ID: "gemini-2.5-flash-lite", Label: "Gemini 2.5 Flash Lite", Provider: "google"},
 	}
 }
 

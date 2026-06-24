@@ -244,6 +244,54 @@ func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	}
 }
 
+// TestRegisterRuntimes_SkipsUnsupportedProfileFamily verifies historical
+// profiles whose protocol_family is no longer supported are not registered as
+// online runtimes even when their command still resolves locally.
+func TestRegisterRuntimes_SkipsUnsupportedProfileFamily(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{"gemini": "/usr/bin/gemini"})
+
+	profiles := []RuntimeProfile{{
+		ID:             "prof-gemini",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "Old Gemini",
+		ProtocolFamily: "gemini",
+		CommandName:    "gemini",
+		Enabled:        true,
+	}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{}
+
+	_, sig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if sig == "" {
+		t.Errorf("profileSig must still be returned for unsupported historical profiles")
+	}
+	if _, ok := d.profileLaunchSpecs["prof-gemini"]; ok {
+		t.Errorf("profileLaunchSpecs should not record an unsupported profile")
+	}
+	if len(fx.sentRuntimes) != 0 {
+		t.Fatalf("sent runtimes = %+v, want none", fx.sentRuntimes)
+	}
+	if len(fx.sentFailures) != 1 {
+		t.Fatalf("sent failures = %+v, want one unsupported profile failure", fx.sentFailures)
+	}
+	failure := fx.sentFailures[0]
+	if failure["profile_id"] != "prof-gemini" {
+		t.Errorf("failure profile_id = %v, want prof-gemini", failure["profile_id"])
+	}
+	if failure["command_name"] != "gemini" {
+		t.Errorf("failure command_name = %v, want gemini", failure["command_name"])
+	}
+	reason, _ := failure["reason"].(string)
+	if !strings.Contains(reason, "unsupported protocol_family: gemini") {
+		t.Errorf("failure reason = %q, want unsupported protocol_family: gemini", reason)
+	}
+}
+
 // TestRegisterRuntimes_ProfilesFetchErrorIsBestEffort verifies a 404 from the
 // profiles endpoint does not fail registration when a built-in agent exists.
 func TestRegisterRuntimes_ProfilesFetchErrorIsBestEffort(t *testing.T) {
