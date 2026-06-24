@@ -172,4 +172,43 @@ describe("StageLane", () => {
     expect(section.className).not.toContain("rounded-2xl");
     expect(section.className).not.toContain("shadow-");
   });
+
+  it("uses a process rail layout with a stage label column and centered node row", () => {
+    const onCardClick = vi.fn();
+    render(
+      <StageLane
+        stage={MOCK_STAGE}
+        nodeIds={MOCK_NODES}
+        agentLookup={agentLookup}
+        pluginLookup={pluginLookup}
+        onCardClick={onCardClick}
+        nodeElementRefs={emptyRefs}
+        criticElementRefs={emptyRefs}
+      />,
+    );
+    const section = screen.getByTestId("stage-lane-stage-1");
+    expect(section.className).toContain("border-y");
+    expect(section.className).not.toContain("border-l-4");
+    expect(screen.getByTestId("stage-lane-shell-stage-1").className).toContain("grid");
+    const nodeRow = screen.getByTestId("stage-lane-node-row-stage-1");
+    expect(nodeRow.className).toContain("w-full");
+    expect(nodeRow.className).toContain("justify-evenly");
+    expect(nodeRow.className).toContain("gap-8");
+  });
+
+  it("keeps a readable vertical connector gap between worker cards and critic badges", () => {
+    const onCardClick = vi.fn();
+    render(
+      <StageLane
+        stage={MOCK_STAGE}
+        nodeIds={MOCK_NODES}
+        agentLookup={agentLookup}
+        pluginLookup={pluginLookup}
+        onCardClick={onCardClick}
+        nodeElementRefs={emptyRefs}
+        criticElementRefs={emptyRefs}
+      />,
+    );
+    expect(screen.getByTestId("stage-lane-node-stack-n2").className).toContain("gap-5");
+  });
 });

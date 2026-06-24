@@ -40,12 +40,12 @@ type PanoramaSelection = {
 
 // Stage transition gradient lookup (6-color cycle -> all pairwise transitions)
 const STAGE_TRANSITION_GRADIENTS = [
-  "bg-gradient-to-b from-slate-50/40 to-stone-50/40",
-  "bg-gradient-to-b from-stone-50/40 to-blue-50/40",
-  "bg-gradient-to-b from-blue-50/40 to-rose-50/40",
-  "bg-gradient-to-b from-rose-50/40 to-violet-50/40",
-  "bg-gradient-to-b from-violet-50/40 to-amber-50/40",
-  "bg-gradient-to-b from-amber-50/40 to-slate-50/40",
+  "bg-gradient-to-b from-slate-50/70 to-stone-50/70",
+  "bg-gradient-to-b from-stone-50/70 to-blue-50/65",
+  "bg-gradient-to-b from-blue-50/65 to-rose-50/65",
+  "bg-gradient-to-b from-rose-50/65 to-violet-50/65",
+  "bg-gradient-to-b from-violet-50/65 to-amber-50/65",
+  "bg-gradient-to-b from-amber-50/65 to-slate-50/70",
 ] as const;
 
 function PanoramaSkeleton() {
@@ -278,47 +278,54 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
       </PageHeader>
 
       <div
-        ref={containerRef}
-        className="flex-1 overflow-auto bg-[radial-gradient(circle_at_top,_rgba(148,163,184,0.08),_transparent_38%)] p-3 relative"
+        data-testid="workflow-panorama-canvas"
+        className="relative flex-1 overflow-auto bg-slate-100/70 p-4"
       >
-        <PanoramaSvgOverlay
-          edges={edges}
-          nodes={nodes}
-          nodePositions={nodePositions}
-          criticPositions={criticPositions}
-        />
+        <div
+          ref={containerRef}
+          data-testid="workflow-panorama-rail"
+          className="relative ml-0 w-full min-w-[1320px] rounded-xl bg-white shadow-[0_14px_40px_rgba(15,23,42,0.08)]"
+        >
+          <PanoramaSvgOverlay
+            edges={edges}
+            nodes={nodes}
+            stages={stages}
+            nodePositions={nodePositions}
+            criticPositions={criticPositions}
+          />
 
-        {sortedStages.length === 0 ? (
-          <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
-            {t(($) => $.overview.stage_canvas.empty_title)}
-          </div>
-        ) : (
-          sortedStages.map((stage, idx) => {
-            const currColorIdx = Math.abs(stage.sort_order) % 6;
-            const gradientClass = STAGE_TRANSITION_GRADIENTS[currColorIdx] ?? STAGE_TRANSITION_GRADIENTS[0];
+          {sortedStages.length === 0 ? (
+            <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+              {t(($) => $.overview.stage_canvas.empty_title)}
+            </div>
+          ) : (
+            sortedStages.map((stage, idx) => {
+              const currColorIdx = Math.abs(stage.sort_order) % 6;
+              const gradientClass = STAGE_TRANSITION_GRADIENTS[currColorIdx] ?? STAGE_TRANSITION_GRADIENTS[0];
 
-            return (
-              <div key={stage.id}>
-                <StageLane
-                  stage={stage}
-                  nodeIds={nodesByStage.get(stage.id) ?? []}
-                  agentLookup={agentLookup}
-                  pluginLookup={pluginLookup}
-                  onCardClick={handleCardClick}
-                  selectedCard={selectedCard}
-                  nodeElementRefs={nodeElementRefs}
-                  criticElementRefs={criticElementRefs}
-                />
-                {idx < sortedStages.length - 1 && (
-                  <div
-                    data-testid="stage-transition-gradient"
-                    className={`h-[6px] ${gradientClass}`}
+              return (
+                <div key={stage.id}>
+                  <StageLane
+                    stage={stage}
+                    nodeIds={nodesByStage.get(stage.id) ?? []}
+                    agentLookup={agentLookup}
+                    pluginLookup={pluginLookup}
+                    onCardClick={handleCardClick}
+                    selectedCard={selectedCard}
+                    nodeElementRefs={nodeElementRefs}
+                    criticElementRefs={criticElementRefs}
                   />
-                )}
-              </div>
-            );
-          })
-        )}
+                  {idx < sortedStages.length - 1 && (
+                    <div
+                      data-testid="stage-transition-gradient"
+                      className={`relative z-0 h-2 ${gradientClass}`}
+                    />
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       {selectedPanelData && (

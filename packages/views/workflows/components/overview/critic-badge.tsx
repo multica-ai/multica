@@ -28,7 +28,7 @@ export function CriticBadge({
       onClick={() => onClick(node.id, "critic")}
       ref={elementRef}
       className={cn(
-        "group flex min-h-[64px] min-w-[120px] shrink-0 flex-col gap-1.5 rounded-xl border-2 border-dashed border-[var(--warning)]/45 bg-[var(--warning)]/6 p-2.5 text-left transition-all duration-150",
+        "group flex h-14 w-40 shrink-0 flex-col gap-1 rounded-lg border-2 border-dashed border-amber-400/80 bg-amber-50 p-2 text-left shadow-[0_1px_2px_rgba(180,83,9,0.08)] transition-all duration-150",
         "hover:-translate-y-0.5 hover:border-[var(--warning)]/75 hover:bg-[var(--warning)]/11 hover:shadow-[0_8px_18px_rgba(245,158,11,0.10)]",
         "active:translate-y-0 active:scale-[0.99]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",

@@ -109,6 +109,12 @@ describe("CompactNodeCard", () => {
     expect(card.getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("uses a wide fixed card width for readable plugin names", () => {
+    const onClick = vi.fn();
+    render(<CompactNodeCard node={MOCK_NODE} agent={MOCK_AGENT} plugin={MOCK_PLUGIN} onClick={onClick} />);
+    expect(screen.getByTestId("compact-node-card-node-1").className).toContain("w-56");
+  });
+
   it("calls elementRef callback with the DOM element", () => {
     const onClick = vi.fn();
     const refs: (HTMLButtonElement | null)[] = [];

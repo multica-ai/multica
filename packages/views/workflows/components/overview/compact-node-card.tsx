@@ -38,8 +38,8 @@ export function CompactNodeCard({
       onClick={() => onClick(node.id, "worker")}
       ref={elementRef}
       className={cn(
-        "group flex min-h-[72px] min-w-[120px] shrink-0 flex-col gap-1.5 rounded-xl border bg-card/95 p-2.5 text-left transition-all duration-150",
-        "hover:-translate-y-0.5 hover:border-primary/45 hover:bg-background hover:shadow-[0_8px_20px_rgba(15,23,42,0.06)]",
+        "group flex h-16 w-56 shrink-0 flex-col gap-1.5 rounded-lg border border-slate-300/90 bg-white p-2.5 text-left shadow-[0_1px_2px_rgba(15,23,42,0.08)] transition-all duration-150",
+        "hover:-translate-y-0.5 hover:border-primary/45 hover:bg-background hover:shadow-[0_8px_20px_rgba(15,23,42,0.08)]",
         "active:translate-y-0 active:scale-[0.99]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         isSelected &&

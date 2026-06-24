@@ -87,6 +87,7 @@ interface NodeDef {
   criticType: "agent" | "human" | "squad" | "api" | "";
   criticAgentRef: string | null;
   isCriticNode: boolean;
+  sort_order: number;
 }
 
 interface EdgeDef {
@@ -197,42 +198,54 @@ const AGENT_DEFS: AgentDef[] = [
 ];
 
 const STAGE_DEFS: StageDef[] = [
-  { ref: "intake", name: "需求接入", sort_order: 1 },
-  { ref: "analysis", name: "需求分析", sort_order: 2 },
-  { ref: "design", name: "技术设计", sort_order: 3 },
-  { ref: "implementation", name: "编码实现", sort_order: 4 },
-  { ref: "testing", name: "测试验证", sort_order: 5 },
-  { ref: "release", name: "发布上线", sort_order: 6 },
+  { ref: "intake", name: "需求接入", sort_order: 0 },
+  { ref: "analysis", name: "需求分析", sort_order: 1 },
+  { ref: "design", name: "技术设计", sort_order: 2 },
+  { ref: "implementation", name: "编码实现", sort_order: 3 },
+  { ref: "testing", name: "测试验证", sort_order: 4 },
+  { ref: "release", name: "发布上线", sort_order: 5 },
 ];
 
 const NODE_DEFS: NodeDef[] = [
-  { ref: "brainstorming", title: "brainstorming", description: "Brainstorming plugin", stageRef: "intake", position_x: 120, position_y: 120, workerType: "agent", agentRef: "brain-stormer", criticType: "", criticAgentRef: null, isCriticNode: false },
-  { ref: "session-context", title: "session-context", description: "Session context manager", stageRef: "intake", position_x: 420, position_y: 120, workerType: "agent", agentRef: "brain-stormer", criticType: "", criticAgentRef: null, isCriticNode: false },
-  { ref: "using-specdeveloper", title: "using-specdeveloper", description: "Spec developer helper", stageRef: "intake", position_x: 720, position_y: 120, workerType: "agent", agentRef: "req-analyzer", criticType: "", criticAgentRef: null, isCriticNode: false },
-  { ref: "requirement-analysis", title: "requirement-analysis", description: "Requirement analysis plugin", stageRef: "analysis", position_x: 120, position_y: 360, workerType: "agent", agentRef: "req-analyzer", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false },
-  { ref: "aireq-evaluator", title: "aireq-evaluator", description: "AI requirement evaluator", stageRef: "analysis", position_x: 120, position_y: 540, workerType: "agent", agentRef: null, criticType: "agent", criticAgentRef: "reviewer", isCriticNode: true },
-  { ref: "system-requirement", title: "system-requirement", description: "System requirement spec", stageRef: "analysis", position_x: 420, position_y: 360, workerType: "agent", agentRef: "req-analyzer", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false },
-  { ref: "sysreq-evaluator", title: "sysreq-evaluator", description: "System requirement evaluator", stageRef: "analysis", position_x: 420, position_y: 540, workerType: "agent", agentRef: null, criticType: "agent", criticAgentRef: "reviewer", isCriticNode: true },
-  { ref: "architecture-design", title: "architecture-design", description: "Architecture design", stageRef: "design", position_x: 120, position_y: 780, workerType: "agent", agentRef: "arch-designer", criticType: "human", criticAgentRef: null, isCriticNode: false },
-  { ref: "api-design", title: "api-design", description: "API design", stageRef: "design", position_x: 420, position_y: 780, workerType: "agent", agentRef: "arch-designer", criticType: "human", criticAgentRef: null, isCriticNode: false },
-  { ref: "db-design", title: "db-design", description: "Database design", stageRef: "design", position_x: 720, position_y: 780, workerType: "agent", agentRef: "arch-designer", criticType: "human", criticAgentRef: null, isCriticNode: false },
-  { ref: "frontend-dev", title: "frontend-dev", description: "Frontend implementation", stageRef: "implementation", position_x: 120, position_y: 1020, workerType: "agent", agentRef: "code-dev", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false },
-  { ref: "backend-dev", title: "backend-dev", description: "Backend implementation", stageRef: "implementation", position_x: 420, position_y: 1020, workerType: "agent", agentRef: "code-dev", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false },
-  { ref: "agent-dev", title: "agent-dev", description: "Agent implementation", stageRef: "implementation", position_x: 720, position_y: 1020, workerType: "agent", agentRef: "code-dev", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false },
-  { ref: "integration", title: "integration", description: "Integration coordination", stageRef: "implementation", position_x: 1020, position_y: 1020, workerType: "squad", agentRef: null, criticType: "human", criticAgentRef: null, isCriticNode: false },
-  { ref: "unit-test", title: "unit-test", description: "Unit testing", stageRef: "testing", position_x: 120, position_y: 1260, workerType: "agent", agentRef: "test-runner", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false },
-  { ref: "e2e-test", title: "e2e-test", description: "E2E testing", stageRef: "testing", position_x: 420, position_y: 1260, workerType: "agent", agentRef: "test-runner", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false },
-  { ref: "perf-test", title: "perf-test", description: "Performance benchmarking", stageRef: "testing", position_x: 720, position_y: 1260, workerType: "agent", agentRef: "test-runner", criticType: "api", criticAgentRef: null, isCriticNode: false },
-  { ref: "pre-release-check", title: "pre-release-check", description: "Pre-release check", stageRef: "release", position_x: 120, position_y: 1500, workerType: "squad", agentRef: null, criticType: "human", criticAgentRef: null, isCriticNode: false },
-  { ref: "production-deploy", title: "production-deploy", description: "Production deploy", stageRef: "release", position_x: 420, position_y: 1500, workerType: "agent", agentRef: "code-dev", criticType: "human", criticAgentRef: null, isCriticNode: false },
+  { ref: "brainstorming", title: "brainstorming", description: "Brainstorming plugin", stageRef: "intake", position_x: 120, position_y: 120, workerType: "agent", agentRef: "brain-stormer", criticType: "", criticAgentRef: null, isCriticNode: false, sort_order: 0 },
+  { ref: "session-context", title: "session-context", description: "Session context manager", stageRef: "intake", position_x: 420, position_y: 120, workerType: "agent", agentRef: "brain-stormer", criticType: "", criticAgentRef: null, isCriticNode: false, sort_order: 1 },
+  { ref: "using-specdeveloper", title: "using-specdeveloper", description: "Spec developer helper", stageRef: "intake", position_x: 720, position_y: 120, workerType: "agent", agentRef: "req-analyzer", criticType: "", criticAgentRef: null, isCriticNode: false, sort_order: 2 },
+  { ref: "requirement-analysis", title: "requirement-analysis", description: "Requirement analysis plugin", stageRef: "analysis", position_x: 120, position_y: 360, workerType: "agent", agentRef: "req-analyzer", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false, sort_order: 0 },
+  { ref: "system-requirement", title: "system-requirement", description: "System requirement spec", stageRef: "analysis", position_x: 420, position_y: 360, workerType: "agent", agentRef: "req-analyzer", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false, sort_order: 1 },
+  { ref: "aireq-evaluator", title: "aireq-evaluator", description: "AI requirement evaluator", stageRef: "analysis", position_x: 120, position_y: 540, workerType: "agent", agentRef: null, criticType: "agent", criticAgentRef: "reviewer", isCriticNode: true, sort_order: 2 },
+  { ref: "sysreq-evaluator", title: "sysreq-evaluator", description: "System requirement evaluator", stageRef: "analysis", position_x: 420, position_y: 540, workerType: "agent", agentRef: null, criticType: "agent", criticAgentRef: "reviewer", isCriticNode: true, sort_order: 3 },
+  { ref: "architecture-design", title: "architecture-design", description: "Architecture design", stageRef: "design", position_x: 120, position_y: 780, workerType: "agent", agentRef: "arch-designer", criticType: "human", criticAgentRef: null, isCriticNode: false, sort_order: 0 },
+  { ref: "api-design", title: "api-design", description: "API design", stageRef: "design", position_x: 420, position_y: 780, workerType: "agent", agentRef: "arch-designer", criticType: "human", criticAgentRef: null, isCriticNode: false, sort_order: 1 },
+  { ref: "db-design", title: "db-design", description: "Database design", stageRef: "design", position_x: 720, position_y: 780, workerType: "agent", agentRef: "arch-designer", criticType: "human", criticAgentRef: null, isCriticNode: false, sort_order: 2 },
+  { ref: "frontend-dev", title: "frontend-dev", description: "Frontend implementation", stageRef: "implementation", position_x: 120, position_y: 1020, workerType: "agent", agentRef: "code-dev", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false, sort_order: 0 },
+  { ref: "backend-dev", title: "backend-dev", description: "Backend implementation", stageRef: "implementation", position_x: 420, position_y: 1020, workerType: "agent", agentRef: "code-dev", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false, sort_order: 1 },
+  { ref: "agent-dev", title: "agent-dev", description: "Agent implementation", stageRef: "implementation", position_x: 720, position_y: 1020, workerType: "agent", agentRef: "code-dev", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false, sort_order: 2 },
+  { ref: "integration", title: "integration", description: "Integration coordination", stageRef: "implementation", position_x: 1020, position_y: 1020, workerType: "squad", agentRef: null, criticType: "human", criticAgentRef: null, isCriticNode: false, sort_order: 3 },
+  { ref: "unit-test", title: "unit-test", description: "Unit testing", stageRef: "testing", position_x: 120, position_y: 1260, workerType: "agent", agentRef: "test-runner", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false, sort_order: 0 },
+  { ref: "e2e-test", title: "e2e-test", description: "E2E testing", stageRef: "testing", position_x: 420, position_y: 1260, workerType: "agent", agentRef: "test-runner", criticType: "agent", criticAgentRef: "reviewer", isCriticNode: false, sort_order: 1 },
+  { ref: "perf-test", title: "perf-test", description: "Performance benchmarking", stageRef: "testing", position_x: 720, position_y: 1260, workerType: "agent", agentRef: "test-runner", criticType: "api", criticAgentRef: null, isCriticNode: false, sort_order: 2 },
+  { ref: "pre-release-check", title: "pre-release-check", description: "Pre-release check", stageRef: "release", position_x: 120, position_y: 1500, workerType: "squad", agentRef: null, criticType: "human", criticAgentRef: null, isCriticNode: false, sort_order: 0 },
+  { ref: "production-deploy", title: "production-deploy", description: "Production deploy", stageRef: "release", position_x: 420, position_y: 1500, workerType: "agent", agentRef: "code-dev", criticType: "human", criticAgentRef: null, isCriticNode: false, sort_order: 1 },
 ];
 
 const EDGE_DEFS: EdgeDef[] = [
+  // Intra-stage: Intake
   { ref: "e-intake-1", sourceRef: "brainstorming", targetRef: "session-context" },
   { ref: "e-intake-2", sourceRef: "session-context", targetRef: "using-specdeveloper" },
+  // Intra-stage: Analysis
   { ref: "e-analysis-1", sourceRef: "requirement-analysis", targetRef: "system-requirement" },
+  // Intra-stage: Implementation
   { ref: "e-implementation-1", sourceRef: "frontend-dev", targetRef: "backend-dev" },
   { ref: "e-implementation-2", sourceRef: "backend-dev", targetRef: "agent-dev" },
+  { ref: "e-implementation-3", sourceRef: "agent-dev", targetRef: "integration" },
+  // Intra-stage: Release
+  { ref: "e-release-1", sourceRef: "pre-release-check", targetRef: "production-deploy" },
+  // Cross-stage edges
+  { ref: "e-cross-1", sourceRef: "using-specdeveloper", targetRef: "requirement-analysis" },
+  { ref: "e-cross-2", sourceRef: "system-requirement", targetRef: "architecture-design" },
+  { ref: "e-cross-3", sourceRef: "db-design", targetRef: "frontend-dev" },
+  { ref: "e-cross-4", sourceRef: "integration", targetRef: "unit-test" },
+  { ref: "e-cross-5", sourceRef: "perf-test", targetRef: "pre-release-check" },
 ];
 
 const NODE_DEF_BY_REF = new Map(NODE_DEFS.map((node) => [node.ref, node]));
@@ -347,6 +360,12 @@ export async function seedFullPanoramaWorkflow(api: TestApiClient): Promise<Full
       await api.updateWorkflowNode(workflow.id, node.id, { worker_id: workerId });
       node.workerId = workerId;
     }
+  }
+
+  // Set sort_order for all nodes (CreateNodeRequest doesn't support sort_order)
+  for (const nodeDef of NODE_DEFS) {
+    const node = nodeMap.get(nodeDef.ref)!;
+    await api.updateWorkflowNode(workflow.id, node.id, { sort_order: nodeDef.sort_order });
   }
 
   const edgeMap = new Map<string, PanoramaSeedEdge>();
@@ -501,7 +520,7 @@ export const FULL_PANORAMA_STATS = {
   totalStages: 6,
   totalAgents: 6,
   totalNodes: 19,
-  totalEdges: 5,
+  totalEdges: 12,
   nodeBreakdown: {
     intake: { nodeCount: 3, criticCount: 0 },
     analysis: { nodeCount: 4, criticCount: 2 },

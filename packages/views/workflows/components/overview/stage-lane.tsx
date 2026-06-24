@@ -19,12 +19,12 @@ export interface StageLaneProps {
 }
 
 const STAGE_BG_COLORS = [
-  "bg-slate-50/40",
-  "bg-stone-50/40",
-  "bg-blue-50/40",
-  "bg-rose-50/40",
-  "bg-violet-50/40",
-  "bg-amber-50/40",
+  "bg-slate-100/85",
+  "bg-stone-100/85",
+  "bg-blue-100/75",
+  "bg-rose-100/75",
+  "bg-violet-100/75",
+  "bg-amber-100/75",
 ] as const;
 
 const STAGE_LABEL_COLORS = [
@@ -61,67 +61,82 @@ export function StageLane({
   return (
     <section
       data-testid={`stage-lane-${stage.id}`}
-      className={cn("px-3 py-2.5", stageBg)}
+      className={cn(
+        "relative z-0 border-y border-border/60 px-3 py-3",
+        stageBg,
+      )}
     >
-      <div className="mb-1.5 flex items-center gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          Stage {stage.sort_order + 1}
-        </span>
-        <span className={cn("text-xs font-semibold tracking-tight", labelColor)}>
-          {stage.name}
-        </span>
-      </div>
-
-      {sortedNodes.length === 0 ? (
-        <div
-          data-testid="stage-lane-empty"
-          className="flex h-8 items-center text-[11px] text-muted-foreground"
-        >
-          No plugins in this stage
+      <div
+        data-testid={`stage-lane-shell-${stage.id}`}
+        className="relative z-20 grid min-h-[108px] grid-cols-[112px_minmax(960px,1fr)] items-stretch gap-4"
+      >
+        <div className="flex flex-col justify-start border-r border-border/50 pr-3 pt-1">
+          <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            Stage {stage.sort_order + 1}
+          </span>
+          <span className={cn("mt-1 text-xs font-semibold leading-snug", labelColor)}>
+            {stage.name}
+          </span>
         </div>
-      ) : (
-        <div className="flex items-start gap-2.5 flex-nowrap overflow-x-auto">
-          {sortedNodes.map((node) => {
-            const agent = agentLookup.get(node.worker_id ?? "") ?? null;
-            const plugin = agent?.plugin_id
-              ? pluginLookup.get(agent.plugin_id) ?? null
-              : null;
-            const criticAgent = node.critic_id
-              ? agentLookup.get(node.critic_id) ?? null
-              : null;
 
-            return (
-              <div key={node.id} className="flex flex-col items-start gap-1.5">
-                <CompactNodeCard
-                  node={node}
-                  agent={agent}
-                  plugin={plugin}
-                  onClick={onCardClick}
-                  isSelected={
-                    selectedCard?.nodeId === node.id &&
-                    selectedCard.focus === "worker"
-                  }
-                  elementRef={nodeElementRefs.get(node.id)}
-                />
-                {hasCriticAttachment(node) && (
-                  <div className="ml-4">
-                    <CriticBadge
+        <div className="flex min-w-0 overflow-x-auto py-1">
+          {sortedNodes.length === 0 ? (
+            <div
+              data-testid="stage-lane-empty"
+              className="flex h-16 items-center justify-center text-[11px] text-muted-foreground"
+            >
+              No plugins in this stage
+            </div>
+          ) : (
+            <div
+              data-testid={`stage-lane-node-row-${stage.id}`}
+              className="flex w-full min-w-[960px] flex-nowrap items-start justify-evenly gap-8 px-4"
+            >
+              {sortedNodes.map((node) => {
+                const agent = agentLookup.get(node.worker_id ?? "") ?? null;
+                const plugin = agent?.plugin_id
+                  ? pluginLookup.get(agent.plugin_id) ?? null
+                  : null;
+                const criticAgent = node.critic_id
+                  ? agentLookup.get(node.critic_id) ?? null
+                  : null;
+
+                return (
+                  <div
+                    key={node.id}
+                    data-testid={`stage-lane-node-stack-${node.id}`}
+                    className="flex flex-col items-center gap-5"
+                  >
+                    <CompactNodeCard
                       node={node}
-                      criticAgent={criticAgent}
+                      agent={agent}
+                      plugin={plugin}
                       onClick={onCardClick}
                       isSelected={
                         selectedCard?.nodeId === node.id &&
-                        selectedCard.focus === "critic"
+                        selectedCard.focus === "worker"
                       }
-                      elementRef={criticElementRefs.get(node.id)}
+                      elementRef={nodeElementRefs.get(node.id)}
                     />
+                    {hasCriticAttachment(node) && (
+                      <CriticBadge
+                        node={node}
+                        criticAgent={criticAgent}
+                        onClick={onCardClick}
+                        isSelected={
+                          selectedCard?.nodeId === node.id &&
+                          selectedCard.focus === "critic"
+                        }
+                        elementRef={criticElementRefs.get(node.id)}
+                      />
+                    )}
                   </div>
-                )}
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </section>
   );
 }

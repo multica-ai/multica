@@ -157,6 +157,27 @@ describe("WorkflowPanoramaPage", () => {
     expect(screen.queryAllByTestId("stage-transition-gradient").length).toBeGreaterThan(0);
   });
 
+  it("renders a left-aligned full-width panorama process rail on a distinct canvas background", () => {
+    renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
+    const canvas = screen.getByTestId("workflow-panorama-canvas");
+    const rail = screen.getByTestId("workflow-panorama-rail");
+    expect(canvas.className).toContain("bg-slate-100/70");
+    expect(rail.className).toContain("ml-0");
+    expect(rail.className).not.toContain("mx-auto");
+    expect(rail.className).not.toContain("border ");
+    expect(rail.className).not.toContain("border-slate");
+    expect(rail.className).toContain("w-full");
+    expect(rail.className).toContain("min-w-[1320px]");
+  });
+
+  it("keeps the SVG connector layer above stage backgrounds", () => {
+    const { container } = renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
+    const svg = container.querySelector("svg.absolute");
+    expect(svg?.getAttribute("class")).toContain("z-10");
+    expect(screen.getByTestId("stage-lane-stage-1").className).toContain("z-0");
+    expect(screen.getByTestId("stage-lane-shell-stage-1").className).toContain("z-20");
+  });
+
   it("opens detail panel on node card click", () => {
     renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
     fireEvent.click(screen.getByTestId("compact-node-card-n1"));
