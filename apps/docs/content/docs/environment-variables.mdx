@@ -187,7 +187,7 @@ For a full explanation of how each parameter affects daemon behavior, see [Daemo
 
 ### Default agent arguments (`MULTICA_<PROVIDER>_ARGS`)
 
-These set a **fleet-wide default** layer of CLI flags for a backend — useful for enforcing a cost or resource ceiling (for example `--max-turns` or `--max-budget-usd`) across every agent on a daemon without editing each agent's `custom_args` individually.
+These set a **fleet-wide default** layer of CLI flags for a backend — a convenient way to apply a default cost or resource baseline (for example `--max-turns`) across every agent on a daemon without editing each agent's `custom_args` individually. This is a default layer, not a hard ceiling: per-agent `custom_args` are appended afterward and can override it (see **Precedence** below).
 
 - **Precedence:** the default args are applied first, then each agent's own `custom_args` are appended after. For flags that take a value, the downstream CLI's own argument parser decides the winner (last occurrence wins for most tools), so an individual agent can raise a daemon default but the default still applies wherever the agent doesn't override it.
 - **Parsing:** the value is split with POSIX shell-word rules, so quoting works — `MULTICA_CLAUDE_ARGS='--append-system-prompt "multi word"'` parses into two tokens.
