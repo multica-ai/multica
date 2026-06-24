@@ -33,6 +33,8 @@ import { ActorAvatar } from "../../common/actor-avatar";
 // view + right slide-in thread panel replace the inline CommentCard stream
 // for channels and DMs.
 import { SlackMessageView } from "./slack-message-view";
+// CEREBRO-PATCH(channels-skeleton-loader): FIR-2010 — reuse the agent-chat skeleton while DM/Channel messages load.
+import { ChatMessageSkeleton } from "../../chat/components/chat-message-list";
 import { ThreadSidePanel } from "./thread-side-panel";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -94,7 +96,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
 
   // Channels are issues, so we reuse the issue timeline hook — same comment
   // model, same WS event handlers, same optimistic reaction logic.
-  const { timeline, submitComment, submitReply, editComment, deleteComment, toggleReaction } =
+  // CEREBRO-PATCH(channels-skeleton-loader): FIR-2010 — consume the timeline loading flag to show a skeleton instead of the empty-state flash.
+  const { timeline, loading, submitComment, submitReply, editComment, deleteComment, toggleReaction } =
     useIssueTimeline(channelId, userId);
 
   const { data: channelDetail } = useQuery({
@@ -364,31 +367,38 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
             threadFullScreen && "hidden",
           )}
         >
-          <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
+          {/* CEREBRO-PATCH(channels-bottom-pin): FIR-2010 — flex column so a short conversation pins to the bottom by the composer (iMessage/Slack), not the top. */}
+          <div ref={scrollRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto">
             {/* CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — "Ny besked"-pille når man læser ældre beskeder. */}
             <JumpToLatestButton
               visible={hasNewBelow}
               onClick={() => scrollToBottom()}
               label="Ny besked"
             />
-            {topLevel.length === 0 ? (
+            {loading && topLevel.length === 0 ? (
+              // CEREBRO-PATCH(channels-skeleton-loader): FIR-2010 — skeleton while the timeline loads prevents the "No messages yet — say hi!" flash.
+              <ChatMessageSkeleton />
+            ) : topLevel.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
                 <MessageSquare className="mb-3 size-10 text-muted-foreground/30" />
                 <p className="text-sm">No messages yet — say hi!</p>
               </div>
             ) : (
-              <SlackMessageView
-                channelId={channelId}
-                topLevel={topLevel}
-                repliesByParent={repliesByParent}
-                currentUserId={userId}
-                canModerate={canModerate} // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
-                activeThreadId={activeThreadId}
-                onOpenThread={setActiveThreadId}
-                onEdit={editComment}
-                onDelete={deleteComment}
-                onToggleReaction={toggleReaction}
-              />
+              // CEREBRO-PATCH(channels-bottom-pin): FIR-2010 — mt-auto pushes a short message list to the bottom of the scroll column; an overflowing list ignores it and the scroll-to-bottom effect handles the open position.
+              <div className="mt-auto">
+                <SlackMessageView
+                  channelId={channelId}
+                  topLevel={topLevel}
+                  repliesByParent={repliesByParent}
+                  currentUserId={userId}
+                  canModerate={canModerate} // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
+                  activeThreadId={activeThreadId}
+                  onOpenThread={setActiveThreadId}
+                  onEdit={editComment}
+                  onDelete={deleteComment}
+                  onToggleReaction={toggleReaction}
+                />
+              </div>
             )}
           </div>
 
