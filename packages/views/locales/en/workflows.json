@@ -210,6 +210,7 @@
     "hand_back": "Hand Back",
     "handing_back": "Handing back…",
     "open_session": "Open Session",
+    "open_session_missing": "No active session bound to this node run.",
     "finalize_approve": "Approve",
     "finalize_reject": "Reject",
     "finalizing": "Finalizing…",

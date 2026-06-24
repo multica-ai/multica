@@ -45,7 +45,10 @@ export function NodeRunControlActions({
 
   const handleOpenSession = () => {
     const sessionId = nodeRun.session_id;
-    if (!sessionId) return;
+    if (!sessionId) {
+      toast.error(t(($) => $.node_run.open_session_missing));
+      return;
+    }
     if (isEmbeddedInCostrict()) {
       postCostrictNavigateToSession({ sessionId });
       return;
@@ -108,17 +111,15 @@ export function NodeRunControlActions({
       )}
       {canHandbackOrFinalize && (
         <>
-          {nodeRun.session_id && (
-            <Button
-              size={size}
-              variant="outline"
-              className={buttonClass}
-              onClick={handleOpenSession}
-            >
-              <MessageSquare className={iconClass + " mr-1"} />
-              {t(($) => $.node_run.open_session)}
-            </Button>
-          )}
+          <Button
+            size={size}
+            variant="outline"
+            className={buttonClass}
+            onClick={handleOpenSession}
+          >
+            <MessageSquare className={iconClass + " mr-1"} />
+            {t(($) => $.node_run.open_session)}
+          </Button>
           <Button
             size={size}
             variant="outline"

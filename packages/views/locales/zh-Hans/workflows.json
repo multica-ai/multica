@@ -209,6 +209,7 @@
     "hand_back": "交还",
     "handing_back": "交还中…",
     "open_session": "进入会话",
+    "open_session_missing": "该节点未绑定活动会话。",
     "finalize_approve": "通过",
     "finalize_reject": "驳回",
     "finalizing": "完成中…",
