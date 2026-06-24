@@ -820,6 +820,27 @@ type ListAutopilotsForUserParams struct {
 	IsAdmin      bool          `json:"is_admin"`
 }
 
+const listSchedulableAutopilotTriggers = `-- name: ListSchedulableAutopilotTriggers :many
+SELECT t.id, t.autopilot_id, t.cron_expression, t.timezone, t.created_at, t.last_fired_at
+FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.kind = 'schedule'
+  AND t.enabled = TRUE
+  AND a.status = 'active'
+  AND t.cron_expression IS NOT NULL
+  AND t.cron_expression <> ''
+ORDER BY t.id
+`
+
+type ListSchedulableAutopilotTriggersRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
+	CronExpression pgtype.Text        `json:"cron_expression"`
+	Timezone       pgtype.Text        `json:"timezone"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	LastFiredAt    pgtype.Timestamptz `json:"last_fired_at"`
+}
+
 // =====================
 // CEREBRO-PATCH(sqlc-autopilot-scope): scoped autopilots (JEH-724).
 // CEREBRO-PATCH(sqlc-private-autopilot): private autopilots are visible only to their owning member (JEH-1749).
@@ -864,6 +885,52 @@ func (q *Queries) ListAutopilotsForUser(ctx context.Context, arg ListAutopilotsF
 			&i.GroupID,
 			&i.Model,
 			&i.IsPrivate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// Lists every schedule trigger the autopilot_schedule_dispatch JobSpec
+// should consider this tick. Returns just the columns the scheduler's
+// scope provider + PlansForScope hook need; the full trigger row is
+// re-loaded by the handler so a trigger update between scope-list and
+// handler-run sees the latest enabled / cron values.
+//
+// last_fired_at is read so the planner hook can anchor cold-start
+// enumeration on the most recent successful fire (set by either the
+// legacy goroutine before the new scheduler took over, or the new
+// scheduler's own TouchAutopilotTriggerFiredAt call). Without it,
+// a trigger that was created days ago and fired by the legacy code
+// looks like a brand-new trigger to the new scheduler on first tick
+// and the half-open `(created_at, now]` enumeration replays the most
+// recent already-fired occurrence — exactly the post-deploy
+// spurious-fire reported on MUL-3551 dev.
+//
+// Filters out webhook / api triggers, disabled triggers, paused/archived
+// autopilots, and any trigger missing its cron expression. ORDER BY id
+// keeps the per-tick scope list stable across replicas.
+func (q *Queries) ListSchedulableAutopilotTriggers(ctx context.Context) ([]ListSchedulableAutopilotTriggersRow, error) {
+	rows, err := q.db.Query(ctx, listSchedulableAutopilotTriggers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSchedulableAutopilotTriggersRow{}
+	for rows.Next() {
+		var i ListSchedulableAutopilotTriggersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AutopilotID,
+			&i.CronExpression,
+			&i.Timezone,
+			&i.CreatedAt,
+			&i.LastFiredAt,
 		); err != nil {
 			return nil, err
 		}
