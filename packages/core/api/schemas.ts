@@ -17,6 +17,7 @@ import type {
   GroupedIssuesResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
+  MemberWithUser,
   Squad,
   TimelineEntry,
   User,
@@ -39,6 +40,7 @@ export interface AppConfigResponse {
   daemon_server_url?: string;
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
+  totp_supported?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +181,7 @@ export const AppConfigSchema = z.object({
   daemon_server_url: OptionalStringSchema,
   daemon_app_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
+  totp_supported: BooleanWithDefaultSchema(false).optional(),
 }).loose();
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
@@ -846,6 +849,9 @@ export const UserSchema = z.object({
   timezone: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+  // totp_enabled is absent on older server builds; default false so the
+  // "Set up" CTA is the safe fallback for users on those deployments.
+  totp_enabled: z.boolean().optional().default(false),
 }).loose();
 
 export const EMPTY_USER: User = {
@@ -1032,3 +1038,41 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
 };
+
+// ---------------------------------------------------------------------------
+// MemberWithUser schema
+//
+// totp_enabled is absent on older server builds; default false so the "Reset
+// authenticator" action is the safe fallback (hidden) for those deployments.
+
+export const MemberWithUserSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  user_id: z.string().default(""),
+  role: z.string().default("member"),
+  created_at: z.string().default(""),
+  name: z.string().default(""),
+  email: z.string().default(""),
+  avatar_url: z.string().nullable().default(null),
+  totp_enabled: z.boolean().optional().default(false),
+}).loose();
+
+export const MemberWithUserListSchema = z.array(MemberWithUserSchema);
+
+export const EMPTY_MEMBER_WITH_USER: MemberWithUser = {
+  id: "",
+  workspace_id: "",
+  user_id: "",
+  role: "member",
+  created_at: "",
+  name: "",
+  email: "",
+  avatar_url: null,
+  totp_enabled: false,
+};
+
+export const AdminResetMemberTOTPResponseSchema = z.object({
+  reset: z.boolean(),
+}).loose();
+
+export const EMPTY_ADMIN_RESET_MEMBER_TOTP_RESPONSE = { reset: false };

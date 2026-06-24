@@ -201,6 +201,11 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
   EMPTY_CANCEL_TASK_RESPONSE,
+  MemberWithUserListSchema,
+  MemberWithUserSchema,
+  AdminResetMemberTOTPResponseSchema,
+  EMPTY_MEMBER_WITH_USER,
+  EMPTY_ADMIN_RESET_MEMBER_TOTP_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -402,6 +407,35 @@ export class ApiClient {
 
   async verifyCode(email: string, code: string): Promise<LoginResponse> {
     return this.fetch("/auth/verify-code", {
+      method: "POST",
+      body: JSON.stringify({ email, code }),
+    });
+  }
+
+  async totpSetupInit(): Promise<{ secret: string; otpauth_url: string }> {
+    return this.fetch("/auth/totp/setup-init", { method: "POST" });
+  }
+
+  async totpSetupVerify(code: string): Promise<{ enabled: boolean }> {
+    return this.fetch("/auth/totp/setup-verify", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  async totpDisable(code: string): Promise<{ disabled: boolean }> {
+    return this.fetch("/auth/totp/disable", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  async totpStatus(email: string): Promise<{ configured: boolean }> {
+    return this.fetch(`/auth/totp-status?email=${encodeURIComponent(email)}`);
+  }
+
+  async loginWithTOTP(email: string, code: string): Promise<LoginResponse> {
+    return this.fetch("/auth/login-totp", {
       method: "POST",
       body: JSON.stringify({ email, code }),
     });
@@ -1528,7 +1562,10 @@ export class ApiClient {
 
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members`);
+    const raw = await this.fetch(`/api/workspaces/${workspaceId}/members`);
+    return parseWithFallback(raw, MemberWithUserListSchema, [], {
+      endpoint: `/api/workspaces/${workspaceId}/members`,
+    });
   }
 
   async createMember(workspaceId: string, data: CreateMemberRequest): Promise<Invitation> {
@@ -1539,15 +1576,28 @@ export class ApiClient {
   }
 
   async updateMember(workspaceId: string, memberId: string, data: UpdateMemberRequest): Promise<MemberWithUser> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
+    const raw = await this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, MemberWithUserSchema, EMPTY_MEMBER_WITH_USER, {
+      endpoint: `/api/workspaces/${workspaceId}/members/${memberId}`,
     });
   }
 
   async deleteMember(workspaceId: string, memberId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
       method: "DELETE",
+    });
+  }
+
+  async adminResetMemberTOTP(workspaceID: string, userID: string): Promise<{ reset: boolean }> {
+    const raw = await this.fetch(
+      `/api/workspaces/${workspaceID}/members/${userID}/totp-reset`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, AdminResetMemberTOTPResponseSchema, EMPTY_ADMIN_RESET_MEMBER_TOTP_RESPONSE, {
+      endpoint: `/api/workspaces/${workspaceID}/members/${userID}/totp-reset`,
     });
   }
 

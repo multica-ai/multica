@@ -65,6 +65,10 @@ type UserResponse struct {
 	ProfileDescription      string          `json:"profile_description"`
 	CreatedAt               string          `json:"created_at"`
 	UpdatedAt               string          `json:"updated_at"`
+	// TotpEnabled is true when the user has a verified TOTP secret
+	// (totp_enabled_at IS NOT NULL). Additive field — old clients that
+	// don't know about it will simply ignore it.
+	TotpEnabled bool `json:"totp_enabled"`
 }
 
 // MaxProfileDescriptionLen caps the user-supplied profile_description body.
@@ -94,6 +98,7 @@ func userToResponse(u db.User) UserResponse {
 		ProfileDescription:      u.ProfileDescription,
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
+		TotpEnabled:             u.TotpEnabledAt.Valid,
 	}
 }
 

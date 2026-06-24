@@ -160,7 +160,11 @@ type Handler struct {
 	// process exit indefinitely if the pool is frozen — at worst the
 	// next replica waits the full TTL.
 	LarkHub *lark.Hub
-	cfg     Config
+	// TOTPService handles TOTP secret generation, encryption, and
+	// validation. Nil when MULTICA_USER_TOTP_KEY is unset (TOTP
+	// disabled); handlers that need it must nil-check and return 503.
+	TOTPService *service.TOTPService
+	cfg         Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {

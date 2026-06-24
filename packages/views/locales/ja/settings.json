@@ -30,6 +30,7 @@
       "preferences": "環境設定",
       "notifications": "通知",
       "tokens": "API トークン",
+      "security": "セキュリティ",
       "general": "一般",
       "repositories": "リポジトリ",
       "github": "GitHub",
@@ -92,6 +93,32 @@
       "granted": "このブラウザは通知バナーを表示できます。",
       "denied": "ブラウザによってブロックされています。ブラウザの設定でこのサイトの通知を許可してください。",
       "enabled_badge": "有効"
+    }
+  },
+  "security": {
+    "title": "セキュリティ",
+    "description": "アカウントのセキュリティ設定を管理します。",
+    "two_factor": {
+      "label": "二要素認証",
+      "hint_unavailable": "このサーバーでは二要素認証は利用できません。",
+      "hint_enabled": "認証アプリでアカウントが保護されています。",
+      "hint_disabled": "認証アプリのコードを要求することで、セキュリティをさらに強化できます。",
+      "unavailable_badge": "利用不可",
+      "setup_button": "設定する",
+      "disable_button": "無効化",
+      "setup_title": "二要素認証を設定する",
+      "setup_scan_qr": "認証アプリ（Google Authenticator、Authy、1Password など）でこの QR コードをスキャンしてください。",
+      "setup_manual": "またはこのシークレットを手動で入力：",
+      "setup_next": "次へ — コードを入力",
+      "setup_verify": "設定を確認するために、認証アプリの 6 桁のコードを入力してください。",
+      "setup_success": "二要素認証が有効になりました。",
+      "setup_invalid": "コードが無効です。もう一度お試しください。",
+      "setup_init_error": "TOTP セットアップを開始できませんでした。再度お試しください。",
+      "disable_title": "二要素認証を無効化する",
+      "disable_prompt": "二要素認証を無効化するには、認証アプリの 6 桁のコードを入力してください。",
+      "disable_success": "二要素認証が無効になりました。",
+      "disable_invalid": "コードが無効です。もう一度お試しください。",
+      "confirm": "確認"
     }
   },
   "tokens": {
@@ -375,6 +402,15 @@
         "label": "メンバー",
         "description": "イシューの作成と作業"
       }
+    },
+    "totp_reset": {
+      "menu_item": "認証アプリをリセット",
+      "confirm_title": "{{name}} の認証アプリをリセットしますか？",
+      "confirm_description": "この操作は、{{name}} の Multica アカウント全体（このワークスペースだけでなく）の認証アプリによるログインを無効にします。{{name}} は Settings → Security から再設定できます。それまでの間、メールコードでログインできます。",
+      "cancel": "キャンセル",
+      "confirm": "認証アプリをリセット",
+      "success": "{{name}} の認証アプリをリセットしました",
+      "error": "認証アプリのリセットに失敗しました"
     }
   }
 }

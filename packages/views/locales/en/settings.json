@@ -30,6 +30,7 @@
       "preferences": "Preferences",
       "notifications": "Notifications",
       "tokens": "API Tokens",
+      "security": "Security",
       "general": "General",
       "repositories": "Repositories",
       "github": "GitHub",
@@ -92,6 +93,32 @@
       "granted": "This browser can show notification banners.",
       "denied": "Blocked by your browser. Enable notifications for this site in your browser settings.",
       "enabled_badge": "Enabled"
+    }
+  },
+  "security": {
+    "title": "Security",
+    "description": "Manage your account security settings.",
+    "two_factor": {
+      "label": "Two-factor authentication",
+      "hint_unavailable": "Two-factor authentication is not available on this server.",
+      "hint_enabled": "Your account is protected with an authenticator app.",
+      "hint_disabled": "Add an extra layer of security by requiring a code from your authenticator app.",
+      "unavailable_badge": "Unavailable",
+      "setup_button": "Set up",
+      "disable_button": "Disable",
+      "setup_title": "Set up two-factor authentication",
+      "setup_scan_qr": "Scan this QR code with your authenticator app (Google Authenticator, Authy, 1Password, etc.).",
+      "setup_manual": "Or enter this secret manually:",
+      "setup_next": "Next — enter code",
+      "setup_verify": "Enter the 6-digit code from your authenticator app to confirm setup.",
+      "setup_success": "Two-factor authentication enabled.",
+      "setup_invalid": "Invalid code. Please try again.",
+      "setup_init_error": "Failed to start TOTP setup. Please try again.",
+      "disable_title": "Disable two-factor authentication",
+      "disable_prompt": "Enter the 6-digit code from your authenticator app to disable two-factor authentication.",
+      "disable_success": "Two-factor authentication disabled.",
+      "disable_invalid": "Invalid code. Please try again.",
+      "confirm": "Confirm"
     }
   },
   "tokens": {
@@ -375,6 +402,15 @@
         "label": "Member",
         "description": "Create and work on issues"
       }
+    },
+    "totp_reset": {
+      "menu_item": "Reset authenticator",
+      "confirm_title": "Reset authenticator for {{name}}?",
+      "confirm_description": "This disables {{name}}'s authenticator login for their entire Multica account — not just this workspace. They'll need to set it up again from Settings → Security to log in with an authenticator code. They can still log in with an email code in the meantime.",
+      "cancel": "Cancel",
+      "confirm": "Reset authenticator",
+      "success": "Authenticator reset for {{name}}",
+      "error": "Failed to reset authenticator"
     }
   }
 }

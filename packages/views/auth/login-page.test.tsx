@@ -29,12 +29,15 @@ function renderWithI18n(ui: ReactElement) {
 
 const mockSendCode = vi.hoisted(() => vi.fn());
 const mockVerifyCode = vi.hoisted(() => vi.fn());
+const mockVerifyTOTPLogin = vi.hoisted(() => vi.fn());
 const mockApiListWorkspaces = vi.hoisted(() => vi.fn());
 const mockApiVerifyCode = vi.hoisted(() => vi.fn());
 const mockApiSetToken = vi.hoisted(() => vi.fn());
 const mockApiGetMe = vi.hoisted(() => vi.fn());
 const mockApiIssueCliToken = vi.hoisted(() => vi.fn());
 const mockSetQueryData = vi.hoisted(() => vi.fn());
+const mockTotpState = vi.hoisted(() => ({ totpSupported: false }));
+const mockTotpSupported = vi.hoisted(() => ({ getState: () => mockTotpState }));
 
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
@@ -47,16 +50,25 @@ vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
     // Zustand hook form — component may call useAuthStore(selector)
     (selector?: (s: unknown) => unknown) => {
-      const state = { sendCode: mockSendCode, verifyCode: mockVerifyCode };
+      const state = { sendCode: mockSendCode, verifyCode: mockVerifyCode, verifyTOTPLogin: mockVerifyTOTPLogin };
       return selector ? selector(state) : state;
     },
     {
       getState: () => ({
         sendCode: mockSendCode,
         verifyCode: mockVerifyCode,
+        verifyTOTPLogin: mockVerifyTOTPLogin,
       }),
     },
   ),
+}));
+
+vi.mock("@multica/core/config", () => ({
+  configStore: mockTotpSupported,
+}));
+
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn() },
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -104,6 +116,8 @@ describe("LoginPage", () => {
       writable: true,
       value: { href: "http://localhost:3000" },
     });
+    // Default: TOTP not enabled so the email-OTP path runs as before
+    mockTotpState.totpSupported = false;
   });
 
   afterEach(() => {
@@ -695,6 +709,68 @@ describe("LoginPage", () => {
     expect(
       screen.getByText(/sign in to multica/i),
     ).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // TOTP step title (bug fix: must NOT reuse "Check your email")
+  // -------------------------------------------------------------------------
+
+  it("shows TOTP-specific title — not 'Check your email' — when on totp step", async () => {
+    // Enable TOTP so submitting the email form goes to choose-method first,
+    // then clicking "Use authenticator app" transitions to the totp step.
+    mockTotpState.totpSupported = true;
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    // Should land on choose-method (totp supported)
+    await waitFor(() => {
+      expect(screen.getByText(/how would you like to verify/i)).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /use authenticator app/i }));
+
+    // TOTP step: title must be the authenticator-specific string
+    await waitFor(() => {
+      expect(screen.getByText(/use your authenticator/i)).toBeInTheDocument();
+    });
+    // And must NOT show the email-OTP title
+    expect(screen.queryByText(/check your email/i)).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // choose-method send-code error rendering
+  // -------------------------------------------------------------------------
+
+  it("renders sendCode failure on choose-method step (regression: was swallowed)", async () => {
+    mockTotpState.totpSupported = true;
+    // Make sendCode fail on the choose-method path. The pre-fix UI swallowed
+    // this (setError ran but no <p> rendered it), so the user stayed on the
+    // same screen with no feedback on rate-limit / SMTP / network errors.
+    mockSendCode.mockRejectedValueOnce(new Error("Too many requests, try again later"));
+
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    // Land on choose-method.
+    await waitFor(() => {
+      expect(screen.getByText(/how would you like to verify/i)).toBeInTheDocument();
+    });
+
+    // Click email fallback — sendCode rejects.
+    await user.click(screen.getByRole("button", { name: /send code to my email/i }));
+
+    // Error from the rejection must be visible to the user.
+    await waitFor(() => {
+      expect(screen.getByText(/too many requests/i)).toBeInTheDocument();
+    });
+    // Still on choose-method (not transitioned to code step).
+    expect(screen.getByText(/how would you like to verify/i)).toBeInTheDocument();
   });
 
 });
