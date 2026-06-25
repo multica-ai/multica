@@ -327,7 +327,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		if base := resolveCoStrictBaseURL(); base != "" {
 			prefix := strings.TrimSpace(os.Getenv("MULTICA_SERVER_PREFIX"))
 			if prefix == "" {
-				prefix = "/multica-backend"
+				prefix = "/workflow-backend"
 			}
 			if !strings.HasPrefix(prefix, "/") {
 				prefix = "/" + prefix
