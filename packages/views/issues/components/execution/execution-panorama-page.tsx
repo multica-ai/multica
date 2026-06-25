@@ -172,8 +172,8 @@ export function ExecutionPanoramaPage({
             }}
             nodeIds={unassignedNodes}
             getActorName={getActorName}
-            agentLookup={new Map()}
-            pluginLookup={new Map()}
+            agentLookup={agentLookup}
+            pluginLookup={pluginLookup}
             onCardClick={() => {}}
             nodeElementRefs={new Map()}
             criticElementRefs={new Map()}
@@ -224,8 +224,8 @@ export function ExecutionPanoramaPage({
             }}
             nodeIds={unassignedNodes}
             getActorName={getActorName}
-            agentLookup={new Map()}
-            pluginLookup={new Map()}
+            agentLookup={agentLookup}
+            pluginLookup={pluginLookup}
             onCardClick={() => {}}
             nodeElementRefs={new Map()}
             criticElementRefs={new Map()}

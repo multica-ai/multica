@@ -263,7 +263,7 @@ describe("ExecutionPanoramaPage", () => {
     expect(screen.getByTestId("stage-lane-stage-1")).toBeInTheDocument();
   });
 
-  it("renders detail panel when node is clicked", () => {
+  it("does not render detail panel initially", () => {
     mocks.isLoading = false;
     mocks.workflowData = { id: "wf-1", title: "Test Workflow" };
     mocks.stagesData = [STAGE];
