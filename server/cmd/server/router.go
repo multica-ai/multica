@@ -66,6 +66,10 @@ func allowedOrigins() []string {
 	return origins
 }
 
+func appURLFromEnv() string {
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_APP_URL")), "/")
+}
+
 // parseTrustedProxies parses a comma-separated list of CIDR prefixes from the
 // MULTICA_TRUSTED_PROXIES env var. Invalid entries are dropped with a single
 // warn-line per entry rather than crashing the server — a typo in one CIDR
@@ -296,7 +300,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					BindingSvc:  h.LarkBindingTokens,
 					Credentials: installSvc,
 					Queries:     queries,
-					PublicURL:   signupConfig.PublicURL,
+					AppURL:      appURLFromEnv(),
 					Logger:      slog.Default(),
 				})
 				var resolverReplier lark.OutcomeReplier
