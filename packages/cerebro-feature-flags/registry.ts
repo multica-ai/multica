@@ -642,6 +642,7 @@ export type CerebroFlagGroupKey =
   | "workspace"
   | "issues"
   | "inbox"
+  | "dm_channel"
   | "voice"
   | "onboarding";
 
@@ -681,6 +682,12 @@ export const CEREBRO_FLAG_GROUPS: CerebroFlagGroup[] = [
     key: "inbox",
     label: "Inbox & notifications",
     description: "How the inbox is organised and how you get notified.",
+  },
+  {
+    key: "dm_channel",
+    label: "DM & Channel",
+    description:
+      "Direct messages and channels: who can create them, how unread counts behave, threads, typing, and search.",
   },
   {
     key: "voice",
@@ -738,7 +745,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   {
     key: "cerebro_channels",
     label: "Channels",
-    group: "workspace",
+    group: "dm_channel",
     description:
       "Enable channel-style conversations (kind=channel issues, /channels/{id} route, channel list in inbox).",
   },
@@ -794,21 +801,21 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   {
     key: "cerebro_channel_row_actions",
     label: "Channel row actions",
-    group: "inbox",
+    group: "dm_channel",
     description:
       "Give channels and DMs the same inbox row controls as notifications: \"remind me\" (snooze) and \"mark as unread\", via the hover menu, mobile swipe gestures, and long-press menu.",
   },
   {
     key: "cerebro_channel_message_search",
     label: "Search in conversation",
-    group: "inbox",
+    group: "dm_channel",
     description:
       "Add a search icon to every channel and DM header. Opens a search bar that highlights matching messages, dims the rest, and lets you step between results with the up/down arrows or Enter/Shift+Enter — Esc closes it. Searches the currently loaded message history of the open conversation.",
   },
   {
     key: "cerebro_global_message_search",
     label: "Messages in global search",
-    group: "inbox",
+    group: "dm_channel",
     description:
       "Include channel and DM messages in the global Cmd+K search. Matches from any conversation you take part in show up in a \"Messages\" group with a snippet, the conversation name, and the sender — so you can find an old link or note without opening each conversation. Access-scoped: you only see messages from your own conversations.",
   },
@@ -822,14 +829,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   {
     key: "cerebro_typing_indicators",
     label: "Typing indicators",
-    group: "inbox",
+    group: "dm_channel",
     description:
       "Show a Slack-style \"is typing…\" line inside a channel or direct-message conversation when another person is composing a reply, and surface when an agent is generating its response. The other person's composer sends a lightweight typing ping (throttled); the indicator clears after a few seconds of silence.",
   },
   {
     key: "cerebro_chat_row_actions",
     label: "Chat row actions",
-    group: "inbox",
+    group: "dm_channel",
     description:
       "Give agent chat sessions the same inbox row menu as notifications and channels: a 3-dot menu (and mobile swipe) to mark read, rename, convert to issue, archive, unarchive, and delete a chat — so an archived chat can be reopened and continued.",
   },
@@ -1268,7 +1275,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   {
     key: "cerebro_channel_create_restricted",
     label: "Restrict who can create channels",
-    group: "permissions",
+    group: "dm_channel",
     description:
       "When on, creating a named channel (POST /api/channels with kind='channel') requires workspace owner or admin role; members get 403. DMs are never gated. Off restores today's behaviour where any workspace member or agent can create a channel. FIR-2660.",
   },
@@ -1296,21 +1303,21 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   {
     key: "cerebro_inbox_thread_split",
     label: "Split channel threads into their own inbox rows",
-    group: "inbox",
+    group: "dm_channel",
     description:
       "On a channel or DM, when someone replies inside a thread, surface that thread as its own inbox row (deep-linking into the thread) instead of folding the reply into the single channel row where it is easy to miss. Only threads with unread replies get a row. FIR-1854.",
   },
   {
     key: "cerebro_dm_reply_threads",
     label: "Agent tag in a DM opens a thread, not a channel",
-    group: "inbox",
+    group: "dm_channel",
     description:
       "On a 1:1 DM, tagging an agent (or member) replies in a thread inside the DM instead of permanently converting the whole DM into a multi-party channel. The DM stays a DM; the mentioned agent is still triggered and answers in the thread. FIR-2010.",
   },
   {
     key: "cerebro_channel_unread_smart",
-    label: "Chat-specific unread (DM counts all, channel only on @mention)",
-    group: "inbox",
+    label: "DM & channel unread (DM counts all, channel only on @mention)",
+    group: "dm_channel",
     description:
       "Make unread behave like Slack/Teams for chat. A DM badge keeps counting every message and marks read on open. A channel badge only turns red when you are @mentioned — other channel activity shows as a bold dot instead of a red count — and a channel is marked read when you scroll past its messages, not just on open. Thread replies keep their own unread. FIR-2010.",
   },
@@ -1399,7 +1406,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   {
     key: "cerebro_chat_recent_list",
     label: "Recent chats on new-chat screen",
-    group: "inbox",
+    group: "dm_channel",
     description:
       "Show the 3 most recent chat sessions at the top of the inbox new-chat screen, with a \"See earlier\" expander to scroll through and resume older conversations in place. Off keeps the plain empty state.",
   },

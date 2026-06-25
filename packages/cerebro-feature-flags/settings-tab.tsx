@@ -1,8 +1,13 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { Lock } from "lucide-react";
+import { Lock, ChevronRight } from "lucide-react";
 import { Switch } from "@multica/ui/components/ui/switch";
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@multica/ui/components/ui/collapsible";
 import {
   NativeSelect,
   NativeSelectOption,
@@ -183,28 +188,36 @@ export function CerebroFeatureFlagsTab() {
         </p>
       )}
 
-      <div className="space-y-6">
+      <div className="space-y-2">
         {CEREBRO_FLAG_GROUPS.map((group) => {
           const flags = flagsForGroup(group.key);
           if (flags.length === 0) return null;
           return (
-            <div key={group.key} className="space-y-2">
-              <div className="space-y-0.5">
-                <h3 className="text-sm font-semibold">{group.label}</h3>
-                <p className="text-xs text-muted-foreground">{group.description}</p>
-              </div>
-              <div className="space-y-3">
-                {flags.map((flag) => (
-                  <FlagRow
-                    key={flag.key}
-                    flagKey={flag.key}
-                    label={flag.label}
-                    description={flag.description}
-                    isAdmin={isAdmin}
-                  />
-                ))}
-              </div>
-            </div>
+            <Collapsible key={group.key} className="rounded-lg border">
+              <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted/50">
+                <div className="flex-1 space-y-0.5">
+                  <h3 className="text-sm font-semibold">{group.label}</h3>
+                  <p className="text-xs text-muted-foreground">{group.description}</p>
+                </div>
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                  {flags.length}
+                </span>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[panel-open]:rotate-90" />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="space-y-3 border-t px-3 py-3">
+                  {flags.map((flag) => (
+                    <FlagRow
+                      key={flag.key}
+                      flagKey={flag.key}
+                      label={flag.label}
+                      description={flag.description}
+                      isAdmin={isAdmin}
+                    />
+                  ))}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           );
         })}
       </div>
