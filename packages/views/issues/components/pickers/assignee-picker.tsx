@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Cpu, Lock, UserMinus } from "lucide-react";
 import type { Agent, AgentRuntime, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
@@ -11,6 +11,7 @@ import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
+import { squadLeaderRuntimeOptions } from "@multica/core/squads";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -74,7 +75,28 @@ export function AssigneePicker({
   const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
   const { getActorName } = useActorName();
   const [runtimeChoiceAgent, setRuntimeChoiceAgent] = useState<Agent | null>(null);
-
+  const [selectedSquadForRuntime, setSelectedSquadForRuntime] = useState<{id: string; name: string} | null>(null);
+  const squadRuntimesQuery = useQuery({
+    ...squadLeaderRuntimeOptions(wsId, selectedSquadForRuntime?.id ?? ""),
+    enabled: !!selectedSquadForRuntime,
+  });
+  const squadRuntimes = squadRuntimesQuery.data ?? [];
+  const squadQueryFetched = squadRuntimesQuery.isFetched;
+ 
+  // Auto-select when squad has exactly 1 compatible runtime
+  useEffect(() => {
+    if (!selectedSquadForRuntime || !squadQueryFetched) return;
+    if (squadRuntimes.length === 1) {
+      onUpdate({
+        assignee_type: "squad",
+        assignee_id: selectedSquadForRuntime.id,
+        runtime_id: squadRuntimes[0].id,
+      });
+      setSelectedSquadForRuntime(null);
+      setOpen(false);
+    }
+  }, [selectedSquadForRuntime, squadRuntimes, squadQueryFetched, onUpdate, setOpen]);
+ 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
 
@@ -122,12 +144,13 @@ export function AssigneePicker({
         setOpen(v);
         if (!v) {
           setFilter("");
+          setSelectedSquadForRuntime(null);
           setRuntimeChoiceAgent(null);
         }
       }}
       width="w-64"
       align={align}
-      searchable={!runtimeChoiceAgent}
+      searchable={!runtimeChoiceAgent && !selectedSquadForRuntime}
       searchPlaceholder={t(($) => $.pickers.assignee.search_placeholder)}
       onSearchChange={setFilter}
       triggerRender={triggerRender}
@@ -142,7 +165,40 @@ export function AssigneePicker({
         )
       }
     >
-      {runtimeChoiceAgent ? (
+      {selectedSquadForRuntime ? (
+        <>
+          <PickerItem selected={false} onClick={() => setSelectedSquadForRuntime(null)}>
+            <ArrowLeft className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="truncate">{selectedSquadForRuntime.name}</span>
+          </PickerItem>
+          {squadRuntimes.length === 0 ? (
+            <PickerItem selected={false} disabled tooltip="没有兼容小队队长的本地运行时，请先安装并启动兼容的本地运行时">
+              <span>没有兼容的运行时</span>
+            </PickerItem>
+          ) : (
+            <PickerSection label={t(($) => $.pickers.assignee.runtime_group)}>
+              {squadRuntimes.map((rt) => (
+                <PickerItem
+                  key={rt.id}
+                  selected={false}
+                  onClick={() => {
+                    onUpdate({
+                      assignee_type: "squad",
+                      assignee_id: selectedSquadForRuntime.id,
+                      runtime_id: rt.id,
+                    });
+                    setSelectedSquadForRuntime(null);
+                    setOpen(false);
+                  }}
+                >
+                  <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="truncate">{rt.name}</span>
+                </PickerItem>
+              ))}
+            </PickerSection>
+          )}
+        </>
+      ) : runtimeChoiceAgent ? (
         <>
           <PickerItem selected={false} onClick={() => setRuntimeChoiceAgent(null)}>
             <ArrowLeft className="h-3.5 w-3.5 text-muted-foreground" />
@@ -265,6 +321,11 @@ export function AssigneePicker({
               key={s.id}
               selected={isSelected("squad", s.id)}
               onClick={() => {
+                if (runtimeChoice) {
+                  setFilter("");
+                  setSelectedSquadForRuntime({ id: s.id, name: s.name });
+                  return;
+                }
                 onUpdate({
                   assignee_type: "squad",
                   assignee_id: s.id,

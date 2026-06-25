@@ -39,6 +39,17 @@ export interface RuntimeDevice {
 
 export type AgentRuntime = RuntimeDevice;
 
+/**
+ * Minimal runtime payload returned by the squad-leader-compatible-runtimes
+ * endpoint. Only id and name are surfaced – no connection credentials,
+ * device info, or visibility metadata. This keeps runtime owner privacy
+ * intact while letting the UI offer a runtime picker for squad assigns.
+ */
+export interface RuntimeBriefResponse {
+  id: string;
+  name: string;
+}
+
 // ---------------------------------------------------------------------------
 // Custom runtime profiles (MUL-3284)
 //

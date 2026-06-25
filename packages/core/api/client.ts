@@ -24,6 +24,7 @@ import type {
   AgentActivityBucket,
   AgentRunCount,
   AgentRuntime,
+  RuntimeBriefResponse,
   RuntimeProfile,
   CreateRuntimeProfileRequest,
   UpdateRuntimeProfileRequest,
@@ -183,6 +184,7 @@ import {
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  RuntimeBriefResponseSchema,
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
@@ -208,6 +210,7 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
   EMPTY_CANCEL_TASK_RESPONSE,
+  EMPTY_RUNTIME_BRIEF_RESPONSE_LIST,
   EMPTY_ACTIVE_TASKS_FOR_ISSUE_RESPONSE,
   EMPTY_TASK_MESSAGE_PAYLOAD_LIST,
 } from "./schemas";
@@ -2104,6 +2107,14 @@ export class ApiClient {
   // working/idle/offline/unstable plus the issues each agent is currently
   // running. Parsed with a lenient schema so a new server-side status
   // value or extra field can't white-screen the Squad page (#2143).
+  async listSquadLeaderCompatibleRuntimes(squadId: string): Promise<RuntimeBriefResponse[]> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/leader/compatible-runtimes`);
+    const res = Array.isArray(raw) ? raw : [];
+    return parseWithFallback(res, z.array(RuntimeBriefResponseSchema), [], {
+      endpoint: "GET /api/squads/:id/leader/compatible-runtimes",
+    }) as RuntimeBriefResponse[];
+  }
+
   async getSquadMemberStatus(squadId: string): Promise<SquadMemberStatusListResponse> {
     const raw = await this.fetch<unknown>(`/api/squads/${squadId}/members/status`);
     return parseWithFallback(raw, SquadMemberStatusListResponseSchema, EMPTY_SQUAD_MEMBER_STATUS_LIST, {

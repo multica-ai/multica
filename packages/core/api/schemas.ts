@@ -1243,3 +1243,12 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
 };
+
+// -- Runtime brief (squad leader compatible runtimes) -------------------------
+
+export const RuntimeBriefResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+}).loose();
+
+export const EMPTY_RUNTIME_BRIEF_RESPONSE_LIST: RuntimeBriefResponse[] = [];

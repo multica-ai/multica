@@ -787,6 +787,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/members", h.AddSquadMember)
 					r.Delete("/members", h.RemoveSquadMember)
 					r.Patch("/members/role", h.UpdateSquadMemberRole)
+					r.Get("/leader/compatible-runtimes", h.ListSquadLeaderCompatibleRuntimes)
 				})
 			})
 

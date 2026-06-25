@@ -1,0 +1,1 @@
+ALTER TABLE chat_session ADD COLUMN issue_id UUID DEFAULT NULL;

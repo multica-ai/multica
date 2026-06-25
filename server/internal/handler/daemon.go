@@ -1230,36 +1230,15 @@ func (h *Handler) filterProjectResourcesForRuntime(ctx context.Context, projectI
 	if len(rows) == 0 {
 		return nil
 	}
-	daemonID := ""
-	if runtime.DaemonID.Valid && runtime.DaemonID.String != "" {
-		daemonID = strings.TrimSpace(runtime.DaemonID.String)
-	}
-	legacyDaemonID := ""
-	if runtime.LegacyDaemonID.Valid && runtime.LegacyDaemonID.String != "" {
-		legacyDaemonID = strings.TrimSpace(runtime.LegacyDaemonID.String)
-	}
-	if daemonID == "" {
-		return rows
-	}
-	out := make([]db.ProjectResource, 0, len(rows))
-	for _, row := range rows {
-		if row.ResourceType != "local_directory" {
-			out = append(out, row)
-			continue
-		}
-		var ref struct {
-			DaemonID string `json:"daemon_id"`
-		}
-		if err := json.Unmarshal(row.ResourceRef, &ref); err != nil || ref.DaemonID == "" {
-			out = append(out, row)
-			continue
-		}
-		refDaemonID := strings.TrimSpace(ref.DaemonID)
-		if refDaemonID == daemonID || (legacyDaemonID != "" && refDaemonID == legacyDaemonID) {
-			out = append(out, row)
-		}
-	}
-	return out
+  	// local_directory is a project-level resource that multiple daemons may
+  	// need to access. In a runtime-decoupled deployment, the task's resolved
+  	// runtime may correspond to a different daemon than the one that created
+  	// the local_directory resource. Rather than filtering by daemon_id here
+  	// (which would hide the resource from other daemons), we return all
+  	// project resources. The daemon-side findLocalDirectoryAssignment already
+  	// filters by daemon_id, so it will only pick up the resource assigned to
+  	// its own daemon.
+  	return rows
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.

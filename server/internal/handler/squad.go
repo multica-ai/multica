@@ -1023,3 +1023,72 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 			"error", err)
 	}
 }
+
+// RuntimeBriefResponse is a lightweight runtime descriptor returned to the
+// frontend for squad-leader runtime selection.
+type RuntimeBriefResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ListSquadLeaderCompatibleRuntimes returns local runtimes owned by the squad
+// leader's owner that are compatible with the leader agent's capability
+// requirements (runtime provider / profile).
+func (h *Handler) ListSquadLeaderCompatibleRuntimes(w http.ResponseWriter, r *http.Request) {
+	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	if !ok {
+		return
+	}
+
+	leader, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          squad.LeaderID,
+		WorkspaceID: squad.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "squad leader agent not found")
+		return
+	}
+
+	runtimes, err := h.Queries.ListAgentRuntimesByOwner(r.Context(), db.ListAgentRuntimesByOwnerParams{
+		WorkspaceID: squad.WorkspaceID,
+		OwnerID:     leader.OwnerID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list runtimes")
+		return
+	}
+
+	result := make([]RuntimeBriefResponse, 0, len(runtimes))
+	for _, rt := range runtimes {
+		if rt.RuntimeMode != "local" || rt.Status != "online" {
+			continue
+		}
+
+		// Compatibility: mirror runtimeMatchesAgentCapability from frontend.
+		if leader.RuntimeProfileID.Valid {
+			// Agent uses a custom runtime profile – runtime must match exactly.
+			if !rt.ProfileID.Valid || rt.ProfileID != leader.RuntimeProfileID {
+				continue
+			}
+		} else {
+			// Agent uses a built-in provider – runtime must match provider
+			// and must not have a custom profile.
+			if leader.RuntimeProvider == "" {
+				continue
+			}
+			if rt.ProfileID.Valid {
+				continue
+			}
+			if rt.Provider != leader.RuntimeProvider {
+				continue
+			}
+		}
+
+		result = append(result, RuntimeBriefResponse{
+			ID:   uuidToString(rt.ID),
+			Name: rt.Name,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
