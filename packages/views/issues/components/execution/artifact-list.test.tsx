@@ -3,13 +3,6 @@ import { describe, it, expect, vi } from "vitest";
 import { ArtifactList } from "./artifact-list";
 import type { WorkflowNodeRun } from "@multica/core/types";
 
-// Mock @multica/core/api
-vi.mock("@multica/core/api", () => ({
-  api: {
-    listAttachments: vi.fn().mockResolvedValue({ attachments: [] }),
-  },
-}));
-
 // Mock @multica/views/i18n for useT hook
 vi.mock("@multica/views/i18n", () => ({
   useT: () => ({
@@ -52,17 +45,17 @@ const baseRun: WorkflowNodeRun = {
 describe("ArtifactList", () => {
   it("renders nothing when no outputs or attachments", () => {
     const empty = { ...baseRun, worker_output: null, critic_output: null };
-    const { container } = render(<ArtifactList nodeRun={empty} wsId="ws-1" />);
+    const { container } = render(<ArtifactList nodeRun={empty} />);
     expect(container.firstChild).toBeNull();
   });
 
   it("renders worker output section when present", () => {
-    render(<ArtifactList nodeRun={baseRun} wsId="ws-1" />);
+    render(<ArtifactList nodeRun={baseRun} />);
     expect(screen.getByText(/Worker Output/i)).toBeInTheDocument();
   });
 
   it("renders critic output section when present", () => {
-    render(<ArtifactList nodeRun={baseRun} wsId="ws-1" />);
+    render(<ArtifactList nodeRun={baseRun} />);
     expect(screen.getByText(/Critic Output/i)).toBeInTheDocument();
   });
 });

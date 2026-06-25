@@ -5,7 +5,6 @@ import { useT } from "@multica/views/i18n";
 
 export interface ArtifactListProps {
   nodeRun: WorkflowNodeRun;
-  wsId: string;
 }
 
 export function ArtifactList({ nodeRun }: ArtifactListProps) {
