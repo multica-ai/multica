@@ -85,7 +85,7 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
     workflowNodesOptions(wsId, workflowId),
   );
 
-  const { data: edges = [] } = useQuery(
+  const { data: edges = [], isLoading: edgesLoading } = useQuery(
     workflowEdgesOptions(wsId, workflowId),
   );
 
@@ -95,7 +95,7 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
 
   const { getActorName } = useActorName();
 
-  const isLoading = workflowLoading || stagesLoading || nodesLoading;
+  const isLoading = workflowLoading || stagesLoading || nodesLoading || edgesLoading;
 
   // ── Derived lookups ──
   const agentLookup = useMemo(() => {
