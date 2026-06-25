@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-06-22
+// Snapshot: 2026-06-25
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -172,6 +172,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "opencode/glm-4.7": { input: 0.6, output: 2.2, cacheRead: 0.1, cacheWrite: 0.6 },
   "opencode/glm-5": { input: 1, output: 3.2, cacheRead: 0.2, cacheWrite: 1 },
   "opencode/glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
+  "opencode/glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
   "opencode/gpt-5": { input: 1.07, output: 8.5, cacheRead: 0.107, cacheWrite: 1.07 },
   "opencode/gpt-5-codex": { input: 1.07, output: 8.5, cacheRead: 0.107, cacheWrite: 1.07 },
   "opencode/gpt-5.1": { input: 1.07, output: 8.5, cacheRead: 0.107, cacheWrite: 1.07 },
