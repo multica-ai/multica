@@ -487,6 +487,58 @@
     "update_failed": "Failed to update label",
     "delete_failed": "Failed to delete label"
   },
+  "execution": {
+    "panorama": {
+      "not_started": "Not started",
+      "no_worker": "No worker configured",
+      "no_run": "Workflow not started yet",
+      "empty_stage": "No nodes in this stage",
+      "unassigned": "Unassigned"
+    },
+    "card": {
+      "worker_label": "Worker",
+      "critic_label": "Critic",
+      "artifacts_count": "{{count}} artifact",
+      "artifacts_count_plural": "{{count}} artifacts"
+    },
+    "detail_panel": {
+      "title": "Node Detail",
+      "status_path": "Status Path",
+      "worker": "Worker",
+      "critic": "Critic",
+      "worker_output": "Worker Output",
+      "critic_output": "Critic Output",
+      "attachments": "Attachments",
+      "not_configured": "Not configured",
+      "no_output": "No output yet",
+      "review_comment": "Review Comment",
+      "metadata": "Metadata",
+      "started_at": "Started",
+      "completed_at": "Completed",
+      "duration": "Duration",
+      "retry_count": "Retries",
+      "error": "Error",
+      "view_full_issue": "View full issue"
+    },
+    "status": {
+      "pending": "Pending",
+      "format_checking": "Format Checking",
+      "format_ok": "Format OK",
+      "format_failed": "Format Failed",
+      "worker_assigned": "Assigned",
+      "working": "Working",
+      "awaiting_input": "Awaiting Input",
+      "awaiting_critic": "Awaiting Critic",
+      "critic_reviewing": "Reviewing",
+      "critic_approved": "Approved",
+      "critic_rework": "Rework",
+      "completed": "Completed",
+      "failed": "Failed",
+      "blocked": "Blocked",
+      "skipped": "Skipped",
+      "cancelled": "Cancelled"
+    }
+  },
   "backlog_hint": {
     "title": "Agent is paused in Backlog",
     "description": "This issue is parked, so the assigned agent will wait. Move it to Todo when you want the agent to start.",

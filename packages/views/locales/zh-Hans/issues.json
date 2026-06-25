@@ -476,6 +476,40 @@
     "update_failed": "更新标签失败",
     "delete_failed": "删除标签失败"
   },
+  "execution": {
+    "panorama": {
+      "not_started": "未启动",
+      "no_worker": "未配置 Worker",
+      "no_run": "Workflow 尚未启动",
+      "empty_stage": "此阶段暂无节点",
+      "unassigned": "未分组"
+    },
+    "card": {
+      "worker_label": "Worker",
+      "critic_label": "Critic",
+      "artifacts_count": "{{count}} 个产物",
+      "artifacts_count_plural": "{{count}} 个产物"
+    },
+    "detail_panel": {
+      "title": "节点详情",
+      "status_path": "状态路径",
+      "worker": "Worker",
+      "critic": "Critic",
+      "worker_output": "Worker 输出",
+      "critic_output": "Critic 输出",
+      "attachments": "附件",
+      "not_configured": "未配置",
+      "no_output": "暂无输出",
+      "review_comment": "审核意见",
+      "metadata": "元数据",
+      "started_at": "开始时间",
+      "completed_at": "完成时间",
+      "duration": "耗时",
+      "retry_count": "重试次数",
+      "error": "错误",
+      "view_full_issue": "查看完整 Issue"
+    }
+  },
   "backlog_hint": {
     "title": "智能体在 backlog 状态下暂停",
     "description": "这个 issue 处于待规划状态，被分配的智能体会等待。准备启动时把它移到 todo。",
