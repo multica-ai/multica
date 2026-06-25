@@ -20,22 +20,57 @@ interface TestWorkspace {
 }
 
 export class TestApiClient {
+  private static readonly DEFAULT_NODE_GRID_COLUMNS = 4;
+  private static readonly DEFAULT_NODE_GRID_X_START = 120;
+  private static readonly DEFAULT_NODE_GRID_Y_START = 80;
+  private static readonly DEFAULT_NODE_GRID_X_GAP = 260;
+  private static readonly DEFAULT_NODE_GRID_Y_GAP = 180;
+
   private token: string | null = null;
   private workspaceSlug: string | null = null;
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
   private createdWorkflowIds: string[] = [];
   private createdWorkflowStageIds: string[] = [];
+  private createdAgentIds: string[] = [];
+  private workflowNodeCounts = new Map<string, number>();
 
   async login(email: string, name: string) {
+    const devCode = process.env.MULTICA_DEV_VERIFICATION_CODE;
+
+    // When MULTICA_DEV_VERIFICATION_CODE is set, the backend uses a fixed
+    // verification code and does not write to the verification_code table.
+    if (devCode) {
+      // With a fixed dev code, we can skip send-code entirely and
+      // verify directly — avoids rate limiting on /auth/send-code.
+      const verifyRes = await fetch(`${API_BASE}/auth/verify-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, code: devCode }),
+      });
+      if (!verifyRes.ok) {
+        throw new Error(`verify-code failed: ${verifyRes.status}`);
+      }
+      const data = await verifyRes.json();
+
+      this.token = data.token;
+
+      if (name && data.user?.name !== name) {
+        await this.authedFetch("/api/me", {
+          method: "PATCH",
+          body: JSON.stringify({ name }),
+        });
+      }
+
+      return data;
+    }
+
+    // Production path: use database-backed verification_code table
     const client = new pg.Client(DATABASE_URL);
     await client.connect();
     try {
-      // Keep each E2E login isolated so previous test runs do not trip the
-      // per-email send-code rate limit.
       await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
 
-      // Step 1: Send verification code
       const sendRes = await fetch(`${API_BASE}/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -45,7 +80,6 @@ export class TestApiClient {
         throw new Error(`send-code failed: ${sendRes.status}`);
       }
 
-      // Step 2: Read code from database
       const result = await client.query(
         "SELECT code FROM verification_code WHERE email = $1 AND used = FALSE AND expires_at > now() ORDER BY created_at DESC LIMIT 1",
         [email],
@@ -54,7 +88,6 @@ export class TestApiClient {
         throw new Error(`No verification code found for ${email}`);
       }
 
-      // Step 3: Verify code to get JWT
       const verifyRes = await fetch(`${API_BASE}/auth/verify-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -67,7 +100,6 @@ export class TestApiClient {
 
       this.token = data.token;
 
-      // Update user name if needed
       if (name && data.user?.name !== name) {
         await this.authedFetch("/api/me", {
           method: "PATCH",
@@ -142,7 +174,29 @@ export class TestApiClient {
     });
     const workflow = await res.json();
     this.createdWorkflowIds.push(workflow.id);
+    this.workflowNodeCounts.set(workflow.id, 0);
     return workflow;
+  }
+
+  async listWorkflows(workspaceId?: string) {
+    const query = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+    const res = await this.authedFetch(`/api/workflows${query}`);
+    return res.json();
+  }
+
+  async getWorkflow(id: string) {
+    const res = await this.authedFetch(`/api/workflows/${id}`);
+    return res.json();
+  }
+
+  async listWorkflowNodes(workflowId: string) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes`);
+    return res.json();
+  }
+
+  async listWorkflowEdges(workflowId: string) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/edges`);
+    return res.json();
   }
 
   async createWorkflowStage(workflowId: string, name: string, sortOrder: number) {
@@ -161,21 +215,33 @@ export class TestApiClient {
     position_x?: number;
     position_y?: number;
     worker_type?: string;
+    worker_id?: string | null;
     critic_type?: string;
+    critic_id?: string | null;
     stage_id?: string | null;
+    format_schema?: unknown;
+    critic_api_url?: string | null;
   }) {
+    const defaultPosition = this.getDefaultNodePosition(workflowId);
+    const body: Record<string, unknown> = {
+      title: data.title,
+      description: data.description ?? "",
+      position_x: data.position_x ?? defaultPosition.x,
+      position_y: data.position_y ?? defaultPosition.y,
+      worker_type: data.worker_type ?? "agent",
+      critic_type: data.critic_type ?? "human",
+    };
+    if (data.worker_id !== undefined) body.worker_id = data.worker_id;
+    if (data.critic_id !== undefined) body.critic_id = data.critic_id;
+    if (data.format_schema !== undefined) body.format_schema = data.format_schema;
+    if (data.critic_api_url !== undefined) body.critic_api_url = data.critic_api_url;
+
     const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes`, {
       method: "POST",
-      body: JSON.stringify({
-        title: data.title,
-        description: data.description ?? "",
-        position_x: data.position_x ?? 0,
-        position_y: data.position_y ?? 0,
-        worker_type: data.worker_type ?? "agent",
-        critic_type: data.critic_type ?? "human",
-      }),
+      body: JSON.stringify(body),
     });
     const node = await res.json();
+    this.incrementWorkflowNodeCount(workflowId);
 
     // If stage_id is provided, assign the node to the stage
     if (data.stage_id !== undefined) {
@@ -200,6 +266,9 @@ export class TestApiClient {
         }),
       }
     );
+    if (!res.ok) {
+      throw new Error(`create workflow edge failed: ${res.status} ${await res.text()}`);
+    }
     return res.json();
   }
 
@@ -211,15 +280,91 @@ export class TestApiClient {
     return res.json();
   }
 
+  // ── Agent / Runtime / Plugin methods ──
+
+  async listRuntimes(params?: { owner?: string }) {
+    const query = new URLSearchParams();
+    if (params?.owner) query.set("owner", params.owner);
+    const qs = query.toString();
+    const res = await this.authedFetch(`/api/runtimes${qs ? `?${qs}` : ""}`);
+    return res.json();
+  }
+
+  async createAgent(data: {
+    name: string;
+    description?: string;
+    instructions?: string;
+    runtime_id: string;
+    runtime_mode?: string;
+    visibility?: string;
+    model?: string;
+    thinking_level?: string;
+    max_concurrent_tasks?: number;
+    plugin_id?: string;
+  }) {
+    const res = await this.authedFetch("/api/agents", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const agent = await res.json();
+    this.createdAgentIds.push(agent.id);
+    return agent;
+  }
+
+  async deleteAgent(id: string) {
+    await this.authedFetch(`/api/agents/${id}`, { method: "DELETE" });
+  }
+
+  async getAgent(id: string) {
+    const res = await this.authedFetch(`/api/agents/${id}`);
+    return res.json();
+  }
+
+  async listAgents(params?: { include_archived?: boolean }) {
+    const query = new URLSearchParams();
+    if (params?.include_archived) query.set("include_archived", "true");
+    const qs = query.toString();
+    const res = await this.authedFetch(`/api/agents${qs ? `?${qs}` : ""}`);
+    return res.json();
+  }
+
+  async listBuiltinPlugins() {
+    const res = await this.authedFetch("/api/plugins/builtin");
+    return res.json();
+  }
+
+  // ── Workflow node update (for setting worker_id on existing nodes) ──
+
+  async updateWorkflowNode(workflowId: string, nodeId: string, data: {
+    title?: string;
+    description?: string;
+    worker_type?: string;
+    worker_id?: string | null;
+    critic_type?: string;
+    critic_id?: string | null;
+    stage_id?: string | null;
+    format_schema?: unknown;
+    position_x?: number;
+    position_y?: number;
+  }) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes/${nodeId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  }
+
   async deleteIssue(id: string) {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
+
+  // ── Cleanup helpers ──
 
   async deleteWorkflow(id: string) {
     await this.authedFetch(`/api/workflows/${id}`, { method: "DELETE" });
   }
 
-  /** Clean up all issues, workflows created during this test.
+  /** Clean up all issues, workflows, agents created during this test.
    *  Workflow cascade deletion handles associated stages and nodes. */
   async cleanup() {
     for (const id of this.createdWorkflowIds) {
@@ -231,6 +376,16 @@ export class TestApiClient {
     }
     this.createdWorkflowIds = [];
     this.createdWorkflowStageIds = [];
+    this.workflowNodeCounts.clear();
+
+    for (const id of this.createdAgentIds) {
+      try {
+        await this.deleteAgent(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdAgentIds = [];
 
     for (const id of this.createdIssueIds) {
       try {
@@ -255,5 +410,20 @@ export class TestApiClient {
     if (this.workspaceSlug) headers["X-Workspace-Slug"] = this.workspaceSlug;
     else if (this.workspaceId) headers["X-Workspace-ID"] = this.workspaceId;
     return fetch(`${API_BASE}${path}`, { ...init, headers });
+  }
+
+  private getDefaultNodePosition(workflowId: string) {
+    const index = this.workflowNodeCounts.get(workflowId) ?? 0;
+    const column = index % TestApiClient.DEFAULT_NODE_GRID_COLUMNS;
+    const row = Math.floor(index / TestApiClient.DEFAULT_NODE_GRID_COLUMNS);
+    return {
+      x: TestApiClient.DEFAULT_NODE_GRID_X_START + column * TestApiClient.DEFAULT_NODE_GRID_X_GAP,
+      y: TestApiClient.DEFAULT_NODE_GRID_Y_START + row * TestApiClient.DEFAULT_NODE_GRID_Y_GAP,
+    };
+  }
+
+  private incrementWorkflowNodeCount(workflowId: string) {
+    const nextCount = (this.workflowNodeCounts.get(workflowId) ?? 0) + 1;
+    this.workflowNodeCounts.set(workflowId, nextCount);
   }
 }

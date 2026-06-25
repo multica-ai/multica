@@ -5,7 +5,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type WorkflowViewMode = "overview" | "editor";
+export type WorkflowViewMode = "panorama" | "editor";
 
 interface WorkflowViewState {
   viewMode: WorkflowViewMode;
@@ -16,7 +16,7 @@ interface WorkflowViewState {
 export const useWorkflowViewStore = create<WorkflowViewState>()(
   persist(
     (set) => ({
-      viewMode: "overview" as WorkflowViewMode,
+      viewMode: "panorama" as WorkflowViewMode,
       setViewMode: (mode: WorkflowViewMode) => set({ viewMode: mode }),
     }),
     {

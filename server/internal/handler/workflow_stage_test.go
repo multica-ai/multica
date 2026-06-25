@@ -70,9 +70,9 @@ func TestCreateStage_InWorkflow(t *testing.T) {
 	}
 }
 
-// TestCrossStageEdge_Rejected verifies that creating an edge between nodes
-// in different stages returns 400.
-func TestCrossStageEdge_Rejected(t *testing.T) {
+// TestCrossStageEdge_Allowed verifies that creating an edge between nodes
+// in different stages succeeds (cross-stage edges are supported for panorama view).
+func TestCrossStageEdge_Allowed(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -156,7 +156,7 @@ func TestCrossStageEdge_Rejected(t *testing.T) {
 	assignNode(nr1.ID, sr1.ID)
 	assignNode(nr2.ID, sr2.ID)
 
-	// Try cross-stage edge
+	// Try cross-stage edge — should succeed
 	w = httptest.NewRecorder()
 	req = newRequest("POST", fmt.Sprintf("/api/workflows/%s/edges", wfID), map[string]any{
 		"source_node_id": nr1.ID,
@@ -164,8 +164,8 @@ func TestCrossStageEdge_Rejected(t *testing.T) {
 	})
 	req = withURLParams(req, "id", wfID)
 	testHandler.CreateWorkflowEdge(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("cross-stage edge: expected 400, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusCreated {
+		t.Fatalf("cross-stage edge: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

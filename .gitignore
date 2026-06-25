@@ -62,3 +62,4 @@ data/
 *.exe
 .als/
 .cospec/
+.multica-pids

@@ -9,7 +9,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useDeleteNode, useAssignNodeToStage } from "@multica/core/workflows/queries";
+import { useCreateStage, useDeleteNode, useAssignNodeToStage } from "@multica/core/workflows/queries";
 import { useWorkflowEditorStore } from "@multica/core/workflows/store";
 import { AssigneePicker } from "../../issues/components/pickers/assignee-picker";
 import type { WorkflowNode, WorkflowStage, WorkerType, CriticType } from "@multica/core/types";
@@ -74,6 +74,7 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], stages = [], dis
   const wsId = useWorkspaceId();
   const deleteMutation = useDeleteNode(wsId, workflowId);
   const assignStageMutation = useAssignNodeToStage(wsId, workflowId);
+  const createStageMutation = useCreateStage(wsId, workflowId);
   const nodeEdits = useWorkflowEditorStore((s) => s.nodeEdits);
   const cacheNodeEdits = useWorkflowEditorStore((s) => s.cacheNodeEdits);
 
@@ -100,6 +101,9 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], stages = [], dis
   const [criticId, setCriticId] = useState<string | null>(saved?.critic_id ?? node.critic_id ?? null);
   const [criticApiUrl, setCriticApiUrl] = useState(saved?.critic_api_url ?? node.critic_api_url ?? "");
   const [stageId, setStageId] = useState<string | null>(node.stage_id ?? null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newStageName, setNewStageName] = useState("");
+  const [newStageDescription, setNewStageDescription] = useState("");
 
   useEffect(() => {
     setStageId(node.stage_id ?? null);
@@ -183,7 +187,6 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], stages = [], dis
         </div>
 
         {/* Stage assignment — immediate mutation, not batched with other edits */}
-        {stages.length > 0 && (
         <div className="space-y-1.5">
           <Label className="text-sm">{t(($) => $.node.stage_label)}</Label>
           <select
@@ -191,7 +194,14 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], stages = [], dis
             className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
             value={stageId ?? ""}
             onChange={(e) => {
-              const newStageId = e.target.value || null;
+              const newVal = e.target.value;
+              if (newVal === "__create_new__") {
+                // Reset the select visually — the sentinel value shouldn't linger
+                (e.target as HTMLSelectElement).value = stageId ?? "";
+                setShowCreateForm(true);
+                return;
+              }
+              const newStageId = newVal || null;
               setStageId(newStageId);
               assignStageMutation.mutate(
                 { nodeId: node.id, stage_id: newStageId },
@@ -203,9 +213,75 @@ export function NodeConfigPanel({ node, workflowId, nodes = [], stages = [], dis
             {stages.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
+            <option value="__create_new__" disabled={disabled}>
+              {t(($) => $.node.stage_create_option)}
+            </option>
           </select>
+
+          {showCreateForm && (
+            <div className="space-y-2 rounded-md border border-muted p-3">
+              <Input
+                disabled={disabled}
+                value={newStageName}
+                onChange={(e) => setNewStageName(e.target.value)}
+                placeholder={t(($) => $.node.stage_create_name_placeholder)}
+                className="h-8 text-sm"
+                autoFocus
+              />
+              <Input
+                disabled={disabled}
+                value={newStageDescription}
+                onChange={(e) => setNewStageDescription(e.target.value)}
+                placeholder={t(($) => $.node.stage_create_description_placeholder)}
+                className="h-8 text-sm"
+              />
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="default"
+                  disabled={disabled || !newStageName.trim() || createStageMutation.isPending}
+                  onClick={async () => {
+                    if (!newStageName.trim()) return;
+                    try {
+                      const created = await createStageMutation.mutateAsync({
+                        name: newStageName.trim(),
+                        description: newStageDescription.trim() || undefined,
+                      });
+                      // Auto-select the newly created stage for this node
+                      setStageId(created.id);
+                      assignStageMutation.mutate(
+                        { nodeId: node.id, stage_id: created.id },
+                        { onError: () => setStageId(node.stage_id ?? null) },
+                      );
+                      setShowCreateForm(false);
+                      setNewStageName("");
+                      setNewStageDescription("");
+                    } catch {
+                      // Error captured by mutation state and displayed below
+                    }
+                  }}
+                >
+                  {createStageMutation.isPending ? t(($) => $.node.saving) : t(($) => $.detail.create_dialog.create)}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={createStageMutation.isPending}
+                  onClick={() => {
+                    setShowCreateForm(false);
+                    setNewStageName("");
+                    setNewStageDescription("");
+                  }}
+                >
+                  {t(($) => $.overview.stage_dialog.cancel)}
+                </Button>
+              </div>
+              {createStageMutation.error && (
+                <p className="text-xs text-destructive">{createStageMutation.error.message}</p>
+              )}
+            </div>
+          )}
         </div>
-        )}
 
         {/* Format Schema */}
         <div className="space-y-1.5">
