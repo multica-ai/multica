@@ -204,10 +204,16 @@ WHERE workspace_id = $1 AND multica_user_id = $2;
 -- =====================
 
 -- name: CreateChannelChatSessionBinding :one
+-- channel_chat_id is the session-isolation key (one chat_session per
+-- (installation_id, channel_chat_id)): Feishu passes the chat id; Slack passes
+-- a stable key that, for channels, includes the thread root so each @bot thread
+-- is its own session. config carries any platform-specific outbound routing the
+-- key alone does not (e.g. Slack's real channel_id when the key is composite);
+-- it is opaque to the shared session service.
 INSERT INTO channel_chat_session_binding (
-    chat_session_id, installation_id, channel_type, channel_chat_id, chat_type
+    chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, config
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6
 )
 RETURNING *;
 
