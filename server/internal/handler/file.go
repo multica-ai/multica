@@ -34,14 +34,6 @@ const maxUploadSize = 100 << 20 // 100 MB
 
 const defaultAttachmentDownloadURLTTL = 30 * time.Minute
 
-const attachmentPreviewCSPHeader = "default-src 'none'; " +
-	"img-src 'self' data:; " +
-	"media-src 'self'; " +
-	"frame-ancestors 'self'; " +
-	"object-src 'none'; " +
-	"base-uri 'none'; " +
-	"form-action 'none'"
-
 type attachmentDownloadMode string
 
 const (
@@ -748,17 +740,56 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Disposition", storage.ContentDisposition(att.ContentType, att.Filename))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	setAttachmentPreviewSecurityHeaders(w)
+	h.setAttachmentPreviewSecurityHeaders(w)
 	if _, err := io.Copy(w, reader); err != nil {
 		slog.Error("failed to stream attachment download", "id", uuidToString(att.ID), "error", err)
 	}
 }
 
-func setAttachmentPreviewSecurityHeaders(w http.ResponseWriter) {
-	// Attachment preview responses may be loaded in same-origin iframes
-	// (for example PDF previews) but must remain unembeddable by third-party
-	// sites. This intentionally overrides the app-wide frame-ancestors 'none'.
-	w.Header().Set("Content-Security-Policy", attachmentPreviewCSPHeader)
+func (h *Handler) setAttachmentPreviewSecurityHeaders(w http.ResponseWriter) {
+	// Attachment preview responses may be loaded by the web app in same-origin
+	// deployments or split app/api self-hosted deployments. Allow only the API
+	// origin itself plus configured frontend/CORS origins.
+	w.Header().Set("Content-Security-Policy", attachmentPreviewCSPHeader(h.cfg.AttachmentFrameAncestors))
+}
+
+func attachmentPreviewCSPHeader(frameAncestors []string) string {
+	ancestors := []string{"'self'"}
+	seen := map[string]struct{}{"'self'": {}}
+	for _, raw := range frameAncestors {
+		source, ok := normalizeFrameAncestorSource(raw)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[source]; exists {
+			continue
+		}
+		seen[source] = struct{}{}
+		ancestors = append(ancestors, source)
+	}
+	return "default-src 'none'; " +
+		"img-src 'self' data:; " +
+		"media-src 'self'; " +
+		"frame-ancestors " + strings.Join(ancestors, " ") + "; " +
+		"object-src 'none'; " +
+		"base-uri 'none'; " +
+		"form-action 'none'"
+}
+
+func normalizeFrameAncestorSource(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "*" {
+		return "", false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", false
+	}
+	return scheme + "://" + strings.ToLower(u.Host), true
 }
 
 // ---------------------------------------------------------------------------
@@ -826,7 +857,7 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	// when a user explicitly opens a preview.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	setAttachmentPreviewSecurityHeaders(w)
+	h.setAttachmentPreviewSecurityHeaders(w)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 	if _, err := w.Write(body); err != nil {
 		slog.Error("failed to write attachment preview body", "id", attachmentID, "error", err)
