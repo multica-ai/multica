@@ -162,6 +162,8 @@ interface ContentEditorProps {
    * before the modal closes.
    */
   flushPendingOnUnmount?: boolean;
+  /** data-acceptance attribute applied to the Tiptap contenteditable div. */
+  dataAcceptance?: string;
 }
 
 interface ContentEditorRef {
@@ -202,6 +204,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       slashCommandMode = "skill",
       attachments,
       flushPendingOnUnmount = false,
+      dataAcceptance,
     },
     ref,
   ) {
@@ -382,6 +385,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         },
         attributes: {
           class: cn("flex-1 rich-text-editor text-sm outline-none", className),
+          ...(dataAcceptance ? { "data-acceptance": dataAcceptance } : {}),
         },
       },
     });

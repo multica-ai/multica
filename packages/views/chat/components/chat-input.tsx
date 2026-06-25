@@ -456,6 +456,7 @@ export function ChatInput({
             ref={editorRef}
             defaultValue={activeRestore?.content ?? inputDraft}
             placeholder={placeholder}
+            dataAcceptance="chat-input"
             onUpdate={(md) => {
               setIsEmpty(!md.trim());
               setInputDraft(draftKey, md);
