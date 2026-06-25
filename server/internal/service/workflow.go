@@ -396,6 +396,40 @@ func (s *WorkflowService) TransitionNodeRun(ctx context.Context, nodeRun db.Mult
 	return &updated, nil
 }
 
+// syncNodeRunSessionFromTask backfills a node run's session_id/runtime_id from
+// its worker agent task when the daemon's asynchronous BindNodeRunSession has
+// not landed yet. This prevents "node run has no active session" in Cloud Web
+// when a human takes over shortly after the agent reveals its CSC session.
+func (s *WorkflowService) syncNodeRunSessionFromTask(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun) error {
+	if nodeRun.SessionID.Valid {
+		return nil
+	}
+	if !nodeRun.WorkerAgentTaskID.Valid {
+		return nil
+	}
+	task, err := s.Queries.GetAgentTask(ctx, nodeRun.WorkerAgentTaskID)
+	if err != nil {
+		return fmt.Errorf("get worker task: %w", err)
+	}
+	if !task.SessionID.Valid {
+		return nil
+	}
+	params := db.BindWorkflowNodeRunSessionParams{ID: nodeRun.ID}
+	params.SessionID = task.SessionID
+	if task.RuntimeID.Valid {
+		params.RuntimeID = task.RuntimeID
+	} else if nodeRun.RuntimeID.Valid {
+		params.RuntimeID = nodeRun.RuntimeID
+	}
+	if nodeRun.DeviceID.Valid {
+		params.DeviceID = nodeRun.DeviceID
+	}
+	if _, err := s.Queries.BindWorkflowNodeRunSession(ctx, params); err != nil {
+		return fmt.Errorf("bind node-run session: %w", err)
+	}
+	return nil
+}
+
 // ── Human takeover / handback (Design Two) ───────────────────────────────────
 
 // TakeoverNodeRun pauses an actively-running node so a human can intervene in
@@ -407,6 +441,12 @@ func (s *WorkflowService) TransitionNodeRun(ctx context.Context, nodeRun db.Mult
 func (s *WorkflowService) TakeoverNodeRun(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun) (*db.MulticaWorkflowNodeRun, error) {
 	if !isValidTransition(nodeRun.Status, NodeRunStatusBlocked) {
 		return nil, fmt.Errorf("invalid transition: %s → %s", nodeRun.Status, NodeRunStatusBlocked)
+	}
+	// The daemon writes the CSC session binding asynchronously. If a human
+	// takes over before that write lands, the node run appears to have no
+	// session. Sync from the worker task so Cloud Web can attach immediately.
+	if err := s.syncNodeRunSessionFromTask(ctx, nodeRun); err != nil {
+		return nil, fmt.Errorf("sync node-run session: %w", err)
 	}
 	updated, err := s.Queries.TakeoverWorkflowNodeRun(ctx, nodeRun.ID)
 	if err != nil {
@@ -427,6 +467,13 @@ func (s *WorkflowService) TakeoverNodeRun(ctx context.Context, nodeRun db.Multic
 func (s *WorkflowService) HandbackNodeRun(ctx context.Context, nodeRun db.MulticaWorkflowNodeRun) (*db.MulticaWorkflowNodeRun, error) {
 	if nodeRun.Status != NodeRunStatusBlocked {
 		return nil, fmt.Errorf("node run is not blocked (status=%s)", nodeRun.Status)
+	}
+	// Ensure the node run carries the CSC session binding before handing back.
+	// The daemon claim handler resolves the resume session from this row, so a
+	// missing session_id would force a fresh session instead of continuing the
+	// conversation the human just steered.
+	if err := s.syncNodeRunSessionFromTask(ctx, nodeRun); err != nil {
+		return nil, fmt.Errorf("sync node-run session: %w", err)
 	}
 	updated, err := s.Queries.HandbackWorkflowNodeRun(ctx, nodeRun.ID)
 	if err != nil {
@@ -472,6 +519,7 @@ func (s *WorkflowService) dispatchHandbackResume(ctx context.Context, nodeRun db
 		if _, err := s.Queries.LinkNodeRunWorkerTask(ctx, db.LinkNodeRunWorkerTaskParams{
 			ID:                nodeRun.ID,
 			WorkerAgentTaskID: task.ID,
+			RuntimeID:         task.RuntimeID,
 		}); err != nil {
 			return fmt.Errorf("link worker task: %w", err)
 		}
