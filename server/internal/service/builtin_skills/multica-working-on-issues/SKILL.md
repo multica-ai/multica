@@ -164,6 +164,35 @@ multica issue status <child-id> todo   # promote when the previous step is truly
 
 Creating every serial step as `todo` enqueues the whole chain at once.
 
+## Sessions are comment threads (start fresh vs. resume)
+
+A session IS a comment thread. A new top-level comment (no `--parent`) starts a
+fresh agent session with no history; a reply (`--parent <root>`) resumes that
+session with its full conversation. The thread root's resolved state is the
+session's open/closed state.
+
+```bash
+# Start fresh / hand off work: post a NEW top-level comment (no --parent).
+multica issue comment add <issue> --content-stdin   # ... = fresh session
+
+# Close a session (resolve its thread root); reopen with unresolve.
+multica issue comment resolve <root-comment-id>
+multica issue comment unresolve <root-comment-id>
+
+# Name a session, list named sessions.
+multica issue session rename <issue> <root-comment-id> --name "..."
+multica issue session list <issue>
+
+# Hand off: close the thread AND store a carry-over brief, then post the
+# new top-level comment. Omit the brief flags to auto-summarise the thread.
+multica issue session handoff <issue> <root-comment-id> \
+  --summary "..." --done "..." --remaining "..."
+```
+
+MCP equivalents: `resolve_comment`, `unresolve_comment`, `rename_session`,
+`handoff_session`, `list_sessions`; `add_comment` with no `parent_id` starts a
+fresh session, a reply resumes it.
+
 ## Incorrect → correct
 
 PR title (link the issue):

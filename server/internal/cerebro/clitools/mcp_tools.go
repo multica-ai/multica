@@ -1021,4 +1021,169 @@ A runtime with paused_at != null will silently refuse all task dispatches until 
 		}
 		return jsonText(result)
 	})
+
+	// -----------------------------------------------------------------------
+	// CEREBRO-PATCH(cerebro-sessions-mcp): FIR-2021 — thread = session tools.
+	// A session IS a comment thread (FIR-1874): a new top-level comment starts a
+	// fresh session, a reply resumes it. These tools let an agent close, rename,
+	// hand off, and list sessions. Start a fresh session with add_comment (no
+	// parent_id); resume one by adding a reply (parent_id set).
+	// -----------------------------------------------------------------------
+
+	// resolve_comment — close a session by resolving its thread root.
+	srv.RegisterTool(mcp.Tool{
+		Name: "resolve_comment",
+		Description: `Resolve a comment thread, which CLOSES its session. In the thread = session model, a resolved thread root means that session is done.
+
+Pass the THREAD ROOT comment id (the top-level comment that started the thread), not a reply id. Use handoff_session instead when you also want to store a carry-over brief for the next session.`,
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"comment_id"},
+			"properties": map[string]any{
+				"comment_id": map[string]any{"type": "string", "description": "Thread root comment id to resolve (closes the session)."},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		id, err := requireString(args, "comment_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		var result any
+		if err := client.PostJSON(ctx, "/api/comments/"+url.PathEscape(id)+"/resolve", map[string]any{}, &result); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(result)
+	})
+
+	// unresolve_comment — reopen a resolved thread / session.
+	srv.RegisterTool(mcp.Tool{
+		Name:        "unresolve_comment",
+		Description: "Reopen a resolved comment thread, which REOPENS its session. Pass the thread root comment id.",
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"comment_id"},
+			"properties": map[string]any{
+				"comment_id": map[string]any{"type": "string", "description": "Thread root comment id to unresolve (reopens the session)."},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		id, err := requireString(args, "comment_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		if err := client.DeleteJSON(ctx, "/api/comments/"+url.PathEscape(id)+"/resolve"); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return mcp.TextResult("Thread reopened (session reopened): " + id), nil
+	})
+
+	// list_sessions — the named sessions (threads) on an issue.
+	srv.RegisterTool(mcp.Tool{
+		Name:        "list_sessions",
+		Description: "List the sessions on an issue. A session is a comment thread; each row carries the thread root comment id, its name, and any stored handoff brief.",
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"issue_id"},
+			"properties": map[string]any{
+				"issue_id": map[string]any{"type": "string", "description": "Issue ID"},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		issueID, err := requireString(args, "issue_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		var result any
+		if err := client.GetJSON(ctx, "/api/cerebro/issues/"+url.PathEscape(issueID)+"/sessions", &result); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(result)
+	})
+
+	// rename_session — set a session's display name.
+	srv.RegisterTool(mcp.Tool{
+		Name:        "rename_session",
+		Description: "Set a session's name (the thread's display name). The session id is the THREAD ROOT comment id.",
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"issue_id", "root_comment_id", "name"},
+			"properties": map[string]any{
+				"issue_id":        map[string]any{"type": "string", "description": "Issue ID"},
+				"root_comment_id": map[string]any{"type": "string", "description": "Thread root comment id (the session id)."},
+				"name":            map[string]any{"type": "string", "description": "New session name."},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		issueID, err := requireString(args, "issue_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		rootID, err := requireString(args, "root_comment_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		name, err := requireString(args, "name")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		var result any
+		path := "/api/cerebro/issues/" + url.PathEscape(issueID) + "/sessions/" + url.PathEscape(rootID)
+		if err := client.PatchJSON(ctx, path, map[string]any{"name": name}, &result); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(result)
+	})
+
+	// handoff_session — close a session and store a carry-over brief.
+	srv.RegisterTool(mcp.Tool{
+		Name: "handoff_session",
+		Description: `Hand off a session: resolve its thread (closing the session) and store a handoff brief on it. Then start the fresh session by calling add_comment with NO parent_id (a new top-level comment).
+
+Supply a brief via summary/done/remaining. Omit them all to let the server auto-summarise the thread.`,
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"issue_id", "root_comment_id"},
+			"properties": map[string]any{
+				"issue_id":        map[string]any{"type": "string", "description": "Issue ID"},
+				"root_comment_id": map[string]any{"type": "string", "description": "Thread root comment id of the session to hand off."},
+				"summary":         map[string]any{"type": "string", "description": "Handoff summary. Omit (with done/remaining) to auto-summarise."},
+				"done":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "What was completed."},
+				"remaining":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "What is left to do."},
+				"plan_ref":        map[string]any{"type": "string", "description": "Optional reference to a plan artifact/issue."},
+			},
+		},
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		issueID, err := requireString(args, "issue_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		rootID, err := requireString(args, "root_comment_id")
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		body := map[string]any{"root_comment_id": rootID}
+		summary := optString(args, "summary")
+		planRef := optString(args, "plan_ref")
+		done, hasDone := args["done"]
+		remaining, hasRemaining := args["remaining"]
+		if summary != "" || planRef != "" || hasDone || hasRemaining {
+			handoff := map[string]any{"summary": summary}
+			if hasDone {
+				handoff["done"] = done
+			}
+			if hasRemaining {
+				handoff["remaining"] = remaining
+			}
+			if planRef != "" {
+				handoff["plan_ref"] = planRef
+			}
+			body["handoff"] = handoff
+		}
+		var result any
+		path := "/api/cerebro/issues/" + url.PathEscape(issueID) + "/sessions/start-fresh"
+		if err := client.PostJSON(ctx, path, body, &result); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(result)
+	})
 }

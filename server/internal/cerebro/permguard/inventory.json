@@ -1603,6 +1603,26 @@
       "gate": "via:POST /api/issues/{id}/comments"
     },
     {
+      "id": "handoff_session",
+      "gate": "via:POST /api/cerebro/issues/{issueId}/sessions/start-fresh"
+    },
+    {
+      "id": "list_sessions",
+      "exempt": "read-only — wraps GET /api/cerebro/issues/{issueId}/sessions"
+    },
+    {
+      "id": "rename_session",
+      "gate": "via:PATCH /api/cerebro/issues/{issueId}/sessions/{sessionId}"
+    },
+    {
+      "id": "resolve_comment",
+      "gate": "via:POST /api/comments/{commentId}/resolve"
+    },
+    {
+      "id": "unresolve_comment",
+      "gate": "via:DELETE /api/comments/{commentId}/resolve"
+    },
+    {
       "id": "add_group_agent",
       "gate": "via:POST /api/groups/{id}/agents"
     },
@@ -2227,6 +2247,26 @@
     {
       "id": "issue comment move",
       "gate": "via:POST /api/comments/move-to-thread"
+    },
+    {
+      "id": "issue comment resolve",
+      "gate": "via:POST /api/comments/{commentId}/resolve"
+    },
+    {
+      "id": "issue comment unresolve",
+      "gate": "via:DELETE /api/comments/{commentId}/resolve"
+    },
+    {
+      "id": "issue session handoff",
+      "gate": "via:POST /api/cerebro/issues/{issueId}/sessions/start-fresh"
+    },
+    {
+      "id": "issue session list",
+      "exempt": "read-only — wraps GET /api/cerebro/issues/{issueId}/sessions"
+    },
+    {
+      "id": "issue session rename",
+      "gate": "via:PATCH /api/cerebro/issues/{issueId}/sessions/{sessionId}"
     },
     {
       "id": "issue context",

@@ -122,6 +122,26 @@ line 2537).
 `--value` is JSON-parsed by default (bool/number sniff); `--type` forces
 `string`/`number`/`bool`.
 
+## Sessions = threads CLI / MCP (FIR-2021)
+
+A session IS a comment thread (FIR-1874). Resume vs. fresh is decided server-side
+by whether the trigger comment has a parent.
+
+| Behavior | File:line |
+|---|---|
+| Fresh-vs-resume: `forceFreshSession = (parentComment == nil)` | `server/internal/handler/comment.go:1057` |
+| Resume lookup keyed by (agent, issue) | `server/internal/handler/daemon.go:1729-1742`; query `server/pkg/db/queries/agent.sql:385` |
+| CLI `issue comment resolve / unresolve` | `server/cmd/multica/cerebro_sessions.go` (POST/DELETE `/api/comments/{id}/resolve`) |
+| CLI `issue session list / rename / handoff` | `server/cmd/multica/cerebro_sessions.go` |
+| MCP `resolve_comment` / `unresolve_comment` / `list_sessions` / `rename_session` / `handoff_session` | `server/internal/cerebro/clitools/mcp_tools.go` |
+| Resolve route (upstream) | `server/cmd/server/router.go:1541-1542` (`ResolveComment` / `UnresolveComment`) |
+| Sessions routes (list / start-fresh / rename) | `server/cmd/server/router.go:2019,2023,2024` → `server/internal/cerebro/sessions/handler.go` |
+
+`handoff` posts to `.../sessions/start-fresh` (resolves the thread + stores the
+brief); `rename` PATCHes `.../sessions/{rootCommentId}` (sessionId path param IS
+the thread root comment id). Omitting the brief flags lets the server
+auto-summarise (`generateHandoff`).
+
 ## Verification command
 
 Re-derive any line above before depending on it:
