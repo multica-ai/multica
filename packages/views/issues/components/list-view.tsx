@@ -165,7 +165,10 @@ export function ListView({
     ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
     : undefined;
 
-  const dragEnabled = !!onMoveIssue;
+  // Disable DnD when any parent is expanded: the flat column order
+  // diverges from the hierarchical render order, so drop-position math
+  // would be inaccurate. Re-collapse all parents to re-enable.
+  const dragEnabled = !!onMoveIssue && expandedParents.size === 0;
 
   const groups = useMemo(
     () => buildListGroups(visibleStatuses),
