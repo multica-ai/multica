@@ -205,8 +205,8 @@ func TestPrepareOpenclawConfigFailsClosedOnCLIError(t *testing.T) {
 // OpenClaw 2026.2.x builds that rejected `openclaw config file` with
 // "too many arguments for 'config'". That command-shape mismatch should
 // not make every task fail during execenv prep; the daemon can derive the
-// active path from documented OPENCLAW_* path vars and then continue using
-// `config get ... --json` for resolved config data.
+// active path from OpenClaw's documented and legacy config candidates and
+// then continue using `config get ... --json` for resolved config data.
 func TestPrepareOpenclawConfigFallsBackWhenConfigFileUnsupported(t *testing.T) {
 	envRoot := t.TempDir()
 	workDir := filepath.Join(envRoot, "workdir")
@@ -265,11 +265,26 @@ func TestOpenclawActiveConfigPathFallbackSources(t *testing.T) {
 				return path
 			},
 		},
+		"legacy_config_path": {
+			setup: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "custom-clawdbot.json")
+				t.Setenv("CLAWDBOT_CONFIG_PATH", path)
+				return path
+			},
+		},
 		"state_dir": {
 			setup: func(t *testing.T) string {
 				stateDir := t.TempDir()
 				path := filepath.Join(stateDir, "openclaw.json")
 				t.Setenv("OPENCLAW_STATE_DIR", stateDir)
+				return path
+			},
+		},
+		"legacy_state_dir": {
+			setup: func(t *testing.T) string {
+				stateDir := t.TempDir()
+				path := filepath.Join(stateDir, "clawdbot.json")
+				t.Setenv("CLAWDBOT_STATE_DIR", stateDir)
 				return path
 			},
 		},
@@ -285,6 +300,30 @@ func TestOpenclawActiveConfigPathFallbackSources(t *testing.T) {
 			setup: func(t *testing.T) string {
 				home := t.TempDir()
 				path := filepath.Join(home, ".openclaw", "openclaw.json")
+				t.Setenv("HOME", home)
+				return path
+			},
+		},
+		"legacy_default_clawdbot": {
+			setup: func(t *testing.T) string {
+				home := t.TempDir()
+				path := filepath.Join(home, ".clawdbot", "clawdbot.json")
+				t.Setenv("HOME", home)
+				return path
+			},
+		},
+		"legacy_default_moltbot": {
+			setup: func(t *testing.T) string {
+				home := t.TempDir()
+				path := filepath.Join(home, ".moltbot", "moltbot.json")
+				t.Setenv("HOME", home)
+				return path
+			},
+		},
+		"legacy_default_moldbot": {
+			setup: func(t *testing.T) string {
+				home := t.TempDir()
+				path := filepath.Join(home, ".moldbot", "moldbot.json")
 				t.Setenv("HOME", home)
 				return path
 			},
@@ -316,6 +355,27 @@ func TestOpenclawActiveConfigPathFallbackSources(t *testing.T) {
 				t.Errorf("path = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+func TestOpenclawActiveConfigPathFallbackFreshInstallUsesCanonicalPath(t *testing.T) {
+	clearOpenclawPathEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {err: openclawConfigFileUnsupportedErr()},
+	})
+
+	got, exists, err := openclawActiveConfigPath(stub.bin, openclawCLITimeout)
+	if err != nil {
+		t.Fatalf("openclawActiveConfigPath: %v", err)
+	}
+	want := filepath.Join(home, ".openclaw", "openclaw.json")
+	if got != want {
+		t.Errorf("path = %q, want canonical fresh-install path %q", got, want)
+	}
+	if exists {
+		t.Fatal("exists = true, want false for fresh install")
 	}
 }
 
@@ -379,6 +439,8 @@ func clearOpenclawPathEnv(t *testing.T) {
 	t.Setenv("OPENCLAW_CONFIG_PATH", "")
 	t.Setenv("OPENCLAW_STATE_DIR", "")
 	t.Setenv("OPENCLAW_HOME", "")
+	t.Setenv("CLAWDBOT_CONFIG_PATH", "")
+	t.Setenv("CLAWDBOT_STATE_DIR", "")
 }
 
 func openclawConfigFileUnsupportedErr() error {

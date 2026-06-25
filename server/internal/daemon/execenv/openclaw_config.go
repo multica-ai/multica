@@ -132,9 +132,8 @@ type OpenclawConfigResult struct {
 //
 //  1. Run `openclaw config file` to find the user's active config path.
 //     For OpenClaw releases whose `config` command rejects the `file`
-//     subcommand shape, fall back to resolving the documented path env vars:
-//     OPENCLAW_CONFIG_PATH, OPENCLAW_STATE_DIR, OPENCLAW_HOME, and the
-//     default location.
+//     subcommand shape, fall back to resolving OpenClaw's active-config
+//     candidates, including legacy Clawdbot/Moltbot/Moldbot locations.
 //  2. Run `openclaw config get agents.list --json` to enumerate every
 //     registered agent ID with its resolved fields. The CLI parses JSON5,
 //     follows $include, and substitutes ${VAR} for us.
@@ -435,14 +434,14 @@ func stripUserMcpServers(resolved map[string]any) {
 // openclawActiveConfigPath runs `openclaw config file` to discover the path
 // the openclaw CLI considers active. Returns (absolutePath, exists, error).
 //
-// The CLI handles the full resolution chain — OPENCLAW_CONFIG_PATH, the
-// state directory (OPENCLAW_STATE_DIR / OPENCLAW_HOME / default), legacy
-// migration, and `~` expansion — so we prefer it when the installed CLI
-// supports the command.
+// The CLI handles the full resolution chain — explicit config path, state
+// directory, OPENCLAW_HOME / default home, legacy locations, migration, and `~`
+// expansion — so we prefer it when the installed CLI supports the command.
 //
 // OpenClaw 2026.2.x briefly rejected `openclaw config file` with the generic
 // "too many arguments for 'config'" error. For that command-shape failure only,
-// fall back to the documented path env vars so task prep can still continue.
+// fall back to the same active-config candidate shape so task prep can still
+// continue without losing upgraded users' legacy config files.
 //
 // The reported path uses `~` shorthand for the user's home; we expand it
 // so the $include reference we write is unambiguous absolute.
@@ -487,33 +486,79 @@ func openclawParseActiveConfigPath(out string) (string, bool, error) {
 }
 
 func openclawFallbackActiveConfigPath() (string, bool, error) {
-	path := strings.TrimSpace(os.Getenv("OPENCLAW_CONFIG_PATH"))
-	if path == "" {
-		stateDir := strings.TrimSpace(os.Getenv("OPENCLAW_STATE_DIR"))
-		if stateDir == "" {
-			home := strings.TrimSpace(os.Getenv("OPENCLAW_HOME"))
-			var err error
-			if home == "" {
-				home, err = os.UserHomeDir()
-				if err != nil {
-					return "", false, fmt.Errorf("resolve openclaw home: %w", err)
-				}
-			} else {
-				home, err = expandOpenclawPath(home)
-				if err != nil {
-					return "", false, fmt.Errorf("resolve OPENCLAW_HOME: %w", err)
-				}
-			}
-			stateDir = filepath.Join(home, ".openclaw")
-		}
-		path = filepath.Join(stateDir, "openclaw.json")
-	}
-
-	path, err := expandOpenclawPath(path)
+	candidates, canonicalPath, err := openclawFallbackConfigCandidates()
 	if err != nil {
 		return "", false, err
 	}
-	return openclawStatConfigPath(path)
+	for _, candidate := range candidates {
+		path, err := expandOpenclawPath(candidate)
+		if err != nil {
+			return "", false, err
+		}
+		exists, err := openclawConfigPathExists(path)
+		if err != nil {
+			return "", false, err
+		}
+		if exists {
+			return path, true, nil
+		}
+	}
+	return openclawStatConfigPath(canonicalPath)
+}
+
+var openclawFallbackConfigFileNames = []string{
+	"openclaw.json",
+	"clawdbot.json",
+	"moltbot.json",
+	"moldbot.json",
+}
+
+var openclawFallbackConfigDirNames = []string{
+	".openclaw",
+	".clawdbot",
+	".moltbot",
+	".moldbot",
+}
+
+func openclawFallbackConfigCandidates() ([]string, string, error) {
+	candidates := make([]string, 0, 2+2*len(openclawFallbackConfigFileNames)+len(openclawFallbackConfigDirNames)*len(openclawFallbackConfigFileNames))
+	for _, env := range []string{"OPENCLAW_CONFIG_PATH", "CLAWDBOT_CONFIG_PATH"} {
+		if path := strings.TrimSpace(os.Getenv(env)); path != "" {
+			candidates = append(candidates, path)
+		}
+	}
+
+	for _, env := range []string{"OPENCLAW_STATE_DIR", "CLAWDBOT_STATE_DIR"} {
+		if dir := strings.TrimSpace(os.Getenv(env)); dir != "" {
+			candidates = appendOpenclawConfigFileCandidates(candidates, dir)
+		}
+	}
+
+	home := strings.TrimSpace(os.Getenv("OPENCLAW_HOME"))
+	var err error
+	if home == "" {
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return nil, "", fmt.Errorf("resolve openclaw home: %w", err)
+		}
+	} else {
+		home, err = expandOpenclawPath(home)
+		if err != nil {
+			return nil, "", fmt.Errorf("resolve OPENCLAW_HOME: %w", err)
+		}
+	}
+
+	for _, dirName := range openclawFallbackConfigDirNames {
+		candidates = appendOpenclawConfigFileCandidates(candidates, filepath.Join(home, dirName))
+	}
+	return candidates, filepath.Join(home, ".openclaw", "openclaw.json"), nil
+}
+
+func appendOpenclawConfigFileCandidates(candidates []string, dir string) []string {
+	for _, name := range openclawFallbackConfigFileNames {
+		candidates = append(candidates, filepath.Join(dir, name))
+	}
+	return candidates
 }
 
 func expandOpenclawPath(path string) (string, error) {
@@ -542,17 +587,25 @@ func openclawStatConfigPath(path string) (string, bool, error) {
 	if !filepath.IsAbs(path) {
 		return "", false, fmt.Errorf("openclaw reported non-absolute config path %q", path)
 	}
+	exists, err := openclawConfigPathExists(path)
+	if err != nil {
+		return "", false, err
+	}
+	return path, exists, nil
+}
+
+func openclawConfigPathExists(path string) (bool, error) {
 	info, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return path, false, nil
+		return false, nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("stat openclaw config %s: %w", path, err)
+		return false, fmt.Errorf("stat openclaw config %s: %w", path, err)
 	}
 	if info.IsDir() {
-		return "", false, fmt.Errorf("openclaw config path %s is a directory, not a file", path)
+		return false, fmt.Errorf("openclaw config path %s is a directory, not a file", path)
 	}
-	return path, true, nil
+	return true, nil
 }
 
 func isOpenclawConfigFileUnsupported(err error) bool {
