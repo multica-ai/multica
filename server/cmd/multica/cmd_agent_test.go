@@ -119,6 +119,7 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_ID", "")
 		t.Setenv("MULTICA_TASK_ID", "")
 		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
 
 		if got := resolveToken(testCmd()); got != "mul_profile_token" {
 			t.Fatalf("resolveToken() = %q, want profile token", got)
@@ -142,6 +143,59 @@ func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
 
 		if got := resolveToken(testCmd()); got != "mat_task_token" {
 			t.Fatalf("resolveToken() = %q, want MULTICA_TOKEN", got)
+		}
+	})
+
+	t.Run("daemon port set without agent context avoids config fallback", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "19514")
+
+		if got := resolveToken(testCmd()); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty (daemon port set, fail closed)", got)
+		}
+	})
+
+	t.Run("daemon port set with explicit task token uses task token", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "mat_task_token")
+		t.Setenv("MULTICA_DAEMON_PORT", "19514")
+
+		if got := resolveToken(testCmd()); got != "mat_task_token" {
+			t.Fatalf("resolveToken() = %q, want MULTICA_TOKEN (task token wins over daemon signal)", got)
+		}
+	})
+
+	// MULTICA_SERVER_URL is a user-facing env var that may be set in a
+	// normal shell. It is NOT a daemon identity signal — only
+	// MULTICA_DAEMON_PORT is. The config fallback must still work when
+	// SERVER_URL is set but no daemon signal is present.
+	t.Run("MULTICA_SERVER_URL alone does not block config fallback", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_SERVER_URL", "https://api.multica.ai")
+
+		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+			t.Fatalf("resolveToken() = %q, want profile token (SERVER_URL is not a daemon identity signal)", got)
+		}
+	})
+
+	// Normal CLI usage: no daemon signals whatsoever. The user-global
+	// config token must be reachable. This is the most basic path and
+	// must not be broken by any daemon-signal guard expansion.
+	t.Run("no daemon signals, normal CLI reads config token", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_SERVER_URL", "")
+
+		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+			t.Fatalf("resolveToken() = %q, want profile token (normal CLI flow)", got)
 		}
 	})
 }

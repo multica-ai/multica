@@ -442,7 +442,7 @@ func newDownloadRequest(t *testing.T, attachmentID, workspaceID string) (*http.R
 	return req, httptest.NewRecorder()
 }
 
-func requireAttachmentPreviewCSP(t *testing.T, header http.Header) {
+func requireAttachmentPreviewCSP(t *testing.T, header http.Header, extraAncestors ...string) {
 	t.Helper()
 	csp := header.Get("Content-Security-Policy")
 	if csp == "" {
@@ -459,8 +459,42 @@ func requireAttachmentPreviewCSP(t *testing.T, header http.Header) {
 			t.Fatalf("Content-Security-Policy missing %q; got %q", directive, csp)
 		}
 	}
+	for _, ancestor := range extraAncestors {
+		if !strings.Contains(csp, ancestor) {
+			t.Fatalf("Content-Security-Policy missing frame ancestor %q; got %q", ancestor, csp)
+		}
+	}
 	if strings.Contains(csp, "frame-ancestors 'none'") {
 		t.Fatalf("Content-Security-Policy still blocks same-origin previews: %q", csp)
+	}
+}
+
+func TestAttachmentPreviewCSPHeader_AllowsConfiguredFrontendOrigins(t *testing.T) {
+	csp := attachmentPreviewCSPHeader([]string{
+		"https://app.example.test",
+		" https://App.Example.Test/some/path ",
+		"http://localhost:3000",
+		"*",
+		"javascript:alert(1)",
+		"not a url",
+	})
+
+	for _, want := range []string{
+		"frame-ancestors 'self' https://app.example.test http://localhost:3000",
+		"default-src 'none'",
+		"object-src 'none'",
+	} {
+		if !strings.Contains(csp, want) {
+			t.Fatalf("Content-Security-Policy missing %q; got %q", want, csp)
+		}
+	}
+	for _, reject := range []string{"*", "javascript:", "not a url", "some/path"} {
+		if strings.Contains(csp, reject) {
+			t.Fatalf("Content-Security-Policy includes rejected source %q; got %q", reject, csp)
+		}
+	}
+	if strings.Count(csp, "https://app.example.test") != 1 {
+		t.Fatalf("Content-Security-Policy should dedupe origins; got %q", csp)
 	}
 }
 
@@ -706,6 +740,7 @@ func TestDownloadAttachment_AutoInternalEndpointProxies(t *testing.T) {
 	origSigner := testHandler.CFSigner
 	testHandler.Storage = store
 	testHandler.cfg.AttachmentDownloadMode = "auto"
+	testHandler.cfg.AttachmentFrameAncestors = []string{"https://app.example.test"}
 	testHandler.CFSigner = nil
 	t.Cleanup(func() {
 		testHandler.Storage = origStorage
@@ -740,7 +775,7 @@ func TestDownloadAttachment_AutoInternalEndpointProxies(t *testing.T) {
 	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
 	}
-	requireAttachmentPreviewCSP(t, w.Header())
+	requireAttachmentPreviewCSP(t, w.Header(), "https://app.example.test")
 	if len(store.presignCalls) != 0 {
 		t.Fatalf("internal endpoint should not presign, calls=%v", store.presignCalls)
 	}

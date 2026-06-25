@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -64,6 +65,17 @@ func allowedOrigins() []string {
 		return defaultOrigins
 	}
 	return origins
+}
+
+// appURLFromEnv resolves the user-facing web app URL. It prefers
+// MULTICA_APP_URL and falls back to FRONTEND_ORIGIN, matching how the backend
+// resolves the app URL elsewhere (handler.daemonSetupURLsFromEnv) and the CLI
+// login flow (cmd/multica tryResolveAppURL). Empty when neither is set.
+func appURLFromEnv() string {
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_APP_URL")), "/"); v != "" {
+		return v
+	}
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")), "/")
 }
 
 // parseTrustedProxies parses a comma-separated list of CIDR prefixes from the
@@ -146,6 +158,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
+	origins := allowedOrigins()
 
 	signupConfig := handler.Config{
 		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
@@ -158,6 +171,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
 		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
 		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		AttachmentFrameAncestors: origins,
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	h.Metrics = opts.BusinessMetrics
@@ -275,14 +289,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				patcher.SetTypingIndicatorManager(typingIndicator)
 
 				// Inbound pipeline seams: lark_inbound_audit logger and the
-				// channel-aware ChatSessionService. They back the Feishu
-				// ResolverSet that the channel-agnostic engine.Router runs
-				// through, sharing the same IssueService + TaskService that
-				// back HTTP, so /issue-created issues share counter, dup
-				// guard, project boundary, broadcast, analytics and
-				// agent-enqueue with the rest of the product.
+				// shared channel-agnostic chat-session service. They back the
+				// Feishu ResolverSet that the engine.Router runs through,
+				// sharing the same IssueService + TaskService that back HTTP, so
+				// /issue-created issues share counter, dup guard, project
+				// boundary, broadcast, analytics and agent-enqueue with the rest
+				// of the product. Feishu is just another consumer of the shared
+				// engine.ChatSession (channel_type-keyed); the Lark session
+				// titles preserve the pre-cutover wording.
 				auditLogger := lark.NewAuditLogger(queries)
-				chatSvc := lark.NewChatSessionService(queries, pool)
+				feishuSession := engine.NewChatSession(queries, pool, channel.TypeFeishu, engine.SessionTitles{
+					Group:    "Lark group chat",
+					Direct:   "Lark direct message",
+					Fallback: "Lark chat",
+				})
 
 				// OutcomeReplier wires the outbound side: NeedsBinding /
 				// AgentOffline / AgentArchived / issue-created translate to a
@@ -296,7 +316,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					BindingSvc:  h.LarkBindingTokens,
 					Credentials: installSvc,
 					Queries:     queries,
-					PublicURL:   signupConfig.PublicURL,
+					AppURL:      appURLFromEnv(),
 					Logger:      slog.Default(),
 				})
 				var resolverReplier lark.OutcomeReplier
@@ -327,7 +347,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Logger:      slog.Default(),
 				})
 				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
-					cs, chatSvc, auditLogger, resolverReplier, typingIndicator,
+					cs, feishuSession, auditLogger, resolverReplier, typingIndicator,
 				))
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
 
@@ -389,6 +409,32 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	} else {
 		slog.Info("lark integration disabled (MULTICA_LARK_SECRET_KEY not set)")
 	}
+
+	// Slack integration (MUL-3516). Gated by MULTICA_SLACK_SECRET_KEY — the key
+	// that decrypts the bot/app tokens stored on the channel_installation row.
+	// When unset the whole block is skipped, so existing deployments are
+	// unaffected; an operator opts in by setting the key and creating a
+	// channel_type='slack' installation (config: app_id=team_id, bot_user_id,
+	// bot_token_encrypted, app_token_encrypted). Registering the Factory
+	// (Socket Mode connect/send) + ResolverSet (inbound pipeline) + the outbound
+	// subscriber (agent reply -> Slack) is all it takes — no engine or core edit,
+	// and Feishu is untouched. The Slack ResolverSet/Outbound share the same
+	// engine.ChatSession, channel_* tables, IssueService and TaskService as
+	// Feishu, so /issue, dedup, and run-triggering behave identically.
+	if slackKey, err := secretbox.LoadKey("MULTICA_SLACK_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(slackKey)
+		if err != nil {
+			slog.Error("slack: secretbox.New failed; slack integration disabled", "error", err)
+		} else {
+			slack.RegisterSlack(channelRegistry, slack.SlackChannelDeps{Decrypt: box.Open, Logger: slog.Default()})
+			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool))
+			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)
+			slog.Info("slack integration enabled")
+		}
+	} else {
+		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -436,7 +482,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.ContentSecurityPolicy)
-	origins := allowedOrigins()
 
 	// Share allowed origins with WebSocket origin checker.
 	realtime.SetAllowedOrigins(origins)
@@ -960,6 +1005,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Runtimes
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Get("/", h.ListAgentRuntimes)
+				r.Get("/latest-version", h.GetLatestCLIRelease)
 				r.Route("/{runtimeId}", func(r chi.Router) {
 					r.Patch("/", h.UpdateAgentRuntime)
 					r.Get("/usage", h.GetRuntimeUsage)

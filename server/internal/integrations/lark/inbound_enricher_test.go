@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 // enricherFakeClient is a programmable APIClient for enricher tests. It
@@ -398,11 +400,11 @@ func TestEnrichPreservesCommandBodyForIssueParsing(t *testing.T) {
 	out := enrich(t, fake, in, InboundEnricherConfig{})
 
 	// Enriched Body now starts with the quoted block → no longer a command.
-	if _, ok := parseIssueCommand(out.Body); ok {
+	if _, ok := engine.ParseIssueCommand(out.Body); ok {
 		t.Errorf("enriched Body should not parse as /issue (it is prefixed): %q", out.Body)
 	}
 	// CommandBody is untouched and still parses with the right title.
-	cmd, ok := parseIssueCommand(out.CommandBody)
+	cmd, ok := engine.ParseIssueCommand(out.CommandBody)
 	if !ok || cmd.Title != "删除 issue 按钮" {
 		t.Errorf("CommandBody should still parse /issue: cmd=%+v ok=%v", cmd, ok)
 	}

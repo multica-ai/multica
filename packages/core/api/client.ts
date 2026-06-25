@@ -928,6 +928,10 @@ export class ApiClient {
     return this.fetch(`/api/runtimes?${search}`);
   }
 
+  async getLatestCliRelease(): Promise<{ tag_name: string | null; repo: string }> {
+    return this.fetch(`/api/runtimes/latest-version`);
+  }
+
   async listCloudRuntimeNodes(
     params?: ListCloudRuntimeNodesParams,
   ): Promise<CloudRuntimeNode[]> {

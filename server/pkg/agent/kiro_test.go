@@ -162,6 +162,116 @@ func TestKiroBackendSetModelFailureFailsTask(t *testing.T) {
 	}
 }
 
+func fakeKiroACPGoalCompleteCloseErrorScript(goalStatus string) string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_goal_done"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_goal_done","update":{"type":"ToolCall","toolCallId":"tc-goal","name":"goal_complete","status":"pending","parameters":{}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_goal_done","update":{"type":"ToolCallUpdate","toolCallId":"tc-goal","status":"` + goalStatus + `","name":"goal_complete","output":"ok"}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"Kiro failed to generate a response"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func TestKiroBackendTreatsGoalCompleteCloseErrorAsCompleted(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPGoalCompleteCloseErrorScript("completed")))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed after goal_complete close error, got %q (error=%q)", result.Status, result.Error)
+		}
+		if result.Error != "" {
+			t.Fatalf("expected close-handshake error to be suppressed, got %q", result.Error)
+		}
+		if result.SessionID != "ses_goal_done" {
+			t.Fatalf("session id = %q, want ses_goal_done", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestKiroBackendDoesNotCompleteAfterFailedGoalComplete(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPGoalCompleteCloseErrorScript("failed")))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed after failed goal_complete, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "Kiro failed to generate a response") {
+			t.Fatalf("expected original prompt error to be preserved, got %q", result.Error)
+		}
+		if result.SessionID != "ses_goal_done" {
+			t.Fatalf("session id = %q, want ses_goal_done", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 // fakeKiroACPStaleLoadSetModelScript impersonates kiro when a resumed
 // session is gone and the caller picked a model: session/load returns
 // an empty result (so the requested id is kept), then

@@ -222,3 +222,59 @@ func TestQuickCreateIssueParentTrustBoundary(t *testing.T) {
 		}
 	})
 }
+
+func TestQuickCreateIssueIgnoresDaemonCLIVersion(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		metadata string
+	}{
+		{name: "missing cli version", metadata: `'{}'::jsonb`},
+		{name: "old cli version", metadata: `jsonb_build_object('cli_version', 'v0.2.15')`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := testPool.Exec(ctx,
+				`UPDATE agent_runtime SET metadata = `+tt.metadata+` WHERE id = $1`,
+				runtimeID,
+			); err != nil {
+				t.Fatalf("set runtime metadata: %v", err)
+			}
+			w := httptest.NewRecorder()
+			req := newRequest("POST", "/api/issues/quick-create", map[string]any{
+				"agent_id": agentID,
+				"prompt":   "Create an issue without daemon CLI version gating",
+			})
+			testHandler.QuickCreateIssue(w, req)
+			if w.Code != http.StatusAccepted {
+				t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+			}
+			var resp QuickCreateIssueResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, resp.TaskID)
+			})
+		})
+	}
+}

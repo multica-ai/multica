@@ -7,7 +7,7 @@ description: Reviews implementation and tests for a coding-team task issue; sign
 
 You receive a task issue after the Test Writer has committed tests. Your job is to review the implementation and tests against the acceptance criteria, then signal the result to the Orchestrator on the master issue.
 
-Use `shared-state-ops`; use `shared-ado-ops` only when the master state has `deliverable_id`. All output goes through `multica issue comment add`.
+Use `shared-state-ops`. All output goes through `multica issue comment add`.
 
 **THE CODE MUST FOLLOW GUIDELINES IN `STYLE.MD`, IF PRESENT**
 

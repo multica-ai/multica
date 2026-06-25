@@ -3,14 +3,83 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	cli "github.com/multica-ai/multica/server/internal/cli"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestGetLatestCLIRelease(t *testing.T) {
+	oldFetch := fetchLatestCLIRelease
+	oldRepo := latestCLIUpdateRepo
+	t.Cleanup(func() {
+		fetchLatestCLIRelease = oldFetch
+		latestCLIUpdateRepo = oldRepo
+	})
+
+	fetchLatestCLIRelease = func() (*cli.GitHubRelease, error) {
+		return &cli.GitHubRelease{TagName: "v0.0.20"}, nil
+	}
+	latestCLIUpdateRepo = func() string { return "ethanturk/multica" }
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodGet, "/api/runtimes/latest-version", nil)
+	testHandler.GetLatestCLIRelease(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		TagName *string `json:"tag_name"`
+		Repo    string  `json:"repo"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Repo != "ethanturk/multica" {
+		t.Fatalf("repo = %q, want ethanturk/multica", body.Repo)
+	}
+	if body.TagName == nil || *body.TagName != "v0.0.20" {
+		t.Fatalf("tag_name = %v, want v0.0.20", body.TagName)
+	}
+}
+
+func TestGetLatestCLIRelease_ReturnsNullTagOnLookupFailure(t *testing.T) {
+	oldFetch := fetchLatestCLIRelease
+	oldRepo := latestCLIUpdateRepo
+	t.Cleanup(func() {
+		fetchLatestCLIRelease = oldFetch
+		latestCLIUpdateRepo = oldRepo
+	})
+
+	fetchLatestCLIRelease = func() (*cli.GitHubRelease, error) {
+		return nil, errors.New("boom")
+	}
+	latestCLIUpdateRepo = func() string { return "ethanturk/multica" }
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodGet, "/api/runtimes/latest-version", nil)
+	testHandler.GetLatestCLIRelease(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["repo"] != "ethanturk/multica" {
+		t.Fatalf("repo = %#v, want ethanturk/multica", body["repo"])
+	}
+	if tag, ok := body["tag_name"]; ok && tag != nil {
+		t.Fatalf("tag_name = %#v, want null/omitted", tag)
+	}
+}
 
 func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
 	tests := []struct {
