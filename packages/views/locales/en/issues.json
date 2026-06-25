@@ -134,7 +134,8 @@
   },
   "list": {
     "empty_status": "No issues",
-    "add_issue_tooltip": "Add issue"
+    "add_issue_tooltip": "Add issue",
+    "cross_status": "cross-status"
   },
   "swimlane": {
     "no_parent": "No parent",

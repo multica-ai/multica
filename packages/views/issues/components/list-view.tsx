@@ -125,17 +125,17 @@ export function ListView({
           const el = document.querySelector(`[data-issue-id="${parentId}"]`) as HTMLElement | null;
           if (el) {
             el.scrollIntoView({ behavior: "auto", block: "center" });
-            // Flash highlight: outline ring + background using rgba().
+            // Flash highlight: outline ring + background using brand token.
             el.style.transition = "background-color 800ms ease-out, outline-color 800ms ease-out";
-            el.style.backgroundColor = "rgba(167, 139, 250, 0.3)";
-            el.style.outline = "4px solid #a78bfa";
+            el.style.backgroundColor = "color-mix(in srgb, var(--brand) 30%, transparent)";
+            el.style.outline = "4px solid var(--brand)";
             // Hold the highlight for 150ms (safe margin for 30fps low-end devices),
             // then clear to trigger the CSS transition fade-out.
             setTimeout(() => {
               el.style.backgroundColor = "";
               // Only clear outlineColor so the outline fades via transition instead
               // of hard-cutting (clearing outline-style would remove it instantly).
-              el.style.outlineColor = "rgba(167, 139, 250, 0)";
+              el.style.outlineColor = "color-mix(in srgb, var(--brand) 0%, transparent)";
             }, 150);
             // Clean up inline properties exactly when the transition ends.
             const onEnd = () => {

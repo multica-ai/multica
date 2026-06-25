@@ -132,7 +132,8 @@
   },
   "list": {
     "empty_status": "イシューなし",
-    "add_issue_tooltip": "イシューを追加"
+    "add_issue_tooltip": "イシューを追加",
+    "cross_status": "クロスステータス"
   },
   "swimlane": {
     "no_parent": "親イシューなし",

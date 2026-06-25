@@ -65,7 +65,7 @@ function renderSubtree(
 
   // Build the list of cross-status children for the dropdown.
   const crossStatusChildren: CrossStatusChild[] = [];
-  if (isParent && crossStatusCount > 0) {
+  if (crossStatusCount > 0) {
     for (const child of allChildren) {
       if (!statusIssueIds.has(child.id)) {
         crossStatusChildren.push({
@@ -91,7 +91,7 @@ function renderSubtree(
       indent,
       isParent,
       childCount: isParent ? sameStatusCount : 0,
-      crossStatusChildCount: isParent ? crossStatusCount : 0,
+      crossStatusChildCount: crossStatusCount,
       crossStatusChildren,
       parentInfo,
     },

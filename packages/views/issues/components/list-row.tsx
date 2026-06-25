@@ -22,6 +22,7 @@ import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { useT } from "../../i18n";
 import type { ParentInfo, CrossStatusChild } from "../utils/hierarchy";
 
 export interface ChildProgress {
@@ -33,22 +34,8 @@ function formatDate(date: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
-const STATUS_CN: Record<string, string> = {
-  todo: "待办",
-  in_progress: "进行中",
-  in_review: "审核中",
-  done: "已完成",
-  backlog: "待规划",
-  cancelled: "已取消",
-  blocked: "阻塞中",
-};
-
 function getStatusColor(status: string): string {
   return STATUS_CONFIG[status as keyof typeof STATUS_CONFIG]?.iconColor ?? "text-muted-foreground";
-}
-
-function formatStatusLabel(status: string): string {
-  return STATUS_CN[status] ?? status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function ListRowContent({
@@ -88,6 +75,7 @@ function ListRowContent({
   onHoverParent?: (parentStatus: string | null) => void;
   onScrollToParent?: (parentId: string, parentStatus: string) => void;
 }) {
+  const { t } = useT("issues");
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
   const p = useWorkspacePaths();
@@ -217,7 +205,7 @@ function ListRowContent({
                 ({childCount})
               </span>
             )}
-            {isParent && crossStatusChildCount > 0 && (
+            {crossStatusChildCount > 0 && (
               <div className="relative shrink-0" ref={crossDropdownRef}>
                 <button
                   type="button"
@@ -228,8 +216,7 @@ function ListRowContent({
                   }}
                   className="text-[11px] text-muted-foreground/50 tabular-nums hover:text-muted-foreground cursor-pointer transition-colors"
                 >
-                  {/* eslint-disable-next-line i18next/no-literal-string */}
-                  ↓ {crossStatusChildCount} 跨状态
+                  ↓ {crossStatusChildCount} {t(($) => $.list.cross_status)}
                 </button>
                 {crossDropdownOpen && crossStatusChildren.length > 0 && (
                   <div className="absolute top-full left-0 z-50 mt-1 bg-popover border border-border rounded-md shadow-md p-1 min-w-[200px] max-h-[240px] overflow-y-auto">
@@ -251,7 +238,7 @@ function ListRowContent({
                           {child.identifier}
                         </span>
                         <span className={`shrink-0 ${getStatusColor(child.status)}`}>
-                          [{formatStatusLabel(child.status)}]
+                          [{t(($) => $.status[child.status])}]
                         </span>
                       </button>
                     ))}
@@ -272,7 +259,7 @@ function ListRowContent({
                   ← {parentInfo.identifier}
                 </span>
                 <span className={`text-[10px] truncate ${getStatusColor(parentInfo.status)}`}>
-                  [{formatStatusLabel(parentInfo.status)}]
+                  [{t(($) => $.status[parentInfo.status])}]
                 </span>
               </button>
             )}
@@ -354,6 +341,10 @@ export const ListRow = memo(function ListRow({
   onHoverParent?: (parentStatus: string | null) => void;
   onScrollToParent?: (parentId: string, parentStatus: string) => void;
 }) {
+  const handleToggle = useCallback(() => {
+    onToggleChildren?.();
+  }, [onToggleChildren]);
+
   return (
     <ListRowContent
       issue={issue}
@@ -364,7 +355,7 @@ export const ListRow = memo(function ListRow({
       childCount={childCount}
       crossStatusChildCount={crossStatusChildCount}
       crossStatusChildren={crossStatusChildren}
-      onToggleChildren={onToggleChildren}
+      onToggleChildren={handleToggle}
       parentInfo={parentInfo}
       onHoverParent={onHoverParent}
       onScrollToParent={onScrollToParent}
@@ -430,6 +421,10 @@ export const DraggableListRow = memo(function DraggableListRow({
     transition,
   };
 
+  const handleToggle = useCallback(() => {
+    onToggleChildren?.();
+  }, [onToggleChildren]);
+
   return (
     <ListRowContent
       issue={issue}
@@ -445,7 +440,7 @@ export const DraggableListRow = memo(function DraggableListRow({
       childCount={childCount}
       crossStatusChildCount={crossStatusChildCount}
       crossStatusChildren={crossStatusChildren}
-      onToggleChildren={onToggleChildren}
+      onToggleChildren={handleToggle}
       parentInfo={parentInfo}
       onHoverParent={onHoverParent}
       onScrollToParent={onScrollToParent}
