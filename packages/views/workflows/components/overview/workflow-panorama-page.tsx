@@ -40,12 +40,12 @@ type PanoramaSelection = {
 
 // Stage transition gradient lookup (6-color cycle -> all pairwise transitions)
 const STAGE_TRANSITION_GRADIENTS = [
-  "bg-gradient-to-b from-slate-50/70 to-stone-50/70",
-  "bg-gradient-to-b from-stone-50/70 to-blue-50/65",
-  "bg-gradient-to-b from-blue-50/65 to-rose-50/65",
-  "bg-gradient-to-b from-rose-50/65 to-violet-50/65",
-  "bg-gradient-to-b from-violet-50/65 to-amber-50/65",
-  "bg-gradient-to-b from-amber-50/65 to-slate-50/70",
+  "bg-gradient-to-b from-slate-50/40 to-stone-50/40",
+  "bg-gradient-to-b from-stone-50/40 to-blue-50/35",
+  "bg-gradient-to-b from-blue-50/35 to-rose-50/35",
+  "bg-gradient-to-b from-rose-50/35 to-violet-50/35",
+  "bg-gradient-to-b from-violet-50/35 to-amber-50/35",
+  "bg-gradient-to-b from-amber-50/35 to-slate-50/40",
 ] as const;
 
 function PanoramaSkeleton() {

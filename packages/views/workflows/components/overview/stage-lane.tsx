@@ -19,21 +19,21 @@ export interface StageLaneProps {
 }
 
 const STAGE_BG_COLORS = [
-  "bg-slate-100/85",
-  "bg-stone-100/85",
-  "bg-blue-100/75",
-  "bg-rose-100/75",
-  "bg-violet-100/75",
-  "bg-amber-100/75",
+  "bg-slate-50/70",
+  "bg-stone-50/70",
+  "bg-blue-50/45",
+  "bg-rose-50/45",
+  "bg-violet-50/45",
+  "bg-amber-50/45",
 ] as const;
 
 const STAGE_LABEL_COLORS = [
-  "text-slate-800",
-  "text-stone-800",
-  "text-blue-900",
-  "text-rose-900",
-  "text-violet-900",
-  "text-amber-900",
+  "text-slate-400",
+  "text-stone-400",
+  "text-blue-400",
+  "text-rose-400",
+  "text-violet-400",
+  "text-amber-400",
 ] as const;
 
 export function StageLane({

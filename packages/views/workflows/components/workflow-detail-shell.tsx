@@ -6,51 +6,40 @@ import { WorkflowPanoramaPage } from "./overview";
 
 import { useT } from "../../i18n";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { GitFork, Pen } from "lucide-react";
 
 export interface WorkflowDetailShellProps {
   workflowId: string;
 }
 
-/** Renders the panorama (default), overview, or editor view with a shared view-toggle dropdown. */
+/** Renders the panorama (default) or editor view with a direct-toggle button. */
 export function WorkflowDetailShell({ workflowId }: WorkflowDetailShellProps) {
   const { t } = useT("workflows");
   const viewMode = useWorkflowViewStore((s) => s.viewMode);
   const setViewMode = useWorkflowViewStore((s) => s.setViewMode);
 
-  // View toggle button — rendered inside both pages' PageHeaders
+  const isPanorama = viewMode === "panorama";
+
   const viewToggle = (
-    <DropdownMenu>
-      <DropdownMenuTrigger
+    <Tooltip>
+      <TooltipTrigger
         render={
-          <Button variant="outline" size="icon-sm" className="text-muted-foreground" title={t(($) => $.view.section)}>
-            {viewMode === "panorama" ? <GitFork className="size-4" /> :
-             <Pen className="size-4" />}
+          <Button
+            variant="outline"
+            size="icon-sm"
+            className="text-muted-foreground"
+            aria-label={isPanorama ? t(($) => $.view.editor) : t(($) => $.view.panorama)}
+            onClick={() => setViewMode(isPanorama ? "editor" : "panorama")}
+          >
+            {isPanorama ? <Pen className="size-4" /> : <GitFork className="size-4" />}
           </Button>
         }
       />
-      <DropdownMenuContent align="end">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>{t(($) => $.view.section)}</DropdownMenuLabel>
-          <DropdownMenuItem onClick={() => setViewMode("panorama")}>
-            <GitFork className="size-4 mr-2" />
-            {t(($) => $.view.panorama)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setViewMode("editor")}>
-            <Pen className="size-4 mr-2" />
-            {t(($) => $.view.editor)}
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      <TooltipContent>
+        {isPanorama ? t(($) => $.view.editor) : t(($) => $.view.panorama)}
+      </TooltipContent>
+    </Tooltip>
   );
 
   if (viewMode === "editor") {

@@ -128,12 +128,12 @@ export function computeEdgePaths(
 }
 
 const STAGE_LINE_COLORS = [
-  "text-slate-400",
-  "text-stone-400",
-  "text-blue-400",
+  "text-slate-300",
+  "text-stone-300",
+  "text-blue-300",
   "text-rose-300",
-  "text-violet-400",
-  "text-amber-400",
+  "text-violet-300",
+  "text-amber-300",
 ] as const;
 
 export function PanoramaSvgOverlay({

@@ -282,11 +282,8 @@ test.describe("Workflow Panorama — Page Shell", () => {
     await expect(heading.first()).toContainText(workflow.title);
 
     // View toggle button should be visible
-    const viewToggle = page
-      .getByRole("button", { name: /view/i })
-      .or(page.locator('[class*="view-toggle"]'))
-      .or(page.locator("button").filter({ has: page.locator("svg") }).last());
-    await expect(viewToggle.first()).toBeVisible({ timeout: 3000 });
+    const viewToggle = page.getByRole("button", { name: /editor/i });
+    await expect(viewToggle).toBeVisible({ timeout: 3000 });
   });
 
   test("view toggle switches between panorama and editor views", async ({
@@ -299,15 +296,12 @@ test.describe("Workflow Panorama — Page Shell", () => {
     await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
     await page.waitForURL(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
-    // Find and click the view toggle dropdown
-    const viewToggleBtn = page.getByRole("button", { name: /view/i });
-    await viewToggleBtn.click();
-    await page.waitForTimeout(300);
+    // Default view is panorama — toggle button shows "Editor" target
+    const viewToggleBtn = page.getByRole("button", { name: /editor/i });
+    await expect(viewToggleBtn).toBeVisible({ timeout: 3000 });
 
-    // Select "Editor" from dropdown
-    const editorOption = page.getByRole("menuitem", { name: /editor/i });
-    await expect(editorOption).toBeVisible({ timeout: 3000 });
-    await editorOption.click();
+    // Click to switch to editor view (direct toggle)
+    await viewToggleBtn.click();
 
     // Editor view (ReactFlow/DAG canvas) should now be visible
     const editorCanvas = page
@@ -316,13 +310,9 @@ test.describe("Workflow Panorama — Page Shell", () => {
       .or(page.locator('[class*="workflow-editor"]'));
     await expect(editorCanvas.first()).toBeVisible({ timeout: 5000 });
 
-    // Switch back to panorama
-    await viewToggleBtn.click();
-    await page.waitForTimeout(300);
-    const overviewOption = page.getByRole("menuitem", { name: /overview|panorama/i });
-    if (await overviewOption.isVisible()) {
-      await overviewOption.click();
-    }
+    // Now button shows "Panorama" — click to switch back
+    const panoramaToggleBtn = page.getByRole("button", { name: /panorama/i });
+    await panoramaToggleBtn.click();
 
     // Panorama view should be visible again
     const panoramaContainer = page
@@ -1096,19 +1086,9 @@ test.describe("Workflow Panorama — View Mode Persistence", () => {
     await page.goto(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
     await page.waitForURL(`${BASE_PATH}/${slug}/workflows/${workflow.id}`);
 
-    // Switch to editor view first
-    const viewToggleBtn = page
-      .locator("button")
-      .filter({ has: page.locator("svg") })
-      .first();
+    // Switch to editor view via direct toggle
+    const viewToggleBtn = page.getByRole("button", { name: /editor/i });
     await viewToggleBtn.click();
-    await page.waitForTimeout(300);
-
-    const editorOption = page.getByRole("menuitem", { name: /editor/i });
-    if (await editorOption.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await editorOption.click();
-      await page.waitForTimeout(500);
-    }
 
     // Reload the page
     await page.reload();
