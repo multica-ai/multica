@@ -1220,6 +1220,48 @@ func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, cl
 	)
 }
 
+// filterProjectResourcesForRuntime wraps listProjectResourcesForProject and
+// filters out local_directory resources whose daemon_id doesn't match the
+// runtime's current daemon_id (or its legacy daemon_id). This prevents a
+// daemon from receiving another daemon's local_directory resource in a
+// runtime-decoupled deployment.
+func (h *Handler) filterProjectResourcesForRuntime(ctx context.Context, projectID pgtype.UUID, runtime db.AgentRuntime) []db.ProjectResource {
+	rows := h.listProjectResourcesForProject(ctx, projectID)
+	if len(rows) == 0 {
+		return nil
+	}
+	daemonID := ""
+	if runtime.DaemonID.Valid && runtime.DaemonID.String != "" {
+		daemonID = strings.TrimSpace(runtime.DaemonID.String)
+	}
+	legacyDaemonID := ""
+	if runtime.LegacyDaemonID.Valid && runtime.LegacyDaemonID.String != "" {
+		legacyDaemonID = strings.TrimSpace(runtime.LegacyDaemonID.String)
+	}
+	if daemonID == "" {
+		return rows
+	}
+	out := make([]db.ProjectResource, 0, len(rows))
+	for _, row := range rows {
+		if row.ResourceType != "local_directory" {
+			out = append(out, row)
+			continue
+		}
+		var ref struct {
+			DaemonID string `json:"daemon_id"`
+		}
+		if err := json.Unmarshal(row.ResourceRef, &ref); err != nil || ref.DaemonID == "" {
+			out = append(out, row)
+			continue
+		}
+		refDaemonID := strings.TrimSpace(ref.DaemonID)
+		if refDaemonID == daemonID || (legacyDaemonID != "" && refDaemonID == legacyDaemonID) {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
 // The response includes the agent's name and skills, fetched fresh from the DB.
 func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
@@ -1397,7 +1439,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
 					resp.ProjectTitle = proj.Title
 				}
-				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
+				if rows := h.filterProjectResourcesForRuntime(r.Context(), issue.ProjectID, runtime); len(rows) > 0 {
 					out := make([]ProjectResourceData, 0, len(rows))
 					for _, row := range rows {
 						label := ""
@@ -1612,7 +1654,46 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.ThreadName = resp.ChatMessage
 				}
 			}
+
+			// If the chat session is linked to an issue, load its project
+			// resources (local_directory, repos, etc.) so the daemon can
+			// write code in the correct local directory.
+			if cs.IssueID.Valid {
+				if issue, err := h.Queries.GetIssue(r.Context(), cs.IssueID); err == nil && issue.ProjectID.Valid {
+					resp.ProjectID = uuidToString(issue.ProjectID)
+					if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
+					resp.ProjectTitle = proj.Title
+					}
+					if rows := h.filterProjectResourcesForRuntime(r.Context(), issue.ProjectID, runtime); len(rows) > 0 {
+						out := make([]ProjectResourceData, 0, len(rows))
+						for _, row := range rows {
+							label := ""
+							if row.Label.Valid {
+								label = row.Label.String
+							}
+							ref := json.RawMessage(row.ResourceRef)
+							if len(ref) == 0 {
+								ref = json.RawMessage("{}")
+							}
+							out = append(out, ProjectResourceData{
+								ID:           uuidToString(row.ID),
+								ResourceType: row.ResourceType,
+								ResourceRef:  ref,
+								Label:        label,
+							})
+							if row.ResourceType == "github_repo" {
+								var payload struct{ URL string `json:"url"` }
+								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
+									resp.Repos = append(resp.Repos, RepoData{URL: payload.URL})
+								}
+							}
+						}
+						resp.ProjectResources = out
+					}
+				}
+			}
 		}
+
 	}
 
 	// Autopilot run_only task: resolve workspace from autopilot_run →
@@ -1640,6 +1721,45 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
 							resp.Repos = repos
 						}
+
+			// If the autopilot run is linked to an issue, load its project
+			// resources (local_directory, repos, etc.) so the daemon can
+			// write code in the correct local directory.
+			if run.IssueID.Valid {
+				if issue, err := h.Queries.GetIssue(r.Context(), run.IssueID); err == nil && issue.ProjectID.Valid {
+					resp.ProjectID = uuidToString(issue.ProjectID)
+					if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
+						resp.ProjectTitle = proj.Title
+					}
+					if rows := h.filterProjectResourcesForRuntime(r.Context(), issue.ProjectID, runtime); len(rows) > 0 {
+						out := make([]ProjectResourceData, 0, len(rows))
+						for _, row := range rows {
+							label := ""
+							if row.Label.Valid {
+								label = row.Label.String
+							}
+							ref := json.RawMessage(row.ResourceRef)
+							if len(ref) == 0 {
+								ref = json.RawMessage("{}")
+							}
+							out = append(out, ProjectResourceData{
+								ID:           uuidToString(row.ID),
+								ResourceType: row.ResourceType,
+								ResourceRef:  ref,
+								Label:        label,
+							})
+							if row.ResourceType == "github_repo" {
+								var payload struct{ URL string `json:"url"` }
+								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
+									resp.Repos = append(resp.Repos, RepoData{URL: payload.URL})
+								}
+							}
+						}
+						resp.ProjectResources = out
+					}
+				}
+			}
+
 					}
 				}
 			}
@@ -1672,7 +1792,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					if proj, err := h.Queries.GetProject(r.Context(), projectUUID); err == nil {
 						resp.ProjectTitle = proj.Title
 					}
-					if rows := h.listProjectResourcesForProject(r.Context(), projectUUID); len(rows) > 0 {
+					if rows := h.filterProjectResourcesForRuntime(r.Context(), projectUUID, runtime); len(rows) > 0 {
 						out := make([]ProjectResourceData, 0, len(rows))
 						for _, row := range rows {
 							label := ""
