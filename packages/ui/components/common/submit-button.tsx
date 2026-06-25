@@ -24,6 +24,8 @@ interface SubmitButtonProps {
   tooltip?: ReactNode;
   /** Tooltip shown over the stop button while a run is in progress. */
   stopTooltip?: ReactNode;
+  /** data-acceptance attribute applied to the send button for acceptance gate. */
+  dataAcceptance?: string;
 }
 
 function SubmitButton({
@@ -34,6 +36,7 @@ function SubmitButton({
   onStop,
   tooltip,
   stopTooltip,
+  dataAcceptance,
 }: SubmitButtonProps) {
   if (running) {
     const stopButton = (
@@ -56,7 +59,7 @@ function SubmitButton({
   }
 
   const submitButton = (
-    <Button size="icon-sm" disabled={disabled || loading} onClick={onClick}>
+    <Button size="icon-sm" disabled={disabled || loading} onClick={onClick} data-acceptance={dataAcceptance}>
       {loading ? <Loader2 className="animate-spin" /> : <ArrowUp />}
     </Button>
   );
