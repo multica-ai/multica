@@ -700,7 +700,7 @@ func (h *Handler) CreateWorkflowEdge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate same stage: nodes must belong to the same stage (or both unassigned)
+	// Validate nodes exist
 	sourceNode, err := h.Queries.GetWorkflowNode(r.Context(), srcID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "source node not found")
@@ -711,12 +711,8 @@ func (h *Handler) CreateWorkflowEdge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "target node not found")
 		return
 	}
-	sourceStageID := uuidToString(sourceNode.StageID)
-	targetStageID := uuidToString(targetNode.StageID)
-	if sourceStageID != targetStageID {
-		writeError(w, http.StatusBadRequest, "nodes must belong to the same stage")
-		return
-	}
+	_ = sourceNode // used for future validation
+	_ = targetNode
 
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, _ := requireUserID(w, r)
@@ -801,11 +797,20 @@ func (h *Handler) CreateWorkflowStage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auto-assign sort_order: append after the last existing stage.
+	// req.SortOrder defaults to 0 when not sent by the client, so we always
+	// compute the next value from existing stages on creation.
+	sortOrder := req.SortOrder
+	if sortOrder <= 0 {
+		existing, _ := h.Queries.ListWorkflowStagesByWorkflow(r.Context(), wf.ID)
+		sortOrder = int32(len(existing))
+	}
+
 	stage, err := h.Queries.CreateWorkflowStage(r.Context(), db.CreateWorkflowStageParams{
 		WorkflowID:  wf.ID,
 		Name:        req.Name,
 		Description: nonNullText(req.Description),
-		SortOrder:   req.SortOrder,
+		SortOrder:   sortOrder,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create stage")
