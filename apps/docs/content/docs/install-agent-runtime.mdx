@@ -170,14 +170,14 @@ Google's Antigravity CLI (`agy`). Pairs with Google's Antigravity service and ru
 
 ### Grok Build (xAI)
 
-xAI's agentic coding CLI (`grok`). Uses the ACP protocol over stdio via `grok agent stdio` (shares the transport with Hermes, Kimi, Kiro CLI, and Qoder). Session resumption works through ACP `session/resume`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically (`grok models`), and skills are copied into `.grok/skills/`. Grok is Claude Code–compatible, so it also reads `CLAUDE.md` / `AGENTS.md` and `.claude/skills/`.
+xAI's agentic coding CLI (`grok`). ACP over stdio via `grok agent stdio` — the same transport as Hermes, Kimi, Kiro CLI, and Qoder. Session resumption through `session/resume`, MCP config through `mcpServers`, models discovered with `grok models`, skills copied into `.grok/skills/`. Claude Code–compatible, so it also reads `CLAUDE.md` / `AGENTS.md` and `.claude/skills/`.
 
 | | |
 |---|---|
 | Daemon looks for | `grok` |
-| Install | See the official docs at [docs.x.ai/build](https://docs.x.ai/build). |
-| Authentication | Two options, both supported. **Browser login:** run `grok login` once on the host (a one-time OAuth that works with a SuperGrok subscription and persists a cached token). **API key:** set `XAI_API_KEY` in the runtime's environment — use this on headless / CI hosts with no browser. When both are present Multica prefers the API key. |
-| Notes | The daemon authenticates non-interactively, so it never opens a browser mid-task — `grok login` (or `XAI_API_KEY`) must be set up on the host *before* a task runs, or the task fails with a hint instead of hanging. |
+| Install | See [docs.x.ai/build](https://docs.x.ai/build). |
+| Authentication | `grok login` once on the host (browser OAuth, works with a SuperGrok subscription), or `XAI_API_KEY` for headless hosts. Multica prefers the key when both are set. |
+| Notes | The daemon authenticates non-interactively and never opens a browser, so the credential must already exist on the host before a task runs. |
 
 ## After installing
 
