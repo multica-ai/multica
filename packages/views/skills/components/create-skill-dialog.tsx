@@ -255,7 +255,7 @@ function isBatchUrl(url: string): boolean {
   try {
     const parsed = new URL(u.startsWith("http") ? u : `https://${u}`);
     const parts = parsed.pathname.split("/").filter(Boolean);
-    return parts.length === 2 && !parts[1].endsWith(".md");
+    return parts.length === 2 && parts[1] !== undefined && !parts[1].endsWith(".md");
   } catch {
     return false;
   }
@@ -315,9 +315,10 @@ function UrlForm({
     try {
       if (isBatchUrl(trimmed)) {
         const summary = await api.importSkillsBatch({ url: trimmed });
-        seedAfterCreate(qc, wsId, summary.skills[0]); // Seed cache with first skill
+        const first = summary.skills[0];
+        if (first) seedAfterCreate(qc, wsId, first);
         toast.success(t(($) => $.create.url.toast_imported_batch, { count: summary.imported }));
-        onCreated(summary.skills[0] ?? ({} as Skill));
+        onCreated(first ?? ({} as Skill));
       } else {
         const skill = await api.importSkill({ url: trimmed });
         seedAfterCreate(qc, wsId, skill);

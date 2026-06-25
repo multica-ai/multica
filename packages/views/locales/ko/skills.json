@@ -6,10 +6,22 @@
     "new_skill": "새 스킬",
     "search_placeholder": "스킬 검색...",
     "scopes": {
-      "all": { "label": "전체", "description": "이 워크스페이스의 모든 스킬" },
-      "used": { "label": "사용 중", "description": "하나 이상의 에이전트에 할당된 스킬" },
-      "unused": { "label": "미사용", "description": "어떤 에이전트에도 할당되지 않은 스킬" },
-      "mine": { "label": "내가 만든 스킬", "description": "내가 생성한 스킬" }
+      "all": {
+        "label": "전체",
+        "description": "이 워크스페이스의 모든 스킬"
+      },
+      "used": {
+        "label": "사용 중",
+        "description": "하나 이상의 에이전트에 할당된 스킬"
+      },
+      "unused": {
+        "label": "미사용",
+        "description": "어떤 에이전트에도 할당되지 않은 스킬"
+      },
+      "mine": {
+        "label": "내가 만든 스킬",
+        "description": "내가 생성한 스킬"
+      }
     },
     "empty": {
       "title": "아직 스킬이 없습니다",
@@ -232,7 +244,8 @@
       "name_conflict_hint": " 가져온 스킬 이름이 이미 있습니다. 다시 시도하기 전에 기존 스킬을 삭제하세요.",
       "fallback_error": "가져오기 실패",
       "cancel": "취소",
-      "toast_imported": "스킬을 가져왔습니다"
+      "toast_imported": "스킬을 가져왔습니다",
+      "toast_imported_batch": "스킬 {{count}}개 가져왔습니다"
     }
   },
   "runtime_import": {
