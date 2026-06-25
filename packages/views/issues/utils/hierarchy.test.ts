@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Issue } from "@multica/core/types";
 import { buildHierarchy, type ParentInfo } from "./hierarchy";
 
-function makeIssue(overrides: Partial<Issue> = {}): Issue {
+function makeIssue(overrides: Partial<Issue> & { stage?: number | null } = {}): Issue {
   return {
     id: "i-1",
     workspace_id: "ws-1",
@@ -22,10 +22,11 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     start_date: null,
     due_date: null,
     metadata: {},
+    stage: null,
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
     ...overrides,
-  };
+  } as Issue;
 }
 
 function makeParentInfo(parentId: string, identifier: string, status: string): ParentInfo {
