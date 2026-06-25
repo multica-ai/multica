@@ -238,7 +238,7 @@ function ListRowContent({
                           {child.identifier}
                         </span>
                         <span className={`shrink-0 ${getStatusColor(child.status)}`}>
-                          [{t(($) => $.status[child.status])}]
+                          [{t(($) => $.status[child.status as keyof typeof $.status])}]
                         </span>
                       </button>
                     ))}
@@ -259,7 +259,7 @@ function ListRowContent({
                   ← {parentInfo.identifier}
                 </span>
                 <span className={`text-[10px] truncate ${getStatusColor(parentInfo.status)}`}>
-                  [{t(($) => $.status[parentInfo.status])}]
+                  [{t(($) => $.status[parentInfo.status as keyof typeof $.status])}]
                 </span>
               </button>
             )}

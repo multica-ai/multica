@@ -50,16 +50,16 @@ describe("buildHierarchy", () => {
     // Children are not expanded inline (parent not expanded), so the fallback
     // appends them as orphaned items.
     expect(result).toHaveLength(3);
-    expect(result[0].issue.id).toBe("p1");
-    expect(result[0].isParent).toBe(true);
-    expect(result[0].childCount).toBe(2);
-    expect(result[0].indent).toBe(0);
+    expect(result[0]!.issue.id).toBe("p1");
+    expect(result[0]!.isParent).toBe(true);
+    expect(result[0]!.childCount).toBe(2);
+    expect(result[0]!.indent).toBe(0);
 
     // Children appended as orphaned (parent not in expandedParents).
-    expect(result[1].issue.id).toBe("c1");
-    expect(result[1].orphaned).toBe(true);
-    expect(result[2].issue.id).toBe("c2");
-    expect(result[2].orphaned).toBe(true);
+    expect(result[1]!.issue.id).toBe("c1");
+    expect(result[1]!.orphaned).toBe(true);
+    expect(result[2]!.issue.id).toBe("c2");
+    expect(result[2]!.orphaned).toBe(true);
   });
 
   it("expands children when parent is in expandedParents set", () => {
@@ -76,14 +76,14 @@ describe("buildHierarchy", () => {
 
     // Parent + 2 children rendered.
     expect(result).toHaveLength(3);
-    expect(result[0].issue.id).toBe("p1");
-    expect(result[0].isParent).toBe(true);
+    expect(result[0]!.issue.id).toBe("p1");
+    expect(result[0]!.isParent).toBe(true);
     // Children are rendered at indent=1 when parent is expanded.
-    expect(result[1].issue.id).toBe("c1");
-    expect(result[1].indent).toBe(1);
-    expect(result[1].isParent).toBe(false);
-    expect(result[2].issue.id).toBe("c2");
-    expect(result[2].indent).toBe(1);
+    expect(result[1]!.issue.id).toBe("c1");
+    expect(result[1]!.indent).toBe(1);
+    expect(result[1]!.isParent).toBe(false);
+    expect(result[2]!.issue.id).toBe("c2");
+    expect(result[2]!.indent).toBe(1);
   });
 
   // ── Scenario 2: all-cross-status parent ──
@@ -103,12 +103,12 @@ describe("buildHierarchy", () => {
     // Parent should NOT be marked as isParent (no same-status children),
     // but should have crossStatusChildCount > 0.
     expect(result).toHaveLength(1);
-    expect(result[0].issue.id).toBe("p1");
-    expect(result[0].isParent).toBe(false);
-    expect(result[0].childCount).toBe(0);
-    expect(result[0].crossStatusChildCount).toBe(1);
-    expect(result[0].crossStatusChildren).toHaveLength(1);
-    expect(result[0].crossStatusChildren[0].identifier).toBe("OXY-2");
+    expect(result[0]!.issue.id).toBe("p1");
+    expect(result[0]!.isParent).toBe(false);
+    expect(result[0]!.childCount).toBe(0);
+    expect(result[0]!.crossStatusChildCount).toBe(1);
+    expect(result[0]!.crossStatusChildren).toHaveLength(1);
+    expect(result[0]!.crossStatusChildren[0]!.identifier).toBe("OXY-2");
   });
 
   // ── Scenario 3: mixed (some same-status + some cross-status) ──
@@ -126,17 +126,17 @@ describe("buildHierarchy", () => {
     const result = buildHierarchy(issues, childrenMap, statusIssueIds, expandedParents, parentInfoMap);
 
     expect(result).toHaveLength(2); // parent + same-status child
-    expect(result[0].issue.id).toBe("p1");
-    expect(result[0].isParent).toBe(true);
-    expect(result[0].childCount).toBe(1);
-    expect(result[0].crossStatusChildCount).toBe(1);
-    expect(result[0].crossStatusChildren).toHaveLength(1);
-    expect(result[0].crossStatusChildren[0].identifier).toBe("OXY-3");
+    expect(result[0]!.issue.id).toBe("p1");
+    expect(result[0]!.isParent).toBe(true);
+    expect(result[0]!.childCount).toBe(1);
+    expect(result[0]!.crossStatusChildCount).toBe(1);
+    expect(result[0]!.crossStatusChildren).toHaveLength(1);
+    expect(result[0]!.crossStatusChildren[0]!.identifier).toBe("OXY-3");
 
     // Cross-status child rows appear in the crossStatusChildren list only.
     // The same-status child is rendered inline.
-    expect(result[1].issue.id).toBe("c1");
-    expect(result[1].indent).toBe(1);
+    expect(result[1]!.issue.id).toBe("c1");
+    expect(result[1]!.indent).toBe(1);
   });
 
   // ── Scenario 4: multi-level recursion ──
@@ -156,17 +156,17 @@ describe("buildHierarchy", () => {
     const result = buildHierarchy(issues, childrenMap, statusIssueIds, expandedParents);
 
     expect(result).toHaveLength(3);
-    expect(result[0].issue.id).toBe("p1");
-    expect(result[0].isParent).toBe(true);
-    expect(result[0].indent).toBe(0);
+    expect(result[0]!.issue.id).toBe("p1");
+    expect(result[0]!.isParent).toBe(true);
+    expect(result[0]!.indent).toBe(0);
 
-    expect(result[1].issue.id).toBe("c1");
-    expect(result[1].isParent).toBe(true); // has a grandchild
-    expect(result[1].indent).toBe(1);
+    expect(result[1]!.issue.id).toBe("c1");
+    expect(result[1]!.isParent).toBe(true); // has a grandchild
+    expect(result[1]!.indent).toBe(1);
 
-    expect(result[2].issue.id).toBe("g1");
-    expect(result[2].isParent).toBe(false);
-    expect(result[2].indent).toBe(2);
+    expect(result[2]!.issue.id).toBe("g1");
+    expect(result[2]!.isParent).toBe(false);
+    expect(result[2]!.indent).toBe(2);
   });
 
   it("does not expand grandchild when child is not expanded", () => {
@@ -187,12 +187,12 @@ describe("buildHierarchy", () => {
     // Parent expanded → shows child inline. Child NOT expanded → grandchild
     // is appended as orphaned by the fallback.
     expect(result).toHaveLength(3);
-    expect(result[0].issue.id).toBe("p1");
-    expect(result[1].issue.id).toBe("c1");
-    expect(result[1].indent).toBe(1);
+    expect(result[0]!.issue.id).toBe("p1");
+    expect(result[1]!.issue.id).toBe("c1");
+    expect(result[1]!.indent).toBe(1);
     // Grandchild is orphaned since child is not expanded.
-    expect(result[2].issue.id).toBe("g1");
-    expect(result[2].orphaned).toBe(true);
+    expect(result[2]!.issue.id).toBe("g1");
+    expect(result[2]!.orphaned).toBe(true);
   });
 
   // ── Scenario 5: cross-status child renders as top-level with parentInfo ──
@@ -213,12 +213,12 @@ describe("buildHierarchy", () => {
     const result = buildHierarchy(issues, childrenMap, statusIssueIds, expandedParents, parentInfoMap);
 
     expect(result).toHaveLength(1);
-    expect(result[0].issue.id).toBe("c1");
-    expect(result[0].isParent).toBe(false);
-    expect(result[0].indent).toBe(0);
-    expect(result[0].parentInfo).toBeDefined();
-    expect(result[0].parentInfo!.identifier).toBe("OXY-1");
-    expect(result[0].parentInfo!.status).toBe("done");
+    expect(result[0]!.issue.id).toBe("c1");
+    expect(result[0]!.isParent).toBe(false);
+    expect(result[0]!.indent).toBe(0);
+    expect(result[0]!.parentInfo).toBeDefined();
+    expect(result[0]!.parentInfo!.identifier).toBe("OXY-1");
+    expect(result[0]!.parentInfo!.status).toBe("done");
   });
 
   // ── Scenario 6: orphan fallback ──
@@ -241,9 +241,9 @@ describe("buildHierarchy", () => {
 
     // Should be rendered as top-level with orphaned flag.
     expect(result).toHaveLength(1);
-    expect(result[0].issue.id).toBe("o1");
-    expect(result[0].orphaned).toBe(true);
-    expect(result[0].indent).toBe(0);
+    expect(result[0]!.issue.id).toBe("o1");
+    expect(result[0]!.orphaned).toBe(true);
+    expect(result[0]!.indent).toBe(0);
   });
 
   // ── Scenario 7: no children at all ──
@@ -259,10 +259,10 @@ describe("buildHierarchy", () => {
     const result = buildHierarchy(issues, childrenMap, statusIssueIds, expandedParents);
 
     expect(result).toHaveLength(2);
-    expect(result[0].isParent).toBe(false);
-    expect(result[0].childCount).toBe(0);
-    expect(result[0].crossStatusChildCount).toBe(0);
-    expect(result[1].isParent).toBe(false);
+    expect(result[0]!.isParent).toBe(false);
+    expect(result[0]!.childCount).toBe(0);
+    expect(result[0]!.crossStatusChildCount).toBe(0);
+    expect(result[1]!.isParent).toBe(false);
   });
 
   // ── Scenario 8: multiple top-level parents ──
@@ -283,11 +283,11 @@ describe("buildHierarchy", () => {
     const result = buildHierarchy(issues, childrenMap, statusIssueIds, expandedParents);
 
     expect(result).toHaveLength(4);
-    expect(result[0].issue.id).toBe("p1");
-    expect(result[1].issue.id).toBe("c1");
-    expect(result[1].indent).toBe(1);
-    expect(result[2].issue.id).toBe("p2");
-    expect(result[3].issue.id).toBe("c2");
-    expect(result[3].indent).toBe(1);
+    expect(result[0]!.issue.id).toBe("p1");
+    expect(result[1]!.issue.id).toBe("c1");
+    expect(result[1]!.indent).toBe(1);
+    expect(result[2]!.issue.id).toBe("p2");
+    expect(result[3]!.issue.id).toBe("c2");
+    expect(result[3]!.indent).toBe(1);
   });
 });
