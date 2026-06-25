@@ -12,7 +12,7 @@ import { RuntimeNodeCard } from "../../../issues/components/execution/runtime-no
 export interface StageLaneProps {
   stage: WorkflowStage;
   nodeIds: WorkflowNode[];
-  getActorName: (type: string, id: string) => string;
+  getActorName: (type: string, id: string) => string | null;
   agentLookup: Map<string, Agent | null>;
   pluginLookup: Map<string, BuiltinPlugin | null>;
   onCardClick: (nodeId: string, focus: "worker" | "critic") => void;

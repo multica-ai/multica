@@ -4,6 +4,31 @@ import userEvent from "@testing-library/user-event";
 import { RuntimeNodeCard } from "./runtime-node-card";
 import type { WorkflowNode, WorkflowNodeRun } from "@multica/core/types";
 
+// Mock @multica/views/i18n for useT hook — handles function selector form
+vi.mock("@multica/views/i18n", () => ({
+  useT: () => ({
+    t: (selector: unknown, options?: { count?: number }) => {
+      if (typeof selector === "function") {
+        const value = selector({
+          execution: {
+            card: {
+              worker_label: "Worker",
+              critic_label: "Critic",
+              artifacts_count: "{{count}} artifact",
+              artifacts_count_plural: "{{count}} artifacts",
+            },
+          },
+        });
+        if (options?.count !== undefined) {
+          return value.replace("{{count}}", String(options.count));
+        }
+        return value;
+      }
+      return String(selector);
+    },
+  }),
+}));
+
 const baseNode: WorkflowNode = {
   id: "node-1",
   workflow_id: "wf-1",

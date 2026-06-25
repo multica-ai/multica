@@ -101,10 +101,6 @@ vi.mock("../../../workflows/components/overview/stage-lane", () => ({
   }) => <div data-testid={`stage-lane-${stage.id}`}>{stage.name}</div>,
 }));
 
-vi.mock("../../../workflows/components/overview/panorama-svg-overlay", () => ({
-  PanoramaSvgOverlay: () => <svg data-testid="panorama-svg-overlay" />,
-}));
-
 vi.mock("./execution-detail-panel", () => ({
   ExecutionDetailPanel: ({ onClose }: { onClose: () => void }) => (
     <div data-testid="execution-detail-panel">
@@ -289,7 +285,7 @@ describe("ExecutionPanoramaPage", () => {
     expect(screen.queryByTestId("execution-detail-panel")).not.toBeInTheDocument();
   });
 
-  it("renders SVG overlay when runId is provided", () => {
+  it("does not render SVG overlay even when runId is provided (deferred in runtime mode)", () => {
     mocks.isLoading = false;
     mocks.workflowData = { id: "wf-1", title: "Test Workflow" };
     mocks.stagesData = [STAGE];
@@ -346,6 +342,6 @@ describe("ExecutionPanoramaPage", () => {
       </Wrapper>,
     );
 
-    expect(screen.getByTestId("panorama-svg-overlay")).toBeInTheDocument();
+    expect(screen.queryByTestId("panorama-svg-overlay")).not.toBeInTheDocument();
   });
 });

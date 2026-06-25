@@ -6,7 +6,6 @@ import {
   workflowDetailOptions,
   workflowStagesOptions,
   workflowNodesOptions,
-  workflowEdgesOptions,
   workflowNodeRunsOptions,
 } from "@multica/core/workflows/queries";
 import { agentListOptions, builtinPluginListOptions } from "@multica/core/workspace/queries";
@@ -19,7 +18,6 @@ import type {
 } from "@multica/core/types";
 import type { BuiltinPlugin } from "@multica/core/api/schemas";
 import { StageLane } from "../../../workflows/components/overview/stage-lane";
-import { PanoramaSvgOverlay } from "../../../workflows/components/overview/panorama-svg-overlay";
 import { ExecutionDetailPanel } from "./execution-detail-panel";
 import { useT } from "@multica/views/i18n";
 import { Loader2 } from "lucide-react";
@@ -53,9 +51,6 @@ export function ExecutionPanoramaPage({
   );
   const { data: nodes, isLoading: ndLoading } = useQuery(
     workflowNodesOptions(wsId, workflowId),
-  );
-  const { data: edges, isLoading: edLoading } = useQuery(
-    workflowEdgesOptions(wsId, workflowId),
   );
   const { data: nodeRuns } = useQuery({
     ...workflowNodeRunsOptions(wsId, workflowId, runId ?? ""),
@@ -96,15 +91,15 @@ export function ExecutionPanoramaPage({
     return map;
   }, [plugins]);
 
-  const getActorName = (type: string, id: string): string => {
+  const getActorName = (type: string, id: string): string | null => {
     if (type === "agent" || type === "human" || type === "member") {
-      return agentLookup.get(id)?.name ?? "";
+      return agentLookup.get(id)?.name ?? null;
     }
-    return "";
+    return null;
   };
 
   // ---- Derived ----
-  const isLoading = wfLoading || stLoading || ndLoading || edLoading;
+  const isLoading = wfLoading || stLoading || ndLoading;
 
   if (isLoading) {
     return (
@@ -133,11 +128,6 @@ export function ExecutionPanoramaPage({
     ? nodeRunMap.get(selectedNodeId) ?? null
     : null;
 
-  // PanoramaSvgOverlay needs DOMRect position maps. In runtime mode we
-  // don't have element refs, so pass empty Maps — the overlay will render
-  // edges only when refs are populated by the caller.
-  const emptyPositions = useMemo(() => new Map<string, DOMRect>(), []);
-
   return (
     <div
       className="relative flex flex-col min-h-0"
@@ -147,16 +137,8 @@ export function ExecutionPanoramaPage({
         className="relative overflow-auto p-3"
         data-testid="panorama-canvas"
       >
-        {/* SVG overlay for edges (only when run exists) */}
-        {runId && (
-          <PanoramaSvgOverlay
-            stages={allStages}
-            nodes={allNodes}
-            edges={edges ?? []}
-            nodePositions={emptyPositions}
-            criticPositions={emptyPositions}
-          />
-        )}
+        {/* SVG edge overlay is deferred in runtime mode — PanoramaSvgOverlay
+        needs element refs from StageLane, which are not wired yet. */}
 
         {allStages.length === 0 ? (
           <StageLane

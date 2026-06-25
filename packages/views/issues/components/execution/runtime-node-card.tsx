@@ -4,6 +4,7 @@ import type { WorkflowNode, WorkflowNodeRun } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { NodeRunStatusIcon } from "./node-run-status-icon";
 import { Bot, User, Paperclip } from "lucide-react";
+import { useT } from "@multica/views/i18n";
 
 const LEFT_BORDER_COLORS: Record<string, string> = {
   completed: "border-l-green-500",
@@ -43,6 +44,7 @@ export function RuntimeNodeCard({
   isSelected = false,
   elementRef,
 }: RuntimeNodeCardProps) {
+  const { t } = useT("issues");
   const status = nodeRun?.status;
   const borderClass = status ? (LEFT_BORDER_COLORS[status] ?? "") : "";
   const hasWorkerOutput = (nodeRun?.worker_output as unknown) != null;
@@ -80,7 +82,7 @@ export function RuntimeNodeCard({
         ) : node.worker_type === "human" ? (
           <User className="h-3 w-3 shrink-0" />
         ) : null}
-        <span className="font-medium">Worker:</span>
+        <span className="font-medium">{t(($) => $.execution.card.worker_label)}:</span>
         <span className={cn(!workerName && "italic")}>
           {workerName ?? "--"}
         </span>
@@ -94,7 +96,7 @@ export function RuntimeNodeCard({
           ) : (
             <User className="h-3 w-3 shrink-0" />
           )}
-          <span className="font-medium">Critic:</span>
+          <span className="font-medium">{t(($) => $.execution.card.critic_label)}:</span>
           <span className={cn(!criticName && "italic")}>
             {criticName ?? "--"}
           </span>
@@ -106,7 +108,9 @@ export function RuntimeNodeCard({
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <Paperclip className="h-3 w-3" />
           <span>
-            {artifactCount} artifact{artifactCount > 1 ? "s" : ""}
+            {artifactCount === 1
+              ? t(($) => $.execution.card.artifacts_count, { count: 1 })
+              : t(($) => $.execution.card.artifacts_count_plural, { count: artifactCount })}
           </span>
         </div>
       )}
