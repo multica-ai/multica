@@ -132,7 +132,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			}
 			if msg.Type == MessageToolResult {
 				if _, ok := goalCompleteCallIDs.LoadAndDelete(msg.CallID); ok {
-					sawCompletedGoalComplete.Store(true)
+					sawCompletedGoalComplete.Store(msg.Status == "completed")
 				}
 			}
 			if msg.Type == MessageText {
