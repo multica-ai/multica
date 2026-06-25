@@ -49,6 +49,9 @@ export type CerebroFlagKey =
   // tools call the same endpoint and are not gated by this flag; this flag only
   // gates the in-app search surface.
   | "cerebro_note_search"
+  // FIR-2022: replaces fixed global-search type sections with one ranked Top
+  // results list and filter chips. Default off until Phase 1 QA signs off.
+  | "cerebro_unified_search"
   // FIR-1590: per-folder access control — "Only you / Selected colleagues /
   // Whole team" on note + document folders. Gates the folder and its contents.
   | "cerebro_folder_access"
@@ -371,6 +374,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2022: OFF until the Notes search scope is QA'd on staging. Gates only
   // the in-app global-search "Notes" scope; the CLI/MCP search tools always work.
   cerebro_note_search: false,
+  // FIR-2022: OFF until unified ranked search is QA'd on staging.
+  cerebro_unified_search: false,
   // FIR-1800: ON — render artifact references in comments/chat/DM/channels.
   cerebro_artifact_references: true,
   cerebro_inbox_slack_block: false,
@@ -806,6 +811,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Include channel and DM messages in the global Cmd+K search. Matches from any conversation you take part in show up in a \"Messages\" group with a snippet, the conversation name, and the sender — so you can find an old link or note without opening each conversation. Access-scoped: you only see messages from your own conversations.",
+  },
+  {
+    key: "cerebro_unified_search",
+    label: "Unified global search",
+    group: "inbox",
+    description:
+      "Replace fixed global-search type sections with one ranked Top results list and filter chips for All, Issues, Notes, Projects, Chats, and Messages. Default off until the ranking feel is QA'd.",
   },
   {
     key: "cerebro_typing_indicators",

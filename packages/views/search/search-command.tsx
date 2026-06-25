@@ -71,6 +71,10 @@ import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { HighlightText } from "./highlight-text";
 import { useSearchStore } from "./search-store";
+import {
+  buildUnifiedSearchResults,
+  type UnifiedSearchFilter,
+} from "./unified-search";
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see SearchCommand body).
@@ -126,6 +130,7 @@ interface NoteHit {
   id: string;
   title: string;
   body: string;
+  updated_at?: string;
 }
 
 // noteSearchTitle / noteSearchSnippet derive a display title + snippet from a
@@ -156,6 +161,7 @@ interface MessageHit {
   author_id: string;
   snippet: string;
   content: string;
+  created_at?: string;
 }
 
 interface SearchResults {
@@ -194,6 +200,8 @@ export function SearchCommand() {
   const messageSearchEnabled = useFeatureFlag("cerebro_global_message_search");
   // CEREBRO-PATCH(cerebro-note-search-ui): FIR-2022 — when on, the Notes leg searches title+body+comments via /api/notes/search instead of title-only listNotes.
   const noteSearchEnabled = useFeatureFlag("cerebro_note_search");
+  // CEREBRO-PATCH(cerebro-unified-search): FIR-2022 — gate the blended Top results UI.
+  const unifiedSearchEnabled = useFeatureFlag("cerebro_unified_search");
 
   // Resolve each recent issue via its cached detail entry. Recent items are
   // typically already in the detail cache because the user has opened them;
@@ -211,6 +219,7 @@ export function SearchCommand() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResults>(EMPTY_RESULTS);
   const [isLoading, setIsLoading] = useState(false);
+  const [contentFilter, setContentFilter] = useState<UnifiedSearchFilter>("all");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -373,6 +382,30 @@ export function SearchCommand() {
     results.messages.length > 0 || // CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407
     filteredMembers.length > 0;
 
+  const unifiedResults = useMemo(
+    () =>
+      buildUnifiedSearchResults(
+        {
+          issues: [...results.issues, ...results.comments],
+          notes: results.notes,
+          projects: results.projects,
+          chats: results.chatSessions.map((chat) => ({
+            ...chat,
+            id: chat.chat_session_id,
+            updated_at: chat.created_at,
+          })),
+          messages: results.messages.map((message) => ({
+            ...message,
+            title: message.channel_title || "Conversation",
+            updated_at: message.created_at,
+          })),
+        },
+        query,
+      ),
+    [query, results],
+  );
+  const unifiedItems = unifiedResults.byFilter[contentFilter];
+
   // Global Cmd+K / Ctrl+K shortcut
   useEffect(() => {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
@@ -456,7 +489,7 @@ export function SearchCommand() {
           noteSearchEnabled
             ? api
                 .searchNotes({ q: q.trim(), limit: 10, signal: controller.signal })
-                .then((r) => r.results.map((x): NoteHit => ({ id: x.id, title: x.title, body: x.snippet ?? "" })))
+                .then((r) => r.results.map((x): NoteHit => ({ id: x.id, title: x.title, body: x.snippet ?? "", updated_at: x.updated_at })))
                 .catch(() => [] as NoteHit[])
             : api
                 .listNotes<NoteHit[]>({ q: q.trim(), limit: 10 })
@@ -687,7 +720,166 @@ export function SearchCommand() {
                 </CommandPrimitive.Empty>
               )}
 
-            {!isLoading && results.projects.length > 0 && (
+            {!isLoading && unifiedSearchEnabled && query.trim() && unifiedResults.all.length > 0 && (
+              <CommandPrimitive.Group
+                heading="Top results"
+                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+              >
+                <UnifiedFilterChips
+                  value={contentFilter}
+                  counts={unifiedResults.counts}
+                  onChange={setContentFilter}
+                />
+                {unifiedItems.map((hit) => {
+                  if (hit.type === "projects") {
+                    const project = hit.item as SearchProjectResult;
+                    return (
+                      <CommandPrimitive.Item
+                        key={`project:${project.id}`}
+                        value={`project:${project.id}`}
+                        onSelect={handleSelect}
+                        className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <ProjectIcon project={project} size="md" />
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{UNIFIED_TYPE_LABEL.project}</span>
+                          <span className="truncate">
+                            <HighlightText text={project.title} query={query} />
+                          </span>
+                          <span className={`ml-auto text-xs shrink-0 ${PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground"}`}>
+                            {PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.label ?? project.status}
+                          </span>
+                        </div>
+                        {project.match_source === "description" && project.matched_snippet && (
+                          <div className="flex items-start gap-2 pl-[70px]">
+                            <span className="text-xs text-muted-foreground truncate">
+                              <HighlightText text={project.matched_snippet} query={query} />
+                            </span>
+                          </div>
+                        )}
+                      </CommandPrimitive.Item>
+                    );
+                  }
+                  if (hit.type === "issues") {
+                    const issue = hit.item as SearchIssueResult;
+                    const isComment = issue.match_source === "comment";
+                    return (
+                      <CommandPrimitive.Item
+                        key={`${isComment ? "comment" : "issue"}:${issue.id}`}
+                        value={issue.id}
+                        onSelect={handleSelect}
+                        className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          {isComment ? (
+                            <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                          ) : (
+                            <StatusIcon status={issue.status} className="size-4 shrink-0" />
+                          )}
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            {isComment ? UNIFIED_TYPE_LABEL.comment : UNIFIED_TYPE_LABEL.issue}
+                          </span>
+                          <span className="text-xs text-muted-foreground shrink-0">{issue.identifier}</span>
+                          <span className="truncate">
+                            <HighlightText text={issue.title} query={query} />
+                          </span>
+                          {!isComment && (
+                            <span className={`ml-auto text-xs shrink-0 ${STATUS_CONFIG[issue.status].iconColor}`}>
+                              {STATUS_CONFIG[issue.status].label}
+                            </span>
+                          )}
+                        </div>
+                        {(isComment || issue.match_source === "description") && issue.matched_snippet && (
+                          <div className="flex items-start gap-2 pl-[70px]">
+                            <span className="text-xs text-muted-foreground truncate">
+                              <HighlightText text={issue.matched_snippet} query={query} />
+                            </span>
+                          </div>
+                        )}
+                      </CommandPrimitive.Item>
+                    );
+                  }
+                  if (hit.type === "chats") {
+                    const session = hit.item as SearchChatSessionResult & { id: string };
+                    return (
+                      <CommandPrimitive.Item
+                        key={`chat:${session.chat_session_id}`}
+                        value={`chat:${session.chat_session_id}`}
+                        onSelect={handleSelect}
+                        className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{UNIFIED_TYPE_LABEL.chat}</span>
+                          <span className="truncate">
+                            <HighlightText text={session.title} query={query} />
+                          </span>
+                        </div>
+                        {session.matched_snippet && (
+                          <div className="flex items-start gap-2 pl-[70px]">
+                            <span className="text-xs text-muted-foreground truncate">
+                              <HighlightText text={session.matched_snippet} query={query} />
+                            </span>
+                          </div>
+                        )}
+                      </CommandPrimitive.Item>
+                    );
+                  }
+                  if (hit.type === "notes") {
+                    const note = hit.item as NoteHit;
+                    return (
+                      <CommandPrimitive.Item
+                        key={`note:${note.id}`}
+                        value={`note:${note.id}`}
+                        onSelect={handleSelect}
+                        className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <NotebookPen className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{UNIFIED_TYPE_LABEL.note}</span>
+                          <span className="truncate">
+                            <HighlightText text={noteSearchTitle(note)} query={query} />
+                          </span>
+                        </div>
+                        {noteSearchSnippet(note) && (
+                          <div className="flex items-start gap-2 pl-[70px]">
+                            <span className="truncate text-xs text-muted-foreground">
+                              <HighlightText text={noteSearchSnippet(note)} query={query} />
+                            </span>
+                          </div>
+                        )}
+                      </CommandPrimitive.Item>
+                    );
+                  }
+                  const message = hit.item as MessageHit;
+                  return (
+                    <CommandPrimitive.Item
+                      key={`message:${message.id}`}
+                      value={`message:${message.channel_id}`}
+                      onSelect={handleSelect}
+                      className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{UNIFIED_TYPE_LABEL.message}</span>
+                        <span className="truncate">
+                          <HighlightText text={message.channel_title || "Conversation"} query={query} />
+                        </span>
+                      </div>
+                      {(message.snippet || message.content) && (
+                        <div className="flex items-start gap-2 pl-[70px]">
+                          <span className="truncate text-xs text-muted-foreground">
+                            <HighlightText text={message.snippet || message.content} query={query} />
+                          </span>
+                        </div>
+                      )}
+                    </CommandPrimitive.Item>
+                  );
+                })}
+              </CommandPrimitive.Group>
+            )}
+
+            {!isLoading && !unifiedSearchEnabled && results.projects.length > 0 && (
               <CommandPrimitive.Group
                 heading={t(($) => $.groups.projects)}
                 className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
@@ -726,7 +918,7 @@ export function SearchCommand() {
               </CommandPrimitive.Group>
             )}
 
-            {!isLoading && results.issues.length > 0 && (
+            {!isLoading && !unifiedSearchEnabled && results.issues.length > 0 && (
               <CommandPrimitive.Group
                 heading={t(($) => $.groups.issues)}
                 className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
@@ -769,7 +961,7 @@ export function SearchCommand() {
             )}
 
             {/* CEREBRO-PATCH(typeahead-comments): FIR-2605 — Comments group: issues matched via comment body. */}
-            {!isLoading && results.comments.length > 0 && (
+            {!isLoading && !unifiedSearchEnabled && results.comments.length > 0 && (
               <CommandPrimitive.Group
                 heading={t(($) => $.groups.comments)}
                 className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
@@ -803,7 +995,7 @@ export function SearchCommand() {
             )}
 
             {/* CEREBRO-PATCH(chat-search-cerebro-ui): FIR-902 — Chat Sessions group in Cmd+K. */}
-            {!isLoading && results.chatSessions.length > 0 && (
+            {!isLoading && !unifiedSearchEnabled && results.chatSessions.length > 0 && (
               <CommandPrimitive.Group
                 heading={t(($) => $.groups.chat_sessions)}
                 className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
@@ -837,7 +1029,7 @@ export function SearchCommand() {
             )}
 
             {/* CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421 — Notes group in Cmd+K. */}
-            {!isLoading && results.notes.length > 0 && (
+            {!isLoading && !unifiedSearchEnabled && results.notes.length > 0 && (
               <CommandPrimitive.Group
                 heading="Notes"
                 className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
@@ -874,7 +1066,7 @@ export function SearchCommand() {
             )}
 
             {/* CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — Messages group in Cmd+K. */}
-            {!isLoading && results.messages.length > 0 && (
+            {!isLoading && !unifiedSearchEnabled && results.messages.length > 0 && (
               <CommandPrimitive.Group
                 heading="Messages"
                 className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
@@ -950,5 +1142,57 @@ export function SearchCommand() {
         </CommandPrimitive>
       </DialogContent>
     </Dialog>
+  );
+}
+
+const UNIFIED_FILTER_LABEL: Record<UnifiedSearchFilter, string> = {
+  all: "All",
+  issues: "Issues",
+  notes: "Notes",
+  projects: "Projects",
+  chats: "Chats",
+  messages: "Messages",
+};
+
+const UNIFIED_TYPE_LABEL = {
+  project: "Project",
+  issue: "Issue",
+  comment: "Comment",
+  chat: "Chat",
+  note: "Note",
+  message: "Message",
+};
+
+const UNIFIED_FILTERS: UnifiedSearchFilter[] = ["all", "issues", "notes", "projects", "chats", "messages"];
+
+function UnifiedFilterChips({
+  value,
+  counts,
+  onChange,
+}: {
+  value: UnifiedSearchFilter;
+  counts: Record<UnifiedSearchFilter, number>;
+  onChange: (value: UnifiedSearchFilter) => void;
+}) {
+  return (
+    <div className="mb-2 flex gap-1 overflow-x-auto px-3 pb-1 no-scrollbar">
+      {UNIFIED_FILTERS.map((filter) => (
+        <button
+          key={filter}
+          type="button"
+          onClick={() => onChange(filter)}
+          className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs ${
+            value === filter
+              ? "border-foreground/20 bg-foreground text-background"
+              : "border-border bg-background text-muted-foreground hover:bg-muted"
+          }`}
+        >
+          <span>{UNIFIED_FILTER_LABEL[filter]}</span>
+          <span className={value === filter ? "text-background/70" : "text-muted-foreground"}>
+            {counts[filter]}
+          </span>
+        </button>
+      ))}
+    </div>
   );
 }

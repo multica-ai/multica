@@ -1,4 +1,5 @@
 // CEREBRO-PATCH(search-page-1326): JEH-1326 — dedicated full-page search with scope tabs and filters
+// CEREBRO-PATCH(cerebro-unified-search): FIR-2022 — flag-gated ranked Top results + search filter chips.
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -21,8 +22,11 @@ import {
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core";
 import { useWorkspacePaths } from "@multica/core/paths";
+import type { WorkspacePaths } from "@multica/core/paths";
 import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
+import type { SearchChatSessionResult } from "@multica/core/types";
 import type { ChatSession } from "@multica/core/types/chat";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { cerebroTasksListOptions } from "@multica/cerebro-tasks/core/queries";
 import type { CerebroTask, TaskStatus, TaskType } from "@multica/cerebro-tasks/core";
 import { DEFAULT_TASKS_FILTER } from "@multica/cerebro-tasks/core";
@@ -50,8 +54,13 @@ import { ProjectIcon } from "../projects/components/project-icon";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { ProjectStatus } from "@multica/core/types";
+import {
+  buildUnifiedSearchResults,
+  type UnifiedSearchFilter,
+  type UnifiedSearchItem,
+} from "./unified-search";
 
-type SearchScope = "all" | "issues" | "projects" | "tasks" | "chats";
+type SearchScope = UnifiedSearchFilter | "tasks";
 type ClosedFilter = "open" | "all";
 type TaskStatusFilter = "all" | TaskStatus;
 type TaskTypeFilter = "all" | TaskType;
@@ -62,10 +71,38 @@ type DateRange = "all" | "24h" | "7d" | "30d";
 interface SearchData {
   issues: SearchIssueResult[];
   projects: SearchProjectResult[];
+  notes: NoteHit[];
+  chatSessions: SearchChatSessionResult[];
+  messages: MessageHit[];
   activeFilters: ActiveFilter[];
 }
 
-const EMPTY_SEARCH_DATA: SearchData = { issues: [], projects: [], activeFilters: [] };
+interface NoteHit {
+  id: string;
+  title: string;
+  body: string;
+  updated_at?: string;
+}
+
+interface MessageHit {
+  id: string;
+  channel_id: string;
+  channel_kind: string;
+  channel_title: string;
+  author_id: string;
+  snippet: string;
+  content: string;
+  created_at?: string;
+}
+
+const EMPTY_SEARCH_DATA: SearchData = { issues: [], projects: [], notes: [], chatSessions: [], messages: [], activeFilters: [] };
+const SEARCH_PAGE_DESCRIPTION = "Find issues, notes, projects, chats, and messages across this workspace";
+const UNIFIED_PAGE_TYPE_LABEL = {
+  project: "Project",
+  note: "Note",
+  chat: "Chat",
+  message: "Message",
+};
 
 // CEREBRO-PATCH(search-page-filter-chips-2595): FIR-2595 trin 1 — inline
 // `from:/assignee:/status:/project:/has:` filter chip rendering.
@@ -143,6 +180,7 @@ export function SearchPage() {
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const navigation = useNavigation();
+  const unifiedSearchEnabled = useFeatureFlag("cerebro_unified_search");
   const [query, setQuery] = useUrlBackedQuery();
   const [scope, setScope] = useState<SearchScope>("all");
   const [closedFilter, setClosedFilter] = useState<ClosedFilter>("all");
@@ -165,9 +203,41 @@ export function SearchPage() {
   const filterChipsEnabled = trimmedQuery.length > 0 || parsedQuery.filters.length > 0;
 
   const globalSearch = useQuery({
-    queryKey: ["full-search", wsId, trimmedQuery, includeClosed],
+    queryKey: ["full-search", wsId, trimmedQuery, includeClosed, unifiedSearchEnabled],
     enabled: trimmedQuery.length > 0,
     queryFn: async () => {
+      if (unifiedSearchEnabled) {
+        const [issueRes, projectRes, chatRes, noteRes, messageRes] = await Promise.all([
+          api.searchIssues({
+            q: trimmedQuery,
+            limit: 50,
+            include_closed: includeClosed,
+          }),
+          api.searchProjects({
+            q: trimmedQuery,
+            limit: 25,
+            include_closed: includeClosed,
+          }),
+          api.searchChatSessions({
+            q: trimmedQuery,
+            limit: 25,
+          }).catch(() => ({ chat_sessions: [], total: 0 })),
+          api
+            .searchNotes({ q: trimmedQuery, limit: 25 })
+            .then((r) => r.results.map((x): NoteHit => ({ id: x.id, title: x.title, body: x.snippet ?? "", updated_at: x.updated_at })))
+            .catch(() => [] as NoteHit[]),
+          api.searchMyChannelMessages(trimmedQuery, 25).catch(() => ({ messages: [], total: 0 })),
+        ]);
+        const activeFilters = (issueRes as { filters?: ActiveFilter[] }).filters ?? [];
+        return {
+          issues: issueRes.issues,
+          projects: projectRes.projects,
+          notes: noteRes,
+          chatSessions: chatRes.chat_sessions,
+          messages: messageRes.messages,
+          activeFilters,
+        };
+      }
       const [issueRes, projectRes] = await Promise.all([
         api.searchIssues({
           q: trimmedQuery,
@@ -187,6 +257,9 @@ export function SearchPage() {
       return {
         issues: issueRes.issues,
         projects: projectRes.projects,
+        notes: [],
+        chatSessions: [],
+        messages: [],
         activeFilters,
       };
     },
@@ -206,7 +279,7 @@ export function SearchPage() {
 
   const chats = useQuery({
     queryKey: ["full-search", wsId, "chats"],
-    enabled: !!wsId,
+    enabled: !!wsId && !unifiedSearchEnabled,
     queryFn: () => api.listChatSessions({ status: "all" }),
     staleTime: 30 * 1000,
   });
@@ -217,6 +290,9 @@ export function SearchPage() {
     return {
       issues: data.issues.filter((issue) => matchesDateRange(issue, dateField, dateRange)),
       projects: data.projects.filter((project) => matchesDateRange(project, dateField, dateRange)),
+      notes: data.notes.filter((note) => matchesDateRange(note, dateField, dateRange)),
+      chatSessions: data.chatSessions.filter((chat) => matchesDateRange(chat, dateField, dateRange)),
+      messages: data.messages.filter((message) => matchesDateRange(message, dateField, dateRange)),
       activeFilters: data.activeFilters,
     };
   }, [dateField, dateRange, globalSearch.data]);
@@ -234,21 +310,50 @@ export function SearchPage() {
       .slice(0, 25);
   }, [chats.data, dateField, dateRange, trimmedQuery]);
 
-  const counts = {
-    issues: searchData.issues.length,
-    projects: searchData.projects.length,
-    tasks: taskRows.length,
-    chats: chatRows.length,
-  };
-  const total = counts.issues + counts.projects + counts.tasks + counts.chats;
+  const unifiedResults = useMemo(
+    () =>
+      buildUnifiedSearchResults(
+        {
+          issues: searchData.issues,
+          notes: searchData.notes,
+          projects: searchData.projects,
+          chats: searchData.chatSessions.map((chat) => ({
+            ...chat,
+            id: chat.chat_session_id,
+            updated_at: chat.created_at,
+          })),
+          messages: searchData.messages.map((message) => ({
+            ...message,
+            title: message.channel_title || "Conversation",
+            updated_at: message.created_at,
+          })),
+        },
+        trimmedQuery,
+      ),
+    [searchData, trimmedQuery],
+  );
+
+  const counts = unifiedSearchEnabled
+    ? { ...unifiedResults.counts, tasks: 0 }
+    : {
+        all: searchData.issues.length + searchData.projects.length + taskRows.length + chatRows.length,
+        issues: searchData.issues.length,
+        notes: 0,
+        projects: searchData.projects.length,
+        tasks: taskRows.length,
+        chats: chatRows.length,
+        messages: 0,
+      };
+  const total = counts.all;
   const isLoading =
     globalSearch.isFetching ||
     tasks.isFetching ||
     chats.isFetching;
   const showIssues = scope === "all" || scope === "issues";
   const showProjects = scope === "all" || scope === "projects";
-  const showTasks = scope === "all" || scope === "tasks";
+  const showTasks = !unifiedSearchEnabled && (scope === "all" || scope === "tasks");
   const showChats = scope === "all" || scope === "chats";
+  const unifiedItems = unifiedResults.byFilter[scope === "tasks" ? "all" : scope];
 
   const open = (path: string) => navigation.push(path);
 
@@ -258,7 +363,7 @@ export function SearchPage() {
         <div className="flex min-w-0 flex-col">
           <h1 className="text-sm font-semibold">Search</h1>
           <p className="truncate text-[11px] text-muted-foreground">
-            Find issues, projects, tasks, and chats across this workspace
+            {SEARCH_PAGE_DESCRIPTION}
           </p>
         </div>
         <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
@@ -308,9 +413,11 @@ export function SearchPage() {
                   <TabsList className="flex h-auto w-full flex-nowrap justify-start gap-1 overflow-x-auto rounded-lg p-1 no-scrollbar sm:w-fit">
                     <ScopeTab value="all" label="All" count={total} />
                     <ScopeTab value="issues" label="Issues" count={counts.issues} />
+                    {unifiedSearchEnabled && <ScopeTab value="notes" label="Notes" count={counts.notes} />}
                     <ScopeTab value="projects" label="Projects" count={counts.projects} />
-                    <ScopeTab value="tasks" label="Tasks" count={counts.tasks} />
+                    {!unifiedSearchEnabled && <ScopeTab value="tasks" label="Tasks" count={counts.tasks} />}
                     <ScopeTab value="chats" label="Chats" count={counts.chats} />
+                    {unifiedSearchEnabled && <ScopeTab value="messages" label="Messages" count={counts.messages} />}
                   </TabsList>
                 </Tabs>
 
@@ -318,7 +425,7 @@ export function SearchPage() {
                 <button type="button" onClick={() => setFilterPanelOpen((v) => !v)}
                   className={cn("flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted xl:hidden", filterPanelOpen && "bg-muted")}>
                   <SlidersHorizontal className="size-3.5" />
-                  {filterPanelOpen ? "Skjul filtre" : `Filtre${activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}`}
+                  {filterPanelOpen ? "Hide filters" : `Filters${activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}`}
                 </button>
 
                 {/* CEREBRO-PATCH(search-page-mobile-filter-panel-2638): FIR-2638 — hidden on mobile until toggled; always visible on xl. */}
@@ -389,7 +496,21 @@ export function SearchPage() {
             </div>
           )}
 
-          {trimmedQuery && (
+          {trimmedQuery && unifiedSearchEnabled && (
+            <ResultSection title="Top results" count={unifiedItems.length} loading={globalSearch.isFetching}>
+              {unifiedItems.map((hit) => (
+                <UnifiedPageResult
+                  key={`${hit.type}:${hit.id}`}
+                  hit={hit}
+                  query={query}
+                  open={open}
+                  p={p}
+                />
+              ))}
+            </ResultSection>
+          )}
+
+          {trimmedQuery && !unifiedSearchEnabled && (
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.7fr)]">
               <div className="flex min-w-0 flex-col gap-4">
                 {showIssues && (
@@ -501,6 +622,149 @@ export function SearchPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function noteTitle(note: NoteHit): string {
+  const title = normalize(note.title);
+  if (title) return title;
+  const firstBodyLine = (note.body ?? "")
+    .split("\n")
+    .map((line) => line.replace(/^#+\s*/, "").trim())
+    .find((line) => line.length > 0);
+  return firstBodyLine || "New note";
+}
+
+function noteSnippet(note: NoteHit): string {
+  const lines = (note.body ?? "").split("\n").filter((line) => line.trim().length > 0);
+  const skipTitle = !normalize(note.title) && lines.length > 0 ? 1 : 0;
+  return lines.slice(skipTitle).join(" ");
+}
+
+function TypeBadge({ children }: { children: ReactNode }) {
+  return (
+    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+      {children}
+    </span>
+  );
+}
+
+function UnifiedPageResult({
+  hit,
+  open,
+  p,
+}: {
+  hit: UnifiedSearchItem;
+  query: string;
+  open: (path: string) => void;
+  p: WorkspacePaths;
+}) {
+  if (hit.type === "issues") {
+    const issue = hit.item as SearchIssueResult;
+    const isComment = issue.match_source === "comment";
+    return (
+      <button
+        type="button"
+        onClick={() => open(p.issueDetail(issue.id))}
+        className="flex w-full min-w-0 flex-col gap-1 rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted/50"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          {isComment ? (
+            <MessageCircle className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <StatusIcon status={issue.status} className="size-4 shrink-0" />
+          )}
+          <TypeBadge>{isComment ? "Comment" : "Issue"}</TypeBadge>
+          <span className="shrink-0 text-xs text-muted-foreground">{issue.identifier}</span>
+          <span className="truncate text-sm font-medium">{issue.title}</span>
+          {!isComment && (
+            <span className={cn("ml-auto hidden shrink-0 text-xs sm:inline", STATUS_CONFIG[issue.status].iconColor)}>
+              {STATUS_CONFIG[issue.status].label}
+            </span>
+          )}
+        </div>
+        {issue.matched_snippet && (
+          <p className="line-clamp-2 pl-16 text-xs text-muted-foreground">{normalize(issue.matched_snippet)}</p>
+        )}
+      </button>
+    );
+  }
+  if (hit.type === "projects") {
+    const project = hit.item as SearchProjectResult;
+    return (
+      <button
+        type="button"
+        onClick={() => open(p.projectDetail(project.id))}
+        className="flex w-full min-w-0 flex-col gap-1 rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted/50"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <ProjectIcon project={project} size="md" />
+          <TypeBadge>{UNIFIED_PAGE_TYPE_LABEL.project}</TypeBadge>
+          <span className="truncate text-sm font-medium">{project.title}</span>
+          <span className={cn("ml-auto hidden shrink-0 text-xs sm:inline", PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground")}>
+            {PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.label ?? project.status}
+          </span>
+        </div>
+        {project.matched_snippet && (
+          <p className="line-clamp-2 pl-16 text-xs text-muted-foreground">{normalize(project.matched_snippet)}</p>
+        )}
+      </button>
+    );
+  }
+  if (hit.type === "notes") {
+    const note = hit.item as NoteHit;
+    return (
+      <button
+        type="button"
+        onClick={() => open(`${p.notes()}?note=${encodeURIComponent(note.id)}`)}
+        className="flex w-full min-w-0 flex-col gap-1 rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted/50"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <Info className="size-4 shrink-0 text-muted-foreground" />
+          <TypeBadge>{UNIFIED_PAGE_TYPE_LABEL.note}</TypeBadge>
+          <span className="truncate text-sm font-medium">{noteTitle(note)}</span>
+        </div>
+        {noteSnippet(note) && (
+          <p className="line-clamp-2 pl-16 text-xs text-muted-foreground">{normalize(noteSnippet(note))}</p>
+        )}
+      </button>
+    );
+  }
+  if (hit.type === "chats") {
+    const chat = hit.item as SearchChatSessionResult & { id: string };
+    return (
+      <button
+        type="button"
+        onClick={() => open(`${p.inbox()}?chat=${encodeURIComponent(chat.chat_session_id)}`)}
+        className="flex w-full min-w-0 flex-col gap-1 rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted/50"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <MessageCircle className="size-4 shrink-0 text-muted-foreground" />
+          <TypeBadge>{UNIFIED_PAGE_TYPE_LABEL.chat}</TypeBadge>
+          <span className="truncate text-sm font-medium">{chat.title}</span>
+        </div>
+        {chat.matched_snippet && (
+          <p className="line-clamp-2 pl-16 text-xs text-muted-foreground">{normalize(chat.matched_snippet)}</p>
+        )}
+      </button>
+    );
+  }
+  const message = hit.item as MessageHit;
+  return (
+    <button
+      type="button"
+      onClick={() => open(p.channelDetail(message.channel_id))}
+      className="flex w-full min-w-0 flex-col gap-1 rounded-lg border bg-background p-3 text-left transition-colors hover:bg-muted/50"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <MessageCircle className="size-4 shrink-0 text-muted-foreground" />
+        <TypeBadge>{UNIFIED_PAGE_TYPE_LABEL.message}</TypeBadge>
+        <span className="truncate text-sm font-medium">{message.channel_title || "Conversation"}</span>
+      </div>
+      {(message.snippet || message.content) && (
+        <p className="line-clamp-2 pl-16 text-xs text-muted-foreground">{normalize(message.snippet || message.content)}</p>
+      )}
+    </button>
   );
 }
 

@@ -30,6 +30,7 @@ const {
   mockSearchProjects,
   mockSearchChatSessions,
   mockListNotes,
+  mockSearchNotes,
   mockSearchMyChannelMessages,
   mockRecentItems,
   mockAllIssues,
@@ -41,12 +42,14 @@ const {
   mockOpenModal,
   mockToastSuccess,
   mockClipboardWrite,
+  mockFeatureFlags,
 } = vi.hoisted(() => ({
   mockPush: vi.fn(),
   mockSearchIssues: vi.fn(),
   mockSearchProjects: vi.fn(),
   mockSearchChatSessions: vi.fn(),
   mockListNotes: vi.fn(),
+  mockSearchNotes: vi.fn(),
   mockSearchMyChannelMessages: vi.fn(),
   mockRecentItems: { current: [] as Array<{ id: string; visitedAt: number }> },
   mockAllIssues: { current: [] as Array<Record<string, unknown>> },
@@ -69,6 +72,7 @@ const {
   mockOpenModal: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockClipboardWrite: vi.fn(() => Promise.resolve()),
+  mockFeatureFlags: { current: new Map<string, boolean>() },
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -78,13 +82,15 @@ vi.mock("@multica/core/api", () => ({
     searchProjects: mockSearchProjects,
     searchChatSessions: mockSearchChatSessions,
     listNotes: mockListNotes,
+    searchNotes: mockSearchNotes,
     searchMyChannelMessages: mockSearchMyChannelMessages,
   },
 }));
 
 // FIR-407 — Messages-in-global-search feature flag; default it ON in tests.
 vi.mock("@multica/cerebro-feature-flags", () => ({
-  useFeatureFlag: () => true,
+  useFeatureFlag: (key: string) =>
+    mockFeatureFlags.current.get(key) ?? key !== "cerebro_unified_search",
 }));
 
 vi.mock("@multica/core/issues/stores", () => {
@@ -191,6 +197,7 @@ describe("SearchCommand", () => {
     mockSearchProjects.mockReset().mockResolvedValue({ projects: [] });
     mockSearchChatSessions.mockReset().mockResolvedValue({ chat_sessions: [], total: 0 });
     mockListNotes.mockReset().mockResolvedValue([]);
+    mockSearchNotes.mockReset().mockResolvedValue({ results: [], total: 0 });
     mockSearchMyChannelMessages.mockReset().mockResolvedValue({ messages: [], total: 0 });
     mockRecentItems.current = [];
     mockAllIssues.current = [];
@@ -202,6 +209,7 @@ describe("SearchCommand", () => {
     mockOpenModal.mockReset();
     mockToastSuccess.mockReset();
     mockClipboardWrite.mockReset().mockResolvedValue(undefined);
+    mockFeatureFlags.current = new Map<string, boolean>();
 
     // cmdk calls scrollIntoView on the first selected item, which jsdom doesn't implement
     Element.prototype.scrollIntoView = vi.fn();
@@ -545,6 +553,103 @@ describe("SearchCommand", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/inbox?chat=session-1");
     expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  it("renders unified Top results with filter chips when the unified search flag is on", async () => {
+    const user = userEvent.setup();
+    mockFeatureFlags.current.set("cerebro_unified_search", true);
+    mockSearchIssues.mockResolvedValue({
+      issues: [
+        {
+          id: "issue-1",
+          identifier: "FIR-1234",
+          title: "Frontend build hangs",
+          status: "todo",
+          match_source: "title",
+          updated_at: "2026-06-24T00:00:00Z",
+        },
+      ],
+    });
+    mockSearchProjects.mockResolvedValue({
+      projects: [
+        {
+          id: "project-1",
+          title: "Search project",
+          status: "in_progress",
+          match_source: "title",
+          updated_at: "2026-06-23T00:00:00Z",
+        },
+      ],
+    });
+    mockSearchNotes.mockResolvedValue({
+      results: [
+        {
+          id: "note-1",
+          title: "Search design note",
+          snippet: "RRF ranking plan",
+          updated_at: "2026-06-25T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "search");
+
+    await waitFor(() => {
+      expect(screen.getByText("Top results")).toBeInTheDocument();
+      expect(
+        screen.getByText((_, el) => el?.textContent === "Search design note" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText("All")).toBeInTheDocument();
+    expect(screen.getByText("Notes")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Notes"));
+
+    expect(
+      screen.getByText((_, el) => el?.textContent === "Search design note" && el?.tagName === "SPAN"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Frontend build hangs")).not.toBeInTheDocument();
+  });
+
+  it("keeps comment-matched issues in unified Top results and the Issues chip", async () => {
+    const user = userEvent.setup();
+    mockFeatureFlags.current.set("cerebro_unified_search", true);
+    mockSearchIssues.mockResolvedValue({
+      issues: [
+        {
+          id: "issue-comment-1",
+          identifier: "FIR-2605",
+          title: "Comment search regression",
+          status: "todo",
+          match_source: "comment",
+          matched_snippet: "Only this issue comment contains needle",
+          updated_at: "2026-06-25T00:00:00Z",
+        },
+      ],
+    });
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "needle");
+
+    await waitFor(() => {
+      expect(screen.getByText("Top results")).toBeInTheDocument();
+      expect(screen.getByText("FIR-2605")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          (_, el) =>
+            el?.textContent === "Only this issue comment contains needle" &&
+            el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText("Issues"));
+
+    expect(screen.getByText("FIR-2605")).toBeInTheDocument();
   });
 
   // FIR-407 — channel/DM messages in global Cmd+K search.
