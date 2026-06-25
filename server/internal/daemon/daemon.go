@@ -231,6 +231,8 @@ type Daemon struct {
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
+
+	pendingQueueNotify chan struct{} // signaled when a new record is enqueued or wakeup connection reconnects
 }
 
 type profileLaunchSpec struct {
@@ -264,6 +266,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
+		pendingQueueNotify:        make(chan struct{}, 1),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
@@ -787,6 +790,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
+	go d.pendingQueueRetrierLoop(ctx)
 
 	// Preflight succeeded and the background loops are up: the daemon has
 	// registered its runtimes and can now claim and run tasks. Flip /health
@@ -3082,7 +3086,8 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// has already refused this task and the only useful UI signal
 		// left is a concrete failure.
 		if isTransientError(err) {
-			taskLog.Error("complete task failed after retries; leaving task in running rather than falling back to fail", "error", err)
+			taskLog.Error("complete task failed after retries; saving to pending queue", "error", err)
+			d.enqueuePendingResult(taskID, result)
 			return
 		}
 		taskLog.Error("complete task rejected by server, falling back to fail", "error", err)

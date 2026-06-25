@@ -104,6 +104,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
 	signalTaskWakeup(taskWakeups, "")
+	d.notifyPendingQueue()
 
 	// Serialize all writes through a single channel: the gorilla/websocket
 	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
