@@ -9,6 +9,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	cli "github.com/multica-ai/multica/server/internal/cli"
+)
+
+var (
+	fetchLatestCLIRelease = cli.FetchLatestRelease
+	latestCLIUpdateRepo   = cli.UpdateRepoSlug
 )
 
 // ---------------------------------------------------------------------------
@@ -335,4 +341,29 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type latestCLIReleaseResponse struct {
+	TagName *string `json:"tag_name"`
+	Repo    string  `json:"repo"`
+}
+
+// GetLatestCLIRelease returns the latest release tag from the same repo slug
+// the CLI/daemon updater uses. Front-end runtime update prompts should source
+// from here instead of embedding their own GitHub repo constant so a self-
+// hosted fork has one authoritative update lineage.
+func (h *Handler) GetLatestCLIRelease(w http.ResponseWriter, r *http.Request) {
+	repo := latestCLIUpdateRepo()
+	release, err := fetchLatestCLIRelease()
+	if err != nil {
+		slog.Warn("latest CLI release lookup failed", "repo", repo, "error", err)
+		writeJSON(w, http.StatusOK, latestCLIReleaseResponse{Repo: repo})
+		return
+	}
+	if release == nil || release.TagName == "" {
+		writeJSON(w, http.StatusOK, latestCLIReleaseResponse{Repo: repo})
+		return
+	}
+	tag := release.TagName
+	writeJSON(w, http.StatusOK, latestCLIReleaseResponse{TagName: &tag, Repo: repo})
 }

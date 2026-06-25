@@ -1,27 +1,41 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../api", () => ({
+  api: {
+    getLatestCliRelease: vi.fn(),
+  },
+}));
+
+import { api } from "../api";
 import {
-  CLI_LATEST_RELEASE_URL,
-  CLI_UPDATE_REPO,
+  LATEST_CLI_VERSION_ENDPOINT,
   fetchLatestCliVersion,
 } from "./update-source";
 
+const mockedGetLatestCliRelease = api.getLatestCliRelease as ReturnType<typeof vi.fn>;
+
 describe("CLI update source", () => {
-  it("defaults frontend update checks to the fork releases", () => {
-    expect(CLI_UPDATE_REPO).toBe("ethanturk/multica");
-    expect(CLI_LATEST_RELEASE_URL).toBe(
-      "https://api.github.com/repos/ethanturk/multica/releases/latest",
-    );
+  afterEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("fetches the latest CLI tag from the configured repo", async () => {
-    const fetcher = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ tag_name: "v1.2.3" }),
-    })) as unknown as typeof fetch;
+  it("uses the server runtime latest-version endpoint as the source of truth", () => {
+    expect(LATEST_CLI_VERSION_ENDPOINT).toBe("/api/runtimes/latest-version");
+  });
 
-    await expect(fetchLatestCliVersion(fetcher)).resolves.toBe("v1.2.3");
-    expect(fetcher).toHaveBeenCalledWith(CLI_LATEST_RELEASE_URL, {
-      headers: { Accept: "application/vnd.github+json" },
+  it("fetches the latest CLI tag via the backend API", async () => {
+    mockedGetLatestCliRelease.mockResolvedValue({
+      repo: "ethanturk/multica",
+      tag_name: "v1.2.3",
     });
+
+    await expect(fetchLatestCliVersion()).resolves.toBe("v1.2.3");
+    expect(mockedGetLatestCliRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns null when the backend API fails", async () => {
+    mockedGetLatestCliRelease.mockRejectedValue(new Error("boom"));
+
+    await expect(fetchLatestCliVersion()).resolves.toBeNull();
   });
 });

@@ -1,18 +1,10 @@
-export const CLI_UPDATE_REPO = "ethanturk/multica";
+import { api } from "../api";
 
-export const CLI_LATEST_RELEASE_URL = `https://api.github.com/repos/${CLI_UPDATE_REPO}/releases/latest`;
+export const LATEST_CLI_VERSION_ENDPOINT = "/api/runtimes/latest-version";
 
-type FetchLike = typeof fetch;
-
-export async function fetchLatestCliVersion(
-  fetcher: FetchLike = fetch,
-): Promise<string | null> {
+export async function fetchLatestCliVersion(): Promise<string | null> {
   try {
-    const resp = await fetcher(CLI_LATEST_RELEASE_URL, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (!resp.ok) return null;
-    const data = (await resp.json()) as { tag_name?: unknown };
+    const data = await api.getLatestCliRelease();
     return typeof data.tag_name === "string" ? data.tag_name : null;
   } catch {
     return null;

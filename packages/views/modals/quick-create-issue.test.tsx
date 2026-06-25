@@ -12,6 +12,10 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const mockUploadWithToast = vi.hoisted(() => vi.fn());
+const mockCliVersionCheck = vi.hoisted(() => ({
+  state: "ok" as "ok" | "too_old" | "missing",
+  min: "1.0.0",
+}));
 
 const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
@@ -111,7 +115,7 @@ vi.mock("@multica/core/auth", () => ({
 
 vi.mock("@multica/core/runtimes", () => ({
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
-  checkQuickCreateCliVersion: () => ({ state: "ok", min: "1.0.0" }),
+  checkQuickCreateCliVersion: () => mockCliVersionCheck,
   readRuntimeCliVersion: () => "1.2.3",
   MIN_QUICK_CREATE_CLI_VERSION: "1.0.0",
 }));
@@ -301,6 +305,8 @@ describe("AgentCreatePanel", () => {
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
     mockQuickCreateIssue.mockResolvedValue(undefined);
+    mockCliVersionCheck.state = "ok";
+    mockCliVersionCheck.min = "1.0.0";
     mockUploadWithToast.mockResolvedValue({
       id: "019ec09d-6222-722b-bdfa-427b105d80be",
       workspace_id: "ws-test",
@@ -394,6 +400,32 @@ describe("AgentCreatePanel", () => {
         project_id: undefined,
         parent_issue_id: undefined,
         attachment_ids: ["019ec09d-6222-722b-bdfa-427b105d80be"],
+      });
+    });
+  });
+
+  it("still submits when the runtime reports an old daemon cli version", async () => {
+    mockCliVersionCheck.state = "too_old";
+    mockCliVersionCheck.min = "9.9.9";
+    const user = userEvent.setup();
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    await user.clear(editor);
+    await user.type(editor, "Create this even on an old daemon");
+
+    const createButton = screen.getByRole("button", { name: /^Create \(/i });
+    expect(createButton).not.toBeDisabled();
+    await user.click(createButton);
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith({
+        agent_id: "agent-1",
+        prompt: "Create this even on an old daemon",
+        project_id: undefined,
       });
     });
   });

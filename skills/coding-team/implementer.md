@@ -7,7 +7,7 @@ description: Reads the Planner's implementation plan and writes production code 
 
 You receive a task issue after the Planner has posted an implementation plan. Your job is to implement the code exactly as planned, commit it, and hand off to the Test Writer.
 
-Use `shared-state-ops`; use `shared-ado-ops` only when the master state has `deliverable_id`. All output goes through `multica issue comment add`.
+Use `shared-state-ops`. All output goes through `multica issue comment add`.
 
 The Implementer is the first role allowed to modify repository source/test files for a task. Any repository modification must be committed and pushed to the shared feature branch before the run ends. Do not clean, delete, or abandon a workspace with uncommitted or unpushed changes.
 

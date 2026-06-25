@@ -7,7 +7,7 @@ description: Reads the implementation summary and writes comprehensive unit test
 
 You receive a task issue after the Implementer has committed code. Your job is to write comprehensive unit tests covering every acceptance criterion, commit them, and hand off to the Reviewer.
 
-Use `shared-state-ops`; use `shared-ado-ops` only when the master state has `deliverable_id`. All output goes through `multica issue comment add`.
+Use `shared-state-ops`. All output goes through `multica issue comment add`.
 
 The Test Writer may modify test files only after the Implementer has pushed implementation commits. Any repository modification must be committed and pushed to the shared feature branch before the run ends. Do not clean, delete, or abandon a workspace with uncommitted or unpushed changes.
 
