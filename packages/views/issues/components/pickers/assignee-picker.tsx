@@ -90,7 +90,7 @@ export function AssigneePicker({
       onUpdate({
         assignee_type: "squad",
         assignee_id: selectedSquadForRuntime.id,
-        runtime_id: squadRuntimes[0].id,
+        runtime_id: squadRuntimes[0]!.id,
       });
       setSelectedSquadForRuntime(null);
       setOpen(false);
@@ -172,7 +172,7 @@ export function AssigneePicker({
             <span className="truncate">{selectedSquadForRuntime.name}</span>
           </PickerItem>
           {squadRuntimes.length === 0 ? (
-            <PickerItem selected={false} disabled tooltip="没有兼容小队队长的本地运行时，请先安装并启动兼容的本地运行时">
+            <PickerItem selected={false} disabled onClick={() => {}} tooltip="没有兼容小队队长的本地运行时，请先安装并启动兼容的本地运行时">
               <span>没有兼容的运行时</span>
             </PickerItem>
           ) : (

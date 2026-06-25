@@ -18,6 +18,7 @@ import type {
   GroupedIssuesResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
+  RuntimeBriefResponse,
   Squad,
   TimelineEntry,
   User,

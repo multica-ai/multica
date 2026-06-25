@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { RuntimeBriefResponse } from "@multica/core/types";
-import { api } from "@multica/core/api/client";
+import { api } from "@multica/core/api";
 
 export function squadLeaderRuntimeOptions(wsId: string, squadId: string) {
   return queryOptions<RuntimeBriefResponse[]>({

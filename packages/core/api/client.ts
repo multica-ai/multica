@@ -133,6 +133,7 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import { z } from "zod";
 import {
   AgentListSchema,
   AgentTaskResponseSchema,
