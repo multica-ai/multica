@@ -256,3 +256,26 @@
 .rich-text-editor a {
   overflow-wrap: anywhere;
 }
+
+/* CEREBRO-PATCH(editor-table-wrap): FIR-1727 follow-up — the stacked-data-table
+   fix above only reaches the readonly markdown renderer (comments/chat/rendered
+   docs), because it tags tables `.data-table` via a rehype plugin. The EDITABLE
+   Tiptap editor (note/document body, issue description, comment composer) renders
+   real ProseMirror table nodes that never get that class, so they fell under the
+   layout-table rule (min-width:max-content + nowrap) and on desktop ran off the
+   right edge — the last column scrolled out of view (Jesper's note screenshot).
+   The editable editor (`.rich-text-editor` WITHOUT `.readonly`) only ever holds
+   user-authored data tables, never email layout tables, so make every table here
+   wrap to fit its container. Mobile already wraps via the `:not(.data-table)`
+   640px rule above (table-layout:fixed), so this only needs to fix desktop. */
+.rich-text-editor:not(.readonly) table {
+  width: 100%;
+  table-layout: auto;
+  min-width: 0;
+}
+.rich-text-editor:not(.readonly) table th,
+.rich-text-editor:not(.readonly) table td {
+  white-space: normal;
+  overflow-wrap: break-word;
+  vertical-align: top;
+}
