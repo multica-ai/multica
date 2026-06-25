@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -43,6 +45,76 @@ func SetMemberContext(ctx context.Context, workspaceID string, member db.Member)
 // any workspace. This lets the middleware distinguish "no identifier provided"
 // (400) from "identifier provided but invalid" (404).
 var errWorkspaceNotFound = errors.New("workspace not found")
+
+const workspaceSlugCacheTTL = time.Minute
+
+type cachedWorkspaceSlug struct {
+	id        string
+	expiresAt time.Time
+}
+
+type workspaceSlugCache struct {
+	mu      sync.RWMutex
+	ttl     time.Duration
+	entries map[string]cachedWorkspaceSlug
+}
+
+var defaultWorkspaceSlugCache = newWorkspaceSlugCache(workspaceSlugCacheTTL)
+
+func newWorkspaceSlugCache(ttl time.Duration) *workspaceSlugCache {
+	return &workspaceSlugCache{
+		ttl:     ttl,
+		entries: make(map[string]cachedWorkspaceSlug),
+	}
+}
+
+func (c *workspaceSlugCache) get(slug string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	now := time.Now()
+
+	c.mu.RLock()
+	entry, ok := c.entries[slug]
+	c.mu.RUnlock()
+	if !ok {
+		return "", false
+	}
+	if now.After(entry.expiresAt) {
+		c.mu.Lock()
+		if current, ok := c.entries[slug]; ok && now.After(current.expiresAt) {
+			delete(c.entries, slug)
+		}
+		c.mu.Unlock()
+		return "", false
+	}
+	return entry.id, true
+}
+
+func (c *workspaceSlugCache) set(slug, id string) {
+	if c == nil || c.ttl <= 0 {
+		return
+	}
+	c.mu.Lock()
+	c.entries[slug] = cachedWorkspaceSlug{
+		id:        id,
+		expiresAt: time.Now().Add(c.ttl),
+	}
+	c.mu.Unlock()
+}
+
+func resolveWorkspaceSlug(ctx context.Context, queries *db.Queries, cache *workspaceSlugCache, slug string) (string, error) {
+	if id, ok := cache.get(slug); ok {
+		return id, nil
+	}
+	ws, err := queries.GetWorkspaceBySlug(ctx, slug)
+	if err != nil {
+		return "", err
+	}
+	id := util.UUIDToString(ws.ID)
+	cache.set(slug, id)
+	return id, nil
+}
 
 // ResolveWorkspaceIDFromRequest returns the workspace UUID for an HTTP
 // request using the same priority order as the workspace middleware. This is
@@ -108,9 +180,11 @@ type workspaceResolver func(r *http.Request) (string, error)
 //     different slug/id (MUL-2600)
 //  2. X-Workspace-Slug header / ?workspace_slug query → GetWorkspaceBySlug → UUID
 //  3. X-Workspace-ID header / ?workspace_id query → UUID directly (CLI/daemon compat)
-//
-// TODO: cache slug→UUID lookup (slug is immutable, safe to cache with short TTL)
 func resolveWorkspaceUUID(queries *db.Queries) workspaceResolver {
+	return resolveWorkspaceUUIDWithCache(queries, defaultWorkspaceSlugCache)
+}
+
+func resolveWorkspaceUUIDWithCache(queries *db.Queries, cache *workspaceSlugCache) workspaceResolver {
 	return func(r *http.Request) (string, error) {
 		// Task-token-authenticated requests must operate on the
 		// token's bound workspace. The auth middleware wrote that ID
@@ -125,18 +199,18 @@ func resolveWorkspaceUUID(queries *db.Queries) workspaceResolver {
 		}
 		// Slug path (preferred — frontend sends this after the URL refactor)
 		if slug := r.URL.Query().Get("workspace_slug"); slug != "" {
-			ws, err := queries.GetWorkspaceBySlug(r.Context(), slug)
+			id, err := resolveWorkspaceSlug(r.Context(), queries, cache, slug)
 			if err != nil {
 				return "", errWorkspaceNotFound
 			}
-			return util.UUIDToString(ws.ID), nil
+			return id, nil
 		}
 		if slug := r.Header.Get("X-Workspace-Slug"); slug != "" {
-			ws, err := queries.GetWorkspaceBySlug(r.Context(), slug)
+			id, err := resolveWorkspaceSlug(r.Context(), queries, cache, slug)
 			if err != nil {
 				return "", errWorkspaceNotFound
 			}
-			return util.UUIDToString(ws.ID), nil
+			return id, nil
 		}
 		// UUID fallback (CLI, daemon, legacy clients)
 		if id := r.URL.Query().Get("workspace_id"); id != "" {
