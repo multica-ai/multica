@@ -2,7 +2,7 @@
 #
 # Services bind to 127.0.0.1 only. For cross-machine or public access, front
 # them with a reverse proxy (Caddy / nginx / Cloudflare Tunnel) that terminates
-# TLS and forwards to 127.0.0.1:8080 (backend) and 127.0.0.1:3000 (frontend).
+# TLS and forwards to 0.0.0.0:8080 (backend) and 127.0.0.1:3000 (frontend).
 # Do NOT change these bindings to 0.0.0.0 — Docker bypasses host firewalls
 # (UFW/iptables) by default, so the raw ports would be exposed to the internet
 # with the default JWT_SECRET and Postgres credentials. See:
@@ -44,7 +44,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+      - "0.0.0.0:${BACKEND_PORT:-8080}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
     environment:
@@ -118,7 +118,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      - "0.0.0.0:${FRONTEND_PORT:-3000}:3000"
     environment:
       HOSTNAME: "0.0.0.0"
     restart: unless-stopped
