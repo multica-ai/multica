@@ -30,7 +30,7 @@ import {
   onIssueLabelsChanged,
   onIssueMetadataChanged,
 } from "../issues/ws-updaters";
-import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
+import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
 import {
   notificationPreferenceOptions,
@@ -230,6 +230,9 @@ export async function handleInboxNew(
 ): Promise<void> {
   const sourceWsId = item.workspace_id;
   if (sourceWsId) onInboxNew(qc, sourceWsId, item);
+  // A new item in ANY workspace can light the workspace-switcher dot, so
+  // refresh the cross-workspace summary regardless of the active workspace.
+  onInboxSummaryInvalidate(qc);
   // Fire a native OS notification only when the app isn't focused. When
   // the user is already looking at Multica, the inbox sidebar's unread
   // styling is enough — no need to interrupt with a banner. `desktopAPI`
@@ -320,6 +323,9 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
   }
+  // Cross-workspace, so outside the wsId guard: a reconnect may have missed
+  // inbox events from any workspace, so re-pull the switcher-dot summary.
+  onInboxSummaryInvalidate(qc);
   // Per-issue caches are keyed without wsId, so the issueKeys.all(wsId)
   // prefix above does not reach them. They rely entirely on WS events for
   // freshness (staleTime: Infinity), so events missed while disconnected
@@ -394,6 +400,12 @@ export function useRealtimeSync(
       inbox: () => {
         const wsId = getCurrentWsId();
         if (wsId) onInboxInvalidate(qc, wsId);
+        // inbox:read / inbox:archived / batch events arrive here. They can
+        // originate from a workspace other than the active one (personal
+        // events fan out to all the user's connections), so always refresh
+        // the cross-workspace summary — its dot must clear when another
+        // workspace's items are read/archived.
+        onInboxSummaryInvalidate(qc);
       },
       agent: () => {
         const wsId = getCurrentWsId();

@@ -15,6 +15,7 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
+  InboxWorkspaceUnread,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
   Squad,
@@ -862,6 +863,25 @@ export const EMPTY_USER: User = {
   created_at: "",
   updated_at: "",
 };
+
+// ---------------------------------------------------------------------------
+// Cross-workspace unread inbox summary (`/api/inbox/unread-summary` GET).
+// One entry per workspace the user belongs to that has unread items; the
+// sidebar derives the workspace-switcher dot from it. Lenient per the usual
+// rules so a future field addition can't blank the dot — on malformed JSON
+// parseWithFallback returns the empty list, which simply hides the dot.
+// ---------------------------------------------------------------------------
+
+export const InboxUnreadSummarySchema = z.array(
+  z
+    .object({
+      workspace_id: z.string(),
+      count: z.number(),
+    })
+    .loose(),
+);
+
+export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 
 // ---------------------------------------------------------------------------
 // Billing schemas (cloud-billing proxy surface)

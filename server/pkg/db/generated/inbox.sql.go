@@ -175,6 +175,48 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 	return count, err
 }
 
+const countUnreadInboxByWorkspace = `-- name: CountUnreadInboxByWorkspace :many
+SELECT i.workspace_id, count(*) AS count
+FROM inbox_item i
+JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+WHERE i.recipient_type = 'member'
+  AND i.recipient_id = $1
+  AND i.read = false
+  AND i.archived = false
+GROUP BY i.workspace_id
+`
+
+type CountUnreadInboxByWorkspaceRow struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Count       int64       `json:"count"`
+}
+
+// Per-workspace unread (non-archived) inbox counts for a recipient member,
+// across every workspace they currently belong to. Powers the sidebar
+// "other workspaces have unread" dot without fetching each workspace's full
+// inbox list. The member join keeps counts scoped to workspaces the user is
+// still a member of, so a stale item left behind in a workspace the user
+// has since left cannot light the dot.
+func (q *Queries) CountUnreadInboxByWorkspace(ctx context.Context, recipientID pgtype.UUID) ([]CountUnreadInboxByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, countUnreadInboxByWorkspace, recipientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountUnreadInboxByWorkspaceRow{}
+	for rows.Next() {
+		var i CountUnreadInboxByWorkspaceRow
+		if err := rows.Scan(&i.WorkspaceID, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createInboxItem = `-- name: CreateInboxItem :one
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
