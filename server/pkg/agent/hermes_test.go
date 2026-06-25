@@ -832,6 +832,9 @@ func TestHermesClientHandleSessionNotificationToolCall(t *testing.T) {
 	if got[1].Output != "/tmp/project\n" {
 		t.Errorf("second output: got %q", got[1].Output)
 	}
+	if got[1].Status != "completed" {
+		t.Errorf("second status: got %q, want completed", got[1].Status)
+	}
 }
 
 func TestHermesClientHandleSessionNotificationTurnEnd(t *testing.T) {
