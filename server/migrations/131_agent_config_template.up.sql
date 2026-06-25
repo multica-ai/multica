@@ -1,7 +1,11 @@
 -- Agent config templates: system-level and personal-level configuration
 -- templates that can be bound to agents for layered config merge.
+--
+-- Idempotent for preview DBs that applied the pre-renumber versions
+-- (125_agent_config_template / 126_agent_config_skip_flags /
+-- 127_instructions_history_template_id) before this file was renumbered to 131.
 
-CREATE TABLE agent_config_template (
+CREATE TABLE IF NOT EXISTS agent_config_template (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     scope VARCHAR(20) NOT NULL CHECK (scope IN ('system', 'personal')),
@@ -14,19 +18,19 @@ CREATE TABLE agent_config_template (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_agent_config_template_ws_scope ON agent_config_template(workspace_id, scope);
+CREATE INDEX IF NOT EXISTS idx_agent_config_template_ws_scope ON agent_config_template(workspace_id, scope);
 
 -- Each workspace can have at most one system default template
-CREATE UNIQUE INDEX idx_act_default_system ON agent_config_template(workspace_id)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_act_default_system ON agent_config_template(workspace_id)
     WHERE scope = 'system' AND is_default = true;
 
 -- Each user can have at most one personal default template per workspace
-CREATE UNIQUE INDEX idx_act_default_personal ON agent_config_template(workspace_id, created_by)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_act_default_personal ON agent_config_template(workspace_id, created_by)
     WHERE scope = 'personal' AND is_default = true;
 
 -- Agent table: add template binding columns
-ALTER TABLE agent ADD COLUMN system_template_id UUID REFERENCES agent_config_template(id) ON DELETE SET NULL;
-ALTER TABLE agent ADD COLUMN personal_template_id UUID REFERENCES agent_config_template(id) ON DELETE SET NULL;
+ALTER TABLE agent ADD COLUMN IF NOT EXISTS system_template_id UUID REFERENCES agent_config_template(id) ON DELETE SET NULL;
+ALTER TABLE agent ADD COLUMN IF NOT EXISTS personal_template_id UUID REFERENCES agent_config_template(id) ON DELETE SET NULL;
 
 -- Migrate existing workspace.agent_defaults → system default templates
 INSERT INTO agent_config_template (workspace_id, scope, name, description, config, is_default, created_at, updated_at)
@@ -42,7 +46,13 @@ SELECT
 FROM workspace w
 WHERE w.settings ? 'agent_defaults'
   AND w.settings->'agent_defaults' IS NOT NULL
-  AND w.settings->'agent_defaults' != 'null'::jsonb;
+  AND w.settings->'agent_defaults' != 'null'::jsonb
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_config_template t
+    WHERE t.workspace_id = w.id
+      AND t.scope = 'system'
+      AND t.is_default = true
+  );
 
 -- Migrate existing member_agent_config → personal default templates
 INSERT INTO agent_config_template (workspace_id, scope, name, description, config, is_default, created_by, created_at, updated_at)
@@ -56,4 +66,11 @@ SELECT
     mac.member_id,
     now(),
     now()
-FROM member_agent_config mac;
+FROM member_agent_config mac
+WHERE NOT EXISTS (
+    SELECT 1 FROM agent_config_template t
+    WHERE t.workspace_id = mac.workspace_id
+      AND t.scope = 'personal'
+      AND t.is_default = true
+      AND t.created_by = mac.member_id
+);

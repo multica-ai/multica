@@ -12,8 +12,11 @@
 -- dropped. scope/member_id columns are kept for now (legacy write paths in
 -- agent_defaults.go / workspace.go still populate them); they are removed
 -- when those legacy paths are deleted.
+--
+-- Idempotent for preview DBs that applied 127_instructions_history_template_id
+-- before this file was renumbered to 133.
 
-ALTER TABLE instructions_history ADD COLUMN template_id UUID;
+ALTER TABLE instructions_history ADD COLUMN IF NOT EXISTS template_id UUID;
 
 -- system rows -> the workspace's default system template
 UPDATE instructions_history ih
@@ -37,8 +40,27 @@ WHERE ih.workspace_id = t.workspace_id
 -- drop unmappable orphans (no default template to attach to)
 DELETE FROM instructions_history WHERE template_id IS NULL;
 
-ALTER TABLE instructions_history ALTER COLUMN template_id SET NOT NULL;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'instructions_history'
+          AND column_name = 'template_id'
+          AND is_nullable = 'YES'
+    ) THEN
+        ALTER TABLE instructions_history ALTER COLUMN template_id SET NOT NULL;
+    END IF;
+END $$;
 
-ALTER TABLE instructions_history
-  ADD CONSTRAINT fk_instructions_history_template
-  FOREIGN KEY (template_id) REFERENCES agent_config_template(id) ON DELETE CASCADE;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_instructions_history_template'
+    ) THEN
+        ALTER TABLE instructions_history
+          ADD CONSTRAINT fk_instructions_history_template
+          FOREIGN KEY (template_id) REFERENCES agent_config_template(id) ON DELETE CASCADE;
+    END IF;
+END $$;
