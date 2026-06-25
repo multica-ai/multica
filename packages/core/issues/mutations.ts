@@ -333,6 +333,15 @@ export function useUpdateIssue() {
       ) {
         qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       }
+      // Local safety net for a project move. The WS echo now carries
+      // project_changed, but a moved issue must also drop out of the OLD
+      // project's filtered list here in case the echo is delayed or dropped. The
+      // surgical onMutate patch is filter-blind — it never removes a card that no
+      // longer matches the list's project filter — so reconcile by refetching
+      // myAll whenever project_id was part of this update (MUL-3669 / #4548).
+      if (Object.prototype.hasOwnProperty.call(vars, "project_id")) {
+        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      }
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
       // to resolve text-preview Eye gates, and unlike other mutations this
@@ -522,6 +531,11 @@ export function useBatchUpdateIssues() {
         Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")
       ) {
         qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      }
+      // Local safety net mirroring useUpdateIssue: drop moved issues from the old
+      // project's filtered list even if the WS echo is delayed (MUL-3669 / #4548).
+      if (Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")) {
+        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
       }
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {

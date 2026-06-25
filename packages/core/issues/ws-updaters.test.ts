@@ -317,10 +317,42 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
   it("invalidates myAll when the project changes (Project board membership)", () => {
     qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(issueA));
 
-    // issueA.project_id is null; moving it into a project shifts Project-board membership.
+    // issueA.project_id is null; moving it into a project shifts Project-board
+    // membership. No server flag here — this exercises the legacy cache-diff
+    // fallback that keeps a new frontend working against an older backend.
     onIssueUpdated(qc, WS_ID, { ...issueA, project_id: "project-9" });
 
     expectInvalidated(qc, issueKeys.myAll(WS_ID));
+  });
+
+  it("invalidates myAll on a server project_changed flag even when the cached project_id already matches (local optimistic move)", () => {
+    // Reproduces the post-optimistic-move state behind MUL-3669: onMutate has
+    // already written the NEW project into detail + list, so a cache diff would
+    // compute projectChanged=false and skip the refetch. The authoritative
+    // server flag must still drive it.
+    const moved: Issue = { ...issueA, project_id: "project-9" };
+    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, moved.id), moved);
+    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(moved));
+
+    onIssueUpdated(qc, WS_ID, moved, { projectChanged: true });
+
+    expectInvalidated(qc, issueKeys.myAll(WS_ID));
+  });
+
+  it("does NOT invalidate myAll when the server flag says project_changed=false (flag overrides the legacy diff)", () => {
+    // No detail/list cache for the issue, so the legacy diff would resolve
+    // oldProjectId=null and fire on the non-null incoming project_id. An explicit
+    // false flag from the server is authoritative and must suppress that.
+    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(issueA));
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { ...issueA, project_id: "project-9" },
+      { projectChanged: false },
+    );
+
+    expect(qc.getQueryState(issueKeys.myAll(WS_ID))?.isInvalidated).toBe(false);
   });
 });
 

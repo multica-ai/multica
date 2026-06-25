@@ -40,11 +40,16 @@ export function onIssueUpdated(
   qc: QueryClient,
   wsId: string,
   issue: Partial<Issue> & { id: string },
-  // assigneeChanged / statusChanged come from the server's issue:updated flags.
-  // assigneeChanged gates the filtered-list (myAll) invalidate so a
-  // non-membership change keeps those lists in place instead of refetching.
-  // statusChanged gates the off-screen count reconcile below.
-  meta: { assigneeChanged?: boolean; statusChanged?: boolean } = {},
+  // assigneeChanged / statusChanged / projectChanged come from the server's
+  // issue:updated flags. assigneeChanged + projectChanged gate the filtered-list
+  // (myAll) invalidate so a non-membership change keeps those lists in place
+  // instead of refetching. statusChanged gates the off-screen count reconcile
+  // below.
+  meta: {
+    assigneeChanged?: boolean;
+    statusChanged?: boolean;
+    projectChanged?: boolean;
+  } = {},
 ) {
   // Look up the OLD parent before mutating list state, so we can keep
   // the parent's children cache in sync (powers the sub-issues list
@@ -61,14 +66,21 @@ export function onIssueUpdated(
   const parentChanged =
     issue.parent_issue_id !== undefined && newParentId !== oldParentId;
 
-  // Project-board membership keys on project_id. There is no project_changed
-  // flag on the wire, so diff the incoming project_id against the cached one.
+  // Project board membership keys on project_id. Prefer the server's
+  // project_changed flag (authoritative, set on the wire). Fall back to diffing
+  // the incoming project_id against the cached one only when the flag is absent
+  // (older backend): the diff is unreliable once a local optimistic move has
+  // overwritten the cached project_id, but it still covers remote/agent moves
+  // and keeps a new frontend on an old backend from regressing (MUL-3669 /
+  // #4548). The local move itself is also covered by the onSettled safety net in
+  // useUpdateIssue, which never depends on this flag.
   const oldProjectId =
     detailData?.project_id ??
     (firstListData ? findIssueLocation(firstListData, issue.id)?.issue.project_id : null) ??
     null;
   const projectChanged =
-    issue.project_id !== undefined && (issue.project_id ?? null) !== oldProjectId;
+    meta.projectChanged ??
+    (issue.project_id !== undefined && (issue.project_id ?? null) !== oldProjectId);
 
   // A status change shifts two bucket totals (the column header counts).
   // patchIssueInBuckets does that surgically, but only when it can find the card

@@ -431,6 +431,26 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     expect(invalidatedKeys).not.toContainEqual(issueKeys.list(WS_ID));
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
+
+  it("invalidates myAll on settle when project_id changes (drops the issue from the old project's list)", async () => {
+    // A project move makes the issue leave the old project's filtered list. The
+    // surgical patch is filter-blind (it never removes a card that no longer
+    // matches the list filter), so onSettled must refetch myAll to drop it —
+    // unlike a status-only move, which deliberately does not (MUL-3669 / #4548).
+    updateIssue.mockResolvedValue(makeIssue(1, { project_id: "project-9" }));
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: "issue-1", project_id: "project-9" });
+    });
+
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
+  });
 });
 
 describe("useBatchUpdateIssues — optimistic patch covers filtered boards too", () => {
@@ -540,6 +560,28 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
 
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).not.toContainEqual(issueKeys.list(WS_ID));
+  });
+
+  it("invalidates myAll on settle when project_id changes (drops moved issues from the old project's list)", async () => {
+    // Mirrors useUpdateIssue: a batch that moves issues between projects must
+    // refetch myAll so they leave the old project's filtered list, even though a
+    // status-only batch deliberately does not (MUL-3669 / #4548).
+    batchUpdateIssues.mockResolvedValue({ updated: 1 });
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+
+    const { result } = renderHook(() => useBatchUpdateIssues(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        ids: ["issue-1"],
+        updates: { project_id: "project-9" },
+      });
+    });
+
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
   });
 });
 
