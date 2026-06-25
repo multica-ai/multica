@@ -14,6 +14,8 @@ interface ActorAvatarProps {
   isSquad?: boolean;
   size?: number;
   className?: string;
+  /** When true, renders the actor name to the right of the avatar. */
+  showName?: boolean;
 }
 
 function ActorAvatar({
@@ -23,8 +25,9 @@ function ActorAvatar({
   isAgent,
   isSystem,
   isSquad,
-  size = 20,
+  size = 30,
   className,
+  showName,
 }: ActorAvatarProps) {
   const [imgError, setImgError] = useState(false);
 
@@ -32,7 +35,7 @@ function ActorAvatar({
     setImgError(false);
   }, [avatarUrl]);
 
-  return (
+  const avatarElement = (
     <div
       data-slot="avatar"
       className={cn(
@@ -63,6 +66,17 @@ function ActorAvatar({
         initials
       )}
     </div>
+  );
+
+  if (!showName) {
+    return avatarElement;
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {avatarElement}
+      <span className="text-sm truncate">{name}</span>
+    </span>
   );
 }
 

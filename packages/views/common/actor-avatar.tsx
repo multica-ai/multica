@@ -61,6 +61,12 @@ interface ActorAvatarProps {
    * and agents, while picker/menu controls keep their own click behavior.
    */
   profileLink?: boolean;
+  /**
+   * Render the actor name inline next to the avatar. Use in high-density
+   * surfaces (comments, execution logs, squad member lists) where the avatar
+   * alone is insufficient for identification.
+   */
+  showName?: boolean;
 }
 
 const FOCUSABLE_ANCESTOR_SELECTOR =
@@ -77,6 +83,7 @@ export function ActorAvatar({
   showStatusDot,
   hoverCardVariant = "profile",
   profileLink,
+  showName,
 }: ActorAvatarProps) {
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
   const paths = useWorkspacePaths();
@@ -89,6 +96,7 @@ export function ActorAvatar({
       isSystem={actorType === "system"}
       isSquad={actorType === "squad"}
       size={size}
+      showName={showName}
       className={className}
     />
   );
@@ -201,7 +209,7 @@ export function AgentStatusDot({ agentId, size }: { agentId: string; size?: numb
   if (detail === "loading") return null;
 
   const { dotClass, label } = availabilityConfig[detail.availability];
-  const dotSize = (size ?? 24) >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
+  const dotSize = (size ?? 30) >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
 
   return (
     <span
