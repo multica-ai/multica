@@ -588,6 +588,7 @@ export function useRealtimeSync(
       if (wsId) {
         onIssueUpdated(qc, wsId, issue, {
           assigneeChanged: payload.assignee_changed,
+          statusChanged: payload.status_changed,
         });
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);

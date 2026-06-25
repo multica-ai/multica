@@ -324,6 +324,91 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
   });
 });
 
+// A board column header shows `byStatus[status].total`. On a status change the
+// surgical patch shifts both bucket totals — but only if it can find the card in
+// a loaded page. A paginated column loads just its first page, so an off-screen
+// issue (very common when an agent flips the status of something the viewer
+// never scrolled to) is absent: patchIssueInBuckets no-ops and the count would
+// silently drift, with no refetch to recover it. The status-changed no-op has to
+// fall back to a single-list refetch.
+describe("onIssueUpdated — off-screen status change reconciles column counts", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("refetches the workspace list when a status-changed issue is not in the loaded page", () => {
+    // First page only: the totals say these columns have items, but the issues
+    // arrays are the loaded window — the moved issue lives beyond it.
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
+      byStatus: {
+        in_review: { issues: [], total: 1 },
+        done: { issues: [], total: 60 },
+      },
+    });
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { id: "off-screen", status: "done" },
+      { statusChanged: true },
+    );
+
+    expectInvalidated(qc, issueKeys.list(WS_ID));
+  });
+
+  it("refetches the filtered myAll list under the same condition", () => {
+    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), {
+      byStatus: { done: { issues: [], total: 60 } },
+    });
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { id: "off-screen", status: "done" },
+      { statusChanged: true },
+    );
+
+    expectInvalidated(qc, issueKeys.myAll(WS_ID));
+  });
+
+  it("does NOT refetch when the status-changed issue is loaded (surgical patch suffices)", () => {
+    const loaded: Issue = { ...baseIssue, id: "loaded", status: "in_review" };
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
+      byStatus: {
+        in_review: { issues: [loaded], total: 1 },
+        done: { issues: [], total: 60 },
+      },
+    });
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { ...loaded, status: "done" },
+      { statusChanged: true },
+    );
+
+    const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
+    expect(list?.byStatus.in_review?.total).toBe(0);
+    expect(list?.byStatus.done?.total).toBe(61);
+    // Reconciled in place — the no-flicker fast path from #4415 must hold.
+    expect(qc.getQueryState(issueKeys.list(WS_ID))?.isInvalidated).toBe(false);
+  });
+
+  it("does NOT refetch an absent issue when the status did not change", () => {
+    // A title/label edit of an off-screen issue cannot affect any count, so it
+    // must not trigger a fallback refetch.
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
+      byStatus: { done: { issues: [], total: 60 } },
+    });
+
+    onIssueUpdated(qc, WS_ID, { id: "off-screen", title: "renamed" });
+
+    expect(qc.getQueryState(issueKeys.list(WS_ID))?.isInvalidated).toBe(false);
+  });
+});
+
 describe("onIssueDeleted", () => {
   let qc: QueryClient;
 

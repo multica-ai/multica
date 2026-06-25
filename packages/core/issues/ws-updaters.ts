@@ -1,4 +1,4 @@
-import type { QueryClient } from "@tanstack/react-query";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
 import { projectKeys } from "../projects/queries";
@@ -40,10 +40,11 @@ export function onIssueUpdated(
   qc: QueryClient,
   wsId: string,
   issue: Partial<Issue> & { id: string },
-  // assigneeChanged comes from the server's issue:updated flags. It gates the
-  // filtered-list (myAll) invalidate so a non-membership change keeps those
-  // lists in place instead of refetching.
-  meta: { assigneeChanged?: boolean } = {},
+  // assigneeChanged / statusChanged come from the server's issue:updated flags.
+  // assigneeChanged gates the filtered-list (myAll) invalidate so a
+  // non-membership change keeps those lists in place instead of refetching.
+  // statusChanged gates the off-screen count reconcile below.
+  meta: { assigneeChanged?: boolean; statusChanged?: boolean } = {},
 ) {
   // Look up the OLD parent before mutating list state, so we can keep
   // the parent's children cache in sync (powers the sub-issues list
@@ -69,8 +70,25 @@ export function onIssueUpdated(
   const projectChanged =
     issue.project_id !== undefined && (issue.project_id ?? null) !== oldProjectId;
 
+  // A status change shifts two bucket totals (the column header counts).
+  // patchIssueInBuckets does that surgically, but only when it can find the card
+  // in a loaded page; a paginated column holds just its first page, so an issue
+  // outside that window — common when an agent flips the status of something the
+  // viewer never scrolled to — makes the patch a no-op (it returns the same
+  // reference) and the totals silently drift. A status change otherwise never
+  // refetches the list (that refetch was the drag flicker removed by the
+  // optimistic-update work), so recover the one case the patch cannot: on a
+  // status-changed no-op, refetch just that single list to reconcile its counts.
+  const patchOrRefetchCounts = (key: QueryKey, data: ListIssuesCache) => {
+    const next = patchIssueInBuckets(data, issue.id, issue);
+    qc.setQueryData<ListIssuesCache>(key, next);
+    if (next === data && meta.statusChanged) {
+      qc.invalidateQueries({ queryKey: key });
+    }
+  };
+
   for (const [key, data] of listQueries) {
-    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issue.id, issue));
+    if (data) patchOrRefetchCounts(key, data);
   }
   // The workspace board (issueKeys.list) is NOT filtered: an issue is always a
   // member, so patchIssueInBuckets above is a complete surgical reconcile —
@@ -85,9 +103,7 @@ export function onIssueUpdated(
   // refetch, no flicker — exactly like the workspace board above.
   const myListQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.myAll(wsId) });
   for (const [key, data] of myListQueries) {
-    if (data?.byStatus) {
-      qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issue.id, issue));
-    }
+    if (data?.byStatus) patchOrRefetchCounts(key, data);
   }
   // Only refetch the filtered lists when the change can actually move an issue
   // in/out of one. My-Issues / actor-panel membership keys on the assignee (the
