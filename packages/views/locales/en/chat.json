@@ -39,7 +39,7 @@
       "hours": "{{count}}h ago",
       "days": "{{count}}d ago"
     },
-    "row_delete_aria": "Delete chat session",
+    "row_delete_aria": "Delete this chat and start fresh",
     "row_rename_aria": "Rename chat session",
     "row_stop_aria": "Stop current run",
     "stop_action": "Stop",
@@ -57,11 +57,11 @@
       "confirming": "Stopping..."
     },
     "delete_dialog": {
-      "title": "Delete chat session",
-      "description_with_title": "\"{{title}}\" and its messages will be permanently removed. This action cannot be undone.",
-      "description_default": "This chat session and its messages will be permanently removed. This action cannot be undone.",
+      "title": "Delete this chat and start fresh",
+      "description_with_title": "\"{{title}}\" and its messages will be permanently removed. Your next message will start a brand-new chat context. This action cannot be undone.",
+      "description_default": "This chat session and its messages will be permanently removed. Your next message will start a brand-new chat context. This action cannot be undone.",
       "cancel": "Cancel",
-      "confirm": "Delete",
+      "confirm": "Delete and start fresh",
       "confirming": "Deleting..."
     }
   },
