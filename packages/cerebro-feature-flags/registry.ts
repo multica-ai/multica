@@ -89,6 +89,12 @@ export type CerebroFlagKey =
   // DM / channel body via a `mention://artifact/<id>` token, rendered as a
   // compact white card that opens the full-page note editor.
   | "cerebro_artifact_references"
+  // FIR-2034: one consistent attachment format across every surface — images
+  // render as real thumbnails, documents as fixed-size colour-coded type cards
+  // (PDF/Excel/Word/…). Same chip in the composer and in the posted thread, and
+  // across issue comments/bodies, chat, DM, and channels. Off = the legacy grey
+  // single-icon row.
+  | "cerebro_attachment_chips"
   // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
@@ -381,6 +387,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_unified_search: false,
   // FIR-1800: ON — render artifact references in comments/chat/DM/channels.
   cerebro_artifact_references: true,
+  // FIR-2034: ON — unified attachment chips (image thumbnails + colour-coded
+  // document cards) everywhere. Opt-out via this flag (kill-switch, no redeploy).
+  cerebro_attachment_chips: true,
   cerebro_inbox_slack_block: false,
   cerebro_inbox_secretary: false,
   cerebro_inbox_favorites: true,
@@ -775,6 +784,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Let a comment, chat message, DM, or channel message reference an artifact (document/note) via a `mention://artifact/<id>` token, rendered as a compact white card (white = real document; grey = uploaded file). Clicking the card opens the full-page note editor (same rule as document cards, FIR-1782). Posted from the CLI with `multica issue comment add --artifact <id>`. Off renders the reference as plain link text.",
+  },
+  {
+    key: "cerebro_attachment_chips",
+    label: "Unified attachment cards",
+    group: "issues",
+    description:
+      "Show attachments in one consistent format everywhere: images render as a real thumbnail (not a file box), and documents render as fixed-size colour-coded cards by type (PDF red, Excel green, Word blue, PowerPoint orange, archive amber, code violet). Same card in the composer while you type and in the posted thread, and identical across issue comments & descriptions, chat, DM, and channels. Every card is clickable (preview or download) and keyboard-focusable. Off falls back to the legacy grey single-icon row.",
   },
   {
     key: "cerebro_web_push",

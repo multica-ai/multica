@@ -5,18 +5,20 @@
 import { Download, FileText, Eye, X } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { Attachment } from "@multica/core/types";
-import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable";
+import { isViewableAttachment, viewableKind } from "@multica/cerebro-attachments/core/viewable";
 import { attachmentForceDownloadPath } from "@multica/cerebro-attachments/core/download-url";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useNavigation } from "@multica/views/navigation";
+import { useFlagValue } from "@multica/cerebro-feature-flags";
+import { AttachmentChip } from "@multica/cerebro-ui";
 
 // Renders attachments that are NOT already referenced inline in the markdown
 // content. Used both for issue bodies and for individual comments.
 //
 // Click behavior:
-// - Viewable filetypes (HTML, Markdown, text, JSON) → open the in-app
-//   attachment viewer in a new tab so the issue context isn't lost.
+// - Viewable filetypes (HTML, Markdown, text, JSON, images, PDF) → open the
+//   in-app attachment viewer in a new tab so the issue context isn't lost.
 // - Other filetypes → fall back to opening the download URL in a new tab,
 //   matching the original behavior.
 //
@@ -26,6 +28,11 @@ import { useNavigation } from "@multica/views/navigation";
 //   sibling with the same identity is already inline.
 //
 // When `content` is undefined, all attachments are rendered.
+//
+// Rendering (FIR-2034): when `cerebro_attachment_chips` is on, each attachment
+// renders as the unified chip — image → thumbnail, document → colour-coded
+// type card — identical to the composer and every other surface. When off, the
+// legacy grey single-icon row is used.
 export function AttachmentList({
   attachments,
   content,
@@ -41,6 +48,7 @@ export function AttachmentList({
   const wsPaths = useWorkspacePaths();
   const wsId = useWorkspaceId();
   const router = useNavigation();
+  const chipsEnabled = useFlagValue("cerebro_attachment_chips");
   if (!attachments?.length) return null;
   const standalone = content
     ? attachments.filter((a) => {
@@ -70,6 +78,34 @@ export function AttachmentList({
     }
   };
 
+  const downloadFile = (id: string) =>
+    window.open(attachmentForceDownloadPath(id, wsId), "_blank", "noopener,noreferrer");
+
+  if (chipsEnabled) {
+    return (
+      <div className={cn("flex flex-wrap items-start gap-2", className)}>
+        {standalone.map((a) => {
+          const viewable = isViewableAttachment(a.content_type, a.filename);
+          const isImage = viewableKind(a.content_type, a.filename) === "image";
+          const activate = () => {
+            if (viewable) openViewer(a.id, a.filename);
+            else if (a.download_url) downloadFile(a.id);
+          };
+          return (
+            <AttachmentChip
+              key={a.id}
+              filename={a.filename}
+              thumbnailSrc={isImage ? a.url : undefined}
+              onActivate={activate}
+              activateLabel={viewable ? "Open in viewer" : "Download"}
+              onRemove={onRemove ? () => onRemove(a.id) : undefined}
+            />
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       {standalone.map((a) => {
@@ -78,7 +114,7 @@ export function AttachmentList({
           if (viewable) {
             openViewer(a.id, a.filename);
           } else if (a.download_url) {
-            window.open(attachmentForceDownloadPath(a.id, wsId), "_blank", "noopener,noreferrer");
+            downloadFile(a.id);
           }
         };
         return (
@@ -112,9 +148,7 @@ export function AttachmentList({
                 aria-label="Download"
                 title="Download"
                 className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                onClick={() =>
-                  window.open(attachmentForceDownloadPath(a.id, wsId), "_blank", "noopener,noreferrer")
-                }
+                onClick={() => downloadFile(a.id)}
               >
                 <Download className="size-3.5" />
               </button>

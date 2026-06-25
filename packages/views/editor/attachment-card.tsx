@@ -12,6 +12,8 @@
 import { Download, Eye, FileText, Loader2, Trash2 } from "lucide-react";
 import { useT } from "../i18n";
 import { getPreviewKind } from "./utils/preview";
+import { useFlagValue } from "@multica/cerebro-feature-flags"; // CEREBRO-PATCH(attachment-card-chips): FIR-2034
+import { AttachmentChip } from "@multica/cerebro-ui"; // CEREBRO-PATCH(attachment-card-chips): FIR-2034
 
 interface AttachmentCardChromeProps {
   filename: string;
@@ -144,6 +146,23 @@ export function AttachmentCard({
     kind === "pdf" || kind === "video" || kind === "audio";
   const canPreview =
     !!href && kind !== null && (!!attachmentId || isUrlPreviewableKind);
+
+  // CEREBRO-PATCH(attachment-card-chips): FIR-2034 — colour-coded type cards in
+  // the composer/inline, matching the posted thread. The in-flight upload keeps
+  // the upstream placeholder; finished docs become chips. Off keeps the row.
+  const cerebroChips = useFlagValue("cerebro_attachment_chips");
+  if (cerebroChips && !uploading) {
+    return (
+      <div className="my-1">
+        <AttachmentChip
+          filename={filename}
+          onActivate={canPreview ? onPreview : href ? onDownload : undefined}
+          activateLabel={canPreview ? "Preview" : "Download"}
+          onRemove={onDelete}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="my-1">

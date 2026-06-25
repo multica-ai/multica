@@ -1,6 +1,14 @@
 export { JumpToLatestButton } from "./components/jump-to-latest-button";
 export { IssueContextTrigger } from "./components/issue-context-trigger";
 export { ComposerExpandToggle } from "./components/composer-expand-toggle";
+export {
+  AttachmentChip,
+  attachmentDocType,
+  ATTACHMENT_CHIP_WIDTH,
+  ATTACHMENT_CHIP_HEIGHT,
+  type AttachmentChipProps,
+  type AttachmentDocType,
+} from "./components/attachment-chip";
 export { ZoomableImage, type ZoomableImageProps } from "./components/zoomable-image";
 export { useZoomPan, type ZoomPanOptions, type ZoomPanState } from "./hooks/use-zoom-pan";
 export { useStickyBottom } from "./hooks/use-sticky-bottom";
