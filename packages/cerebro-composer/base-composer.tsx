@@ -135,6 +135,12 @@ export interface BaseComposerProps {
 
   // --- slots (chat) ---
   topSlot?: ReactNode;
+  /** Rendered ABOVE the bordered field box (outside its absolute-overlay
+   *  context) but inside the floated wrapper, so it sits above the input and
+   *  floats with the field when pinned. Issue comments route the armed-handoff
+   *  banner here (FIR-1874) so it pushes the field down instead of overlapping
+   *  the trigger-target bar / first line. */
+  aboveField?: ReactNode;
   leftAdornment?: ReactNode;
   rightAdornment?: ReactNode;
   /** Rendered immediately before the Submit button — used by issue comments to
@@ -195,6 +201,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
   avatar = null,
   size = "default",
   topSlot,
+  aboveField,
   leftAdornment,
   rightAdornment,
   sendMenu,
@@ -464,6 +471,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
             />
           )}
           <div className="min-w-0 flex-1">
+            {aboveField}
             <div
               {...dropZoneProps}
               data-testid="composer-input"

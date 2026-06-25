@@ -75,7 +75,7 @@ export function CommentComposer({
       avatar={isReply ? avatar : null}
       pin={isReply ? "sticky-bottom" : pinnable ? "fixed" : "none"}
       sendMenu={isReply ? undefined : sendMenu}
-      topSlot={isReply ? undefined : topBanner}
+      aboveField={isReply ? undefined : topBanner}
       suppressPlaceholder={!!triggerAgentId}
       hasTopOverlay={!!triggerAgentId}
       confirmBeforeSend={confirmBeforeSend}

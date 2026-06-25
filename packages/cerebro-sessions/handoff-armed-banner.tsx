@@ -3,10 +3,11 @@
 import { ScrollText, X } from "lucide-react";
 
 // FIR-1874: when a session is armed for handoff from the Send-button menu, the
-// composer shows this banner across the top of the field so the user can see
-// that their next message will start a fresh session carrying a summary of the
-// chosen one. The handoff (close + summary) does not happen until Send — the X
-// cancels it before then.
+// composer shows this banner as a slim bar ABOVE the field (not over it) so the
+// user can see that their next message will start a fresh session carrying a
+// summary of the chosen one. The handoff (close + summary) does not happen until
+// Send — the X cancels it before then. (Jesper: it must sit above the input box,
+// like the "Replying to X" bar, instead of covering the text.)
 export function HandoffArmedBanner({
   name,
   onCancel,
@@ -15,7 +16,7 @@ export function HandoffArmedBanner({
   onCancel: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2 rounded-t-lg border-b border-primary/30 bg-primary/5 px-3 py-1.5 text-xs text-primary">
+    <div className="mb-1.5 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs text-primary">
       <ScrollText className="h-3.5 w-3.5 shrink-0" />
       <span className="min-w-0 flex-1 truncate">
         New session · Handoff from <span className="font-semibold">{name}</span>

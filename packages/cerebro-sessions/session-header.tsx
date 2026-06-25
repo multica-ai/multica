@@ -83,7 +83,23 @@ export function SessionHeader({
 
   return (
     <div className="flex w-full items-center justify-between gap-2 border-b px-4 py-2.5">
-      {active ? (
+      {/* Jesper (FIR-1874): the rename input must stay in place where the name
+          sits — on the left — not jump across to the right where the status
+          badge is. So it replaces the name in the left slot, and the status
+          group hides while editing. */}
+      {editing ? (
+        <Input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          className="h-7 min-w-0 flex-1 text-sm font-semibold"
+        />
+      ) : active ? (
         // Active session: always open, no collapse affordance.
         <div className="flex min-w-0 flex-1 items-center text-left">{title}</div>
       ) : (
@@ -98,19 +114,7 @@ export function SessionHeader({
           {title}
         </button>
       )}
-      {editing ? (
-        <Input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
-            if (e.key === "Escape") setEditing(false);
-          }}
-          className="h-7 max-w-[16rem] text-sm font-semibold"
-        />
-      ) : (
+      {!editing && (
         <div className="flex shrink-0 items-center gap-2">
           {hasHandoff && onToggleHandoff ? (
             <button
