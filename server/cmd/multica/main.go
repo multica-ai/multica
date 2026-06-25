@@ -72,6 +72,7 @@ func init() {
 	wakeupCmd.GroupID = groupCore      // CEREBRO-PATCH(cerebro-wakeup-cli): FIR-3013
 	chatCmd.GroupID = groupCore        // CEREBRO-PATCH(chat-cli): TECH-3183
 	channelCmd.GroupID = groupCore     // CEREBRO-PATCH(fir-125-channel-cli)
+	noteCmd.GroupID = groupCore        // CEREBRO-PATCH(cerebro-note-cli): FIR-2022 note read/search CLI
 
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(projectCmd)
@@ -89,6 +90,7 @@ func init() {
 	rootCmd.AddCommand(wakeupCmd)      // CEREBRO-PATCH(cerebro-wakeup-cli): FIR-3013
 	rootCmd.AddCommand(chatCmd)        // CEREBRO-PATCH(chat-cli): TECH-3183
 	rootCmd.AddCommand(channelCmd)     // CEREBRO-PATCH(fir-125-channel-cli)
+	rootCmd.AddCommand(noteCmd)        // CEREBRO-PATCH(cerebro-note-cli): FIR-2022 note read/search CLI
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)

@@ -264,6 +264,11 @@ const AdminChannelMessageSearchResponseSchema = z.object({ messages: z.array(z.o
 export type AdminChannelMessageSearchResponse = z.infer<typeof AdminChannelMessageSearchResponseSchema>;
 const EMPTY_ADMIN_CHANNEL_MESSAGE_SEARCH: AdminChannelMessageSearchResponse = { messages: [], total: 0 };
 
+// CEREBRO-PATCH(note-search-client): FIR-2022 — notes/documents search (title + body + comments) response schema + type.
+const NoteSearchResponseSchema = z.object({ results: z.array(z.object({ id: z.string(), workspace_id: z.string().default(""), kind: z.string().default(""), title: z.string().default(""), folder_id: z.string().nullable().optional(), issue_id: z.string().nullable().optional(), project_id: z.string().nullable().optional(), owner_id: z.string().nullable().optional(), visibility: z.string().nullable().optional(), updated_at: z.string().default(""), match_source: z.string().default(""), snippet: z.string().default(""), matched_comment_snippet: z.string().nullable().optional() }).loose()).default([]), total: z.number().default(0) }).loose();
+export type NoteSearchResponse = z.infer<typeof NoteSearchResponseSchema>;
+const EMPTY_NOTE_SEARCH: NoteSearchResponse = { results: [], total: 0 };
+
 // CEREBRO-PATCH(channel-perms-client): TECH-3698 — per-channel permission
 // settings schema + safe defaults (enum drift downgrades to the default).
 const DEFAULT_CHANNEL_PERMISSIONS: ChannelPermissions = {
@@ -2661,6 +2666,16 @@ export class ApiClient {
     return parseWithFallback(raw, AdminChannelMessageSearchResponseSchema, EMPTY_ADMIN_CHANNEL_MESSAGE_SEARCH, {
       endpoint: "GET /api/cerebro/my/channel-messages/search",
     });
+  }
+
+  // CEREBRO-PATCH(note-search-client): FIR-2022 — search notes/documents by title, body AND comments (access-scoped to the caller).
+  async searchNotes(params: { q: string; kind?: string; limit?: number; offset?: number; signal?: AbortSignal }): Promise<NoteSearchResponse> {
+    const qs = new URLSearchParams({ q: params.q });
+    if (params.kind) qs.set("kind", params.kind);
+    if (params.limit) qs.set("limit", String(params.limit));
+    if (params.offset) qs.set("offset", String(params.offset));
+    const raw = await this.fetch<unknown>(`/api/notes/search?${qs.toString()}`, { signal: params.signal });
+    return parseWithFallback(raw, NoteSearchResponseSchema, EMPTY_NOTE_SEARCH, { endpoint: "GET /api/notes/search" });
   }
 
   async createChannel(data: CreateChannelRequest): Promise<Channel> {

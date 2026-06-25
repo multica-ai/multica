@@ -192,6 +192,8 @@ export function SearchCommand() {
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   // CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — include channel/DM messages in Cmd+K when enabled.
   const messageSearchEnabled = useFeatureFlag("cerebro_global_message_search");
+  // CEREBRO-PATCH(cerebro-note-search-ui): FIR-2022 — when on, the Notes leg searches title+body+comments via /api/notes/search instead of title-only listNotes.
+  const noteSearchEnabled = useFeatureFlag("cerebro_note_search");
 
   // Resolve each recent issue via its cached detail entry. Recent items are
   // typically already in the detail cache because the user has opened them;
@@ -450,10 +452,15 @@ export function SearchCommand() {
             limit: 10,
             signal: controller.signal,
           }).catch(() => ({ chat_sessions: [], total: 0 })),
-          // CEREBRO-PATCH(cerebro-notes-search-ui): owner-scoped Notes search; never throws into the palette.
-          api
-            .listNotes<NoteHit[]>({ q: q.trim(), limit: 10 })
-            .catch(() => [] as NoteHit[]),
+          // CEREBRO-PATCH(cerebro-note-search-ui): FIR-2022 — title+body+comments search when enabled, else title-only listNotes. Never throws into the palette.
+          noteSearchEnabled
+            ? api
+                .searchNotes({ q: q.trim(), limit: 10, signal: controller.signal })
+                .then((r) => r.results.map((x): NoteHit => ({ id: x.id, title: x.title, body: x.snippet ?? "" })))
+                .catch(() => [] as NoteHit[])
+            : api
+                .listNotes<NoteHit[]>({ q: q.trim(), limit: 10 })
+                .catch(() => [] as NoteHit[]),
           messageSearchEnabled
             ? api.searchMyChannelMessages(q.trim(), 10).catch(() => ({ messages: [], total: 0 }))
             : Promise.resolve({ messages: [], total: 0 }),
@@ -478,7 +485,7 @@ export function SearchCommand() {
         }
       }
     }, 300);
-  }, [messageSearchEnabled]); // CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — re-bind when the messages flag toggles.
+  }, [messageSearchEnabled, noteSearchEnabled]); // CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — re-bind when the messages flag toggles. FIR-2022: also when the note-search flag toggles.
 
   const handleValueChange = useCallback(
     (value: string) => {

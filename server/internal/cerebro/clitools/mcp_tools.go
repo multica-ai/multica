@@ -114,6 +114,8 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	registerSkillLearningTools(srv, client)
 	// CEREBRO-PATCH(cerebro-wakeup-mcp-tools): FIR-3013 agent wakeup scheduling tools.
 	registerWakeupTools(srv, client)
+	// CEREBRO-PATCH(mcp-note-tools): FIR-2022 read + search notes/documents + comments.
+	registerNoteTools(srv, client)
 
 	// -----------------------------------------------------------------------
 	// list_issues

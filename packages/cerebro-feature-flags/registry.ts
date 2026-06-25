@@ -44,6 +44,11 @@ export type CerebroFlagKey =
   // bold dot), and a channel is marked read on scrolling past, not on open.
   | "cerebro_channel_unread_smart"
   | "cerebro_notes"
+  // FIR-2022: full-text search over notes/documents AND their comments, surfaced
+  // as a dedicated "Notes" scope in the app's global search. The CLI/MCP search
+  // tools call the same endpoint and are not gated by this flag; this flag only
+  // gates the in-app search surface.
+  | "cerebro_note_search"
   // FIR-1590: per-folder access control — "Only you / Selected colleagues /
   // Whole team" on note + document folders. Gates the folder and its contents.
   | "cerebro_folder_access"
@@ -363,6 +368,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_note_inbox_pane: true,
   // FIR-1621: ON (FIR-1647) — coupling + send-to-agent flow shipped.
   cerebro_note_agent_collab: true,
+  // FIR-2022: OFF until the Notes search scope is QA'd on staging. Gates only
+  // the in-app global-search "Notes" scope; the CLI/MCP search tools always work.
+  cerebro_note_search: false,
   // FIR-1800: ON — render artifact references in comments/chat/DM/channels.
   cerebro_artifact_references: true,
   cerebro_inbox_slack_block: false,

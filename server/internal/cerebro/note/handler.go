@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -63,6 +64,11 @@ type Handler struct {
 	// permission check (tests); in production it is wired to the same gate the
 	// issue comment path uses.
 	Gate MentionGate
+	// Pool is the raw pgx pool the FTS note/document search uses (FIR-2022).
+	// Search runs raw SQL inside a tx so it can SET LOCAL the pg_trgm word-
+	// similarity threshold; sqlc cannot express the dynamic text-vs-kind SQL.
+	// Optional: nil makes GET /api/notes/search return 503 (e.g. in unit tests).
+	Pool *pgxpool.Pool
 }
 
 // New constructs the handler. The router wires both query packages, the event
@@ -143,6 +149,10 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Get("/", h.ListNotes)
 	r.Post("/", h.CreateNote)
 	r.Get("/recent", h.ListRecentNotes)
+	// FIR-2022 — full-text search over documents (all artifact kinds) + their
+	// comments. Static path, registered before /{id} so chi never treats
+	// "search" as a note id. See search.go.
+	r.Get("/search", h.SearchNotes)
 	// FIR-1621 — reverse note↔object coupling: list notes that reference a given
 	// object (e.g. an issue), so the issue page shows its coupled notes.
 	r.Get("/by-reference", h.ListNotesForReference)
