@@ -1603,6 +1603,18 @@
       "gate": "via:POST /api/issues/{id}/comments"
     },
     {
+      "id": "list_note_comments",
+      "exempt": "read-only — wraps GET /api/notes/{id}/comments"
+    },
+    {
+      "id": "read_note",
+      "exempt": "read-only — wraps GET /api/notes/{id}"
+    },
+    {
+      "id": "search_notes",
+      "exempt": "read-only — wraps GET /api/notes/search"
+    },
+    {
       "id": "handoff_session",
       "gate": "via:POST /api/cerebro/issues/{issueId}/sessions/start-fresh"
     },
@@ -2411,6 +2423,18 @@
     {
       "id": "mcp serve",
       "exempt": "local-only — runs the MCP stdio server in this process"
+    },
+    {
+      "id": "note comments",
+      "exempt": "read-only — wraps GET /api/notes/{id}/comments"
+    },
+    {
+      "id": "note read",
+      "exempt": "read-only — wraps GET /api/notes/{id}"
+    },
+    {
+      "id": "note search",
+      "exempt": "read-only — wraps GET /api/notes/search"
     },
     {
       "id": "orchestrate run",
