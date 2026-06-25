@@ -472,10 +472,21 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
   // null (latest). The "jump to last read" button re-anchors to the first
   // unread message so a window around it loads. Reset on channel switch or
   // deep-link change so a stale anchor from another channel never leaks in.
+  // pinnedToLiveRef: user sent a message or jumped to latest — keep anchor null
+  // even though ?message= may still be in the URL (URL is entry-only).
+  const pinnedToLiveRef = useRef(false);
   const [anchorMessageId, setAnchorMessageId] = useState<string | null>(linkedMessageId);
-  useEffect(() => { setAnchorMessageId(linkedMessageId); }, [linkedMessageId, channelId]);
-  const { data: msgData, isLoading: loadingMessages, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery(channelMessagesOptions(wsId, channelId ?? null, anchorMessageId));
+  useEffect(() => {
+    pinnedToLiveRef.current = false;
+    setAnchorMessageId(linkedMessageId);
+  }, [linkedMessageId, channelId]);
+  const handleJumpToMessage = useCallback((messageId: string | null) => {
+    if (messageId === null) pinnedToLiveRef.current = true;
+    setAnchorMessageId(messageId);
+  }, []);
+  const { data: msgData, isLoading: loadingMessages, isFetching: fetchingMessages, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery(channelMessagesOptions(wsId, channelId ?? null, anchorMessageId));
   const messages = msgData?.messages ?? [];
+  const showMessagesLoading = loadingMessages && messages.length === 0;
   const highlight = msgData?.highlight ?? null;
   const { data: members = [] } = useQuery(channelMembersOptions(wsId, channelId ?? null));
   const { data: workspaceMembers = [] } = useQuery(memberListOptions(wsId));
@@ -675,7 +686,8 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
             />
             <MessageList
               messages={messages ?? []}
-              loading={loadingMessages}
+              loading={showMessagesLoading}
+              fetching={fetchingMessages}
               channelId={channelId}
               wsId={wsId}
               memberIds={mentionMemberIds}
@@ -689,7 +701,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
               firstUnreadMessageId={activeChannel.first_unread_message_id ?? null}
               hasUnread={activeHasUnread}
               onMarkRead={handleMarkRead}
-              onJumpToMessage={setAnchorMessageId}
+              onJumpToMessage={handleJumpToMessage}
               messagesAnchorId={anchorMessageId}
             />
           </div>
@@ -1677,6 +1689,7 @@ function ChannelHeader({
 function MessageList({
   messages,
   loading,
+  fetching = false,
   channelId,
   wsId,
   memberIds,
@@ -1695,6 +1708,8 @@ function MessageList({
 }: {
   messages: ChannelMessage[];
   loading: boolean;
+  /** True while the messages query is refetching (re-anchor or post-send). */
+  fetching?: boolean;
   channelId: string;
   wsId: string;
   memberIds: string[];
@@ -1746,7 +1761,7 @@ function MessageList({
   const pendingSelfScrollRef = useRef(false);
   // Deep-link (?message=) is for initial entry positioning only. Once the user
   // sends a message they are on the live timeline — re-enable bottom follow even
-  // if the URL still carries the deep-link param.
+  // if the URL still carries the deep-link param (the param is not stripped).
   const liveAtLatestRef = useRef(false);
   const paths = useWorkspacePaths();
   const nav = useNavigation();
@@ -1800,6 +1815,26 @@ function MessageList({
     liveAtLatestRef.current = false;
   }, [linkedMessageId]);
 
+  const finishSelfSendScroll = useCallback(() => {
+    requestAnimationFrame(() =>
+      animateScrollToBottom(scrollRef.current, () => {
+        pendingSelfScrollRef.current = false;
+        if (liveAtLatestRef.current) onMarkRead?.();
+      }),
+    );
+  }, [onMarkRead]);
+
+  const wasFetchingRef = useRef(false);
+  // Re-anchor (deep-link -> latest) or post-send refetch: scroll once new data lands.
+  useEffect(() => {
+    const wasFetching = wasFetchingRef.current;
+    wasFetchingRef.current = fetching;
+    if (!pendingSelfScrollRef.current) return;
+    if (wasFetching && !fetching && messages.length > 0) {
+      finishSelfSendScroll();
+    }
+  }, [fetching, messages.length, finishSelfSendScroll]);
+
   // Live follow: a new message arriving while the user is already pinned to the
   // bottom keeps them there. Don't yank if they've scrolled up to read history
   // or are parked at the unread boundary.
@@ -1822,21 +1857,14 @@ function MessageList({
       // suppresses the "jump to last read" indicator (the channel-list refetch
       // may set hasUnread=true before the messages refetch lands, and the
       // scroll may not have reached the bottom yet).
-      requestAnimationFrame(() =>
-        animateScrollToBottom(scrollRef.current, () => {
-          pendingSelfScrollRef.current = false;
-        }),
-      );
+      finishSelfSendScroll();
       return;
     }
 
     if (grew && prev > 0 && followLatest && isNearBottom()) {
       requestAnimationFrame(() => scrollListToBottom(scrollRef.current));
     }
-    if (selfSent && !grew && !tailChanged) {
-      pendingSelfScrollRef.current = false;
-    }
-  }, [messages, linkedMessageId, isNearBottom]);
+  }, [messages, linkedMessageId, isNearBottom, finishSelfSendScroll]);
 
   // Catch-up: clear unread once the user reaches the bottom (seen all new
   // messages). Also fires when a live message lands while already at the
@@ -1860,6 +1888,9 @@ function MessageList({
     // stays true for the entire animation (cleared in animateScrollToBottom's
     // onDone callback).
     if (pendingSelfScrollRef.current) { setShowJumpToLastRead(false); return; }
+    // User sent a message and moved to the live timeline; suppress until they
+    // scroll back into history.
+    if (liveAtLatestRef.current) { setShowJumpToLastRead(false); return; }
     if (!firstUnreadInPage) { setShowJumpToLastRead(true); return; }
     // At the bottom: the user has seen all messages and onMarkRead is about to
     // fire. Suppress the indicator so it doesn't flash during the brief window
@@ -1902,6 +1933,7 @@ function MessageList({
 
   useEffect(() => {
     if (messages.length === 0) return;
+    if (liveAtLatestRef.current) return;
     // Reply deep-link (?around targeted a reply): center the window on the
     // thread root message, then auto-open its reply panel so the reply —
     // which lives inside the panel, not the top-level list — is reachable.
@@ -1972,10 +2004,6 @@ function MessageList({
       if (messagesAnchorId) {
         onJumpToMessage?.(null);
       }
-      // Drop ?message= so linkedMessageId stops pinning the scroll logic after send.
-      if (linkedMessageId) {
-        nav.replace(paths.channelDetail(channelId));
-      }
     },
     onSuccess: () => {
       editorRef.current?.clearContent();
@@ -1997,7 +2025,7 @@ function MessageList({
     sendMutation.mutate(content);
   }, [sendMutation]);
 
-  if (loading) {
+  if (loading && messages.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

@@ -1,4 +1,4 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 
 export const channelKeys = {
@@ -64,6 +64,7 @@ export function channelMessagesOptions(
         ? lastPage.messages[0]!.created_at
         : undefined,
     enabled: !!channelId,
+    placeholderData: keepPreviousData,
     // Flatten pages into the message list (ASC display order) and surface the
     // first page's `highlight` (set when ?around targets a reply) so callers
     // can auto-expand the thread + scroll-highlight the reply.
