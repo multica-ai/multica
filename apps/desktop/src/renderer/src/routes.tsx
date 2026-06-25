@@ -25,12 +25,14 @@ import { DesktopAgentsPage } from "./components/desktop-agents-page";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
+import { UserManagementPage } from "@multica/views/admin";
 import { useT } from "@multica/views/i18n";
 import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { DesktopRouteErrorPage } from "./components/route-error-page";
+import { useAuthStore } from "@multica/core/auth";
 
 /**
  * Wraps `SettingsPage` so the desktop-only extra tabs can pull their labels
@@ -57,6 +59,17 @@ function DesktopSettingsRoute() {
       ]}
     />
   );
+}
+
+/**
+ * Guard for the /admin route — only super-admins may access it.
+ * Non-super-admin users see null (the router stays at the current path;
+ * the tab bar will not surface an entry for them anyway).
+ */
+function DesktopAdminRoute() {
+  const user = useAuthStore((s) => s.user);
+  if (!user?.is_super_admin) return null;
+  return <UserManagementPage />;
 }
 
 /**
@@ -112,6 +125,13 @@ export const appRoutes: RouteObject[] = [
     errorElement: <DesktopRouteErrorPage />,
     children: [
       { index: true, element: null },
+      // Super-admin user-management page — system-level, not workspace-scoped.
+      // The nav entry in app-sidebar.tsx is already gated on is_super_admin.
+      {
+        path: "admin",
+        element: <DesktopAdminRoute />,
+        handle: { title: "User Management" },
+      },
       {
         path: ":workspaceSlug",
         element: <WorkspaceRouteLayout />,

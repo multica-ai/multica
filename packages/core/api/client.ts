@@ -90,6 +90,10 @@ import type {
   PinnedItemType,
   ReorderPinsRequest,
   Invitation,
+  AdminUser,
+  AdminWorkspaceSummary,
+  AdminPendingInvitation,
+  MemberRole,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -2238,6 +2242,76 @@ export class ApiClient {
     return this.fetch(`/api/lark/binding/redeem`, {
       method: "POST",
       body: JSON.stringify({ token }),
+    });
+  }
+
+  // Super-admin endpoints
+  async adminListUsers(params?: {
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<AdminUser[]> {
+    const qs = new URLSearchParams();
+    if (params?.search) qs.set("search", params.search);
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    if (params?.offset != null) qs.set("offset", String(params.offset));
+    const query = qs.toString();
+    return this.fetch(`/api/admin/users${query ? `?${query}` : ""}`);
+  }
+
+  async adminUpdateUser(userId: string, name: string): Promise<User> {
+    return this.fetch(`/api/admin/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  // Admin workspace list (for invite dropdown)
+  async adminListWorkspaces(): Promise<AdminWorkspaceSummary[]> {
+    return this.fetch("/api/admin/workspaces");
+  }
+
+  // Admin: list all pending invitations
+  async adminListPendingInvitations(): Promise<AdminPendingInvitation[]> {
+    return this.fetch("/api/admin/invitations");
+  }
+
+  // Admin: invite a user (by email) to one or more workspaces
+  async adminCreateInvitations(data: {
+    email: string;
+    name?: string;
+    role?: MemberRole;
+    workspaces: string[];
+  }): Promise<{ email: string; user_exists: boolean; results: { workspace_id: string; status: string }[] }> {
+    return this.fetch("/api/admin/invitations", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Admin: revoke an invitation
+  async adminRevokeInvitation(invitationId: string): Promise<void> {
+    await this.fetch(`/api/admin/invitations/${invitationId}`, { method: "DELETE" });
+  }
+
+  // Admin: add existing user to workspace(s)
+  async adminAddUserToWorkspaces(userId: string, workspaceIds: string[], role?: MemberRole): Promise<{ added: number }> {
+    return this.fetch(`/api/admin/users/${userId}/workspaces`, {
+      method: "POST",
+      body: JSON.stringify({ workspace_ids: workspaceIds, role: role ?? "member" }),
+    });
+  }
+
+  // Admin: remove user from a workspace
+  async adminRemoveUserFromWorkspace(userId: string, workspaceId: string): Promise<void> {
+    await this.fetch(`/api/admin/users/${userId}/workspaces/${workspaceId}`, { method: "DELETE" });
+  }
+
+  // Admin: change user's role in a workspace
+  async adminUpdateUserRole(userId: string, workspaceId: string, role: MemberRole): Promise<{ member_id: string; role: string }> {
+    return this.fetch(`/api/admin/users/${userId}/workspaces/${workspaceId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
     });
   }
 }

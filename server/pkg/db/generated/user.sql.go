@@ -11,6 +11,44 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const adminUpdateUserName = `-- name: AdminUpdateUserName :one
+UPDATE "user" SET
+    name = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+`
+
+type AdminUpdateUserNameParams struct {
+	ID   pgtype.UUID `json:"id"`
+	Name string      `json:"name"`
+}
+
+// Updates only the name field for a given user. Used by super-admin endpoints.
+// Non-empty validation is enforced at the handler level (empty string would write
+// ” rather than no-op because the name column is NOT NULL with no COALESCE).
+func (q *Queries) AdminUpdateUserName(ctx context.Context, arg AdminUpdateUserNameParams) (User, error) {
+	row := q.db.QueryRow(ctx, adminUpdateUserName, arg.ID, arg.Name)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
+		&i.ProfileDescription,
+		&i.Timezone,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO "user" (name, email, avatar_url)
 VALUES ($1, $2, $3)
@@ -137,6 +175,59 @@ func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistPa
 		&i.Timezone,
 	)
 	return i, err
+}
+
+const listUsers = `-- name: ListUsers :many
+SELECT id, name, email, avatar_url, created_at, updated_at
+FROM "user"
+WHERE ($1::text = '' OR name ILIKE '%' || $1 || '%' OR email ILIKE '%' || $1 || '%')
+ORDER BY name ASC, id ASC
+LIMIT $2
+OFFSET $3
+`
+
+type ListUsersParams struct {
+	Column1 string `json:"column_1"`
+	Limit   int32  `json:"limit"`
+	Offset  int32  `json:"offset"`
+}
+
+type ListUsersRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	Name      string             `json:"name"`
+	Email     string             `json:"email"`
+	AvatarUrl pgtype.Text        `json:"avatar_url"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Returns all users matching an optional search term (ILIKE on name or email),
+// ordered by name, with limit/offset pagination. Used by super-admin endpoints only.
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
+	rows, err := q.db.Query(ctx, listUsers, arg.Column1, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersRow{}
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Email,
+			&i.AvatarUrl,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markUserOnboarded = `-- name: MarkUserOnboarded :one

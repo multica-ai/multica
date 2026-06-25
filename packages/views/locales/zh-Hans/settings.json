@@ -340,6 +340,8 @@
     "invite_email_placeholder": "user@company.com",
     "invite_button": "邀请",
     "inviting": "邀请中...",
+    "invite_name_label": "显示名（可选）",
+    "invite_name_placeholder": "不填写则注册后使用默认名字",
     "toast_invitation_sent": "已发送邀请",
     "toast_invitation_failed": "发送邀请失败",
     "no_members": "未找到成员。",

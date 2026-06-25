@@ -158,6 +158,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
 		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
 		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		SuperAdminEmails:         splitAndTrim(os.Getenv("SUPER_ADMIN_EMAILS")),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	h.Metrics = opts.BusinessMetrics
@@ -685,6 +686,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/api/invitations/{id}", h.GetMyInvitation)
 		r.Post("/api/invitations/{id}/accept", h.AcceptInvitation)
 		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
+
+		// Super-admin endpoints. Every handler calls requireSuperAdmin internally.
+		// Rate-limited to prevent enumeration of all user emails by a compromised
+		// super-admin credential.
+		adminRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_ADMIN", 60), time.Minute, trustedProxies)
+		r.With(adminRL).Route("/api/admin", func(r chi.Router) {
+			r.Get("/users", h.AdminListUsers)
+			r.Patch("/users/{id}", h.AdminUpdateUser)
+			r.Get("/workspaces", h.AdminListWorkspaces)
+			r.Get("/invitations", h.AdminListPendingInvitations)
+			r.Post("/invitations", h.AdminCreateInvitations)
+			r.Delete("/invitations/{id}", h.AdminRevokeInvitation)
+			r.Post("/users/{id}/workspaces", h.AdminAddUserToWorkspace)
+			r.Delete("/users/{id}/workspaces/{workspaceId}", h.AdminRemoveUserFromWorkspace)
+			r.Patch("/users/{id}/workspaces/{workspaceId}", h.AdminUpdateUserRole)
+		})
 
 		r.Route("/api/tokens", func(r chi.Router) {
 			r.Get("/", h.ListPersonalAccessTokens)
