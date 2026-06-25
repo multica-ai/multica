@@ -1,35 +1,39 @@
 "use client";
 
-import type { WorkflowNode, Agent } from "@multica/core/types";
+import type { WorkflowNode } from "@multica/core/types";
 import type { BuiltinPlugin } from "@multica/core/api/schemas";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../../../i18n";
 
 export interface CompactNodeCardProps {
   node: WorkflowNode;
-  agent: Agent | null;
+  workerName: string | null;
   plugin: BuiltinPlugin | null;
   onClick: (nodeId: string, focus: "worker") => void;
   isSelected?: boolean;
   elementRef?: (el: HTMLButtonElement | null) => void;
 }
 
-const statusDotColors: Record<string, string> = {
-  working: "bg-[var(--success)]",
-  idle: "bg-[var(--info)]",
-  blocked: "bg-[var(--warning)]",
-  error: "bg-destructive",
-  offline: "bg-muted-foreground/40",
-};
-
 export function CompactNodeCard({
   node,
-  agent,
+  workerName,
   plugin,
   onClick,
   isSelected = false,
   elementRef,
 }: CompactNodeCardProps) {
+  const { t } = useT("workflows");
   const displayName = plugin?.name ?? node.title;
+
+  const subtitleLabel = (() => {
+    if (workerName) return workerName;
+    const wt = node.worker_type;
+    const typeLabel =
+      wt === "human" ? t(($) => $.node.worker_type_human)
+      : wt === "squad" ? t(($) => $.node.worker_type_squad)
+      : t(($) => $.node.worker_type_agent);
+    return `${typeLabel} · ${t(($) => $.overview.detail_panel.not_configured)}`;
+  })();
 
   return (
     <button
@@ -51,19 +55,17 @@ export function CompactNodeCard({
         {displayName}
       </span>
 
-      {agent && (
-        <div className="mt-auto flex items-center gap-1.5">
-          <span
-            className={cn(
-              "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
-              statusDotColors[agent.status] ?? "bg-muted-foreground/40",
-            )}
-          />
-          <span className="truncate text-[11px] text-muted-foreground">
-            {agent.name}
-          </span>
-        </div>
-      )}
+      <div className="mt-auto flex items-center gap-1.5">
+        <span
+          className={cn(
+            "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
+            workerName ? "bg-[var(--success)]" : "bg-muted-foreground/40",
+          )}
+        />
+        <span className="truncate text-[11px] text-muted-foreground">
+          {subtitleLabel}
+        </span>
+      </div>
     </button>
   );
 }

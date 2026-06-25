@@ -115,7 +115,7 @@ export type {
   ListWebhookDeliveriesResponse,
 } from "./autopilot";
 export type * from "./workflow";
-export { NODE_SHAPES, parseNodeShape } from "./workflow";
+export { NODE_SHAPES, parseNodeShape, workerTypeToActorType } from "./workflow";
 export type {
   Squad,
   SquadMember,

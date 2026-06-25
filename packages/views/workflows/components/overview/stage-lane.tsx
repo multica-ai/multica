@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import type { WorkflowStage, WorkflowNode, Agent } from "@multica/core/types";
+import { workerTypeToActorType } from "@multica/core/types";
 import type { BuiltinPlugin } from "@multica/core/api/schemas";
 import { cn } from "@multica/ui/lib/utils";
 import { CompactNodeCard } from "./compact-node-card";
@@ -10,6 +11,7 @@ import { CriticBadge } from "./critic-badge";
 export interface StageLaneProps {
   stage: WorkflowStage;
   nodeIds: WorkflowNode[];
+  getActorName: (type: string, id: string) => string;
   agentLookup: Map<string, Agent | null>;
   pluginLookup: Map<string, BuiltinPlugin | null>;
   onCardClick: (nodeId: string, focus: "worker" | "critic") => void;
@@ -39,6 +41,7 @@ const STAGE_LABEL_COLORS = [
 export function StageLane({
   stage,
   nodeIds,
+  getActorName,
   agentLookup,
   pluginLookup,
   onCardClick,
@@ -93,6 +96,9 @@ export function StageLane({
               className="flex w-full min-w-[960px] flex-nowrap items-start justify-evenly gap-8 px-4"
             >
               {sortedNodes.map((node) => {
+                const workerName = node.worker_id
+                  ? getActorName(workerTypeToActorType(node.worker_type), node.worker_id)
+                  : null;
                 const agent = agentLookup.get(node.worker_id ?? "") ?? null;
                 const plugin = agent?.plugin_id
                   ? pluginLookup.get(agent.plugin_id) ?? null
@@ -109,7 +115,7 @@ export function StageLane({
                   >
                     <CompactNodeCard
                       node={node}
-                      agent={agent}
+                      workerName={workerName}
                       plugin={plugin}
                       onClick={onCardClick}
                       isSelected={

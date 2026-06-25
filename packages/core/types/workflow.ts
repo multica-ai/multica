@@ -17,6 +17,15 @@ export function parseNodeShape(formatSchema: unknown): NodeShape {
   }
   return "rectangle";
 }
+
+/** Map workflow node worker/critic type to actor type used by useActorName(). */
+export function workerTypeToActorType(t: string): "member" | "agent" | "squad" {
+  if (t === "human") return "member";
+  if (t === "agent") return "agent";
+  if (t === "squad") return "squad";
+  return "member";
+}
+
 export type NodeRunStatus =
   | "pending" | "format_checking" | "format_ok" | "format_failed"
   | "worker_assigned" | "working" | "awaiting_input" | "awaiting_critic"

@@ -10,6 +10,7 @@ import {
   workflowEdgesOptions,
 } from "@multica/core/workflows/queries";
 import { agentListOptions, builtinPluginListOptions } from "@multica/core/workspace/queries";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkflowViewStore } from "@multica/core/workflows/stores/view-store";
 import { useNavigation } from "../../../navigation";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -91,6 +92,8 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
 
   const { data: pluginsData } = useQuery(builtinPluginListOptions());
+
+  const { getActorName } = useActorName();
 
   const isLoading = workflowLoading || stagesLoading || nodesLoading;
 
@@ -308,6 +311,7 @@ export function WorkflowPanoramaPage({ workflowId, viewToggle }: WorkflowPanoram
                   <StageLane
                     stage={stage}
                     nodeIds={nodesByStage.get(stage.id) ?? []}
+                    getActorName={getActorName}
                     agentLookup={agentLookup}
                     pluginLookup={pluginLookup}
                     onCardClick={handleCardClick}

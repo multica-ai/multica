@@ -15,6 +15,7 @@ import {
 import { issueKeys } from "@multica/core/issues/queries";
 import { api } from "@multica/core/api";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { workerTypeToActorType } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogHeader } from "@multica/ui/components/ui/dialog";
@@ -67,13 +68,6 @@ function getRunSummary(nodeRuns: { status: string }[]): { label: string; variant
   // Mixed terminal states (e.g. some completed + some cancelled after cancel) — treat as cancelled.
   if (anyCancelled) return { label: "Cancelled", variant: "outline" as const };
   return { label: "Pending", variant: "outline" as const };
-}
-
-function workerTypeToActorType(t: string): string {
-  if (t === "human") return "member";
-  if (t === "agent") return "agent";
-  if (t === "squad") return "squad";
-  return "member";
 }
 
 function isWorkerDone(status: string): boolean {

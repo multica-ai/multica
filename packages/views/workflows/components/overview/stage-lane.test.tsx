@@ -55,6 +55,8 @@ describe("StageLane", () => {
   const agentLookup = new Map<string, Agent | null>([["agent-1", MOCK_AGENT], ["agent-2", null]]);
   const pluginLookup = new Map<string, BuiltinPlugin | null>([["plugin-1", MOCK_PLUGIN]]);
   const emptyRefs = new Map();
+  const getActorName = (_type: string, id: string) =>
+    id === "agent-1" ? "Brainstorm Agent" : id;
 
   it("renders stage name as compact header", () => {
     const onCardClick = vi.fn();
@@ -62,6 +64,7 @@ describe("StageLane", () => {
       <StageLane
         stage={MOCK_STAGE}
         nodeIds={MOCK_NODES}
+        getActorName={getActorName}
         agentLookup={agentLookup}
         pluginLookup={pluginLookup}
         onCardClick={onCardClick}
@@ -78,6 +81,7 @@ describe("StageLane", () => {
       <StageLane
         stage={MOCK_STAGE}
         nodeIds={MOCK_NODES}
+        getActorName={getActorName}
         agentLookup={agentLookup}
         pluginLookup={pluginLookup}
         onCardClick={onCardClick}
@@ -94,6 +98,7 @@ describe("StageLane", () => {
       <StageLane
         stage={MOCK_STAGE}
         nodeIds={MOCK_NODES}
+        getActorName={getActorName}
         agentLookup={agentLookup}
         pluginLookup={pluginLookup}
         onCardClick={onCardClick}
@@ -111,6 +116,7 @@ describe("StageLane", () => {
       <StageLane
         stage={MOCK_STAGE}
         nodeIds={MOCK_NODES}
+        getActorName={getActorName}
         agentLookup={agentLookup}
         pluginLookup={pluginLookup}
         onCardClick={onCardClick}
@@ -127,6 +133,7 @@ describe("StageLane", () => {
       <StageLane
         stage={MOCK_STAGE}
         nodeIds={MOCK_NODES}
+        getActorName={getActorName}
         agentLookup={agentLookup}
         pluginLookup={pluginLookup}
         onCardClick={onCardClick}
@@ -144,6 +151,7 @@ describe("StageLane", () => {
       <StageLane
         stage={MOCK_STAGE}
         nodeIds={[]}
+        getActorName={getActorName}
         agentLookup={agentLookup}
         pluginLookup={pluginLookup}
         onCardClick={onCardClick}
@@ -160,6 +168,7 @@ describe("StageLane", () => {
       <StageLane
         stage={MOCK_STAGE}
         nodeIds={MOCK_NODES}
+        getActorName={getActorName}
         agentLookup={agentLookup}
         pluginLookup={pluginLookup}
         onCardClick={onCardClick}
@@ -179,6 +188,7 @@ describe("StageLane", () => {
       <StageLane
         stage={MOCK_STAGE}
         nodeIds={MOCK_NODES}
+        getActorName={getActorName}
         agentLookup={agentLookup}
         pluginLookup={pluginLookup}
         onCardClick={onCardClick}
@@ -202,6 +212,7 @@ describe("StageLane", () => {
       <StageLane
         stage={MOCK_STAGE}
         nodeIds={MOCK_NODES}
+        getActorName={getActorName}
         agentLookup={agentLookup}
         pluginLookup={pluginLookup}
         onCardClick={onCardClick}
