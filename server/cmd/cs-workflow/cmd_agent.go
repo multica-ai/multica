@@ -248,7 +248,7 @@ func resolveAuthBaseURL(cmd *cobra.Command) string {
 // resolveServerURL returns the multica service API base URL.
 // Priority:
 //  1. --server-url flag / MULTICA_SERVER_URL env (explicit override)
-//  2. COSTRICT_BASE_URL + MULTICA_SERVER_PREFIX (default /multica-backend)
+//  2. COSTRICT_BASE_URL + MULTICA_SERVER_PREFIX (default /workflow-backend)
 //  3. auth.json base_url + MULTICA_SERVER_PREFIX
 //  4. Legacy ~/.multica/config.json server_url
 func resolveServerURL(cmd *cobra.Command) string {
@@ -262,7 +262,7 @@ func resolveServerURL(cmd *cobra.Command) string {
 	if base := resolveCoStrictBaseURL(); base != "" {
 		prefix := strings.TrimSpace(os.Getenv("MULTICA_SERVER_PREFIX"))
 		if prefix == "" {
-			prefix = "/multica-backend"
+			prefix = "/workflow-backend"
 		}
 		if !strings.HasPrefix(prefix, "/") {
 			prefix = "/" + prefix
