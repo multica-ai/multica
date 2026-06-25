@@ -3,15 +3,21 @@ import { describe, it, expect, vi } from "vitest";
 import { ArtifactList } from "./artifact-list";
 import type { WorkflowNodeRun } from "@multica/core/types";
 
-// Mock @multica/views/i18n for useT hook
+// Mock @multica/views/i18n for useT hook — handles function selector form
 vi.mock("@multica/views/i18n", () => ({
   useT: () => ({
-    t: (key: string) => {
-      const map: Record<string, string> = {
-        "execution.detail_panel.worker_output": "Worker Output",
-        "execution.detail_panel.critic_output": "Critic Output",
-      };
-      return map[key] || key;
+    t: (selector: unknown) => {
+      if (typeof selector === "function") {
+        return selector({
+          execution: {
+            detail_panel: {
+              worker_output: "Worker Output",
+              critic_output: "Critic Output",
+            },
+          },
+        });
+      }
+      return String(selector);
     },
   }),
 }));

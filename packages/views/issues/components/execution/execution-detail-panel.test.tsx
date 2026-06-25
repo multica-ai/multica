@@ -4,22 +4,28 @@ import { describe, it, expect, vi } from "vitest";
 import { ExecutionDetailPanel } from "./execution-detail-panel";
 import type { WorkflowNode, WorkflowNodeRun } from "@multica/core/types";
 
-// Mock @multica/views/i18n for useT hook
+// Mock @multica/views/i18n for useT hook — handles function selector form
 vi.mock("@multica/views/i18n", () => ({
   useT: () => ({
-    t: (key: string) => {
-      const map: Record<string, string> = {
-        "execution.detail_panel.status_path": "Status Path",
-        "execution.detail_panel.worker": "Worker",
-        "execution.detail_panel.critic": "Critic",
-        "execution.detail_panel.not_configured": "Not configured",
-        "execution.detail_panel.metadata": "Metadata",
-        "execution.detail_panel.started_at": "Started At",
-        "execution.detail_panel.completed_at": "Completed At",
-        "execution.detail_panel.duration": "Duration",
-        "execution.detail_panel.retry_count": "Retry Count",
-      };
-      return map[key] || key;
+    t: (selector: unknown) => {
+      if (typeof selector === "function") {
+        return selector({
+          execution: {
+            detail_panel: {
+              status_path: "Status Path",
+              worker: "Worker",
+              critic: "Critic",
+              not_configured: "Not configured",
+              metadata: "Metadata",
+              started_at: "Started At",
+              completed_at: "Completed At",
+              duration: "Duration",
+              retry_count: "Retry Count",
+            },
+          },
+        });
+      }
+      return String(selector);
     },
   }),
 }));
