@@ -231,7 +231,8 @@ func postComment(t *testing.T, issueID, content string, parentID *string) string
 	return comment["id"].(string)
 }
 
-// postCommentAsAgent posts a comment with the X-Agent-ID header.
+// postCommentAsAgent posts a comment authenticated as the given agent via a
+// real mat_ task token (see authRequestWithAgent / mintTaskToken).
 func postCommentAsAgent(t *testing.T, issueID, content, agentID string, parentID *string) string {
 	t.Helper()
 	body := map[string]any{
