@@ -29,6 +29,8 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+// CEREBRO-PATCH(stacked-data-tables): tag markdown data tables + inject per-cell data-label (FIR-1727).
+import { rehypeStackedDataTables } from "@multica/ui/markdown/cerebro-stacked-tables";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
 import { Maximize2, Download, Link as LinkIcon, FileText, Eye } from "lucide-react";
@@ -117,6 +119,9 @@ const sanitizeSchema = {
       ...(defaultSchema.attributes?.img ?? []),
       "alt",
     ],
+    // CEREBRO-PATCH(stacked-data-tables): keep the data-table class + per-cell data-label through sanitize (FIR-1727).
+    table: [...(defaultSchema.attributes?.table ?? []), ["className", "data-table"]],
+    td: [...(defaultSchema.attributes?.td ?? []), "dataLabel"],
   },
 };
 
@@ -416,9 +421,10 @@ const components: Partial<Components> = {
   div: FileCardDiv,
 
   // Tables — wrap in tableWrapper div for border/radius/scroll (matches Tiptap)
-  table: ({ children }) => (
+  // CEREBRO-PATCH(stacked-data-tables): forward the data-table class so CSS can render data tables as stacked cards on mobile (FIR-1727).
+  table: ({ children, className }) => (
     <div className="tableWrapper">
-      <table>{children}</table>
+      <table className={className}>{children}</table>
     </div>
   ),
 
@@ -531,7 +537,8 @@ export const ReadonlyContent = memo(function ReadonlyContent({
     <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
+        // CEREBRO-PATCH(stacked-data-tables): run after rehypeRaw, before sanitize (which whitelists the injected class/attr) — FIR-1727.
+        rehypePlugins={[rehypeRaw, rehypeStackedDataTables, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}
         components={components}
       >

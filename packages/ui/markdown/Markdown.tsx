@@ -10,6 +10,8 @@ import { FileText, Download } from 'lucide-react'
 import { cn } from '@multica/ui/lib/utils'
 import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
 import { CodeBlock, InlineCode } from './CodeBlock'
+// CEREBRO-PATCH(stacked-data-tables): tag markdown data tables + inject per-cell data-label (FIR-1727).
+import { rehypeStackedDataTables } from './cerebro-stacked-tables'
 import { preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
 import { preprocessMentionShortcodes } from './mentions'
@@ -103,6 +105,9 @@ const sanitizeSchema = {
       ...(defaultSchema.attributes?.img ?? []),
       'alt',
     ],
+    // CEREBRO-PATCH(stacked-data-tables): keep the data-table class + per-cell data-label through sanitize (FIR-1727).
+    table: [...(defaultSchema.attributes?.table ?? []), ['className', 'data-table']],
+    td: [...(defaultSchema.attributes?.td ?? []), 'dataLabel'],
   },
 }
 
@@ -302,17 +307,18 @@ function createComponents(
       ol: ({ children }) => <ol className="my-2 space-y-1 pl-6 list-decimal">{children}</ol>,
       li: ({ children }) => <li>{children}</li>,
       // CEREBRO-PATCH(table-text-wrap): table-fixed + break-words so text wraps in cells on narrow screens instead of overflowing (JEH-1611)
+      // CEREBRO-PATCH(stacked-data-tables): forward data-table class + per-cell data-label so CSS can stack data tables into cards on mobile (FIR-1727).
       // Clean tables
-      table: ({ children }) => (
+      table: ({ children, className }) => (
         <div className="my-3 overflow-x-auto">
-          <table className="w-full table-fixed text-sm">{children}</table>
+          <table className={cn("w-full table-fixed text-sm", className)}>{children}</table>
         </div>
       ),
       thead: ({ children }) => <thead className="border-b">{children}</thead>,
       th: ({ children }) => (
         <th className="text-left py-2 px-3 font-semibold text-muted-foreground break-words">{children}</th>
       ),
-      td: ({ children }) => <td className="py-2 px-3 border-b border-border/50 break-words align-top">{children}</td>,
+      td: ({ children, node }) => <td data-label={node?.properties?.dataLabel as string | undefined} className="py-2 px-3 border-b border-border/50 break-words align-top">{children}</td>,
       // Headings - H1/H2 same size, differentiated by weight
       h1: ({ children }) => <h1 className="font-sans text-base font-bold mt-5 mb-3">{children}</h1>,
       h2: ({ children }) => (
@@ -363,16 +369,17 @@ function createComponents(
     ol: ({ children }) => <ol className="my-3 space-y-1.5 pl-6 list-decimal">{children}</ol>,
     li: ({ children }) => <li className="leading-relaxed">{children}</li>,
     // CEREBRO-PATCH(table-text-wrap): table-fixed + break-words so text wraps in cells on narrow screens instead of overflowing (JEH-1611)
+    // CEREBRO-PATCH(stacked-data-tables): forward data-table class + per-cell data-label so CSS can stack data tables into cards on mobile (FIR-1727).
     // Beautiful tables
-    table: ({ children }) => (
+    table: ({ children, className }) => (
       <div className="my-4 overflow-x-auto rounded-md border">
-        <table className="w-full table-fixed divide-y divide-border">{children}</table>
+        <table className={cn("w-full table-fixed divide-y divide-border", className)}>{children}</table>
       </div>
     ),
     thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
     tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
     th: ({ children }) => <th className="text-left py-3 px-4 font-semibold text-sm break-words">{children}</th>,
-    td: ({ children }) => <td className="py-3 px-4 text-sm break-words align-top">{children}</td>,
+    td: ({ children, node }) => <td data-label={node?.properties?.dataLabel as string | undefined} className="py-3 px-4 text-sm break-words align-top">{children}</td>,
     tr: ({ children }) => <tr className="hover:bg-muted/30 transition-colors">{children}</tr>,
     // Rich headings
     h1: ({ children }) => <h1 className="font-sans text-base font-bold mt-7 mb-4">{children}</h1>,
@@ -452,7 +459,8 @@ export function Markdown({
     <div className={cn('markdown-content break-words', className)}>
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
+        // CEREBRO-PATCH(stacked-data-tables): after rehypeRaw, before sanitize (which whitelists the injected class/attr) — FIR-1727.
+        rehypePlugins={[rehypeRaw, rehypeStackedDataTables, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}
         components={components}
       >

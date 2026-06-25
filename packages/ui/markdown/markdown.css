@@ -10,3 +10,22 @@
 
 /* CEREBRO-PATCH(markdown-overflow-guard): FIR-2560 follow-up — break long unbreakable tokens (URLs, hashes, slugs) on EVERY markdown surface (chat, comments, descriptions, skills). overflow-wrap:anywhere lowers min-content so flex bubbles can shrink and never force horizontal scroll; the `break-words` utility on .markdown-content is overflow-wrap:break-word, which does NOT lower min-content and so left the long-URL overflow unsolved. This unlayered rule wins over the Tailwind utility layer. */
 .markdown-content, .markdown-content p, .markdown-content li, .markdown-content a, .markdown-content code, .markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content td, .markdown-content th { overflow-wrap: anywhere; }
+
+/* CEREBRO-PATCH(stacked-data-tables): FIR-1727 — on a phone, four fixed columns
+   crush agent tables until words shred letter-by-letter. Below 640px a markdown
+   DATA table (tagged `.data-table` by rehypeStackedDataTables) becomes one card
+   per row, each cell labelled with its column header via the injected data-label.
+   Layout tables (no header row) are untagged and keep their existing behaviour. */
+@media (max-width: 640px) {
+  .markdown-content table.data-table { table-layout: auto; }
+  .markdown-content table.data-table,
+  .markdown-content table.data-table tbody,
+  .markdown-content table.data-table tr,
+  .markdown-content table.data-table td { display: block; width: 100%; }
+  .markdown-content table.data-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .markdown-content table.data-table tr { border: 1px solid var(--border); border-radius: var(--radius, 8px); padding: 0.5rem 0.9rem; margin-bottom: 0.85rem; }
+  .markdown-content table.data-table td { border: none; border-top: 1px solid var(--border); padding: 0.55rem 0; }
+  .markdown-content table.data-table tr td:first-child { border-top: none; }
+  .markdown-content table.data-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 3px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; color: var(--muted-foreground); }
+  .markdown-content table.data-table td:empty { display: none; }
+}
