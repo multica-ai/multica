@@ -486,6 +486,14 @@ func openclawParseActiveConfigPath(out string) (string, bool, error) {
 }
 
 func openclawFallbackActiveConfigPath() (string, bool, error) {
+	if explicitPath := strings.TrimSpace(os.Getenv("OPENCLAW_CONFIG_PATH")); explicitPath != "" {
+		path, err := expandOpenclawPath(explicitPath)
+		if err != nil {
+			return "", false, err
+		}
+		return openclawStatConfigPath(path)
+	}
+
 	candidates, canonicalPath, err := openclawFallbackConfigCandidates()
 	if err != nil {
 		return "", false, err
@@ -521,8 +529,8 @@ var openclawFallbackConfigDirNames = []string{
 }
 
 func openclawFallbackConfigCandidates() ([]string, string, error) {
-	candidates := make([]string, 0, 2+2*len(openclawFallbackConfigFileNames)+len(openclawFallbackConfigDirNames)*len(openclawFallbackConfigFileNames))
-	for _, env := range []string{"OPENCLAW_CONFIG_PATH", "CLAWDBOT_CONFIG_PATH"} {
+	candidates := make([]string, 0, 1+2*len(openclawFallbackConfigFileNames)+len(openclawFallbackConfigDirNames)*len(openclawFallbackConfigFileNames))
+	for _, env := range []string{"CLAWDBOT_CONFIG_PATH"} {
 		if path := strings.TrimSpace(os.Getenv(env)); path != "" {
 			candidates = append(candidates, path)
 		}

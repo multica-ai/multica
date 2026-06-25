@@ -379,6 +379,35 @@ func TestOpenclawActiveConfigPathFallbackFreshInstallUsesCanonicalPath(t *testin
 	}
 }
 
+func TestOpenclawActiveConfigPathFallbackOpenclawConfigPathHardOverride(t *testing.T) {
+	clearOpenclawPathEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	explicitPath := filepath.Join(t.TempDir(), "missing-openclaw.json")
+	t.Setenv("OPENCLAW_CONFIG_PATH", explicitPath)
+	legacyPath := filepath.Join(home, ".clawdbot", "clawdbot.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatalf("mkdir legacy config dir: %v", err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {err: openclawConfigFileUnsupportedErr()},
+	})
+
+	got, exists, err := openclawActiveConfigPath(stub.bin, openclawCLITimeout)
+	if err != nil {
+		t.Fatalf("openclawActiveConfigPath: %v", err)
+	}
+	if got != explicitPath {
+		t.Errorf("path = %q, want OPENCLAW_CONFIG_PATH hard override %q", got, explicitPath)
+	}
+	if exists {
+		t.Fatal("exists = true, want false when explicit OPENCLAW_CONFIG_PATH is missing")
+	}
+}
+
 func TestOpenclawActiveConfigPathFallbackErrorIncludesOriginalCLIError(t *testing.T) {
 	clearOpenclawPathEnv(t)
 	badPath := filepath.Join(t.TempDir(), "openclaw.json")
