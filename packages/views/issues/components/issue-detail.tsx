@@ -49,7 +49,7 @@ import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
-import { WorkflowDagViewer } from "./workflow-dag-viewer";
+import { ExecutionPanoramaPage } from "./execution";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
@@ -840,8 +840,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
   }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Track workflow run state from the DAG viewer (source of truth for running status).
-  const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
+  // Track workflow run state from node runs data.
+  const { data: workflowNodeRuns } = useQuery({
+    ...workflowNodeRunsOptions(wsId, issue?.assignee_id ?? "", issue?.workflow_run_id ?? ""),
+    enabled: issue?.assignee_type === "workflow" && !!issue?.assignee_id && !!issue?.workflow_run_id,
+  });
+  const isWorkflowRunning = useMemo(() => {
+    if (!workflowNodeRuns) return false;
+    const terminal = new Set(["completed", "critic_approved", "failed", "blocked", "skipped", "cancelled"]);
+    return !workflowNodeRuns.every((nr) => terminal.has(nr.status));
+  }, [workflowNodeRuns]);
 
   // Fire `onDelete` once when the issue transitions from loaded to missing.
   // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
@@ -1910,15 +1918,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {descDragOver && <FileDropOverlay />}
           </div>
 
-          {/* Workflow DAG — shown when the issue is assigned to a workflow */}
+          {/* Workflow Execution Panorama — shown when the issue is assigned to a workflow */}
           {issue.assignee_type === "workflow" && issue.assignee_id && (
             <div className="mt-10">
-              <WorkflowDagViewer
+              <ExecutionPanoramaPage
                 workflowId={issue.assignee_id}
                 runId={issue.workflow_run_id}
                 wsId={wsId}
-                parentIssueId={issue.id}
-                onRunningChange={setIsWorkflowRunning}
               />
             </div>
           )}
