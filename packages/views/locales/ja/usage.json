@@ -1,6 +1,6 @@
 {
-  "title": "使用量",
-  "subtitle": "このワークスペース全体のトークン消費とエージェントの活動です。",
+  "title": "デジタル従業員ダッシュボード",
+  "subtitle": "このワークスペースのエージェントの稼働状態、負荷、成果を確認します。",
   "filter": {
     "project_label": "プロジェクト",
     "all_projects": "すべてのプロジェクト",
@@ -48,9 +48,63 @@
     "header_tasks": "タスク",
     "no_data": "この期間にエージェントの活動はありません。"
   },
+  "workforce": {
+    "usage_detail_title": "使用量とトレンド",
+    "kpi": {
+      "employees": "デジタル従業員",
+      "employees_hint": "オンライン {{online}} · アーカイブ {{archived}}",
+      "on_duty": "現在稼働中",
+      "on_duty_hint": "実行 {{running}} · 待機 {{queued}}",
+      "tasks": "タスク · {{days}}日",
+      "tasks_hint": "失敗 {{failed}} · 実行時間 {{time}}",
+      "tokens": "トークン · {{days}}日",
+      "tokens_hint": "推定コスト {{cost}}"
+    },
+    "board": {
+      "title": "全従業員の運用ボード",
+      "subtitle": "利用可能なエージェント {{count}} 件 · 現在状態と {{days}}日成果で並び替え",
+      "active_window": "{{days}}日内に活動 {{count}}件",
+      "header_agent": "デジタル従業員",
+      "header_status": "状態",
+      "header_activity": "最近の活動",
+      "header_tasks": "{{days}}日タスク",
+      "header_runtime": "時間/コスト",
+      "runs_in_window": "{{days}}日 {{count}}回",
+      "failed_count": "失敗 {{count}}",
+      "no_runtime": "ランタイムなし",
+      "no_agents": "利用可能なデジタル従業員はまだありません。"
+    },
+    "status": {
+      "title": "稼働分布",
+      "capacity": "同時実行の使用量",
+      "capacity_hint": "{{percent}} 使用中"
+    },
+    "top": {
+      "title": "{{days}}日 高頻度従業員",
+      "no_data": "タスクデータはまだありません。"
+    },
+    "availability": {
+      "online": "オンライン",
+      "unstable": "不安定",
+      "offline": "オフライン",
+      "archived": "アーカイブ済み",
+      "loading": "読み込み中"
+    },
+    "workload": {
+      "working": "作業中",
+      "queued": "待機中",
+      "idle": "待機"
+    },
+    "last_active": {
+      "none": "最近の実行なし",
+      "today": "今日実行",
+      "yesterday": "昨日実行",
+      "days_ago": "{{days}}日前に実行"
+    }
+  },
   "empty": {
-    "title": "まだ使用量はありません",
-    "body": "ここでエージェントがタスクを実行し始めると、トークンの消費と実行時間がこの画面に表示されます。"
+    "title": "従業員データはまだありません",
+    "body": "エージェントを作成して実行すると、稼働状態、タスク成果、使用量がここに表示されます。"
   },
   "duration": {
     "less_than_minute": "1分未満"

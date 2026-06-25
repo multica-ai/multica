@@ -1,6 +1,6 @@
 {
-  "title": "사용량",
-  "subtitle": "이 워크스페이스의 토큰 비용과 에이전트 활동입니다.",
+  "title": "디지털 직원 대시보드",
+  "subtitle": "이 워크스페이스 에이전트의 실시간 상태, 작업 부하, 산출 현황입니다.",
   "filter": {
     "project_label": "프로젝트",
     "all_projects": "모든 프로젝트",
@@ -48,9 +48,63 @@
     "header_tasks": "작업",
     "no_data": "이 기간에는 에이전트 활동이 없습니다."
   },
+  "workforce": {
+    "usage_detail_title": "사용량 및 추세",
+    "kpi": {
+      "employees": "디지털 직원",
+      "employees_hint": "온라인 {{online}} · 보관됨 {{archived}}",
+      "on_duty": "현재 작업 중",
+      "on_duty_hint": "실행 {{running}} · 대기 {{queued}}",
+      "tasks": "작업 · {{days}}일",
+      "tasks_hint": "실패 {{failed}} · 실행 시간 {{time}}",
+      "tokens": "토큰 · {{days}}일",
+      "tokens_hint": "예상 비용 {{cost}}"
+    },
+    "board": {
+      "title": "전체 직원 운영 보드",
+      "subtitle": "사용 가능한 에이전트 {{count}}개 · 현재 상태와 {{days}}일 산출 기준 정렬",
+      "active_window": "{{days}}일 내 활동 {{count}}개",
+      "header_agent": "디지털 직원",
+      "header_status": "상태",
+      "header_activity": "최근 활동",
+      "header_tasks": "{{days}}일 작업",
+      "header_runtime": "시간/비용",
+      "runs_in_window": "{{days}}일 {{count}}회",
+      "failed_count": "실패 {{count}}",
+      "no_runtime": "런타임 없음",
+      "no_agents": "사용 가능한 디지털 직원이 없습니다."
+    },
+    "status": {
+      "title": "운영 분포",
+      "capacity": "동시 실행 사용량",
+      "capacity_hint": "{{percent}} 사용 중"
+    },
+    "top": {
+      "title": "{{days}}일 고빈도 직원",
+      "no_data": "아직 작업 데이터가 없습니다."
+    },
+    "availability": {
+      "online": "온라인",
+      "unstable": "불안정",
+      "offline": "오프라인",
+      "archived": "보관됨",
+      "loading": "로드 중"
+    },
+    "workload": {
+      "working": "작업 중",
+      "queued": "대기 중",
+      "idle": "유휴"
+    },
+    "last_active": {
+      "none": "최근 실행 없음",
+      "today": "오늘 실행",
+      "yesterday": "어제 실행",
+      "days_ago": "{{days}}일 전 실행"
+    }
+  },
   "empty": {
-    "title": "아직 사용량이 없습니다",
-    "body": "여기에서 에이전트가 작업을 실행하기 시작하면 토큰 비용과 실행 시간이 이 화면에 표시됩니다."
+    "title": "아직 직원 데이터가 없습니다",
+    "body": "에이전트를 만들고 실행하면 실시간 상태, 작업 산출, 사용량이 여기에 표시됩니다."
   },
   "duration": {
     "less_than_minute": "1분 미만"
