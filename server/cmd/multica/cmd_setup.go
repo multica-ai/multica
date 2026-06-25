@@ -193,15 +193,8 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	// error (GitHub #3912).
 	existing, _ := cli.LoadCLIConfigForProfile(profile)
 	serverURL, userProvidedServerURL := resolveSelfHostServerURL(cmd, existing)
-	appURL := cli.FlagOrEnv(cmd, "app-url", "MULTICA_APP_URL", "")
+	appURL := resolveSelfHostAppURL(cmd, existing)
 	frontendPort, _ := cmd.Flags().GetInt("frontend-port")
-
-	// Keep the already-configured app_url (set via an earlier setup or `config
-	// set`) when no flag/env is given and --frontend-port wasn't passed, so
-	// re-running setup self-host doesn't reset a remote frontend to localhost.
-	if appURL == "" && !cmd.Flags().Changed("frontend-port") && existing.AppURL != "" {
-		appURL = existing.AppURL
-	}
 
 	if appURL == "" {
 		if userProvidedServerURL && !serverHostIsLocal(serverURL) {
@@ -308,10 +301,33 @@ func resolveSelfHostServerURL(cmd *cobra.Command, existing cli.CLIConfig) (serve
 		return normalizeAPIBaseURL(v), true
 	}
 	if !cmd.Flags().Changed("port") && existing.ServerURL != "" {
-		return existing.ServerURL, true
+		// `config set server_url` stores the value as-is, so it may be the
+		// documented ws:// daemon form; normalize it to the http(s) base the
+		// probe and stored server_url expect, like resolveServerURL does.
+		return normalizeAPIBaseURL(existing.ServerURL), true
 	}
 	port, _ := cmd.Flags().GetInt("port")
 	return fmt.Sprintf("http://localhost:%d", port), false
+}
+
+// resolveSelfHostAppURL resolves the frontend URL for `setup self-host`: the
+// --app-url flag wins, then MULTICA_APP_URL, then an already-configured app_url
+// from the existing config (unless --frontend-port was passed). Returns "" when
+// none of those is set, leaving the caller to infer it — prompt for a remote
+// host, or fall back to localhost:<frontend-port>.
+//
+// Mirrors resolveSelfHostServerURL so re-running setup self-host keeps a
+// configured remote frontend instead of resetting it to localhost. Unlike
+// server_url, app_url is a plain frontend URL rather than a ws:// daemon
+// address, so it is used as-is without normalizeAPIBaseURL.
+func resolveSelfHostAppURL(cmd *cobra.Command, existing cli.CLIConfig) string {
+	if v := cli.FlagOrEnv(cmd, "app-url", "MULTICA_APP_URL", ""); v != "" {
+		return v
+	}
+	if !cmd.Flags().Changed("frontend-port") && existing.AppURL != "" {
+		return existing.AppURL
+	}
+	return ""
 }
 
 // serverHostIsLocal reports whether serverURL points at the same machine as
