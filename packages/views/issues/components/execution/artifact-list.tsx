@@ -19,7 +19,7 @@ export function ArtifactList({ nodeRun }: ArtifactListProps) {
       {hasWorkerOutput && (
         <div>
           <h4 className="text-[11px] font-medium text-muted-foreground mb-1">
-            {t("execution.detail_panel.worker_output")}
+            {t(($) => $.execution.detail_panel.worker_output)}
           </h4>
           <pre className="text-xs bg-muted/50 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap">
             {JSON.stringify(nodeRun.worker_output, null, 2)}
@@ -29,7 +29,7 @@ export function ArtifactList({ nodeRun }: ArtifactListProps) {
       {hasCriticOutput && (
         <div>
           <h4 className="text-[11px] font-medium text-muted-foreground mb-1">
-            {t("execution.detail_panel.critic_output")}
+            {t(($) => $.execution.detail_panel.critic_output)}
           </h4>
           <pre className="text-xs bg-muted/50 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap">
             {JSON.stringify(nodeRun.critic_output, null, 2)}

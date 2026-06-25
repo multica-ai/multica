@@ -52,11 +52,15 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (opts: { queryKey?: unknown[] }) => {
     const key = opts.queryKey ?? [];
-    if (Array.isArray(key) && key.includes("stages")) return { data: mocks.stagesData, isLoading: mocks.isLoading, isError: false };
-    if (Array.isArray(key) && key.includes("nodes")) return { data: mocks.nodesData, isLoading: false };
+    // Stages: data only available when NOT loading (mimics real API behavior)
+    if (Array.isArray(key) && key.includes("stages")) return { data: mocks.isLoading ? [] : mocks.stagesData, isLoading: mocks.isLoading, isError: false };
+    if (Array.isArray(key) && key.includes("nodes")) return { data: mocks.isLoading ? [] : mocks.nodesData, isLoading: mocks.isLoading };
     if (Array.isArray(key) && key.includes("edges")) return { data: mocks.edgesData, isLoading: false };
     if (Array.isArray(key) && key.includes("agents") && !key.includes("plugins")) return { data: mocks.agentsData, isLoading: false };
     if (Array.isArray(key) && key.includes("plugins")) return { data: mocks.pluginsData, isLoading: false };
+    if (Array.isArray(key) && key.includes("members")) return { data: [], isLoading: false };
+    if (Array.isArray(key) && key.includes("squads")) return { data: [], isLoading: false };
+    if (Array.isArray(key) && key.includes("list")) return { data: { workflows: [] }, isLoading: false };
     return { data: mocks.workflowData, isLoading: mocks.isLoading, isError: mocks.isError, refetch: vi.fn() };
   },
   useMutation: () => ({ mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false }),
@@ -70,10 +74,13 @@ vi.mock("@multica/core/workflows/queries", () => ({
   workflowStagesOptions: (wsId: string, workflowId: string) => ({ queryKey: ["workflows", wsId, workflowId, "stages"] }),
   workflowNodesOptions: (wsId: string, workflowId: string) => ({ queryKey: ["workflows", wsId, workflowId, "nodes"] }),
   workflowEdgesOptions: (wsId: string, workflowId: string) => ({ queryKey: ["workflows", wsId, workflowId, "edges"] }),
+  workflowListOptions: (wsId: string) => ({ queryKey: ["workflows", wsId, "list"] }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "agents"] }),
+  memberListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "members"] }),
+  squadListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "squads"] }),
   builtinPluginListOptions: () => ({ queryKey: ["plugins", "builtin"] }),
 }));
 
@@ -203,5 +210,130 @@ describe("WorkflowPanoramaPage", () => {
     mocks.isError = true;
     const { container } = renderWithI18n(<WorkflowPanoramaPage workflowId="wf-1" />);
     expect(container.querySelector('[role="alert"]')).toBeTruthy();
+  });
+
+  describe("incremental data loading (first-entry simulation)", () => {
+    it("renders SVG overlay when edges arrive after nodes/stages", () => {
+      // Simulate first entry: nodes/stages loaded, but edges NOT yet loaded
+      mocks.edgesData = [];
+
+      const { container, rerender } = renderWithI18n(
+        <WorkflowPanoramaPage workflowId="wf-1" />,
+      );
+
+      // After initial render: cards visible, SVG should be absent (no edges yet)
+      expect(screen.getByTestId("compact-node-card-n1")).toBeTruthy();
+      const svgBefore = container.querySelector("svg.absolute");
+      console.log("[DIAG] after initial render (edges=[]): svg present =", !!svgBefore);
+      console.log("[DIAG] container query for svg:", container.querySelectorAll("svg").length, "svg elements total");
+
+      // Simulate edges arriving asynchronously
+      mocks.edgesData = MOCK_EDGES;
+      rerender(<WorkflowPanoramaPage workflowId="wf-1" />);
+
+      // After edges arrive: SVG overlay should render with connection lines
+      const svgAfter = container.querySelector("svg.absolute");
+      console.log("[DIAG] after edges arrive: svg present =", !!svgAfter);
+      if (svgAfter) {
+        const paths = svgAfter.querySelectorAll("path");
+        console.log("[DIAG] svg path count:", paths.length);
+        for (let i = 0; i < paths.length; i++) {
+          const p = paths[i]!;
+          console.log(`[DIAG] path[${i}]: d="${p.getAttribute("d")}", marker-end="${p.getAttribute("marker-end")}"`);
+        }
+      }
+
+      // Also check for any path elements in the container
+      const allPaths = container.querySelectorAll("path");
+      console.log("[DIAG] total path elements in container:", allPaths.length);
+
+      expect(svgAfter).toBeTruthy();
+      expect(svgAfter!.querySelectorAll("path").length).toBeGreaterThan(0);
+    });
+
+    it("renders SVG overlay when edges and positions arrive in separate renders", () => {
+      // Simulate: edges arrive BEFORE positions are measured
+      // (edges=[] on initial render, edges arrive on re-render)
+      mocks.edgesData = [];
+
+      const { container, rerender } = renderWithI18n(
+        <WorkflowPanoramaPage workflowId="wf-1" />,
+      );
+
+      // Verify initial state: no SVG
+      const svgBefore = container.querySelector("svg.absolute");
+      console.log("[DIAG-separate] before edges: svg =", !!svgBefore);
+
+      // Now edges arrive
+      mocks.edgesData = MOCK_EDGES;
+      rerender(<WorkflowPanoramaPage workflowId="wf-1" />);
+
+      const svgAfter = container.querySelector("svg.absolute");
+      console.log("[DIAG-separate] after edges: svg =", !!svgAfter);
+      if (svgAfter) {
+        console.log("[DIAG-separate] svg path count:", svgAfter.querySelectorAll("path").length);
+      }
+
+      expect(svgAfter).toBeTruthy();
+    });
+
+    it("handles skeleton-to-panorama transition with delayed edges", () => {
+      // Simulate FULL first-entry flow:
+      // Step 1: loading skeleton
+      mocks.isLoading = true;
+      mocks.edgesData = [];
+
+      const { container, rerender } = renderWithI18n(
+        <WorkflowPanoramaPage workflowId="wf-1" />,
+      );
+
+      // Verify skeleton
+      const skeleton = container.querySelector('[data-testid="panorama-skeleton"]');
+      console.log("[DIAG-transition] step1 skeleton present:", !!skeleton);
+
+      // Step 2: nodes/stages arrive, but edges still loading
+      mocks.isLoading = false;
+      // edgesData stays []
+      rerender(<WorkflowPanoramaPage workflowId="wf-1" />);
+
+      // Check state after skeleton→panorama transition
+      expect(screen.getByTestId("compact-node-card-n1")).toBeTruthy();
+      let svgAfterLoad = container.querySelector("svg.absolute");
+      console.log("[DIAG-transition] step2a (after skeleton→panorama): svg present =", !!svgAfterLoad);
+
+      // Step 2b: ANOTHER rerender to flush any pending useLayoutEffect state updates
+      rerender(<WorkflowPanoramaPage workflowId="wf-1" />);
+      svgAfterLoad = container.querySelector("svg.absolute");
+      console.log("[DIAG-transition] step2b (after extra rerender): svg present =", !!svgAfterLoad);
+      if (svgAfterLoad) {
+        const paths = svgAfterLoad.querySelectorAll("path");
+        console.log("[DIAG-transition] step2b path count:", paths.length);
+        paths.forEach((p, i) => {
+          console.log(`[DIAG-transition] step2b path[${i}]: marker="${p.getAttribute("marker-end")}", d="${p.getAttribute("d")?.substring(0, 60)}"`);
+        });
+      }
+
+      // Step 3: edges finally arrive
+      mocks.edgesData = MOCK_EDGES;
+      rerender(<WorkflowPanoramaPage workflowId="wf-1" />);
+
+      const svgAfterEdges = container.querySelector("svg.absolute");
+      console.log("[DIAG-transition] step3 (edges arrived): svg present =", !!svgAfterEdges);
+      if (svgAfterEdges) {
+        const paths = svgAfterEdges.querySelectorAll("path");
+        console.log("[DIAG-transition] step3 path count:", paths.length);
+        const edgePaths = Array.from(paths).filter(p => p.getAttribute("marker-end"));
+        console.log("[DIAG-transition] step3 edge paths:", edgePaths.length);
+      }
+
+      // Check PanoramaSvgOverlay's SVG
+      const panoramaSvg = container.querySelector("svg.absolute.z-10");
+      console.log("[DIAG-transition] final panorama svg:", !!panoramaSvg);
+
+      expect(panoramaSvg).toBeTruthy();
+      const edgePaths = panoramaSvg!.querySelectorAll('path[marker-end]');
+      console.log("[DIAG-transition] final edge paths count:", edgePaths.length);
+      expect(edgePaths.length).toBeGreaterThan(0);
+    });
   });
 });

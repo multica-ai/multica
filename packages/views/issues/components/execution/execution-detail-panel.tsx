@@ -76,7 +76,7 @@ export function ExecutionDetailPanel({
           {status && (
             <section>
               <h3 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                {t("execution.detail_panel.status_path")}
+                {t(($) => $.execution.detail_panel.status_path)}
               </h3>
               <div className="flex items-center gap-2 text-xs">
                 <span
@@ -119,7 +119,7 @@ export function ExecutionDetailPanel({
           {/* Worker info */}
           <section>
             <h3 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
-              {t("execution.detail_panel.worker")}
+              {t(($) => $.execution.detail_panel.worker)}
             </h3>
             <div className="flex items-center gap-2 text-sm">
               {node.worker_type === "agent" ? (
@@ -137,7 +137,7 @@ export function ExecutionDetailPanel({
           {/* Critic info */}
           <section>
             <h3 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
-              {t("execution.detail_panel.critic")}
+              {t(($) => $.execution.detail_panel.critic)}
             </h3>
             {node.critic_type || node.critic_id ? (
               <>
@@ -157,7 +157,7 @@ export function ExecutionDetailPanel({
               </>
             ) : (
               <p className="text-xs text-muted-foreground italic">
-                {t("execution.detail_panel.not_configured")}
+                {t(($) => $.execution.detail_panel.not_configured)}
               </p>
             )}
           </section>
@@ -169,13 +169,13 @@ export function ExecutionDetailPanel({
           {nodeRun && (
             <section>
               <h3 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                {t("execution.detail_panel.metadata")}
+                {t(($) => $.execution.detail_panel.metadata)}
               </h3>
               <dl className="text-xs space-y-1">
                 {nodeRun.started_at && (
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">
-                      {t("execution.detail_panel.started_at")}
+                      {t(($) => $.execution.detail_panel.started_at)}
                     </dt>
                     <dd>{new Date(nodeRun.started_at).toLocaleString()}</dd>
                   </div>
@@ -183,7 +183,7 @@ export function ExecutionDetailPanel({
                 {nodeRun.completed_at && (
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">
-                      {t("execution.detail_panel.completed_at")}
+                      {t(($) => $.execution.detail_panel.completed_at)}
                     </dt>
                     <dd>{new Date(nodeRun.completed_at).toLocaleString()}</dd>
                   </div>
@@ -191,7 +191,7 @@ export function ExecutionDetailPanel({
                 {duration != null && (
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">
-                      {t("execution.detail_panel.duration")}
+                      {t(($) => $.execution.detail_panel.duration)}
                     </dt>
                     <dd>{duration}s</dd>
                   </div>
@@ -199,7 +199,7 @@ export function ExecutionDetailPanel({
                 {nodeRun.retry_count > 0 && (
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">
-                      {t("execution.detail_panel.retry_count")}
+                      {t(($) => $.execution.detail_panel.retry_count)}
                     </dt>
                     <dd>{nodeRun.retry_count}</dd>
                   </div>

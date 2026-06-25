@@ -95,10 +95,9 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("../../../workflows/components/overview/stage-lane", () => ({
   StageLane: ({
     stage,
-    nodeIds,
   }: {
     stage: { id: string; name: string };
-    nodeIds: unknown[];
+    nodeIds?: unknown[];
   }) => <div data-testid={`stage-lane-${stage.id}`}>{stage.name}</div>,
 }));
 

@@ -45,7 +45,7 @@ export function ExecutionPanoramaPage({
   const { t } = useT("issues");
 
   // ---- Data queries ----
-  const { data: workflow, isLoading: wfLoading } = useQuery(
+  const { isLoading: wfLoading } = useQuery(
     workflowDetailOptions(wsId, workflowId),
   );
   const { data: stages, isLoading: stLoading } = useQuery(
@@ -163,7 +163,7 @@ export function ExecutionPanoramaPage({
             stage={{
               id: "unassigned",
               workflow_id: workflowId,
-              name: t("execution.panorama.unassigned"),
+              name: t(($) => $.execution.panorama.unassigned),
               description: "",
               sort_order: 0,
               node_count: unassignedNodes.length,
@@ -215,7 +215,7 @@ export function ExecutionPanoramaPage({
             stage={{
               id: "unassigned",
               workflow_id: workflowId,
-              name: t("execution.panorama.unassigned"),
+              name: t(($) => $.execution.panorama.unassigned),
               description: "",
               sort_order: 999,
               node_count: unassignedNodes.length,
