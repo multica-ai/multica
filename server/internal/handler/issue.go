@@ -784,7 +784,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// (origin_type = 'workflow') are excluded from the list by default.
 	excludeWorkflowOrigin := pgtype.Bool{Bool: true, Valid: true}
 	if r.URL.Query().Get("include_workflow_origin") == "true" {
-		excludeWorkflowOrigin = pgtype.Bool{Bool: false, Valid: true}
+		// Setting Valid: false sends SQL NULL, which causes the query's
+		// `$N::bool IS NULL` check to short-circuit and skip the filter.
+		excludeWorkflowOrigin = pgtype.Bool{Valid: false}
 	}
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
