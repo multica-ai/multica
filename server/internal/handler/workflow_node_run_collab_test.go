@@ -160,6 +160,87 @@ func TestTakeoverNodeRun_PausesWorkingNode(t *testing.T) {
 	}
 }
 
+// seedCollabNodeRunWithTask creates a working node_run linked to a worker agent
+// task whose session_id is already known (as if the daemon pinned the task
+// session but has not yet written the node-run binding). Returns the node run
+// id, the worker agent id, and the CSC session id string.
+func seedCollabNodeRunWithTask(t *testing.T) (nodeRunID, agentID, sessionID string) {
+	t.Helper()
+	ctx := context.Background()
+	sessionID = "csc-takeover-sync-test-001"
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'Takeover Sync Worker', '', 'cloud', '{}'::jsonb, $2, 'workspace', 1, $3)
+		RETURNING id
+	`, testWorkspaceID, testRuntimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_agent WHERE id = $1`, agentID) })
+
+	var workflowID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow (workspace_id, title, status, created_by_type, created_by_id)
+		VALUES ($1, 'Takeover Sync WF', 'active', 'member', $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&workflowID); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM multica_workflow WHERE id = $1`, workflowID) })
+
+	var nodeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow_node (workflow_id, title, worker_type, worker_id, critic_type)
+		VALUES ($1, 'Takeover Sync Node', 'agent', $2, 'api')
+		RETURNING id
+	`, workflowID, agentID).Scan(&nodeID); err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+
+	var runID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow_run (workflow_id, workspace_id, workflow_title, status, triggered_by_type, triggered_by_id)
+		VALUES ($1, $2, 'Takeover Sync WF', 'running', 'member', $3)
+		RETURNING id
+	`, workflowID, testWorkspaceID, testUserID).Scan(&runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_workflow_node_run (
+			workflow_run_id, workflow_node_id, node_title, status, worker_type, critic_type,
+			runtime_id
+		)
+		VALUES ($1, $2, 'Takeover Sync Node', 'working', 'agent', 'api', $3)
+		RETURNING id
+	`, runID, nodeID, testRuntimeID).Scan(&nodeRunID); err != nil {
+		t.Fatalf("seed node run: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO multica_agent_task_queue (
+			agent_id, issue_id, status, priority, runtime_id, session_id,
+			workflow_node_run_id
+		)
+		VALUES ($1, NULL, 'running', 2, $2, $3, $4)
+		RETURNING id
+	`, agentID, testRuntimeID, sessionID, nodeRunID).Scan(&taskID); err != nil {
+		t.Fatalf("seed worker task: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE multica_workflow_node_run SET worker_agent_task_id = $1 WHERE id = $2
+	`, taskID, nodeRunID); err != nil {
+		t.Fatalf("link worker task: %v", err)
+	}
+
+	return nodeRunID, agentID, sessionID
+}
+
 // TestTakeoverNodeRun_RejectsTerminalNode verifies an already-completed node
 // cannot be taken over (invalid transition → 400), so the state machine guard
 // is enforced at the HTTP boundary, not just in the pure-function unit test.
@@ -175,6 +256,52 @@ func TestTakeoverNodeRun_RejectsTerminalNode(t *testing.T) {
 
 	if w.Code != 400 {
 		t.Fatalf("takeover of completed node: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestTakeoverNodeRun_SyncsMissingSessionFromTask verifies that when the daemon
+// has pinned a session on the worker task but not yet written the node-run
+// binding, takeover backfills session_id/runtime_id from the task so Cloud Web
+// can attach to the live CSC session immediately.
+func TestTakeoverNodeRun_SyncsMissingSessionFromTask(t *testing.T) {
+	nodeRunID, _, sessionID := seedCollabNodeRunWithTask(t)
+
+	// Pre-condition: the node run itself has no session binding yet.
+	nrBefore := fetchNodeRun(t, nodeRunID)
+	if nrBefore.SessionID.Valid {
+		t.Fatalf("pre-condition: node run session_id should be NULL, got %q", nrBefore.SessionID.String)
+	}
+
+	req := withURLParam(
+		newRequest("POST", "/api/node-runs/"+nodeRunID+"/blocked", nil),
+		"nodeRunId", nodeRunID,
+	)
+	w := httptest.NewRecorder()
+	testHandler.TakeoverNodeRun(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("takeover: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp WorkflowNodeRunResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "blocked" {
+		t.Fatalf("expected status blocked, got %s", resp.Status)
+	}
+	if resp.SessionID == nil || *resp.SessionID != sessionID {
+		t.Fatalf("expected response session_id %q, got %v", sessionID, resp.SessionID)
+	}
+
+	nr := fetchNodeRun(t, nodeRunID)
+	if nr.Status != "blocked" {
+		t.Fatalf("db status: expected blocked, got %s", nr.Status)
+	}
+	if !nr.SessionID.Valid || nr.SessionID.String != sessionID {
+		t.Fatalf("db session_id: expected %q, got %v", sessionID, nr.SessionID)
+	}
+	if nr.CompletedAt.Valid {
+		t.Fatalf("takeover must leave completed_at NULL (paused, not stuck), got %v", nr.CompletedAt)
 	}
 }
 
