@@ -303,7 +303,10 @@ export type CerebroFlagKey =
   | "cerebro_chat_recent_list"
   // FIR-1412: folders (with sub-folders) for the Skills and Autopilots lists.
   | "cerebro_skill_folders"
-  | "cerebro_autopilot_folders";
+  | "cerebro_autopilot_folders"
+  // FIR-2042: mobile-web "Install Multica" top banner with per-platform
+  // guidance (Android native install prompt; iOS Share → Add to Home Screen).
+  | "cerebro_pwa_install_banner";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -630,6 +633,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-1412: default ON — folders are additive and harmless when unused.
   cerebro_skill_folders: true,
   cerebro_autopilot_folders: true,
+  // FIR-2042: default ON — the install banner only appears on mobile web when
+  // the app is not already installed, and is dismissible.
+  cerebro_pwa_install_banner: true,
 };
 
 /**

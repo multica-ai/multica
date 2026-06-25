@@ -11,7 +11,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { NoAccessPage } from "@multica/views/workspace/no-access-page";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
-import { CerebroOpenInAppBanner } from "@/components/cerebro-open-in-app-banner";
+import { CerebroInstallPwaBanner } from "@/components/cerebro-install-pwa-banner";
 import { CerebroWorkspaceFavicon } from "@/components/cerebro-workspace-favicon";
 import {
   CerebroWorkspaceTitle,
@@ -105,7 +105,7 @@ export default function WorkspaceLayout({
         <CerebroWorkspaceFavicon />
         <CerebroWorkspaceTitle />
         <CerebroWorkspaceSidebarColor />
-        <CerebroOpenInAppBanner />
+        <CerebroInstallPwaBanner />
         {children}
       </MemberPresenceProvider>
     </WorkspaceSlugProvider>

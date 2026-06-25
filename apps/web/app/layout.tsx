@@ -85,7 +85,12 @@ export const metadata: Metadata = {
   },
   description:
     "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
-  manifest: "/manifest.webmanifest",
+  // FIR-2042: the manifest <link> is rendered manually in the body below with
+  // crossOrigin="use-credentials" so it can carry the auth cookie. Next's
+  // metadata.manifest emits a plain <link> with no crossorigin, which is fetched
+  // anonymously and 302s to the Cloudflare Access login on Firtal's gated hosts —
+  // breaking Android Chrome installability. Do not re-add `manifest:` here or
+  // there will be two competing <link rel="manifest"> tags.
   applicationName: "Multica",
   appleWebApp: {
     capable: true,
@@ -153,6 +158,19 @@ export default async function RootLayout({
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >
       <body className="h-full overflow-hidden">
+        {/*
+          FIR-2042: manifest link with credentials. React hoists this <link>
+          into <head> during SSR, so crossorigin="use-credentials" is present
+          at document-parse time — the browser sends the Cloudflare Access cookie
+          when fetching the manifest, instead of being bounced to the login page.
+          This is what lets Android Chrome read the manifest and offer "Install"
+          for logged-in users, with zero public/anonymous exposure of the file.
+        */}
+        <link
+          rel="manifest"
+          href="/manifest.webmanifest"
+          crossOrigin="use-credentials"
+        />
         {/* CEREBRO-PATCH(web-serwist): wrap with SerwistProvider for service worker */}
         <SerwistProvider
           swUrl="/sw.js"
