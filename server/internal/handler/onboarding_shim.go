@@ -207,7 +207,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	var assistant db.Agent
 	assistantCreated := false
 	for _, existing := range agents {
-		if existing.Name == onboardingAssistantName && existing.Visibility == "workspace" {
+		if existing.Name == onboardingAssistantName && existing.Visibility == "private" {
 			assistant = existing
 			break
 		}
@@ -221,7 +221,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			RuntimeMode:        runtime.RuntimeMode,
 			RuntimeConfig:      []byte("{}"),
 			RuntimeID:          runtime.ID,
-			Visibility:         "workspace",
+			Visibility:         "private",
 			MaxConcurrentTasks: 6,
 			OwnerID:            parseUUID(userID),
 			Instructions:       onboardingAssistantInstructions,
