@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,6 +40,11 @@ const (
 	defaultCodexSemanticInactivityTimeout  = 10 * time.Minute
 	defaultCodexFirstTurnNoProgressTimeout = 30 * time.Second
 	codexVersionDiagnosticTimeout          = 2 * time.Second
+	// blindRunThreshold is the minimum number of shell commands that must have
+	// executed before a blind-run warning is logged. Fewer than this means the
+	// agent simply didn't use shell tools enough to draw a conclusion about
+	// output capture. See openai/codex#20874.
+	blindRunThreshold = 3
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
 	// waits for codex to exit on its own after stdin is closed, before forcing
 	// a context-cancel kill. A clean exit lets codex run its shutdown path and
@@ -885,6 +891,19 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		finalOutput := output.String()
 		outputMu.Unlock()
 
+		// Warn when every shell command returned empty output — the agent ran
+		// blind. This is a known upstream codex-cli bug on Windows
+		// (openai/codex#20874): commands execute but stdout and exit codes
+		// are never surfaced to the model.
+		if c.isBlindRun() && b.cfg.Logger != nil {
+			b.cfg.Logger.Warn("codex blind run detected: all shell commands returned empty output",
+				"exec_commands", c.execCommands.Load(),
+				"empty_exec_commands", c.emptyExecCommands.Load(),
+				"thread_id", threadID,
+				"pid", cmd.Process.Pid,
+			)
+		}
+
 		// Build usage map from accumulated codex usage.
 		// First check JSON-RPC notifications (often empty for Codex).
 		var usageMap map[string]TokenUsage
@@ -1217,6 +1236,18 @@ type codexClient struct {
 
 	turnErrorMu sync.Mutex
 	turnError   string // captured from turn/completed status=failed or terminal error notifications
+
+	// Blind-run detection: track shell command results to detect when the codex
+	// runtime is returning empty output for every command (upstream Windows bug,
+	// openai/codex#20874). Counters are per-turn and reset on each new turn so a
+	// single productive command clears the blind-run flag for the rest of the turn.
+	//
+	// Concurrency: these are written by the reader goroutine (trackExecCommandResult
+	// in handleLine) and read by the lifecycle goroutine (isBlindRun). atomic.Int64
+	// provides the necessary happens-before edges without taking codexClient.mu,
+	// which is scoped to pending RPC bookkeeping.
+	execCommands      atomic.Int64
+	emptyExecCommands atomic.Int64
 }
 
 func (c *codexClient) setTurnError(msg string) {
@@ -1234,6 +1265,34 @@ func (c *codexClient) getTurnError() string {
 	c.turnErrorMu.Lock()
 	defer c.turnErrorMu.Unlock()
 	return c.turnError
+}
+
+// trackExecCommandResult records a shell command result for blind-run detection.
+// Only commandExecution tool results are tracked (not fileChange or agentMessage).
+// output is trimmed before the empty check — a whitespace-only or missing
+// aggregatedOutput field both count as empty. Uses atomic counters so the
+// reader goroutine and the lifecycle goroutine can both call this safely.
+func (c *codexClient) trackExecCommandResult(output string) {
+	c.execCommands.Add(1)
+	if strings.TrimSpace(output) == "" {
+		c.emptyExecCommands.Add(1)
+	}
+}
+
+// resetBlindRunCounters clears per-turn shell command counters. Called at the
+// start of each new turn so a previous turn's blind run doesn't carry over.
+func (c *codexClient) resetBlindRunCounters() {
+	c.execCommands.Store(0)
+	c.emptyExecCommands.Store(0)
+}
+
+// isBlindRun reports whether every shell command executed during this turn
+// returned empty output, which means the agent ran blind. At least
+// blindRunThreshold commands must have executed to avoid false positives from
+// runs that simply didn't use shell tools.
+func (c *codexClient) isBlindRun() bool {
+	ec := c.execCommands.Load()
+	return ec >= blindRunThreshold && c.emptyExecCommands.Load() == ec
 }
 
 type pendingRPC struct {
@@ -1563,6 +1622,7 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 	switch msgType {
 	case "task_started":
 		c.turnStarted = true
+		c.resetBlindRunCounters()
 		if c.onMessage != nil {
 			c.onMessage(Message{Type: MessageStatus, Status: "running", SessionID: c.threadID})
 		}
@@ -1585,6 +1645,7 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 	case "exec_command_end":
 		callID, _ := msg["call_id"].(string)
 		output, _ := msg["output"].(string)
+		c.trackExecCommandResult(output)
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolResult,
@@ -1641,6 +1702,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 	switch method {
 	case "turn/started":
 		c.turnStarted = true
+		c.resetBlindRunCounters()
 		if turnID := extractNestedString(params, "turn", "id"); turnID != "" {
 			c.turnID = turnID
 		}
@@ -1751,6 +1813,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 
 	case method == "item/completed" && itemType == "commandExecution":
 		output, _ := item["aggregatedOutput"].(string)
+		c.trackExecCommandResult(output)
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolResult,

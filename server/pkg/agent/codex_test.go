@@ -2404,3 +2404,113 @@ func TestHasManagedCodexMcpConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexTrackExecCommandResult(t *testing.T) {
+	t.Parallel()
+
+	c := &codexClient{}
+
+	// Empty output increments both counters.
+	c.trackExecCommandResult("")
+	if c.execCommands.Load() != 1 || c.emptyExecCommands.Load() != 1 {
+		t.Fatalf("after empty: execCommands=%d emptyExecCommands=%d, want both=1", c.execCommands.Load(), c.emptyExecCommands.Load())
+	}
+
+	// Non-empty output only increments the total.
+	c.trackExecCommandResult("hello world")
+	if c.execCommands.Load() != 2 || c.emptyExecCommands.Load() != 1 {
+		t.Fatalf("after non-empty: execCommands=%d emptyExecCommands=%d, want 2,1", c.execCommands.Load(), c.emptyExecCommands.Load())
+	}
+
+	// Whitespace-only output counts as empty.
+	c.trackExecCommandResult("   \n\t  ")
+	if c.execCommands.Load() != 3 || c.emptyExecCommands.Load() != 2 {
+		t.Fatalf("after whitespace: execCommands=%d emptyExecCommands=%d, want 3,2", c.execCommands.Load(), c.emptyExecCommands.Load())
+	}
+
+	// Map missing aggregatedOutput key — item["aggregatedOutput"].(string)
+	// returns "", which counts as empty (same as whitespace-only output).
+	c.trackExecCommandResult("")
+	if c.execCommands.Load() != 4 || c.emptyExecCommands.Load() != 3 {
+		t.Fatalf("after nil output: execCommands=%d emptyExecCommands=%d, want 4,3", c.execCommands.Load(), c.emptyExecCommands.Load())
+	}
+}
+
+func TestCodexIsBlindRun(t *testing.T) {
+	t.Parallel()
+
+	// Fewer than threshold commands — not a blind run even if all are empty.
+	c := &codexClient{}
+	c.trackExecCommandResult("")
+	c.trackExecCommandResult("")
+	if c.isBlindRun() {
+		t.Fatal("2 empty commands is not enough to flag a blind run")
+	}
+
+	// Exactly threshold empty commands — blind run.
+	c.trackExecCommandResult("")
+	if !c.isBlindRun() {
+		t.Fatal("3 empty commands should flag a blind run")
+	}
+
+	// 2 empty + 1 with output = not blind (mixed).
+	c2 := &codexClient{}
+	c2.trackExecCommandResult("")
+	c2.trackExecCommandResult("output")
+	c2.trackExecCommandResult("")
+	if c2.isBlindRun() {
+		t.Fatal("mixed output should not flag a blind run")
+	}
+
+	// All commands have output — not blind.
+	c3 := &codexClient{}
+	c3.trackExecCommandResult("line1")
+	c3.trackExecCommandResult("line2")
+	c3.trackExecCommandResult("line3")
+	c3.trackExecCommandResult("line4")
+	if c3.isBlindRun() {
+		t.Fatal("all outputs present should not flag a blind run")
+	}
+
+	// 5 commands all empty — blind run.
+	c4 := &codexClient{}
+	for i := 0; i < 5; i++ {
+		c4.trackExecCommandResult("")
+	}
+	if !c4.isBlindRun() {
+		t.Fatal("5 empty commands should flag a blind run")
+	}
+}
+
+func TestCodexBlindRunResetOnNewTurn(t *testing.T) {
+	t.Parallel()
+
+	c := &codexClient{}
+
+	// First turn: 3 empty commands → blind run.
+	c.resetBlindRunCounters()
+	c.trackExecCommandResult("")
+	c.trackExecCommandResult("")
+	c.trackExecCommandResult("")
+	if !c.isBlindRun() {
+		t.Fatal("first turn: 3 empty commands should flag blind run")
+	}
+
+	// New turn starts: counters reset.
+	c.resetBlindRunCounters()
+	if c.isBlindRun() {
+		t.Fatal("after reset: should not be a blind run")
+	}
+	if c.execCommands.Load() != 0 || c.emptyExecCommands.Load() != 0 {
+		t.Fatalf("after reset: execCommands=%d emptyExecCommands=%d, want both=0",
+			c.execCommands.Load(), c.emptyExecCommands.Load())
+	}
+
+	// New turn: 3 commands all with output → not blind.
+	c.trackExecCommandResult("ok1")
+	c.trackExecCommandResult("ok2")
+	c.trackExecCommandResult("ok3")
+	if c.isBlindRun() {
+		t.Fatal("second turn: all outputs present should not flag blind run")
+	}
+}
