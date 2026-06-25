@@ -66,8 +66,15 @@ func allowedOrigins() []string {
 	return origins
 }
 
+// appURLFromEnv resolves the user-facing web app URL. It prefers
+// MULTICA_APP_URL and falls back to FRONTEND_ORIGIN, matching how the backend
+// resolves the app URL elsewhere (handler.daemonSetupURLsFromEnv) and the CLI
+// login flow (cmd/multica tryResolveAppURL). Empty when neither is set.
 func appURLFromEnv() string {
-	return strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_APP_URL")), "/")
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_APP_URL")), "/"); v != "" {
+		return v
+	}
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")), "/")
 }
 
 // parseTrustedProxies parses a comma-separated list of CIDR prefixes from the
