@@ -22,6 +22,17 @@ export type InboxItemType =
   | "quick_create_done"
   | "quick_create_failed";
 
+/**
+ * One workspace's unread inbox count in the cross-workspace summary
+ * (`GET /api/inbox/unread-summary`). The sidebar uses this to light a dot on
+ * the workspace switcher when a workspace OTHER than the active one has
+ * unread items.
+ */
+export interface InboxWorkspaceUnread {
+  workspace_id: string;
+  count: number;
+}
+
 export interface InboxItem {
   id: string;
   workspace_id: string;

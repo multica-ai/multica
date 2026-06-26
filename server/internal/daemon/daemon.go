@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -46,6 +47,11 @@ var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered"
 const (
 	taskSlotWaitTimeout     = 2 * time.Second
 	taskSlotCapacityBackoff = 5 * time.Second
+)
+
+var (
+	taskPrepareLeaseRefresh = 15 * time.Second
+	taskPrepareLeaseTimeout = 10 * time.Second
 )
 
 func taskScopedAuthToken(task Task) (string, error) {
@@ -113,13 +119,17 @@ var (
 // surfaced through a per-task claim (project github_repo resources today,
 // possibly other typed sources later) — those don't show up in
 // GetWorkspaceRepos, so they would be wiped on refresh if we shared one map.
+// taskRepoRefs tracks optional checkout refs for the specific task that
+// surfaced each project repo so two projects using the same URL don't leak refs
+// into each other.
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
 	reposVersion    string // stored for future use: skip refresh when version unchanged
 	allowedRepoURLs map[string]struct{}
 	taskRepoURLs    map[string]struct{}
-	settings        json.RawMessage // workspace settings (JSONB)
+	taskRepoRefs    map[string]map[string]string // taskID -> repo URL -> checkout ref
+	settings        json.RawMessage              // workspace settings (JSONB)
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
 	// profileSetSig is a content hash of the workspace's custom runtime
@@ -141,22 +151,23 @@ type repoCacheBackend interface {
 
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
-	cfg       Config
-	client    *Client
-	repoCache repoCacheBackend
-	logger    *slog.Logger
+	cfg        Config
+	client     *Client
+	repoCache  repoCacheBackend
+	skillCache *SkillBundleCache
+	logger     *slog.Logger
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
-	// profileCommandPaths maps a custom runtime profile_id -> the absolute
-	// executable path resolved on PATH for that profile's command_name
+	// profileLaunchSpecs maps a custom runtime profile_id -> the absolute
+	// executable path plus fixed launch args resolved for that profile
 	// (MUL-3284). Populated in registerRuntimesForWorkspace when a profile's
-	// command resolves; read by runTask via customCommandPathForRuntime to
-	// launch the custom command for a claimed task. Guarded by mu.
-	profileCommandPaths map[string]string
-	reloading    sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSet   *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+	// command resolves; read by runTask to launch the custom command for a
+	// claimed task. Guarded by mu.
+	profileLaunchSpecs map[string]profileLaunchSpec
+	reloading          sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSet         *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -222,9 +233,15 @@ type Daemon struct {
 	runUpdateFn func(targetVersion string) (string, error)
 }
 
+type profileLaunchSpec struct {
+	path      string
+	fixedArgs []string
+}
+
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
+	skillCacheRoot := filepath.Join(cfg.WorkspacesRoot, ".skill-cache", "v1")
 	client := NewClient(cfg.ServerBaseURL)
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
@@ -233,10 +250,11 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		cfg:                       cfg,
 		client:                    client,
 		repoCache:                 repocache.New(cacheRoot, logger),
+		skillCache:                NewSkillBundleCache(skillCacheRoot),
 		logger:                    logger,
 		workspaces:                make(map[string]*workspaceState),
 		runtimeIndex:              make(map[string]Runtime),
-		profileCommandPaths:       make(map[string]string),
+		profileLaunchSpecs:        make(map[string]profileLaunchSpec),
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
@@ -848,48 +866,51 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 	return nil
 }
 
-// recordProfileCommandPath remembers the absolute executable path resolved
-// for a custom runtime profile's command_name. Called from
+// recordProfileLaunch remembers the absolute executable path and fixed launch
+// args resolved for a custom runtime profile. Called from
 // registerRuntimesForWorkspace. Lazily initializes the map so test fixtures
 // that build a Daemon literal without seeding every map don't panic.
-func (d *Daemon) recordProfileCommandPath(profileID, path string) {
+func (d *Daemon) recordProfileLaunch(profileID, path string, fixedArgs []string) {
 	if profileID == "" || path == "" {
 		return
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.profileCommandPaths == nil {
-		d.profileCommandPaths = make(map[string]string)
+	if d.profileLaunchSpecs == nil {
+		d.profileLaunchSpecs = make(map[string]profileLaunchSpec)
 	}
-	d.profileCommandPaths[profileID] = path
+	d.profileLaunchSpecs[profileID] = profileLaunchSpec{
+		path:      path,
+		fixedArgs: append([]string(nil), fixedArgs...),
+	}
 }
 
-// customCommandPathForRuntime returns the resolved custom executable path for
-// a claimed task's RuntimeID, and whether the runtime is a custom-profile
-// runtime. It returns ("", false) for built-in runtimes (no profile) and for
-// runtimes whose profile command was never resolved on this host. runTask
-// uses this to override the launch path so a custom runtime can run even when
-// the host has no built-in agent of the same provider installed.
-func (d *Daemon) customCommandPathForRuntime(runtimeID string) (string, bool) {
+// customProfileLaunchForRuntime returns the resolved custom executable path and
+// fixed args for a claimed task's RuntimeID, and whether the runtime is a
+// custom-profile runtime. It returns false for built-in runtimes (no profile)
+// and for runtimes whose profile command was never resolved on this host.
+func (d *Daemon) customProfileLaunchForRuntime(runtimeID string) (profileLaunchSpec, bool) {
 	if runtimeID == "" {
-		return "", false
+		return profileLaunchSpec{}, false
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	rt, ok := d.runtimeIndex[runtimeID]
 	if !ok || rt.ProfileID == "" {
-		return "", false
+		return profileLaunchSpec{}, false
 	}
-	path, ok := d.profileCommandPaths[rt.ProfileID]
-	if !ok || path == "" {
-		return "", false
+	spec, ok := d.profileLaunchSpecs[rt.ProfileID]
+	if !ok || spec.path == "" {
+		return profileLaunchSpec{}, false
 	}
-	return path, true
+	spec.fixedArgs = append([]string(nil), spec.fixedArgs...)
+	return spec, true
 }
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
 	var runtimes []map[string]string
+	var failedProfiles []map[string]string
 	for name, entry := range d.cfg.Agents {
 		version, err := detectAgentVersion(ctx, entry.Path)
 		if err != nil {
@@ -925,9 +946,9 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	// between sync ticks without making an extra round trip on every tick
 	// (MUL-3332). An empty string means the fetch failed and the caller must
 	// keep whatever signature was previously cached on the workspaceState.
-	profileSig := d.appendProfileRuntimes(ctx, workspaceID, &runtimes)
+	profileSig := d.appendProfileRuntimes(ctx, workspaceID, &runtimes, &failedProfiles)
 
-	if len(runtimes) == 0 {
+	if len(runtimes) == 0 && len(failedProfiles) == 0 {
 		// profileSig is still meaningful even when nothing resolves: the
 		// drift-refresh path uses it to remember "we already converged on the
 		// disabled-everywhere state" so the next sync tick is a no-op instead
@@ -944,13 +965,14 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
 		"runtimes":          runtimes,
+		"failed_profiles":   failedProfiles,
 	}
 
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
 		return nil, "", fmt.Errorf("register runtimes: %w", err)
 	}
-	if len(resp.Runtimes) == 0 {
+	if len(resp.Runtimes) == 0 && len(failedProfiles) == 0 {
 		return nil, "", fmt.Errorf("register runtimes: empty response")
 	}
 	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
@@ -960,9 +982,9 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 // appendProfileRuntimes fetches the workspace's enabled custom runtime
 // profiles (MUL-3284) and appends a runtime registration entry for each one
 // whose command_name resolves on this host's PATH. For each resolved profile
-// it records the absolute command path keyed by profile_id (via
-// recordProfileCommandPath) so runTask can later launch the custom executable
-// for a claimed task.
+// it records the absolute command path and fixed args keyed by profile_id (via
+// recordProfileLaunch) so runTask can later launch the custom executable for a
+// claimed task.
 //
 // Best-effort by contract: any error fetching profiles (older server, network
 // blip) is logged and swallowed — registration proceeds with the built-in
@@ -981,7 +1003,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 // treat that as "unknown, do not overwrite a previously-stored signature"
 // (otherwise a transient 5xx would silently flip the daemon into thinking the
 // workspace has zero profiles).
-func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string) string {
+func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string, failedProfiles *[]map[string]string) string {
 	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
 	if err != nil {
 		// Best-effort: never fail registration because profiles couldn't be
@@ -1002,6 +1024,18 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 				"workspace_id", workspaceID, "profile_id", profile.ID, "display_name", profile.DisplayName)
 			continue
 		}
+		if !agent.IsSupportedType(profile.ProtocolFamily) {
+			reason := "unsupported protocol_family: " + profile.ProtocolFamily
+			d.logger.Warn("skip custom runtime profile: unsupported protocol_family",
+				"workspace_id", workspaceID, "profile_id", profile.ID,
+				"display_name", profile.DisplayName, "protocol_family", profile.ProtocolFamily)
+			*failedProfiles = append(*failedProfiles, map[string]string{
+				"profile_id":   profile.ID,
+				"command_name": profile.CommandName,
+				"reason":       reason,
+			})
+			continue
+		}
 		// Resolve the executable to launch for this profile. A per-machine
 		// path override (MUL-3284, `multica runtime profile set-path`) wins
 		// over the PATH lookup when it is set AND points at a real
@@ -1013,12 +1047,14 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		// the override nor PATH resolves, the profile is skipped (existing
 		// behavior).
 		var resolved string
+		var failureReason string
 		if override := strings.TrimSpace(d.cfg.ProfileCommandOverrides[profile.ID]); override != "" {
 			if profilePathExecutable(override) {
 				resolved = override
 				d.logger.Info("custom runtime profile: using per-machine command path override",
 					"workspace_id", workspaceID, "profile_id", profile.ID, "command_path", resolved)
 			} else {
+				failureReason = "Configured path override is not executable: " + override
 				d.logger.Warn("custom runtime profile: command path override not executable; falling back to PATH",
 					"workspace_id", workspaceID, "profile_id", profile.ID,
 					"override_path", override, "command_name", profile.CommandName)
@@ -1032,6 +1068,15 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 				d.logger.Info("skip custom runtime profile: command not found on PATH",
 					"workspace_id", workspaceID, "profile_id", profile.ID,
 					"command_name", profile.CommandName, "error", err)
+				if failureReason != "" {
+					failureReason += "; "
+				}
+				failureReason += "command not found on PATH: " + profile.CommandName
+				*failedProfiles = append(*failedProfiles, map[string]string{
+					"profile_id":   profile.ID,
+					"command_name": profile.CommandName,
+					"reason":       failureReason,
+				})
 				continue
 			}
 			resolved = r
@@ -1047,15 +1092,10 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		d.recordProfileCommandPath(profile.ID, resolved)
+		d.recordProfileLaunch(profile.ID, resolved, profile.FixedArgs)
 		d.logger.Info("registering custom runtime profile",
 			"workspace_id", workspaceID, "profile_id", profile.ID,
 			"protocol_family", profile.ProtocolFamily, "command_path", resolved)
-		// NOTE: profile.FixedArgs are launch args every agent on this runtime
-		// inherits. Wiring them into the spawned command is intentionally not
-		// done here — it's an optional, best-effort enhancement (see MUL-3284
-		// PR2 task notes). TODO(MUL-3284): plumb FixedArgs into the agent
-		// launch command if/when the agent backend exposes a hook for it.
 		*runtimes = append(*runtimes, map[string]string{
 			"name":       displayName,
 			"type":       profile.ProtocolFamily,
@@ -1200,7 +1240,7 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 // idempotent. Called from runTask before the agent spawns so
 // `multica repo checkout` accepts project-only URLs without an extra round
 // trip back to GetWorkspaceRepos (which doesn't carry project resources).
-func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
+func (d *Daemon) registerTaskRepos(workspaceID, taskID string, repos []RepoData) {
 	if len(repos) == 0 {
 		return
 	}
@@ -1219,6 +1259,9 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 	if ws.taskRepoURLs == nil {
 		ws.taskRepoURLs = make(map[string]struct{}, len(repos))
 	}
+	if taskID != "" && ws.taskRepoRefs == nil {
+		ws.taskRepoRefs = make(map[string]map[string]string)
+	}
 	candidates := make([]repoCandidate, 0, len(repos))
 	for _, repo := range repos {
 		url := strings.TrimSpace(repo.URL)
@@ -1230,6 +1273,14 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 		_, inWorkspace := ws.allowedRepoURLs[url]
 		_, inTask := ws.taskRepoURLs[url]
 		ws.taskRepoURLs[url] = struct{}{}
+		if taskID != "" {
+			if ws.taskRepoRefs[taskID] == nil {
+				ws.taskRepoRefs[taskID] = make(map[string]string, len(repos))
+			}
+			if _, exists := ws.taskRepoRefs[taskID][url]; !exists {
+				ws.taskRepoRefs[taskID][url] = strings.TrimSpace(repo.Ref)
+			}
+		}
 		candidates = append(candidates, repoCandidate{
 			url:     url,
 			tracked: inWorkspace || inTask,
@@ -1255,6 +1306,33 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 			defer d.bgSyncs.Done()
 			d.syncWorkspaceRepos(workspaceID, toSync)
 		}()
+	}
+}
+
+func (d *Daemon) taskRepoDefaultRef(workspaceID, taskID, repoURL string) string {
+	taskID = strings.TrimSpace(taskID)
+	repoURL = strings.TrimSpace(repoURL)
+	if taskID == "" || repoURL == "" {
+		return ""
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok || ws.taskRepoRefs == nil {
+		return ""
+	}
+	return strings.TrimSpace(ws.taskRepoRefs[taskID][repoURL])
+}
+
+func (d *Daemon) clearTaskRepoRefs(workspaceID, taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if ws, ok := d.workspaces[workspaceID]; ok && ws.taskRepoRefs != nil {
+		delete(ws.taskRepoRefs, taskID)
 	}
 }
 
@@ -1887,6 +1965,7 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
+	execenv.ApplyFeatureFlagSnapshot(resp.FeatureFlags)
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
@@ -2902,9 +2981,16 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		pollInterval = 5 * time.Second
 	}
 	var (
-		watcherOnce     sync.Once
-		cancelledByPoll <-chan struct{}
+		watcherOnce      sync.Once
+		prepareLeaseOnce sync.Once
+		cancelledByPoll  <-chan struct{}
+		stopPrepareLease func()
 	)
+	defer func() {
+		if stopPrepareLease != nil {
+			stopPrepareLease()
+		}
+	}()
 
 	onWait := func(holder string) {
 		reason := fmt.Sprintf("local_directory %s", assignment.AbsPath)
@@ -2918,6 +3004,9 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			// The UI just won't see the explicit "waiting" badge.
 			taskLog.Warn("local_directory: mark waiting status failed", "error", waitErr)
 		}
+		prepareLeaseOnce.Do(func() {
+			stopPrepareLease = d.startTaskPrepareLeaseExtender(waitCtx, task, taskLog)
+		})
 		// Start polling once we actually park. shouldInterruptAgent inside
 		// watchTaskCancellation already handles both server-side terminal
 		// states (completed/failed/cancelled) and the row-deleted
@@ -3101,6 +3190,185 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 	return reused
 }
 
+func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
+	if task == nil || task.Agent == nil || len(task.Agent.SkillRefs) == 0 {
+		return nil
+	}
+	resolved := make(map[string]SkillData, len(task.Agent.SkillRefs))
+	misses := make([]SkillRefData, 0)
+	for _, ref := range task.Agent.SkillRefs {
+		ref := ref
+		var bundle SkillData
+		if err := d.skillCache.WithRefLock(task.WorkspaceID, ref, func() error {
+			if cached, ok := d.skillCache.Load(task.WorkspaceID, ref); ok {
+				bundle = cached
+				return nil
+			}
+			misses = append(misses, ref)
+			return nil
+		}); err != nil {
+			return fmt.Errorf("load skill bundle cache: %w", err)
+		}
+		if bundle.ID != "" {
+			resolved[skillRefKey(ref.Source, ref.ID)] = bundle
+		}
+	}
+
+	// Resolve each missing bundle in its own request, caching it the moment it
+	// arrives. The download is the slow part on jittery links, so fetching the
+	// whole set in one atomic body read meant a single timeout discarded all
+	// progress and the cache never converged — every dispatch re-downloaded
+	// everything and timed out again. Per-skill, each download fits its own
+	// size-scaled deadline and is persisted independently, so even a dispatch
+	// that ultimately fails leaves the skills it did fetch cached for the next
+	// one. (GitHub #4505 / MUL-3650)
+	for _, ref := range misses {
+		bundle, err := d.resolveSkillBundle(ctx, task, ref)
+		if err != nil {
+			return fmt.Errorf("resolve skill bundles: %w", err)
+		}
+		resolved[skillRefKey(bundle.Source, bundle.ID)] = bundle
+	}
+
+	skills := make([]SkillData, 0, len(task.Agent.SkillRefs))
+	for _, ref := range task.Agent.SkillRefs {
+		bundle, ok := resolved[skillRefKey(ref.Source, ref.ID)]
+		if !ok {
+			return fmt.Errorf("skill bundle missing after resolve: skill_id=%s source=%s hash=%s", ref.ID, ref.Source, ref.Hash)
+		}
+		skills = append(skills, bundle)
+	}
+	task.Agent.Skills = skills
+	return nil
+}
+
+// resolveSkillBundle downloads one skill bundle and writes it to the on-disk
+// cache before returning. The request runs under its own deadline, scaled to
+// the bundle's declared size rather than the daemon's fixed 30s control-plane
+// timeout, so a large bundle on a slow link is given room to finish instead of
+// being cut off mid-body. Caching on success is what lets the resolve converge
+// across dispatches. (GitHub #4505 / MUL-3650)
+func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRefData) (SkillData, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, skillBundleResolveTimeout(ref.SizeBytes))
+	defer cancel()
+
+	bundle, err := d.client.ResolveSkillBundle(reqCtx, task.RuntimeID, task.ID, ref)
+	if err != nil {
+		return SkillData{}, err
+	}
+	// The resolve endpoint serves the agent's *current* bundle and hash, which
+	// may differ from the claim-time ref when the skill was edited between
+	// claim and prepare (see ResolveTaskSkillBundles). So confirm only that the
+	// server returned the skill we asked for (source/id), then validate the
+	// bundle for self-consistency against a ref derived from itself — pinning
+	// it to the possibly-stale requested hash would reject a legitimate update.
+	if bundle.Source != ref.Source || bundle.ID != ref.ID {
+		return SkillData{}, fmt.Errorf("resolve skill bundle returned wrong skill: requested source=%s id=%s, got source=%s id=%s", ref.Source, ref.ID, bundle.Source, bundle.ID)
+	}
+	bundleRef := skillRefFromBundle(bundle)
+	if !validateSkillBundle(bundleRef, bundle) {
+		return SkillData{}, fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
+	}
+	if err := d.skillCache.WithRefLock(task.WorkspaceID, bundleRef, func() error {
+		return d.skillCache.Store(task.WorkspaceID, bundle)
+	}); err != nil {
+		return SkillData{}, fmt.Errorf("store skill bundle cache: %w", err)
+	}
+	return bundle, nil
+}
+
+const (
+	// skillBundleResolveMinTimeout floors the per-skill resolve deadline so a
+	// tiny bundle still tolerates connection setup and round-trip latency.
+	skillBundleResolveMinTimeout = 30 * time.Second
+	// skillBundleResolveMaxTimeout caps it so a wedged download cannot pin a
+	// task in prepare indefinitely.
+	skillBundleResolveMaxTimeout = 5 * time.Minute
+	// skillBundleResolveMinThroughput is the pessimistic floor throughput
+	// (bytes/sec) used to scale the deadline to bundle size — deliberately low
+	// to cover slow, jittery links rather than ideal bandwidth.
+	skillBundleResolveMinThroughput = 50 * 1024
+)
+
+// skillBundleResolveTimeout returns the deadline budget for downloading a
+// bundle of the given size: at least skillBundleResolveMinTimeout, scaled up at
+// skillBundleResolveMinThroughput, and capped at skillBundleResolveMaxTimeout.
+func skillBundleResolveTimeout(sizeBytes int64) time.Duration {
+	if sizeBytes <= 0 {
+		return skillBundleResolveMinTimeout
+	}
+	scaled := time.Duration(sizeBytes/skillBundleResolveMinThroughput) * time.Second
+	if scaled < skillBundleResolveMinTimeout {
+		return skillBundleResolveMinTimeout
+	}
+	if scaled > skillBundleResolveMaxTimeout {
+		return skillBundleResolveMaxTimeout
+	}
+	return scaled
+}
+
+func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, taskLog *slog.Logger) func() {
+	leaseCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(taskPrepareLeaseRefresh)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-leaseCtx.Done():
+				return
+			case <-ticker.C:
+				reqCtx, reqCancel := context.WithTimeout(leaseCtx, taskPrepareLeaseTimeout)
+				err := d.client.ExtendTaskPrepareLease(reqCtx, task.RuntimeID, task.ID)
+				reqCancel()
+				if err != nil {
+					taskLog.Warn("extend task prepare lease failed", "error", err)
+				}
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			<-done
+		})
+	}
+}
+
+func skillRefKey(source, id string) string {
+	return source + "\x00" + id
+}
+
+func skillRefFromBundle(bundle SkillData) SkillRefData {
+	files := make([]skillbundle.File, 0, len(bundle.Files))
+	for _, file := range bundle.Files {
+		files = append(files, skillbundle.File{Path: file.Path, Content: file.Content})
+	}
+	manifest := skillbundle.BuildManifest(skillbundle.Skill{
+		ID:          bundle.ID,
+		Source:      bundle.Source,
+		Name:        bundle.Name,
+		Description: bundle.Description,
+		Content:     bundle.Content,
+		Files:       files,
+	})
+	fileRefs := make([]SkillFileRefData, 0, len(manifest.Files))
+	for _, file := range manifest.Files {
+		fileRefs = append(fileRefs, SkillFileRefData{Path: file.Path, SHA256: file.SHA256, SizeBytes: file.SizeBytes})
+	}
+	return SkillRefData{
+		ID:        bundle.ID,
+		Source:    bundle.Source,
+		Hash:      manifest.Hash,
+		SizeBytes: manifest.SizeBytes,
+		FileCount: manifest.FileCount,
+		Files:     fileRefs,
+	}
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -3117,7 +3385,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// in the per-workspace allowlist and the local cache, otherwise
 	// `multica repo checkout` would reject project-only URLs that aren't also
 	// bound at the workspace level.
-	d.registerTaskRepos(task.WorkspaceID, task.Repos)
+	d.registerTaskRepos(task.WorkspaceID, task.ID, task.Repos)
+	defer d.clearTaskRepoRefs(task.WorkspaceID, task.ID)
 
 	entry, ok := d.cfg.Agents[provider]
 	// A custom runtime profile (MUL-3284) overrides the executable path: the
@@ -3127,15 +3396,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Critically, a custom runtime can live on a host that has NO built-in
 	// agent of the same provider installed, so when the runtime is custom we
 	// synthesize an AgentEntry instead of hard-failing on the !ok lookup.
-	if customPath, isCustom := d.customCommandPathForRuntime(task.RuntimeID); isCustom {
-		entry.Path = customPath
+	var profileFixedArgs []string
+	if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
+		entry.Path = customSpec.path
+		profileFixedArgs = customSpec.fixedArgs
 		ok = true
 		d.logger.Info("task uses custom runtime profile command",
 			"task_id", task.ID, "runtime_id", task.RuntimeID,
-			"provider", provider, "command_path", customPath)
+			"provider", provider, "command_path", customSpec.path,
+			"fixed_args", len(profileFixedArgs))
 	}
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
+	}
+
+	stopPrepareLease := d.startTaskPrepareLeaseExtender(ctx, task, taskLog)
+	defer stopPrepareLease()
+
+	if err := d.ensureTaskSkillBundles(ctx, &task); err != nil {
+		return TaskResult{}, err
 	}
 
 	agentName := "agent"
@@ -3166,6 +3445,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		Repos:                            convertReposForEnv(task.Repos),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
+		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
 		AutopilotRunID:                   task.AutopilotRunID,
@@ -3175,6 +3455,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotSource:                  task.AutopilotSource,
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:                task.QuickCreatePrompt,
+		HandoffNote:                      task.HandoffNote,
 		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
@@ -3280,8 +3561,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// "start task failed: <…>" string and the same failure_reason
 	// taxonomy as before — see MUL-2946 for the classifier contract.
 	if err := d.client.StartTask(ctx, task.ID); err != nil {
+		stopPrepareLease()
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}
+	stopPrepareLease()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
@@ -3299,7 +3582,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// In local_directory mode the workdir is the user's own repo, reuse is
 	// already disabled above (see localAssignment == nil), and the brief
 	// would otherwise live on inside the user's repository — a subsequent
-	// manual `claude` / `codex` / `gemini` run in that directory would pick
+	// manual `claude` / `codex` run in that directory would pick
 	// up stale Multica instructions (issue id, trigger comment id, reply
 	// rules) and start acting on the previous task's context. Excise the
 	// marker block on the way out instead.
@@ -3313,7 +3596,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// into the user's repo. Without this pass the user's tree
 			// accumulates one directory layer per task — see MUL-2784.
 			// CleanupRuntimeConfig handles the runtime brief inside
-			// CLAUDE.md / AGENTS.md / GEMINI.md; CleanupSidecars handles
+			// CLAUDE.md / AGENTS.md; CleanupSidecars handles
 			// every other file Prepare placed under WorkDir. Together
 			// they round-trip the workdir to its exact pre-task bytes.
 			if cerr := execenv.CleanupSidecars(env.RootDir); cerr != nil {
@@ -3440,6 +3723,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	var customArgs []string
 	extraArgs := defaultArgsForProvider(d.cfg, provider)
+	if len(profileFixedArgs) > 0 {
+		extraArgs = append(append([]string{}, profileFixedArgs...), extraArgs...)
+	}
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
@@ -4142,7 +4428,7 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
-		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, Ref: r.Ref}
 	}
 	return result
 }

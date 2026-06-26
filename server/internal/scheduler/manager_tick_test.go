@@ -74,7 +74,7 @@ func TestManagerTickClosesAbandonedRunning(t *testing.T) {
 			if err := mgr.Register(*job); err != nil {
 				t.Fatalf("register: %v", err)
 			}
-			if err := mgr.runOnce(ctx); err != nil {
+			if err := mgr.RunOnce(ctx); err != nil {
 				t.Fatalf("runOnce: %v", err)
 			}
 
@@ -140,7 +140,7 @@ func TestManagerHandlerPanicWritesFailed(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := mgr.runOnce(ctx); err != nil {
+	if err := mgr.RunOnce(ctx); err != nil {
 		t.Fatalf("runOnce: %v", err)
 	}
 

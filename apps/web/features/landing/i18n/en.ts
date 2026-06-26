@@ -1,4 +1,4 @@
-import { githubUrl } from "../components/shared";
+import { githubUrl, discordUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
 export function createEnDict(allowSignup: boolean): LandingDict {
@@ -244,6 +244,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           { label: "Documentation", href: "/docs" },
           { label: "API", href: githubUrl },
           { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
+          { label: "Discord", href: discordUrl },
         ],
       },
       company: {
@@ -292,6 +293,106 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.3.30",
+        date: "2026-06-25",
+        title: "Slack Channel Integration, a Smoother Editor, and Many Reliability Fixes",
+        changes: [],
+        features: [
+          "Slack conversations now run on the new unified collaboration channel, putting Slack on the same reliable footing as Feishu and Lark",
+          "The Issue composer now accepts the highlighted @mention or suggestion when you press Tab, so picking the right teammate or Issue is a single keypress",
+          "Task list items can be toggled from a one-click button in the editor's floating menu",
+        ],
+        improvements: [
+          "Frontend continuous integration now skips automatically when a pull request does not touch frontend code, freeing up build time for the changes that actually need it",
+          "Command line subcommands have broader automated test coverage so everyday workflows stay stable across releases",
+          "Provider-specific default agent arguments now have explicit documentation, and a one-time Lark cutover flag was retired now that the unified channel adapter is fully in production",
+        ],
+        fixes: [
+          "OpenClaw is more forgiving about config file mismatches and supports the newer 2026.6.x agents schema, keeping existing OpenClaw runtimes connected",
+          "Moving an Issue between projects now removes it from the old project list right away, and board column counts stay accurate when an Issue's status changes off-screen",
+          "Attachment previews open correctly even when files are served from a different origin",
+          "Command line agents wait for the daemon to be ready before falling back to a personal access token, and the self-host setup flow now respects existing configuration and surfaces server URL changes",
+          "Lark messages now link to the configured app URL instead of falling back to a generic web address",
+          "Codex runs clean up correctly even when their output overflows, Kiro runs preserve their goal completion state through close errors, and agent shutdown now terminates the entire opencode process group before closing",
+          "Quick-create reliably keeps every uploaded file attached when several uploads happen at the same time",
+          "Redis webhook rate limiting no longer throttles unrelated webhooks together, and daemon skill bundles load reliably even for large skill libraries",
+          "Issue label names now reject control characters so labels stay readable everywhere",
+        ],
+      },
+      {
+        version: "0.3.29",
+        date: "2026-06-24",
+        title: "Feishu Channel Upgrade, Feature Rollout Controls, and More Reliable Autopilots",
+        changes: [],
+        features: [
+          "Feishu conversations now run on a new unified collaboration channel, making message handling more stable and consistent and laying the groundwork for more chat platforms",
+          "New feature rollout controls cover both the app and the daemon, so teams can open up risky changes gradually and to a limited audience",
+          "When agents read long Issue discussions, resolved threads now fold down to their key conclusion to keep the context focused",
+          "Feishu users can start a fresh conversation with the `/new` command, and Feishu WebSocket connections can use a configured proxy",
+        ],
+        improvements: [
+          "Scheduled autopilots are more dependable: even with missed schedules, retries, or several runners working at once, they settle on the intended single run",
+          "Agent runtime briefings can switch to a slimmer version that drops redundant detail, with the full version still available as a fallback",
+          "Runtime provider docs now match the current provider list, with Qoder, CodeBuddy, and Antigravity guidance added and the outdated Gemini CLI runtime removed",
+          "The branch or version pinned in a project's repository settings now takes effect during local agent work, so agents no longer end up on the wrong branch",
+        ],
+        fixes: [
+          "Sub-Issues now stay in stable creation order inside a parent Issue",
+          "Attachment previews now open correctly inside Issues",
+          "The @mention picker now selects the highlighted person or Issue even when search results reorder",
+          "Cancelled chat drafts stay deleted after you navigate away and come back",
+          "Autopilot cold starts, the agent status in the Issue header, and Antigravity provider errors now report more accurately",
+        ],
+      },
+      {
+        version: "0.3.28",
+        date: "2026-06-23",
+        title: "Staged Sub-Issues and Qoder Runtime Support",
+        changes: [],
+        features: [
+          "Sub-Issues can now be organized into stages, so parallel work moves forward together and the parent Issue is updated only when a stage is complete",
+          "Assigning or batch-updating an Issue now confirms upfront whether it will start an agent — and which one — so you can apply the change without launching a run; when a run does start, you can attach a handoff note that the agent receives as context for that run",
+          "Qoder is now available as an agent provider, including model discovery and provider branding",
+          "Custom runtimes can include fixed launch arguments, with clearer feedback when a saved runtime cannot register",
+        ],
+        improvements: [
+          "Project descriptions now travel with agent work, giving agents more durable context from the project they are working in",
+          "Command line workflows now cover comment resolve actions, Issue usage summaries, and autopilot subscriber management",
+          "Readonly code blocks include a copy button, and the marketing header now shows the live GitHub star count",
+          "Agent skill delivery is more efficient for newer daemons while keeping older daemons compatible",
+        ],
+        fixes: [
+          "Issue batch edit menus now show the real shared status, priority, and assignee for the selected Issues",
+          "Dragging Issues across board and list views no longer snaps cards back before settling",
+          "GitHub PR links and check updates are routed to the workspace that owns the repository",
+          "Live task transcripts now keep updating while a run is still in progress",
+          "Custom runtime deletion now removes the saved profile instead of only removing a row that could return later",
+        ],
+      },
+      {
+        version: "0.3.27",
+        date: "2026-06-22",
+        title: "Threaded Lark Replies and Smoother Team Workflows",
+        changes: [],
+        features: [
+          "Lark conversations now reply inside the original topic when a message starts from a topic, keeping team discussions easier to follow",
+          "Squad leaders can see member skills in the roster, making delegation more precise",
+          "Discord is now available from the website footer, help menu, README, and a dismissible in-app sidebar card",
+        ],
+        improvements: [
+          "Agent activity in Issue headers opens on hover, so live work is easier to check at a glance",
+          "Desktop sidebars and pinned navigation feel smoother, clearer, and less noisy",
+          "Chat replies, assignment catch-up, and contributor guidance are tighter so agent work stays in the right place with less noise",
+          "Remote CLI setup and custom runtime deletion now give clearer guidance before users continue",
+        ],
+        fixes: [
+          "Backlog parent Issues stay parked when child work finishes, avoiding unexpected follow-up automation",
+          "Project deletion now requires an owner or admin, and private GitHub skill imports work when a valid token is available",
+          "Login verification focuses the code field automatically, and detail sidebars no longer animate unexpectedly when pages open",
+          "Codex and daemon diagnostics are more reliable when permissions or slow task claims need investigation",
+        ],
+      },
       {
         version: "0.3.25",
         date: "2026-06-18",

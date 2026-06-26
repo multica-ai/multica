@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -22,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -140,6 +142,27 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	// Feature flags: loaded once at startup from MULTICA_FEATURE_FLAGS_FILE
+	// (a YAML rule set) with FF_<KEY> env overrides layered on top.
+	// See docs/feature-flags.md for the schema and lifecycle rules.
+	//
+	// Booting the server without any flag config is intentional: when the
+	// env var is unset, every IsEnabled call falls through to the caller's
+	// default, so existing code paths are unchanged until someone adds a
+	// rule. A misconfigured (malformed / missing) file surfaces as a hard
+	// error so operators see misconfig the same way they do for any other
+	// MULTICA_*_FILE knob.
+	flags, err := featureflag.NewServiceFromEnv(featureflag.WithLogger(slog.Default()))
+	if err != nil {
+		slog.Error("feature flag configuration failed to load", "error", err)
+		os.Exit(1)
+	}
+	// MUL-3560: execenv consults `runtime_brief_slim` to decide between
+	// the legacy and slim runtime brief. Default-off everywhere; staging
+	// YAML opts in, prod stays on legacy until staging burns in.
+	execenv.SetFeatureFlags(flags)
+	_ = flags // remaining call sites adopt flags as needed; see docs/feature-flags.md
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -318,6 +341,7 @@ func main() {
 		BusinessMetrics:    businessMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
+		FeatureFlags:       flags,
 		HeartbeatScheduler: heartbeatScheduler,
 	})
 
@@ -347,18 +371,18 @@ func main() {
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
-	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
 
-	// Lark inbound supervisor: holds the §4.4 WS lease per installation
-	// and runs the EventConnector for each. Nil when the Lark master
-	// key is unset — self-host deployments that have not opted in to
-	// Lark do not pay any goroutine cost. Lifecycle is bound to
-	// sweepCtx so the Hub winds down alongside the other long-running
-	// workers, AFTER the HTTP server has drained.
-	if h.LarkHub != nil {
-		go h.LarkHub.Run(sweepCtx)
+	// Channel inbound supervisor (MUL-3620): holds the §4.4 WS lease per
+	// installation and drives each channel.Channel. It is built
+	// unconditionally (it is channel-agnostic, not Lark-specific), so it
+	// always exists here; with no platform registered or no installation
+	// rows it simply idles. Lifecycle is bound to sweepCtx so it winds down
+	// alongside the other long-running workers, AFTER the HTTP server has
+	// drained.
+	if h.ChannelSupervisor != nil {
+		go h.ChannelSupervisor.Run(sweepCtx)
 	}
 
 	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
@@ -378,11 +402,19 @@ func main() {
 	schedulerMgr := scheduler.NewManager(pool, scheduler.Options{})
 	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
 		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
-	} else {
-		go func() {
-			_ = schedulerMgr.Run(sweepCtx)
-		}()
 	}
+	// MUL-3551: scheduled-Autopilot dispatch runs on the same DB-backed
+	// scheduler. The job owns its plan_times via PlansForScope (each
+	// trigger has its own cron expression, so the Cadence planner does
+	// not fit). Crash recovery, occurrence-level idempotency, lease
+	// theft, and retry are all reused from the manager + sys_cron_executions
+	// — there is no separate goroutine for scheduled Autopilot anymore.
+	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
+		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
+	}
+	go func() {
+		_ = schedulerMgr.Run(sweepCtx)
+	}()
 
 	if metricsServer != nil {
 		go func() {
@@ -425,19 +457,26 @@ func main() {
 	sweepCancel()
 	heartbeatScheduler.Stop()
 
-	// Join the Lark Hub's per-installation supervisor goroutines so the
+	// Join the channel supervisor's per-installation goroutines so the
 	// lease renewer can issue a final release before process exit;
 	// otherwise the next replica would have to wait the full LeaseTTL
 	// before picking up the installation on the other side of the
 	// redeploy. The wait is bounded — if a supervisor is wedged (DB
-	// pool stalled, a future real EventConnector ignoring ctx, etc.)
-	// the fallback is the natural LeaseTTL expiry on the other side,
-	// which is strictly better than holding shutdown open forever.
-	if h.LarkHub != nil {
-		if !h.LarkHub.WaitWithTimeout(h.LarkHub.ShutdownTimeout()) {
-			slog.Warn("lark hub: supervisors did not exit within shutdown timeout; proceeding",
-				"timeout", h.LarkHub.ShutdownTimeout().String(),
+	// pool stalled, a connector ignoring ctx, etc.) the fallback is the
+	// natural LeaseTTL expiry on the other side, which is strictly better
+	// than holding shutdown open forever. Then drain the Feishu runtime:
+	// the supervisors have stopped delivering inbound events, so flush the
+	// debounced run triggers and join any in-flight outbound replies
+	// (each bounded by ReplyTimeout) so a binding card / offline notice is
+	// not lost on shutdown.
+	if h.ChannelSupervisor != nil {
+		if !h.ChannelSupervisor.WaitWithTimeout(h.ChannelSupervisor.ShutdownTimeout()) {
+			slog.Warn("channel supervisor: connections did not exit within shutdown timeout; proceeding",
+				"timeout", h.ChannelSupervisor.ShutdownTimeout().String(),
 			)
+		}
+		if h.ChannelRouter != nil {
+			h.ChannelRouter.Drain()
 		}
 	}
 

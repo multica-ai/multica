@@ -69,6 +69,7 @@
     "section_progress": "진행률",
     "section_description": "설명",
     "description_placeholder": "설명 추가...",
+    "description_hint": "이 프로젝트의 모든 작업에서 컨텍스트로 에이전트에게 공유됩니다.",
     "empty_issues_title": "연결된 이슈가 없습니다",
     "empty_issues_hint": "새 이슈를 만들거나 기존 이슈를 이 프로젝트에 할당하세요.",
     "empty_issues_new_button": "새 이슈",

@@ -404,6 +404,7 @@ const mockIssue: Issue = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  stage: null,
   start_date: null,
   due_date: "2026-06-01T00:00:00Z",
   metadata: {},
@@ -440,7 +441,7 @@ const mockTimeline: TimelineEntry[] = [
 // Import component under test (after mocks)
 // ---------------------------------------------------------------------------
 
-import { IssueDetail } from "./issue-detail";
+import { IssueDetail, groupSubIssuesByStage } from "./issue-detail";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1229,5 +1230,38 @@ describe("IssueDetail (shared)", () => {
         expect.objectContaining({ description: "" }),
       );
     });
+  });
+});
+
+describe("groupSubIssuesByStage", () => {
+  const child = (id: string, stage: number | null): Issue => ({
+    ...mockIssue,
+    id,
+    parent_issue_id: "parent-1",
+    stage,
+  });
+
+  it("returns a single null-stage group when nothing is staged", () => {
+    const groups = groupSubIssuesByStage([child("a", null), child("b", null)]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.stage).toBeNull();
+    expect(groups[0]?.items.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+
+  it("orders staged groups ascending with the unstaged group last", () => {
+    const groups = groupSubIssuesByStage([
+      child("s2", 2),
+      child("u", null),
+      child("s1a", 1),
+      child("s1b", 1),
+    ]);
+    expect(groups.map((g) => g.stage)).toEqual([1, 2, null]);
+    expect(groups[0]?.items.map((i) => i.id)).toEqual(["s1a", "s1b"]);
+    expect(groups[2]?.items.map((i) => i.id)).toEqual(["u"]);
+  });
+
+  it("omits the unstaged group when every child is staged", () => {
+    const groups = groupSubIssuesByStage([child("s1", 1), child("s2", 2)]);
+    expect(groups.map((g) => g.stage)).toEqual([1, 2]);
   });
 });

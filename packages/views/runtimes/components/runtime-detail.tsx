@@ -10,12 +10,20 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import type { AgentRuntime, Agent, MemberWithUser } from "@multica/core/types";
+import type {
+  AgentRuntime,
+  Agent,
+  MemberWithUser,
+  RuntimeProfile,
+} from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
-import { deriveRuntimeHealth } from "@multica/core/runtimes";
+import {
+  deriveRuntimeHealth,
+  runtimeProfileListOptions,
+} from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
@@ -37,6 +45,7 @@ import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
+import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { useT } from "../../i18n";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
@@ -94,6 +103,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const navigation = useNavigation();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: profiles = [] } = useQuery(runtimeProfileListOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
   const now = useNowTick();
 
@@ -111,7 +121,14 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
     ? currentMember.role === "owner" || currentMember.role === "admin"
     : false;
   const isRuntimeOwner = user && runtime.owner_id === user.id;
-  const canDelete = isAdmin || isRuntimeOwner;
+  const canEditRuntime = isAdmin || isRuntimeOwner;
+  const runtimeProfile: RuntimeProfile | null = runtime.profile_id
+    ? profiles.find((p) => p.id === runtime.profile_id) ?? null
+    : null;
+  const isCustomRuntime = !!runtime.profile_id;
+  const canDelete = isCustomRuntime
+    ? isAdmin && !!runtimeProfile
+    : canEditRuntime;
 
   const servingAgents = agents.filter(
     (a) => a.runtime_id === runtime.id && !a.archived_at,
@@ -120,10 +137,15 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   // Successful delete (light or cascade) closes the dialog and navigates
   // back to the runtimes list. Toast lives here so the cascade-mode count
   // and the light-mode "Runtime deleted" share one entry point.
-  const handleDeleted = () => {
+  const handleRuntimeDeleted = () => {
     setDeleteOpen(false);
     navigation.replace(paths.runtimes());
     toast.success(t(($) => $.detail.toast_deleted));
+  };
+
+  const handleProfileDeleted = () => {
+    setDeleteOpen(false);
+    navigation.replace(paths.runtimes());
   };
 
   const daemonShort = shortDaemonId(runtime.daemon_id);
@@ -139,7 +161,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
           </span>
         }
         actions={
-          !canDelete ? (
+          !canEditRuntime ? (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="h-3 w-3" />
               {t(($) => $.detail.read_only)}
@@ -178,6 +200,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               runtime={runtime}
               cliVersion={cliVersion}
               launchedBy={launchedBy}
+              canEdit={!!canEditRuntime}
               canDelete={!!canDelete}
               onDelete={() => setDeleteOpen(true)}
             />
@@ -185,16 +208,23 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         </div>
       </div>
 
-      {/* Delete confirmation — unified light/cascade dialog. Shared across
-          this page and the runtime list kebab so the two entry points stay
-          in lockstep on copy and behaviour. */}
-      <DeleteRuntimeDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        runtime={runtime}
-        wsId={wsId}
-        onDeleted={handleDeleted}
-      />
+      {isCustomRuntime && runtimeProfile ? (
+        <DeleteRuntimeProfileDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          profile={runtimeProfile}
+          wsId={wsId}
+          onDeleted={handleProfileDeleted}
+        />
+      ) : (
+        <DeleteRuntimeDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          runtime={runtime}
+          wsId={wsId}
+          onDeleted={handleRuntimeDeleted}
+        />
+      )}
     </div>
   );
 }
@@ -439,20 +469,19 @@ function DiagnosticsCard({
   runtime,
   cliVersion,
   launchedBy,
+  canEdit,
   canDelete,
   onDelete,
 }: {
   runtime: AgentRuntime;
   cliVersion: string | null;
   launchedBy: string | null;
+  canEdit: boolean;
   canDelete: boolean;
   onDelete: () => void;
 }) {
   const { t } = useT("runtimes");
   const isLocal = runtime.runtime_mode === "local";
-  // canDelete here doubles as the "can edit runtime" predicate — it already
-  // means "workspace owner/admin OR runtime owner", which is the same gate
-  // the server enforces for the visibility PATCH.
   return (
     <div className="rounded-lg border">
       <div className="border-b px-4 py-2.5">
@@ -463,7 +492,7 @@ function DiagnosticsCard({
           <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
             {t(($) => $.detail.diagnostics_visibility)}
           </div>
-          {canDelete ? (
+          {canEdit ? (
             <VisibilityEditor runtime={runtime} />
           ) : (
             <VisibilityReadout runtime={runtime} />

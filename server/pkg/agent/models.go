@@ -101,8 +101,6 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		models := codexStaticModels()
 		annotateCodexThinking(ctx, models, executablePath)
 		return models, nil
-	case "gemini":
-		return geminiStaticModels(), nil
 	case "antigravity":
 		// agy 1.0.6 added a `--model` flag plus an `agy models` catalog
 		// command (MUL-3125). Enumerate it on demand like the other
@@ -129,6 +127,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 	case "kiro":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
+		})
+	case "qoder":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverQoderModels(ctx, executablePath)
 		})
 	case "opencode":
 		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
@@ -200,8 +202,6 @@ func acceptedModelIDsForProvider(providerType string) (map[string]bool, bool) {
 		return modelIDSet(claudeStaticModels()), true
 	case providerType == "codex":
 		return modelIDSet(codexStaticModels()), true
-	case providerType == "gemini":
-		return modelIDSet(geminiStaticModels()), true
 	default:
 		return nil, false
 	}
@@ -221,8 +221,7 @@ func isRuntimeSpecificModelID(model string) bool {
 	}
 	return modelHasKnownPrefix(model) ||
 		modelIDSet(claudeStaticModels())[model] ||
-		modelIDSet(codexStaticModels())[model] ||
-		modelIDSet(geminiStaticModels())[model]
+		modelIDSet(codexStaticModels())[model]
 }
 
 func modelHasKnownPrefix(model string) bool {
@@ -301,31 +300,6 @@ func codexStaticModels() []Model {
 		{ID: "gpt-5", Label: "GPT-5", Provider: "openai"},
 		{ID: "o3", Label: "o3", Provider: "openai"},
 		{ID: "o3-mini", Label: "o3-mini", Provider: "openai"},
-	}
-}
-
-// geminiStaticModels lists the values we pass via `gemini -m`. Gemini
-// CLI has no `models list` subcommand, so dynamic discovery isn't
-// possible; the next best thing is to expose the CLI's own aliases
-// (auto / pro / flash / flash-lite and the `auto-gemini-*` family)
-// alongside a few explicit version pins. Aliases track whatever the
-// installed CLI considers current (see `resolveModel` in the CLI's
-// packages/core/src/config/models.ts), so new Gemini releases light
-// up without a Multica redeploy. Default is `auto` to match Google's
-// recommendation — the CLI picks Pro vs Flash per task and falls back
-// when quota is exhausted.
-func geminiStaticModels() []Model {
-	return []Model{
-		{ID: "auto", Label: "Auto (Gemini 3)", Provider: "google", Default: true},
-		{ID: "auto-gemini-2.5", Label: "Auto (Gemini 2.5)", Provider: "google"},
-		{ID: "pro", Label: "Pro", Provider: "google"},
-		{ID: "flash", Label: "Flash", Provider: "google"},
-		{ID: "flash-lite", Label: "Flash Lite", Provider: "google"},
-		{ID: "gemini-3-pro-preview", Label: "Gemini 3 Pro (preview)", Provider: "google"},
-		{ID: "gemini-3-flash-preview", Label: "Gemini 3 Flash (preview)", Provider: "google"},
-		{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro", Provider: "google"},
-		{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", Provider: "google"},
-		{ID: "gemini-2.5-flash-lite", Label: "Gemini 2.5 Flash Lite", Provider: "google"},
 	}
 }
 
@@ -828,6 +802,16 @@ func discoverCopilotModels(ctx context.Context, executablePath string) ([]Model,
 	return models, nil
 }
 
+// discoverQoderModels spins up `qodercli --yolo --acp` and parses models from session/new.
+func discoverQoderModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "qodercli",
+		clientName:   "multica-model-discovery",
+		acpArgs:      []string{"--yolo", "--acp"},
+		tmpdirPrefix: "multica-qoder-discovery-",
+	})
+}
+
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in
 // the same way (initialize → session/new → parse models block) — the
@@ -849,9 +833,8 @@ type acpDiscoveryProvider struct {
 // discoverACPModels runs the ACP handshake for any agent CLI that
 // implements the standard `initialize` + `session/new` flow and
 // advertises its model catalog in the response under
-// `models.availableModels` / `models.currentModelId`. This covers
-// Hermes and Kimi today; future ACP backends can plug in by adding
-// an acpDiscoveryProvider entry instead of duplicating the loop.
+// `models.availableModels` / `models.currentModelId`. Provider-specific
+// `launchArgs` select ACP mode (e.g. `acp` vs `--acp`).
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = p.defaultBin

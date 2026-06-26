@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -109,6 +111,14 @@ var issuePullRequestsCmd = &cobra.Command{
 	RunE:    runIssuePullRequests,
 }
 
+var issueChildrenCmd = &cobra.Command{
+	Use:     "children <id>",
+	Aliases: []string{"subissues"},
+	Short:   "List an issue's sub-issues grouped by stage",
+	Args:    exactArgs(1),
+	RunE:    runIssueChildren,
+}
+
 var issueCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new issue",
@@ -166,6 +176,20 @@ var issueCommentDeleteCmd = &cobra.Command{
 	RunE:  runIssueCommentDelete,
 }
 
+var issueCommentResolveCmd = &cobra.Command{
+	Use:   "resolve <comment-id>",
+	Short: "Resolve a comment thread",
+	Args:  exactArgs(1),
+	RunE:  runIssueCommentResolve,
+}
+
+var issueCommentUnresolveCmd = &cobra.Command{
+	Use:   "unresolve <comment-id>",
+	Short: "Unresolve a comment thread",
+	Args:  exactArgs(1),
+	RunE:  runIssueCommentUnresolve,
+}
+
 // Subscriber subcommands.
 
 var issueSubscriberCmd = &cobra.Command{
@@ -208,6 +232,13 @@ var issueRunMessagesCmd = &cobra.Command{
 	Short: "List messages for an execution",
 	Args:  exactArgs(1),
 	RunE:  runIssueRunMessages,
+}
+
+var issueUsageCmd = &cobra.Command{
+	Use:   "usage <issue-id>",
+	Short: "Show aggregated token usage for an issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueUsage,
 }
 
 var issueRerunCmd = &cobra.Command{
@@ -263,6 +294,7 @@ func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
 	issueCmd.AddCommand(issuePullRequestsCmd)
+	issueCmd.AddCommand(issueChildrenCmd)
 	issueCmd.AddCommand(issueCreateCmd)
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
@@ -271,6 +303,7 @@ func init() {
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
+	issueCmd.AddCommand(issueUsageCmd)
 	issueCmd.AddCommand(issueRerunCmd)
 	issueCmd.AddCommand(issueCancelTaskCmd)
 	issueCmd.AddCommand(issueSearchCmd)
@@ -278,6 +311,8 @@ func init() {
 	issueCommentCmd.AddCommand(issueCommentListCmd)
 	issueCommentCmd.AddCommand(issueCommentAddCmd)
 	issueCommentCmd.AddCommand(issueCommentDeleteCmd)
+	issueCommentCmd.AddCommand(issueCommentResolveCmd)
+	issueCommentCmd.AddCommand(issueCommentUnresolveCmd)
 
 	issueSubscriberCmd.AddCommand(issueSubscriberListCmd)
 	issueSubscriberCmd.AddCommand(issueSubscriberAddCmd)
@@ -301,6 +336,9 @@ func init() {
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
 
+	issueChildrenCmd.Flags().String("output", "table", "Output format: table or json")
+	issueChildrenCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+
 	// issue create
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
@@ -311,6 +349,7 @@ func init() {
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
+	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
@@ -332,6 +371,7 @@ func init() {
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
+	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
@@ -351,12 +391,16 @@ func init() {
 	issueCommentListCmd.Flags().Int("recent", 0, "Return the N most recently active threads (root + descendants per thread). Use --before/--before-id from the previous response to scroll to older threads.")
 	issueCommentListCmd.Flags().Bool("roots-only", false, "Only return top-level comments (parent_id is null). Each root also carries reply_count + last_activity_at so you can triage which thread to open.")
 	issueCommentListCmd.Flags().Bool("summary", false, "Clip each comment's content to a short preview (sets content_truncated) so you can scan a list without pulling full bodies. Composes with any mode.")
+	issueCommentListCmd.Flags().Bool("full", false, "Escape hatch: return every comment in resolved threads verbatim. By default the complete-thread reads (default list, --recent, --thread without --tail) are folded — a resolved thread collapses to its root + conclusion, with the dropped count reported on the root — so you do not pay tokens for settled discussion. Pass --full when you need the folded discussion. No effect on --since/--tail/--roots-only reads, which are never folded.")
 	issueCommentListCmd.Flags().String("before", "", "Cursor (RFC3339Nano timestamp). With --recent: thread cursor (last_activity_at). With --thread + --tail: reply cursor (reply created_at). Read from the X-Multica-Next-Before response header; must be paired with --before-id.")
 	issueCommentListCmd.Flags().String("before-id", "", "Cursor UUID. With --recent: thread root UUID. With --thread + --tail: oldest reply UUID. Read from the X-Multica-Next-Before-Id response header; must be paired with --before.")
 
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
 	issueRunsCmd.Flags().Bool("full-id", false, "Show full task UUIDs in table output")
+
+	// issue usage
+	issueUsageCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
@@ -375,6 +419,10 @@ func init() {
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// issue comment resolve/unresolve
+	issueCommentResolveCmd.Flags().String("output", "json", "Output format: table or json")
+	issueCommentUnresolveCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue search
 	issueSearchCmd.Flags().Int("limit", 20, "Maximum number of results to return")
@@ -637,6 +685,120 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, issue)
 }
 
+// childStage extracts the integer stage from a child issue response map.
+// Returns ok=false when the child is unstaged (stage null/absent).
+func childStage(m map[string]any) (int, bool) {
+	v, ok := m["stage"]
+	if !ok || v == nil {
+		return 0, false
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(i), true
+	}
+	return 0, false
+}
+
+func runIssueChildren(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	var resp struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID+"/children", &resp); err != nil {
+		return fmt.Errorf("list child issues: %w", err)
+	}
+	children := resp.Issues
+
+	// Order by stage ascending (unstaged last), preserving the API's
+	// within-stage order (position, then created_at desc).
+	sort.SliceStable(children, func(i, j int) bool {
+		si, oki := childStage(children[i])
+		sj, okj := childStage(children[j])
+		if oki != okj {
+			return oki // staged before unstaged
+		}
+		return si < sj
+	})
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		actors := loadActorDisplayLookup(ctx, client)
+		headers := []string{"STAGE", "KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE"}
+		rows := make([][]string, 0, len(children))
+		for _, c := range children {
+			stageCell := "-"
+			if s, ok := childStage(c); ok {
+				stageCell = strconv.Itoa(s)
+			}
+			rows = append(rows, []string{
+				stageCell,
+				issueDisplayKey(c),
+				strVal(c, "title"),
+				strVal(c, "status"),
+				strVal(c, "priority"),
+				formatAssignee(c, actors),
+			})
+		}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+
+	// JSON: group by stage so an agent can see, at a glance, how many
+	// sub-issues there are and which stage each belongs to.
+	type stageGroup struct {
+		Stage  int              `json:"stage"`
+		Total  int              `json:"total"`
+		Done   int              `json:"done"`
+		Issues []map[string]any `json:"issues"`
+	}
+	stages := []stageGroup{}
+	unstaged := []map[string]any{}
+	idxByStage := map[int]int{}
+	for _, c := range children {
+		s, ok := childStage(c)
+		if !ok {
+			unstaged = append(unstaged, c)
+			continue
+		}
+		gi, seen := idxByStage[s]
+		if !seen {
+			stages = append(stages, stageGroup{Stage: s})
+			gi = len(stages) - 1
+			idxByStage[s] = gi
+		}
+		stages[gi].Issues = append(stages[gi].Issues, c)
+		stages[gi].Total++
+		if st := strVal(c, "status"); st == "done" || st == "cancelled" {
+			stages[gi].Done++
+		}
+	}
+	return cli.PrintJSON(os.Stdout, map[string]any{
+		"total":    len(children),
+		"stages":   stages,
+		"unstaged": unstaged,
+	})
+}
+
 // isHTTPURL reports whether path is an http:// or https:// URL.
 // Used to skip URL-shaped values passed to --attachment, which only
 // accepts local file paths. Trims surrounding whitespace because
@@ -734,6 +896,13 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("resolve project: %w", err)
 		}
 		body["project_id"] = project.ID
+	}
+	if cmd.Flags().Changed("stage") {
+		stage, _ := cmd.Flags().GetInt("stage")
+		if stage < 1 {
+			return fmt.Errorf("--stage must be >= 1")
+		}
+		body["stage"] = stage
 	}
 	if v, _ := cmd.Flags().GetString("start-date"); v != "" {
 		body["start_date"] = v
@@ -949,6 +1118,13 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			body["parent_issue_id"] = parent.ID
 		}
 	}
+	if cmd.Flags().Changed("stage") {
+		stage, _ := cmd.Flags().GetInt("stage")
+		if stage < 1 {
+			return fmt.Errorf("--stage must be >= 1")
+		}
+		body["stage"] = stage
+	}
 
 	if len(body) == 0 {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
@@ -1096,6 +1272,7 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	tail, _ := cmd.Flags().GetInt("tail")
 	rootsOnly, _ := cmd.Flags().GetBool("roots-only")
 	summary, _ := cmd.Flags().GetBool("summary")
+	full, _ := cmd.Flags().GetBool("full")
 	// Flags().Changed distinguishes "user did not pass --recent" from
 	// "user explicitly passed --recent 0" (or a negative value). The
 	// GetInt zero-value collapses both cases, which would otherwise
@@ -1151,6 +1328,18 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	}
 	if summary {
 		params.Set("summary", "true")
+	}
+	// Resolve-aware folding is the default on the complete-thread reads (default
+	// list, --recent, --thread without --tail): a resolved thread collapses to
+	// root + conclusion so an agent does not pay tokens for settled discussion.
+	// --full opts out. The partial-thread reads (--since / --tail) and
+	// --roots-only cannot be folded safely (server rejects fold there), so we
+	// never send fold for them and --full is a harmless no-op. Sending fold only
+	// when eligible keeps every existing read command — including the prompt's
+	// `--thread <id> --tail 30` cold path — working unchanged.
+	foldEligible := !rootsOnly && since == "" && !tailSet
+	if foldEligible && !full {
+		params.Set("fold", "true")
 	}
 	if thread != "" {
 		params.Set("thread", thread)
@@ -1318,6 +1507,44 @@ func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runIssueCommentResolve(cmd *cobra.Command, args []string) error {
+	return runIssueCommentResolution(cmd, args[0], true)
+}
+
+func runIssueCommentUnresolve(cmd *cobra.Command, args []string) error {
+	return runIssueCommentResolution(cmd, args[0], false)
+}
+
+func runIssueCommentResolution(cmd *cobra.Command, commentID string, resolve bool) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	path := "/api/comments/" + url.PathEscape(commentID) + "/resolve"
+	var result map[string]any
+	if resolve {
+		if err := client.PostJSON(ctx, path, nil, &result); err != nil {
+			return fmt.Errorf("resolve comment: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Comment %s resolved.\n", commentID)
+	} else {
+		if err := client.DeleteJSONResponse(ctx, path, &result); err != nil {
+			return fmt.Errorf("unresolve comment: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Comment %s unresolved.\n", commentID)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
 // ---------------------------------------------------------------------------
 // Execution history commands
 // ---------------------------------------------------------------------------
@@ -1373,6 +1600,44 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 			errMsg,
 		})
 	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runIssueUsage(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/usage", &result); err != nil {
+		return fmt.Errorf("get issue usage: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	// JSON numbers decode to float64; formatMetadataValue renders them as clean
+	// integers (no scientific notation for large cache-token counts).
+	headers := []string{"INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "RUNS"}
+	rows := [][]string{{
+		formatMetadataValue(result["total_input_tokens"]),
+		formatMetadataValue(result["total_output_tokens"]),
+		formatMetadataValue(result["total_cache_read_tokens"]),
+		formatMetadataValue(result["total_cache_write_tokens"]),
+		formatMetadataValue(result["task_count"]),
+	}}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }

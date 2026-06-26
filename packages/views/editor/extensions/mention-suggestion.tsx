@@ -42,7 +42,7 @@ import {
   sortUserItemsByRecency,
 } from "./mention-recency";
 import { matchesPinyin } from "./pinyin-match";
-import { createSuggestionPopupRender } from "./suggestion-popup";
+import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -146,7 +146,14 @@ function mergeMentionItems(
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(
   function MentionList({ items, query, command, includeProjectSearch = false }, ref) {
     const { t } = useT("editor");
-    const [selectedIndex, setSelectedIndex] = useState(0);
+    // Selection is tracked by item identity, NOT by a positional index. The
+    // list is re-bucketed by groupItems() and grows asynchronously (server
+    // search results), so a slot index is not a stable target — the row under
+    // index N changes as the list reorders. selectedKey pins the highlight to
+    // a specific item; the numeric index is derived from it against the SAME
+    // order the popup renders (orderedItems). null means "no explicit pick yet"
+    // → the first rendered row is highlighted by default.
+    const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [serverItems, setServerItems] = useState<MentionItem[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [searchedQuery, setSearchedQuery] = useState("");
@@ -232,23 +239,36 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       return mergeMentionItems(items, currentServerItems).slice(0, MAX_ITEMS);
     }, [items, normalizedQuery, searchedQuery, serverItems]);
 
-    useEffect(() => {
-      setSelectedIndex(0);
-    }, [displayItems]);
+    // The single index space for selection. groupItems() re-buckets displayItems
+    // (current → recent → search → users → issues); orderedItems is exactly what
+    // the popup renders, top to bottom. Keyboard nav, Enter, clicks, highlight,
+    // and scroll all index THIS, so the highlighted row always equals the
+    // committed item — there is no second "data order" to drift against.
+    const groups = useMemo(() => groupItems(displayItems), [displayItems]);
+    const orderedItems = useMemo(() => groups.flatMap((g) => g.items), [groups]);
+
+    // Derive the numeric index from the pinned identity. If the selected item
+    // is no longer in the list (query narrowed it away) or nothing is picked
+    // yet, fall back to the first row. This self-heals across reorders and
+    // async result arrival without ever force-resetting an active selection.
+    const selectedIndex = useMemo(() => {
+      if (selectedKey === null) return 0;
+      const i = orderedItems.findIndex((it) => mentionItemKey(it) === selectedKey);
+      return i === -1 ? 0 : i;
+    }, [orderedItems, selectedKey]);
 
     useEffect(() => {
       itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
     }, [selectedIndex]);
 
     const selectItem = useCallback(
-      (index: number) => {
-        const item = displayItems[index];
+      (item: MentionItem | undefined) => {
         if (!item) return;
         const wsId = getCurrentWsId();
         if (wsId) recordMentionUsage(wsId, item);
         command(item);
       },
-      [displayItems, command],
+      [command],
     );
 
     useImperativeHandle(ref, () => ({
@@ -257,27 +277,29 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
         // those keys belong to the IME (Enter commits composition, etc).
         if (isImeComposing(event)) return false;
         if (event.key === "ArrowUp") {
-          if (displayItems.length === 0) return true;
-          setSelectedIndex(
-            (i) => (i + displayItems.length - 1) % displayItems.length,
-          );
+          if (orderedItems.length === 0) return true;
+          const next = (selectedIndex + orderedItems.length - 1) % orderedItems.length;
+          setSelectedKey(mentionItemKey(orderedItems[next]!));
           return true;
         }
         if (event.key === "ArrowDown") {
-          if (displayItems.length === 0) return true;
-          setSelectedIndex((i) => (i + 1) % displayItems.length);
+          if (orderedItems.length === 0) return true;
+          const next = (selectedIndex + 1) % orderedItems.length;
+          setSelectedKey(mentionItemKey(orderedItems[next]!));
           return true;
         }
-        if (event.key === "Enter") {
-          if (displayItems.length === 0) return true;
-          selectItem(selectedIndex);
+        // Enter is the canonical accept; plain Tab is an additive alias (see
+        // isPickerAcceptKey). Shift/modifier+Tab fall through to focus nav.
+        if (isPickerAcceptKey(event)) {
+          if (orderedItems.length === 0) return true;
+          selectItem(orderedItems[selectedIndex]);
           return true;
         }
         return false;
       },
     }));
 
-    if (displayItems.length === 0) {
+    if (orderedItems.length === 0) {
       const isWaitingForServer =
         normalizedQuery !== "" &&
         (isSearching || searchedQuery !== normalizedQuery);
@@ -291,8 +313,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       );
     }
 
-    const groups = groupItems(displayItems);
-    const hasContextGroups = displayItems.some((item) => item.group === "current" || item.group === "recent");
+    const hasContextGroups = orderedItems.some((item) => item.group === "current" || item.group === "recent");
     const contextLayout = hasContextGroups;
     const groupLabel = (label: string): string => {
       if (label === "Current") return t(($) => $.mention.group_current);
@@ -314,7 +335,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
             key={`${item.type}-${item.id}`}
             item={item}
             selected={idx === selectedIndex}
-            onSelect={() => selectItem(idx)}
+            onSelect={() => selectItem(item)}
             buttonRef={(el) => { itemRefs.current[idx] = el; }}
           />
         );

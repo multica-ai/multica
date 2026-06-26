@@ -58,6 +58,29 @@ graph TD
 - **同一个守护进程在同一个工作区同一款工具上只会有一条运行时**——重启守护进程不会产生重复记录
 - Multica 界面的 **Runtimes** 页面列的就是这些行
 
+## 自定义运行时配置
+
+内置 provider 探测覆盖常见工具；如果团队有一款兼容 Multica 已支持协议族、但需要工作区级启动命令的 AI CLI，可以定义 **custom runtime profile**。你可以在 Runtimes UI 里管理，也可以用 CLI：
+
+```bash
+multica runtime profile list
+multica runtime profile create --display-name "Composer" --protocol-family codex --command-name agent
+multica runtime profile update <profile-id> --command-name agent
+multica runtime profile delete <profile-id>
+```
+
+这里填写的是 argv 风格命令，不是 shell 字符串。Multica 存的是可执行文件名和固定参数，守护进程会直接用 `exec.Command(command_name, fixed_args...)` 启动。支持普通参数、引号和反斜杠转义；不支持管道、重定向、`&&`、`;`、反引号、`$VAR` / `$(...)` 展开。需要 shell 行为时，用 wrapper script 包一层。
+目前命令和参数的解析入口在 Runtimes UI；CLI 的 profile 命令负责管理 profile 记录和本机路径覆盖。
+
+如果桌面应用拉起的守护进程找不到你在终端里能运行的命令，可以在这台机器上固定绝对路径：
+
+```bash
+multica runtime profile set-path <profile-id> --path /abs/path/to/agent
+multica runtime profile unset-path <profile-id>
+```
+
+修改 profile 的命令或参数后，已开始的任务仍使用启动时的参数；守护进程重新注册后，新领取的任务才会使用新配置。混合版本部署时，建议先升级 server，再逐步升级 daemon：`fixed_args` 的录入在 server 侧 Runtimes UI，`failed_profiles` 注册报告也由 server 展示。旧组件可能会忽略自己不认识的字段，而不是明确报错；先升 server 能让 rollout 更可观察。
+
 <Callout type="info">
 **云端运行时即将开放**，目前处于等待名单阶段。上线后，你无需在本地运行守护进程，即可在 Multica Cloud 上直接执行智能体任务。在 [下载页面](https://multica.ai/download) 登记邮箱以获取通知。
 </Callout>

@@ -145,17 +145,17 @@ func attachmentDownloadPath(id string) string {
 //
 //  1. Persist `a.Url` only when the deployment has signaled the storage
 //     backend serves URLs publicly without per-request auth:
-//       - `Storage.CdnDomain()` is non-empty (operator configured a
-//         public-facing base URL — `S3_CDN_DOMAIN` for the S3 backend or
-//         `LOCAL_UPLOAD_BASE_URL` for LocalStorage), AND
-//       - `h.CFSigner` is nil (no per-request CloudFront signing — when
-//         signing is on, the same CDN domain serves PRIVATE content via
-//         time-bounded signed URLs and the raw `a.Url` is unauth-deny),
-//         AND
-//       - `a.Url` is itself an absolute http(s) URL with no signature
-//         query — defends against legacy rows backfilled while baseURL
-//         was unset, and against a freshly-signed `download_url` ever
-//         leaking into `a.Url` (the original MUL-3130 bug).
+//     - `Storage.CdnDomain()` is non-empty (operator configured a
+//     public-facing base URL — `S3_CDN_DOMAIN` for the S3 backend or
+//     `LOCAL_UPLOAD_BASE_URL` for LocalStorage), AND
+//     - `h.CFSigner` is nil (no per-request CloudFront signing — when
+//     signing is on, the same CDN domain serves PRIVATE content via
+//     time-bounded signed URLs and the raw `a.Url` is unauth-deny),
+//     AND
+//     - `a.Url` is itself an absolute http(s) URL with no signature
+//     query — defends against legacy rows backfilled while baseURL
+//     was unset, and against a freshly-signed `download_url` ever
+//     leaking into `a.Url` (the original MUL-3130 bug).
 //
 //  2. Every other shape — CloudFront-signed mode, S3 presign /proxy
 //     against a private bucket without a CDN domain, raw S3 / R2 /
@@ -740,9 +740,56 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Disposition", storage.ContentDisposition(att.ContentType, att.Filename))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	h.setAttachmentPreviewSecurityHeaders(w)
 	if _, err := io.Copy(w, reader); err != nil {
 		slog.Error("failed to stream attachment download", "id", uuidToString(att.ID), "error", err)
 	}
+}
+
+func (h *Handler) setAttachmentPreviewSecurityHeaders(w http.ResponseWriter) {
+	// Attachment preview responses may be loaded by the web app in same-origin
+	// deployments or split app/api self-hosted deployments. Allow only the API
+	// origin itself plus configured frontend/CORS origins.
+	w.Header().Set("Content-Security-Policy", attachmentPreviewCSPHeader(h.cfg.AttachmentFrameAncestors))
+}
+
+func attachmentPreviewCSPHeader(frameAncestors []string) string {
+	ancestors := []string{"'self'"}
+	seen := map[string]struct{}{"'self'": {}}
+	for _, raw := range frameAncestors {
+		source, ok := normalizeFrameAncestorSource(raw)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[source]; exists {
+			continue
+		}
+		seen[source] = struct{}{}
+		ancestors = append(ancestors, source)
+	}
+	return "default-src 'none'; " +
+		"img-src 'self' data:; " +
+		"media-src 'self'; " +
+		"frame-ancestors " + strings.Join(ancestors, " ") + "; " +
+		"object-src 'none'; " +
+		"base-uri 'none'; " +
+		"form-action 'none'"
+}
+
+func normalizeFrameAncestorSource(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "*" {
+		return "", false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", false
+	}
+	return scheme + "://" + strings.ToLower(u.Host), true
 }
 
 // ---------------------------------------------------------------------------
@@ -810,6 +857,7 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	// when a user explicitly opens a preview.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	h.setAttachmentPreviewSecurityHeaders(w)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
 	if _, err := w.Write(body); err != nil {
 		slog.Error("failed to write attachment preview body", "id", attachmentID, "error", err)

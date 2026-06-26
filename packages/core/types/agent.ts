@@ -63,7 +63,6 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "opencode",
   "openclaw",
   "hermes",
-  "gemini",
   "pi",
   "cursor",
   "kimi",
@@ -196,6 +195,13 @@ export interface AgentTask {
    * or deleted.
    */
   trigger_summary?: string;
+  /**
+   * Handoff instruction the assigner attached when starting this run (MUL-3375).
+   * Present only on assignment-triggered runs that carried a note; the execution
+   * log shows it inline as the trigger reason. Absent (legacy / no note) falls
+   * back to the generic "initial run" label.
+   */
+  handoff_note?: string;
   /**
    * Server-computed source discriminator used by the activity row to label
    * tasks that have no linked issue (so e.g. quick-create tasks render

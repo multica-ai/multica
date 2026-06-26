@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -25,6 +26,8 @@ Your responsibilities, in order:
 
 1. **Read the issue** (title, description, latest comments, acceptance
    criteria) and decide which squad member is best suited to do the work.
+   Match the task to each member's listed **skills** and role in the Squad
+   Roster below — prefer the member whose skills cover the work.
 2. **Delegate by @mention.** Post a single comment on this issue that
    @mentions the chosen member(s) and tells them what to do.
    - **Be terse.** Every Multica agent already has full context of the
@@ -139,6 +142,8 @@ func buildSquadRoster(ctx context.Context, q *db.Queries, squad db.Squad) string
 		members = nil
 	}
 
+	skillNamesByAgentID, skillsLoaded := loadSquadMemberSkillNames(ctx, q, members, util.UUIDToString(squad.LeaderID))
+
 	rows := make([]string, 0, len(members))
 	for _, m := range members {
 		// Skip the leader if they happen to also be in the member list —
@@ -146,7 +151,7 @@ func buildSquadRoster(ctx context.Context, q *db.Queries, squad db.Squad) string
 		if m.MemberType == "agent" && util.UUIDToString(m.MemberID) == util.UUIDToString(squad.LeaderID) {
 			continue
 		}
-		row := renderMemberRow(ctx, q, m)
+		row := renderMemberRow(ctx, q, m, skillNamesByAgentID, skillsLoaded)
 		if row != "" {
 			rows = append(rows, row)
 		}
@@ -164,9 +169,41 @@ func buildSquadRoster(ctx context.Context, q *db.Queries, squad db.Squad) string
 	return sb.String()
 }
 
+func loadSquadMemberSkillNames(ctx context.Context, q *db.Queries, members []db.SquadMember, leaderID string) (map[string][]string, bool) {
+	agentIDs := make([]pgtype.UUID, 0)
+	seen := make(map[string]struct{}, len(members))
+	for _, m := range members {
+		if m.MemberType != "agent" {
+			continue
+		}
+		id := util.UUIDToString(m.MemberID)
+		if id == leaderID {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		agentIDs = append(agentIDs, m.MemberID)
+	}
+	if len(agentIDs) == 0 {
+		return map[string][]string{}, true
+	}
+	rows, err := q.ListAgentSkillNamesByAgentIDs(ctx, agentIDs)
+	if err != nil {
+		return nil, false
+	}
+	byAgentID := make(map[string][]string, len(agentIDs))
+	for _, row := range rows {
+		id := util.UUIDToString(row.AgentID)
+		byAgentID[id] = append(byAgentID[id], row.Name)
+	}
+	return byAgentID, true
+}
+
 // renderMemberRow renders a single roster row, returning "" if the member
 // can't be resolved or should be skipped (e.g. archived agent).
-func renderMemberRow(ctx context.Context, q *db.Queries, m db.SquadMember) string {
+func renderMemberRow(ctx context.Context, q *db.Queries, m db.SquadMember, skillNamesByAgentID map[string][]string, skillsLoaded bool) string {
 	id := util.UUIDToString(m.MemberID)
 	role := strings.TrimSpace(m.Role)
 	switch m.MemberType {
@@ -178,7 +215,9 @@ func renderMemberRow(ctx context.Context, q *db.Queries, m db.SquadMember) strin
 		if ag.ArchivedAt.Valid {
 			return ""
 		}
-		return formatRosterRow(ag.Name, "agent", role, formatMention(ag.Name, "agent", id))
+		// Agents carry skills; surfacing them lets the leader delegate by
+		// capability instead of guessing from the free-text role label.
+		return formatRosterRow(ag.Name, "agent", role, agentSkillsRosterSegment(skillNamesByAgentID, skillsLoaded, id), formatMention(ag.Name, "agent", id))
 	case "member":
 		user, err := q.GetUser(ctx, m.MemberID)
 		if err != nil {
@@ -186,14 +225,32 @@ func renderMemberRow(ctx context.Context, q *db.Queries, m db.SquadMember) strin
 		}
 		// Mention syntax for humans uses the user_id (matches the rest of
 		// the product — see util.MentionRe and frontend mention payloads).
+		// Humans have no Multica skills, so no skills segment is rendered.
 		userID := util.UUIDToString(m.MemberID)
-		return formatRosterRow(user.Name, "member (human)", role, formatMention(user.Name, "member", userID))
+		return formatRosterRow(user.Name, "member (human)", role, "", formatMention(user.Name, "member", userID))
 	default:
 		return ""
 	}
 }
 
-func formatRosterRow(name, kind, role, mention string) string {
+// agentSkillsRosterSegment returns the roster segment describing an agent
+// member's assigned skills. "skills: a, b" when the agent has skills (the
+// names are pre-sorted by ListAgentSkillNamesByAgentIDs), "no skills assigned"
+// when it has none so the leader knows the capability is genuinely absent, and
+// "" only when the lookup fails — a transient DB error degrades to the prior
+// name+role row rather than asserting a misleading "no skills".
+func agentSkillsRosterSegment(skillNamesByAgentID map[string][]string, skillsLoaded bool, agentID string) string {
+	if !skillsLoaded {
+		return ""
+	}
+	names := skillNamesByAgentID[agentID]
+	if len(names) == 0 {
+		return "no skills assigned"
+	}
+	return "skills: " + strings.Join(names, ", ")
+}
+
+func formatRosterRow(name, kind, role, skills, mention string) string {
 	var sb strings.Builder
 	sb.WriteString("- ")
 	sb.WriteString(name)
@@ -203,6 +260,10 @@ func formatRosterRow(name, kind, role, mention string) string {
 		sb.WriteString(`, role: "`)
 		sb.WriteString(role)
 		sb.WriteString(`"`)
+	}
+	if skills != "" {
+		sb.WriteString(" — ")
+		sb.WriteString(skills)
 	}
 	sb.WriteString(" — `")
 	sb.WriteString(mention)

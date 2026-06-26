@@ -81,7 +81,7 @@ func BuildResumedCommentsHint(issueID, triggerCommentID, triggerThreadID string)
 // timeline (oldest-first, server cap 2000), point the agent at the triggering
 // CONVERSATION: `--thread <trigger> --tail 30` returns that thread's root plus
 // its 30 newest replies (root is always included, even at --tail 0) — the
-// context the triggering comment actually needs. A `--recent 20` pointer is kept
+// context the triggering comment actually needs. A `--recent 10` pointer is kept
 // for cross-thread background the agent can pull on judgment.
 //
 // Both surfaces call this so the cold fallback cannot drift between them (same
@@ -97,7 +97,8 @@ func BuildColdCommentsHint(issueID, triggerCommentID, triggerThreadID string) st
 		"Read the triggering conversation first: "+
 			"`multica issue comment list %s --thread %s --tail 30 --output json` "+
 			"(that thread's root + its 30 newest replies). "+
-			"Need cross-thread background? `multica issue comment list %s --recent 20 --output json`.\n\n",
+			"Need cross-thread background? `multica issue comment list %s --recent 10 --output json` "+
+			"(resolved threads come back folded — `--full` to expand).\n\n",
 		issueID, threadID, issueID,
 	)
 }
@@ -157,6 +158,9 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 	if triggerCommentID == "" {
 		return ""
 	}
+	if useSlimBrief() {
+		return buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID)
+	}
 	if runtimeGOOS == "windows" {
 		return fmt.Sprintf(
 			"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
@@ -195,6 +199,45 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 			"    # 2. Post the comment:\n"+
 			"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
 			"    # 3. Remove the temp file so a later run does not pick up stale content:\n"+
+			"    rm ./reply.md\n\n"+
+			"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
+		issueID, triggerCommentID,
+	)
+}
+
+
+// buildCommentReplyInstructionsSlim is the post-MUL-3560 compressed
+// reply-instructions block. Selected by BuildCommentReplyInstructions when
+// the `runtime_brief_slim` feature flag is on; the legacy verbose form
+// above stays the default in production.
+//
+// The slim block carries only the trigger-specific cookbook (the exact
+// `--parent` UUID, the file path, the cleanup line) plus the two
+// behavioural rules tests pin ("do NOT reuse --parent" and "do not rely
+// on `\n` escapes"). The detailed shell-hazard rationale lives in the
+// canonical `## Comment Formatting` section the same brief carries, so
+// repeating it inline at every comment-triggered step 7 would be
+// duplication, not signal.
+func buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID string) string {
+	if runtimeGOOS == "windows" {
+		return fmt.Sprintf(
+			"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
+				"do NOT reuse --parent values from previous turns in this session.\n\n"+
+				"On Windows, write the reply body to a UTF-8 file with your file-write tool first, then post with `--content-file`. "+
+				"Do NOT pipe via `--content-stdin` — PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to native commands and silently drops non-ASCII (Chinese, Japanese, Cyrillic, accents, emoji) as `?` before bytes reach `multica.exe`. "+
+				"See ## Comment Formatting above for the full rule:\n\n"+
+				"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
+				"    Remove-Item ./reply.md\n\n"+
+				"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
+			issueID, triggerCommentID,
+		)
+	}
+	return fmt.Sprintf(
+		"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
+			"do NOT reuse --parent values from previous turns in this session.\n\n"+
+			"Write the reply body to a UTF-8 file with your file-write tool first, then post it with `--content-file` "+
+			"(see ## Comment Formatting above for why inline `--content` and `--content-stdin` HEREDOCs are unsafe — MUL-2904 / #4182):\n\n"+
+			"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
 			"    rm ./reply.md\n\n"+
 			"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
 		issueID, triggerCommentID,

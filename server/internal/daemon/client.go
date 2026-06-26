@@ -92,6 +92,13 @@ type Client struct {
 	token   string
 	client  *http.Client
 
+	// bundleClient downloads skill bundles. Unlike client it carries no fixed
+	// Timeout: bundles can be large and slow on jittery links, so the caller
+	// supplies a per-request, size-scaled deadline via context instead of
+	// being capped by the 30s control-plane timeout that fits heartbeat /
+	// claim but not a multi-megabyte body read. (GitHub #4505)
+	bundleClient *http.Client
+
 	// Identity headers sent on every request as X-Client-*. Populated by
 	// SetIdentity(); empty values are simply omitted.
 	platform string
@@ -102,10 +109,11 @@ type Client struct {
 // NewClient creates a new daemon API client.
 func NewClient(baseURL string) *Client {
 	return &Client{
-		baseURL:  baseURL,
-		client:   &http.Client{Timeout: 30 * time.Second},
-		platform: "daemon",
-		os:       normalizeGOOS(runtime.GOOS),
+		baseURL:      baseURL,
+		client:       &http.Client{Timeout: 30 * time.Second},
+		bundleClient: &http.Client{},
+		platform:     "daemon",
+		os:           normalizeGOOS(runtime.GOOS),
 	}
 }
 
@@ -141,6 +149,7 @@ func (c *Client) setIdentityHeaders(req *http.Request) {
 	if c.os != "" {
 		req.Header.Set("X-Client-OS", c.os)
 	}
+	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilitySkillBundlesV1)
 }
 
 // SetToken sets the auth token for authenticated requests.
@@ -161,6 +170,33 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 		return nil, err
 	}
 	return resp.Task, nil
+}
+
+// ResolveSkillBundle downloads a single skill bundle. It uses bundleClient (no
+// fixed timeout) so the deadline is governed entirely by ctx, which the daemon
+// scales to the bundle's size, and retries transient transport blips within
+// whatever budget ctx leaves. Resolving one skill per request — rather than the
+// agent's whole bundle in one atomic body read — lets each download fit its own
+// deadline and be cached independently, so a slow link makes incremental
+// progress instead of failing the entire set on every dispatch. (GitHub #4505)
+func (c *Client) ResolveSkillBundle(ctx context.Context, runtimeID, taskID string, ref SkillRefData) (SkillData, error) {
+	var resp struct {
+		Bundles []SkillData `json:"bundles"`
+	}
+	path := fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/skill-bundles/resolve", runtimeID, taskID)
+	if err := c.postJSONViaWithRetry(ctx, c.bundleClient, path, map[string]any{
+		"skills": []SkillRefData{ref},
+	}, &resp, skillBundleResolveRetrySchedule); err != nil {
+		return SkillData{}, err
+	}
+	if len(resp.Bundles) != 1 {
+		return SkillData{}, fmt.Errorf("resolve skill bundle: expected 1 bundle, got %d", len(resp.Bundles))
+	}
+	return resp.Bundles[0], nil
+}
+
+func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/prepare-lease", runtimeID, taskID), map[string]any{}, nil)
 }
 
 func (c *Client) StartTask(ctx context.Context, taskID string) error {
@@ -293,8 +329,8 @@ type (
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":             runtimeID,
-		"supports_batch_import":  true,
+		"runtime_id":            runtimeID,
+		"supports_batch_import": true,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -467,8 +503,7 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 // (MUL-3284). protocol_family is the provider used for task routing (it
 // selects the agent backend), while command_name is the actual executable
 // the daemon resolves on PATH and launches. fixed_args are launch arguments
-// every agent on this runtime inherits — wiring them into the spawned command
-// is best-effort and may not be plumbed yet (see the TODO in runTask).
+// every agent on this runtime inherits.
 type RuntimeProfile struct {
 	ID             string   `json:"id"`
 	WorkspaceID    string   `json:"workspace_id"`
@@ -513,6 +548,16 @@ var defaultTerminalRetrySchedule = []time.Duration{
 	16 * time.Second,
 	32 * time.Second,
 	64 * time.Second,
+}
+
+// skillBundleResolveRetrySchedule rides out brief transport blips on a single
+// bundle download. Kept short on purpose: the real budget is the size-scaled
+// context deadline the daemon sets per skill, and a skill that still fails is
+// retried on the next dispatch once its siblings are cached. N entries → N+1
+// attempts. (GitHub #4505)
+var skillBundleResolveRetrySchedule = []time.Duration{
+	500 * time.Millisecond,
+	2 * time.Second,
 }
 
 // retrySleep is the sleep used between retry attempts. Pulled into a package
@@ -573,6 +618,13 @@ func isTransientError(err error) bool {
 // idempotent success (see service/task.go), so a duplicate replay from a
 // retry is safe even if the server's prior response was lost in transit.
 func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any, respBody any, schedule []time.Duration) error {
+	return c.postJSONViaWithRetry(ctx, c.client, path, reqBody, respBody, schedule)
+}
+
+// postJSONViaWithRetry is postJSONWithRetry over an explicit http.Client, so
+// large-body endpoints can run on bundleClient (deadline from ctx) while the
+// control-plane keeps its fixed 30s client.
+func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any, schedule []time.Duration) error {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -581,7 +633,7 @@ func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any
 			}
 			return err
 		}
-		err := c.postJSON(ctx, path, reqBody, respBody)
+		err := c.postJSONVia(ctx, httpClient, path, reqBody, respBody)
 		if err == nil {
 			return nil
 		}
@@ -599,6 +651,13 @@ func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
+	return c.postJSONVia(ctx, c.client, path, reqBody, respBody)
+}
+
+// postJSONVia is postJSON over an explicit http.Client. Callers pick the client
+// to control the timeout regime: c.client (fixed 30s) for control-plane calls,
+// c.bundleClient (deadline from ctx) for large skill-bundle downloads.
+func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any) error {
 	var body io.Reader
 	if reqBody != nil {
 		data, err := json.Marshal(reqBody)
@@ -618,7 +677,7 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 	}
 	c.setIdentityHeaders(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

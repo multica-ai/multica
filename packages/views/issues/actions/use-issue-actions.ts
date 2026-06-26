@@ -14,8 +14,6 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
-const BACKLOG_HINT_LS_KEY = "multica:backlog-agent-hint-dismissed";
-
 export interface UseIssueActionsResult {
   isPinned: boolean;
   updateField: (updates: Partial<UpdateIssueRequest>) => void;
@@ -57,13 +55,36 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const openModal = useModalStore((s) => s.open);
 
   const issueId = issue?.id ?? null;
-  const issueStatus = issue?.status ?? null;
   const issueIdentifier = issue?.identifier ?? null;
   const issueProjectId = issue?.project_id ?? null;
+  const issueStatus = issue?.status ?? null;
 
   const updateField = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
       if (!issueId) return;
+      // Assigning to an agent/squad may start a run. Route through the
+      // pre-trigger confirm modal (preview + optional handoff note + "暂不开始"),
+      // which applies the change itself — the four entry points share this one
+      // backend-driven flow instead of guessing (MUL-3375). Every other field
+      // change (status, priority, member assign, unassign) applies directly.
+      //
+      // Backlog is the parking lot: assigning a backlog issue never starts a run
+      // (server/internal/service/issue_trigger.go), so the modal would only show
+      // an empty "won't start" box with a single Apply button. Apply directly,
+      // matching the batch backlog short-circuit in BatchActionToolbar.
+      if (
+        (updates.assignee_type === "agent" || updates.assignee_type === "squad") &&
+        updates.assignee_id &&
+        issueStatus !== "backlog"
+      ) {
+        openModal("issue-run-confirm", {
+          issueIds: [issueId],
+          mode: "assign",
+          assigneeType: updates.assignee_type,
+          assigneeId: updates.assignee_id,
+        });
+        return;
+      }
       updateIssue.mutate(
         { id: issueId, ...updates },
         {
@@ -75,17 +96,6 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
             ),
         },
       );
-      // Hint: assigning an agent to a backlog issue won't trigger execution
-      // until the issue is moved to an active status.
-      if (
-        updates.assignee_type === "agent" &&
-        updates.assignee_id &&
-        issueStatus === "backlog" &&
-        typeof window !== "undefined" &&
-        localStorage.getItem(BACKLOG_HINT_LS_KEY) !== "true"
-      ) {
-        openModal("issue-backlog-agent-hint", { issueId });
-      }
     },
     [issueId, issueStatus, updateIssue, openModal, t],
   );

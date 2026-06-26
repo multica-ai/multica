@@ -22,6 +22,10 @@
     "low": "低",
     "none": "優先度なし"
   },
+  "stage": {
+    "none": "ステージなし",
+    "value": "ステージ {{n}}"
+  },
   "scope": {
     "all_label": "すべて",
     "all_description": "このワークスペースのすべてのイシュー",
@@ -193,6 +197,7 @@
     "pull_request_card_show_less": "折りたたむ",
     "prop_status": "ステータス",
     "prop_priority": "優先度",
+    "prop_stage": "ステージ",
     "prop_assignee": "担当者",
     "prop_start_date": "開始日",
     "prop_due_date": "期限",
@@ -351,6 +356,7 @@
     "trigger_autopilot": "オートパイロット実行",
     "trigger_comment": "コメントトリガー",
     "trigger_initial": "初回実行",
+    "trigger_handoff_prefix": "引き継ぎ：",
     "status_queued": "待機中",
     "status_dispatched": "開始中",
     "status_waiting_local_directory": "ローカルディレクトリ待機中",
@@ -466,9 +472,6 @@
     "row_backlog_label": "バックログ",
     "row_backlog_hint": "エージェントを一時停止のままにします",
     "row_todo_label": "未着手",
-    "row_todo_hint": "エージェントを開始します",
-    "dont_show_again": "今後表示しない",
-    "keep_in_backlog": "バックログのままにする",
-    "move_to_todo": "未着手に移動"
+    "row_todo_hint": "エージェントを開始します"
   }
 }

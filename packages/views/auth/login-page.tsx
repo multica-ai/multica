@@ -349,6 +349,7 @@ export function LoginPage({
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
             <InputOTP
+              autoFocus
               maxLength={6}
               value={code}
               onChange={(value) => {

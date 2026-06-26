@@ -339,7 +339,7 @@ func TestAttachLabelCrossWorkspaceLabel(t *testing.T) {
 	}
 }
 
-// TestLabelNameTooLong — names longer than 64 chars must return 400.
+// TestLabelNameTooLong — names longer than 32 chars must return 400.
 func TestLabelNameTooLong(t *testing.T) {
 	longName := strings.Repeat("a", 33)
 	w := httptest.NewRecorder()
@@ -361,10 +361,76 @@ func TestLabelNameTooLong(t *testing.T) {
 	})
 	testHandler.CreateLabel(w, req)
 	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateLabel 64-char name: expected 201, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("CreateLabel 32-char name: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	var created LabelResponse
 	json.NewDecoder(w.Body).Decode(&created)
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+created.ID, nil)
+		req = withURLParam(req, "id", created.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+}
+
+func TestLabelNameRejectsControlCharacters(t *testing.T) {
+	cases := []struct {
+		name string
+		body map[string]any
+		call func(*httptest.ResponseRecorder, *http.Request)
+	}{
+		{
+			name: "create newline",
+			body: map[string]any{"name": "bug\nurgent", "color": "#123456"},
+			call: func(w *httptest.ResponseRecorder, req *http.Request) {
+				testHandler.CreateLabel(w, req)
+			},
+		},
+		{
+			name: "create tab",
+			body: map[string]any{"name": "bug\turgent", "color": "#123456"},
+			call: func(w *httptest.ResponseRecorder, req *http.Request) {
+				testHandler.CreateLabel(w, req)
+			},
+		},
+		{
+			name: "update control",
+			body: map[string]any{"name": "bug\u0000urgent"},
+			call: func(w *httptest.ResponseRecorder, req *http.Request) {
+				req = withURLParam(req, "id", "00000000-0000-0000-0000-000000000000")
+				testHandler.UpdateLabel(w, req)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := newRequest("POST", "/api/labels", tc.body)
+			tc.call(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestLabelNameAllowsEmoji(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/labels", map[string]any{
+		"name":  "🐛 bug",
+		"color": "#123456",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel emoji name: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created LabelResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	if created.Name != "🐛 bug" {
+		t.Fatalf("CreateLabel emoji name: got %q", created.Name)
+	}
 	t.Cleanup(func() {
 		w := httptest.NewRecorder()
 		req := newRequest("DELETE", "/api/labels/"+created.ID, nil)

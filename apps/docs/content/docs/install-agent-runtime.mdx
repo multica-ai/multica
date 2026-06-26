@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 12 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 13 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 12 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 13 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,9 +31,9 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 12 supported tools
+## The 13 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 12.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 13.
 
 ### Claude Code (Anthropic)
 
@@ -76,16 +76,6 @@ Model routing goes through your GitHub account entitlement — the tool doesn't 
 | Install | See GitHub's CLI docs at [github.com/github/copilot-cli](https://github.com/github/copilot-cli). |
 | Authentication | Browser-based GitHub login through the CLI. |
 | Notes | Requires an active GitHub Copilot subscription on the signed-in account. |
-
-### Gemini (Google)
-
-Supports the Gemini 2.5 and 3 series. No session resumption, no MCP — suitable for one-shot tasks.
-
-| | |
-|---|---|
-| Daemon looks for | `gemini` |
-| Install | Follow the official guide at [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli). The standard route is the npm package `@google/gemini-cli`. |
-| Authentication | `gemini` will prompt for a Google account login, or set `GEMINI_API_KEY`. |
 
 ### OpenCode (SST)
 
@@ -145,6 +135,26 @@ Minimalist. **Session resumption is unusual** — the resume id is the path to a
 |---|---|
 | Daemon looks for | `pi` |
 | Install | See Inflection's CLI docs at [pi.ai](https://pi.ai/). |
+| Authentication | Per the vendor's docs. |
+
+### CodeBuddy (Tencent)
+
+A Claude Code–compatible CLI agent. Multica drives it with the same stream-json protocol as Claude Code: session resumption works via `--resume`, MCP config is passed through `--mcp-config`, and skills land in `.claude/skills/`. Models are discovered dynamically.
+
+| | |
+|---|---|
+| Daemon looks for | `codebuddy` |
+| Install | See the official CLI docs at [codebuddy.ai/cli](https://www.codebuddy.ai/cli). |
+| Authentication | Per the vendor's docs. |
+
+### Qoder (Alibaba)
+
+Agentic coding CLI using the ACP protocol over stdio (shares the transport with Hermes, Kimi, and Kiro CLI). Session resumption works through ACP `session/resume`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically, and skills are copied into `.qoder/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `qodercli` |
+| Install | See the official CLI docs at [qoder.com/cli](https://qoder.com/cli). |
 | Authentication | Per the vendor's docs. |
 
 ### Antigravity (Google)

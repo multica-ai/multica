@@ -22,6 +22,10 @@
     "low": "低",
     "none": "无优先级"
   },
+  "stage": {
+    "none": "无阶段",
+    "value": "阶段 {{n}}"
+  },
   "scope": {
     "all_label": "全部",
     "all_description": "工作区内的全部 issue",
@@ -194,6 +198,7 @@
     "pull_request_card_show_less": "收起",
     "prop_status": "状态",
     "prop_priority": "优先级",
+    "prop_stage": "阶段",
     "prop_assignee": "负责人",
     "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
@@ -356,6 +361,7 @@
     "trigger_autopilot": "自动化运行",
     "trigger_comment": "评论触发",
     "trigger_initial": "首次运行",
+    "trigger_handoff_prefix": "交接：",
     "status_queued": "排队中",
     "status_dispatched": "启动中",
     "status_waiting_local_directory": "等待本地目录释放",
@@ -471,9 +477,6 @@
     "row_backlog_label": "Backlog",
     "row_backlog_hint": "智能体保持暂停",
     "row_todo_label": "Todo",
-    "row_todo_hint": "启动智能体",
-    "dont_show_again": "不再提示",
-    "keep_in_backlog": "保持在 Backlog",
-    "move_to_todo": "移到 Todo"
+    "row_todo_hint": "启动智能体"
   }
 }

@@ -29,6 +29,14 @@ export function pendingRuntimeCommandName(runtime: AgentRuntime): string | null 
   return typeof command === "string" && command.trim() ? command : null;
 }
 
+export function customRuntimeRegistrationFailure(
+  runtime: AgentRuntime,
+): string | null {
+  if (runtime.metadata?.runtime_profile_registration_error !== true) return null;
+  const reason = runtime.metadata.runtime_profile_failure_reason;
+  return typeof reason === "string" && reason.trim() ? reason : null;
+}
+
 export function isPendingCustomRuntimeWarning(
   runtime: AgentRuntime,
   now: number,

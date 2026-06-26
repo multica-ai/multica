@@ -314,8 +314,10 @@ function useEditAttachmentState(
   const { t } = useT("issues");
   const { uploadWithToast } = useFileUpload(api);
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const editorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
+  const savingRef = useRef(false);
   const [content, setContent] = useState(entry.content ?? "");
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
@@ -398,7 +400,7 @@ function useEditAttachmentState(
   };
 
   const saveEdit = async () => {
-    if (cancelledRef.current) return;
+    if (cancelledRef.current || savingRef.current) return;
     const trimmed = editorRef.current
       ?.getMarkdown()
       ?.replace(/(\n\s*)+$/, "")
@@ -417,6 +419,8 @@ function useEditAttachmentState(
     const suppressAgentIds = triggerPreview.agents
       .filter((agent) => suppressedAgentIds.has(agent.id))
       .map((agent) => agent.id);
+    savingRef.current = true;
+    setSaving(true);
     try {
       await onEdit(
         entry.id,
@@ -431,11 +435,15 @@ function useEditAttachmentState(
           ? err.message
           : t(($) => $.comment.update_failed),
       );
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
   return {
     editing,
+    saving,
     editorRef,
     editorAttachments,
     handleUpload,
@@ -645,8 +653,11 @@ function CommentRow({
                 multiple
                 onSelect={(file) => edit.editorRef.current?.uploadFile(file)}
               />
-              <Button size="sm" variant="ghost" onClick={edit.cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
-              <Button size="sm" variant="outline" onClick={edit.saveEdit}>{t(($) => $.comment.save_action)}</Button>
+              <Button size="sm" variant="ghost" onClick={edit.cancelEdit} disabled={edit.saving}>{t(($) => $.comment.cancel_edit)}</Button>
+              <Button size="sm" variant="outline" onClick={edit.saveEdit} disabled={edit.saving}>
+                {edit.saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {t(($) => $.comment.save_action)}
+              </Button>
             </div>
           </div>
           {edit.isDragOver && <FileDropOverlay />}
@@ -932,8 +943,11 @@ function CommentCardImpl({
                     />
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={edit.cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
-                    <Button size="sm" variant="outline" onClick={edit.saveEdit}>{t(($) => $.comment.save_action)}</Button>
+                    <Button size="sm" variant="ghost" onClick={edit.cancelEdit} disabled={edit.saving}>{t(($) => $.comment.cancel_edit)}</Button>
+                    <Button size="sm" variant="outline" onClick={edit.saveEdit} disabled={edit.saving}>
+                      {edit.saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      {t(($) => $.comment.save_action)}
+                    </Button>
                   </div>
                 </div>
                 {edit.isDragOver && <FileDropOverlay />}

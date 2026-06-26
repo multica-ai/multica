@@ -154,7 +154,6 @@ var allFileBasedProviders = []string{
 	"kimi",
 	"kiro",
 	"antigravity",
-	"gemini",
 }
 
 // TestPrepareThenCleanupSidecarsRoundTripEmptyWorkdir is the headline
@@ -212,7 +211,7 @@ func TestPrepareThenCleanupSidecarsRoundTripEmptyWorkdir(t *testing.T) {
 func TestPrepareThenCleanupSidecarsPreservesUserSkillSibling(t *testing.T) {
 	t.Parallel()
 	// One representative case per provider that writes into a
-	// provider-native skill directory. Gemini and Hermes don't have a
+	// provider-native skill directory. Hermes doesn't have a
 	// native discovery path; they fall back to .agent_context/skills/,
 	// which is also covered (a user-created sibling under there should
 	// also survive). Codex is intentionally excluded — its workspace
@@ -233,7 +232,6 @@ func TestPrepareThenCleanupSidecarsPreservesUserSkillSibling(t *testing.T) {
 		{"kiro", filepath.Join(".kiro", "skills", "my-own"), "SKILL.md"},
 		{"antigravity", filepath.Join(".agents", "skills", "my-own"), "SKILL.md"},
 		{"hermes", filepath.Join(".agent_context", "skills", "my-own"), "SKILL.md"},
-		{"gemini", filepath.Join(".agent_context", "skills", "my-own"), "SKILL.md"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -608,7 +606,7 @@ func TestSidecarManifestRoundTripJSON(t *testing.T) {
 // is fully cleaned up.
 //
 // Codex skills live under codex-home (not workdir), so the per-skill
-// collision branch doesn't apply to it. Gemini falls back to
+// collision branch doesn't apply to it. Hermes falls back to
 // .agent_context/skills/ same as the default; Hermes goes there too.
 var sameSlugSkillProviderCases = []struct {
 	provider string
@@ -624,7 +622,6 @@ var sameSlugSkillProviderCases = []struct {
 	{"kiro", filepath.Join(".kiro", "skills", "issue-review")},
 	{"antigravity", filepath.Join(".agents", "skills", "issue-review")},
 	{"hermes", filepath.Join(".agent_context", "skills", "issue-review")},
-	{"gemini", filepath.Join(".agent_context", "skills", "issue-review")},
 }
 
 // TestPrepareThenCleanupSidecarsSameSlugCollisionPerProvider is the

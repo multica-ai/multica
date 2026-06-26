@@ -16,6 +16,12 @@ Multica 支持两种 Skill 来源：
 
 大多数情况用**工作区 Skill**：导入一次，团队所有成员的智能体都能用。本机 Skill 适合先在本地测试、或涉及敏感本地内容的场景。
 
+## 仓库级 Skill
+
+仓库级 Skill 是预期行为。有些 AI 编程工具会发现**提交在仓库里的项目级 Skill**，例如 `.claude/skills/`、`.cursor/skills/`、`.opencode/skills/` 或 `.agents/skills/`。当 Multica 任务检出这个仓库时，这些文件会留在工作目录里，底层工具可以按自己的原生发现规则加载它们。你不需要为了在这个仓库里使用这些 repo skills 而先把它们导入 Multica；Multica 也不会自动把它们导入工作区 Skill 注册表。
+
+对支持项目级发现的工具，工作区 Skill 也会同步到同一个 provider 原生位置。如果某个工作区 Skill 会和已有的仓库 Skill 目录冲突，Multica 会把工作区副本写到类似 `review-helper-multica` 的 sibling 名称下，而不是覆盖仓库文件。工具随后可能会同时看到两个 Skill，其中工作区副本使用调整后的名称。
+
 ## 导入 Skill
 
 工作区 Skill 有四种来源：

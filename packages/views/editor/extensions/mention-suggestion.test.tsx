@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workspaceKeys } from "@multica/core/workspace/queries";
@@ -207,6 +207,112 @@ describe("createMentionSuggestion", () => {
     expect(
       ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Enter" }) }),
     ).toBe(true);
+  });
+
+  // MUL-3685: plain Tab accepts the highlighted row exactly like Enter.
+  it("accepts the highlighted row on plain Tab, like Enter", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue" },
+      { id: "i-2", label: "MUL-2", type: "issue" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={command} />
+      </I18nWrapper>,
+    );
+
+    const handled = ref.current?.onKeyDown({
+      event: new KeyboardEvent("keydown", { key: "Tab" }),
+    });
+
+    expect(handled).toBe(true);
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-1");
+  });
+
+  // Shift+Tab and any modifier+Tab stay focus navigation — they must NOT
+  // accept, so the picker never traps reverse Tab traversal or OS switching.
+  it("does not accept on Shift+Tab or modifier+Tab", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [{ id: "i-1", label: "MUL-1", type: "issue" }];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={command} />
+      </I18nWrapper>,
+    );
+
+    const press = (init: KeyboardEventInit) =>
+      ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", init) });
+
+    expect(press({ key: "Tab", shiftKey: true })).toBe(false);
+    expect(press({ key: "Tab", metaKey: true })).toBe(false);
+    expect(press({ key: "Tab", ctrlKey: true })).toBe(false);
+    expect(press({ key: "Tab", altKey: true })).toBe(false);
+    expect(command).not.toHaveBeenCalled();
+  });
+
+  it("captures Tab while the popup has no selectable items, like Enter", () => {
+    const ref = createRef<MentionListRef>();
+
+    render(<I18nWrapper><MentionList ref={ref} items={[]} query="协作" command={vi.fn()} /></I18nWrapper>);
+
+    expect(
+      ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Tab" }) }),
+    ).toBe(true);
+  });
+
+  // MUL-3607: groupItems() re-buckets the list (current → recent → search →
+  // users → issues), so an item that sits LATER in the data array can render
+  // NEAR THE TOP. Selection must follow the rendered order — otherwise the
+  // highlighted row and the committed item drift apart and you mention the
+  // neighbour of who you picked. (Issue rows are used because they render
+  // without workspace/avatar context; the bug is type-agnostic.)
+  it("commits the highlighted row, not its neighbour, when groups reorder the list", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+
+    // Data order is [MUL-2 (issues bucket), MUL-1 (search bucket)], but
+    // groupItems hoists the search row, so the RENDERED order is [MUL-1, MUL-2].
+    const items: MentionItem[] = [
+      { id: "i-plain", label: "MUL-2", type: "issue" },
+      { id: "i-search", label: "MUL-1", type: "issue", group: "search" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={command} includeProjectSearch />
+      </I18nWrapper>,
+    );
+
+    const highlightedLabel = () => {
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
+      return buttons.find((b) => b.classList.contains("bg-accent"))?.textContent ?? "";
+    };
+    const press = (key: string) =>
+      act(() => {
+        ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key }) });
+      });
+
+    // First rendered row is the hoisted search result. Enter commits it, not
+    // the issue that sits first in the data array.
+    expect(highlightedLabel()).toBe("MUL-1");
+    press("Enter");
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-1");
+
+    command.mockClear();
+
+    // Arrow down one row, then Enter — still commits exactly the highlighted row.
+    press("ArrowDown");
+    expect(highlightedLabel()).toBe("MUL-2");
+    press("Enter");
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-2");
   });
 
   it("hides personal agents owned by someone else from a regular member", () => {

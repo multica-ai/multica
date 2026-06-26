@@ -5,6 +5,7 @@ import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
 import { useTranslation } from "react-i18next"
+import { motion, useReducedMotion } from "motion/react"
 
 import { useIsMobile } from "@multica/ui/hooks/use-mobile"
 import { cn } from "@multica/ui/lib/utils"
@@ -173,7 +174,12 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
-  const { isMobile, state, openMobile, setOpenMobile, isResizing } = useSidebar()
+  const { isMobile, state, openMobile, setOpenMobile, isResizing, width } = useSidebar()
+  const reducedMotion = useReducedMotion()
+  const animateOffcanvas = collapsible === "offcanvas"
+  const motionTransition = reducedMotion
+    ? { duration: 0 }
+    : { type: "spring" as const, stiffness: 420, damping: 38, mass: 0.8 }
 
   if (collapsible === "none") {
     return (
@@ -226,31 +232,49 @@ function Sidebar({
       data-slot="sidebar"
     >
       {/* This is what handles the sidebar gap on desktop */}
-      <div
+      <motion.div
         data-slot="sidebar-gap"
         className={cn(
           "relative w-(--sidebar-width) bg-transparent",
-          !isResizing && "transition-[width] duration-200 ease-linear",
-          "group-data-[collapsible=offcanvas]:w-0",
+          !animateOffcanvas && !isResizing && "transition-[width] duration-200 ease-linear",
+          !animateOffcanvas && "group-data-[collapsible=offcanvas]:w-0",
           "group-data-[side=right]:rotate-180",
           variant === "floating" || variant === "inset"
-            ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]"
-            : "group-data-[collapsible=icon]:w-(--sidebar-width-icon)"
+            ? !animateOffcanvas && "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]"
+            : !animateOffcanvas && "group-data-[collapsible=icon]:w-(--sidebar-width-icon)"
         )}
+        animate={animateOffcanvas ? { width: state === "collapsed" ? 0 : width } : undefined}
+        initial={false}
+        transition={motionTransition}
       />
-      <div
+      <motion.div
         data-slot="sidebar-container"
         data-side={side}
         className={cn(
-          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)] md:flex",
-          !isResizing && "transition-[left,right,width] duration-200 ease-linear",
+          "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex",
+          animateOffcanvas
+            ? side === "left"
+              ? "left-0"
+              : "right-0"
+            : "data-[side=left]:left-0 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] data-[side=right]:right-0 data-[side=right]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+          !animateOffcanvas && !isResizing && "transition-[left,right,width] duration-200 ease-linear",
           // Adjust the padding for floating and inset variants.
           variant === "floating" || variant === "inset"
             ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
             : "group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l",
           className
         )}
-        {...props}
+        animate={
+          animateOffcanvas
+            ? {
+                x: state === "collapsed" ? (side === "left" ? -width : width) : 0,
+                width,
+              }
+            : undefined
+        }
+        initial={false}
+        transition={motionTransition}
+        {...(props as React.ComponentProps<typeof motion.div>)}
       >
         <div
           data-sidebar="sidebar"
@@ -259,7 +283,7 @@ function Sidebar({
         >
           {children}
         </div>
-      </div>
+      </motion.div>
     </div>
   )
 }
