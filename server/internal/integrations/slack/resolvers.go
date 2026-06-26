@@ -118,7 +118,11 @@ func (r *installationResolver) ResolveInstallation(ctx context.Context, msg chan
 	}
 	inst, err := r.q.GetChannelInstallationByAppID(ctx, db.GetChannelInstallationByAppIDParams{
 		ChannelType: string(TypeSlack),
-		AppID:       raw.TeamID, // Slack team_id is stored in the routing-key slot
+		// Route by the event's api_app_id: each BYO installation stores its real
+		// Slack app id in the routing-key slot (config->>'app_id'), and the
+		// per-installation Socket Mode connection only ever delivers events for
+		// its own app, so api_app_id uniquely identifies the installation.
+		AppID: raw.APIAppID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

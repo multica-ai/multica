@@ -1,15 +1,16 @@
 // Package slack is the Slack integration for the channel-agnostic engine. It
-// began (MUL-3516) as a per-installation channel.Channel adapter and was
-// reshaped (MUL-3666) into the multi-tenant B2 model: Multica hosts ONE Slack
-// app, workspace admins self-install via OAuth, and a single deployment-level
-// Socket Mode connection (AppConnector) receives events for every installed
-// workspace and routes each inbound event to its installation by team_id. Each
-// channel_installation carries only that workspace's bot token (xoxb-, for
-// outbound) plus routing metadata — not its own connection. The inbound
-// translation (Events API payload -> channel.InboundMessage) lives in
-// inbound.go; the outbound reply path (chat.postMessage with Markdown->mrkdwn
-// conversion + threading) lives in channel.go. The design references the proven
-// Slack adapter in Nous Research's Hermes Agent.
+// uses the bring-your-own-app (BYO) model (MUL-3666): each agent's Slack app is
+// created and installed by the workspace admin, who pastes its bot token (xoxb-)
+// and app-level token (xapp-) into Multica. Each channel_installation therefore
+// carries its OWN app-level token and gets its OWN Socket Mode connection,
+// supervised per-installation by the engine like Feishu (slack_channel.go) — so
+// several agents can each have a distinct bot identity in one Slack workspace.
+// Installations are keyed and routed by the real Slack app id
+// (config->>'app_id' == the inbound event's api_app_id). The inbound translation
+// (Events API payload -> channel.InboundMessage) lives in inbound.go; the
+// outbound reply path (chat.postMessage with Markdown->mrkdwn + threading) lives
+// in channel.go. The design references the proven Slack adapter in Nous
+// Research's Hermes Agent.
 package slack
 
 import (
@@ -24,28 +25,17 @@ import (
 // Slack installation. The cross-platform columns stay flat; everything
 // Slack-specific lives in this opaque blob (the documented config boundary).
 //
-// app_id holds the Slack team_id — the per-installation routing key — so the
-// generic GetChannelInstallationByAppID query (which reads config->>'app_id')
-// and the (channel_type, config->>'app_id') unique index route Slack inbound
-// events with NO new query and NO schema change. team_id is also kept as its
-// own field for readability; the two carry the same value.
+// app_id holds the REAL Slack app id (parsed from the xapp- token). It is the
+// per-installation routing key: the generic GetChannelInstallationByAppID query
+// (config->>'app_id') and the (channel_type, app_id) unique index map an inbound
+// event's api_app_id to its installation, so several apps — several agents — in
+// one Slack workspace stay distinct. team_id is kept for display only.
 //
-// The bot token (xoxb-…, obtained per workspace via OAuth) authorizes Web API
-// calls (chat.postMessage) and is stored as base64-encoded secretbox ciphertext
-// (never plaintext), mirroring Feishu's app_secret_encrypted.
-//
-// app_token_encrypted is set ONLY for "bring-your-own-app" (BYO) installations
-// (MUL-3666): the user pastes their own Slack app's app-level token (xapp-) so
-// each agent can have its own bot identity in the same Slack workspace. A BYO
-// installation drives its OWN Socket Mode connection from this token. Under the
-// hosted B2 model the field is empty — the single deployment-level app token
-// (xapp-, from env) serves every hosted installation, since app-level tokens
-// cannot be obtained through OAuth. The field's presence is therefore the
-// discriminator between a hosted installation (empty → AppConnector serves it)
-// and a BYO installation (set → it gets a dedicated connection). For BYO,
-// app_id holds the REAL Slack app id (parsed from the xapp- token), not the
-// team id; real app ids ("A…") never collide with team ids ("T…") in the
-// (channel_type, app_id) unique index, so hosted and BYO installs coexist.
+// bot_token_encrypted (xoxb-, outbound Web API: chat.postMessage) and
+// app_token_encrypted (xapp-, this installation's own Socket Mode connection)
+// are both stored as base64-encoded secretbox ciphertext, never plaintext
+// (mirroring Feishu's app_secret_encrypted). Both are pasted by the admin at
+// BYO install time.
 type installConfig struct {
 	AppID             string `json:"app_id"`
 	TeamID            string `json:"team_id,omitempty"`
@@ -92,20 +82,6 @@ func decodeCredentials(raw json.RawMessage, decrypt Decrypter) (credentials, err
 		BotUserID: cfg.BotUserID,
 		BotToken:  botToken,
 	}, nil
-}
-
-// botUserIDFromConfig reads just the bot_user_id from a stored installation
-// config blob, without touching the encrypted tokens. The AppConnector uses it
-// to resolve the @-mention identity for an inbound event's team.
-func botUserIDFromConfig(raw json.RawMessage) (string, error) {
-	if len(raw) == 0 {
-		return "", nil
-	}
-	var cfg installConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return "", fmt.Errorf("decode slack installation config: %w", err)
-	}
-	return cfg.BotUserID, nil
 }
 
 // PublicConfig is the non-secret subset of an installation config, safe to

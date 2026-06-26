@@ -172,15 +172,6 @@ type Handler struct {
 	// delivering events, to flush debounced run triggers and join in-flight
 	// reply goroutines. Built unconditionally (even without Lark).
 	ChannelRouter *engine.Router
-	// SlackConnector is the single deployment-level Socket Mode connection that
-	// receives inbound Slack events for every installed workspace and routes
-	// them by team_id (MUL-3666, B2). Unlike the per-installation channels the
-	// ChannelSupervisor drives, this is ONE connection for the whole app, so it
-	// is started directly by main.go (go SlackConnector.Run(ctx)) rather than
-	// through the Supervisor. Nil unless MULTICA_SLACK_APP_TOKEN is set. It owns
-	// no per-installation lease, so shutdown just cancels its context — no join
-	// needed for correctness.
-	SlackConnector *slack.AppConnector
 	// SlackInstall owns the Slack OAuth self-serve install lifecycle (begin /
 	// callback / list / revoke) and the at-rest encryption of the per-workspace
 	// bot token (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set;

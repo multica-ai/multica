@@ -385,16 +385,6 @@ func main() {
 		go h.ChannelSupervisor.Run(sweepCtx)
 	}
 
-	// Slack inbound (MUL-3666, B2): the single app-level Socket Mode connection
-	// that receives events for every installed workspace and routes them by
-	// team_id. It is NOT a per-installation channel, so it runs alongside the
-	// Supervisor rather than under it. Bound to sweepCtx so it winds down with
-	// the other long-running workers after HTTP drains; it holds no lease, so
-	// cancelling the context is a clean stop (no join needed).
-	if h.SlackConnector != nil {
-		go h.SlackConnector.Run(sweepCtx)
-	}
-
 	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
 	// `sys_cron_executions` table into the distributed lease + audit
 	// log for internal periodic jobs. The first job is

@@ -3,10 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
-	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -54,8 +51,8 @@ func slackInstallationToResponse(row db.ChannelInstallation) SlackInstallationRe
 // member-visible so the Integrations tab renders for non-admins. Response
 // flags mirror Lark:
 //   - configured: at-rest encryption key is set (SlackInstall != nil).
-//   - install_supported: the OAuth client credentials are wired, so the
-//     "Connect Slack" flow can actually run.
+//   - install_supported: kept for the management UI; true whenever configured,
+//     since a BYO install needs only the at-rest key (no hosted OAuth creds).
 func (h *Handler) ListSlackInstallations(w http.ResponseWriter, r *http.Request) {
 	if h.SlackInstall == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -81,63 +78,8 @@ func (h *Handler) ListSlackInstallations(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"installations":     out,
 		"configured":        true,
-		"install_supported": h.SlackInstall.InstallSupported(),
+		"install_supported": true,
 	})
-}
-
-// BeginSlackInstallResponse carries the Slack authorize URL the browser is
-// redirected (or popped) to.
-type BeginSlackInstallResponse struct {
-	URL string `json:"url"`
-}
-
-// BeginSlackInstall (POST /api/workspaces/{id}/slack/install/begin?agent_id=…)
-// starts the OAuth flow. Admin-only at the router. The agent_id picks which
-// Multica agent the installed bot represents; it must belong to this workspace.
-func (h *Handler) BeginSlackInstall(w http.ResponseWriter, r *http.Request) {
-	if h.SlackInstall == nil || !h.SlackInstall.InstallSupported() {
-		writeError(w, http.StatusServiceUnavailable, "slack install not configured")
-		return
-	}
-	userID, ok := requireUserID(w, r)
-	if !ok {
-		return
-	}
-	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
-	if !ok {
-		return
-	}
-	agentIDStr := strings.TrimSpace(r.URL.Query().Get("agent_id"))
-	if agentIDStr == "" {
-		writeError(w, http.StatusBadRequest, "agent_id is required")
-		return
-	}
-	agentUUID, ok := parseUUIDOrBadRequest(w, agentIDStr, "agent_id")
-	if !ok {
-		return
-	}
-	// Ownership pre-check at the boundary so a wrong agent_id is a clear 404.
-	if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID:          agentUUID,
-		WorkspaceID: wsUUID,
-	}); err != nil {
-		writeError(w, http.StatusNotFound, "agent not found in this workspace")
-		return
-	}
-	initiatorUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
-	if !ok {
-		return
-	}
-	authorizeURL, err := h.SlackInstall.Begin(slack.BeginParams{
-		WorkspaceID: wsUUID,
-		AgentID:     agentUUID,
-		InitiatorID: initiatorUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start slack install")
-		return
-	}
-	writeJSON(w, http.StatusOK, BeginSlackInstallResponse{URL: authorizeURL})
 }
 
 // RegisterSlackBYORequest is the body for a bring-your-own-app install: the two
@@ -216,54 +158,9 @@ func (h *Handler) RegisterSlackBYO(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, slackInstallationToResponse(row))
 }
 
-// SlackOAuthCallback (GET /api/slack/oauth/callback?code=…&state=…) is the
-// redirect Slack sends after the admin authorizes the app. It is NOT
-// workspace-scoped in the path — the workspace/agent/initiator are recovered
-// from the sealed state. It exchanges the code for a bot token, upserts the
-// installation, then bounces the browser back to the Settings → Integrations
-// tab with a success/error flag (mirroring GitHubSetupCallback).
-func (h *Handler) SlackOAuthCallback(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	settingsURL := slackSettingsRedirect()
-
-	// The user declined the consent screen, or Slack reported an error.
-	if oauthErr := strings.TrimSpace(q.Get("error")); oauthErr != "" {
-		http.Redirect(w, r, settingsURL+"&slack_error="+url.QueryEscape(oauthErr), http.StatusFound)
-		return
-	}
-	if h.SlackInstall == nil || !h.SlackInstall.InstallSupported() {
-		http.Redirect(w, r, settingsURL+"&slack_error=not_configured", http.StatusFound)
-		return
-	}
-	code := strings.TrimSpace(q.Get("code"))
-	state := strings.TrimSpace(q.Get("state"))
-	if code == "" || state == "" {
-		http.Redirect(w, r, settingsURL+"&slack_error=missing_params", http.StatusFound)
-		return
-	}
-
-	res, err := h.SlackInstall.Complete(r.Context(), code, state)
-	if err != nil {
-		reason := "internal_error"
-		switch {
-		case errors.Is(err, slack.ErrInvalidState):
-			reason = "invalid_state"
-		case errors.Is(err, slack.ErrTeamOwnedByAnotherWorkspace):
-			reason = "team_in_other_workspace"
-		}
-		slog.Error("slack: oauth callback failed", "error", err, "reason", reason)
-		http.Redirect(w, r, settingsURL+"&slack_error="+reason, http.StatusFound)
-		return
-	}
-	h.publish(protocol.EventSlackInstallationCreated, uuidToString(res.WorkspaceID), "system", "", map[string]any{
-		"id": uuidToString(res.InstallationID),
-	})
-	http.Redirect(w, r, settingsURL+"&slack_connected=1", http.StatusFound)
-}
-
 // RevokeSlackInstallation (DELETE /api/workspaces/{id}/slack/installations/{installationId})
 // flips status to 'revoked'. Admin-only at the router. The row is preserved for
-// audit; a re-install via OAuth flips status back to 'active'.
+// audit; a re-install (re-pasting the app's tokens) flips status back to 'active'.
 func (h *Handler) RevokeSlackInstallation(w http.ResponseWriter, r *http.Request) {
 	if h.SlackInstall == nil {
 		writeError(w, http.StatusServiceUnavailable, "slack integration not configured")
@@ -364,15 +261,4 @@ func (h *Handler) RedeemSlackBindingToken(w http.ResponseWriter, r *http.Request
 		InstallationID: uuidToString(redeemed.InstallationID),
 		SlackUserID:    redeemed.SlackUserID,
 	})
-}
-
-// slackSettingsRedirect builds the Settings → Integrations URL the OAuth
-// callback bounces the browser back to, carrying a result flag. Mirrors
-// GitHubSetupCallback's FRONTEND_ORIGIN handling.
-func slackSettingsRedirect() string {
-	frontend := strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
-	if frontend == "" {
-		frontend = "http://localhost:3000"
-	}
-	return strings.TrimRight(frontend, "/") + "/settings?tab=integrations"
 }

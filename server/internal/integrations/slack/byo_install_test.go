@@ -78,7 +78,7 @@ func TestRegisterBYO_PersistsEncryptedTokensKeyedByAppID(t *testing.T) {
 	defer srv.Close()
 
 	q := &fakeInstallQueries{rowID: mustUUID(t, "44444444-4444-4444-4444-444444444444")}
-	svc := newTestInstallService(t, q, OAuthConfig{}) // BYO needs NO OAuth creds
+	svc := newTestInstallService(t, q) // BYO needs NO OAuth creds
 	svc.apiURL = srv.URL + "/"
 
 	row, err := svc.RegisterBYO(context.Background(), byoParams(
@@ -134,7 +134,7 @@ func TestRegisterBYO_PersistsEncryptedTokensKeyedByAppID(t *testing.T) {
 
 func TestRegisterBYO_InvalidTokens(t *testing.T) {
 	q := &fakeInstallQueries{}
-	svc := newTestInstallService(t, q, OAuthConfig{})
+	svc := newTestInstallService(t, q)
 
 	// Bad bot token prefix — rejected before any network call or upsert.
 	p := byoParams("11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222")
@@ -157,7 +157,7 @@ func TestRegisterBYO_AuthTestFailure(t *testing.T) {
 	srv := authTestServer(t, false) // Slack rejects the bot token
 	defer srv.Close()
 	q := &fakeInstallQueries{}
-	svc := newTestInstallService(t, q, OAuthConfig{})
+	svc := newTestInstallService(t, q)
 	svc.apiURL = srv.URL + "/"
 
 	if _, err := svc.RegisterBYO(context.Background(), byoParams(
@@ -183,7 +183,7 @@ func TestRegisterBYO_CrossWorkspace_Rejected(t *testing.T) {
 			AgentID:     mustUUID(t, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
 		},
 	}
-	svc := newTestInstallService(t, q, OAuthConfig{})
+	svc := newTestInstallService(t, q)
 	svc.apiURL = srv.URL + "/"
 
 	if _, err := svc.RegisterBYO(context.Background(), byoParams(
@@ -206,7 +206,7 @@ func TestRegisterBYO_AgentMove_RetiresStaleSessionBindings(t *testing.T) {
 			AgentID:     mustUUID(t, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
 		},
 	}
-	svc := newTestInstallService(t, q, OAuthConfig{})
+	svc := newTestInstallService(t, q)
 	svc.apiURL = srv.URL + "/"
 
 	if _, err := svc.RegisterBYO(context.Background(), byoParams(

@@ -414,10 +414,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	//
 	// The ResolverSet/Outbound share the same engine.ChatSession, channel_*
 	// tables, IssueService and TaskService as Feishu, so /issue, dedup, and
-	// run-triggering behave identically. Feishu is untouched. The Slack Factory
-	// is intentionally NOT registered into channelRegistry: the Supervisor skips
-	// channel types with no Factory (each Slack install carries only outbound
-	// creds + routing, not its own connection).
+	// run-triggering behave identically. Feishu is untouched. Each Slack
+	// installation is a bring-your-own-app (BYO) install carrying its OWN
+	// app-level token, so a per-installation Slack Factory is registered and the
+	// Supervisor drives one Socket Mode connection per installation (like Feishu).
 	if slackKey, err := secretbox.LoadKey("MULTICA_SLACK_SECRET_KEY"); err == nil {
 		box, err := secretbox.New(slackKey)
 		if err != nil {
@@ -438,51 +438,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier))
 			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)
-			slog.Info("slack integration enabled")
 
-			// OAuth self-serve install. The hosted Slack app's client
-			// credentials are deployment-level; the redirect URL defaults to
-			// {MULTICA_PUBLIC_URL}/api/slack/oauth/callback (override with
-			// MULTICA_SLACK_REDIRECT_URL). The InstallService is built whenever
-			// the secret key is present so listing / revoking existing installs
-			// works; Begin/Complete additionally require the client credentials
-			// (InstallSupported()).
-			redirectURL := strings.TrimSpace(os.Getenv("MULTICA_SLACK_REDIRECT_URL"))
-			if redirectURL == "" && signupConfig.PublicURL != "" {
-				redirectURL = signupConfig.PublicURL + "/api/slack/oauth/callback"
-			}
-			var slackScopes []string
-			if rawScopes := strings.TrimSpace(os.Getenv("MULTICA_SLACK_SCOPES")); rawScopes != "" {
-				slackScopes = splitAndTrim(rawScopes)
-			}
-			installSvc, ierr := slack.NewInstallService(queries, pool, box, slack.OAuthConfig{
-				ClientID:     strings.TrimSpace(os.Getenv("MULTICA_SLACK_CLIENT_ID")),
-				ClientSecret: strings.TrimSpace(os.Getenv("MULTICA_SLACK_CLIENT_SECRET")),
-				RedirectURL:  redirectURL,
-				Scopes:       slackScopes,
-			}, slog.Default())
+			// Per-installation inbound: the Supervisor builds + supervises one
+			// Socket Mode connection per active Slack installation, authenticated
+			// with that installation's OWN app-level token (xapp-, pasted at BYO
+			// install) — no deployment-level app token, no single connection.
+			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{Decrypt: box.Open, Logger: slog.Default()})
+
+			// BYO self-serve install (paste bot token + app-level token). The
+			// InstallService needs only the at-rest encryption key — there is no
+			// hosted OAuth client credential.
+			installSvc, ierr := slack.NewInstallService(queries, pool, box, slog.Default())
 			if ierr != nil {
 				slog.Error("slack: InstallService init failed; install disabled", "error", ierr)
 			} else {
 				h.SlackInstall = installSvc
-				if installSvc.InstallSupported() {
-					slog.Info("slack oauth install enabled")
-				} else {
-					slog.Info("slack oauth install disabled (MULTICA_SLACK_CLIENT_ID/SECRET or redirect URL not set); listing/revoke still work")
-				}
 			}
-
-			if appToken := strings.TrimSpace(os.Getenv("MULTICA_SLACK_APP_TOKEN")); appToken != "" {
-				h.SlackConnector = slack.NewAppConnector(slack.AppConnectorConfig{
-					AppToken: appToken,
-					Handler:  channelRouter.Handle,
-					BotUsers: slack.NewInstallationBotUserLookup(queries),
-					Logger:   slog.Default(),
-				})
-				slog.Info("slack inbound enabled (app-level socket mode connection)")
-			} else {
-				slog.Info("slack inbound disabled (MULTICA_SLACK_APP_TOKEN not set); outbound + routing still wired")
-			}
+			slog.Info("slack integration enabled (BYO per-installation socket mode)")
 		}
 	} else {
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
@@ -620,7 +592,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// browser redirect; the workspace/agent/initiator are recovered from the
 	// sealed state). It exchanges the code, upserts the install, then bounces
 	// the browser back to Settings → Integrations.
-	r.Get("/api/slack/oauth/callback", h.SlackOAuthCallback)
 	// Stripe webhook (no Multica auth — Stripe signs the raw body
 	// with a shared secret, the multica-cloud upstream verifies. We
 	// only forward the bytes + the Stripe-Signature header; see
@@ -786,7 +757,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/slack/installations/{installationId}", h.RevokeSlackInstallation)
-					r.Post("/slack/install/begin", h.BeginSlackInstall)
 					r.Post("/slack/install/byo", h.RegisterSlackBYO)
 				})
 			})

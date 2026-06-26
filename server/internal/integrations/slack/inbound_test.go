@@ -226,13 +226,3 @@ func TestDecodeCredentials(t *testing.T) {
 		t.Error("empty config should error")
 	}
 }
-
-func TestBotUserIDFromConfig(t *testing.T) {
-	got, err := botUserIDFromConfig(json.RawMessage(`{"app_id":"T1","bot_user_id":"UBOT"}`))
-	if err != nil || got != "UBOT" {
-		t.Fatalf("botUserIDFromConfig = %q, %v", got, err)
-	}
-	if got, err := botUserIDFromConfig(nil); err != nil || got != "" {
-		t.Errorf("empty config = %q, %v, want empty", got, err)
-	}
-}
