@@ -378,7 +378,7 @@ var catalog = []Capability{
 		Key:         "update_agent",
 		Title:       "Edit agent",
 		Category:    CategoryAgents,
-		Description: "Edit an agent's config, skills, tools, env, archive/restore it, or cancel its tasks.",
+		Description: "Edit an agent's config, skills, tools, env, archive/restore it, cancel its tasks, or govern its context (propose/review change-requests, roll back, transfer ownership).",
 		Ops: []string{
 			"PUT /api/agents/{id}/",
 			"POST /api/agents/{id}/archive",
@@ -391,6 +391,14 @@ var catalog = []Capability{
 			"PUT /api/agents/{id}/tools/{name}/",
 			"PUT /api/agents/{id}/tool-overrides/{toolName}",
 			"DELETE /api/agents/{id}/tool-overrides/{toolName}",
+			// Agent Office — versioning + governance for agent context (FIR-1775),
+			// the direct analog of skill governance under manage_skills: editing an
+			// agent's context (proposing a change-request, reviewing one, rolling
+			// back a version, transferring context ownership) is an edit-agent action.
+			"POST /api/agents/{id}/context/change-requests",
+			"POST /api/agents/context/change-requests/{crId}/review",
+			"POST /api/agents/{id}/context/rollback",
+			"PUT /api/agents/{id}/context/ownership",
 		},
 	},
 	{
