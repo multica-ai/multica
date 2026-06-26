@@ -971,7 +971,15 @@ var ErrChatTaskAgentNoRuntime = errors.New("chat task: agent has no runtime")
 //   - Infrastructure failures (DB load / insert errors) are wrapped
 //     as ordinary errors. The caller should treat them as retryable
 //     or page-worthy, NOT as user-facing state.
-func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession) (db.AgentTaskQueue, error) {
+//
+// initiatorUserID is the user who actually sent the triggering message — the
+// real requester behind this run. Callers pass it explicitly because
+// chat_session.creator_id is not a reliable source: Lark group sessions set the
+// creator to the installer, not the sender (see the lark dispatcher). Web chat
+// passes the request user; the lark dispatcher passes the inbound sender of the
+// latest message in the silence window. Stored on the task so the daemon brief
+// can attribute the run to the right person. See MUL-2645.
+func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if s.IsWorkspacePaused(ctx, chatSession.WorkspaceID) {
 		slog.Info("chat task enqueue blocked: workspace paused", "chat_session_id", util.UUIDToString(chatSession.ID))
 		return db.AgentTaskQueue{}, fmt.Errorf("workspace tasks are paused")

@@ -37,24 +37,27 @@ type fakeDedupRow struct {
 // processed=false. The default empty map means "first delivery for
 // every message_id".
 type fakeQueries struct {
-	installationByApp  db.LarkInstallation
-	installationErr    error
-	userBinding        db.LarkUserBinding
-	userBindingErr     error
-	chatSession        db.ChatSession
-	chatSessionErr     error
-	workspace          db.Workspace
-	workspaceErr       error
-	dedup              map[string]*fakeDedupRow
-	dedupClaimErr      error
-	dedupReclaim       bool // when true, in-flight rows are re-claimable (simulates staleness)
-	nextTokenByte      byte // monotonically incremented; ensures each minted token is distinct
-	calledUserBinding  int
-	calledChatSession  int
-	calledInstallation int
-	calledClaim        int
-	calledMark         int
-	calledRelease      int
+	installationByApp db.LarkInstallation
+	installationErr   error
+	userBinding       db.LarkUserBinding
+	userBindingErr    error
+	// userBindingByOpenID, when set, overrides userBinding per Lark open ID so a
+	// test can simulate distinct senders in one chat (MUL-2645 latest-sender-wins).
+	userBindingByOpenID map[string]db.LarkUserBinding
+	chatSession         db.ChatSession
+	chatSessionErr      error
+	workspace           db.Workspace
+	workspaceErr        error
+	dedup               map[string]*fakeDedupRow
+	dedupClaimErr       error
+	dedupReclaim        bool // when true, in-flight rows are re-claimable (simulates staleness)
+	nextTokenByte       byte // monotonically incremented; ensures each minted token is distinct
+	calledUserBinding   int
+	calledChatSession   int
+	calledInstallation  int
+	calledClaim         int
+	calledMark          int
+	calledRelease       int
 }
 
 // mintToken produces a deterministic, distinct token per call so
@@ -72,6 +75,11 @@ func (f *fakeQueries) GetLarkInstallationByAppID(ctx context.Context, appID stri
 
 func (f *fakeQueries) GetLarkUserBindingByOpenID(ctx context.Context, arg db.GetLarkUserBindingByOpenIDParams) (db.LarkUserBinding, error) {
 	f.calledUserBinding++
+	if f.userBindingByOpenID != nil {
+		if b, ok := f.userBindingByOpenID[arg.LarkOpenID]; ok {
+			return b, nil
+		}
+	}
 	return f.userBinding, f.userBindingErr
 }
 
@@ -277,13 +285,15 @@ func (f *fakeIssueCreator) Create(ctx context.Context, p service.IssueCreatePara
 }
 
 type fakeEnqueuer struct {
-	called int
-	task   db.AgentTaskQueue
-	err    error
+	called           int
+	task             db.AgentTaskQueue
+	err              error
+	lastInitiatorUID pgtype.UUID
 }
 
-func (f *fakeEnqueuer) EnqueueChatTask(ctx context.Context, _ db.ChatSession) (db.AgentTaskQueue, error) {
+func (f *fakeEnqueuer) EnqueueChatTask(ctx context.Context, _ db.ChatSession, initiatorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
 	f.called++
+	f.lastInitiatorUID = initiatorUserID
 	return f.task, f.err
 }
 
@@ -459,6 +469,11 @@ func TestDispatcher_PlainMessageEnqueuesTask(t *testing.T) {
 	if chat.lastEnsureParams.Sender != queries.userBinding.MulticaUserID {
 		t.Fatalf("p2p session creator should be sender; got %+v", chat.lastEnsureParams.Sender)
 	}
+	// The task initiator is also the sender (MUL-2645).
+	if enq.lastInitiatorUID != queries.userBinding.MulticaUserID {
+		t.Fatalf("p2p task initiator should be sender; got %+v want %+v",
+			enq.lastInitiatorUID, queries.userBinding.MulticaUserID)
+	}
 }
 
 func TestDispatcher_GroupMessageUsesInstallerAsCreator(t *testing.T) {
@@ -488,6 +503,60 @@ func TestDispatcher_GroupMessageUsesInstallerAsCreator(t *testing.T) {
 	if chat.lastEnsureParams.Sender != inst.InstallerUserID {
 		t.Fatalf("group session creator should be installer; got %+v want %+v",
 			chat.lastEnsureParams.Sender, inst.InstallerUserID)
+	}
+}
+
+// TestDispatcher_GroupMessageEnqueuesWithSenderAsInitiator is the MUL-2645
+// review regression: in a Lark group chat the session creator is the installer,
+// but the TASK INITIATOR must be the actual message sender. Before the fix the
+// claim derived the initiator from chat_session.creator_id (= installer), so
+// every group member appeared to the agent as the installer. The dispatcher now
+// passes the sender's MulticaUserID to EnqueueChatTask; this asserts that the
+// enqueued initiator is the sender (boundUser), NOT the installer.
+func TestDispatcher_GroupMessageEnqueuesWithSenderAsInitiator(t *testing.T) {
+	inst := activeInstallation()
+	sessionID := validUUID(0x66)
+	queries := &fakeQueries{
+		installationByApp: inst,
+		userBinding:       boundUser(),
+		chatSession:       db.ChatSession{ID: sessionID, AgentID: inst.AgentID},
+	}
+	chat := &fakeChat{ensureID: sessionID, appendResult: AppendResult{}}
+	enq := &fakeEnqueuer{task: db.AgentTaskQueue{ID: validUUID(0x77)}}
+	d := &Dispatcher{
+		Queries:     queries,
+		Chat:        chat,
+		Audit:       &fakeAudit{},
+		TaskService: enq,
+	}
+
+	// Batching is disabled (d.batcher == nil), so the flush fires inline and the
+	// enqueue is observable synchronously.
+	_, err := d.Handle(context.Background(), InboundMessage{
+		AppID:          "ok",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		SenderOpenID:   "ou_user_a",
+		Body:           "hey bot",
+		MessageID:      "msg-g2",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if enq.called != 1 {
+		t.Fatalf("expected exactly one EnqueueChatTask at flush; called=%d", enq.called)
+	}
+	// Session creator stays the installer (member-churn stability)...
+	if chat.lastEnsureParams.Sender != inst.InstallerUserID {
+		t.Fatalf("group session creator should be installer; got %+v", chat.lastEnsureParams.Sender)
+	}
+	// ...but the task initiator is the SENDER, not the installer.
+	if enq.lastInitiatorUID != queries.userBinding.MulticaUserID {
+		t.Fatalf("group task initiator should be the sender; got %+v want %+v",
+			enq.lastInitiatorUID, queries.userBinding.MulticaUserID)
+	}
+	if enq.lastInitiatorUID == inst.InstallerUserID {
+		t.Fatalf("group task initiator must NOT be the installer (%+v)", inst.InstallerUserID)
 	}
 }
 
@@ -987,6 +1056,52 @@ func TestDispatcher_DebounceCoalescesRunTrigger(t *testing.T) {
 	f.fireArmed()
 	if enq.called != 2 {
 		t.Fatalf("a message after the window must start a new run; called=%d", enq.called)
+	}
+}
+
+// TestDispatcher_LatestSenderWinsAsInitiator pins the MUL-2645 batching
+// decision: when several people speak in one chat within a single silence
+// window, the coalesced run's initiator is the LAST sender. The debouncer keeps
+// only the latest scheduled flush per session, and each flush captures its own
+// message's sender, so the final enqueue carries the last sender's identity.
+func TestDispatcher_LatestSenderWinsAsInitiator(t *testing.T) {
+	sessionID := validUUID(0x66)
+	alice := boundUser() // MulticaUserID 0x55, open id ou_alice below
+	bob := boundUser()
+	bob.MulticaUserID = validUUID(0xBB)
+	queries := &fakeQueries{
+		installationByApp:   activeInstallation(),
+		chatSession:         db.ChatSession{ID: sessionID, AgentID: validUUID(0x33)},
+		userBindingByOpenID: map[string]db.LarkUserBinding{"ou_alice": alice, "ou_bob": bob},
+	}
+	chat := &fakeChat{ensureID: sessionID, appendResult: AppendResult{}}
+	enq := &fakeEnqueuer{task: db.AgentTaskQueue{ID: validUUID(0x77)}}
+	f := &fakeTimerFactory{}
+	d := &Dispatcher{Queries: queries, Chat: chat, Audit: &fakeAudit{}, TaskService: enq}
+	d.batcher = newTestBatcher(f)
+
+	send := func(openID, msgID string) {
+		if _, err := d.Handle(context.Background(), InboundMessage{
+			AppID:        "ok",
+			ChatType:     ChatTypeP2P,
+			SenderOpenID: OpenID(openID),
+			Body:         "hi",
+			MessageID:    msgID,
+		}); err != nil {
+			t.Fatalf("unexpected error for %s: %v", msgID, err)
+		}
+	}
+
+	send("ou_alice", "m1") // Alice first...
+	send("ou_bob", "m2")   // ...then Bob, within the same window.
+	f.fireArmed()          // window closes → one coalesced run
+
+	if enq.called != 1 {
+		t.Fatalf("a coalesced burst must enqueue exactly once; called=%d", enq.called)
+	}
+	if enq.lastInitiatorUID != bob.MulticaUserID {
+		t.Fatalf("latest sender (Bob) should be the initiator; got %+v want %+v",
+			enq.lastInitiatorUID, bob.MulticaUserID)
 	}
 }
 

@@ -108,6 +108,21 @@ type Task struct {
 	ChatHistory                      []ChatHistoryMessage `json:"chat_history,omitempty"`
 	ChatMessages                     []string             `json:"chat_messages,omitempty"`
 	ChatMessageID                    string               `json:"chat_message_id,omitempty"`
+	// Initiator* identify the actor who triggered THIS task (the real
+	// requester behind the current comment/mention or chat message) as
+	// distinct from the runtime owner whose credentials the agent runs with.
+	// Comment-triggered tasks resolve to the triggering comment's author;
+	// chat tasks resolve to the chat session creator. Empty for task kinds
+	// with no attributable human initiator (on-assign, autopilot,
+	// quick-create). InitiatorEmail is set only for member initiators. The
+	// daemon emits these into the brief under `## Task Initiator` so a
+	// workspace-visible agent can attribute the request per person. The
+	// agent's effective credentials stay owner-scoped — this is an attested
+	// identity, not a credential. See MUL-2645.
+	InitiatorType  string `json:"initiator_type,omitempty"`
+	InitiatorID    string `json:"initiator_id,omitempty"`
+	InitiatorName  string `json:"initiator_name,omitempty"`
+	InitiatorEmail string `json:"initiator_email,omitempty"`
 	// AuthToken is the task-scoped credential the server mints at claim time.
 	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
 	// agent never sees the daemon's own (often workspace-owner) credential.

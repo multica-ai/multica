@@ -51,7 +51,7 @@ const (
 // and is wired in router.go.
 type TaskDispatcher interface {
 	EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error)
-	EnqueueChatTask(ctx context.Context, chatSession db.ChatSession) (db.AgentTaskQueue, error)
+	EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID) (db.AgentTaskQueue, error)
 }
 
 // MentionGate is the same trigger-permission gate the issue comment path applies
@@ -206,7 +206,7 @@ func (h *Handler) SendComments(w http.ResponseWriter, r *http.Request) {
 	case couplingIssue:
 		agentsTriggered, ok = h.dispatchToIssue(w, r, wsUUID, ownerUUID, refID, body, toSend)
 	case couplingChat:
-		agentsTriggered, ok = h.dispatchToChat(w, r, wsUUID, refID, body)
+		agentsTriggered, ok = h.dispatchToChat(w, r, wsUUID, refID, body, userID)
 	default:
 		writeError(w, http.StatusConflict, "note is not coupled to an issue or chat")
 		return
@@ -513,7 +513,7 @@ func (h *Handler) dispatchToIssue(w http.ResponseWriter, r *http.Request, wsUUID
 // dispatchToChat posts the bundle as a user chat message on the coupled session
 // and enqueues its bound agent — mirroring SendChatMessage's create-then-enqueue
 // order so the daemon always finds the message.
-func (h *Handler) dispatchToChat(w http.ResponseWriter, r *http.Request, wsUUID pgtype.UUID, refID, body string) (int, bool) {
+func (h *Handler) dispatchToChat(w http.ResponseWriter, r *http.Request, wsUUID pgtype.UUID, refID, body, userID string) (int, bool) {
 	sessionUUID, err := util.ParseUUID(refID)
 	if err != nil {
 		writeError(w, http.StatusConflict, "coupled chat id is invalid")
@@ -536,7 +536,8 @@ func (h *Handler) dispatchToChat(w http.ResponseWriter, r *http.Request, wsUUID 
 		writeError(w, http.StatusInternalServerError, "failed to post chat message")
 		return 0, false
 	}
-	if _, err := h.Tasks.EnqueueChatTask(r.Context(), session); err != nil {
+	initiatorUUID, _ := util.ParseUUID(userID)
+	if _, err := h.Tasks.EnqueueChatTask(r.Context(), session, initiatorUUID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task")
 		return 0, false
 	}

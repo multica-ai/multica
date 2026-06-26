@@ -2859,6 +2859,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
+		InitiatorType:                    task.InitiatorType,
+		InitiatorID:                      task.InitiatorID,
+		InitiatorName:                    task.InitiatorName,
+		InitiatorEmail:                   task.InitiatorEmail,
 		WorkspaceContext:                 task.WorkspaceContext,
 		// CEREBRO-PATCH(runtime-config-snapshot): FIR-2384 — when a fewer-calls saving rewrote the start-of-run reads, suppress/replace the redundant read steps in the runtime workflow brief. snapshot_prompt inlines issue+thread; bundled_read points at `multica issue context`.
 		IssueSnapshotInlined: strings.TrimSpace(task.IssueSnapshot) != "",

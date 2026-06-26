@@ -95,7 +95,7 @@ INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, 
 VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
 ON CONFLICT (chat_session_id) WHERE status = 'queued' AND chat_session_id IS NOT NULL
 DO UPDATE SET priority = agent_task_queue.priority
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, title, model_override
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, title, model_override, initiator_user_id
 `
 
 type CreateOrGetQueuedChatTaskParams struct {
@@ -155,6 +155,7 @@ func (q *Queries) CreateOrGetQueuedChatTask(ctx context.Context, arg CreateOrGet
 		&i.WaitReason,
 		&i.Title,
 		&i.ModelOverride,
+		&i.InitiatorUserID,
 	)
 	return i, err
 }

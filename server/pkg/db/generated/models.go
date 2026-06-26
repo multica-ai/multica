@@ -158,6 +158,7 @@ type AgentTaskQueue struct {
 	WaitReason        pgtype.Text        `json:"wait_reason"`
 	Title             pgtype.Text        `json:"title"`
 	ModelOverride     pgtype.Text        `json:"model_override"`
+	InitiatorUserID   pgtype.UUID        `json:"initiator_user_id"`
 }
 
 type AgentToolGrant struct {
