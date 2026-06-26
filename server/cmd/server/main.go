@@ -320,6 +320,46 @@ func main() {
 				AvatarUrl: pgtype.Text{},
 			})
 			if err != nil {
+				// The email already belongs to an existing account that isn't
+				// linked to this subject_id yet — e.g. the person was
+				// provisioned earlier under a different Casdoor subject (re-created
+				// in Casdoor, org migration) or a pre-Casdoor local account holds
+				// this email. Adopt that account by binding this subject_id to it,
+				// unless it already carries a *different* subject_id (a genuine
+				// two-identity-one-email collision we must not silently hijack).
+				if util.IsUniqueViolation(err) {
+					existing, findErr := queries.GetUserByEmail(ctx, email)
+					if findErr == nil {
+						if existing.SubjectID.Valid && existing.SubjectID.String != subjectID {
+							slog.Warn("casdoor: email owned by a different subject_id, refusing to adopt",
+								"subject_id", subjectID,
+								"existing_subject_id", existing.SubjectID.String,
+								"existing_user_id", util.UUIDToString(existing.ID),
+								"email", email,
+							)
+							return "", err
+						}
+						if !existing.SubjectID.Valid {
+							if setErr := queries.SetUserSubjectID(ctx, db.SetUserSubjectIDParams{
+								ID:        existing.ID,
+								SubjectID: pgtype.Text{String: subjectID, Valid: true},
+							}); setErr != nil {
+								slog.Warn("casdoor: failed to adopt existing user by email",
+									"user_id", util.UUIDToString(existing.ID),
+									"subject_id", subjectID,
+									"error", setErr,
+								)
+								return "", setErr
+							}
+						}
+						slog.Info("casdoor: adopted existing user by email",
+							"user_id", util.UUIDToString(existing.ID),
+							"subject_id", subjectID,
+							"email", email,
+						)
+						return util.UUIDToString(existing.ID), nil
+					}
+				}
 				return "", err
 			}
 			if setErr := queries.SetUserSubjectID(ctx, db.SetUserSubjectIDParams{
