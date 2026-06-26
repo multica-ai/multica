@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import { FolderOpen, Loader2, Server } from "lucide-react";
+import { Check, FolderOpen, Loader2, Server, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@multica/ui/components/ui/button";
@@ -383,10 +383,13 @@ export function OpenClawConfigDialog({
                   {t(($) => $.openclawConfig.field_hint_validating)}
                 </span>
               ) : validation === "ok" ? (
-                <span>✓ {t(($) => $.openclawConfig.field_hint_ok)}</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Check className="h-3 w-3" />
+                  {t(($) => $.openclawConfig.field_hint_ok)}
+                </span>
               ) : validation === "error" ? (
-                <span>
-                  ✗{" "}
+                <span className="inline-flex items-center gap-1.5">
+                  <X className="h-3 w-3" />
                   {validationReason === "not_absolute"
                     ? t(($) => $.openclawConfig.field_error.not_absolute)
                     : validationReason === "not_found"
