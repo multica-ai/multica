@@ -1040,6 +1040,14 @@ var excluded = map[string]string{
 	"POST /api/daemon/workspaces/{workspaceId}/repo/check":                         "daemon-token — runtime daemon callback",
 	"POST /api/daemon/workspaces/{workspaceId}/tool-policy/resolve":                "daemon-token — runtime daemon callback; the local-runtime per-tool resolve seam itself runs the tool-policy gate internally (TECH-3173)",
 
+	// personal browser — the per-action resolve seam for the tools:personal-browser
+	// capability. The capability itself is a reported runtime tool (surfaced and set
+	// Allow/Ask/Deny via the tool-policy table on every layer), not a platform action;
+	// this agent-only (mat_ token) route just runs the tool-policy chain internally
+	// with Base=Deny and the request host, so it is the enforcement point, not a
+	// separately-governable platform capability (FIR-2037).
+	"POST /api/cerebro/personal-browser/authorize": "resolve-seam — agent-only per-action gate for the tools:personal-browser tool; runs the tool-policy chain internally with Base=Deny + host condition (FIR-2037), the enforcement point itself, not a separately-governable platform action",
+
 	// pre-auth — establishes or clears identity, or a signed external webhook;
 	// there is no authenticated actor yet to gate on.
 	"POST /auth/google":                      "pre-auth — establishes identity",
