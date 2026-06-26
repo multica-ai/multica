@@ -841,9 +841,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Track workflow run state from node runs data.
+  // refetchInterval is set to false here because ExecutionPanoramaPage
+  // maintains its own observer with the same queryKey that handles polling.
+  // Two observers on the same key with refetchInterval would double-poll.
   const { data: workflowNodeRuns } = useQuery({
     ...workflowNodeRunsOptions(wsId, issue?.assignee_id ?? "", issue?.workflow_run_id ?? ""),
     enabled: issue?.assignee_type === "workflow" && !!issue?.assignee_id && !!issue?.workflow_run_id,
+    refetchInterval: false,
   });
   const isWorkflowRunning = useMemo(() => {
     if (!workflowNodeRuns) return false;

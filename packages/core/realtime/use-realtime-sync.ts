@@ -20,7 +20,6 @@ import {
   agentRunCountsKeys,
   agentTasksKeys,
 } from "../agents/queries";
-import { workflowKeys } from "../workflows/queries";
 import { githubKeys } from "../github/queries";
 import { gitlabKeys } from "../gitlab/queries";
 import {
@@ -575,11 +574,19 @@ export function useRealtimeSync(
       if (issue_id) qc.invalidateQueries({ queryKey: issueKeys.subscribers(issue_id) });
     });
 
-    // Workflow node run updates — keep DAG status fresh
+    // Workflow node run updates — keep DAG status fresh.
+    // Uses a predicate rather than nodeRunsAll() because the actual queryKey
+    // is ["workflows", wsId, "detail", workflowId, "runs", runId, "node-runs"]
+    // and the flat ["workflows", "node-runs"] key was never consumed by any query.
     const unsubNodeRunUpdated = ws.on("workflow:node_run_updated", (p) => {
       const { run_id } = p as { run_id: string };
       if (run_id) {
-        qc.invalidateQueries({ queryKey: workflowKeys.nodeRunsAll() });
+        qc.invalidateQueries({
+          predicate: (query) => {
+            const key = query.queryKey;
+            return Array.isArray(key) && key.includes("node-runs");
+          },
+        });
       }
     });
 
