@@ -6,12 +6,10 @@ import { Download, FileText, Eye, X } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { Attachment } from "@multica/core/types";
 import { isViewableAttachment, viewableKind } from "@multica/cerebro-attachments/core/viewable";
-import { attachmentForceDownloadPath } from "@multica/cerebro-attachments/core/download-url";
-import { useWorkspacePaths } from "@multica/core/paths";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { useNavigation } from "@multica/views/navigation";
+import { standaloneAttachments } from "@multica/cerebro-attachments/core/standalone";
 import { useFlagValue } from "@multica/cerebro-feature-flags";
 import { AttachmentChip } from "@multica/cerebro-ui";
+import { useAttachmentActions } from "../use-attachment-actions";
 
 // Renders attachments that are NOT already referenced inline in the markdown
 // content. Used both for issue bodies and for individual comments.
@@ -45,41 +43,11 @@ export function AttachmentList({
   // CEREBRO-PATCH(attachment-list-onremove): edit-time attachment removal (upstream multi-attachment feature).
   onRemove?: (attachmentId: string) => void;
 }) {
-  const wsPaths = useWorkspacePaths();
-  const wsId = useWorkspaceId();
-  const router = useNavigation();
   const chipsEnabled = useFlagValue("cerebro_attachment_chips");
+  const { openViewer, downloadFile } = useAttachmentActions();
   if (!attachments?.length) return null;
-  const standalone = content
-    ? attachments.filter((a) => {
-        if (content.includes(a.url)) return false;
-        const hasSiblingInContent = attachments.some(
-          (other) =>
-            other.id !== a.id &&
-            other.filename === a.filename &&
-            other.content_type === a.content_type &&
-            other.size_bytes === a.size_bytes &&
-            content.includes(other.url),
-        );
-        if (hasSiblingInContent) return false;
-        return true;
-      })
-    : attachments;
+  const standalone = standaloneAttachments(attachments, content);
   if (!standalone.length) return null;
-
-  const openViewer = (id: string, filename: string) => {
-    const path = wsPaths.attachmentView(id);
-    if (router.openInNewTab) {
-      router.openInNewTab(path, filename);
-    } else if (router.getShareableUrl) {
-      window.open(router.getShareableUrl(path), "_blank", "noopener,noreferrer");
-    } else {
-      window.open(path, "_blank", "noopener,noreferrer");
-    }
-  };
-
-  const downloadFile = (id: string) =>
-    window.open(attachmentForceDownloadPath(id, wsId), "_blank", "noopener,noreferrer");
 
   if (chipsEnabled) {
     return (

@@ -95,6 +95,11 @@ export type CerebroFlagKey =
   // across issue comments/bodies, chat, DM, and channels. Off = the legacy grey
   // single-icon row.
   | "cerebro_attachment_chips"
+  // FIR-2034: move an issue's standalone attachments off the top of the page
+  // into a dedicated "Attachments" tab, rendered as a tidy list of rows
+  // (preview + name + size + uploader/time). The top shows only a one-line
+  // hint. Off = attachments stay inline at the top (the chip grid).
+  | "cerebro_attachments_tab"
   // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
@@ -393,6 +398,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2034: ON — unified attachment chips (image thumbnails + colour-coded
   // document cards) everywhere. Opt-out via this flag (kill-switch, no redeploy).
   cerebro_attachment_chips: true,
+  // FIR-2034: OFF until QA signs off — opt-in moves issue attachments into a tab.
+  cerebro_attachments_tab: false,
   cerebro_inbox_slack_block: false,
   cerebro_inbox_secretary: false,
   cerebro_inbox_favorites: true,
@@ -797,6 +804,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Show attachments in one consistent format everywhere: images render as a real thumbnail (not a file box), and documents render as fixed-size colour-coded cards by type (PDF red, Excel green, Word blue, PowerPoint orange, archive amber, code violet). Same card in the composer while you type and in the posted thread, and identical across issue comments & descriptions, chat, DM, and channels. Every card is clickable (preview or download) and keyboard-focusable. Off falls back to the legacy grey single-icon row.",
+  },
+  {
+    key: "cerebro_attachments_tab",
+    label: "Attachments tab",
+    group: "issues",
+    description:
+      "Move an issue's standalone attachments off the top of the page into a dedicated \"Attachments\" tab next to Comments / Agent Runs / CLI runs. Inside the tab each file is a row: a small preview (image thumbnail or type-coloured icon), the filename and type, its size, and who uploaded it when, with open/download actions on hover. The top of the issue shows only a one-line hint with the file count. Off keeps attachments inline at the top of the issue (the unified chip grid).",
   },
   {
     key: "cerebro_web_push",

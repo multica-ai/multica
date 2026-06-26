@@ -4,3 +4,5 @@ export {
   attachmentDetailOptions,
 } from "./queries";
 export { attachmentDownloadHref, attachmentForceDownloadPath } from "./download-url";
+export { standaloneAttachments } from "./standalone";
+export { formatBytes } from "./format-bytes";

@@ -80,7 +80,8 @@ import { ContentEditor, type ContentEditorRef } from "../../editor/content-edito
 import { FileDropOverlay } from "../../editor/file-drop-overlay";
 import { TitleEditor } from "../../editor/title-editor";
 import { useFileDropZone } from "../../editor/use-file-drop-zone";
-import { AttachmentList } from "@multica/cerebro-attachments/views";
+// CEREBRO-PATCH(attachments-tab): FIR-2034 — issue attachments render in a dedicated tab as rows.
+import { IssueAttachmentsSlot, AttachmentsTab, AttachmentsTabLabel } from "@multica/cerebro-attachments/views";
 import { ArtifactList } from "@multica/cerebro-artifacts/views/components";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
@@ -1238,6 +1239,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const sessionContextHairlineEnabled = useFeatureFlag("cerebro_session_context_hairline");
   // CEREBRO-PATCH(cli-runs-tab-flag): FIR-1839 — the former "Sessions" tab (local CLI work-sessions), renamed "CLI runs" and hidden unless opted in.
   const cliRunsTabEnabled = useFeatureFlag("cerebro_cli_runs_tab");
+  // CEREBRO-PATCH(attachments-tab): FIR-2034 — gate the issue Attachments tab.
+  const attachmentsTabEnabled = useFeatureFlag("cerebro_attachments_tab");
   const issueKind = issue?.kind ?? "issue";
   // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
   // agent the backend trigger logic will wake when a member posts a
@@ -2394,7 +2397,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           )}
 
           {!isChat && (
-            <AttachmentList
+            // CEREBRO-PATCH(attachments-tab): FIR-2034 — top slot shows a one-line hint when the tab is on, the inline list otherwise.
+            <IssueAttachmentsSlot
               attachments={issue.attachments}
               content={issue.description ?? ""}
               className="mt-3"
@@ -2539,6 +2543,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   <TabsTrigger value="agent-runs">Agent Runs</TabsTrigger>
                   {/* CEREBRO-PATCH(cli-runs-tab-flag): FIR-1839 — "Sessions" tab renamed to "CLI runs", hidden unless cerebro_cli_runs_tab is on. */}
                   {cliRunsTabEnabled && <TabsTrigger value="cli-runs">CLI runs</TabsTrigger>}
+                  {/* CEREBRO-PATCH(attachments-tab): FIR-2034 — issue attachments as a tab. */}
+                  {attachmentsTabEnabled && (
+                    <TabsTrigger value="attachments">
+                      <AttachmentsTabLabel attachments={issue.attachments} content={issue.description ?? ""} />
+                    </TabsTrigger>
+                  )}
                 </TabsList>
               )}
 
@@ -2554,6 +2564,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 <TabsContent value="cli-runs">
                   <div className="mt-2">
                     <WorkSessionHistory issueId={id} />
+                  </div>
+                </TabsContent>
+              )}
+
+              {/* CEREBRO-PATCH(attachments-tab): FIR-2034 — issue attachments tab body (rows). */}
+              {!isChat && attachmentsTabEnabled && (
+                <TabsContent value="attachments">
+                  <div className="mt-2">
+                    <AttachmentsTab attachments={issue.attachments} content={issue.description ?? ""} />
                   </div>
                 </TabsContent>
               )}

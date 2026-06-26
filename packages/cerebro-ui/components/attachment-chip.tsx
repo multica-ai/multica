@@ -48,7 +48,7 @@ export type AttachmentDocType =
   | "code"
   | "other";
 
-interface DocTypeStyle {
+export interface DocTypeStyle {
   label: string;
   Icon: LucideIcon;
   /** Icon colour. */
@@ -61,7 +61,7 @@ interface DocTypeStyle {
 // file's type colour should read the same in every theme, the way Slack /
 // Linear colour their file pills. Each pairs a light + dark variant so the
 // tint stays legible on both backgrounds.
-const DOC_TYPE_STYLES: Record<AttachmentDocType, DocTypeStyle> = {
+export const DOC_TYPE_STYLES: Record<AttachmentDocType, DocTypeStyle> = {
   pdf: {
     label: "PDF",
     Icon: FileText,
