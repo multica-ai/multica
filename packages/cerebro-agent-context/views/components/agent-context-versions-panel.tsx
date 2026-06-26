@@ -22,7 +22,7 @@ import {
 import { Badge } from "@multica/ui/components/ui/badge";
 import { agentContextVersionsOptions } from "../../core/queries";
 import { useRollbackAgentContext } from "../../core/mutations";
-import { AgentContextDiffView } from "./agent-context-diff-view";
+import { AgentContextFieldDiff } from "./agent-context-field-diff";
 
 interface Props {
   agent: Agent;
@@ -170,13 +170,13 @@ export function AgentContextVersionsPanel({
               Diff — {diffTarget?.version ?? "…"} vs current
             </DialogTitle>
           </DialogHeader>
-          {diffTarget && (
-            <div className="mt-2">
-              <AgentContextDiffView
-                base={diffTarget.snapshot.instructions}
-                proposed={agent.instructions}
+          {diffTarget && versions[0] && (
+            <div className="mt-2 max-h-[60vh] overflow-y-auto pr-1">
+              <AgentContextFieldDiff
+                base={diffTarget.snapshot}
+                proposed={versions[0].snapshot}
                 baseLabel={diffTarget.version}
-                proposedLabel="current"
+                proposedLabel={`current (${versions[0].version})`}
               />
             </div>
           )}

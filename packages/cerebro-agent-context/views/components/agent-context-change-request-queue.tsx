@@ -27,9 +27,12 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Textarea } from "@multica/ui/components/ui/textarea";
-import { agentContextChangeRequestsOptions } from "../../core/queries";
+import {
+  agentContextChangeRequestsOptions,
+  agentContextVersionsOptions,
+} from "../../core/queries";
 import { useReviewAgentContextChangeRequest } from "../../core/mutations";
-import { AgentContextDiffView } from "./agent-context-diff-view";
+import { AgentContextFieldDiff } from "./agent-context-field-diff";
 
 interface Props {
   agent: Agent;
@@ -79,6 +82,15 @@ export function AgentContextChangeRequestQueue({
   const { data: requests = [], isLoading } = useQuery(
     agentContextChangeRequestsOptions(agent.id),
   );
+  const { data: versions = [] } = useQuery(
+    agentContextVersionsOptions(agent.id),
+  );
+
+  // The base for a request's diff is the snapshot of its base_version; fall
+  // back to the latest version snapshot if that exact version isn't loaded.
+  const baseSnapshotFor = (req: AgentContextChangeRequest) =>
+    versions.find((v) => v.version === req.base_version)?.snapshot ??
+    versions[0]?.snapshot;
 
   const pendingCount = requests.filter((r) => r.status === "pending").length;
   const mutation = useReviewAgentContextChangeRequest(agent.id, wsId);
@@ -181,12 +193,18 @@ export function AgentContextChangeRequestQueue({
               </div>
 
               <div className="border-t px-2.5 py-2">
-                <AgentContextDiffView
-                  base={agent.instructions}
-                  proposed={req.proposed_snapshot.instructions}
-                  baseLabel={`current (${req.base_version})`}
-                  proposedLabel={req.proposed_version}
-                />
+                {baseSnapshotFor(req) ? (
+                  <AgentContextFieldDiff
+                    base={baseSnapshotFor(req)!}
+                    proposed={req.proposed_snapshot}
+                    baseLabel={`base (${req.base_version})`}
+                    proposedLabel={req.proposed_version}
+                  />
+                ) : (
+                  <div className="rounded-md border border-dashed px-3 py-3 text-center text-xs text-muted-foreground">
+                    Loading diff…
+                  </div>
+                )}
               </div>
 
               {req.status === "pending" && canReview && (
