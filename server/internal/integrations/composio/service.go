@@ -240,9 +240,10 @@ func (s *Service) BeginConnect(ctx context.Context, userID pgtype.UUID, toolkitS
 	composioUserID := util.UUIDToString(userID)
 
 	state, err := signState(s.secret, stateClaims{
-		UserID:      composioUserID,
-		ToolkitSlug: slug,
-		Exp:         s.now().Add(s.stateTTL).Unix(),
+		UserID:       composioUserID,
+		ToolkitSlug:  slug,
+		AuthConfigID: authConfigID,
+		Exp:          s.now().Add(s.stateTTL).Unix(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("composio: sign state: %w", err)
@@ -290,12 +291,13 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 		return claims.ToolkitSlug, fmt.Errorf("composio: state has invalid user id: %w", err)
 	}
 
-	// Resolve the toolkit's auth config to validate ownership against and to
-	// persist alongside the row. Best-effort: if resolution fails (transient
-	// upstream error), authConfigID is "" and verifyAccountOwnership falls back
-	// to the owner check alone — the security-critical invariant — rather than
-	// failing the whole callback on a cache miss.
-	authConfigID, _ := s.authConfigForToolkit(ctx, claims.ToolkitSlug)
+	// The auth_config_id was resolved at BeginConnect and signed into the state,
+	// so we compare against THAT exact value rather than re-resolving here (a
+	// re-resolve that failed or drifted would otherwise fail-open: a missing
+	// expected auth config used to skip the check, letting another toolkit's
+	// account id be bound under this toolkit's slug). An empty value fails
+	// closed in verifyAccountOwnership.
+	authConfigID := claims.AuthConfigID
 
 	// Defense-in-depth (PR 4608 review): the signed state proves *who* started
 	// the handshake and *which* toolkit, but connected_account_id rides back as
@@ -633,11 +635,13 @@ func betterAuthConfig(a, b authCandidate) bool {
 
 // verifyAccountOwnership confirms with Composio that connectedAccountID really
 // belongs to expectedUserID and was created under expectedAuthConfigID, so a
-// tampered connected_account_id on the callback cannot smuggle another user's
-// account into the local mirror. It fails closed: an upstream error, an unknown
-// account, an owner mismatch, or an auth-config mismatch all return
-// ErrAccountVerification (upstream transport errors are wrapped for logging but
-// still block the write).
+// tampered or cross-toolkit connected_account_id on the callback cannot smuggle
+// another account into the local mirror. It fails closed: an upstream error, an
+// unknown account, an owner mismatch, an EMPTY expected auth config, or an
+// auth-config mismatch all return ErrAccountVerification. Requiring a non-empty,
+// exactly-matching auth config is what closes the cross-toolkit binding gap —
+// the expected value is the auth_config_id signed into the state at
+// BeginConnect, which is toolkit-specific.
 func (s *Service) verifyAccountOwnership(ctx context.Context, connectedAccountID, expectedUserID, expectedAuthConfigID string) error {
 	resp, err := s.sdk.ListConnectedAccounts(ctx, sdk.ListConnectedAccountsRequest{
 		ConnectedAccountIDs: []string{connectedAccountID},
@@ -658,10 +662,11 @@ func (s *Service) verifyAccountOwnership(ctx context.Context, connectedAccountID
 	if acct.UserID != expectedUserID {
 		return ErrAccountVerification
 	}
-	// expectedAuthConfigID is empty only if the toolkit slug somehow has no
-	// mapping (already rejected at BeginConnect); guard anyway and skip the
-	// check rather than rejecting a legitimately-mapped account.
-	if expectedAuthConfigID != "" && acct.AuthConfigID != expectedAuthConfigID {
+	// Fail closed: the account MUST have been created under the exact auth
+	// config the connect link used. An empty expected value (state missing it,
+	// or a resolver gap) is rejected rather than skipped — skipping is the
+	// fail-open hole that let a cross-toolkit account id be bound here.
+	if expectedAuthConfigID == "" || acct.AuthConfigID != expectedAuthConfigID {
 		return ErrAccountVerification
 	}
 	return nil

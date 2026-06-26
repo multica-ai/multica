@@ -13,9 +13,10 @@ func TestSignVerifyState_RoundTrip(t *testing.T) {
 	t.Parallel()
 	now := time.Unix(1_700_000_000, 0)
 	tok, err := signState(testSecret, stateClaims{
-		UserID:      "11111111-1111-1111-1111-111111111111",
-		ToolkitSlug: "notion",
-		Exp:         now.Add(5 * time.Minute).Unix(),
+		UserID:       "11111111-1111-1111-1111-111111111111",
+		ToolkitSlug:  "notion",
+		AuthConfigID: "ac_notion",
+		Exp:          now.Add(5 * time.Minute).Unix(),
 	})
 	if err != nil {
 		t.Fatalf("signState: %v", err)
@@ -29,6 +30,9 @@ func TestSignVerifyState_RoundTrip(t *testing.T) {
 	}
 	if got.ToolkitSlug != "notion" {
 		t.Errorf("toolkit slug = %q", got.ToolkitSlug)
+	}
+	if got.AuthConfigID != "ac_notion" {
+		t.Errorf("auth config id = %q", got.AuthConfigID)
 	}
 }
 

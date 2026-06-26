@@ -34,7 +34,13 @@ var (
 type stateClaims struct {
 	UserID      string `json:"u"`
 	ToolkitSlug string `json:"t"`
-	Exp         int64  `json:"e"`
+	// AuthConfigID is the exact Composio auth_config_id resolved at BeginConnect
+	// and used to create the connect link. Signing it into the state lets
+	// CompleteCallback verify the returned account was created under THIS
+	// toolkit's auth config without re-resolving (which could fail-open). It is
+	// an opaque config handle (ac_…), not a credential.
+	AuthConfigID string `json:"a"`
+	Exp          int64  `json:"e"`
 }
 
 // signState produces a URL-safe "<payload>.<sig>" token. payload is the

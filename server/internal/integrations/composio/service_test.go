@@ -267,6 +267,11 @@ func TestBeginConnect_MappingAndState(t *testing.T) {
 	if claims.ToolkitSlug != "notion" || claims.UserID != util.UUIDToString(userID) {
 		t.Errorf("claims = %+v", claims)
 	}
+	// The resolved auth_config_id is signed into the state so the callback can
+	// verify the returned account against it exactly (no fail-open re-resolve).
+	if claims.AuthConfigID != "ac_notion" {
+		t.Errorf("state auth config = %q, want ac_notion", claims.AuthConfigID)
+	}
 }
 
 func TestBeginConnect_UnsupportedToolkit(t *testing.T) {
@@ -371,9 +376,10 @@ func TestCompleteCallback_SuccessAndIdempotent(t *testing.T) {
 	sdkFake := &fakeSDK{acctUserID: util.UUIDToString(userID), acctAuthConfigID: "ac_notion"}
 	svc := newTestService(t, sdkFake, store)
 	state, _ := signState(testSecret, stateClaims{
-		UserID:      util.UUIDToString(userID),
-		ToolkitSlug: "notion",
-		Exp:         time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
+		UserID:       util.UUIDToString(userID),
+		ToolkitSlug:  "notion",
+		AuthConfigID: "ac_notion",
+		Exp:          time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
 	})
 
 	slug, err := svc.CompleteCallback(context.Background(), state, "success", "ca_123")
@@ -439,9 +445,10 @@ func TestCompleteCallback_TamperedAccountRejected(t *testing.T) {
 	sdkFake := &fakeSDK{acctUserID: util.UUIDToString(mintUUID(99)), acctAuthConfigID: "ac_notion"}
 	svc := newTestService(t, sdkFake, store)
 	state, _ := signState(testSecret, stateClaims{
-		UserID:      util.UUIDToString(userID),
-		ToolkitSlug: "notion",
-		Exp:         time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
+		UserID:       util.UUIDToString(userID),
+		ToolkitSlug:  "notion",
+		AuthConfigID: "ac_notion",
+		Exp:          time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
 	})
 	if _, err := svc.CompleteCallback(context.Background(), state, "success", "ca_evil"); !errors.Is(err, ErrAccountVerification) {
 		t.Fatalf("expected ErrAccountVerification for foreign account, got %v", err)
@@ -451,21 +458,51 @@ func TestCompleteCallback_TamperedAccountRejected(t *testing.T) {
 	}
 }
 
-// TestCompleteCallback_WrongAuthConfigRejected ensures an account that exists
-// for the right user but under a different auth config is also rejected.
+// TestCompleteCallback_WrongAuthConfigRejected is the cross-toolkit proof: the
+// account belongs to the right user but was created under a DIFFERENT toolkit's
+// auth config (e.g. the user pasting their slack account id into a notion
+// callback). The state-signed auth_config_id must not match, so it is rejected.
 func TestCompleteCallback_WrongAuthConfigRejected(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
 	userID := mintUUID(21)
+	// Account is owned by the user but lives under ac_other (another toolkit).
 	sdkFake := &fakeSDK{acctUserID: util.UUIDToString(userID), acctAuthConfigID: "ac_other"}
+	svc := newTestService(t, sdkFake, store)
+	state, _ := signState(testSecret, stateClaims{
+		UserID:       util.UUIDToString(userID),
+		ToolkitSlug:  "notion",
+		AuthConfigID: "ac_notion",
+		Exp:          time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
+	})
+	if _, err := svc.CompleteCallback(context.Background(), state, "success", "ca_x"); !errors.Is(err, ErrAccountVerification) {
+		t.Fatalf("expected ErrAccountVerification for wrong auth config, got %v", err)
+	}
+	if len(store.rows) != 0 {
+		t.Fatalf("no row should be written, got %d", len(store.rows))
+	}
+}
+
+// TestCompleteCallback_MissingAuthConfigFailsClosed is the regression for the
+// re-review blocker: a state with no signed auth_config_id (the old fail-open
+// path) plus an account owned by the user must STILL be rejected — the empty
+// expected auth config now fails closed instead of skipping the check.
+func TestCompleteCallback_MissingAuthConfigFailsClosed(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	userID := mintUUID(25)
+	// Account genuinely belongs to the user — only the missing auth-config
+	// binding should trip the rejection.
+	sdkFake := &fakeSDK{acctUserID: util.UUIDToString(userID), acctAuthConfigID: "ac_notion"}
 	svc := newTestService(t, sdkFake, store)
 	state, _ := signState(testSecret, stateClaims{
 		UserID:      util.UUIDToString(userID),
 		ToolkitSlug: "notion",
-		Exp:         time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
+		// AuthConfigID deliberately omitted (empty) — must fail closed.
+		Exp: time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
 	})
-	if _, err := svc.CompleteCallback(context.Background(), state, "success", "ca_x"); !errors.Is(err, ErrAccountVerification) {
-		t.Fatalf("expected ErrAccountVerification for wrong auth config, got %v", err)
+	if _, err := svc.CompleteCallback(context.Background(), state, "success", "ca_owned"); !errors.Is(err, ErrAccountVerification) {
+		t.Fatalf("expected ErrAccountVerification when state carries no auth config, got %v", err)
 	}
 	if len(store.rows) != 0 {
 		t.Fatalf("no row should be written, got %d", len(store.rows))

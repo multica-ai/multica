@@ -323,7 +323,8 @@
     "toast_disconnected": "已断开",
     "disconnect_confirm_title": "断开这个应用？",
     "disconnect_confirm_description": "你的已连接账号将在 Composio 侧被撤销，你的 agent 将失去对该 toolkit 的访问权限。你可以稍后重新连接。",
-    "disconnect_confirm_cancel": "取消"
+    "disconnect_confirm_cancel": "取消",
+    "connections_load_failed": "无法加载你已有的连接，连接状态可能不完整。"
   },
   "repositories": {
     "section_title": "代码仓库",

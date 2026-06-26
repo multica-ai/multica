@@ -146,6 +146,15 @@ export function ComposioTab() {
             placeholder={t(($) => $.composio.search_placeholder)}
             className="max-w-xs"
           />
+          {connectionsQuery.isError && (
+            // Don't silently treat a failed connections fetch as "nothing
+            // connected" — that would hide real connections and offer Connect
+            // on something already linked. Surface it so the user knows the
+            // connected state may be incomplete; the catalog still renders.
+            <p className="text-xs text-destructive">
+              {t(($) => $.composio.connections_load_failed)}
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((tk) => (
               <ToolkitCard
