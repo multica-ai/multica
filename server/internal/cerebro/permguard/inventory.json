@@ -1591,6 +1591,10 @@
     {
       "id": "PUT /api/workspaces/{id}/web-fetch-policy",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/cerebro/personal-browser/authorize",
+      "gate": "tools:personal-browser"
     }
   ],
   "mcp": [
@@ -2747,6 +2751,34 @@
     {
       "id": "workspace update",
       "gate": "via:PUT /api/workspaces/{id}/"
+    },
+    {
+      "id": "cerebro-browser snapshot",
+      "gate": "via:POST /api/cerebro/personal-browser/authorize"
+    },
+    {
+      "id": "cerebro-browser click",
+      "gate": "via:POST /api/cerebro/personal-browser/authorize"
+    },
+    {
+      "id": "cerebro-browser fill",
+      "gate": "via:POST /api/cerebro/personal-browser/authorize"
+    },
+    {
+      "id": "cerebro-browser navigate",
+      "gate": "via:POST /api/cerebro/personal-browser/authorize"
+    },
+    {
+      "id": "cerebro-browser sessions",
+      "gate": "via:POST /api/cerebro/personal-browser/authorize"
+    },
+    {
+      "id": "cerebro-browser logout",
+      "gate": "via:POST /api/cerebro/personal-browser/authorize"
+    },
+    {
+      "id": "cerebro-browser clear-cookies",
+      "gate": "via:POST /api/cerebro/personal-browser/authorize"
     }
   ]
 }
