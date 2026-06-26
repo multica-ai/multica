@@ -6,6 +6,7 @@
 // view of that same bundle.
 
 import type { AgentContextSnapshot } from "@multica/core/types";
+import { maskSecretsDeep } from "./mask-secrets";
 
 export interface SnapshotField {
   /** Stable key (matches the snapshot property). */
@@ -18,16 +19,24 @@ export interface SnapshotField {
   mono: boolean;
 }
 
+// Free-form JSON fields can embed raw auth tokens; mask secret-looking values
+// before they are rendered or diffed so the version history / Propose-change
+// modal never shows a plaintext secret. See ./mask-secrets.
 function jsonToText(v: unknown): string {
   if (v == null) return "";
-  if (typeof v === "string") return v.trim();
+  if (typeof v === "string") return maskSecretsDeepString(v);
   if (Array.isArray(v) && v.length === 0) return "";
   if (typeof v === "object" && Object.keys(v as object).length === 0) return "";
   try {
-    return JSON.stringify(v, null, 2);
+    return JSON.stringify(maskSecretsDeep(v), null, 2);
   } catch {
     return String(v);
   }
+}
+
+function maskSecretsDeepString(s: string): string {
+  const masked = maskSecretsDeep(s);
+  return typeof masked === "string" ? masked.trim() : s.trim();
 }
 
 function listToText(v: string[] | undefined | null): string {
