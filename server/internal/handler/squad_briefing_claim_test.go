@@ -154,7 +154,49 @@ func TestClaim_NonLeaderTask_NoBriefing(t *testing.T) {
 	}
 }
 
-// TestClaim_LeaderTaskWithoutSquadID_NoBriefing covers the back-compat path:
+// TestClaim_LeaderTaskWithDanglingSquadID_NoBriefing is the load-bearing
+// contract for dropping the FK on agent_task_queue.squad_id (migration 127):
+// when a squad is hard-deleted AFTER a leader task was enqueued, the task row
+// keeps a now-dangling squad_id. The claim must still succeed (HTTP 200, task
+// delivered) and simply skip briefing injection — GetSquadInWorkspace returns
+// no row, so the err != nil guard makes this identical to "condition not
+// matched". Never a 500, never a stale/empty briefing. Without the FK nothing
+// in the DB prevents the dangling row, so this guard lives entirely in the
+// claim handler and must stay tested.
+func TestClaim_LeaderTaskWithDanglingSquadID_NoBriefing(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadBriefingClaimFixture(t, ctx, "Briefing dangling")
+	want := enqueueClaimTask(t, ctx, fx, true /*isLeader*/, true /*withSquadID*/)
+
+	// Hard-delete the squad AFTER enqueue, leaving task.squad_id dangling.
+	// There is no FK (migration 127), so the task row is untouched.
+	if _, err := testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, fx.SquadID); err != nil {
+		t.Fatalf("delete squad: %v", err)
+	}
+	// Confirm the task still carries the (now orphaned) squad_id — i.e. the
+	// delete did not cascade/null it, which is the whole point of no-FK.
+	var stillSet bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT squad_id = $2 FROM agent_task_queue WHERE id = $1`, want, fx.SquadID,
+	).Scan(&stillSet); err != nil {
+		t.Fatalf("reload task squad_id: %v", err)
+	}
+	if !stillSet {
+		t.Fatalf("expected task.squad_id to remain the dangling UUID after squad delete (no FK)")
+	}
+
+	got, instr, raw := claimAgentInstructionsForTest(t, fx.RuntimeID)
+	if got != want {
+		t.Fatalf("claimed task id = %q, want %q (claim must still succeed 200): %s", got, want, raw)
+	}
+	if strings.Contains(instr, "## Squad Operating Protocol") || strings.Contains(instr, "## Squad Roster") {
+		t.Fatalf("dangling squad_id must NOT get squad briefing, got:\n%s", instr)
+	}
+}
+
 // leader tasks enqueued before migration 127 (or by an old binary) have a NULL
 // squad_id. The claim handler must skip injection rather than panic or guess —
 // equivalent to the pre-fix "condition not matched" behavior, never a stale
