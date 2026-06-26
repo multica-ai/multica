@@ -168,6 +168,7 @@
     "add_sub_issue_aria": "添加子 issue",
     "section_properties": "属性",
     "section_parent_issue": "父 issue",
+    "section_attachments": "附件",
     "section_pull_requests": "Pull Request",
     "section_metadata": "元数据",
     "section_details": "详情",
