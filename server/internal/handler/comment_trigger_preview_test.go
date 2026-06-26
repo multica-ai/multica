@@ -204,6 +204,75 @@ func TestPreviewCommentTriggers_MatchesCreateForInheritedParentMention(t *testin
 	}
 }
 
+// TestPreviewCommentTriggers_SquadAssigneeReplyDoesNotDoubleTrigger is the
+// regression test for MUL-3744. Scenario:
+//
+//   - Issue is assigned to a SQUAD (leader L).
+//   - Member root comment @mentions another agent (Kim).
+//   - Member posts a plain reply with no mention of its own ("hello").
+//
+// Before the fix the trigger-preview returned BOTH L (squad leader, via the
+// assignee path because the reply itself had no routing mention) and Kim
+// (via parent-mention inheritance on the @mention path). After the fix the
+// leader stays out of the way — the @mention path is already routing the
+// reply to Kim, so only one agent fires.
+func TestPreviewCommentTriggers_SquadAssigneeReplyDoesNotDoubleTrigger(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	leaderID := createHandlerTestAgent(t, "Preview Squad Leader L", nil)
+	kimID := createHandlerTestAgent(t, "Preview Squad Mention Kim", nil)
+	squadID := createCommentTriggerPreviewSquad(t, "Preview Squad Reply Routing", leaderID)
+	issueID := createCommentTriggerPreviewIssue(t, "squad reply mention inheritance MUL-3744", "squad", squadID)
+
+	// Sanity: a plain top-level "hello" by a member on this squad-assigned
+	// issue wakes the leader (no @mention is routing the work).
+	topLevelPreview := previewCommentTriggersForTest(t, issueID, CommentTriggerPreviewRequest{
+		Content: "hello",
+	})
+	requirePreviewAgents(t, topLevelPreview, leaderID)
+
+	// Member root comment that @mentions Kim — leader is skipped here by
+	// the existing rule (MUL-2170: member @-mentioning anyone skips leader).
+	rootContent := fmt.Sprintf("[@Kim](mention://agent/%s) can you take a look?", kimID)
+	rootID := insertMemberRootCommentForTriggerPreviewTest(t, issueID, rootContent)
+	if got := countQueuedCommentTriggerTasks(t, issueID, leaderID); got != 0 {
+		t.Fatalf("fixture queued leader tasks = %d, want 0", got)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 0 {
+		t.Fatalf("fixture queued Kim tasks = %d, want 0", got)
+	}
+
+	// Composer preview of a plain reply ("hello") to that root.
+	// Expected: only Kim fires — via parent-mention inheritance on the
+	// @mention path. The squad leader must NOT also be queued.
+	replyContent := "hello"
+	replyParentID := rootID
+	replyBody := map[string]any{
+		"content":   replyContent,
+		"parent_id": rootID,
+	}
+	replyPreview := previewCommentTriggersForTest(t, issueID, CommentTriggerPreviewRequest{
+		Content:  replyContent,
+		ParentID: &replyParentID,
+	})
+	requirePreviewAgents(t, replyPreview, kimID)
+	if replyPreview.Agents[0].Source != string(commentTriggerSourceMentionAgent) {
+		t.Fatalf("reply preview source = %q, want %q (mention path), got %+v",
+			replyPreview.Agents[0].Source, commentTriggerSourceMentionAgent, replyPreview.Agents)
+	}
+
+	// Verify the create path matches the preview — leader stays at 0.
+	postCommentForTriggerPreviewTest(t, issueID, replyBody)
+	if got := countQueuedCommentTriggerTasks(t, issueID, leaderID); got != 0 {
+		t.Fatalf("after plain reply on squad issue: expected 0 leader tasks, got %d (MUL-3744)", got)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 1 {
+		t.Fatalf("after plain reply on squad issue: expected 1 Kim task (inherited mention), got %d", got)
+	}
+}
+
 func TestPreviewCommentTriggers_ReturnsMentionedAgentsAndSuppressFiltersCreate(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

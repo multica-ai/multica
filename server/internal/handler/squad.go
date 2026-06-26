@@ -937,6 +937,24 @@ func commentMentionsAnyone(content string) bool {
 	return false
 }
 
+// commentRoutesViaMention returns true when the comment will route work via
+// the @mention trigger path — either through its own routing mention, or by
+// inheriting the parent (thread root) mentions on a plain reply (see
+// shouldInheritParentMentions). The squad-leader skip rule treats inherited
+// mentions identically to direct ones: if the @mention path is going to fire,
+// the leader stays out of the way so the same comment never enqueues two
+// agents for the same intent (MUL-3744).
+func commentRoutesViaMention(content string, parentComment *db.Comment, authorType string) bool {
+	if commentMentionsAnyone(content) {
+		return true
+	}
+	own := util.ParseMentions(content)
+	if !shouldInheritParentMentions(parentComment, own, authorType) {
+		return false
+	}
+	return commentMentionsAnyone(parentComment.Content)
+}
+
 // The squad-leader assign/promotion readiness decision now lives in the single
 // service.IssueService.WillEnqueueRun predicate (MUL-3375), shared by the issue
 // write paths and the preview endpoint. The former handler-local mirrors

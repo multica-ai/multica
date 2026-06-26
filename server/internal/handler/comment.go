@@ -1382,7 +1382,7 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		}
 	}
 
-	if trigger, ok := h.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, actorType, actorID, opts); ok {
+	if trigger, ok := h.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, parentComment, actorType, actorID, opts); ok {
 		add(trigger)
 	}
 
@@ -1393,7 +1393,7 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	return triggers
 }
 
-func (h *Handler) computeAssignedSquadLeaderCommentTrigger(ctx context.Context, issue db.Issue, content, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
+func (h *Handler) computeAssignedSquadLeaderCommentTrigger(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
 		return commentAgentTrigger{}, false
 	}
@@ -1408,7 +1408,15 @@ func (h *Handler) computeAssignedSquadLeaderCommentTrigger(ctx context.Context, 
 		h.lastTaskWasLeader(ctx, issue.ID, squad.LeaderID) {
 		return commentAgentTrigger{}, false
 	}
-	if authorType == "member" && commentMentionsAnyone(content) {
+	// Suppress the leader trigger when a member comment routes work to
+	// someone — either by an explicit @mention in this comment, or via the
+	// parent-inheritance path that the @mention trigger uses (a plain reply
+	// to a member-authored parent inherits the parent's mentions; see
+	// shouldInheritParentMentions). Without the inheritance check, a reply
+	// like "hello" to a parent that @mentions AgentX double-triggers: the
+	// squad leader wakes via this branch AND AgentX wakes via the mention
+	// branch's inheritance — see MUL-3744.
+	if authorType == "member" && commentRoutesViaMention(content, parentComment, authorType) {
 		return commentAgentTrigger{}, false
 	}
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
