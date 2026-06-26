@@ -12,7 +12,7 @@
 // is on.
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +23,13 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import { Input } from "@multica/ui/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@multica/ui/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -135,7 +142,7 @@ export function FolderAccessEditor({
                   }
                 >
                   <SelectTrigger className="w-36 shrink-0">
-                    <SelectValue />
+                    <SelectValue>{() => ROLE_LABELS[g.role]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {ROLE_VALUES.map((r) => (
@@ -226,33 +233,87 @@ function AddGrantRow({
   }) => void;
 }) {
   const [granteeType, setGranteeType] = React.useState<GranteeType>("group");
-  const [granteeId, setGranteeId] = React.useState<string | null>(null);
+  // Multi-select: several grantees of the chosen type can be queued and added in
+  // one go, each as its own grant at the selected role.
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [role, setRole] = React.useState<GrantRole>("viewer");
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
 
   const needsId = granteeType !== "workspace";
   const idOptions =
     granteeType === "workspace" ? [] : directory.options[granteeType];
 
-  const key = `${granteeType}:${granteeId ?? "ws"}`;
-  const duplicate = existing.includes(key);
-  const canAdd = (!needsId || Boolean(granteeId)) && !duplicate;
+  // An option already granted directly on this folder is shown as such and
+  // can't be re-queued (change its role on the row above instead).
+  const isExisting = (id: string) => existing.includes(`${granteeType}:${id}`);
 
-  function reset() {
-    setGranteeId(null);
+  const filtered = idOptions.filter((o) =>
+    o.name.toLowerCase().includes(search.trim().toLowerCase()),
+  );
+
+  // Workspace is a single grant with no id; grantee types add one grant per
+  // selected, skipping any that already exist.
+  const workspaceDuplicate =
+    granteeType === "workspace" && existing.includes("workspace:ws");
+  const addableIds = [...selectedIds].filter((id) => !isExisting(id));
+  const canAdd = needsId ? addableIds.length > 0 : !workspaceDuplicate;
+
+  function changeType(next: GranteeType) {
+    setGranteeType(next);
+    setSelectedIds(new Set());
+    setSearch("");
+    setPickerOpen(false);
   }
+
+  function toggle(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function add() {
+    if (needsId) {
+      for (const id of addableIds) {
+        onAdd({
+          surface,
+          folder_id: folderId,
+          grantee_type: granteeType,
+          grantee_id: id,
+          role,
+        });
+      }
+    } else {
+      onAdd({
+        surface,
+        folder_id: folderId,
+        grantee_type: granteeType,
+        grantee_id: null,
+        role,
+      });
+    }
+    setSelectedIds(new Set());
+    setSearch("");
+    setPickerOpen(false);
+  }
+
+  const triggerLabel =
+    selectedIds.size === 0
+      ? `Choose ${GRANTEE_TYPE_LABELS[granteeType].toLowerCase()}…`
+      : `${selectedIds.size} selected`;
 
   return (
     <div className="space-y-2 rounded-md border border-dashed p-2">
       <div className="flex items-center gap-2">
         <Select
           value={granteeType}
-          onValueChange={(v) => {
-            setGranteeType(v as GranteeType);
-            setGranteeId(null);
-          }}
+          onValueChange={(v) => changeType(v as GranteeType)}
         >
           <SelectTrigger className="w-36 shrink-0">
-            <SelectValue />
+            <SelectValue>{() => GRANTEE_TYPE_LABELS[granteeType]}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             {GRANTEE_TYPE_VALUES.map((t) => (
@@ -264,33 +325,72 @@ function AddGrantRow({
         </Select>
 
         {needsId && (
-          <Select
-            value={granteeId ?? ""}
-            onValueChange={(v) => setGranteeId(v)}
-          >
-            <SelectTrigger className="min-w-0 flex-1">
-              <SelectValue placeholder="Choose…" />
-            </SelectTrigger>
-            <SelectContent>
-              {idOptions.length === 0 && (
-                <SelectItem value="__none" disabled>
-                  None available
-                </SelectItem>
-              )}
-              {idOptions.map((o) => (
-                <SelectItem key={o.id} value={o.id}>
-                  {o.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+            <PopoverTrigger className="flex h-8 min-w-0 flex-1 items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
+              <span
+                className={
+                  selectedIds.size === 0
+                    ? "truncate text-muted-foreground"
+                    : "truncate"
+                }
+              >
+                {triggerLabel}
+              </span>
+              <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72 p-0">
+              <div className="border-b p-2">
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={`Search ${GRANTEE_TYPE_LABELS[
+                    granteeType
+                  ].toLowerCase()}s…`}
+                  className="h-8"
+                />
+              </div>
+              <div className="max-h-60 overflow-y-auto p-1">
+                {filtered.length === 0 && (
+                  <p className="px-2 py-3 text-sm text-muted-foreground">
+                    {idOptions.length === 0 ? "None available" : "No matches"}
+                  </p>
+                )}
+                {filtered.map((o) => {
+                  const already = isExisting(o.id);
+                  const checked = already || selectedIds.has(o.id);
+                  return (
+                    <label
+                      key={o.id}
+                      className={
+                        already
+                          ? "flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm opacity-60"
+                          : "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
+                      }
+                    >
+                      <Checkbox
+                        checked={checked}
+                        disabled={already}
+                        onCheckedChange={() => toggle(o.id)}
+                      />
+                      <span className="min-w-0 flex-1 truncate">{o.name}</span>
+                      {already && (
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          added
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            </PopoverContent>
+          </Popover>
         )}
       </div>
 
       <div className="flex items-center gap-2">
         <Select value={role} onValueChange={(v) => setRole(v as GrantRole)}>
           <SelectTrigger className="w-36 shrink-0">
-            <SelectValue />
+            <SelectValue>{() => ROLE_LABELS[role]}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             {ROLE_VALUES.map((r) => (
@@ -300,28 +400,16 @@ function AddGrantRow({
             ))}
           </SelectContent>
         </Select>
-        <Button
-          size="sm"
-          className="ml-auto"
-          disabled={!canAdd}
-          onClick={() => {
-            onAdd({
-              surface,
-              folder_id: folderId,
-              grantee_type: granteeType,
-              grantee_id: needsId ? granteeId : null,
-              role,
-            });
-            reset();
-          }}
-        >
+        <Button size="sm" className="ml-auto" disabled={!canAdd} onClick={add}>
           <Plus className="size-4" />
-          Add
+          {needsId && addableIds.length > 1
+            ? `Add ${addableIds.length}`
+            : "Add"}
         </Button>
       </div>
-      {duplicate && (
+      {workspaceDuplicate && (
         <p className="text-xs text-muted-foreground">
-          That grantee already has access here — change its role above.
+          The whole workspace already has access here — change its role above.
         </p>
       )}
     </div>
