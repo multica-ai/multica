@@ -845,8 +845,8 @@ var catalog = []Capability{
 		Category:    CategoryCredentials,
 		Description: "Grant, deny, or clear an actor's (agent / group / user) access to a specific credential at a given layer (FIR-1479). The credential twin of \"Grant runtime tool access\". Highly sensitive.",
 		Ops: []string{
-			"POST /api/agents/{id}/credential-grants",
-			"DELETE /api/agents/{id}/credential-grants",
+			"PUT /api/workspaces/{id}/tool-policy",
+			"DELETE /api/workspaces/{id}/tool-policy",
 		},
 	},
 

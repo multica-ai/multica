@@ -1,14 +1,6 @@
 {
   "http": [
     {
-      "id": "DELETE /api/agents/{id}/credential-grants",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/agents/{id}/credential-grants",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "DELETE /api/agents/{id}/tool-grants",
       "gate": "workspace_admin"
     },
