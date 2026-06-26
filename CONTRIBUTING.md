@@ -489,6 +489,23 @@ VITE_API_URL=http://localhost:<backend-port>
 VITE_WS_URL=ws://localhost:<backend-port>/ws
 ```
 
+#### Running multiple worktrees side-by-side
+
+`pnpm dev:desktop` auto-isolates a worktree so several worktrees can run their
+own desktop dev instance at once — no extra setup. From a linked worktree it
+derives, from the worktree path (same `cksum % 1000` offset as the backend /
+frontend ports in `.env.worktree`):
+
+- `DESKTOP_RENDERER_PORT` = `5173 + offset` — its own Vite dev server
+- `DESKTOP_APP_SUFFIX` = the worktree folder name — its own single-instance
+  lock / `userData`, and an app named `Multica Canary <folder>` so it is
+  distinguishable in Cmd+Tab
+
+The primary checkout is left untouched (`5173`, `Multica Canary`). Set either
+env var explicitly to override the derived value. Which backend each instance
+talks to is still controlled only by `apps/desktop/.env*` above — point each
+worktree's desktop at its own backend to also isolate the daemon profile.
+
 ### Isolation Guarantee
 
 Nothing in this flow touches the system-installed `multica` or the default
