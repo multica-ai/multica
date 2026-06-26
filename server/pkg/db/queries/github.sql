@@ -120,12 +120,14 @@ WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $
 -- selected so a single app firing multiple suites on the same head doesn't
 -- get counted N times. Late-arriving suites for an OLD head are stored but
 -- excluded by the head_sha filter, so they can't override the new head's
--- pending view.
+-- pending view. reference_only links (a PR that merely mentions the issue
+-- identifier in its body, with no closing keyword and no title/branch
+-- reference) are filtered out — they are not working PRs for this issue.
 WITH issue_prs AS (
     SELECT pr.id, pr.head_sha
     FROM github_pull_request pr
     JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = sqlc.arg('issue_id')
+    WHERE ipr.issue_id = sqlc.arg('issue_id') AND NOT ipr.reference_only
 ),
 per_app_latest AS (
     SELECT DISTINCT ON (cs.pr_id, cs.app_id)
@@ -164,7 +166,7 @@ SELECT
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
-WHERE ipr.issue_id = sqlc.arg('issue_id')
+WHERE ipr.issue_id = sqlc.arg('issue_id') AND NOT ipr.reference_only
 ORDER BY pr.pr_created_at DESC;
 
 -- name: ListIssueIDsForPullRequest :many
@@ -262,15 +264,24 @@ RETURNING suite_id, head_sha, app_id, conclusion, status, suite_updated_at;
 -- the current title/body parse result so authors can remove a closing keyword
 -- before merge. Post-terminal edits can opt into preserving the stored value,
 -- keeping the merge-time decision stable.
+--
+-- reference_only marks a link justified ONLY by a bare body mention (no closing
+-- keyword, no title/branch reference). It follows the same preserve gate as
+-- close_intent so a post-terminal edit can't retroactively hide a PR that did
+-- the work. The issue's PR list filters these out (see ListPullRequestsByIssue).
 INSERT INTO issue_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
+    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent, reference_only
 ) VALUES (
-    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id'), $3
+    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id'), $3, sqlc.arg('reference_only')
 )
 ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
     close_intent = CASE
         WHEN sqlc.arg('preserve_close_intent') THEN issue_pull_request.close_intent
         ELSE EXCLUDED.close_intent
+    END,
+    reference_only = CASE
+        WHEN sqlc.arg('preserve_close_intent') THEN issue_pull_request.reference_only
+        ELSE EXCLUDED.reference_only
     END;
 
 -- name: UnlinkIssueFromPullRequest :exec

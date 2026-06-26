@@ -852,14 +852,36 @@ func TestWebhook_MergedPR_OnlyClosesIdentifiersWithClosingKeyword(t *testing.T) 
 	)
 	fireBareWebhook(t, secret, installationID, 1, title, body, "fix/login")
 
-	// All three should be linked — auto-link layer is intentionally generous.
-	for _, issue := range []IssueResponse{closes, followUp, unblocks} {
-		linked, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(issue.ID))
+	// The closing-keyword issue (also a bare title prefix) is a genuine target,
+	// so it shows in the PR list. The follow-up / unblocks issues are matched
+	// only by a bare body mention — auto-link still records the row (generous),
+	// but the link is reference_only and excluded from the issue's PR list
+	// (MUL-3739).
+	listed, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(closes.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue(%s): %v", closes.Identifier, err)
+	}
+	if len(listed) != 1 {
+		t.Errorf("expected %s (closing keyword) to show in the PR list, got %d rows", closes.Identifier, len(listed))
+	}
+	for _, issue := range []IssueResponse{followUp, unblocks} {
+		listed, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(issue.ID))
 		if err != nil {
 			t.Fatalf("ListPullRequestsByIssue(%s): %v", issue.Identifier, err)
 		}
-		if len(linked) != 1 {
-			t.Errorf("expected %s to be linked to the PR, got %d link rows", issue.Identifier, len(linked))
+		if len(listed) != 0 {
+			t.Errorf("expected %s (bare body mention) to be hidden from the PR list, got %d rows", issue.Identifier, len(listed))
+		}
+		// The link row still exists — flagged reference_only, not deleted — so
+		// close_intent stays trackable across later edits.
+		var refOnly bool
+		if err := testPool.QueryRow(ctx,
+			`SELECT reference_only FROM issue_pull_request WHERE issue_id = $1`, issue.ID,
+		).Scan(&refOnly); err != nil {
+			t.Fatalf("query reference_only(%s): %v", issue.Identifier, err)
+		}
+		if !refOnly {
+			t.Errorf("expected %s link to be reference_only, got false", issue.Identifier)
 		}
 	}
 
@@ -1246,6 +1268,78 @@ func TestWebhook_LinkOnlySiblingMergeAfterCloseKeywordPR(t *testing.T) {
 	}
 	if got.Status != "done" {
 		t.Errorf("after both PRs merged (A with close_intent, B link-only): status = %q, want done", got.Status)
+	}
+}
+
+// TestWebhook_BareBodyMentionHiddenFromPRList is the regression guard for
+// MUL-3739: a PR that only mentions an issue identifier in its body (no closing
+// keyword, no title prefix, no branch reference) must not appear in that
+// issue's PR list. Editing the body to add/remove a closing keyword flips the
+// PR's visibility, because reference_only follows the live title/body parse
+// while the PR is still open.
+func TestWebhook_BareBodyMentionHiddenFromPRList(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "bare-mention-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "mentioned in passing",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264006
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "bare-mention-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	listLen := func() int {
+		t.Helper()
+		rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+		if err != nil {
+			t.Fatalf("ListPullRequestsByIssue: %v", err)
+		}
+		return len(rows)
+	}
+
+	// 1) Opened with only a bare body mention → hidden from the PR list.
+	firePRWebhook(t, secret, installationID, 1, "Unrelated cleanup", "Context for reviewers: see "+created.Identifier, "feat/cleanup", "opened")
+	if n := listLen(); n != 0 {
+		t.Errorf("bare body mention should be hidden from PR list, got %d rows", n)
+	}
+
+	// 2) Edited to declare closing intent → now a genuine target, shown.
+	firePRWebhook(t, secret, installationID, 1, "Unrelated cleanup", "Closes "+created.Identifier, "feat/cleanup", "edited")
+	if n := listLen(); n != 1 {
+		t.Errorf("after adding a closing keyword the PR should show, got %d rows", n)
+	}
+
+	// 3) Edited back to a bare mention → hidden again.
+	firePRWebhook(t, secret, installationID, 1, "Unrelated cleanup", "Reverting: just referencing "+created.Identifier, "feat/cleanup", "edited")
+	if n := listLen(); n != 0 {
+		t.Errorf("after removing the closing keyword the PR should be hidden again, got %d rows", n)
 	}
 }
 
