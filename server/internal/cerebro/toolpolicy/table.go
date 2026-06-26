@@ -112,6 +112,12 @@ type TableQuery struct {
 	// checks the cerebro_platform_capabilities flag) so prod sees nothing new
 	// until an admin turns the flag on (FIR-2594).
 	IncludePlatform bool
+	// IncludeCredentials appends the per-credential authoring rows (one row per
+	// credential capability per Agent Vault box) to the listing, so an admin can
+	// author Allow/Ask/Deny on a credential at every actor layer. Gated by the
+	// caller (the handler checks cerebro_credentials_per_actor) so prod sees
+	// nothing new until an admin turns the flag on (FIR-1479 redesign).
+	IncludeCredentials bool
 }
 
 // Table returns one row per capability (tool) in the workspace, each with the
@@ -323,6 +329,19 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	out, err = s.appendRepoRows(ctx, in, groupIDs, out)
 	if err != nil {
 		return nil, err
+	}
+
+	// Append the per-credential rows (one per credential capability per Agent
+	// Vault box). Like repo rows these are not in the capability register; they
+	// carry a non-empty ResourcePattern (cerebro-credential:<uuid>) and the box's
+	// name as Category, so the UI groups a box's verbs under it and the admin
+	// authors access per actor layer. Gated by IncludeCredentials so an unflagged
+	// workspace lists exactly what it listed before (FIR-1479 redesign).
+	if in.IncludeCredentials {
+		out, err = s.appendCredentialRows(ctx, in, groupIDs, out)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Append the per-connection-tool rows (one per tool per enabled MCP
