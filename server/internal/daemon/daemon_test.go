@@ -896,6 +896,114 @@ func TestWatchTaskCancellation_RunningTaskNotInterrupted(t *testing.T) {
 	}
 }
 
+// TestSyncTasksAfterReconnect_TerminalStateSignals checks that a task in
+// a terminal state (cancelled) receives a forceCheck signal.
+func TestSyncTasksAfterReconnect_TerminalStateSignals(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"cancelled"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+
+	// Register a buffered forceCheck channel, same as handleTask does.
+	forceCheck := make(chan struct{}, 1)
+	d.activeTaskCancels.Store("task-cancelled", forceCheck)
+	defer d.activeTaskCancels.Delete("task-cancelled")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	d.syncTasksAfterReconnect(ctx)
+
+	// The channel should have received a signal.
+	select {
+	case <-forceCheck:
+		// Expected: syncTasksAfterReconnect detected the terminal state
+		// and triggered a forceCheck.
+	default:
+		t.Fatal("expected forceCheck signal for terminal task, but channel was empty")
+	}
+}
+
+// TestSyncTasksAfterReconnect_RunningTaskNotSignalled checks that a task
+// that is still running does NOT receive a forceCheck signal.
+func TestSyncTasksAfterReconnect_RunningTaskNotSignalled(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"running"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+
+	forceCheck := make(chan struct{}, 1)
+	d.activeTaskCancels.Store("task-running", forceCheck)
+	defer d.activeTaskCancels.Delete("task-running")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	d.syncTasksAfterReconnect(ctx)
+
+	// The channel should NOT have received a signal.
+	select {
+	case <-forceCheck:
+		t.Fatal("expected no signal for running task, but channel received one")
+	default:
+		// Expected.
+	}
+}
+
+// TestSyncTasksAfterReconnect_TransientErrorNotSignalled checks that a
+// transient server error (500) does NOT trigger a forceCheck signal.
+func TestSyncTasksAfterReconnect_TransientErrorNotSignalled(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"internal server error"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+
+	forceCheck := make(chan struct{}, 1)
+	d.activeTaskCancels.Store("task-error", forceCheck)
+	defer d.activeTaskCancels.Delete("task-error")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	d.syncTasksAfterReconnect(ctx)
+
+	// The channel should NOT have received a signal.
+	select {
+	case <-forceCheck:
+		t.Fatal("expected no signal on transient error, but channel received one")
+	default:
+		// Expected.
+	}
+}
+
 func TestMergeUsage(t *testing.T) {
 	t.Parallel()
 
