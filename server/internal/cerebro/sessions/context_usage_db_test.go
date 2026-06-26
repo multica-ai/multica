@@ -91,7 +91,7 @@ func TestContextUsage_BindsInitialRunToFirstSession(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	seedRootComment(t, issueID, workspaceID) // session 1 root, the active+oldest session
 	seedInitialRunWithUsage(t, issueID, workspaceID, "claude-opus-4-8", 250_000)
@@ -118,7 +118,7 @@ func TestContextUsage_SecondSessionDoesNotAdoptInitialRun(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	first := seedRootComment(t, issueID, workspaceID)  // session 1 (oldest)
 	second := seedRootComment(t, issueID, workspaceID) // session 2 (newer)
@@ -164,7 +164,7 @@ func TestContextUsage_BindsRunsAtAnyThreadDepth(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	// root → depth-1 reply → depth-2 reply. The run fires inside the depth-2
 	// comment (the shape produced when an agent, forced to reply at parent =
@@ -239,7 +239,7 @@ func TestContextUsage_PrefersFootprintOverCumulative(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	// FIR-1874: a session is a thread, so the run must be triggered inside one.
 	rootID := seedRootComment(t, issueID, workspaceID)
@@ -287,7 +287,7 @@ func TestContextUsage_ClampsOverWindowCumulative(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	rootID := seedRootComment(t, issueID, workspaceID)
 	// 7M cumulative cache_read on the 1M opus-4-8 window, no footprint recorded.
@@ -319,7 +319,7 @@ func TestContextUsage_FootprintIsNotApproximate(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	rootID := seedRootComment(t, issueID, workspaceID)
 	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "claude-opus-4-8", 1_955_000, 1_700_000)
@@ -352,7 +352,7 @@ func TestContextUsage_TracksCompactions(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	rootID := seedRootComment(t, issueID, workspaceID)
 	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "claude-opus-4-8", 100_000, 0)
@@ -382,7 +382,7 @@ func TestContextUsage_NoCompactionWhenSteady(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	rootID := seedRootComment(t, issueID, workspaceID)
 	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "claude-opus-4-8", 100_000, 0)

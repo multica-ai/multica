@@ -164,6 +164,8 @@ multica issue status <child-id> todo   # promote when the previous step is truly
 
 Creating every serial step as `todo` enqueues the whole chain at once.
 
+<!-- CEREBRO-PATCH(handoff-start-new-skill): FIR-2021 — document the one-command handoff (--start-new / start_new). -->
+
 ## Sessions are comment threads (start fresh vs. resume)
 
 A session IS a comment thread. A new top-level comment (no `--parent`) starts a
@@ -183,15 +185,23 @@ multica issue comment unresolve <root-comment-id>
 multica issue session rename <issue> <root-comment-id> --name "..."
 multica issue session list <issue>
 
-# Hand off: close the thread AND store a carry-over brief, then post the
-# new top-level comment. Omit the brief flags to auto-summarise the thread.
+# Hand off: close the thread AND store a carry-over brief. Omit the brief
+# flags to auto-summarise the thread.
 multica issue session handoff <issue> <root-comment-id> \
   --summary "..." --done "..." --remaining "..."
+
+# One-command handoff: also open a NEW session and start a fresh run on it
+# (the issue's assignee agent, no memory of the old thread). No need to post
+# the new top-level comment yourself. --prompt sets the new session's opening
+# message (default points the fresh run at the brief).
+multica issue session handoff <issue> <root-comment-id> \
+  --summary "..." --done "..." --remaining "..." --start-new
 ```
 
 MCP equivalents: `resolve_comment`, `unresolve_comment`, `rename_session`,
-`handoff_session`, `list_sessions`; `add_comment` with no `parent_id` starts a
-fresh session, a reply resumes it.
+`handoff_session` (pass `start_new: true` for the one-command handoff),
+`list_sessions`; `add_comment` with no `parent_id` starts a fresh session, a
+reply resumes it.
 
 ## Incorrect → correct
 

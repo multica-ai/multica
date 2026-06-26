@@ -142,6 +142,17 @@ brief); `rename` PATCHes `.../sessions/{rootCommentId}` (sessionId path param IS
 the thread root comment id). Omitting the brief flags lets the server
 auto-summarise (`generateHandoff`).
 
+<!-- CEREBRO-PATCH(handoff-start-new-skill): FIR-2021 — source map for the one-command handoff (--start-new / start_new). -->
+
+One-command handoff (FIR-2021): `--start-new` (CLI) / `start_new: true` (MCP) /
+`"start_new": true` (API body) makes `start-fresh` also open a new session and
+start a fresh run on it — `Handler.startFreshSession` creates a new top-level
+comment (the new session root, authored by the issue assignee) and enqueues a
+`force_fresh_session` task via `TaskService.EnqueueTaskForIssueFromComment`. v1
+targets the issue's assignee agent. Response adds a `fresh_run` object
+(`root_comment_id`, `task_id`, `agent_id`). See
+`server/internal/cerebro/sessions/handler.go`.
+
 ## Verification command
 
 Re-derive any line above before depending on it:

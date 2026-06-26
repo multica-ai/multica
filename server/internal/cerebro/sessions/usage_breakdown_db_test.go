@@ -39,7 +39,7 @@ func TestUsageBreakdown_PerSessionTotalsAndCostFallback(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	first := seedRootComment(t, issueID, workspaceID)  // session 1 (oldest)
 	second := seedRootComment(t, issueID, workspaceID) // session 2
@@ -103,7 +103,7 @@ func TestUsageBreakdown_EmptyIssue(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 	seedRootComment(t, issueID, workspaceID)
 
 	var resp usageBreakdownResponse

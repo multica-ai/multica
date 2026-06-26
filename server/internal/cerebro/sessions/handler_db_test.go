@@ -109,7 +109,7 @@ func seedRootComment(t *testing.T, issueID, workspaceID string) string {
 func TestStartFreshHandoffResolvesThread(t *testing.T) {
 	issueID, workspaceID := seedIssue(t)
 	commentID := seedRootComment(t, issueID, workspaceID)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	rec := callStartFresh(h, issueID, workspaceID, `{"root_comment_id":"`+commentID+`"}`)
 	if rec.Code != http.StatusCreated {
@@ -133,5 +133,32 @@ func TestStartFreshHandoffResolvesThread(t *testing.T) {
 	}
 	if !hasHandoff {
 		t.Error("expected a session row with a handoff keyed to the thread root")
+	}
+}
+
+// TestStartFreshStartNewClosesThenSurfacesEnqueueError proves the FIR-2021
+// one-command handoff ordering guarantee: with start_new=true the old thread is
+// closed FIRST (durably), and only then is the fresh run attempted. When the
+// fresh-run dependency is unavailable (TaskService nil here) the handler returns
+// 502 but the close must already be committed — a half-done handoff never leaves
+// the old session open.
+func TestStartFreshStartNewClosesThenSurfacesEnqueueError(t *testing.T) {
+	issueID, workspaceID := seedIssue(t)
+	commentID := seedRootComment(t, issueID, workspaceID)
+	// nil TaskService → startFreshSession fails, but the close is durable.
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
+
+	rec := callStartFresh(h, issueID, workspaceID, `{"root_comment_id":"`+commentID+`","start_new":true}`)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("start_new with no TaskService: want 502, got code=%d body=%s", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+
+	var resolved bool
+	if err := sessTestPool.QueryRow(context.Background(),
+		`SELECT resolved_at IS NOT NULL FROM comment WHERE id = $1::uuid`, commentID).Scan(&resolved); err != nil {
+		t.Fatalf("read comment: %v", err)
+	}
+	if !resolved {
+		t.Error("expected the thread root to be resolved (session closed) even when the fresh run could not start")
 	}
 }

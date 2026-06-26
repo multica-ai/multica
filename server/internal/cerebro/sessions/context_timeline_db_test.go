@@ -50,7 +50,7 @@ func TestContextTimeline_OrdersAndFlagsCompaction(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 
 	rootID := seedRootComment(t, issueID, workspaceID)
 	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "claude-opus-4-8", 100_000, 0)
@@ -87,7 +87,7 @@ func TestContextTimeline_EmptyWhenNoHistory(t *testing.T) {
 		t.Skip("no test DB")
 	}
 	issueID, workspaceID := seedIssue(t)
-	h := NewHandler(sessTestPool, db.New(sessTestPool))
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
 	rootID := seedRootComment(t, issueID, workspaceID)
 
 	var resp contextTimelineResponse

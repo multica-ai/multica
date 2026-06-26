@@ -102,10 +102,14 @@ var issueSessionRenameCmd = &cobra.Command{
 
 var issueSessionHandoffCmd = &cobra.Command{
 	Use:   "handoff <issue> <root-comment-id>",
-	Short: "Hand off a session: close its thread and store a carry-over brief",
+	Short: "Hand off a session: close its thread, store a brief, optionally start a fresh session",
 	Long: "Resolve the thread (closing the session) and store a handoff brief on it. " +
-		"With no --summary/--done/--remaining the server auto-summarises the thread. " +
-		"Start the fresh session afterwards by posting a new top-level comment.",
+		"With no --summary/--done/--remaining the server auto-summarises the thread.\n\n" +
+		"Add --start-new for a one-command handoff: the server then opens a NEW " +
+		"top-level session and starts a fresh run on it (the issue's assignee agent, " +
+		"no memory of the old thread), so you don't have to post a new top-level " +
+		"comment yourself. Use --prompt to set the new session's opening message " +
+		"(default points the fresh run at the brief).",
 	Args: cobra.ExactArgs(2),
 	RunE: runIssueSessionHandoff,
 }
@@ -192,12 +196,32 @@ func runIssueSessionHandoff(cmd *cobra.Command, args []string) error {
 		body["handoff"] = handoff
 	}
 
+	// One-command handoff: also open a new session and start a fresh run on it.
+	startNew, _ := cmd.Flags().GetBool("start-new")
+	prompt, _ := cmd.Flags().GetString("prompt")
+	if startNew {
+		body["start_new"] = true
+		if prompt != "" {
+			body["prompt"] = prompt
+		}
+	}
+
 	var result map[string]any
 	path := "/api/cerebro/issues/" + url.PathEscape(issueRef.ID) + "/sessions/start-fresh"
 	if err := client.PostJSON(ctx, path, body, &result); err != nil {
 		return fmt.Errorf("hand off session: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "Session %s handed off and closed. Post a new top-level comment to start the fresh session.\n", args[1])
+	if startNew {
+		msg := fmt.Sprintf("Session %s handed off and closed; a fresh session has been started.", args[1])
+		if fresh, ok := result["fresh_run"].(map[string]any); ok {
+			if rc, ok := fresh["root_comment_id"].(string); ok {
+				msg += fmt.Sprintf(" New session root comment: %s.", rc)
+			}
+		}
+		fmt.Fprintln(os.Stderr, msg)
+	} else {
+		fmt.Fprintf(os.Stderr, "Session %s handed off and closed. Post a new top-level comment to start the fresh session (or pass --start-new next time).\n", args[1])
+	}
 	if output, _ := cmd.Flags().GetString("output"); output == "table" {
 		return nil
 	}
@@ -220,6 +244,8 @@ func init() {
 	issueSessionHandoffCmd.Flags().StringSlice("done", nil, "What was completed (repeatable)")
 	issueSessionHandoffCmd.Flags().StringSlice("remaining", nil, "What is left to do (repeatable)")
 	issueSessionHandoffCmd.Flags().String("plan-ref", "", "Reference to a plan artifact/issue")
+	issueSessionHandoffCmd.Flags().Bool("start-new", false, "Also open a new session and start a fresh run on it (one-command handoff)")
+	issueSessionHandoffCmd.Flags().String("prompt", "", "Opening message for the new session (with --start-new; default points the fresh run at the brief)")
 	issueSessionHandoffCmd.Flags().String("output", "json", "Output format: table or json")
 
 	issueSessionCmd.AddCommand(issueSessionListCmd)

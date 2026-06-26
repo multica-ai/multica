@@ -1139,7 +1139,9 @@ Pass the THREAD ROOT comment id (the top-level comment that started the thread),
 	// handoff_session — close a session and store a carry-over brief.
 	srv.RegisterTool(mcp.Tool{
 		Name: "handoff_session",
-		Description: `Hand off a session: resolve its thread (closing the session) and store a handoff brief on it. Then start the fresh session by calling add_comment with NO parent_id (a new top-level comment).
+		Description: `Hand off a session: resolve its thread (closing the session) and store a handoff brief on it.
+
+One-command handoff: set start_new=true and the server ALSO opens a new top-level session and starts a fresh run on it (the issue's assignee agent, no memory of the old thread) — you do NOT need to call add_comment afterwards. Use prompt to set the new session's opening message (default points the fresh run at the brief). With start_new=false (default) only the close + brief happens; start the new session yourself by calling add_comment with NO parent_id.
 
 Supply a brief via summary/done/remaining. Omit them all to let the server auto-summarise the thread.`,
 		InputSchema: map[string]any{
@@ -1152,6 +1154,8 @@ Supply a brief via summary/done/remaining. Omit them all to let the server auto-
 				"done":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "What was completed."},
 				"remaining":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "What is left to do."},
 				"plan_ref":        map[string]any{"type": "string", "description": "Optional reference to a plan artifact/issue."},
+				"start_new":       map[string]any{"type": "boolean", "description": "Also open a new session and start a fresh run on it (one-command handoff). Default false."},
+				"prompt":          map[string]any{"type": "string", "description": "Opening message for the new session (with start_new). Default points the fresh run at the brief."},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -1180,6 +1184,12 @@ Supply a brief via summary/done/remaining. Omit them all to let the server auto-
 				handoff["plan_ref"] = planRef
 			}
 			body["handoff"] = handoff
+		}
+		if optBool(args, "start_new", false) {
+			body["start_new"] = true
+			if p := optString(args, "prompt"); p != "" {
+				body["prompt"] = p
+			}
 		}
 		var result any
 		path := "/api/cerebro/issues/" + url.PathEscape(issueID) + "/sessions/start-fresh"

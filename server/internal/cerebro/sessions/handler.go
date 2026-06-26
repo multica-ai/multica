@@ -11,6 +11,7 @@ package sessions
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,18 +22,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type Handler struct {
 	pool     *pgxpool.Pool
 	upstream *db.Queries
+	// tasks + bus power the "start a fresh session" half of a one-command handoff
+	// (FIR-2021): open a new top-level session root and enqueue a
+	// force_fresh_session run on it. Both are nil-safe — when unset, handoff
+	// degrades to close-only (the caller starts the new session manually).
+	tasks *service.TaskService
+	bus   *events.Bus
 }
 
-func NewHandler(pool *pgxpool.Pool, upstream *db.Queries) *Handler {
-	return &Handler{pool: pool, upstream: upstream}
+func NewHandler(pool *pgxpool.Pool, upstream *db.Queries, tasks *service.TaskService, bus *events.Bus) *Handler {
+	return &Handler{pool: pool, upstream: upstream, tasks: tasks, bus: bus}
 }
 
 // handoffBrief is the agent-generated (or auto-summarised) carry-over a session
@@ -66,6 +76,29 @@ type sessionResponse struct {
 type handoffRequest struct {
 	RootCommentID string        `json:"root_comment_id"`
 	Handoff       *handoffBrief `json:"handoff"`
+	// StartNew turns this into a one-command handoff (FIR-2021): after closing the
+	// chosen thread, the server opens a NEW top-level session and starts a fresh
+	// run on it (the issue's assignee agent, clean context). When false (default)
+	// only the close + brief happens; the caller starts the new session manually.
+	StartNew bool `json:"start_new"`
+	// Prompt is the opening message of the new session. Empty → a default kickoff
+	// that points the fresh run at the carry-over brief. Only used with StartNew.
+	Prompt string `json:"prompt"`
+}
+
+// startFreshResponse is the StartFresh body. It embeds the closed session's row
+// (backward-compatible: all existing top-level fields stay) and adds fresh_run
+// only when start_new opened a new session.
+type startFreshResponse struct {
+	sessionResponse
+	FreshRun *freshRunInfo `json:"fresh_run,omitempty"`
+}
+
+// freshRunInfo identifies the new session opened by a one-command handoff.
+type freshRunInfo struct {
+	RootCommentID string `json:"root_comment_id"`
+	TaskID        string `json:"task_id"`
+	AgentID       string `json:"agent_id"`
 }
 
 type updateRequest struct {
@@ -245,8 +278,137 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to start fresh")
 		return
 	}
-	writeJSON(w, http.StatusCreated, session)
+
+	resp := startFreshResponse{sessionResponse: session}
+
+	// One-command handoff (FIR-2021): the old thread is now closed and the brief
+	// stored — open a NEW session and start a clean run on it. Done after the
+	// commit so the close stays durable regardless of the enqueue outcome.
+	if req.StartNew {
+		fresh, ferr := h.startFreshSession(r, issue, req.Prompt)
+		if ferr != nil {
+			// The handoff (close + brief) already succeeded; only opening the fresh
+			// session failed. 502 tells the caller the new session did not start.
+			writeError(w, http.StatusBadGateway, "session closed but failed to start fresh session: "+ferr.Error())
+			return
+		}
+		resp.FreshRun = fresh
+	}
+
+	writeJSON(w, http.StatusCreated, resp)
 }
+
+// startFreshSession opens a brand-new session on the issue and starts a fresh run
+// on it: a new top-level comment (the new session root, authored by the assignee
+// agent) + a force_fresh_session task triggered by it. Stays entirely on exported
+// TaskService APIs so the orchestration lives in the cerebro zone. v1 targets the
+// issue's assignee agent — the demonstrated self-handoff to clean context.
+func (h *Handler) startFreshSession(r *http.Request, issue db.Issue, prompt string) (*freshRunInfo, error) {
+	if h.tasks == nil {
+		return nil, fmt.Errorf("starting a fresh session is not available on this server")
+	}
+	if issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
+		return nil, fmt.Errorf("issue is not assigned to an agent; assign an agent before handing off to a fresh session")
+	}
+	ctx := r.Context()
+
+	// Resolve the human principal that authorises the fresh run. A member caller
+	// (UI button) seeds from their own id; an agent caller inherits via X-Task-ID.
+	delegation, err := h.delegationForCaller(r)
+	if err != nil {
+		return nil, err
+	}
+
+	// Open the new session: a fresh top-level comment authored by the assignee
+	// agent (the agent that will run). This is what makes the handoff land in a
+	// new session under the thread = session model.
+	kickoff := strings.TrimSpace(prompt)
+	if kickoff == "" {
+		kickoff = defaultHandoffKickoff
+	}
+	comment, err := h.upstream.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "agent",
+		AuthorID:    issue.AssigneeID,
+		Content:     kickoff,
+		Type:        "comment",
+		ParentID:    pgtype.UUID{}, // top-level == new session root
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create fresh-session comment: %w", err)
+	}
+	h.publishCommentCreated(issue, comment)
+
+	// Start the clean run, triggered by the new session root. forceFreshSession so
+	// the daemon skips the (agent_id, issue_id) resume and starts with no memory.
+	task, err := h.tasks.EnqueueTaskForIssueFromComment(ctx, issue, comment.ID, delegation, true)
+	if err != nil {
+		return nil, fmt.Errorf("enqueue fresh-session run: %w", err)
+	}
+	return &freshRunInfo{
+		RootCommentID: util.UUIDToString(comment.ID),
+		TaskID:        util.UUIDToString(task.ID),
+		AgentID:       util.UUIDToString(task.AgentID),
+	}, nil
+}
+
+// delegationForCaller derives the task-delegation context (the human principal an
+// agent run must carry) from the request: a member caller seeds from their own
+// user id; an agent caller inherits from the X-Task-ID of its current run.
+func (h *Handler) delegationForCaller(r *http.Request) (service.TaskDelegationContext, error) {
+	ctx := r.Context()
+	if member, ok := middleware.MemberFromContext(ctx); ok && member.UserID.Valid {
+		return h.tasks.CommentDelegationContext(ctx, "member", util.UUIDToString(member.UserID), "", "comment")
+	}
+	taskHdr := strings.TrimSpace(r.Header.Get("X-Task-ID"))
+	if taskHdr == "" {
+		return service.TaskDelegationContext{}, fmt.Errorf("cannot start a fresh session without a caller identity")
+	}
+	taskID, err := util.ParseUUID(taskHdr)
+	if err != nil {
+		return service.TaskDelegationContext{}, fmt.Errorf("invalid source task")
+	}
+	srcTask, err := h.upstream.GetAgentTask(ctx, taskID)
+	if err != nil {
+		return service.TaskDelegationContext{}, fmt.Errorf("source task not found")
+	}
+	return h.tasks.CommentDelegationContext(ctx, "agent", util.UUIDToString(srcTask.AgentID), taskHdr, "comment")
+}
+
+// publishCommentCreated mirrors TaskService.createAgentComment's WS broadcast so
+// the new session root shows up in the timeline in real time. Best-effort.
+func (h *Handler) publishCommentCreated(issue db.Issue, comment db.Comment) {
+	if h.bus == nil {
+		return
+	}
+	h.bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+		ActorType:   "agent",
+		ActorID:     util.UUIDToString(comment.AuthorID),
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":          util.UUIDToString(comment.ID),
+				"issue_id":    util.UUIDToString(comment.IssueID),
+				"author_type": comment.AuthorType,
+				"author_id":   util.UUIDToString(comment.AuthorID),
+				"content":     comment.Content,
+				"type":        comment.Type,
+				"parent_id":   util.UUIDToPtr(comment.ParentID),
+				"created_at":  comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+			},
+			"issue_title":  issue.Title,
+			"issue_status": issue.Status,
+		},
+	})
+}
+
+// defaultHandoffKickoff is the opening message of a handed-off fresh session when
+// the caller supplies no custom prompt. It tells the fresh run (which has no
+// memory of the prior thread) where to find the carry-over brief.
+const defaultHandoffKickoff = "🔄 Fresh session (handoff). This is a brand-new run with no memory of the previous thread.\n\n" +
+	"Read the carry-over brief from the handed-off session — run `multica issue session list <issue>` and look at the `handoff` field on the most recently closed thread (summary / done / remaining) — then continue from the `remaining` items."
 
 // generateHandoff auto-summarises a THREAD (its root comment + replies) when no
 // agent brief is supplied. Deterministic, no LLM: it captures how many comments
