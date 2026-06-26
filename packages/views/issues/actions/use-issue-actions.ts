@@ -136,14 +136,19 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   // Detach from the parent and promote to a standalone issue. Reversible
   // (Set parent re-links it), non-destructive, and mirrors the clear-date
-  // actions — so it applies directly with a success toast instead of a
-  // confirm modal. `stage` only orders sub-issues under a parent, so clear
-  // it in the same write to avoid an orphaned value on a standalone issue.
+  // actions — so it applies directly instead of a confirm modal. `stage`
+  // only orders sub-issues under a parent, so clear it in the same write to
+  // avoid an orphaned value on a standalone issue. The success toast fires
+  // from onSuccess, not eagerly after mutate() — otherwise a request that
+  // fails on permission/network/validation would flash "removed" before the
+  // error toast and the optimistic rollback (false confirmation).
   const removeParent = useCallback(() => {
     if (!issueId) return;
     updateIssue.mutate(
       { id: issueId, parent_issue_id: null, stage: null },
       {
+        onSuccess: () =>
+          toast.success(t(($) => $.actions.remove_parent_issue_success)),
         onError: (err) =>
           toast.error(
             err instanceof Error && err.message
@@ -152,7 +157,6 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
           ),
       },
     );
-    toast.success(t(($) => $.actions.remove_parent_issue_success));
   }, [issueId, updateIssue, t]);
 
   const openAddChild = useCallback(() => {

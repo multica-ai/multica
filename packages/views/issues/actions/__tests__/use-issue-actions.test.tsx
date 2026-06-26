@@ -235,7 +235,7 @@ describe("useIssueActions", () => {
     });
   });
 
-  it("removeParent clears parent_issue_id and stage in one write and toasts success", () => {
+  it("removeParent clears parent_issue_id and stage in one write, never via the run-confirm modal", () => {
     const childIssue = {
       ...mockIssue,
       parent_issue_id: "parent-1",
@@ -249,11 +249,47 @@ describe("useIssueActions", () => {
 
     expect(mockUpdateMutate).toHaveBeenCalledWith(
       { id: "issue-1", parent_issue_id: null, stage: null },
-      expect.any(Object),
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
     );
-    expect(toast.success).toHaveBeenCalled();
     // Detaching never routes through the run-confirm modal.
     expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
+  it("removeParent toasts success only from onSuccess — not eagerly, and not on failure", () => {
+    const childIssue = {
+      ...mockIssue,
+      parent_issue_id: "parent-1",
+    } as Issue;
+    const { result } = renderHook(() => useIssueActions(childIssue), { wrapper });
+
+    act(() => {
+      result.current.removeParent();
+    });
+
+    // mutate() is fire-and-forget here (mocked), so nothing is confirmed yet.
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(mockUpdateMutate).toHaveBeenCalledTimes(1);
+
+    const opts = mockUpdateMutate.mock.calls[0]![1] as {
+      onSuccess: () => void;
+      onError: (err: unknown) => void;
+    };
+
+    // A failed write surfaces the error, never a false "removed" confirmation.
+    act(() => {
+      opts.onError(new Error("forbidden"));
+    });
+    expect(toast.error).toHaveBeenCalledWith("forbidden");
+    expect(toast.success).not.toHaveBeenCalled();
+
+    // Only the server-confirmed success toasts.
+    act(() => {
+      opts.onSuccess();
+    });
+    expect(toast.success).toHaveBeenCalledTimes(1);
   });
 
   it("togglePin calls createPin when not pinned and deletePin when pinned", async () => {
