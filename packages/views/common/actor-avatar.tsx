@@ -103,13 +103,17 @@ export function ActorAvatar({
   // still have no presence signal and render no dot.
   const wrapAgentDot = showStatusDot && actorType === "agent";
   const wrapMemberDot = showStatusDot && actorType === "member";
+  // CEREBRO-PATCH(presence-dot-anchor): FIR-2067 — shrink-0 + self-start keep the
+  // dot wrapper hugging the avatar, so the bottom-right dot does not drift down
+  // when a stretching flex parent (e.g. a tall channel/DM message row) grows it.
+  const dotWrapClass = "relative inline-flex shrink-0 self-start";
   const dotted = wrapAgentDot ? (
-    <span className="relative inline-flex">
+    <span className={dotWrapClass}>
       {avatar}
       <AgentStatusDot agentId={actorId} size={size} />
     </span>
   ) : wrapMemberDot ? (
-    <span className="relative inline-flex">
+    <span className={dotWrapClass}>
       {avatar}
       <MemberStatusDot userId={actorId} size={size} />
     </span>
