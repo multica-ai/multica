@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,6 +80,65 @@ func TestNewClient_TrimsTrailingSlash(t *testing.T) {
 	}
 	if got, want := c.BaseURL(), "https://x.example.com"; got != want {
 		t.Errorf("BaseURL = %q, want %q", got, want)
+	}
+}
+
+// recordingTransport observes whether it actually handled a request.
+type recordingTransport struct {
+	mu     sync.Mutex
+	calls  int
+	last   *http.Request
+	status int
+}
+
+func (rt *recordingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	rt.mu.Lock()
+	rt.calls++
+	rt.last = r
+	rt.mu.Unlock()
+	body := io.NopCloser(strings.NewReader(`{"items":[]}`))
+	return &http.Response{
+		StatusCode: rt.statusOr(200),
+		Body:       body,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Request:    r,
+	}, nil
+}
+func (rt *recordingTransport) statusOr(d int) int {
+	if rt.status == 0 {
+		return d
+	}
+	return rt.status
+}
+
+// TestNewClient_HonorsInjectedHTTPClient asserts that when Options.HTTPClient
+// is non-nil the SDK actually routes requests through *that* client — full
+// fidelity, not just transport+timeout. GPT-Boy's PR review against #4603
+// caught the partial behavior; this test locks the fix in.
+func TestNewClient_HonorsInjectedHTTPClient(t *testing.T) {
+	rt := &recordingTransport{}
+	hc := &http.Client{Transport: rt}
+	c, err := composio.NewClient(composio.Options{
+		APIKey:     "k",
+		BaseURL:    "https://api.example.invalid",
+		HTTPClient: hc,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if _, err := c.ListToolkits(context.Background(), composio.ListToolkitsRequest{}); err != nil {
+		t.Fatalf("ListToolkits: %v", err)
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.calls != 1 {
+		t.Fatalf("expected 1 call through injected transport, got %d", rt.calls)
+	}
+	if rt.last == nil || rt.last.URL.Host != "api.example.invalid" {
+		t.Errorf("request did not flow through injected client: %+v", rt.last)
+	}
+	if got := rt.last.Header.Get("x-api-key"); got != "k" {
+		t.Errorf("api key header lost in injected client: %q", got)
 	}
 }
 
@@ -174,10 +234,15 @@ func TestListConnectedAccounts_QueryString(t *testing.T) {
 		})
 	})
 	resp, err := c.ListConnectedAccounts(context.Background(), composio.ListConnectedAccountsRequest{
-		UserID:       "u_1",
-		ToolkitSlugs: []string{"notion", "slack"},
-		Statuses:     []string{"ACTIVE"},
-		Limit:        25,
+		UserIDs:             []string{"u_1", "u_2"},
+		ToolkitSlugs:        []string{"notion", "slack"},
+		AuthConfigIDs:       []string{"ac_a"},
+		ConnectedAccountIDs: []string{"ca_x"},
+		Statuses:            []string{"ACTIVE"},
+		OrderBy:             "updated_at",
+		OrderDirection:      "desc",
+		AccountType:         "PRIVATE",
+		Limit:               25,
 	})
 	if err != nil {
 		t.Fatalf("ListConnectedAccounts: %v", err)
@@ -186,11 +251,37 @@ func TestListConnectedAccounts_QueryString(t *testing.T) {
 		t.Errorf("unexpected response: %+v", resp)
 	}
 	q := seen.URL.Query()
-	if q.Get("user_id") != "u_1" {
-		t.Errorf("user_id = %q", q.Get("user_id"))
+
+	// Per Composio v3.1 these are plural array params.
+	if got := q["user_ids"]; len(got) != 2 || got[0] != "u_1" || got[1] != "u_2" {
+		t.Errorf("user_ids = %v", got)
 	}
 	if got := q["toolkit_slugs"]; len(got) != 2 || got[0] != "notion" || got[1] != "slack" {
 		t.Errorf("toolkit_slugs = %v", got)
+	}
+	if got := q["auth_config_ids"]; len(got) != 1 || got[0] != "ac_a" {
+		t.Errorf("auth_config_ids = %v", got)
+	}
+	if got := q["connected_account_ids"]; len(got) != 1 || got[0] != "ca_x" {
+		t.Errorf("connected_account_ids = %v", got)
+	}
+	if got := q["statuses"]; len(got) != 1 || got[0] != "ACTIVE" {
+		t.Errorf("statuses = %v", got)
+	}
+
+	// Singular legacy keys must NOT appear — guard against regression.
+	if q.Has("user_id") || q.Has("auth_config_id") {
+		t.Errorf("legacy singular query keys leaked: %s", seen.URL.RawQuery)
+	}
+
+	if q.Get("order_by") != "updated_at" {
+		t.Errorf("order_by = %q", q.Get("order_by"))
+	}
+	if q.Get("order_direction") != "desc" {
+		t.Errorf("order_direction = %q", q.Get("order_direction"))
+	}
+	if q.Get("account_type") != "PRIVATE" {
+		t.Errorf("account_type = %q", q.Get("account_type"))
 	}
 	if q.Get("limit") != "25" {
 		t.Errorf("limit = %q", q.Get("limit"))
@@ -354,10 +445,28 @@ func TestExecuteTool_Success(t *testing.T) {
 		if r.URL.Path != "/tools/execute/GITHUB_CREATE_ISSUE" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		var body composio.ExecuteToolRequest
-		readJSON(t, r, &body)
-		if body.UserID != "u_1" || body.Arguments["title"] != "hi" {
-			t.Errorf("body = %+v", body)
+		// Decode into a raw map first so we can assert wire keys directly.
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		var wire map[string]any
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			t.Fatalf("unmarshal wire: %v", err)
+		}
+		if wire["user_id"] != "u_1" {
+			t.Errorf("user_id = %v", wire["user_id"])
+		}
+		// The spec field is `version`, not `toolkit_versions`.
+		if wire["version"] != "latest" {
+			t.Errorf("version = %v (want %q)", wire["version"], "latest")
+		}
+		if _, leaked := wire["toolkit_versions"]; leaked {
+			t.Errorf("legacy toolkit_versions field leaked to wire: %s", raw)
+		}
+		args, _ := wire["arguments"].(map[string]any)
+		if args["title"] != "hi" {
+			t.Errorf("arguments.title = %v", args["title"])
 		}
 		writeJSON(t, w, http.StatusOK, map[string]any{
 			"successful": true,
@@ -368,12 +477,40 @@ func TestExecuteTool_Success(t *testing.T) {
 	resp, err := c.ExecuteTool(context.Background(), "GITHUB_CREATE_ISSUE", composio.ExecuteToolRequest{
 		UserID:    "u_1",
 		Arguments: map[string]any{"title": "hi"},
+		Version:   "latest",
 	})
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
 	if !resp.Successful || resp.Data["issue_number"].(float64) != 42 || resp.LogID != "log_1" {
 		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+// TestExecuteToolRequest_VersionSerialization locks in the json tag for the
+// Version field — GPT-Boy's review against PR #4603 caught that the field
+// used to serialize as `toolkit_versions`, which is not a v3.1 wire key.
+func TestExecuteToolRequest_VersionSerialization(t *testing.T) {
+	req := composio.ExecuteToolRequest{
+		UserID:  "u_1",
+		Version: "20251027_00",
+	}
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got := string(b)
+	if !strings.Contains(got, `"version":"20251027_00"`) {
+		t.Errorf("version not serialized as `version`: %s", got)
+	}
+	if strings.Contains(got, "toolkit_versions") {
+		t.Errorf("legacy toolkit_versions key leaked: %s", got)
+	}
+
+	// Zero-value Version must omit the field entirely (omitempty).
+	bEmpty, _ := json.Marshal(composio.ExecuteToolRequest{UserID: "u_1"})
+	if strings.Contains(string(bEmpty), "version") {
+		t.Errorf("empty Version should omit, got: %s", bEmpty)
 	}
 }
 

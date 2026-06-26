@@ -39,7 +39,11 @@ type Options struct {
 	Timeout time.Duration
 
 	// HTTPClient lets callers inject a custom *http.Client (for example with
-	// a corporate transport or instrumentation). If nil the default is used.
+	// a corporate transport, custom CookieJar, redirect policy, or
+	// observability instrumentation). When non-nil it is adopted in full
+	// via resty.NewWithClient — the caller's Transport, Jar, CheckRedirect,
+	// and built-in Timeout all carry through. If both this client's
+	// Timeout and [Options.Timeout] are set, [Options.Timeout] wins.
 	HTTPClient *http.Client
 
 	// RetryCount is the number of retries resty performs on transient
@@ -89,20 +93,13 @@ func NewClient(opts Options) (*Client, error) {
 		timeout = 0 // resty treats 0 as "no timeout"
 	}
 
-	rc := resty.New().
+	rc := newRestyClient(opts.HTTPClient).
 		SetBaseURL(baseURL).
 		SetHeader("Content-Type", "application/json").
 		SetHeader("Accept", "application/json").
 		SetHeader("User-Agent", ua).
 		SetHeader("x-api-key", opts.APIKey).
 		SetTimeout(timeout)
-
-	if opts.HTTPClient != nil {
-		rc = rc.SetTransport(opts.HTTPClient.Transport)
-		if opts.HTTPClient.Timeout > 0 {
-			rc = rc.SetTimeout(opts.HTTPClient.Timeout)
-		}
-	}
 
 	if opts.RetryCount > 0 {
 		rc = rc.SetRetryCount(opts.RetryCount)
@@ -117,6 +114,18 @@ func NewClient(opts Options) (*Client, error) {
 		apiKey:    opts.APIKey,
 		userAgent: ua,
 	}, nil
+}
+
+// newRestyClient constructs a resty.Client honoring an injected *http.Client
+// in full when one is provided. resty.NewWithClient adopts the caller's
+// http.Client wholesale — so the caller's Transport, Jar, CheckRedirect,
+// and Timeout all carry through — which matches the documented contract
+// of [Options.HTTPClient].
+func newRestyClient(hc *http.Client) *resty.Client {
+	if hc != nil {
+		return resty.NewWithClient(hc)
+	}
+	return resty.New()
 }
 
 // BaseURL returns the resolved API root after defaulting.

@@ -26,7 +26,9 @@ type ListToolkitsRequest struct {
 	Category string
 	Limit    int
 	Cursor   string
-	SortBy   string // "popular" (default) | "alphabetical"
+	// SortBy is the upstream sort order. Per the v3.1 spec the valid enum
+	// values are "usage" and "alphabetically".
+	SortBy string
 }
 
 // ListToolkitsResponse is the typed paginated response.

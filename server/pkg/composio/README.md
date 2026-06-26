@@ -50,7 +50,7 @@ link, err := client.CreateLink(ctx, composio.CreateLinkRequest{
 
 // 2. After Composio creates the account, fetch what the user has connected
 accounts, err := client.ListConnectedAccounts(ctx, composio.ListConnectedAccountsRequest{
-    UserID:   multicaUserID.String(),
+    UserIDs:  []string{multicaUserID.String()},
     Statuses: []string{"ACTIVE"},
 })
 

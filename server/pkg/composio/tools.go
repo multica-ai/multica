@@ -26,12 +26,19 @@ type ExecuteToolRequest struct {
 	// the caller does not have the explicit `ca_` id handy.
 	UserID string `json:"user_id,omitempty"`
 
-	// ToolkitVersions controls how Composio resolves the tool definition.
-	// Pass "latest" or a dated version like "20251027_00". The Composio
-	// docs note that manual execution requires an explicit version.
-	ToolkitVersions string `json:"toolkit_versions,omitempty"`
+	// Version pins the tool definition version. Pass "latest" or a dated
+	// version like "20251027_00"; defaults to "00000000_00" upstream.
+	//
+	// The Composio docs note that manual tool execution requires an explicit
+	// version; setting this avoids unintended drift when Composio promotes
+	// a new latest.
+	Version string `json:"version,omitempty"`
 
-	// AllowTracing flips Composio-side tracing on for this call.
+	// AllowTracing is the upstream-deprecated debug-tracing flag.
+	//
+	// Deprecated: marked deprecated on the Composio side (v3.1) — kept here
+	// only for backward compatibility with existing callers. Will be removed
+	// once Composio drops the field.
 	AllowTracing bool `json:"allow_tracing,omitempty"`
 }
 

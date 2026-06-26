@@ -65,13 +65,23 @@ func (c *Client) CreateLink(ctx context.Context, req CreateLinkRequest) (*Create
 
 // ListConnectedAccountsRequest collects the optional filters supported by
 // GET /connected_accounts. Zero values are omitted from the query string.
+//
+// Per the Composio v3.1 spec all filters are plural array params: the SDK
+// sends one query entry per slice element (`user_ids=u1&user_ids=u2`).
+// Pass a single-element slice for the common "list by one user" case.
+//
+// Spec: https://docs.composio.dev/reference/api-reference/connected-accounts/getConnectedAccounts
 type ListConnectedAccountsRequest struct {
-	UserID       string
-	ToolkitSlugs []string // OR'd by the upstream
-	AuthConfigID string
-	Statuses     []string // ACTIVE, EXPIRED, INACTIVE, …
-	Limit        int      // 0 = use upstream default
-	Cursor       string
+	UserIDs             []string
+	ToolkitSlugs        []string
+	AuthConfigIDs       []string
+	ConnectedAccountIDs []string
+	Statuses            []string // ACTIVE, EXPIRED, INACTIVE, …
+	OrderBy             string   // "created_at" (default) | "updated_at"
+	OrderDirection      string   // "asc" | "desc" (default)
+	AccountType         string   // experimental: PRIVATE | SHARED | ALL
+	Limit               int      // 0 = use upstream default
+	Cursor              string
 }
 
 // ConnectedAccount mirrors a subset of the Composio response shape. Only the
@@ -100,21 +110,39 @@ type ListConnectedAccountsResponse struct {
 // ListConnectedAccounts returns the connections matching the supplied filters.
 func (c *Client) ListConnectedAccounts(ctx context.Context, req ListConnectedAccountsRequest) (*ListConnectedAccountsResponse, error) {
 	q := url.Values{}
-	if req.UserID != "" {
-		q.Set("user_id", req.UserID)
-	}
-	for _, slug := range req.ToolkitSlugs {
-		if slug != "" {
-			q.Add("toolkit_slugs", slug)
+	for _, v := range req.UserIDs {
+		if v != "" {
+			q.Add("user_ids", v)
 		}
 	}
-	if req.AuthConfigID != "" {
-		q.Set("auth_config_id", req.AuthConfigID)
-	}
-	for _, s := range req.Statuses {
-		if s != "" {
-			q.Add("statuses", s)
+	for _, v := range req.ToolkitSlugs {
+		if v != "" {
+			q.Add("toolkit_slugs", v)
 		}
+	}
+	for _, v := range req.AuthConfigIDs {
+		if v != "" {
+			q.Add("auth_config_ids", v)
+		}
+	}
+	for _, v := range req.ConnectedAccountIDs {
+		if v != "" {
+			q.Add("connected_account_ids", v)
+		}
+	}
+	for _, v := range req.Statuses {
+		if v != "" {
+			q.Add("statuses", v)
+		}
+	}
+	if req.OrderBy != "" {
+		q.Set("order_by", req.OrderBy)
+	}
+	if req.OrderDirection != "" {
+		q.Set("order_direction", req.OrderDirection)
+	}
+	if req.AccountType != "" {
+		q.Set("account_type", req.AccountType)
 	}
 	if req.Limit > 0 {
 		q.Set("limit", strconv.Itoa(req.Limit))
