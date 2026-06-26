@@ -170,6 +170,8 @@
     "add_sub_issue_aria": "Add sub-issue",
     "section_properties": "Properties",
     "section_parent_issue": "Parent issue",
+    "remove_parent_aria": "Remove parent",
+    "remove_parent_toast_success": "Parent removed",
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadata",
     "section_details": "Details",
