@@ -12,7 +12,9 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -210,6 +212,95 @@ func TestCerebroCanUseAgent_NilInvokerReturnsTrue(t *testing.T) {
 	}
 	if !allowed {
 		t.Fatalf("nil invoker should return true (fail-open)")
+	}
+}
+
+// CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 tests for the per-key
+// tool-policy write gate — credential.* → manage_credential_access, others → owner/admin.
+
+func TestCerebroRequireCredentialGrantPolicy_NilQueriesPasses(t *testing.T) {
+	// With nil CerebroQueries the credential gate must fail open, same as the
+	// connections gate, so upstream-only fixtures keep working.
+	h := &Handler{}
+	r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", nil)
+	w := httptest.NewRecorder()
+	if !h.cerebroRequireCredentialGrantPolicy(w, r, "00000000-0000-0000-0000-000000000000") {
+		t.Fatalf("nil CerebroQueries: credential gate must pass, got body=%q", w.Body.String())
+	}
+}
+
+func TestRequireToolPolicyWritePolicy_RoutesPerKey(t *testing.T) {
+	// Proves the per-key routing: a credential.* key takes the manage_credential_access
+	// branch, which fails open with nil CerebroQueries → next runs. A non-credential key
+	// takes the owner/admin branch, which has no fail-open path: an unauthenticated
+	// request is blocked and next never runs.
+	h := &Handler{}
+
+	t.Run("credential key fails open to next", func(t *testing.T) {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", strings.NewReader(`{"tool_key":"credential.reveal"}`))
+		w := httptest.NewRecorder()
+		h.RequireToolPolicyWritePolicy("id")(next).ServeHTTP(w, r)
+		if !called {
+			t.Fatalf("credential key: expected next to run (nil-queries fail open), status=%d body=%q", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("non-credential key blocks unauthenticated", func(t *testing.T) {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", strings.NewReader(`{"tool_key":"firtal_registry"}`))
+		w := httptest.NewRecorder()
+		h.RequireToolPolicyWritePolicy("id")(next).ServeHTTP(w, r)
+		if called {
+			t.Fatalf("non-credential key: owner/admin branch must block an unauthenticated request, but next ran")
+		}
+		if w.Code == http.StatusOK || w.Code == http.StatusNoContent {
+			t.Fatalf("non-credential key: expected a block status, got %d", w.Code)
+		}
+	})
+}
+
+func TestToolPolicyWriteIsCredential_RoutesByToolKey(t *testing.T) {
+	h := &Handler{}
+	tests := []struct {
+		name   string
+		method string
+		query  string
+		body   string
+		want   bool
+	}{
+		{"put credential", http.MethodPut, "", `{"tool_key":"credential.reveal"}`, true},
+		{"put non-credential", http.MethodPut, "", `{"tool_key":"firtal_registry"}`, false},
+		{"put empty key", http.MethodPut, "", `{"tool_key":""}`, false},
+		{"put malformed body fails closed", http.MethodPut, "", `{not json`, false},
+		{"delete credential query", http.MethodDelete, "tool_key=credential.rotate", "", true},
+		{"delete non-credential query", http.MethodDelete, "tool_key=firtal_registry", "", false},
+		{"delete missing key", http.MethodDelete, "", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			url := "/api/workspaces/x/tool-policy"
+			if tc.query != "" {
+				url += "?" + tc.query
+			}
+			var bodyReader io.Reader
+			if tc.body != "" {
+				bodyReader = strings.NewReader(tc.body)
+			}
+			r := httptest.NewRequest(tc.method, url, bodyReader)
+			if got := h.toolPolicyWriteIsCredential(r); got != tc.want {
+				t.Fatalf("toolPolicyWriteIsCredential = %v, want %v", got, tc.want)
+			}
+			// PUT bodies must be restored so the downstream handler can decode them.
+			if tc.method == http.MethodPut && tc.body != "" {
+				restored, _ := io.ReadAll(r.Body)
+				if !bytes.Equal(restored, []byte(tc.body)) {
+					t.Fatalf("body not restored: got %q, want %q", restored, tc.body)
+				}
+			}
+		})
 	}
 }
 
