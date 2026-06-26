@@ -126,6 +126,12 @@ reads it from a file (suggested mode 0600). The third channel,
 `--custom-env <json>`, puts the value on the command line where shell history
 and `ps` can see it — avoid it for real secrets.
 
+At task claim time the server also reads the workspace's global environment
+map from workspace settings and merges it with the agent's `custom_env`.
+Agent-specific keys win over workspace keys. Critical internal variables
+(`MULTICA_*`, `PATH`, `CODEX_HOME`, and the daemon-managed runtime paths) are
+filtered out before they reach the daemon payload.
+
 Read-side facts (these are the wrong assumptions to avoid):
 
 - Agent resources never expose plaintext `custom_env`. `agent
@@ -140,6 +146,10 @@ Read-side facts (these are the wrong assumptions to avoid):
   /api/agents/{id}/env"). Plaintext env writes are handled by
   `PUT /api/agents/{id}/env` (`multica agent env set`), which is owner/admin-only
   and writes an audit row.
+- Workspace global env values use `GET /api/workspaces/{id}/env` and
+  `PUT /api/workspaces/{id}/env`. Generic workspace reads expose only redacted
+  metadata for that map, and generic workspace settings writes preserve the
+  stored secrets instead of accepting a redacted round-trip payload.
 
 ### mcp_config
 

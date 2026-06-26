@@ -302,6 +302,28 @@
       }
     }
   },
+  "workspace_env": {
+    "section_title": "전역 환경 변수",
+    "intro": "이 워크스페이스의 모든 에이전트 프로세스에 주입됩니다. 같은 키의 에이전트별 변수가 우선합니다.",
+    "not_revealed_title_other": "전역 변수 {{count}}개 구성됨",
+    "not_revealed_empty": "전역 환경 변수가 없습니다.",
+    "not_revealed_hint": "값은 공개하기 전까지 숨겨집니다. 모든 공개와 편집은 워크스페이스 감사 로그에 기록됩니다.",
+    "reveal_action": "공개 및 편집",
+    "revealing": "공개하는 중...",
+    "reveal_failed_toast": "전역 환경 변수를 불러오지 못했습니다",
+    "duplicate_keys_toast": "중복된 환경 변수 키",
+    "saved_toast": "전역 환경 변수를 저장했습니다",
+    "save_failed_toast": "전역 환경 변수를 저장하지 못했습니다",
+    "add": "추가",
+    "save": "저장",
+    "unsaved_changes": "저장되지 않은 변경 사항",
+    "key_placeholder": "KEY",
+    "value_placeholder": "value",
+    "show_value_aria": "값 표시",
+    "hide_value_aria": "값 숨기기",
+    "remove_aria": "변수 제거",
+    "empty_editable": "전역 환경 변수가 없습니다. 추가하면 모든 에이전트 시작 시 주입됩니다."
+  },
   "lark": {
     "section_title": "Lark",
     "page_description": "각 Multica 에이전트를 Lark(飞书) PersonalAgent 봇에 연결하세요. 멤버는 봇과 1:1로 대화하거나, 그룹에서 @ 멘션하거나, /issue 를 입력해 새 Multica 이슈를 만들 수 있습니다.",

@@ -16,6 +16,7 @@ import {
   SquadSchema,
   TimelineEntriesSchema,
   UserSchema,
+  WorkspaceEnvResponseSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
 
@@ -88,6 +89,48 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     const payload = { issues: [issueWithoutStage], total: 1 };
     const parsed = ListIssuesResponseSchema.parse(payload);
     expect(parsed.issues[0]?.stage).toBeNull();
+  });
+});
+
+describe("WorkspaceEnvResponseSchema", () => {
+  it("parses a well-formed workspace env response", () => {
+    const parsed = WorkspaceEnvResponseSchema.parse({
+      workspace_id: "workspace-1",
+      global_env: {
+        ANTHROPIC_API_KEY: "secret",
+        ANTHROPIC_BASE_URL: "https://example.test",
+      },
+    });
+
+    expect(parsed.workspace_id).toBe("workspace-1");
+    expect(parsed.global_env).toEqual({
+      ANTHROPIC_API_KEY: "secret",
+      ANTHROPIC_BASE_URL: "https://example.test",
+    });
+  });
+
+  it("defaults missing global_env to an empty map for older backends", () => {
+    const parsed = WorkspaceEnvResponseSchema.parse({
+      workspace_id: "workspace-1",
+    });
+
+    expect(parsed.global_env).toEqual({});
+  });
+
+  it("rejects non-string env values so parseWithFallback can return its fallback", () => {
+    const parsed = parseWithFallback(
+      {
+        workspace_id: "workspace-1",
+        global_env: {
+          ANTHROPIC_API_KEY: 123,
+        },
+      },
+      WorkspaceEnvResponseSchema,
+      { workspace_id: "", global_env: {} },
+      { endpoint: "GET /api/workspaces/:id/env" },
+    );
+
+    expect(parsed).toEqual({ workspace_id: "", global_env: {} });
   });
 });
 

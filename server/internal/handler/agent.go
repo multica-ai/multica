@@ -362,6 +362,68 @@ type TaskAgentData struct {
 	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
 }
 
+func workspaceGlobalEnvFromSettings(settings []byte) map[string]string {
+	if len(settings) == 0 {
+		return nil
+	}
+	var payload struct {
+		GlobalEnv map[string]string `json:"global_env"`
+	}
+	if err := json.Unmarshal(settings, &payload); err != nil {
+		slog.Warn("failed to unmarshal workspace global_env", "error", err)
+		return nil
+	}
+	if len(payload.GlobalEnv) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(payload.GlobalEnv))
+	for key, value := range payload.GlobalEnv {
+		key = strings.TrimSpace(key)
+		if key == "" || isBlockedCustomEnvKey(key) {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func mergeWorkspaceAndAgentEnv(workspaceEnv, agentEnv map[string]string) map[string]string {
+	if len(workspaceEnv) == 0 && len(agentEnv) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(workspaceEnv)+len(agentEnv))
+	for key, value := range workspaceEnv {
+		key = strings.TrimSpace(key)
+		if key == "" || isBlockedCustomEnvKey(key) {
+			continue
+		}
+		merged[key] = value
+	}
+	for key, value := range agentEnv {
+		key = strings.TrimSpace(key)
+		if key == "" || isBlockedCustomEnvKey(key) {
+			continue
+		}
+		merged[key] = value
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
+func isBlockedCustomEnvKey(key string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(key))
+	if strings.HasPrefix(upper, "MULTICA_") {
+		return true
+	}
+	switch upper {
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "CURSOR_DATA_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+		return true
+	}
+	return false
+}
+
 // taskToResponse maps a queue row to its wire shape. workspaceID is threaded
 // in because the row itself doesn't carry one (workspace lives on the agent
 // / issue / chat session) — we ask the caller to resolve it once and pass it

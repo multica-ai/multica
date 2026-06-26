@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -631,6 +632,67 @@ func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
 	}
 	if resp.Task.WorkspaceContext != wsContext {
 		t.Errorf("workspace_context = %q, want %q", resp.Task.WorkspaceContext, wsContext)
+	}
+}
+
+func TestClaimTaskByRuntime_MergesWorkspaceAndAgentEnv(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var priorSettings []byte
+	if err := testPool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&priorSettings); err != nil {
+		t.Fatalf("read workspace.settings: %v", err)
+	}
+	workspaceSettings := []byte(`{"global_env":{"GLOBAL_ONLY":"workspace-value","SHARED_KEY":"workspace-value","MULTICA_TOKEN":"blocked"}}`)
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = $1 WHERE id = $2`, workspaceSettings, testWorkspaceID); err != nil {
+		t.Fatalf("set workspace.settings: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `UPDATE workspace SET settings = $1 WHERE id = $2`, priorSettings, testWorkspaceID)
+	})
+
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Workspace env claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Workspace env claim agent")
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = $1 WHERE id = $2`, []byte(`{"SHARED_KEY":"agent-value","AGENT_ONLY":"agent-value"}`), agentID); err != nil {
+		t.Fatalf("set agent custom_env: %v", err)
+	}
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "workspace-env-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID    string `json:"id"`
+			Agent *struct {
+				CustomEnv map[string]string `json:"custom_env"`
+			} `json:"agent"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil || resp.Task.ID != taskID {
+		t.Fatalf("expected dispatched task %s to be claimed, got %#v body=%s", taskID, resp.Task, w.Body.String())
+	}
+	if resp.Task.Agent == nil {
+		t.Fatalf("claim response missing agent payload: %s", w.Body.String())
+	}
+	want := map[string]string{
+		"GLOBAL_ONLY": "workspace-value",
+		"SHARED_KEY":  "agent-value",
+		"AGENT_ONLY":  "agent-value",
+	}
+	if !reflect.DeepEqual(resp.Task.Agent.CustomEnv, want) {
+		t.Fatalf("custom_env = %#v, want %#v", resp.Task.Agent.CustomEnv, want)
 	}
 }
 

@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
+const mockGetWorkspaceEnv = vi.hoisted(() => vi.fn());
+const mockUpdateWorkspaceEnv = vi.hoisted(() => vi.fn());
 const mockInvalidateQueries = vi.hoisted(() => vi.fn());
 const workspaceRef = vi.hoisted(() => ({
   current: {
@@ -17,6 +19,7 @@ const workspaceRef = vi.hoisted(() => ({
     context: "",
     issue_prefix: "TES",
     repos: [] as { url: string }[],
+    settings: {} as Record<string, unknown>,
   },
 }));
 const membersRef = vi.hoisted(() => ({
@@ -62,7 +65,12 @@ vi.mock("@multica/core/workspace/mutations", () => ({
 }));
 
 vi.mock("@multica/core/api", () => ({
-  api: { updateWorkspace: mockUpdateWorkspace, getBaseUrl: () => "http://127.0.0.1:8080" },
+  api: {
+    updateWorkspace: mockUpdateWorkspace,
+    getWorkspaceEnv: mockGetWorkspaceEnv,
+    updateWorkspaceEnv: mockUpdateWorkspaceEnv,
+    getBaseUrl: () => "http://127.0.0.1:8080",
+  },
 }));
 
 vi.mock("@multica/core/auth", () => {
@@ -111,6 +119,7 @@ describe("WorkspaceTab — issue prefix editing", () => {
       context: "",
       issue_prefix: "TES",
       repos: [],
+      settings: {},
     };
     membersRef.current = [{ user_id: "user-1", role: "owner" }];
     mockUpdateWorkspace.mockImplementation(
@@ -123,6 +132,14 @@ describe("WorkspaceTab — issue prefix editing", () => {
         issue_prefix: payload.issue_prefix ?? workspaceRef.current.issue_prefix,
       }),
     );
+    mockGetWorkspaceEnv.mockResolvedValue({
+      workspace_id: "workspace-1",
+      global_env: {},
+    });
+    mockUpdateWorkspaceEnv.mockImplementation(async (_id: string, payload: { global_env: Record<string, string> }) => ({
+      workspace_id: "workspace-1",
+      global_env: payload.global_env,
+    }));
   });
 
   it("renders the current prefix in the input", () => {
@@ -233,5 +250,48 @@ describe("WorkspaceTab — issue prefix editing", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
     expect(screen.getByPlaceholderText("TES")).toBeDisabled();
+  });
+
+  it("shows the redacted global env key count before reveal", () => {
+    workspaceRef.current = {
+      ...workspaceRef.current,
+      settings: {
+        global_env: { has_values: true, key_count: 2 },
+      },
+    };
+
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByText("2 global variables configured")).toBeTruthy();
+    expect(mockGetWorkspaceEnv).not.toHaveBeenCalled();
+  });
+
+  it("reveals and saves workspace global env through the dedicated endpoint", async () => {
+    const user = userEvent.setup();
+    mockGetWorkspaceEnv.mockResolvedValue({
+      workspace_id: "workspace-1",
+      global_env: { GLOBAL_ONLY: "workspace-value" },
+    });
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("button", { name: "Reveal & edit" }));
+
+    const keyInput = await screen.findByDisplayValue("GLOBAL_ONLY");
+    const valueInput = screen.getByDisplayValue("workspace-value");
+    await user.clear(keyInput);
+    await user.type(keyInput, "GLOBAL_NEXT");
+    await user.clear(valueInput);
+    await user.type(valueInput, "next-value");
+
+    const globalEnvSection = screen.getByRole("heading", { name: "Global environment" }).closest("section");
+    expect(globalEnvSection).not.toBeNull();
+    await user.click(within(globalEnvSection as HTMLElement).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspaceEnv).toHaveBeenCalledWith("workspace-1", {
+        global_env: { GLOBAL_NEXT: "next-value" },
+      });
+    });
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
   });
 });

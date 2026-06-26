@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Loader2, Save, LogOut } from "lucide-react";
+import { Camera, Eye, Loader2, Lock, Save, LogOut } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
@@ -39,8 +39,18 @@ import {
 import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
+import { EnvEditor, entriesToEnvMap, envMapToEntries, type EnvEditorEntry } from "../../common/env-editor";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
 import { useT } from "../../i18n";
+
+function workspaceGlobalEnvKeyCount(settings: Record<string, unknown> | undefined): number {
+  const globalEnv = settings?.global_env;
+  if (!globalEnv || typeof globalEnv !== "object" || Array.isArray(globalEnv)) {
+    return 0;
+  }
+  const keyCount = (globalEnv as { key_count?: unknown }).key_count;
+  return typeof keyCount === "number" && Number.isFinite(keyCount) ? keyCount : 0;
+}
 
 export function WorkspaceTab() {
   const { t } = useT("settings");
@@ -103,6 +113,10 @@ export function WorkspaceTab() {
   const [context, setContext] = useState(workspace?.context ?? "");
   const [issuePrefix, setIssuePrefix] = useState(workspace?.issue_prefix ?? "");
   const [saving, setSaving] = useState(false);
+  const [globalEnvRevealed, setGlobalEnvRevealed] = useState<EnvEditorEntry[] | null>(null);
+  const [globalEnvOriginal, setGlobalEnvOriginal] = useState<Record<string, string>>({});
+  const [globalEnvRevealing, setGlobalEnvRevealing] = useState(false);
+  const [globalEnvSaving, setGlobalEnvSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
@@ -132,6 +146,8 @@ export function WorkspaceTab() {
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
     setIssuePrefix(workspace?.issue_prefix ?? "");
+    setGlobalEnvRevealed(null);
+    setGlobalEnvOriginal({});
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
   }, [workspace?.id]);
 
@@ -190,6 +206,65 @@ export function WorkspaceTab() {
       return;
     }
     void performSave(false);
+  };
+
+  const globalEnvKeyCount = workspaceGlobalEnvKeyCount(workspace?.settings);
+  const currentGlobalEnvMap = globalEnvRevealed ? entriesToEnvMap(globalEnvRevealed) : globalEnvOriginal;
+  const globalEnvDirty =
+    globalEnvRevealed !== null &&
+    JSON.stringify(currentGlobalEnvMap) !== JSON.stringify(globalEnvOriginal);
+
+  const handleRevealGlobalEnv = async () => {
+    if (!workspace) return;
+    setGlobalEnvRevealing(true);
+    try {
+      const resp = await api.getWorkspaceEnv(workspace.id);
+      const env = resp.global_env ?? {};
+      setGlobalEnvOriginal(env);
+      setGlobalEnvRevealed(envMapToEntries(env));
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.workspace_env.reveal_failed_toast));
+    } finally {
+      setGlobalEnvRevealing(false);
+    }
+  };
+
+  const handleSaveGlobalEnv = async () => {
+    if (!workspace || globalEnvRevealed === null) return;
+    const keys = globalEnvRevealed.filter((e) => e.key.trim()).map((e) => e.key.trim());
+    const uniqueKeys = new Set(keys);
+    if (uniqueKeys.size < keys.length) {
+      toast.error(t(($) => $.workspace_env.duplicate_keys_toast));
+      return;
+    }
+
+    setGlobalEnvSaving(true);
+    try {
+      const resp = await api.updateWorkspaceEnv(workspace.id, {
+        global_env: currentGlobalEnvMap,
+      });
+      const env = resp.global_env ?? {};
+      setGlobalEnvOriginal(env);
+      setGlobalEnvRevealed(envMapToEntries(env));
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) =>
+          ws.id === workspace.id
+            ? {
+                ...ws,
+                settings: {
+                  ...ws.settings,
+                  global_env: Object.keys(env).length > 0 ? { has_values: true, key_count: Object.keys(env).length } : undefined,
+                },
+              }
+            : ws,
+        ),
+      );
+      toast.success(t(($) => $.workspace_env.saved_toast));
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.workspace_env.save_failed_toast));
+    } finally {
+      setGlobalEnvSaving(false);
+    }
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -373,6 +448,62 @@ export function WorkspaceTab() {
               <p className="text-xs text-muted-foreground">
                 {t(($) => $.workspace.manage_hint)}
               </p>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">{t(($) => $.workspace_env.section_title)}</h2>
+        <Card>
+          <CardContent className="space-y-4">
+            {globalEnvRevealed === null ? (
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="flex items-center gap-2 text-sm font-medium">
+                    <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+                    {globalEnvKeyCount > 0
+                      ? t(($) => $.workspace_env.not_revealed_title, { count: globalEnvKeyCount })
+                      : t(($) => $.workspace_env.not_revealed_empty)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t(($) => $.workspace_env.not_revealed_hint)}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={globalEnvRevealing || !canManageWorkspace}
+                  onClick={handleRevealGlobalEnv}
+                  className="shrink-0"
+                >
+                  {globalEnvRevealing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                  {globalEnvRevealing ? t(($) => $.workspace_env.revealing) : t(($) => $.workspace_env.reveal_action)}
+                </Button>
+              </div>
+            ) : (
+              <EnvEditor
+                entries={globalEnvRevealed}
+                onChange={setGlobalEnvRevealed}
+                onSave={handleSaveGlobalEnv}
+                saving={globalEnvSaving}
+                dirty={globalEnvDirty}
+                intro={t(($) => $.workspace_env.intro)}
+                addLabel={t(($) => $.workspace_env.add)}
+                saveLabel={t(($) => $.workspace_env.save)}
+                unsavedLabel={t(($) => $.workspace_env.unsaved_changes)}
+                keyPlaceholder={t(($) => $.workspace_env.key_placeholder)}
+                valuePlaceholder={t(($) => $.workspace_env.value_placeholder)}
+                showValueLabel={t(($) => $.workspace_env.show_value_aria)}
+                hideValueLabel={t(($) => $.workspace_env.hide_value_aria)}
+                removeLabel={t(($) => $.workspace_env.remove_aria)}
+                emptyLabel={t(($) => $.workspace_env.empty_editable)}
+              />
             )}
           </CardContent>
         </Card>
