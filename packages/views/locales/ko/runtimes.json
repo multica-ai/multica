@@ -272,7 +272,6 @@
     "col_health": "상태",
     "col_owner": "소유자",
     "col_agents": "에이전트",
-    "col_workload": "작업량",
     "col_cost": "비용 · 7일",
     "_comment_account_col": "CEREBRO-PATCH(runtime-list-account-column): col_account replaces upstream col_cli (FIR-2308)",
     "col_account": "Account",

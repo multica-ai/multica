@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { useSquadsViewStore } from "./view-store";
+import { useProjectViewStore } from "./view-store";
 import { setCurrentWorkspace } from "../../platform/workspace-storage";
 
 const flush = () => new Promise((resolve) => queueMicrotask(() => resolve(null)));
@@ -26,7 +26,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   localStorage.clear();
-  useSquadsViewStore.setState({ scope: "mine" });
+  useProjectViewStore.setState({ viewMode: "compact" });
   setCurrentWorkspace(null, null);
 });
 
@@ -34,70 +34,70 @@ afterEach(() => {
   setCurrentWorkspace(null, null);
 });
 
-describe("useSquadsViewStore", () => {
-  it("defaults to 'mine'", () => {
-    expect(useSquadsViewStore.getState().scope).toBe("mine");
+describe("useProjectViewStore", () => {
+  it("defaults to 'compact'", () => {
+    expect(useProjectViewStore.getState().viewMode).toBe("compact");
   });
 
-  it("setScope mutates the store", () => {
-    useSquadsViewStore.getState().setScope("all");
-    expect(useSquadsViewStore.getState().scope).toBe("all");
+  it("setViewMode mutates the store", () => {
+    useProjectViewStore.getState().setViewMode("comfortable");
+    expect(useProjectViewStore.getState().viewMode).toBe("comfortable");
   });
 
   it("partialize persists view prefs (no actions) under the workspace-namespaced key", async () => {
     setCurrentWorkspace("acme", "ws_a");
     await flush();
-    useSquadsViewStore.getState().setScope("all");
+    useProjectViewStore.getState().setViewMode("comfortable");
 
-    const raw = localStorage.getItem("multica_squads_view:acme");
+    const raw = localStorage.getItem("multica_projects_view:acme");
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw as string);
     expect(Object.keys(parsed.state).sort()).toEqual([
       "filters",
       "hiddenColumns",
-      "scope",
       "sortDirection",
       "sortField",
+      "viewMode",
     ]);
-    expect(parsed.state.scope).toBe("all");
+    expect(parsed.state.viewMode).toBe("comfortable");
   });
 
-  it("rehydrates a different saved scope on workspace switch", async () => {
+  it("rehydrates a different saved viewMode on workspace switch", async () => {
     localStorage.setItem(
-      "multica_squads_view:acme",
-      JSON.stringify({ state: { scope: "all" }, version: 0 }),
+      "multica_projects_view:acme",
+      JSON.stringify({ state: { viewMode: "comfortable" }, version: 0 }),
     );
     localStorage.setItem(
-      "multica_squads_view:beta",
-      JSON.stringify({ state: { scope: "mine" }, version: 0 }),
+      "multica_projects_view:beta",
+      JSON.stringify({ state: { viewMode: "compact" }, version: 0 }),
     );
 
     setCurrentWorkspace("acme", "ws_a");
     await flush();
     await flush();
-    expect(useSquadsViewStore.getState().scope).toBe("all");
+    expect(useProjectViewStore.getState().viewMode).toBe("comfortable");
 
     setCurrentWorkspace("beta", "ws_b");
     await flush();
     await flush();
-    expect(useSquadsViewStore.getState().scope).toBe("mine");
+    expect(useProjectViewStore.getState().viewMode).toBe("compact");
   });
 
-  it("resets to 'mine' when switching to a workspace with no persisted value", async () => {
+  it("resets to 'compact' when switching to a workspace with no persisted value", async () => {
     localStorage.setItem(
-      "multica_squads_view:acme",
-      JSON.stringify({ state: { scope: "all" }, version: 0 }),
+      "multica_projects_view:acme",
+      JSON.stringify({ state: { viewMode: "comfortable" }, version: 0 }),
     );
 
     setCurrentWorkspace("acme", "ws_a");
     await flush();
     await flush();
-    expect(useSquadsViewStore.getState().scope).toBe("all");
+    expect(useProjectViewStore.getState().viewMode).toBe("comfortable");
 
     setCurrentWorkspace("beta", "ws_b");
     await flush();
     await flush();
-    expect(useSquadsViewStore.getState().scope).toBe("mine");
-    expect(localStorage.getItem("multica_squads_view:acme")).not.toBeNull();
+    expect(useProjectViewStore.getState().viewMode).toBe("compact");
+    expect(localStorage.getItem("multica_projects_view:acme")).not.toBeNull();
   });
 });

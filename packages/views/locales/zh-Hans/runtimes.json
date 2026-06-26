@@ -272,7 +272,6 @@
     "col_health": "健康度",
     "col_owner": "所有者",
     "col_agents": "智能体",
-    "col_workload": "工作负载",
     "col_cost": "费用 · 7 天",
     "_comment_account_col": "CEREBRO-PATCH(runtime-list-account-column): col_account replaces upstream col_cli (FIR-2308)",
     "col_account": "账户",

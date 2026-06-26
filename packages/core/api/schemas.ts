@@ -774,7 +774,7 @@ export const EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE = {
   total: 0,
 };
 
-export const EMPTY_WEBHOOK_DELIVERY = {
+export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
   id: "",
   workspace_id: "",
   autopilot_id: "",
