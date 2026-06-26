@@ -11,6 +11,7 @@ import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ChannelDetailPage } from "./pages/channel-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
+import { CerebroBrowserPage } from "./pages/cerebro-browser-page";
 import { SprintDetailPage } from "./pages/sprint-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { AutopilotCreatePage, AutopilotEditPage } from "@multica/cerebro-autopilot-pages";
@@ -196,6 +197,12 @@ export const appRoutes: RouteObject[] = [
             path: "cerebro/references/:object/:refId",
             element: <ReferenceReverseLookupRoute />,
             handle: { title: "Reference" },
+          },
+          {
+            // FIR-2037: personal browser tab (gated by cerebro_browser).
+            path: "cerebro/browser",
+            element: <CerebroBrowserPage />,
+            handle: { title: "Browser" },
           },
           {
             path: "channels/:id",

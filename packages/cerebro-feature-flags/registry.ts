@@ -310,6 +310,9 @@ export type CerebroFlagKey =
   // FIR-1412: folders (with sub-folders) for the Skills and Autopilots lists.
   | "cerebro_skill_folders"
   | "cerebro_autopilot_folders"
+  // FIR-2037: personal browser — a Multica-owned browser that opens as a tab in
+  // the desktop app, with logins that persist across restarts. Desktop-only.
+  | "cerebro_browser"
   // FIR-2042: mobile-web "Install Multica" top banner with per-platform
   // guidance (Android native install prompt; iOS Share → Add to Home Screen).
   | "cerebro_pwa_install_banner";
@@ -398,6 +401,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_groups_enabled: true,
   cerebro_runtime_pause: true,
   cerebro_tasks: false,
+  // FIR-2037: OFF until the personal browser tab is built + verified on the
+  // desktop app. Gates the Browser tab and its native browser pane.
+  cerebro_browser: false,
   cerebro_pin_input: true,
   cerebro_workflows: false,
   cerebro_skill_mention: true,
@@ -977,6 +983,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Enable the cross-agent tasks page at /:workspace/tasks (full task list with filters and pagination).",
+  },
+  {
+    key: "cerebro_browser",
+    label: "Personal browser tab",
+    group: "workspace",
+    description:
+      "Enable a Multica-owned browser that opens as a tab in the desktop app (like an issue), where you log into sites once and the logins persist across restarts. Desktop-only; the native browser pane is created only when the tab is opened. A later phase lets an agent drive this same browser.",
   },
   {
     key: "cerebro_pin_input",

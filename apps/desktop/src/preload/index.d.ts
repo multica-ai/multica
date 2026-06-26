@@ -130,6 +130,33 @@ interface DaemonAPI {
   openLogFile: () => Promise<{ success: boolean; error?: string }>;
 }
 
+/** FIR-2037: personal browser pane driven from the renderer's Browser tab. */
+interface CerebroBrowserNavState {
+  url: string;
+  title: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  isLoading: boolean;
+}
+
+interface CerebroBrowserAPI {
+  open: () => Promise<void>;
+  hide: () => Promise<void>;
+  setBounds: (bounds: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }) => Promise<void>;
+  navigate: (url: string) => Promise<void>;
+  back: () => Promise<void>;
+  forward: () => Promise<void>;
+  reload: () => Promise<void>;
+  onNavState: (
+    callback: (state: CerebroBrowserNavState) => void,
+  ) => () => void;
+}
+
 interface UpdaterAPI {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
   onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
@@ -150,6 +177,7 @@ declare global {
     desktopAPI: DesktopAPI;
     daemonAPI: DaemonAPI;
     updater: UpdaterAPI;
+    cerebroBrowser: CerebroBrowserAPI;
   }
 }
 

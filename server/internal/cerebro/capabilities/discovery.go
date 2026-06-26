@@ -131,6 +131,16 @@ var providerRegistry = map[string]Set{
 			// that name ever reaches the hook). Default stays Deny: the socket is
 			// sealed until the policy explicitly resolves to allow/ask.
 			"agent-browser",
+			// personal-browser is the in-app personal browser (FIR-2037): the
+			// agent drives the SAME Multica-owned browser pane the user is logged
+			// into, via the `multica cerebro-browser` CLI over a loopback control
+			// channel. Like agent-browser it is a Bash-invoked local CLI, not a
+			// native Claude tool, so it surfaces as the capability
+			// "tools:personal-browser" in the Tools tab and its real enforcement
+			// is the claim-time gate (resolvePersonalBrowserAllowed), not the
+			// PreToolUse hook. Default stays Deny: the agent never receives the
+			// MULTICA_PERSONAL_BROWSER grant until the policy resolves allow/ask.
+			"personal-browser",
 		},
 		MCPServers:      []string{},
 		ToolProtocols:   []string{"mcp_stdio"},

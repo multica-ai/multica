@@ -1479,6 +1479,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 		// CEREBRO-PATCH(daemon-agentvault-claim-env): TECH-3196 merge per-agent Agent Vault proxy env (flag-gated, fail-open).
 		customEnv = h.mergeAgentVaultEnvForClaim(r, agent.ID, agent.WorkspaceID, agent.Name, customEnv)
+		// CEREBRO-PATCH(personal-browser-gate): FIR-2037 inject MULTICA_PERSONAL_BROWSER when the personal-browser feature flag is on; per-host authorization is per-action.
+		customEnv = h.withPersonalBrowserEnv(r.Context(), customEnv, agent.WorkspaceID)
 		var customArgs []string
 		if agent.CustomArgs != nil {
 			if err := json.Unmarshal(agent.CustomArgs, &customArgs); err != nil {

@@ -57,5 +57,11 @@ server/**
 # same way as the `_cerebro.go` source files above.
 !server/**/*_cerebro_test.go
 !server/**/cerebro_*_test.go
+# Net-new cerebro built-in agent skills are fork-only ADDITIONS (a whole new
+# skill directory upstream never ships), not edits to an upstream skill — same
+# philosophy as the _cerebro.go carve-outs above. A markdown SKILL.md cannot
+# carry an inline CEREBRO-PATCH marker cleanly, so the directory is carved out.
+# One explicit line per cerebro skill keeps edits to UPSTREAM skills still caught.
+!server/internal/service/builtin_skills/multica-personal-browser/**
 !**/*.test.*
 !**/*.spec.*

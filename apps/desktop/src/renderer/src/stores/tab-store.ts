@@ -141,6 +141,9 @@ const ROUTE_ICONS: Record<string, string> = {
  */
 export function resolveRouteIcon(pathname: string): string {
   const segments = pathname.split("/").filter(Boolean);
+  // FIR-2037: the personal browser lives at /{slug}/cerebro/browser, so its
+  // distinguishing segment is at index 2, not 1.
+  if (segments[1] === "cerebro" && segments[2] === "browser") return "Globe";
   return ROUTE_ICONS[segments[1] ?? ""] ?? "ListTodo";
 }
 

@@ -243,6 +243,49 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:open-log-file"),
 };
 
+// FIR-2037: personal browser pane. The native WebContentsView lives in the
+// main process; the renderer's Browser tab drives it through these calls and
+// listens for navigation-state updates to keep its toolbar in sync.
+interface CerebroBrowserNavState {
+  url: string;
+  title: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  isLoading: boolean;
+}
+
+const cerebroBrowserAPI = {
+  /** Show the pane (creates it on first call) and load its landing page. */
+  open: (): Promise<void> => ipcRenderer.invoke("cerebro-browser:open"),
+  /** Hide the pane when leaving the Browser tab; session stays alive. */
+  hide: (): Promise<void> => ipcRenderer.invoke("cerebro-browser:hide"),
+  /** Position the native pane over the renderer's host rectangle. */
+  setBounds: (bounds: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }): Promise<void> => ipcRenderer.invoke("cerebro-browser:set-bounds", bounds),
+  /** Navigate the pane to a user-typed address-bar string. */
+  navigate: (url: string): Promise<void> =>
+    ipcRenderer.invoke("cerebro-browser:navigate", url),
+  back: (): Promise<void> => ipcRenderer.invoke("cerebro-browser:back"),
+  forward: (): Promise<void> => ipcRenderer.invoke("cerebro-browser:forward"),
+  reload: (): Promise<void> => ipcRenderer.invoke("cerebro-browser:reload"),
+  /** Subscribe to navigation-state changes (url/title/loading/history).
+   *  Returns an unsubscribe function. */
+  onNavState: (callback: (state: CerebroBrowserNavState) => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      state: CerebroBrowserNavState,
+    ) => callback(state);
+    ipcRenderer.on("cerebro-browser:nav-state", handler);
+    return () => {
+      ipcRenderer.removeListener("cerebro-browser:nav-state", handler);
+    };
+  },
+};
+
 const updaterAPI = {
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
     const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
@@ -275,6 +318,7 @@ if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("desktopAPI", desktopAPI);
   contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
+  contextBridge.exposeInMainWorld("cerebroBrowser", cerebroBrowserAPI);
 } else {
   // @ts-expect-error - fallback for non-isolated context
   window.electron = electronAPI;
@@ -284,4 +328,6 @@ if (process.contextIsolated) {
   window.daemonAPI = daemonAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.cerebroBrowser = cerebroBrowserAPI;
 }

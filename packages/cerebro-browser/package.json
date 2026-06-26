@@ -1,0 +1,28 @@
+{
+  "name": "@multica/cerebro-browser",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "exports": {
+    "./views/browser-nav-item": "./views/browser-nav-item.tsx"
+  },
+  "dependencies": {
+    "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*"
+  },
+  "peerDependencies": {
+    "lucide-react": "catalog:",
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

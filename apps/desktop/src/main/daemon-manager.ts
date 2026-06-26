@@ -1003,6 +1003,15 @@ function stopLogTail(): void {
   }
 }
 
+/**
+ * The Multica server base URL this desktop app is signed in against. Used by the
+ * personal-browser control server (FIR-2037) to call the server's per-action
+ * authorize endpoint as the agent. Null before the renderer sets the target.
+ */
+export function getTargetApiBaseUrl(): string | null {
+  return targetApiBaseUrl;
+}
+
 export function setupDaemonManager(
   windowGetter: () => BrowserWindow | null,
 ): void {

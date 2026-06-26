@@ -6,6 +6,8 @@ import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { setupCerebroBrowserPane } from "./cerebro-browser-pane";
+import { stopCerebroBrowserControlServer } from "./cerebro-browser-control-server";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { installNavigationGestures } from "./navigation-gestures";
@@ -489,6 +491,9 @@ if (!gotTheLock) {
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
     setupLocalDirectory(() => mainWindow);
+    // FIR-2037: personal browser pane IPC. Cheap to register — the native
+    // view is only created when the renderer opens the Browser tab.
+    setupCerebroBrowserPane(() => mainWindow);
 
     // macOS: deep link arrives via open-url event
     app.on("open-url", (_event, url) => {
@@ -515,4 +520,10 @@ if (!gotTheLock) {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+// FIR-2037: tear down the personal-browser agent transport and remove its
+// sidecar rendezvous file so no stale port/token survives the app.
+app.on("will-quit", () => {
+  void stopCerebroBrowserControlServer();
 });

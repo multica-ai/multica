@@ -83,6 +83,8 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { DashboardNavItem } from "@multica/cerebro-dashboard/views/dashboard-nav-item";
 // CEREBRO-PATCH(cerebro-tasks-sidebar): JEH-900 sidebar entry for cerebro tasks page
 import { TasksNavItem } from "@multica/cerebro-tasks/views/tasks-nav-item";
+// CEREBRO-PATCH(cerebro-browser-sidebar): FIR-2037 sidebar entry for the personal browser tab
+import { BrowserNavItem } from "@multica/cerebro-browser/views/browser-nav-item";
 // CEREBRO-PATCH(cerebro-workflows-sidebar): JEH-1047 sidebar entry for cerebro workflows page
 import { WorkflowsNavItem } from "@multica/cerebro-workflows/views/workflows-nav-item";
 // CEREBRO-PATCH(cerebro-permissions-sidebar): FIR-2230 phase 7 — removed; the standalone Permissions page was merged into the single Access page (see cerebro-access-sidebar below).
@@ -860,6 +862,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       {/* CEREBRO-PATCH(cerebro-tasks-sidebar): JEH-900 tasks after Issues */}
                       {item.key === "issues" && (
                         <TasksNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
+                      )}
+                      {/* CEREBRO-PATCH(cerebro-browser-sidebar): FIR-2037 Browser tab after Issues */}
+                      {item.key === "issues" && (
+                        <BrowserNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                       )}
                     </React.Fragment>
                   );
