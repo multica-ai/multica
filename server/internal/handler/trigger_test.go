@@ -315,3 +315,55 @@ func TestOnCommentTriggerDecision(t *testing.T) {
 		})
 	}
 }
+
+// -------------------------------------------------------------------
+// isNoteComment — the /note opt-out prefix
+// -------------------------------------------------------------------
+
+func TestIsNoteComment(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"plain comment triggers", "just a plain comment", false},
+		{"note prefix skips", "/note check the API expiry", true},
+		{"bare note skips", "/note", true},
+		{"uppercase note skips (case-insensitive)", "/NOTE shout", true},
+		{"mixed case note skips", "/Note mixed", true},
+		{"leading whitespace tolerated", "   /note leading space", true},
+		{"note followed by newline skips", "/note\nmultiline body", true},
+		{"plural notes does not match (word boundary)", "/notes are plural", false},
+		{"noteworthy does not match", "/noteworthy idea", false},
+		{"slash space note does not match", "/ note has a space", false},
+		{"mid-sentence note does not match", "see foo/note here", false},
+		{"note as second token does not match", "fyi /note", false},
+		{"empty content does not match", "", false},
+		{"whitespace-only content does not match", "   ", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isNoteComment(tt.content); got != tt.want {
+				t.Errorf("isNoteComment(%q) = %v, want %v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestTriggerTasksForComment_NoteShortCircuits proves a /note comment returns
+// before any of the three enqueue paths run. shouldEnqueueOnComment,
+// shouldEnqueueSquadLeaderOnComment, and enqueueMentionedAgentTasks all
+// dereference h.Queries, so a nil-Queries Handler would panic if the /note
+// guard were missing or moved below them. The comment also @mentions an agent
+// to exercise the mention path specifically.
+func TestTriggerTasksForComment_NoteShortCircuits(t *testing.T) {
+	h := &Handler{} // nil Queries / TaskService on purpose
+	issue := issueWithAgentAssignee()
+	comment := db.Comment{
+		Content: fmt.Sprintf("/note cc [@Other](mention://agent/%s) just an fyi", otherAgentID),
+	}
+
+	// Must not panic — the guard short-circuits before any DB access.
+	h.triggerTasksForComment(context.Background(), issue, comment, nil, "member", memberID)
+}

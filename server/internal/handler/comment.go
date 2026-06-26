@@ -10,7 +10,9 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -1022,6 +1024,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// thread IS a session now (open/closed = the thread root's resolved_at), and a
 	// reply reopening it is already handled by AutoUnresolveThreadOnReply above.
 
+	// CEREBRO-PATCH(note-comment-prefix): MUL-3115 — /note comments skip all agent trigger paths.
+	if isNoteComment(comment.Content) {
+		writeJSON(w, http.StatusCreated, resp)
+		return
+	}
+
 	// CEREBRO-PATCH(task-delegation-context): comment/mention task starts must
 	// carry the original human principal. Member comments seed the chain;
 	// agent comments inherit it from X-Task-ID or default-deny the enqueue.
@@ -1094,6 +1102,18 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// CEREBRO-PATCH(note-comment-prefix): MUL-3115 — comments prefixed with /note skip agent triggering on all trigger paths.
+const noteCommentPrefix = "/note"
+
+func isNoteComment(content string) bool {
+	trimmed := strings.TrimLeft(content, " \t\r\n")
+	firstToken := trimmed
+	if i := strings.IndexFunc(trimmed, unicode.IsSpace); i >= 0 {
+		firstToken = trimmed[:i]
+	}
+	return strings.EqualFold(firstToken, noteCommentPrefix)
 }
 
 func (h *Handler) privateAutopilotTaskOwner(ctx context.Context, issue db.Issue, taskIDHeader, authorType string) (pgtype.UUID, bool) {
@@ -1617,43 +1637,46 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			// dm-promote-on-mention) apply to edits too. Keep this aligned
 			// with the inline block above; if the trigger flow ever moves to
 			// a helper, route both call sites through it.
-			commentDelegation, delegationErr := h.TaskService.CommentDelegationContext(r.Context(), actorType, actorID, r.Header.Get("X-Task-ID"), "comment")
-			mentionDelegation, mentionDelegationErr := h.TaskService.CommentDelegationContext(r.Context(), actorType, actorID, r.Header.Get("X-Task-ID"), "mention")
-			privateAutopilotOwnerID, privateAutopilotComment := h.privateAutopilotTaskOwner(r.Context(), issue, r.Header.Get("X-Task-ID"), actorType)
+			// CEREBRO-PATCH(note-comment-prefix): MUL-3115 — /note comments skip all agent trigger paths on edit too.
+			if !isNoteComment(comment.Content) {
+				commentDelegation, delegationErr := h.TaskService.CommentDelegationContext(r.Context(), actorType, actorID, r.Header.Get("X-Task-ID"), "comment")
+				mentionDelegation, mentionDelegationErr := h.TaskService.CommentDelegationContext(r.Context(), actorType, actorID, r.Header.Get("X-Task-ID"), "mention")
+				privateAutopilotOwnerID, privateAutopilotComment := h.privateAutopilotTaskOwner(r.Context(), issue, r.Header.Get("X-Task-ID"), actorType)
 
-			if actorType == "member" &&
-				!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
-				!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
-				// CEREBRO-PATCH(private-agent-run-request-on-comment-edit): TECH-3252 —
-				// mirror the create-comment path: an edited member comment on an issue
-				// assigned to a private agent the actor cannot trigger becomes a
-				// run-request to the owner instead of being silently dropped.
-				if h.shouldEnqueueOnComment(r.Context(), issue, actorType, actorID) {
-					if delegationErr != nil {
-						slog.Warn("enqueue agent task on comment-edit blocked by delegation policy", "issue_id", uuidToString(issue.ID), "error", delegationErr)
-						// edited top-level comments also start fresh sessions.
-					} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation, parentComment == nil); err != nil {
-						slog.Warn("enqueue agent task on comment-edit failed", "issue_id", uuidToString(issue.ID), "error", err)
+				if actorType == "member" &&
+					!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
+					!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
+					// CEREBRO-PATCH(private-agent-run-request-on-comment-edit): TECH-3252 —
+					// mirror the create-comment path: an edited member comment on an issue
+					// assigned to a private agent the actor cannot trigger becomes a
+					// run-request to the owner instead of being silently dropped.
+					if h.shouldEnqueueOnComment(r.Context(), issue, actorType, actorID) {
+						if delegationErr != nil {
+							slog.Warn("enqueue agent task on comment-edit blocked by delegation policy", "issue_id", uuidToString(issue.ID), "error", delegationErr)
+							// edited top-level comments also start fresh sessions.
+						} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation, parentComment == nil); err != nil {
+							slog.Warn("enqueue agent task on comment-edit failed", "issue_id", uuidToString(issue.ID), "error", err)
+						}
+					} else {
+						h.requestPrivateAssigneeRunOnComment(r.Context(), issue, comment, actorType, actorID)
 					}
-				} else {
-					h.requestPrivateAssigneeRunOnComment(r.Context(), issue, comment, actorType, actorID)
+					// CEREBRO-PATCH(wake-no-silent-fail): FIR-1703 — same audit line for the edit-comment wake path.
+					h.observeCommentWakeOutcome(r.Context(), issue, comment, actorType, actorID)
 				}
-				// CEREBRO-PATCH(wake-no-silent-fail): FIR-1703 — same audit line for the edit-comment wake path.
-				h.observeCommentWakeOutcome(r.Context(), issue, comment, actorType, actorID)
-			}
 
-			if !privateAutopilotComment && h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, comment.Content, actorType, actorID) {
-				h.enqueueSquadLeaderTask(r.Context(), issue, comment.ID, actorType, actorID, commentTaskDelegation{context: commentDelegation, err: delegationErr})
-			}
+				if !privateAutopilotComment && h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, comment.Content, actorType, actorID) {
+					h.enqueueSquadLeaderTask(r.Context(), issue, comment.ID, actorType, actorID, commentTaskDelegation{context: commentDelegation, err: delegationErr})
+				}
 
-			h.enqueueMentionedAgentTasks(r.Context(), r, issue, comment, parentComment, actorType, actorID, mentionDelegation, mentionDelegationErr, privateAutopilotOwnerID)
+				h.enqueueMentionedAgentTasks(r.Context(), r, issue, comment, parentComment, actorType, actorID, mentionDelegation, mentionDelegationErr, privateAutopilotOwnerID)
 
-			if h.ChannelListen != nil {
-				h.ChannelListen.EnqueueChannelListenerTasks(r.Context(), issue, comment, parentComment, actorType, actorID)
-			}
+				if h.ChannelListen != nil {
+					h.ChannelListen.EnqueueChannelListenerTasks(r.Context(), issue, comment, parentComment, actorType, actorID)
+				}
 
-			if !privateAutopilotComment && h.ChannelListen != nil {
-				h.ChannelListen.PromoteDMOnMention(r.Context(), issue, comment, parentComment, workspaceID, actorType, actorID)
+				if !privateAutopilotComment && h.ChannelListen != nil {
+					h.ChannelListen.PromoteDMOnMention(r.Context(), issue, comment, parentComment, workspaceID, actorType, actorID)
+				}
 			}
 		}
 	}

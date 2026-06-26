@@ -242,6 +242,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
               debounceMs={100}
               currentIssueId={issueId}
               submitOnEnter={submitOnEnter}
+              enableSlashCommands
+              slashCommandMode="command"
               // CEREBRO-PATCH(input-autofocus): JEH-756 — issue pages stay
               // opt-out (read-first); channel and DM views opt in.
               autoFocus={autoFocus}
