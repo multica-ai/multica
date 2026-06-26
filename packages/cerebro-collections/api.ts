@@ -100,17 +100,29 @@ export async function removeFolderGrant(
 // ---------------------------------------------------------------------------
 
 // A folder surfaced on the Collections page, normalised across both backends.
+// parent_id wires the flat list into a tree on the Collections page; null is a
+// root folder. Both backends already return parent_id (artifact_folder and
+// cerebro_entity_folder are both self-referencing) — we just surface it here.
 export interface CollectionFolder {
   surface: GrantSurface;
   id: string;
   name: string;
   group: string; // Documents | Notes | Skills | Autopilots
+  parent_id: string | null;
 }
 
+// parent_id is optional-and-nullable on purpose: an older backend may omit the
+// field entirely, in which case the folder is treated as a root (per the API
+// Response Compatibility rule — enum/shape drift downgrades, never crashes).
 const artifactFolderSchema = z.object({
   id: z.string(),
   name: z.string(),
   kind: z.enum(["document", "note"]),
+  parent_id: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
 });
 type RawArtifactFolder = z.infer<typeof artifactFolderSchema>;
 const artifactFolderListSchema = z.array(artifactFolderSchema);
@@ -120,6 +132,11 @@ const entityFolderSchema = z.object({
   id: z.string(),
   name: z.string(),
   kind: z.enum(["skill", "autopilot"]),
+  parent_id: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? null),
 });
 type RawEntityFolder = z.infer<typeof entityFolderSchema>;
 const entityFolderListSchema = z.array(entityFolderSchema);
@@ -140,6 +157,7 @@ export async function fetchArtifactCollectionFolders(): Promise<
     id: f.id,
     name: f.name,
     group: f.kind === "note" ? "Notes" : "Documents",
+    parent_id: f.parent_id,
   }));
 }
 
@@ -160,5 +178,43 @@ export async function fetchEntityCollectionFolders(
     id: f.id,
     name: f.name,
     group: f.kind === "skill" ? "Skills" : "Autopilots",
+    parent_id: f.parent_id,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Folder move. Re-parents a folder (or moves it to root with parentId=null) on
+// whichever backend owns it. Both PUT endpoints already accept parent_id and
+// guard against cycles server-side; we just route to the right one by surface.
+//   artifact: PUT /api/artifact-folders/{id}      body { parent_id }
+//   entity:   PUT /api/cerebro/entity-folders/{id} body { parent_id }
+// An empty-string parent_id means "move to root" on both backends (a non-null,
+// non-omitted field), which is why we send "" rather than omitting it.
+// ---------------------------------------------------------------------------
+
+export interface MoveCollectionFolderInput {
+  surface: GrantSurface;
+  folderId: string;
+  parentId: string | null;
+  // Only consumed by the entity backend, which keys folders by kind.
+  entityKind?: "skill" | "autopilot";
+}
+
+export async function moveCollectionFolder(
+  input: MoveCollectionFolderInput,
+): Promise<void> {
+  const parentField = input.parentId ?? "";
+  if (input.surface === "artifact") {
+    await api.updateArtifactFolder(input.folderId, {
+      parent_id: parentField,
+    });
+    return;
+  }
+  await api.cerebroRequest<unknown>(
+    `/api/cerebro/entity-folders/${input.folderId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ parent_id: parentField }),
+    },
+  );
 }

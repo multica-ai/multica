@@ -5,8 +5,13 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { removeFolderGrant, upsertFolderGrant } from "./api";
-import { folderGrantKeys } from "./queries";
+import {
+  moveCollectionFolder,
+  removeFolderGrant,
+  upsertFolderGrant,
+  type MoveCollectionFolderInput,
+} from "./api";
+import { collectionFolderKeys, folderGrantKeys } from "./queries";
 import type { RemoveFolderGrantInput, UpsertFolderGrantInput } from "./types";
 
 export function useUpsertFolderGrant() {
@@ -30,6 +35,33 @@ export function useRemoveFolderGrant() {
     onSettled: (_data, _err, input) => {
       void qc.invalidateQueries({
         queryKey: folderGrantKeys.folder(wsId, input.surface, input.folder_id),
+      });
+    },
+  });
+}
+
+// Re-parents a folder on the Collections tree. The move changes the folder
+// list (new parent_id) and, because grants cascade by ancestry, the effective
+// access of the moved subtree — so we invalidate both the folder list for the
+// affected surface and the folder-grant prefix for the moved folder.
+export function useMoveCollectionFolder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (input: MoveCollectionFolderInput) =>
+      moveCollectionFolder(input),
+    onSettled: (_data, _err, input) => {
+      if (input.surface === "artifact") {
+        void qc.invalidateQueries({
+          queryKey: collectionFolderKeys.artifact(wsId),
+        });
+      } else if (input.entityKind) {
+        void qc.invalidateQueries({
+          queryKey: collectionFolderKeys.entity(wsId, input.entityKind),
+        });
+      }
+      void qc.invalidateQueries({
+        queryKey: folderGrantKeys.folder(wsId, input.surface, input.folderId),
       });
     },
   });
