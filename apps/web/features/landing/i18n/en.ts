@@ -294,6 +294,31 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.31",
+        date: "2026-06-26",
+        title: "Cross-workspace unread dot, Composio toolkit foundation, and a friendlier editor",
+        changes: [],
+        features: [
+          "The workspace switcher shows a dot when another workspace has unread inbox items.",
+          "New Composio toolkit foundation that prepares the upcoming third-party integrations.",
+          "You can run desktop dev on multiple checkouts side by side without them clashing.",
+          "The Chinese docs homepage now opens with a short intro video.",
+        ],
+        improvements: [
+          "Contributor docs note that the desktop dev command isolates per checkout.",
+        ],
+        fixes: [
+          "Tab now reliably indents selected list items in the Issue editor and keeps focus in place.",
+          "Squad leaders boot with the full squad briefing when you @-mention them in a comment, and replies that inherit the parent mention no longer trigger them again.",
+          "Code-block selections in Issues stay put while the page re-renders.",
+          "Assigning an Issue directly to an agent opens the handoff note instantly instead of waiting on a check.",
+          "The workspace switcher's unread dot now matches what you actually see in your inbox.",
+          "The edit-comment save button shows a loading state until the change is saved.",
+          "Search results load reliably again.",
+          "Self-hosting fails fast with a clear hint when Docker Compose v2 is missing.",
+        ],
+      },
+      {
         version: "0.3.30",
         date: "2026-06-25",
         title: "Slack Channel Integration, a Smoother Editor, and Many Reliability Fixes",
