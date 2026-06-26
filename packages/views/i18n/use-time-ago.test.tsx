@@ -82,6 +82,19 @@ describe("useTimeAgo", () => {
     expect(timeAgo("2026-06-15T12:00:00Z")).toBe("in 3mo"); // +3 calendar months
   });
 
+  it("renders imminent future instants as 'soon' only with soonForFuture", () => {
+    const plain = renderHook(() => useTimeAgo(), { wrapper: wrapper("en") });
+    // Without the option a sub-minute future instant stays "just now".
+    expect(plain.result.current("2026-03-15T12:00:30Z")).toBe("just now"); // +30s
+
+    const soon = renderHook(() => useTimeAgo({ soonForFuture: true }), {
+      wrapper: wrapper("en"),
+    });
+    expect(soon.result.current("2026-03-15T12:00:30Z")).toBe("soon"); // +30s
+    // A past sub-minute instant keeps "just now" even with the option.
+    expect(soon.result.current("2026-03-15T11:59:30Z")).toBe("just now"); // -30s
+  });
+
   it("localizes the labels via the Language setting", () => {
     const { result } = renderHook(() => useTimeAgo(), {
       wrapper: wrapper("zh-Hans"),

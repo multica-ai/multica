@@ -6,6 +6,7 @@
   "loading": "Loading...",
   "time": {
     "just_now": "just now",
+    "soon": "soon",
     "minutes_ago": "{{count}}m ago",
     "hours_ago": "{{count}}h ago",
     "days_ago": "{{count}}d ago",

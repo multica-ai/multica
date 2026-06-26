@@ -250,11 +250,14 @@ function NameCell({ autopilot }: { autopilot: Autopilot }) {
         {autopilot.title}
       </span>
       {/* Paused marker: in the "all" scope active and paused rows mix, so a
-          paused automation needs an inline signal. */}
+          paused automation needs an inline signal. Hidden at @2xl, where the
+          Next-run column shows an explicit "Paused" — keeping it only below the
+          breakpoint avoids duplicating the signal while preserving it on narrow
+          layouts (the Next-run column is hidden there). */}
       {autopilot.status === "paused" && (
         <span
           title={t(($) => $.status.paused)}
-          className="flex shrink-0 items-center text-amber-500"
+          className="flex shrink-0 items-center text-amber-500 @2xl:hidden"
         >
           <Pause className="size-3" />
         </span>
@@ -372,9 +375,24 @@ function LastRunCell({ autopilot }: { autopilot: Autopilot }) {
 }
 
 function NextRunCell({ autopilot }: { autopilot: Autopilot }) {
-  const { i18n } = useT("autopilots");
-  const timeAgo = useTimeAgo();
+  const { t, i18n } = useT("autopilots");
+  // next_run_at is always a scheduled future instant, so render imminent runs
+  // as "soon" rather than the direction-less "just now".
+  const timeAgo = useTimeAgo({ soonForFuture: true });
   const next = autopilot.next_run_at;
+  // A paused autopilot won't fire, so any computed next_run_at is moot — surface
+  // the paused state here instead of a misleading countdown. Mirror the amber
+  // Pause marker used beside the name.
+  if (autopilot.status === "paused") {
+    return (
+      <ListGridCell className="hidden gap-1.5 @2xl:flex">
+        <Pause className="size-3 shrink-0 text-amber-500" />
+        <span className="text-xs text-muted-foreground">
+          {t(($) => $.status.paused)}
+        </span>
+      </ListGridCell>
+    );
+  }
   return (
     <ListGridCell className="hidden @2xl:flex">
       {next ? (

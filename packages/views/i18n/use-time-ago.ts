@@ -10,18 +10,22 @@ import { useT } from "./use-t";
 // "in 3h". Day granularity is calendar-based in the viewer's Viewing Timezone;
 // past the day cap it continues into calendar months, then years — there is no
 // absolute-date fallback.
-export function useTimeAgo() {
+// `soonForFuture`: a sub-minute gap buckets to the direction-less "just now"
+// (it absorbs clock skew either way). For a genuinely scheduled future instant
+// — the autopilot next run — that past-tense label reads wrong, so callers can
+// opt into rendering imminent future times as "soon" instead.
+export function useTimeAgo(opts?: { soonForFuture?: boolean }) {
   const { t } = useT("common");
   const timeZone = useViewingTimezone();
   return (dateStr: string): string => {
-    const bucket = relativeTimeBucket(
-      new Date(dateStr).getTime(),
-      Date.now(),
-      timeZone,
-    );
+    const then = new Date(dateStr).getTime();
+    const now = Date.now();
+    const bucket = relativeTimeBucket(then, now, timeZone);
     switch (bucket.kind) {
       case "just_now":
-        return t(($) => $.time.just_now);
+        return opts?.soonForFuture && then > now
+          ? t(($) => $.time.soon)
+          : t(($) => $.time.just_now);
       case "minutes":
         return t(($) => (bucket.future ? $.time.in_minutes : $.time.minutes_ago), {
           count: bucket.count,
