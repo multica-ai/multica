@@ -13,6 +13,8 @@ vi.mock("@multica/views/i18n", () => ({
             detail_panel: {
               worker_output: "Worker Output",
               critic_output: "Critic Output",
+              attachments: "Artifacts",
+              no_output: "No output yet",
             },
           },
         });
@@ -49,19 +51,29 @@ const baseRun: WorkflowNodeRun = {
 };
 
 describe("ArtifactList", () => {
-  it("renders nothing when no outputs or attachments", () => {
+  it("renders section header and empty state when no outputs", () => {
     const empty = { ...baseRun, worker_output: null, critic_output: null };
-    const { container } = render(<ArtifactList nodeRun={empty} />);
-    expect(container.firstChild).toBeNull();
+    render(<ArtifactList nodeRun={empty} />);
+    expect(screen.getByText("Artifacts")).toBeInTheDocument();
+    expect(screen.getByText("No output yet")).toBeInTheDocument();
   });
 
   it("renders worker output section when present", () => {
-    render(<ArtifactList nodeRun={baseRun} />);
-    expect(screen.getByText(/Worker Output/i)).toBeInTheDocument();
+    const runWithWorker = { ...baseRun, critic_output: null };
+    render(<ArtifactList nodeRun={runWithWorker} />);
+    expect(screen.getByText("Worker Output")).toBeInTheDocument();
+    expect(screen.queryByText("No output yet")).not.toBeInTheDocument();
   });
 
   it("renders critic output section when present", () => {
     render(<ArtifactList nodeRun={baseRun} />);
-    expect(screen.getByText(/Critic Output/i)).toBeInTheDocument();
+    expect(screen.getByText("Critic Output")).toBeInTheDocument();
+  });
+
+  it("renders both worker and critic outputs when both present", () => {
+    render(<ArtifactList nodeRun={baseRun} />);
+    expect(screen.getByText("Artifacts")).toBeInTheDocument();
+    expect(screen.getByText("Worker Output")).toBeInTheDocument();
+    expect(screen.getByText("Critic Output")).toBeInTheDocument();
   });
 });

@@ -3,7 +3,7 @@
 import type { WorkflowNode, WorkflowNodeRun } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { NodeRunStatusIcon } from "./node-run-status-icon";
-import { Bot, User, Paperclip } from "lucide-react";
+import { Bot, User, Building2, Paperclip } from "lucide-react";
 import { useT } from "@multica/views/i18n";
 
 export interface RuntimeNodeCardProps {
@@ -14,6 +14,13 @@ export interface RuntimeNodeCardProps {
   onClick: (nodeId: string) => void;
   isSelected?: boolean;
   elementRef?: (el: HTMLButtonElement | null) => void;
+}
+
+/** Maps worker/critic type to its Lucide icon component. */
+function typeIcon(t: string) {
+  if (t === "agent") return Bot;
+  if (t === "squad") return Building2;
+  return User; // "human" or fallback
 }
 
 export function RuntimeNodeCard({
@@ -29,18 +36,16 @@ export function RuntimeNodeCard({
   const hasWorkerOutput = nodeRun?.worker_output != null;
   const hasCriticOutput = nodeRun?.critic_output != null;
 
-  // Build artifact names from outputs
+  // Build artifact names from outputs — use output labels as artifact descriptors
   const artifactNames: string[] = [];
   if (hasWorkerOutput) {
-    artifactNames.push(
-      `${t(($) => $.execution.card.worker_label)} ${t(($) => $.execution.detail_panel.worker_output)}`,
-    );
+    artifactNames.push(t(($) => $.execution.detail_panel.worker_output));
   }
   if (hasCriticOutput) {
-    artifactNames.push(
-      `${t(($) => $.execution.card.critic_label)} ${t(($) => $.execution.detail_panel.critic_output)}`,
-    );
+    artifactNames.push(t(($) => $.execution.detail_panel.critic_output));
   }
+
+  const WorkerIcon = typeIcon(node.worker_type);
 
   return (
     <button
@@ -66,24 +71,25 @@ export function RuntimeNodeCard({
         )}
       </div>
 
-      {/* Row 2: Worker */}
+      {/* Row 2: Worker (type icon + label + name + status) */}
       <div className="flex items-center gap-2 h-6 text-[11px] text-muted-foreground">
-        {node.worker_type === "agent" ? (
-          <Bot className="h-3 w-3 shrink-0" />
-        ) : node.worker_type === "human" ? (
-          <User className="h-3 w-3 shrink-0" />
-        ) : null}
+        <WorkerIcon className="h-3 w-3 shrink-0" />
         <span className="font-medium">{t(($) => $.execution.card.worker_label)}:</span>
         <span className={cn(!workerName && "italic")}>
           {workerName ?? "--"}
         </span>
+        {nodeRun && (
+          <NodeRunStatusIcon status={nodeRun.status} className="h-3.5 w-3.5 shrink-0 ml-auto" />
+        )}
       </div>
 
-      {/* Row 3: Critic (only when configured) */}
+      {/* Row 3: Critic (only when configured; type icon + label + name) */}
       {(node.critic_type || node.critic_id) && (
         <div className="flex items-center gap-2 h-6 text-[11px] text-muted-foreground">
           {node.critic_type === "agent" ? (
             <Bot className="h-3 w-3 shrink-0" />
+          ) : node.critic_type === "squad" ? (
+            <Building2 className="h-3 w-3 shrink-0" />
           ) : (
             <User className="h-3 w-3 shrink-0" />
           )}
@@ -99,7 +105,7 @@ export function RuntimeNodeCard({
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <Paperclip className="h-3 w-3 shrink-0" />
           <span className="truncate">
-            {artifactNames.join(", ")}
+            {t(($) => $.execution.card.artifacts_label)}: {artifactNames.join(", ")}
           </span>
         </div>
       )}

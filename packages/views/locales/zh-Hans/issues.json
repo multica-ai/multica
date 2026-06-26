@@ -507,7 +507,9 @@
       "duration": "耗时",
       "retry_count": "重试次数",
       "error": "错误",
-      "view_full_issue": "查看完整 Issue"
+      "view_full_issue": "查看完整 Issue",
+      "unblock": "解除阻塞",
+      "retry": "重试"
     }
   },
   "backlog_hint": {

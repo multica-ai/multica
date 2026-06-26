@@ -518,7 +518,9 @@
       "duration": "Duration",
       "retry_count": "Retries",
       "error": "Error",
-      "view_full_issue": "View full issue"
+      "view_full_issue": "View full issue",
+      "unblock": "Unblock",
+      "retry": "Retry"
     },
     "status": {
       "pending": "Pending",

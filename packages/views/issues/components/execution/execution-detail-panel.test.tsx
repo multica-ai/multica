@@ -10,20 +10,32 @@ vi.mock("@multica/views/i18n", () => ({
     t: (selector: unknown) => {
       if (typeof selector === "function") {
         return selector({
+          detail: {
+            desc_label: "Description",
+          },
           execution: {
             detail_panel: {
               status_path: "Status Path",
               worker: "Worker",
               critic: "Critic",
               not_configured: "Not configured",
+              worker_output: "Worker Output",
+              critic_output: "Critic Output",
+              attachments: "Artifacts",
+              no_output: "No output yet",
               metadata: "Metadata",
               started_at: "Started At",
               completed_at: "Completed At",
               duration: "Duration",
               retry_count: "Retry Count",
+              error: "Error",
+              view_full_issue: "View full issue",
+              unblock: "Unblock",
+              retry: "Retry",
+              review_comment: "Review Comment",
             },
           },
-        });
+          });
       }
       return String(selector);
     },
@@ -139,5 +151,125 @@ describe("ExecutionDetailPanel", () => {
       />,
     );
     expect(screen.getByText(/Not configured/i)).toBeInTheDocument();
+  });
+
+  it("renders artifact section with empty state when no outputs", () => {
+    const noOutputRun = { ...run, worker_output: null };
+    render(
+      <ExecutionDetailPanel
+        node={node}
+        nodeRun={noOutputRun}
+        workerName="后端助手"
+        criticName="审核员"
+        onClose={vi.fn()}
+        wsId="ws-1"
+      />,
+    );
+    expect(screen.getByText("Artifacts")).toBeInTheDocument();
+    expect(screen.getByText("No output yet")).toBeInTheDocument();
+  });
+
+  it("renders metadata with retry_count always visible", () => {
+    render(
+      <ExecutionDetailPanel
+        node={node}
+        nodeRun={run}
+        workerName="后端助手"
+        criticName="审核员"
+        onClose={vi.fn()}
+        wsId="ws-1"
+      />,
+    );
+    expect(screen.getByText("Metadata")).toBeInTheDocument();
+    expect(screen.getByText("Retry Count")).toBeInTheDocument();
+    expect(screen.getByText("0")).toBeInTheDocument();
+  });
+
+  it("renders duration in human-readable format when completed", () => {
+    const completedRun = {
+      ...run,
+      status: "completed" as const,
+      started_at: "2026-06-25T10:00:00Z",
+      completed_at: "2026-06-25T10:05:30Z",
+    };
+    render(
+      <ExecutionDetailPanel
+        node={node}
+        nodeRun={completedRun}
+        workerName="后端助手"
+        criticName="审核员"
+        onClose={vi.fn()}
+        wsId="ws-1"
+      />,
+    );
+    expect(screen.getByText("5m 30s")).toBeInTheDocument();
+  });
+
+  it("renders 'View full issue' link when issueId provided", () => {
+    render(
+      <ExecutionDetailPanel
+        node={node}
+        nodeRun={run}
+        workerName="后端助手"
+        criticName="审核员"
+        onClose={vi.fn()}
+        wsId="demo111"
+        issueId="33cf28ab-f5ce-4ff7-b199-fb4a6c32064c"
+      />,
+    );
+    const link = screen.getByText("View full issue");
+    expect(link).toBeInTheDocument();
+    expect(link.closest("a")).toHaveAttribute(
+      "href",
+      "/tasks/demo111/issues/33cf28ab-f5ce-4ff7-b199-fb4a6c32064c",
+    );
+  });
+
+  it("does not render 'View full issue' when issueId not provided", () => {
+    render(
+      <ExecutionDetailPanel
+        node={node}
+        nodeRun={run}
+        workerName="后端助手"
+        criticName="审核员"
+        onClose={vi.fn()}
+        wsId="ws-1"
+      />,
+    );
+    expect(screen.queryByText("View full issue")).not.toBeInTheDocument();
+  });
+
+  it("renders unblock button when status is blocked and onUnblock provided", () => {
+    const blockedRun = { ...run, status: "blocked" as const };
+    const onUnblock = vi.fn();
+    render(
+      <ExecutionDetailPanel
+        node={node}
+        nodeRun={blockedRun}
+        workerName="后端助手"
+        criticName="审核员"
+        onClose={vi.fn()}
+        wsId="ws-1"
+        onUnblock={onUnblock}
+      />,
+    );
+    expect(screen.getByText("Unblock")).toBeInTheDocument();
+  });
+
+  it("renders retry button when status is failed and onRetry provided", () => {
+    const failedRun = { ...run, status: "failed" as const };
+    const onRetry = vi.fn();
+    render(
+      <ExecutionDetailPanel
+        node={node}
+        nodeRun={failedRun}
+        workerName="后端助手"
+        criticName="审核员"
+        onClose={vi.fn()}
+        wsId="ws-1"
+        onRetry={onRetry}
+      />,
+    );
+    expect(screen.getByText("Retry")).toBeInTheDocument();
   });
 });

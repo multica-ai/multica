@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import type { WorkflowNode, WorkflowNodeRun } from "@multica/core/types";
-import { X, Bot, User } from "lucide-react";
+import { X, Bot, User, ExternalLink, RotateCcw, Unlock } from "lucide-react";
 import { useT } from "@multica/views/i18n";
 import { NodeRunStatusIcon } from "./node-run-status-icon";
 import { ArtifactList } from "./artifact-list";
@@ -15,6 +15,9 @@ export interface ExecutionDetailPanelProps {
   criticName: string | null;
   onClose: () => void;
   wsId: string;
+  issueId?: string;
+  onUnblock?: () => void;
+  onRetry?: () => void;
 }
 
 export function ExecutionDetailPanel({
@@ -23,6 +26,10 @@ export function ExecutionDetailPanel({
   workerName,
   criticName,
   onClose,
+  wsId,
+  issueId,
+  onUnblock,
+  onRetry,
 }: ExecutionDetailPanelProps) {
   const { t } = useT("issues");
 
@@ -43,6 +50,15 @@ export function ExecutionDetailPanel({
             1000,
         )
       : null;
+
+  // Format duration as "Xm Ys" or "Xs"
+  const durationLabel = useMemo(() => {
+    if (duration == null) return null;
+    if (duration < 60) return `${duration}s`;
+    const minutes = Math.floor(duration / 60);
+    const seconds = duration % 60;
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }, [duration]);
 
   // Extract error from failed/blocked node runs
   const errorMessage = useMemo(() => {
@@ -237,25 +253,23 @@ export function ExecutionDetailPanel({
                     <dd>{new Date(nodeRun.completed_at).toLocaleString()}</dd>
                   </div>
                 )}
-                {duration != null && (
+                {durationLabel != null && (
                   <div className="flex justify-between">
                     <dt className="text-muted-foreground">
                       {t(($) => $.execution.detail_panel.duration)}
                     </dt>
-                    <dd>{duration}s</dd>
+                    <dd>{durationLabel}</dd>
                   </div>
                 )}
-                {nodeRun.retry_count > 0 && (
-                  <div className="flex justify-between">
-                    <dt className="text-muted-foreground">
-                      {t(($) => $.execution.detail_panel.retry_count)}
-                    </dt>
-                    <dd>{nodeRun.retry_count}</dd>
-                  </div>
-                )}
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">
+                    {t(($) => $.execution.detail_panel.retry_count)}
+                  </dt>
+                  <dd>{nodeRun.retry_count}</dd>
+                </div>
                 {errorMessage && (
                   <div className="flex flex-col gap-1 pt-2 border-t border-border/50 mt-2">
-                    <dt className="text-muted-foreground">
+                    <dt className="text-red-600 dark:text-red-400 font-medium">
                       {t(($) => $.execution.detail_panel.error)}
                     </dt>
                     <dd className="text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
@@ -265,6 +279,39 @@ export function ExecutionDetailPanel({
                 )}
               </dl>
             </section>
+          )}
+        </div>
+
+        {/* Footer actions */}
+        <div className="shrink-0 px-5 py-3 border-t border-border/60 space-y-2">
+          {issueId && (
+            <a
+              href={`/tasks/${wsId}/issues/${issueId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {t(($) => $.execution.detail_panel.view_full_issue)}
+            </a>
+          )}
+          {status === "blocked" && onUnblock && (
+            <button
+              onClick={onUnblock}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1.5 text-xs font-medium hover:bg-amber-100 transition-colors"
+            >
+              <Unlock className="h-3 w-3" />
+              {t(($) => $.execution.detail_panel.unblock)}
+            </button>
+          )}
+          {status === "failed" && onRetry && (
+            <button
+              onClick={onRetry}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-md bg-red-50 text-red-700 border border-red-200 px-3 py-1.5 text-xs font-medium hover:bg-red-100 transition-colors"
+            >
+              <RotateCcw className="h-3 w-3" />
+              {t(($) => $.execution.detail_panel.retry)}
+            </button>
           )}
         </div>
       </aside>
