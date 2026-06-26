@@ -418,6 +418,8 @@
     "more": "更多",
     "create_sub_issue": "创建子 issue",
     "set_parent_issue": "设置父 issue...",
+    "remove_parent_issue": "移除父 issue",
+    "remove_parent_issue_success": "已移除父 issue",
     "add_sub_issue": "添加子 issue...",
     "delete_issue": "删除 issue"
   },

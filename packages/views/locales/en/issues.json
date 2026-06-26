@@ -432,6 +432,8 @@
     "more": "More",
     "create_sub_issue": "Create sub-issue",
     "set_parent_issue": "Set parent issue...",
+    "remove_parent_issue": "Remove parent issue",
+    "remove_parent_issue_success": "Removed parent issue",
     "add_sub_issue": "Add sub-issue...",
     "delete_issue": "Delete issue"
   },

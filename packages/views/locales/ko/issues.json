@@ -431,6 +431,8 @@
     "more": "더 보기",
     "create_sub_issue": "하위 이슈 만들기",
     "set_parent_issue": "상위 이슈 설정...",
+    "remove_parent_issue": "상위 이슈 제거",
+    "remove_parent_issue_success": "상위 이슈를 제거했습니다",
     "add_sub_issue": "하위 이슈 추가...",
     "delete_issue": "이슈 삭제"
   },

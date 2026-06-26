@@ -21,6 +21,7 @@ import {
   PinOff,
   Plus,
   Tag,
+  Unlink,
   Users,
 } from "lucide-react";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
@@ -1573,14 +1574,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
           </button>
           {parentIssueOpen && <div className="pl-2">
-            <AppLink
-              href={paths.issueDetail(parentIssue.id)}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
-            >
-              <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-              <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
-              <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
-            </AppLink>
+            <div className="flex items-center gap-0.5 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors group">
+              <AppLink
+                href={paths.issueDetail(parentIssue.id)}
+                className="flex flex-1 min-w-0 items-center gap-1.5 py-1.5 text-xs"
+              >
+                <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
+                <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
+              </AppLink>
+              <button
+                type="button"
+                title={t(($) => $.actions.remove_parent_issue)}
+                aria-label={t(($) => $.actions.remove_parent_issue)}
+                onClick={() => actions.removeParent()}
+                className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <Unlink className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>}
         </div>
       )}

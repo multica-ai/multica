@@ -453,6 +453,97 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
   });
 });
 
+describe("useUpdateIssue — detaching a sub-issue prunes the old parent's children cache", () => {
+  const PARENT_ID = "parent-1";
+  const childKey = issueKeys.children(WS_ID, PARENT_ID);
+
+  let qc: QueryClient;
+  let updateIssue: ReturnType<typeof vi.fn<(id: string, data: unknown) => Promise<Issue>>>;
+
+  function childIds(): string[] {
+    return (qc.getQueryData<Issue[]>(childKey) ?? []).map((c) => c.id);
+  }
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    updateIssue = vi.fn();
+    setApiInstance({ updateIssue } as unknown as ApiClient);
+    // Seed the detail cache so onMutate resolves the old parent from the
+    // freshest source, plus the parent's children list rendered by the
+    // sub-issues section.
+    const child = makeIssue(1, { parent_issue_id: PARENT_ID, stage: 2 });
+    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, child.id), child);
+    qc.setQueryData<Issue[]>(childKey, [
+      child,
+      makeIssue(2, { parent_issue_id: PARENT_ID }),
+    ]);
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("optimistically removes the issue from the old parent's children array", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((r) => {
+        resolve = r;
+      }),
+    );
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", parent_issue_id: null, stage: null });
+    });
+
+    // Pruned immediately so the parent's sub-issues list drops it now, not
+    // after the settle refetch; the sibling is untouched.
+    expect(childIds()).toEqual(["issue-2"]);
+
+    await act(async () => {
+      resolve(makeIssue(1, { parent_issue_id: null, stage: null }));
+    });
+    expect(childIds()).not.toContain("issue-1");
+  });
+
+  it("restores the old parent's children when the request fails", async () => {
+    updateIssue.mockRejectedValue(new Error("boom"));
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current
+        .mutateAsync({ id: "issue-1", parent_issue_id: null, stage: null })
+        .catch(() => {});
+    });
+
+    expect(childIds()).toEqual(["issue-1", "issue-2"]);
+  });
+
+  it("keeps the issue under its parent for a non-reparenting update", async () => {
+    updateIssue.mockResolvedValue(
+      makeIssue(1, { parent_issue_id: PARENT_ID, status: "done" }),
+    );
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", status: "done" });
+    });
+
+    // A status-only change patches in place — never prunes the relationship.
+    expect(childIds()).toEqual(["issue-1", "issue-2"]);
+  });
+});
+
 describe("useBatchUpdateIssues — optimistic patch covers filtered boards too", () => {
   const sort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
   const myScope = "assigned";

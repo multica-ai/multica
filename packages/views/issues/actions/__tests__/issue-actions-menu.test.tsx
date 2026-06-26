@@ -194,6 +194,41 @@ describe("IssueActionsDropdown", () => {
     expect(await screen.findByText("Test User")).toBeInTheDocument();
   });
 
+  it("shows 'Remove parent issue' in the More submenu only when the issue has a parent", async () => {
+    const childIssue = { ...mockIssue, parent_issue_id: "parent-1" } as Issue;
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={childIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("More"));
+
+    expect(await screen.findByText("Remove parent issue")).toBeInTheDocument();
+  });
+
+  it("hides 'Remove parent issue' when the issue has no parent", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("More"));
+
+    // The sibling "Set parent issue..." proves the submenu opened.
+    expect(await screen.findByText("Set parent issue...")).toBeInTheDocument();
+    expect(screen.queryByText("Remove parent issue")).not.toBeInTheDocument();
+  });
+
   it("clicking Delete issue opens the delete-confirm modal", async () => {
     render(
       wrap(

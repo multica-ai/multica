@@ -413,6 +413,8 @@
     "more": "その他",
     "create_sub_issue": "サブイシューを作成",
     "set_parent_issue": "親イシューを設定...",
+    "remove_parent_issue": "親イシューを解除",
+    "remove_parent_issue_success": "親イシューを解除しました",
     "add_sub_issue": "サブイシューを追加...",
     "delete_issue": "イシューを削除"
   },
