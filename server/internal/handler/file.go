@@ -633,6 +633,7 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "cloudfront attachment downloads are not configured")
 			return
 		}
+		h.setAttachmentPreviewSecurityHeaders(w)
 		http.Redirect(
 			w,
 			r,
@@ -660,6 +661,7 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadGateway, "failed to create download URL")
 			return
 		}
+		h.setAttachmentPreviewSecurityHeaders(w)
 		http.Redirect(w, r, signedURL, http.StatusFound)
 	case attachmentDownloadModeProxy:
 		h.proxyAttachmentDownload(w, r, att, key)
