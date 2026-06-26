@@ -176,14 +176,19 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 }
 
 const countUnreadInboxByWorkspace = `-- name: CountUnreadInboxByWorkspace :many
-SELECT i.workspace_id, count(*) AS count
-FROM inbox_item i
-JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
-WHERE i.recipient_type = 'member'
-  AND i.recipient_id = $1
-  AND i.read = false
-  AND i.archived = false
-GROUP BY i.workspace_id
+SELECT newest.workspace_id, count(*) AS count
+FROM (
+    SELECT DISTINCT ON (i.workspace_id, COALESCE(i.issue_id, i.id))
+        i.workspace_id, i.read
+    FROM inbox_item i
+    JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+    WHERE i.recipient_type = 'member'
+      AND i.recipient_id = $1
+      AND i.archived = false
+    ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
+) newest
+WHERE newest.read = false
+GROUP BY newest.workspace_id
 `
 
 type CountUnreadInboxByWorkspaceRow struct {
@@ -191,12 +196,16 @@ type CountUnreadInboxByWorkspaceRow struct {
 	Count       int64       `json:"count"`
 }
 
-// Per-workspace unread (non-archived) inbox counts for a recipient member,
-// across every workspace they currently belong to. Powers the sidebar
-// "other workspaces have unread" dot without fetching each workspace's full
-// inbox list. The member join keeps counts scoped to workspaces the user is
-// still a member of, so a stale item left behind in a workspace the user
-// has since left cannot light the dot.
+// Per-workspace unread inbox counts for a recipient member, matching the
+// inbox UI's deduplicated view: notifications are grouped per issue
+// (Linear-style, one row per issue) and an issue counts as unread only when
+// its NEWEST non-archived item is unread. Opening an issue marks just that
+// newest item read, so counting raw unread rows would keep older siblings
+// alive and light the switcher dot for a workspace whose inbox the user sees
+// as empty (MUL-3695). Items without an issue group on their own id. The
+// member join keeps counts scoped to workspaces the user still belongs to,
+// so a stale item left behind in a workspace the user has since left cannot
+// light the dot.
 func (q *Queries) CountUnreadInboxByWorkspace(ctx context.Context, recipientID pgtype.UUID) ([]CountUnreadInboxByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, countUnreadInboxByWorkspace, recipientID)
 	if err != nil {

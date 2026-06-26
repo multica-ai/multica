@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
-import { deduplicateInboxItems, hasOtherWorkspaceUnread, inboxKeys } from "./queries";
+import { deduplicateInboxItems, hasOtherWorkspaceUnread, inboxKeys, unreadWorkspaceIds } from "./queries";
 
 function item(overrides: Partial<InboxItem>): InboxItem {
   return {
@@ -126,6 +126,24 @@ describe("hasOtherWorkspaceUnread", () => {
         null,
       ),
     ).toBe(true);
+  });
+});
+
+describe("unreadWorkspaceIds", () => {
+  it("collects only workspaces with a non-zero count", () => {
+    const ids = unreadWorkspaceIds([
+      { workspace_id: "ws-1", count: 0 },
+      { workspace_id: "ws-2", count: 3 },
+      { workspace_id: "ws-3", count: 1 },
+    ]);
+    expect(ids.has("ws-1")).toBe(false);
+    expect(ids.has("ws-2")).toBe(true);
+    expect(ids.has("ws-3")).toBe(true);
+    expect(ids.size).toBe(2);
+  });
+
+  it("returns an empty set for an empty summary", () => {
+    expect(unreadWorkspaceIds([]).size).toBe(0);
   });
 });
 

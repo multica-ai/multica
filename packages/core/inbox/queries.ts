@@ -43,6 +43,16 @@ export function hasOtherWorkspaceUnread(
 }
 
 /**
+ * Set of workspace ids that have unread inbox items. Lets the workspace
+ * switcher dropdown mark WHICH workspace a pending message lives in (the
+ * aggregate switcher dot only says "somewhere else"). Workspaces with a zero
+ * count are excluded.
+ */
+export function unreadWorkspaceIds(summary: InboxWorkspaceUnread[]): Set<string> {
+  return new Set(summary.filter((s) => s.count > 0).map((s) => s.workspace_id));
+}
+
+/**
  * Unread inbox count for the given workspace, aligned with what the inbox
  * list UI renders: archived items excluded, then deduplicated by issue so a
  * single issue with three unread notifications counts once.
