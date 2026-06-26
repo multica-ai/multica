@@ -499,8 +499,7 @@
     "card": {
       "worker_label": "Worker",
       "critic_label": "Critic",
-      "artifacts_count": "{{count}} artifact",
-      "artifacts_count_plural": "{{count}} artifacts"
+      "artifacts_label": "Artifacts"
     },
     "detail_panel": {
       "title": "Node Detail",

@@ -7,22 +7,21 @@ import type { WorkflowNode, WorkflowNodeRun } from "@multica/core/types";
 // Mock @multica/views/i18n for useT hook — handles function selector form
 vi.mock("@multica/views/i18n", () => ({
   useT: () => ({
-    t: (selector: unknown, options?: { count?: number }) => {
+    t: (selector: unknown) => {
       if (typeof selector === "function") {
-        const value = selector({
+        return selector({
           execution: {
             card: {
               worker_label: "Worker",
               critic_label: "Critic",
-              artifacts_count: "{{count}} artifact",
-              artifacts_count_plural: "{{count}} artifacts",
+              artifacts_label: "Artifacts",
+            },
+            detail_panel: {
+              worker_output: "Worker Output",
+              critic_output: "Critic Output",
             },
           },
         });
-        if (options?.count !== undefined) {
-          return value.replace("{{count}}", String(options.count));
-        }
-        return value;
       }
       return String(selector);
     },
@@ -134,5 +133,37 @@ describe("RuntimeNodeCard", () => {
     );
     await userEvent.click(screen.getByTestId("runtime-node-card-node-1"));
     expect(onClick).toHaveBeenCalledWith("node-1");
+  });
+
+  it("shows artifact names when worker_output and critic_output exist", () => {
+    const runWithOutputs: WorkflowNodeRun = {
+      ...completedRun,
+      worker_output: { summary: "已完成需求文档" },
+      critic_output: { comment: "审核通过" },
+    };
+    render(
+      <RuntimeNodeCard
+        node={baseNode}
+        nodeRun={runWithOutputs}
+        workerName="小助手"
+        criticName="审核员"
+        onClick={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/Worker Output/)).toBeInTheDocument();
+    expect(screen.getByText(/Critic Output/)).toBeInTheDocument();
+  });
+
+  it("does not show artifact row when no outputs exist", () => {
+    render(
+      <RuntimeNodeCard
+        node={baseNode}
+        nodeRun={completedRun}
+        workerName="小助手"
+        criticName="审核员"
+        onClick={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/Output/)).not.toBeInTheDocument();
   });
 });

@@ -28,7 +28,19 @@ export function RuntimeNodeCard({
   const { t } = useT("issues");
   const hasWorkerOutput = nodeRun?.worker_output != null;
   const hasCriticOutput = nodeRun?.critic_output != null;
-  const artifactCount = (hasWorkerOutput ? 1 : 0) + (hasCriticOutput ? 1 : 0);
+
+  // Build artifact names from outputs
+  const artifactNames: string[] = [];
+  if (hasWorkerOutput) {
+    artifactNames.push(
+      `${t(($) => $.execution.card.worker_label)} ${t(($) => $.execution.detail_panel.worker_output)}`,
+    );
+  }
+  if (hasCriticOutput) {
+    artifactNames.push(
+      `${t(($) => $.execution.card.critic_label)} ${t(($) => $.execution.detail_panel.critic_output)}`,
+    );
+  }
 
   return (
     <button
@@ -82,14 +94,12 @@ export function RuntimeNodeCard({
         </div>
       )}
 
-      {/* Row 4: Artifact count (only when > 0) */}
-      {artifactCount > 0 && (
+      {/* Row 4: Artifact names (only when artifacts exist) */}
+      {artifactNames.length > 0 && (
         <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <Paperclip className="h-3 w-3" />
-          <span>
-            {artifactCount === 1
-              ? t(($) => $.execution.card.artifacts_count, { count: 1 })
-              : t(($) => $.execution.card.artifacts_count_plural, { count: artifactCount })}
+          <Paperclip className="h-3 w-3 shrink-0" />
+          <span className="truncate">
+            {artifactNames.join(", ")}
           </span>
         </div>
       )}

@@ -488,8 +488,7 @@
     "card": {
       "worker_label": "Worker",
       "critic_label": "Critic",
-      "artifacts_count": "{{count}} 个产物",
-      "artifacts_count_plural": "{{count}} 个产物"
+      "artifacts_label": "产物"
     },
     "detail_panel": {
       "title": "节点详情",
