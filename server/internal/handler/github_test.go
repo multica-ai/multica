@@ -1343,6 +1343,85 @@ func TestWebhook_BareBodyMentionHiddenFromPRList(t *testing.T) {
 	}
 }
 
+// TestWebhook_HiddenBodyMentionDoesNotBlockAutoAdvance guards the P1 the code
+// review flagged on PR #4611: a reference_only link (a PR that only mentions the
+// issue in its body) is hidden from the PR list, so it must not silently gate
+// auto-advance either. Here PR B stays open with a bare body mention while PR A
+// merges with a closing keyword — the issue must still reach `done`, because
+// the invisible PR B is excluded from the close aggregate's open_count.
+func TestWebhook_HiddenBodyMentionDoesNotBlockAutoAdvance(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "hidden-mention-gate-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "closing PR plus invisible mention",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264007
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "hidden-mention-gate-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	// PR B opens with only a bare body mention → reference_only, hidden, open.
+	firePRWebhook(t, secret, installationID, 1, "Unrelated cleanup", "Context: see "+created.Identifier, "feat/cleanup", "opened")
+	// PR A opens with a closing keyword → genuine closing PR.
+	firePRWebhook(t, secret, installationID, 2, "Primary work", "Closes "+created.Identifier, "feat/primary", "opened")
+
+	// Only PR A shows in the list; PR B is hidden.
+	listed, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("expected only the closing PR to show, got %d rows", len(listed))
+	}
+
+	// Sanity: issue is still in_progress (PR A open).
+	got, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue after open: %v", err)
+	}
+	if got.Status != "in_progress" {
+		t.Fatalf("after both PRs opened: status = %q, want in_progress", got.Status)
+	}
+
+	// PR A merges. PR B is still open but reference_only, so it must NOT count
+	// toward open_count — the issue should advance to done.
+	firePRWebhook(t, secret, installationID, 2, "Primary work", "Closes "+created.Identifier, "feat/primary", "merged")
+	got, err = testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue after merge: %v", err)
+	}
+	if got.Status != "done" {
+		t.Errorf("closing PR merged while only a hidden body-only mention is open: status = %q, want done", got.Status)
+	}
+}
+
 // ── CI / mergeable_state tests ─────────────────────────────────────────────
 
 func TestDerivePRMergeableState(t *testing.T) {

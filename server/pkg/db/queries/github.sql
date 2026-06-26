@@ -182,12 +182,19 @@ WHERE pull_request_id = $1;
 -- (with close_intent) are persisted before this query runs, so the result
 -- is event-agnostic — a link-only sibling closing after a closing-keyword
 -- PR has already merged still resolves the issue.
+--
+-- reference_only links (a PR that merely mentions the issue identifier in its
+-- body) are excluded: they are hidden from the issue PR list, so they must not
+-- silently gate auto-advance either. An open body-only mention would otherwise
+-- keep open_count > 0 and block the issue from advancing while being invisible
+-- in the UI. (reference_only rows never carry close_intent, so excluding them
+-- does not change merged_with_close_intent_count.)
 SELECT
     COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
     COALESCE(SUM(CASE WHEN pr.state = 'merged' AND ipr.close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-WHERE ipr.issue_id = $1;
+WHERE ipr.issue_id = $1 AND NOT ipr.reference_only;
 
 -- =====================
 -- GitHub PR check suite

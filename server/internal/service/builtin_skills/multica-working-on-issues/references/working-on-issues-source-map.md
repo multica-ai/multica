@@ -77,10 +77,13 @@ boolean (`migrations/127_issue_pull_request_reference_only.up.sql`). The handler
 computes a `qualifyingIdents` set = identifiers in **title or branch** (any
 `extractIdentifiers` match) ∪ **body closing keywords** (`closingIdents`). A
 linked identifier NOT in that set was matched only by a bare body mention, so its
-row is written with `reference_only = true`. `ListPullRequestsByIssue` filters
-`AND NOT reference_only`, so reference-only links are hidden from the CLI and the
-UI PR list while still existing for close-intent tracking. `reference_only`
-follows the same `preserve_close_intent` terminal gate as `close_intent`.
+row is written with `reference_only = true`. Both `ListPullRequestsByIssue` and
+`GetIssuePullRequestCloseAggregate` filter `AND NOT reference_only`, so
+reference-only links are hidden from the CLI / UI PR list **and** excluded from
+the auto-advance gate (an open body-only mention must not silently block the
+issue from reaching `done` while invisible in the list). The row still exists for
+edit-time close-intent tracking. `reference_only` follows the same
+`preserve_close_intent` terminal gate as `close_intent`.
 
 Drifted from the prior skill's `github.go:727` citation, which pointed at the old
 call-site location for the link logic.
