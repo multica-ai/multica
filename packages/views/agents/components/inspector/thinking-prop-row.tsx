@@ -1,11 +1,11 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type { RuntimeModel } from "@multica/core/types";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { PropRow } from "../../../common/prop-row";
 import { useT } from "../../../i18n";
 import { ThinkingPicker } from "./thinking-picker";
+import { resolveThinkingLevels } from "./thinking-levels";
 
 /**
  * Thinking row for the agent inspector. Hidden when the active model has
@@ -46,8 +46,7 @@ export function ThinkingPropRow({
   );
 
   const models = modelsQuery.data?.models ?? [];
-  const entry = pickModelEntry(models, model);
-  const levels = entry?.thinking?.supported_levels ?? [];
+  const levels = resolveThinkingLevels(models, model);
   if (levels.length === 0 && !value) return null;
 
   return (
@@ -60,12 +59,4 @@ export function ThinkingPropRow({
       />
     </PropRow>
   );
-}
-
-function pickModelEntry(
-  models: RuntimeModel[],
-  model: string,
-): RuntimeModel | undefined {
-  if (model) return models.find((m) => m.id === model);
-  return models.find((m) => m.default) ?? models[0];
 }

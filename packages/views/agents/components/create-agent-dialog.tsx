@@ -5,6 +5,7 @@ import { Globe, Lock } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
+import { ReasoningPicker } from "./reasoning-picker";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
 import { AvatarPicker } from "./avatar-picker";
@@ -87,6 +88,11 @@ export function CreateAgentDialog({
     template?.visibility ?? "workspace",
   );
   const [model, setModel] = useState(template?.model ?? "");
+  // Reasoning/effort override (MUL-3772). "" = follow the local CLI config.
+  // Duplicate mode clones the source agent's level so the picker pre-fills.
+  const [thinkingLevel, setThinkingLevel] = useState(
+    template?.thinking_level ?? "",
+  );
   const [instructions, setInstructions] = useState(template?.instructions ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(template?.avatar_url ?? null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
@@ -160,6 +166,9 @@ export function CreateAgentDialog({
         runtime_id: selectedRuntime.id,
         visibility,
         model: model.trim() || undefined,
+        // Omit when "" so the backend leaves out the effort flag and the
+        // local CLI config decides — matches the "follow CLI config" sentinel.
+        thinking_level: thinkingLevel || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
       };
@@ -340,6 +349,14 @@ export function CreateAgentDialog({
               value={model}
               onChange={setModel}
               disabled={!selectedRuntime}
+            />
+
+            <ReasoningPicker
+              runtimeId={selectedRuntime?.id ?? null}
+              runtimeOnline={selectedRuntime?.status === "online"}
+              model={model}
+              value={thinkingLevel}
+              onChange={setThinkingLevel}
             />
 
             {/* --- Optional sections (instructions / skills) ---
