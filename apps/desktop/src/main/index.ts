@@ -12,8 +12,11 @@ import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { installNavigationGestures } from "./navigation-gestures";
 import { getAppVersion } from "./app-version";
-import { loadRuntimeConfig } from "./runtime-config-loader";
+import { loadRuntimeConfig, desktopConfigPath } from "./runtime-config-loader";
+import { parseRuntimeConfig } from "../shared/runtime-config";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
+import { mkdir, writeFile } from "fs/promises";
+import { dirname } from "path";
 import {
   createElectronReloadPrompt,
   installRendererRecoveryHandlers,
@@ -395,6 +398,39 @@ if (!gotTheLock) {
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
+    });
+
+    // FIR-2037: write the chosen server to ~/.multica/desktop.json. The Server
+    // settings tab calls this, then relaunches so main re-reads endpoints on
+    // boot. Validate through parseRuntimeConfig so an invalid URL is rejected
+    // with a message instead of writing a config that breaks the next launch.
+    ipcMain.handle(
+      "runtime-config:set",
+      async (
+        _event,
+        apiUrl: string,
+      ): Promise<{ ok: true } | { ok: false; error: string }> => {
+        try {
+          const config = parseRuntimeConfig(
+            JSON.stringify({ schemaVersion: 1, apiUrl }),
+          );
+          const path = desktopConfigPath();
+          await mkdir(dirname(path), { recursive: true });
+          await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
+          return { ok: true };
+        } catch (err) {
+          return {
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      },
+    );
+
+    // FIR-2037: relaunch the app so the new runtime config takes effect.
+    ipcMain.handle("app:relaunch", () => {
+      app.relaunch();
+      app.exit(0);
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen

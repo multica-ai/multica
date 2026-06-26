@@ -14,6 +14,12 @@ interface DesktopAPI {
   onSystemLocaleChanged: (callback: (locale: string) => void) => () => void;
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig: RuntimeConfigResult;
+  /** FIR-2037: persist the chosen server to ~/.multica/desktop.json. */
+  setRuntimeConfig: (
+    apiUrl: string,
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** FIR-2037: relaunch the app so a new server config takes effect. */
+  relaunchApp: () => Promise<void>;
   /** Listen for auth token delivered via deep link. Returns an unsubscribe function. */
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */

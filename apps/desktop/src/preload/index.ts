@@ -74,6 +74,14 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
+  /** FIR-2037: persist the chosen server to ~/.multica/desktop.json. Validated
+   *  in main; returns an error message instead of writing an invalid config. */
+  setRuntimeConfig: (
+    apiUrl: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> =>
+    ipcRenderer.invoke("runtime-config:set", apiUrl),
+  /** FIR-2037: relaunch the app so a new server config takes effect. */
+  relaunchApp: (): Promise<void> => ipcRenderer.invoke("app:relaunch"),
   /** Listen for auth token delivered via deep link */
   onAuthToken: (callback: (token: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, token: string) =>

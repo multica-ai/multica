@@ -53,9 +53,10 @@ import { NoteReferencesSection } from "@multica/cerebro-notes/views/note-referen
 import { ReminderOverview } from "@multica/cerebro-reminders/views";
 import { SearchPage } from "@multica/views/search";
 import { useT } from "@multica/views/i18n";
-import { Download, Server } from "lucide-react";
+import { Download, Globe, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
+import { ServerSettingsTab } from "./components/server-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { DesktopRouteErrorPage } from "./components/route-error-page";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
@@ -110,6 +111,12 @@ function SettingsRoute() {
   return (
     <SettingsPage
       extraAccountTabs={[
+        {
+          value: "server",
+          label: "Server",
+          icon: Globe,
+          content: <ServerSettingsTab />,
+        },
         {
           value: "daemon",
           label: "Daemon",
