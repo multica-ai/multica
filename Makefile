@@ -41,18 +41,19 @@ endef
 # The self-host compose files use compose-spec syntax (top-level `name:`, no
 # `version:`) that the legacy v1 `docker-compose` standalone cannot parse, so we
 # fail early with an actionable message instead of a cryptic CLI parse error
-# (e.g. "unknown shorthand flag: 'f' in -f") when the plugin is missing.
+# (e.g. "unknown shorthand flag: 'f' in -f") when the plugin is missing or v1.
+# Keep the message short and OS-agnostic: per-OS install steps belong in docs.
 define REQUIRE_COMPOSE
 	@if ! $(COMPOSE) version >/dev/null 2>&1; then \
 		echo "Docker Compose v2 ('docker compose') was not found."; \
-		echo "Self-hosting requires the Compose v2 CLI plugin; the legacy 'docker-compose' (v1) is not supported."; \
-		echo ""; \
-		echo "Install it (see https://docs.docker.com/compose/install/linux/):"; \
-		echo "  sudo mkdir -p /usr/local/lib/docker/cli-plugins"; \
-		echo "  sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$$(uname -m) -o /usr/local/lib/docker/cli-plugins/docker-compose"; \
-		echo "  sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose"; \
-		echo ""; \
-		echo "Then verify with: docker compose version"; \
+		echo "Self-hosting requires the Compose v2 CLI plugin; legacy 'docker-compose' v1 is not supported."; \
+		echo "Install Docker Compose from https://docs.docker.com/compose/install/ and verify with: docker compose version"; \
+		exit 1; \
+	fi; \
+	if ! $(COMPOSE) version --short 2>/dev/null | grep -Eq '^v?2\.'; then \
+		echo "'$(COMPOSE)' is not Docker Compose v2."; \
+		echo "Self-hosting requires the Compose v2 CLI plugin; legacy 'docker-compose' v1 is not supported."; \
+		echo "Install Docker Compose from https://docs.docker.com/compose/install/ and verify with: docker compose version"; \
 		exit 1; \
 	fi
 endef
