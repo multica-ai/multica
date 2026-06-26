@@ -335,16 +335,20 @@ describe("ChannelDetail thread header", () => {
     expect(mockMarkChannelRead).not.toHaveBeenCalled();
   });
 
-  // CEREBRO-PATCH(channel-unread-focus-guard): TECH-3352 — opening a channel is
+  // CEREBRO-PATCH(channel-unread-focus-guard): TECH-3352 — opening a DM is
   // explicit read intent, so it marks read on open even when the document is
   // hidden. The focus guard now only applies to messages that arrive while the
   // thread is already open (covered in cerebro-channels/use-channel-auto-mark-read.test.ts).
+  // CEREBRO-PATCH(channel-unread-smart): FIR-2010 — under smart-unread (the flag
+  // is mocked on here) a CHANNEL is read on scroll-past, not on open, so this
+  // open-intent guarantee is asserted on a DM, which keeps mark-on-open. The
+  // channel smart-mode path is covered by the scroll-mark tests.
   it("marks read on open even when the document is hidden", () => {
     const hiddenSpy = vi
       .spyOn(document, "visibilityState", "get")
       .mockReturnValue("hidden");
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
-    const unread: Channel = { ...baseChannel, unread_count: 3 };
+    const unread: Channel = { ...baseChannel, kind: "dm", unread_count: 3 };
     render(<ChannelDetail channelId="c1" initialChannel={unread} />);
     expect(mockMarkChannelRead).toHaveBeenCalledWith("c1");
     hiddenSpy.mockRestore();
