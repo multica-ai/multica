@@ -315,18 +315,18 @@ the specific second model you will find in the code and must NOT cement.
   second place to express "who may use this credential" — do not confuse the vault-access table for
   a permission interface.
 
-- **`cerebro_credential_policy` is a PARALLEL authoring store — do NOT wire it into enforcement.**
-  The `credentialpolicy` package + `cerebro_credential_policy` table (FIR-1479, migration 9096,
-  handler `agent_credential_grant_cerebro.go`, endpoint `/api/agents/{id}/credential-grants`, flag
-  `cerebro_credentials_per_actor`, default OFF) back the per-actor credentials column in the
-  Permissions UI as **authoring + display only**. `multicaCredentialPolicy.Check` does **not** read
-  it; the capabilities card itself calls the value "advisory display, never an access decision." It
-  is a SECOND, separate model for the exact thing the tool-policy chain already models above — a
-  parallel path, not the target. **Do not "make it real" by connecting it to `Check`.** The correct
-  move is to author the per-actor credentials column onto the tool-policy chain credential rows
-  (one model) and retire `cerebro_credential_policy`. Reading the display-only column as an
-  "enforcement gap to be wired in" is the specific mistake this section exists to prevent — it cost
-  a full review cycle on FIR-1739.
+- **The `cerebro_credential_policy` parallel store is RETIRED (FIR-1479) — there is no second model
+  to wire in.** Earlier the `credentialpolicy` package + `cerebro_credential_policy` table (migration
+  9096), handler `agent_credential_grant_cerebro.go`, endpoint `/api/agents/{id}/credential-grants`,
+  and `AgentCredentialGrantsPanel` backed a per-actor credentials column as a SECOND, separate
+  authoring/display model. `multicaCredentialPolicy.Check` never read it. That parallel path is now
+  removed: the per-actor credentials authoring surface lives on the tool-policy chain credential rows
+  above (`toolpolicy/table_credential.go`, flag `cerebro_credentials_per_actor` for visibility,
+  writes gated by `manage_credential_access`), so authoring and enforcement read the SAME store. The
+  migration-9096 table is left orphaned (non-destructive), not dropped. If you are tempted to add a
+  new credentials-specific authoring store or to read a display-only column as an "enforcement gap to
+  be wired in," don't — that was the mistake this section was written for (it cost a review cycle on
+  FIR-1739). Author credential access as `credential.*` rows on the chain, nowhere else.
 
 ---
 
@@ -343,8 +343,9 @@ The end state we are building toward (FIR-1496):
    last-owner guard, signup) are documented as such so "code-only" reads as a deliberate choice,
    not a missing feature.
 3. **Credentials onto the chain** (Base=Deny), retiring the grant resolver for credentials. The
-   separate `cerebro_credential_policy` authoring store (FIR-1479) folds onto the chain credential
-   rows and is retired — it is never wired into `Check` as a parallel enforcement path (§5.4).
+   separate `cerebro_credential_policy` authoring store (FIR-1479) has folded onto the chain
+   credential rows and is now retired (§5.4) — it was never wired into `Check` as a parallel
+   enforcement path.
 4. **Persona service removed** (§5.1, done); the **capability engine** (§5.2) is a documented,
    usable function that consolidates onto the chain via the engine-flip (FIR-1512, §5.3) — never
    an ad-hoc drop.
