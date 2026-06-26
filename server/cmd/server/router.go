@@ -592,6 +592,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 per-agent Agent Vault broker at claim.
 	if avMod, avOK := cerebroagentvault.NewModule(pool); avOK {
 		h.AgentVaultBroker = avMod.Service
+		// CEREBRO-PATCH(cerebro-agentvault-mirror-wire): FIR-1739 Part B project tool-policy credential grants onto the Agent Vault access table.
+		avMod.Service.SetGrantMirror(&chainCredentialGrantSource{policy: cerebrotoolpolicy.NewStore(pool), creds: cerebroQueries}, avMod.Store)
 	}
 	// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent access-table CRUD handler.
 	cerebroAgentVaultHandler := cerebroagentvault.NewHandler(pool)
