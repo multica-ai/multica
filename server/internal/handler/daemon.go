@@ -1384,16 +1384,30 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
 
-			// Squad-leader briefing injection: when the issue is assigned
-			// to a squad and the claiming agent is that squad's current
-			// leader, append a full briefing (Operating Protocol + Roster
-			// + user Instructions) to the agent's own Instructions. We
-			// append (not replace) so per-agent instructions remain
-			// authoritative for general behavior; the squad briefing
-			// stacks on top as task-specific squad context.
-			if resp.Agent != nil && issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
+			// Squad-leader briefing injection: keyed off the task being a
+			// leader-task (is_leader_task) carrying a squad_id — NOT off the
+			// issue being assigned to a squad. The task flag is stamped at
+			// enqueue time and is true for every path that routes work to a
+			// squad leader: direct assign-to-squad, quick-create, comment
+			// @squad-mention (even when the issue itself is assigned to a
+			// plain agent — the MUL-3724 case), sub-issue done callback,
+			// autopilot squad-assignee, and retry-clone inheritance. The old
+			// issue.AssigneeType=="squad" gate missed the comment-mention
+			// path, so the leader booted with zero squad context and
+			// degraded into doing the work itself instead of orchestrating.
+			//
+			// We resolve the squad directly from task.SquadID rather than
+			// reverse-looking-up "which squad is this agent the leader of",
+			// which is ambiguous when one agent leads multiple squads. The
+			// uuidToString(squad.LeaderID) == resp.Agent.ID re-check is kept
+			// as a defensive gate: if the squad's leader was swapped after the
+			// task was enqueued, we never feed a stale briefing to a
+			// non-leader. We append (not replace) so per-agent instructions
+			// stay authoritative; the squad briefing stacks on top as
+			// task-specific squad context.
+			if resp.Agent != nil && task.IsLeaderTask && task.SquadID.Valid {
 				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-					ID:          issue.AssigneeID,
+					ID:          task.SquadID,
 					WorkspaceID: issue.WorkspaceID,
 				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
 					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)

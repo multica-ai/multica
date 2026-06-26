@@ -516,7 +516,7 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Is
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, triggerCommentID); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID); err != nil {
 		slog.Warn("child done: enqueue parent squad leader task failed",
 			"error", err,
 			"parent_id", uuidToString(parent.ID),
