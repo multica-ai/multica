@@ -120,6 +120,7 @@ export function StageLane({
                       workerName={workerName}
                       criticName={criticName}
                       onClick={(id) => onNodeClick?.(id)}
+                      elementRef={nodeElementRefs.get(node.id)}
                     />
                   );
                 }

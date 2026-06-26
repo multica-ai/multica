@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useCallback, useLayoutEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   workflowDetailOptions,
   workflowStagesOptions,
   workflowNodesOptions,
+  workflowEdgesOptions,
   workflowNodeRunsOptions,
 } from "@multica/core/workflows/queries";
 import { agentListOptions, builtinPluginListOptions } from "@multica/core/workspace/queries";
@@ -18,6 +19,7 @@ import type {
 } from "@multica/core/types";
 import type { BuiltinPlugin } from "@multica/core/api/schemas";
 import { StageLane } from "../../../workflows/components/overview/stage-lane";
+import { PanoramaSvgOverlay } from "../../../workflows/components/overview/panorama-svg-overlay";
 import { ExecutionDetailPanel } from "./execution-detail-panel";
 import { useT } from "@multica/views/i18n";
 import { Loader2 } from "lucide-react";
@@ -56,6 +58,10 @@ export function ExecutionPanoramaPage({
     ...workflowNodeRunsOptions(wsId, workflowId, runId ?? ""),
     enabled: !!runId,
   });
+  const { data: edges } = useQuery({
+    ...workflowEdgesOptions(wsId, workflowId),
+    enabled: !!runId,
+  });
   const { data: agents } = useQuery(agentListOptions(wsId));
 
   // builtinPluginListOptions is global (no wsId parameter)
@@ -63,6 +69,76 @@ export function ExecutionPanoramaPage({
 
   // ---- Local state ----
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  // ---- Node/critic position measurement for SVG overlay ----
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const nodeElementMap = useRef(new Map<string, HTMLButtonElement>());
+  const criticElementMap = useRef(new Map<string, HTMLButtonElement>());
+  const [nodePositions, setNodePositions] = useState(new Map<string, DOMRect>());
+  const [criticPositions, setCriticPositions] = useState(new Map<string, DOMRect>());
+
+  const measurePositions = useCallback(() => {
+    const containerRect = containerRef.current?.getBoundingClientRect();
+    if (!containerRect) return;
+
+    const nextNodePos = new Map<string, DOMRect>();
+    nodeElementMap.current.forEach((el, id) => {
+      const rect = el.getBoundingClientRect();
+      nextNodePos.set(id, new DOMRect(
+        rect.left - containerRect.left + (containerRef.current?.scrollLeft ?? 0),
+        rect.top - containerRect.top + (containerRef.current?.scrollTop ?? 0),
+        rect.width,
+        rect.height,
+      ));
+    });
+    setNodePositions(nextNodePos);
+
+    const nextCriticPos = new Map<string, DOMRect>();
+    criticElementMap.current.forEach((el, id) => {
+      const rect = el.getBoundingClientRect();
+      nextCriticPos.set(id, new DOMRect(
+        rect.left - containerRect.left + (containerRef.current?.scrollLeft ?? 0),
+        rect.top - containerRect.top + (containerRef.current?.scrollTop ?? 0),
+        rect.width,
+        rect.height,
+      ));
+    });
+    setCriticPositions(nextCriticPos);
+  }, []);
+
+  useLayoutEffect(() => {
+    measurePositions();
+    const observer = new ResizeObserver(() => measurePositions());
+    if (containerRef.current) observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [nodes, stages, measurePositions]);
+
+  // ---- Create callback refs for nodes and critics ----
+  const nodeElementRefs = useMemo(() => {
+    const map = new Map<string, (el: HTMLButtonElement | null) => void>();
+    const allNodes = nodes ?? [];
+    for (const node of allNodes) {
+      map.set(node.id, (el) => {
+        if (el) nodeElementMap.current.set(node.id, el);
+        else nodeElementMap.current.delete(node.id);
+      });
+    }
+    return map;
+  }, [nodes]);
+
+  const criticElementRefs = useMemo(() => {
+    const map = new Map<string, (el: HTMLButtonElement | null) => void>();
+    const allNodes = nodes ?? [];
+    for (const node of allNodes) {
+      if (node.critic_id || node.critic_api_url) {
+        map.set(node.id, (el) => {
+          if (el) criticElementMap.current.set(node.id, el);
+          else criticElementMap.current.delete(node.id);
+        });
+      }
+    }
+    return map;
+  }, [nodes]);
 
   // ---- Lookup maps ----
   const nodeRunMap = useMemo(() => {
@@ -134,11 +210,20 @@ export function ExecutionPanoramaPage({
       data-testid="execution-panorama"
     >
       <div
+        ref={containerRef}
         className="relative overflow-auto p-3"
         data-testid="panorama-canvas"
       >
-        {/* SVG edge overlay is deferred in runtime mode — PanoramaSvgOverlay
-        needs element refs from StageLane, which are not wired yet. */}
+        {/* SVG overlay for edges (only when run exists) */}
+        {runId && (
+          <PanoramaSvgOverlay
+            edges={edges ?? []}
+            nodes={allNodes}
+            stages={allStages}
+            nodePositions={nodePositions}
+            criticPositions={criticPositions}
+          />
+        )}
 
         {allStages.length === 0 ? (
           <StageLane
@@ -157,8 +242,8 @@ export function ExecutionPanoramaPage({
             agentLookup={agentLookup}
             pluginLookup={pluginLookup}
             onCardClick={() => {}}
-            nodeElementRefs={new Map()}
-            criticElementRefs={new Map()}
+            nodeElementRefs={nodeElementRefs}
+            criticElementRefs={criticElementRefs}
             mode="runtime"
             nodeRuns={nodeRunMap}
             onNodeClick={(id) => setSelectedNodeId(id)}
@@ -181,8 +266,8 @@ export function ExecutionPanoramaPage({
                   agentLookup={agentLookup}
                   pluginLookup={pluginLookup}
                   onCardClick={() => {}}
-                  nodeElementRefs={new Map()}
-                  criticElementRefs={new Map()}
+                  nodeElementRefs={nodeElementRefs}
+                  criticElementRefs={criticElementRefs}
                   mode="runtime"
                   nodeRuns={nodeRunMap}
                   onNodeClick={(id) => setSelectedNodeId(id)}
@@ -209,8 +294,8 @@ export function ExecutionPanoramaPage({
             agentLookup={agentLookup}
             pluginLookup={pluginLookup}
             onCardClick={() => {}}
-            nodeElementRefs={new Map()}
-            criticElementRefs={new Map()}
+            nodeElementRefs={nodeElementRefs}
+            criticElementRefs={criticElementRefs}
             mode="runtime"
             nodeRuns={nodeRunMap}
             onNodeClick={(id) => setSelectedNodeId(id)}

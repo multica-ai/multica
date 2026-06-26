@@ -109,6 +109,10 @@ vi.mock("./execution-detail-panel", () => ({
   ),
 }));
 
+vi.mock("../../../workflows/components/overview/panorama-svg-overlay", () => ({
+  PanoramaSvgOverlay: () => <svg data-testid="panorama-svg-overlay" />,
+}));
+
 // ---------------------------------------------------------------------------
 // Test wrapper
 // ---------------------------------------------------------------------------
@@ -285,7 +289,7 @@ describe("ExecutionPanoramaPage", () => {
     expect(screen.queryByTestId("execution-detail-panel")).not.toBeInTheDocument();
   });
 
-  it("does not render SVG overlay even when runId is provided (deferred in runtime mode)", () => {
+  it("renders SVG overlay when runId is provided", () => {
     mocks.isLoading = false;
     mocks.workflowData = { id: "wf-1", title: "Test Workflow" };
     mocks.stagesData = [STAGE];
@@ -339,6 +343,29 @@ describe("ExecutionPanoramaPage", () => {
     render(
       <Wrapper>
         <ExecutionPanoramaPage workflowId="wf-1" runId="run-1" wsId="ws-1" />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("panorama-svg-overlay")).toBeInTheDocument();
+  });
+
+  it("does not render SVG overlay when runId is null", () => {
+    mocks.isLoading = false;
+    mocks.workflowData = { id: "wf-1", title: "Test Workflow" };
+    mocks.stagesData = [STAGE];
+    mocks.nodesData = [NODE];
+    mocks.agentsData = [AGENT];
+    mocks.pluginsData = {
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 100,
+      hasMore: false,
+    };
+
+    render(
+      <Wrapper>
+        <ExecutionPanoramaPage workflowId="wf-1" runId={null} wsId="ws-1" />
       </Wrapper>,
     );
 
