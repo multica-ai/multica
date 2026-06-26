@@ -837,7 +837,8 @@ type ListSchedulableAutopilotTriggersRow struct {
 // last_fired_at is read so the planner hook can anchor cold-start
 // enumeration on the most recent successful fire (set by either the
 // legacy goroutine before the new scheduler took over, or the new
-// scheduler's own TouchAutopilotTriggerFiredAt call). Without it,
+// scheduler's own post-dispatch advance — AdvanceTriggerNextRun, falling
+// back to TouchAutopilotTriggerFiredAt on a cron parse error). Without it,
 // a trigger that was created days ago and fired by the legacy code
 // looks like a brand-new trigger to the new scheduler on first tick
 // and the half-open `(created_at, now]` enumeration replays the most
