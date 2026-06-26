@@ -211,7 +211,7 @@ export function ExecutionPanoramaPage({
     >
       <div
         ref={containerRef}
-        className="relative overflow-auto p-3"
+        className="relative p-3"
         data-testid="panorama-canvas"
       >
         {/* SVG overlay for edges (only when run exists) */}
