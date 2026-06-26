@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/notification"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -257,6 +258,15 @@ func main() {
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+
+	// Start the notification engine for cross-squad agent collaboration.
+	// Rules (R1-R5) and detectors (D1-D6) are event-driven — no timers.
+	notificationEngine := notification.NewEngine(
+		bus,
+		queries,
+		notification.NewHandlerActionExecutor(queries, nil),
+	)
+	notificationEngine.Start()
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
