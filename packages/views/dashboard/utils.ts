@@ -227,6 +227,23 @@ export function mergeAgentDashboardRows(
   });
 }
 
+// Drop usage rows whose agent no longer exists in the workspace. The agent
+// list is fetched with `include_archived: true`, so archived agents keep
+// their names and stay on the leaderboard; only hard-deleted agents fall out
+// of `knownAgentIds`. Those are legacy rollup rows that would otherwise
+// render as a bare UUID (MUL-3771).
+//
+// `knownAgentIds` is empty while the agent list is still loading; callers
+// pass `null` in that case so the rows pass through untouched instead of the
+// whole leaderboard blanking on a slow fetch.
+export function filterKnownAgentRows(
+  rows: AgentDashboardRow[],
+  knownAgentIds: ReadonlySet<string> | null,
+): AgentDashboardRow[] {
+  if (!knownAgentIds) return rows;
+  return rows.filter((r) => knownAgentIds.has(r.agentId));
+}
+
 // ---------------------------------------------------------------------------
 // Weekly fold for run-time + tasks. Mirrors `aggregateByWeek` in
 // `runtimes/utils.ts` which already covers cost / tokens — same calendar

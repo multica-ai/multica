@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { useWorkspaceId } from "@multica/core/hooks";
+import type { Agent } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
@@ -52,6 +53,7 @@ import {
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
   computeDailyTotals,
+  filterKnownAgentRows,
   formatDuration,
   mergeAgentDashboardRows,
   type AgentDashboardRow,
@@ -98,6 +100,7 @@ const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
+const EMPTY_AGENTS: Agent[] = [];
 
 function fmtMoney(n: number): string {
   if (n >= 100) return `$${n.toFixed(0)}`;
@@ -169,7 +172,8 @@ export function DashboardPage() {
   useCustomPricingStore((s) => s.pricings);
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const agentsQuery = useQuery(agentListOptions(wsId));
+  const agents = agentsQuery.data ?? EMPTY_AGENTS;
 
   // Validate the picked project against the current workspace's list. A
   // stale UUID — left over from a project that's been deleted, or from the
@@ -310,6 +314,20 @@ export function DashboardPage() {
     [agentTokenRows, runTimeRows],
   );
 
+  // Hide rollup rows for agents that were hard-deleted from the workspace —
+  // they'd otherwise show up as a bare UUID on the leaderboard (MUL-3771).
+  // Archived agents stay (the agent list is fetched with archived included);
+  // only truly-removed agents drop out. Skip filtering until the agent list
+  // has loaded so a slow agents fetch doesn't transiently blank the list.
+  const knownAgentIds = useMemo(
+    () => (agentsQuery.isSuccess ? new Set(agents.map((a) => a.id)) : null),
+    [agentsQuery.isSuccess, agents],
+  );
+  const visibleAgentRows = useMemo(
+    () => filterKnownAgentRows(agentRows, knownAgentIds),
+    [agentRows, knownAgentIds],
+  );
+
   return (
     <div className="flex h-full flex-col">
       {/* h-auto + min-h-12 + flex-wrap: the toolbar (project filter,
@@ -411,7 +429,7 @@ export function DashboardPage() {
               {/* Per-agent leaderboard — user picks the ranking metric;
                   the progress bar and column emphasis follow the metric. */}
               <Leaderboard
-                rows={agentRows}
+                rows={visibleAgentRows}
                 agents={agents}
                 lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
               />
