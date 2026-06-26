@@ -135,7 +135,7 @@ export function FolderAccessEditor({
                   }
                 >
                   <SelectTrigger className="w-36 shrink-0">
-                    <SelectValue />
+                    <SelectValue>{() => ROLE_LABELS[g.role]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {ROLE_VALUES.map((r) => (
@@ -252,7 +252,7 @@ function AddGrantRow({
           }}
         >
           <SelectTrigger className="w-36 shrink-0">
-            <SelectValue />
+            <SelectValue>{() => GRANTEE_TYPE_LABELS[granteeType]}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             {GRANTEE_TYPE_VALUES.map((t) => (
@@ -269,7 +269,9 @@ function AddGrantRow({
             onValueChange={(v) => setGranteeId(v)}
           >
             <SelectTrigger className="min-w-0 flex-1">
-              <SelectValue placeholder="Choose…" />
+              <SelectValue placeholder="Choose…">
+                {() => idOptions.find((o) => o.id === granteeId)?.name ?? null}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {idOptions.length === 0 && (
@@ -290,7 +292,7 @@ function AddGrantRow({
       <div className="flex items-center gap-2">
         <Select value={role} onValueChange={(v) => setRole(v as GrantRole)}>
           <SelectTrigger className="w-36 shrink-0">
-            <SelectValue />
+            <SelectValue>{() => ROLE_LABELS[role]}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             {ROLE_VALUES.map((r) => (
