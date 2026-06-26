@@ -828,7 +828,7 @@ func TestWatchTaskCancellation_TaskDeleted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	cancelled := d.watchTaskCancellation(ctx, "task-deleted", 10*time.Millisecond, slog.Default())
+	cancelled := d.watchTaskCancellation(ctx, "task-deleted", 10*time.Millisecond, slog.Default(), nil)
 
 	select {
 	case <-cancelled:
@@ -858,7 +858,7 @@ func TestWatchTaskCancellation_StatusCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	cancelled := d.watchTaskCancellation(ctx, "task-cancelled", 10*time.Millisecond, slog.Default())
+	cancelled := d.watchTaskCancellation(ctx, "task-cancelled", 10*time.Millisecond, slog.Default(), nil)
 
 	select {
 	case <-cancelled:
@@ -884,7 +884,7 @@ func TestWatchTaskCancellation_RunningTaskNotInterrupted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	cancelled := d.watchTaskCancellation(ctx, "task-running", 10*time.Millisecond, slog.Default())
+	cancelled := d.watchTaskCancellation(ctx, "task-running", 10*time.Millisecond, slog.Default(), nil)
 
 	select {
 	case <-cancelled:

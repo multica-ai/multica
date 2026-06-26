@@ -190,7 +190,11 @@ type Daemon struct {
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
-	ready         atomic.Bool        // false until preflight completes; gates /health status (starting -> running)
+	// activeTaskCancels maps taskID -> forceCheck channel. The WS-reconnect
+	// path sends on these channels to trigger an immediate status check
+	// inside watchTaskCancellation for tasks still running locally.
+	activeTaskCancels sync.Map
+	ready             atomic.Bool // false until preflight completes; gates /health status (starting -> running)
 
 	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
 	// microseconds it takes to make a decision; ClaimTask itself runs without
@@ -2732,11 +2736,35 @@ func shouldInterruptAgent(status string, err error) bool {
 	return isAgentTaskTerminal(status)
 }
 
+// syncTasksAfterReconnect triggers an immediate status check for every
+// active task by sending on its forceCheck channel. Tasks that reached
+// terminal states server-side during the disconnection window are
+// interrupted through the same close(cancelled) path the polling
+// goroutine uses. Called from the WS wakeup path.
+func (d *Daemon) syncTasksAfterReconnect(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	d.activeTaskCancels.Range(func(key, value interface{}) bool {
+		taskID := key.(string)
+		ch := value.(chan struct{})
+		status, err := d.client.GetTaskStatus(ctx, taskID)
+		if shouldInterruptAgent(status, err) {
+			d.logger.Warn("task reached terminal state during WS disconnection, interrupting agent",
+				"task_id", shortID(taskID), "status", status)
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}
+		return true
+	})
+}
+
 // watchTaskCancellation polls the server for the task's status on the given
 // interval and returns a channel that is closed when the running agent
 // should be interrupted. The polling goroutine stops when ctx is cancelled,
 // so callers should pass the runCtx that was set up around the agent run.
-func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollInterval time.Duration, taskLog *slog.Logger) <-chan struct{} {
+func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollInterval time.Duration, taskLog *slog.Logger, forceCheck <-chan struct{}) <-chan struct{} {
 	cancelled := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(pollInterval)
@@ -2746,18 +2774,19 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				status, err := d.client.GetTaskStatus(ctx, taskID)
-				if !shouldInterruptAgent(status, err) {
-					continue
-				}
-				if err != nil {
-					taskLog.Info("task gone server-side, interrupting agent", "error", err)
-				} else {
-					taskLog.Info("task reached terminal state server-side, interrupting agent", "status", status)
-				}
-				close(cancelled)
-				return
+			case <-forceCheck:
 			}
+			status, err := d.client.GetTaskStatus(ctx, taskID)
+			if !shouldInterruptAgent(status, err) {
+				continue
+			}
+			if err != nil {
+				taskLog.Info("task gone server-side, interrupting agent", "error", err)
+			} else {
+				taskLog.Info("task reached terminal state server-side, interrupting agent", "status", status)
+			}
+			close(cancelled)
+			return
 		}
 	}()
 	return cancelled
@@ -2846,7 +2875,13 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	if pollInterval == 0 {
 		pollInterval = 5 * time.Second
 	}
-	cancelledByPoll := d.watchTaskCancellation(runCtx, task.ID, pollInterval, taskLog)
+	// Create a buffered forceCheck channel so the WS-reconnect sync path
+	// can trigger an immediate task-status check. Buffered(size=1) so a
+	// non-blocking send from syncTasksAfterReconnect never blocks.
+	forceCheck := make(chan struct{}, 1)
+	d.activeTaskCancels.Store(task.ID, forceCheck)
+	defer d.activeTaskCancels.Delete(task.ID)
+	cancelledByPoll := d.watchTaskCancellation(runCtx, task.ID, pollInterval, taskLog, forceCheck)
 	go func() {
 		select {
 		case <-cancelledByPoll:
@@ -3013,7 +3048,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		// reassignment case (404), which is the full set of "this task
 		// shouldn't run anymore" signals we need to react to during the wait.
 		watcherOnce.Do(func() {
-			cancelledByPoll = d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog)
+			cancelledByPoll = d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog, nil)
 			go func() {
 				select {
 				case <-cancelledByPoll:

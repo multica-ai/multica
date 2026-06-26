@@ -105,6 +105,10 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
 	signalTaskWakeup(taskWakeups, "")
 
+	// After reconnection, immediately trigger status checks for every
+	// active task via their forceCheck channels.
+	go d.syncTasksAfterReconnect(d.recoveryContext())
+
 	// Serialize all writes through a single channel: the gorilla/websocket
 	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
 	// sender now coexists with future server-initiated writes. The buffer
