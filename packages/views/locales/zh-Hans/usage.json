@@ -1,6 +1,6 @@
 {
-  "title": "用量",
-  "subtitle": "查看当前 Workspace 的 token 消耗和智能体运行情况。",
+  "title": "数字员工看板",
+  "subtitle": "查看当前 Workspace 的数字员工在线状态、负载和任务产出。",
   "filter": {
     "project_label": "项目",
     "all_projects": "全部项目",
@@ -48,9 +48,63 @@
     "header_tasks": "任务数",
     "no_data": "所选时间范围内暂无智能体活动。"
   },
+  "workforce": {
+    "usage_detail_title": "用量与趋势",
+    "kpi": {
+      "employees": "数字员工",
+      "employees_hint": "在线 {{online}} · 归档 {{archived}}",
+      "on_duty": "当前在岗",
+      "on_duty_hint": "运行 {{running}} · 排队 {{queued}}",
+      "tasks": "任务 · {{days}}天",
+      "tasks_hint": "失败 {{failed}} · 运行 {{time}}",
+      "tokens": "Token · {{days}}天",
+      "tokens_hint": "预估费用 {{cost}}"
+    },
+    "board": {
+      "title": "全员运行主看板",
+      "subtitle": "{{count}} 个可用数字员工 · 按当前状态和 {{days}} 天产出排序",
+      "active_window": "{{count}} 个近 {{days}}天有运行",
+      "header_agent": "数字员工",
+      "header_status": "状态",
+      "header_activity": "近期活动",
+      "header_tasks": "{{days}}天任务",
+      "header_runtime": "时长/费用",
+      "runs_in_window": "{{days}}天 {{count}} 次",
+      "failed_count": "失败 {{count}}",
+      "no_runtime": "未绑定运行时",
+      "no_agents": "暂无可用数字员工。"
+    },
+    "status": {
+      "title": "运行分布",
+      "capacity": "并发占用",
+      "capacity_hint": "{{percent}} 占用"
+    },
+    "top": {
+      "title": "{{days}}天高频员工",
+      "no_data": "暂无任务数据。"
+    },
+    "availability": {
+      "online": "在线",
+      "unstable": "不稳定",
+      "offline": "离线",
+      "archived": "已归档",
+      "loading": "加载中"
+    },
+    "workload": {
+      "working": "工作中",
+      "queued": "排队中",
+      "idle": "空闲"
+    },
+    "last_active": {
+      "none": "近期无运行",
+      "today": "今天运行",
+      "yesterday": "昨天运行",
+      "days_ago": "{{days}}天前运行"
+    }
+  },
   "empty": {
-    "title": "暂无消耗数据",
-    "body": "当智能体在这里开始执行任务后，它们的 token 消耗和运行时长将出现在此处。"
+    "title": "暂无数字员工数据",
+    "body": "创建并启动数字员工后，它们的在线状态、任务产出和消耗会出现在此处。"
   },
   "duration": {
     "less_than_minute": "<1分钟"

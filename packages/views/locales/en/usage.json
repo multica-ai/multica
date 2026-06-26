@@ -1,6 +1,6 @@
 {
-  "title": "Usage",
-  "subtitle": "Token spend and agent activity across this workspace.",
+  "title": "Digital workforce",
+  "subtitle": "Live status, workload, and output across this workspace's agents.",
   "filter": {
     "project_label": "Project",
     "all_projects": "All projects",
@@ -48,9 +48,63 @@
     "header_tasks": "Tasks",
     "no_data": "No agent activity in this window."
   },
+  "workforce": {
+    "usage_detail_title": "Usage and trend detail",
+    "kpi": {
+      "employees": "Digital employees",
+      "employees_hint": "{{online}} online · {{archived}} archived",
+      "on_duty": "On duty now",
+      "on_duty_hint": "{{running}} running · {{queued}} queued",
+      "tasks": "Tasks · {{days}}D",
+      "tasks_hint": "{{failed}} failed · {{time}} run time",
+      "tokens": "Tokens · {{days}}D",
+      "tokens_hint": "{{cost}} estimated"
+    },
+    "board": {
+      "title": "All-employee operations board",
+      "subtitle": "{{count}} available agents · sorted by current state and {{days}}D output",
+      "active_window": "{{count}} active in {{days}}D",
+      "header_agent": "Digital employee",
+      "header_status": "Status",
+      "header_activity": "Recent activity",
+      "header_tasks": "{{days}}D tasks",
+      "header_runtime": "Time/cost",
+      "runs_in_window": "{{count}} in {{days}}D",
+      "failed_count": "{{count}} failed",
+      "no_runtime": "No runtime",
+      "no_agents": "No available digital employees yet."
+    },
+    "status": {
+      "title": "Operating distribution",
+      "capacity": "Concurrency used",
+      "capacity_hint": "{{percent}} occupied"
+    },
+    "top": {
+      "title": "High-frequency employees · {{days}}D",
+      "no_data": "No task data yet."
+    },
+    "availability": {
+      "online": "Online",
+      "unstable": "Unstable",
+      "offline": "Offline",
+      "archived": "Archived",
+      "loading": "Loading"
+    },
+    "workload": {
+      "working": "Working",
+      "queued": "Queued",
+      "idle": "Idle"
+    },
+    "last_active": {
+      "none": "No recent runs",
+      "today": "Ran today",
+      "yesterday": "Ran yesterday",
+      "days_ago": "Ran {{days}}d ago"
+    }
+  },
   "empty": {
-    "title": "No usage yet",
-    "body": "Once agents start running tasks here, their token spend and run time will appear in this view."
+    "title": "No workforce data yet",
+    "body": "Create and run agents to see their live status, task output, and usage here."
   },
   "duration": {
     "less_than_minute": "<1m"

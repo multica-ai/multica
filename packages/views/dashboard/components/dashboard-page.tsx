@@ -1,9 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban } from "lucide-react";
+import {
+  BarChart3,
+  Bot,
+  CheckCircle2,
+  Clock3,
+  FolderKanban,
+  Loader2,
+  RadioTower,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { cn } from "@multica/ui/lib/utils";
 import {
   Select,
   SelectContent,
@@ -15,12 +24,23 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
+  summarizeActivityWindow,
+  useWorkspaceActivityMap,
+  useWorkspacePresenceMap,
+  type AgentActivity,
+  type AgentAvailability,
+  type AgentPresenceDetail,
+  type Workload,
+} from "@multica/core/agents";
+import {
   dashboardUsageDailyOptions,
   dashboardUsageByAgentOptions,
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
 } from "@multica/core/dashboard";
+import { runtimeListOptions } from "@multica/core/runtimes";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import type { Agent, AgentRuntime, Project } from "@multica/core/types";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
@@ -36,6 +56,7 @@ import {
 } from "../../runtimes/components/charts";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { Sparkline } from "../../agents/components/sparkline";
 import {
   addDaysIso,
   aggregateByWeek,
@@ -98,10 +119,120 @@ const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
+const EMPTY_AGENTS: Agent[] = [];
+const EMPTY_RUNTIMES: AgentRuntime[] = [];
+const EMPTY_PROJECTS: Project[] = [];
+
+const AVAILABILITY_DOT_CLASS: Record<AgentAvailability | "loading", string> = {
+  online: "bg-success",
+  unstable: "bg-warning",
+  offline: "bg-muted-foreground/40",
+  archived: "bg-muted-foreground/40",
+  loading: "bg-muted-foreground/30",
+};
+
+const AVAILABILITY_TEXT_CLASS: Record<AgentAvailability | "loading", string> = {
+  online: "text-success",
+  unstable: "text-warning",
+  offline: "text-muted-foreground",
+  archived: "text-muted-foreground",
+  loading: "text-muted-foreground",
+};
+
+const WORKLOAD_TEXT_CLASS: Record<Workload, string> = {
+  working: "text-brand",
+  queued: "text-warning",
+  idle: "text-muted-foreground",
+};
+
+interface WorkforceRow {
+  agent: Agent;
+  runtime: AgentRuntime | null;
+  presence: AgentPresenceDetail | null;
+  activity: AgentActivity | undefined;
+  activityWindow: ReturnType<typeof summarizeActivityWindow>;
+  metrics: AgentDashboardRow | null;
+  failedCount: number;
+}
+
+interface WorkforceSummary {
+  total: number;
+  archived: number;
+  online: number;
+  unstable: number;
+  offline: number;
+  working: number;
+  queued: number;
+  idle: number;
+  runningTasks: number;
+  queuedTasks: number;
+  capacity: number;
+  activeInWindow: number;
+}
 
 function fmtMoney(n: number): string {
   if (n >= 100) return `$${n.toFixed(0)}`;
   return `$${n.toFixed(2)}`;
+}
+
+function formatPercent(n: number): string {
+  return `${Math.round(n)}%`;
+}
+
+function activityDaysAgo(activity: AgentActivity | undefined): number | null {
+  if (!activity) return null;
+  for (let i = activity.buckets.length - 1; i >= 0; i--) {
+    const bucket = activity.buckets[i];
+    if (bucket && bucket.total > 0) return activity.buckets.length - 1 - i;
+  }
+  return null;
+}
+
+function rowSortScore(row: WorkforceRow): number {
+  const presence = row.presence;
+  if (!presence) return 50;
+  if (presence.workload === "working") return 0;
+  if (presence.workload === "queued") return 10;
+  if (presence.availability === "online") return 20;
+  if (presence.availability === "unstable") return 30;
+  return 40;
+}
+
+function buildWorkforceSummary(
+  rows: WorkforceRow[],
+  archived: number,
+): WorkforceSummary {
+  const summary: WorkforceSummary = {
+    total: rows.length,
+    archived,
+    online: 0,
+    unstable: 0,
+    offline: 0,
+    working: 0,
+    queued: 0,
+    idle: 0,
+    runningTasks: 0,
+    queuedTasks: 0,
+    capacity: 0,
+    activeInWindow: 0,
+  };
+
+  for (const row of rows) {
+    const p = row.presence;
+    if (p) {
+      if (p.availability === "online") summary.online += 1;
+      else if (p.availability === "unstable") summary.unstable += 1;
+      else summary.offline += 1;
+
+      summary[p.workload] += 1;
+      summary.runningTasks += p.runningCount;
+      summary.queuedTasks += p.queuedCount;
+      summary.capacity += p.capacity;
+    }
+    if (row.activityWindow.totalRuns > 0) summary.activeInWindow += 1;
+  }
+
+  return summary;
 }
 
 // Local segmented control — same visual language the runtime usage section
@@ -168,8 +299,21 @@ export function DashboardPage() {
   // they do so the dashboard reflects the new rates.
   useCustomPricingStore((s) => s.pricings);
 
-  const { data: projects = [] } = useQuery(projectListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const projectsQuery = useQuery(projectListOptions(wsId));
+  const agentsQuery = useQuery(agentListOptions(wsId));
+  const runtimesQuery = useQuery(runtimeListOptions(wsId));
+  const { byAgent: presenceMap, loading: presenceLoading } =
+    useWorkspacePresenceMap(wsId);
+  const { byAgent: activityMap, loading: activityLoading } =
+    useWorkspaceActivityMap(wsId);
+  const projects = projectsQuery.data ?? EMPTY_PROJECTS;
+  const agents = agentsQuery.data ?? EMPTY_AGENTS;
+  const runtimes = runtimesQuery.data ?? EMPTY_RUNTIMES;
+  const activeAgents = useMemo(
+    () => agents.filter((a) => !a.archived_at),
+    [agents],
+  );
+  const archivedCount = agents.length - activeAgents.length;
 
   // Validate the picked project against the current workspace's list. A
   // stale UUID — left over from a project that's been deleted, or from the
@@ -230,16 +374,21 @@ export function DashboardPage() {
   );
 
   const isLoading =
+    agentsQuery.isLoading ||
+    runtimesQuery.isLoading ||
+    presenceLoading ||
+    activityLoading ||
     dailyQuery.isLoading ||
     byAgentQuery.isLoading ||
     runTimeQuery.isLoading ||
     runTimeDailyQuery.isLoading;
 
-  // Four independent rollups, but the empty-state is one decision — only
-  // show "no data yet" when ALL came back empty so a project with tokens
-  // but no runs (or vice-versa) doesn't look broken.
+  // Empty only when there are no active agents AND all rollups are empty.
+  // A workspace with configured digital employees but no recent tasks still
+  // deserves an operations board; it is an idle fleet, not a blank dashboard.
   const hasNoData =
     !isLoading &&
+    activeAgents.length === 0 &&
     dailyUsage.length === 0 &&
     byAgentUsage.length === 0 &&
     runTimeRows.length === 0 &&
@@ -309,6 +458,54 @@ export function DashboardPage() {
     () => mergeAgentDashboardRows(agentTokenRows, runTimeRows),
     [agentTokenRows, runTimeRows],
   );
+  const runtimesById = useMemo(
+    () => new Map(runtimes.map((r) => [r.id, r] as const)),
+    [runtimes],
+  );
+  const metricsByAgent = useMemo(
+    () => new Map(agentRows.map((r) => [r.agentId, r] as const)),
+    [agentRows],
+  );
+  const failuresByAgent = useMemo(
+    () => new Map(runTimeRows.map((r) => [r.agent_id, r.failed_count] as const)),
+    [runTimeRows],
+  );
+  const activityWindowDays = Math.min(days, 30);
+  const workforceRows = useMemo(() => {
+    return activeAgents
+      .map<WorkforceRow>((agent) => {
+        const activity = activityMap.get(agent.id);
+        return {
+          agent,
+          runtime: runtimesById.get(agent.runtime_id) ?? null,
+          presence: presenceMap.get(agent.id) ?? null,
+          activity,
+          activityWindow: summarizeActivityWindow(activity, activityWindowDays),
+          metrics: metricsByAgent.get(agent.id) ?? null,
+          failedCount: failuresByAgent.get(agent.id) ?? 0,
+        };
+      })
+      .toSorted((a, b) => {
+        const score = rowSortScore(a) - rowSortScore(b);
+        if (score !== 0) return score;
+        const taskDelta =
+          (b.metrics?.taskCount ?? 0) - (a.metrics?.taskCount ?? 0);
+        if (taskDelta !== 0) return taskDelta;
+        return b.activityWindow.totalRuns - a.activityWindow.totalRuns;
+      });
+  }, [
+    activeAgents,
+    activityMap,
+    activityWindowDays,
+    failuresByAgent,
+    metricsByAgent,
+    presenceMap,
+    runtimesById,
+  ]);
+  const workforceSummary = useMemo(
+    () => buildWorkforceSummary(workforceRows, archivedCount),
+    [workforceRows, archivedCount],
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -353,73 +550,542 @@ export function DashboardPage() {
             <DashboardEmpty />
           ) : (
             <>
-              {/* KPI row — same 3-divide-x card grid the runtime usage
-                  section uses, expanded to four tiles. */}
-              <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
-                <KpiCard
-                  label={t(($) => $.kpi.cost_label, { days })}
-                  value={fmtMoney(totals.cost)}
-                />
-                <KpiCard
-                  label={t(($) => $.kpi.tokens_label, { days })}
-                  value={formatTokens(
-                    totals.input + totals.output + totals.cacheRead + totals.cacheWrite,
-                  )}
-                  hint={t(($) => $.kpi.tokens_hint, {
-                    input: formatTokens(totals.input),
-                    output: formatTokens(totals.output),
-                  })}
-                />
-                <KpiCard
-                  label={t(($) => $.kpi.run_time_label, { days })}
-                  value={formatDuration(
-                    runTimeTotals.totalSeconds,
-                    t(($) => $.duration.less_than_minute),
-                  )}
-                  hint={t(($) => $.kpi.run_time_hint, {
-                    tasks: runTimeTotals.taskCount,
-                  })}
-                />
-                <KpiCard
-                  label={t(($) => $.kpi.tasks_label, { days })}
-                  value={String(runTimeTotals.taskCount)}
-                  hint={t(($) => $.kpi.tasks_hint, {
-                    failed: runTimeTotals.failedCount,
-                  })}
-                  accent={runTimeTotals.failedCount > 0 ? "default" : "default"}
-                />
-              </div>
-
-              {/* Trend chart — toggle picks Tokens / Cost / Time / Tasks
-                  and the parent's dim selector decides whether the bars are
-                  per-day or per-calendar-week. All four metrics share the
-                  same x-axis so the user can mentally overlay them by
-                  flipping the toggle. */}
-              <TrendBlock
-                dim={dim}
-                dailyCost={dailyCost}
-                dailyTokens={dailyTokens}
-                dailyTime={dailyTime}
-                dailyTasks={dailyTasks}
-                weeklyCost={weeklyCost}
-                weeklyTokens={weeklyTokens}
-                weeklyTime={weeklyTime}
-                weeklyTasks={weeklyTasks}
+              <WorkforceKpis
+                summary={workforceSummary}
+                totals={totals}
+                runTimeTotals={runTimeTotals}
+                days={days}
                 lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
               />
 
-              {/* Per-agent leaderboard — user picks the ranking metric;
-                  the progress bar and column emphasis follow the metric. */}
-              <Leaderboard
-                rows={agentRows}
-                agents={agents}
+              <WorkforceBoard
+                rows={workforceRows}
+                summary={workforceSummary}
+                days={days}
+                activityWindowDays={activityWindowDays}
                 lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
               />
+
+              <section className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                  <h2 className="text-sm font-semibold">
+                    {t(($) => $.workforce.usage_detail_title)}
+                  </h2>
+                </div>
+                <TrendBlock
+                  dim={dim}
+                  dailyCost={dailyCost}
+                  dailyTokens={dailyTokens}
+                  dailyTime={dailyTime}
+                  dailyTasks={dailyTasks}
+                  weeklyCost={weeklyCost}
+                  weeklyTokens={weeklyTokens}
+                  weeklyTime={weeklyTime}
+                  weeklyTasks={weeklyTasks}
+                  lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
+                />
+                <Leaderboard
+                  rows={agentRows}
+                  agents={agents}
+                  lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
+                />
+              </section>
             </>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function WorkforceKpis({
+  summary,
+  totals,
+  runTimeTotals,
+  days,
+  lessThanMinuteLabel,
+}: {
+  summary: WorkforceSummary;
+  totals: ReturnType<typeof computeDailyTotals>;
+  runTimeTotals: { totalSeconds: number; taskCount: number; failedCount: number };
+  days: TimeRange;
+  lessThanMinuteLabel: string;
+}) {
+  const { t } = useT("usage");
+  const totalTokens =
+    totals.input + totals.output + totals.cacheRead + totals.cacheWrite;
+  return (
+    <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
+      <KpiCard
+        label={t(($) => $.workforce.kpi.employees)}
+        value={String(summary.total)}
+        hint={t(($) => $.workforce.kpi.employees_hint, {
+          online: summary.online,
+          archived: summary.archived,
+        })}
+      />
+      <KpiCard
+        label={t(($) => $.workforce.kpi.on_duty)}
+        value={String(summary.working + summary.queued)}
+        hint={t(($) => $.workforce.kpi.on_duty_hint, {
+          running: summary.runningTasks,
+          queued: summary.queuedTasks,
+        })}
+        accent={summary.working > 0 ? "brand" : "default"}
+      />
+      <KpiCard
+        label={t(($) => $.workforce.kpi.tasks, { days })}
+        value={String(runTimeTotals.taskCount)}
+        hint={t(($) => $.workforce.kpi.tasks_hint, {
+          failed: runTimeTotals.failedCount,
+          time: formatDuration(runTimeTotals.totalSeconds, lessThanMinuteLabel),
+        })}
+        accent={runTimeTotals.failedCount === 0 ? "success" : "default"}
+      />
+      <KpiCard
+        label={t(($) => $.workforce.kpi.tokens, { days })}
+        value={formatTokens(totalTokens)}
+        hint={t(($) => $.workforce.kpi.tokens_hint, {
+          cost: fmtMoney(totals.cost),
+        })}
+      />
+    </div>
+  );
+}
+
+function WorkforceBoard({
+  rows,
+  summary,
+  days,
+  activityWindowDays,
+  lessThanMinuteLabel,
+}: {
+  rows: WorkforceRow[];
+  summary: WorkforceSummary;
+  days: TimeRange;
+  activityWindowDays: number;
+  lessThanMinuteLabel: string;
+}) {
+  const { t } = useT("usage");
+  const topRows = useMemo(
+    () =>
+      rows
+        .toSorted((a, b) => {
+          const taskDelta =
+            (b.metrics?.taskCount ?? 0) - (a.metrics?.taskCount ?? 0);
+          if (taskDelta !== 0) return taskDelta;
+          return b.activityWindow.totalRuns - a.activityWindow.totalRuns;
+        })
+        .slice(0, 5),
+    [rows],
+  );
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.8fr)]">
+      <section className="rounded-lg border bg-card">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Bot className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">
+                {t(($) => $.workforce.board.title)}
+              </h2>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t(($) => $.workforce.board.subtitle, {
+                count: rows.length,
+                days,
+              })}
+            </p>
+          </div>
+          <div className="rounded-md border bg-background px-2.5 py-1.5 text-xs text-muted-foreground">
+            {t(($) => $.workforce.board.active_window, {
+              count: summary.activeInWindow,
+              days: activityWindowDays,
+            })}
+          </div>
+        </div>
+        <WorkforceRowsTable
+          rows={rows}
+          days={days}
+          activityWindowDays={activityWindowDays}
+          lessThanMinuteLabel={lessThanMinuteLabel}
+        />
+      </section>
+
+      <div className="space-y-5">
+        <StatusDistributionPanel summary={summary} />
+        <TopAgentsPanel
+          rows={topRows}
+          days={days}
+          lessThanMinuteLabel={lessThanMinuteLabel}
+        />
+      </div>
+    </div>
+  );
+}
+
+function WorkforceRowsTable({
+  rows,
+  days,
+  activityWindowDays,
+  lessThanMinuteLabel,
+}: {
+  rows: WorkforceRow[];
+  days: TimeRange;
+  activityWindowDays: number;
+  lessThanMinuteLabel: string;
+}) {
+  const { t } = useT("usage");
+  if (rows.length === 0) {
+    return (
+      <div className="px-4 py-10 text-center text-xs text-muted-foreground">
+        {t(($) => $.workforce.board.no_agents)}
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="min-w-[760px]">
+        <div className="grid grid-cols-[minmax(0,1.55fr)_9.5rem_7rem_6rem_6.5rem] items-center gap-3 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
+          <span>{t(($) => $.workforce.board.header_agent)}</span>
+          <span>{t(($) => $.workforce.board.header_status)}</span>
+          <span>{t(($) => $.workforce.board.header_activity)}</span>
+          <span className="text-right">
+            {t(($) => $.workforce.board.header_tasks, { days })}
+          </span>
+          <span className="text-right">
+            {t(($) => $.workforce.board.header_runtime)}
+          </span>
+        </div>
+        <div className="divide-y">
+          {rows.map((row) => {
+            const metrics = row.metrics;
+            const daysAgo = activityDaysAgo(row.activity);
+            const recentLabel =
+              daysAgo == null
+                ? t(($) => $.workforce.last_active.none)
+                : daysAgo === 0
+                  ? t(($) => $.workforce.last_active.today)
+                  : daysAgo === 1
+                    ? t(($) => $.workforce.last_active.yesterday)
+                    : t(($) => $.workforce.last_active.days_ago, {
+                        days: daysAgo,
+                      });
+            const taskCount = metrics?.taskCount ?? 0;
+            const failedCount = row.failedCount;
+            return (
+              <div
+                key={row.agent.id}
+                className="grid grid-cols-[minmax(0,1.55fr)_9.5rem_7rem_6rem_6.5rem] items-center gap-3 px-4 py-3"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <ActorAvatar
+                    actorType="agent"
+                    actorId={row.agent.id}
+                    size={26}
+                    enableHoverCard
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">
+                      {row.agent.name}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {row.runtime
+                        ? `${row.runtime.provider} · ${row.runtime.name}`
+                        : t(($) => $.workforce.board.no_runtime)}
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <AvailabilityBadge availability={row.presence?.availability} />
+                  <WorkloadBadge presence={row.presence} />
+                </div>
+                <div className="space-y-1">
+                  <Sparkline
+                    buckets={row.activityWindow.buckets}
+                    width={84}
+                    height={20}
+                    className="block"
+                  />
+                  <div className="text-[11px] text-muted-foreground">
+                    {t(($) => $.workforce.board.runs_in_window, {
+                      count: row.activityWindow.totalRuns,
+                      days: activityWindowDays,
+                    })}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-medium tabular-nums">
+                    {taskCount}
+                  </div>
+                  <div
+                    className={cn(
+                      "text-[11px] tabular-nums",
+                      failedCount > 0
+                        ? "text-destructive"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {failedCount > 0
+                      ? t(($) => $.workforce.board.failed_count, {
+                          count: failedCount,
+                        })
+                      : recentLabel}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs tabular-nums">
+                    {formatDuration(metrics?.seconds ?? 0, lessThanMinuteLabel)}
+                  </div>
+                  <div className="text-[11px] tabular-nums text-muted-foreground">
+                    {fmtMoney(metrics?.cost ?? 0)}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusDistributionPanel({ summary }: { summary: WorkforceSummary }) {
+  const { t } = useT("usage");
+  const utilization =
+    summary.capacity > 0 ? (summary.runningTasks / summary.capacity) * 100 : 0;
+  return (
+    <section className="rounded-lg border bg-card p-4">
+      <div className="mb-4 flex items-center gap-2">
+        <RadioTower className="h-4 w-4 text-muted-foreground" />
+        <h3 className="text-sm font-semibold">
+          {t(($) => $.workforce.status.title)}
+        </h3>
+      </div>
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <DistributionBar
+            label={t(($) => $.workforce.availability.online)}
+            value={summary.online}
+            total={summary.total}
+            fillClassName="bg-success"
+          />
+          <DistributionBar
+            label={t(($) => $.workforce.availability.unstable)}
+            value={summary.unstable}
+            total={summary.total}
+            fillClassName="bg-warning"
+          />
+          <DistributionBar
+            label={t(($) => $.workforce.availability.offline)}
+            value={summary.offline}
+            total={summary.total}
+            fillClassName="bg-muted-foreground/40"
+          />
+        </div>
+        <div className="space-y-2 border-t pt-4">
+          <DistributionBar
+            label={t(($) => $.workforce.workload.working)}
+            value={summary.working}
+            total={summary.total}
+            fillClassName="bg-brand"
+          />
+          <DistributionBar
+            label={t(($) => $.workforce.workload.queued)}
+            value={summary.queued}
+            total={summary.total}
+            fillClassName="bg-warning"
+          />
+          <DistributionBar
+            label={t(($) => $.workforce.workload.idle)}
+            value={summary.idle}
+            total={summary.total}
+            fillClassName="bg-muted-foreground/40"
+          />
+        </div>
+        <div className="border-t pt-4">
+          <div className="mb-2 flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">
+              {t(($) => $.workforce.status.capacity)}
+            </span>
+            <span className="font-medium tabular-nums">
+              {summary.runningTasks}/{summary.capacity}
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-brand transition-[width] duration-300"
+              style={{ width: `${Math.min(100, utilization)}%` }}
+            />
+          </div>
+          <div className="mt-1 text-[11px] text-muted-foreground">
+            {t(($) => $.workforce.status.capacity_hint, {
+              percent: formatPercent(utilization),
+            })}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TopAgentsPanel({
+  rows,
+  days,
+  lessThanMinuteLabel,
+}: {
+  rows: WorkforceRow[];
+  days: TimeRange;
+  lessThanMinuteLabel: string;
+}) {
+  const { t } = useT("usage");
+  return (
+    <section className="rounded-lg border bg-card p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+        <h3 className="text-sm font-semibold">
+          {t(($) => $.workforce.top.title, { days })}
+        </h3>
+      </div>
+      {rows.length === 0 ? (
+        <div className="py-8 text-center text-xs text-muted-foreground">
+          {t(($) => $.workforce.top.no_data)}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {rows.map((row, index) => {
+            const tasks = row.metrics?.taskCount ?? 0;
+            return (
+              <div
+                key={row.agent.id}
+                className="grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-2"
+              >
+                <div className="font-mono text-xs text-muted-foreground">
+                  {index + 1}
+                </div>
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">
+                    {row.agent.name}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {formatDuration(row.metrics?.seconds ?? 0, lessThanMinuteLabel)}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-medium tabular-nums">{tasks}</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {fmtMoney(row.metrics?.cost ?? 0)}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DistributionBar({
+  label,
+  value,
+  total,
+  fillClassName,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  fillClassName: string;
+}) {
+  const pct = total > 0 ? (value / total) * 100 : 0;
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-medium tabular-nums">{value}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn(
+            "h-full rounded-full transition-[width] duration-300",
+            fillClassName,
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function AvailabilityBadge({
+  availability,
+}: {
+  availability: AgentAvailability | undefined;
+}) {
+  const { t } = useT("usage");
+  const key = availability ?? "loading";
+  const label =
+    key === "online"
+      ? t(($) => $.workforce.availability.online)
+      : key === "unstable"
+        ? t(($) => $.workforce.availability.unstable)
+        : key === "archived"
+          ? t(($) => $.workforce.availability.archived)
+          : key === "offline"
+            ? t(($) => $.workforce.availability.offline)
+            : t(($) => $.workforce.availability.loading);
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs",
+        AVAILABILITY_TEXT_CLASS[key],
+      )}
+    >
+      <span
+        className={cn("h-1.5 w-1.5 rounded-full", AVAILABILITY_DOT_CLASS[key])}
+      />
+      {label}
+    </span>
+  );
+}
+
+function WorkloadBadge({
+  presence,
+}: {
+  presence: AgentPresenceDetail | null;
+}) {
+  const { t } = useT("usage");
+  const workload = presence?.workload ?? "idle";
+  const Icon =
+    workload === "working" ? Loader2 : workload === "queued" ? Clock3 : CheckCircle2;
+  const label =
+    workload === "working"
+      ? t(($) => $.workforce.workload.working)
+      : workload === "queued"
+        ? t(($) => $.workforce.workload.queued)
+        : t(($) => $.workforce.workload.idle);
+  const detail =
+    workload === "working"
+      ? `${presence?.runningCount ?? 0}/${presence?.capacity ?? 0}`
+      : workload === "queued"
+        ? String(presence?.queuedCount ?? 0)
+        : "";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-xs",
+        WORKLOAD_TEXT_CLASS[workload],
+      )}
+    >
+      <Icon
+        className={cn("h-3 w-3", workload === "working" && "animate-spin")}
+      />
+      <span>{label}</span>
+      {detail && <span className="tabular-nums text-muted-foreground">{detail}</span>}
+    </span>
   );
 }
 
