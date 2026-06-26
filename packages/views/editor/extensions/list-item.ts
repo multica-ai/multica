@@ -1,5 +1,65 @@
 import { type Editor, InputRule } from "@tiptap/core";
 import { ListItem, TaskItem } from "@tiptap/extension-list";
+import { sinkListItem as pmSinkListItem } from "@tiptap/pm/schema-list";
+import { type Command, TextSelection } from "@tiptap/pm/state";
+import type { NodeType } from "@tiptap/pm/model";
+
+/**
+ * Tab indent that also works for a multi-item selection whose first item is the
+ * first child of its (sub)list.
+ *
+ * Stock `sinkListItem` (prosemirror-schema-list) bails — returns false without
+ * dispatching — whenever `range.startIndex === 0`, because the first item has no
+ * preceding sibling to nest under. That is correct for a collapsed cursor in the
+ * first item, but it also kills the natural "select the whole list from the top
+ * and press Tab" gesture: the command sees the first item at index 0 and does
+ * nothing (MUL-3697).
+ *
+ * The structurally-correct behaviour in a nested-list model (matching Notion /
+ * GitHub) is: keep the first selected item as an anchor and sink the rest under
+ * it. We get that by re-running the *stock* command on a selection narrowed to
+ * start inside the SECOND selected item (so its `startIndex` becomes 1) while
+ * keeping the original `$to`. The narrowed selection is computed on a derived
+ * state and never dispatched on its own, so the whole operation is a single
+ * dispatch / single undo step.
+ *
+ * Shift-Tab / `liftListItem` has no equivalent limitation (it handles ranges and
+ * the first-item case correctly), so only Tab needs this wrapper.
+ */
+function sinkListItemRange(itemType: NodeType): Command {
+  return (state, dispatch) => {
+    // Normal path — cursor or range not starting at the first item. This also
+    // covers the genuine no-op for a collapsed cursor in the first item: stock
+    // returns false and the fallback guards below also return false.
+    if (pmSinkListItem(itemType)(state, dispatch)) return true;
+
+    const { $from, $to } = state.selection;
+    const range = $from.blockRange(
+      $to,
+      (node) => node.childCount > 0 && node.firstChild?.type === itemType,
+    );
+    // Clean false (no dispatch) when the fallback does not apply: no list range,
+    // the range does not start at the first item, fewer than two items are
+    // selected, or the item type does not match (C2).
+    if (!range) return false;
+    if (range.startIndex !== 0) return false;
+    if (range.endIndex - range.startIndex < 2) return false;
+    if (range.parent.child(range.startIndex).type !== itemType) return false;
+
+    // Move $from into the second selected item, keep $to in the last selected
+    // item (C1 — do not collapse onto the second item). +2 steps over the
+    // <listItem> + <paragraph> open tokens into inline content; `between` snaps
+    // to a valid text position if the item does not start with a paragraph.
+    const secondItemStart =
+      range.start + range.parent.child(range.startIndex).nodeSize + 2;
+    const narrowed = state.apply(
+      state.tr.setSelection(
+        TextSelection.between(state.doc.resolve(secondItemStart), $to),
+      ),
+    );
+    return pmSinkListItem(itemType)(narrowed, dispatch);
+  };
+}
 
 /**
  * Shared list keymap with proper "double-Enter exits list" behaviour.
@@ -19,7 +79,8 @@ import { ListItem, TaskItem } from "@tiptap/extension-list";
  * empty items are unaffected because `splitListItem` handles them correctly
  * and returns true.
  *
- * Tab / Shift-Tab indent / dedent the item.
+ * Tab indents the item(s) — see `sinkListItemRange` for the multi-item
+ * first-item handling. Shift-Tab dedents via the stock command.
  */
 function listItemKeymap(editor: Editor, name: string) {
   return {
@@ -28,7 +89,13 @@ function listItemKeymap(editor: Editor, name: string) {
         () => commands.splitListItem(name),
         () => commands.liftListItem(name),
       ]),
-    Tab: () => editor.commands.sinkListItem(name),
+    Tab: () => {
+      const itemType = editor.schema.nodes[name];
+      if (!itemType) return false;
+      return sinkListItemRange(itemType)(editor.state, (tr) =>
+        editor.view.dispatch(tr),
+      );
+    },
     "Shift-Tab": () => editor.commands.liftListItem(name),
   };
 }
