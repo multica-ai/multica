@@ -310,7 +310,24 @@ async function fetchHealth(): Promise<DaemonStatus> {
   }
 
   const active = await ensureActiveProfile();
-  const data = await fetchHealthAtPort(active.port);
+  let data = await fetchHealthAtPort(active.port);
+
+  // Fallback: a daemon started via CLI without --profile runs on the
+  // default health port. Check it so the UI doesn't show "Daemon not
+  // running" when a daemon is serving the same backend on the default
+  // profile. The fallback is only consulted when the desktop-managed
+  // profile shows no running daemon. #4583
+  if ((!data || data.status !== "running") && active.name !== "") {
+    const fallback = await fetchHealthAtPort(DEFAULT_HEALTH_PORT);
+    if (
+      fallback?.status === "running" &&
+      (!targetApiBaseUrl ||
+        !fallback.server_url ||
+        urlsMatch(fallback.server_url, targetApiBaseUrl))
+    ) {
+      data = fallback;
+    }
+  }
 
   if (!data || data.status !== "running") {
     // A start that never reaches "running" is the symptom; an expired/invalid
@@ -831,6 +848,17 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
     // Let polling track it through to "running".
     pollOnce();
     return { success: true };
+  }
+
+  // Fallback: a daemon started via CLI without --profile runs on the default
+  // health port. If one is already alive there, don't start a second daemon on
+  // the desktop profile. #4583
+  if (active.name !== "") {
+    const fallback = await fetchHealthAtPort(DEFAULT_HEALTH_PORT);
+    if (daemonStatusAlive(fallback?.status)) {
+      pollOnce();
+      return { success: true };
+    }
   }
 
   currentState = "starting";
