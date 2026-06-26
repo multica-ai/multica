@@ -57,6 +57,8 @@ vi.mock("@tanstack/react-query", () => ({
     if (Array.isArray(key) && key.includes("edges")) return { data: mocks.edgesData, isLoading: false };
     if (Array.isArray(key) && key.includes("agents") && !key.includes("plugins")) return { data: mocks.agentsData, isLoading: false };
     if (Array.isArray(key) && key.includes("plugins")) return { data: mocks.pluginsData, isLoading: false };
+    if (Array.isArray(key) && key.includes("members")) return { data: [], isLoading: false };
+    if (Array.isArray(key) && key.includes("squads")) return { data: [], isLoading: false };
     return { data: mocks.workflowData, isLoading: mocks.isLoading, isError: mocks.isError, refetch: vi.fn() };
   },
   useMutation: () => ({ mutateAsync: vi.fn(), mutate: vi.fn(), isPending: false }),
@@ -70,11 +72,14 @@ vi.mock("@multica/core/workflows/queries", () => ({
   workflowStagesOptions: (wsId: string, workflowId: string) => ({ queryKey: ["workflows", wsId, workflowId, "stages"] }),
   workflowNodesOptions: (wsId: string, workflowId: string) => ({ queryKey: ["workflows", wsId, workflowId, "nodes"] }),
   workflowEdgesOptions: (wsId: string, workflowId: string) => ({ queryKey: ["workflows", wsId, workflowId, "edges"] }),
+  workflowListOptions: (wsId: string) => ({ queryKey: ["workflows", wsId, "list"] }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "agents"] }),
   builtinPluginListOptions: () => ({ queryKey: ["plugins", "builtin"] }),
+  memberListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "members"] }),
+  squadListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "squads"] }),
 }));
 
 vi.mock("@multica/core/paths", () => ({
