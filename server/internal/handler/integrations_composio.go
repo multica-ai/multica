@@ -1,0 +1,168 @@
+package handler
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
+)
+
+// Composio integration handlers (MUL-3720, Stage 2 MVP). All routes are
+// user-scoped (requireUserID) and live outside the workspace-membership group —
+// a Composio connection belongs to a user, not a workspace. The whole block
+// returns 503 when h.Composio is nil (COMPOSIO_API_KEY unset), matching the
+// Lark/GitHub "integration not configured" convention.
+
+// ComposioConnectInitRequest is the POST /connect/init body.
+type ComposioConnectInitRequest struct {
+	ToolkitSlug string `json:"toolkit_slug"`
+}
+
+// ComposioConnectInitResponse carries the hosted Composio Connect Link the
+// frontend redirects the user to.
+type ComposioConnectInitResponse struct {
+	RedirectURL string `json:"redirect_url"`
+}
+
+// ComposioConnectionResponse is the wire shape for one connection row.
+type ComposioConnectionResponse struct {
+	ID          string  `json:"id"`
+	ToolkitSlug string  `json:"toolkit_slug"`
+	Status      string  `json:"status"`
+	ConnectedAt string  `json:"connected_at"`
+	LastUsedAt  *string `json:"last_used_at"`
+}
+
+// ComposioConnectInit (POST /api/integrations/composio/connect/init) starts a
+// hosted Composio auth flow for the requested toolkit and returns the redirect
+// URL. An unsupported toolkit slug is a 400 (the MVP only wires Notion).
+func (h *Handler) ComposioConnectInit(w http.ResponseWriter, r *http.Request) {
+	if h.Composio == nil {
+		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	userUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	var req ComposioConnectInitRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.ToolkitSlug) == "" {
+		writeError(w, http.StatusBadRequest, "toolkit_slug is required")
+		return
+	}
+
+	redirectURL, err := h.Composio.BeginConnect(r.Context(), userUUID, req.ToolkitSlug)
+	if err != nil {
+		if errors.Is(err, composio.ErrToolkitNotSupported) {
+			writeError(w, http.StatusBadRequest, "toolkit not supported")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "failed to start composio connect")
+		return
+	}
+	writeJSON(w, http.StatusOK, ComposioConnectInitResponse{RedirectURL: redirectURL})
+}
+
+// ComposioCallback (GET /api/integrations/composio/callback) is the browser
+// redirect target Composio sends the user back to after the hosted flow. The
+// signed `state` query param is the source of truth for the user identity, so
+// the request is attributed from it (the route still sits under Auth so the
+// browser session is present, but identity comes from the state). On success
+// the row is upserted and the browser is redirected to the settings page; any
+// failure redirects to the same page with a stable error code so the user is
+// never left on a blank API response.
+func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
+	if h.Composio == nil {
+		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		return
+	}
+	q := r.URL.Query()
+	state := q.Get("state")
+	status := q.Get("status")
+	connectedAccountID := q.Get("connected_account_id")
+
+	slug, err := h.Composio.CompleteCallback(r.Context(), state, status, connectedAccountID)
+	if err != nil {
+		// Every failure (tampered/expired state, non-success status, write
+		// error) collapses to the generic failure redirect — we never tell the
+		// browser which check failed.
+		http.Redirect(w, r, h.Composio.CallbackRedirect(slug, false), http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, h.Composio.CallbackRedirect(slug, true), http.StatusFound)
+}
+
+// ListComposioConnections (GET /api/integrations/composio/connections) returns
+// the caller's active connections.
+func (h *Handler) ListComposioConnections(w http.ResponseWriter, r *http.Request) {
+	if h.Composio == nil {
+		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	userUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	conns, err := h.Composio.ListConnections(r.Context(), userUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list composio connections")
+		return
+	}
+	out := make([]ComposioConnectionResponse, 0, len(conns))
+	for _, c := range conns {
+		out = append(out, ComposioConnectionResponse{
+			ID:          c.ID,
+			ToolkitSlug: c.ToolkitSlug,
+			Status:      c.Status,
+			ConnectedAt: c.ConnectedAt,
+			LastUsedAt:  c.LastUsedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// DeleteComposioConnection (DELETE /api/integrations/composio/connections/{id})
+// disconnects a connection the caller owns. Idempotent at the service layer;
+// a connection that does not belong to the caller is a 404.
+func (h *Handler) DeleteComposioConnection(w http.ResponseWriter, r *http.Request) {
+	if h.Composio == nil {
+		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	userUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	connUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "connection id")
+	if !ok {
+		return
+	}
+	if err := h.Composio.Disconnect(r.Context(), userUUID, connUUID); err != nil {
+		if errors.Is(err, composio.ErrConnectionNotFound) {
+			writeError(w, http.StatusNotFound, "composio connection not found")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "failed to disconnect composio connection")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

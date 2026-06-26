@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -25,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -34,6 +37,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
+	composiosdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
@@ -435,6 +439,45 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
 
+	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY — the key the
+	// standalone SDK authenticates Composio with. When unset the whole block is
+	// skipped and the composio HTTP handlers return 503; existing deployments
+	// are unaffected. An operator opts in by setting COMPOSIO_API_KEY plus the
+	// toolkit→auth-config map (COMPOSIO_AUTH_CONFIGS_JSON, MVP: {"notion":"ac_…"})
+	// and a callback base (COMPOSIO_CALLBACK_BASE_URL, falling back to
+	// MULTICA_PUBLIC_URL). State signing uses COMPOSIO_STATE_SECRET, or a key
+	// derived from JWT_SECRET when that is unset.
+	if composioAPIKey := strings.TrimSpace(os.Getenv("COMPOSIO_API_KEY")); composioAPIKey != "" {
+		sdkClient, err := composiosdk.NewClient(composiosdk.Options{APIKey: composioAPIKey})
+		if err != nil {
+			slog.Error("composio: SDK client init failed; composio integration disabled", "error", err)
+		} else {
+			stateSecret := composioStateSecret()
+			callbackBase := composioCallbackBaseURL(signupConfig.PublicURL)
+			switch {
+			case len(stateSecret) == 0:
+				slog.Error("composio: no state secret (set COMPOSIO_STATE_SECRET or JWT_SECRET); composio integration disabled")
+			case callbackBase == "":
+				slog.Error("composio: no callback base url (set COMPOSIO_CALLBACK_BASE_URL or MULTICA_PUBLIC_URL); composio integration disabled")
+			default:
+				svc, serr := composiointeg.NewService(sdkClient, queries, composiointeg.Config{
+					StateSecret:     stateSecret,
+					CallbackBaseURL: callbackBase,
+					FrontendBaseURL: appURLFromEnv(),
+					AuthConfigs:     parseComposioAuthConfigs(os.Getenv("COMPOSIO_AUTH_CONFIGS_JSON")),
+				})
+				if serr != nil {
+					slog.Error("composio: service init failed; composio integration disabled", "error", serr)
+				} else {
+					h.Composio = svc
+					slog.Info("composio integration enabled")
+				}
+			}
+		}
+	} else {
+		slog.Info("composio integration disabled (COMPOSIO_API_KEY not set)")
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -724,6 +767,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// the token only proves "this open_id requested binding," and
 		// is combined with the logged-in user to create the mapping.
 		r.Post("/api/lark/binding/redeem", h.RedeemLarkBindingToken)
+
+		// Composio integration (MUL-3720). User-scoped (no workspace context):
+		// a connection belongs to a user. The callback is a GET so it works as
+		// a top-level browser redirect under cookie auth (no CSRF gate on GET).
+		// All four return 503 when COMPOSIO_API_KEY is unset.
+		r.Route("/api/integrations/composio", func(r chi.Router) {
+			r.Post("/connect/init", h.ComposioConnectInit)
+			r.Get("/callback", h.ComposioCallback)
+			r.Get("/connections", h.ListComposioConnections)
+			r.Delete("/connections/{id}", h.DeleteComposioConnection)
+		})
 
 		// User-scoped invitation routes (no workspace context required)
 		r.Get("/api/invitations", h.ListMyInvitations)
@@ -1246,4 +1300,50 @@ func cloudRuntimeFleetURLFromEnv() string {
 		return url
 	}
 	return strings.TrimSpace(os.Getenv("MULTICA_FLEET_URL"))
+}
+
+// parseComposioAuthConfigs parses COMPOSIO_AUTH_CONFIGS_JSON — a JSON object
+// mapping a toolkit slug to its Composio auth_config_id, e.g.
+// {"notion":"ac_xxx"}. Invalid JSON is logged and treated as "no toolkits
+// configured" rather than crashing boot: every BeginConnect then 400s with
+// "toolkit not supported", which is a clear operator signal.
+func parseComposioAuthConfigs(raw string) map[string]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		slog.Warn("COMPOSIO_AUTH_CONFIGS_JSON: ignoring invalid JSON", "error", err)
+		return nil
+	}
+	return m
+}
+
+// composioStateSecret resolves the HMAC key for the connect-state. Prefers an
+// explicit COMPOSIO_STATE_SECRET; otherwise derives a composio-specific key
+// from JWT_SECRET via SHA-256 so the two signing domains never share an
+// identical key. Returns nil when neither is set (composio stays disabled).
+func composioStateSecret() []byte {
+	if v := strings.TrimSpace(os.Getenv("COMPOSIO_STATE_SECRET")); v != "" {
+		return []byte(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("JWT_SECRET")); v != "" {
+		sum := sha256.Sum256([]byte("composio-state:" + v))
+		return sum[:]
+	}
+	return nil
+}
+
+// composioCallbackBaseURL resolves the public API base used to build the
+// Composio callback URL. Prefers COMPOSIO_CALLBACK_BASE_URL, then the
+// already-resolved MULTICA_PUBLIC_URL, then the app URL.
+func composioCallbackBaseURL(publicURL string) string {
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("COMPOSIO_CALLBACK_BASE_URL")), "/"); v != "" {
+		return v
+	}
+	if publicURL != "" {
+		return publicURL
+	}
+	return appURLFromEnv()
 }
