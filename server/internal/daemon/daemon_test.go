@@ -1004,6 +1004,48 @@ func TestSyncTasksAfterReconnect_TransientErrorNotSignalled(t *testing.T) {
 	}
 }
 
+// TestSyncTasksAfterReconnect_ChannelFullNotBlocked verifies that
+// the non-blocking send in syncTasksAfterReconnect never blocks
+// when the forceCheck channel already has an unconsumed signal.
+func TestSyncTasksAfterReconnect_ChannelFullNotBlocked(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"cancelled"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+
+	// Pre-fill the channel to simulate an unconsumed signal.
+	forceCheck := make(chan struct{}, 1)
+	forceCheck <- struct{}{}
+	d.activeTaskCancels.Store("task-full", forceCheck)
+	defer d.activeTaskCancels.Delete("task-full")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Must not block or panic when the channel is full.
+	done := make(chan struct{})
+	go func() {
+		d.syncTasksAfterReconnect(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Expected: non-blocking send via default case.
+	case <-time.After(2 * time.Second):
+		t.Fatal("syncTasksAfterReconnect blocked on full channel")
+	}
+}
+
 func TestMergeUsage(t *testing.T) {
 	t.Parallel()
 
