@@ -32,3 +32,10 @@ matches what you are about to touch before you start.
   touching the inbox list, a `Cerebro*RowActions` component, or adding a
   notification type. Covers the reminder family and how note @-mentions surface
   as `mentioned` inbox items.
+
+- [`agent-trigger-mapping.md`](./agent-trigger-mapping.md) — **What starts a new
+  agent run and what does not.** All 6 trigger types (assignment, @mention, human
+  comment, time wakeup, status wakeup, CI wakeup), the double-trigger pattern and
+  its fix, and rules for safe parent/sub-issue coordination. Read before designing
+  any issue flow that involves sub-issues, delegation, or agent-to-agent
+  handoffs.
