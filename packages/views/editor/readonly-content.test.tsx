@@ -2,12 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 
-const { getAttachmentTextContentMock, downloadAttachmentMock } = vi.hoisted(
-  () => ({
+const { getAttachmentTextContentMock, downloadAttachmentMock, flagState } =
+  vi.hoisted(() => ({
     getAttachmentTextContentMock: vi.fn(),
     downloadAttachmentMock: vi.fn(),
-  }),
-);
+    // cerebro_attachment_chips defaults ON (registry default); the legacy
+    // grey-row file-card tests flip it OFF in their own beforeEach.
+    flagState: { chips: true },
+  }));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFlagValue: (key: string) =>
+    key === "cerebro_attachment_chips" ? flagState.chips : false,
+}));
 
 vi.mock("@multica/core/api", () => ({
   api: { getAttachmentTextContent: getAttachmentTextContentMock },
@@ -520,6 +527,14 @@ describe("ReadonlyContent slash command rendering", () => {
 });
 
 describe("ReadonlyContent file-card downloads", () => {
+  // Legacy grey-row file card (flag OFF). The chip path is covered below.
+  beforeEach(() => {
+    flagState.chips = false;
+  });
+  afterEach(() => {
+    flagState.chips = true;
+  });
+
   it("uses the forced attachment download path for file cards with an attachment id", async () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
 
@@ -563,5 +578,24 @@ describe("ReadonlyContent file-card downloads", () => {
       "_blank",
       "noopener,noreferrer",
     );
+  });
+});
+
+describe("ReadonlyContent file-card chips (FIR-2034, flag on)", () => {
+  it("renders an image file card as a real thumbnail, not the grey row", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={[
+          '<div data-type="fileCard"',
+          'data-href="/api/attachments/att-1/download"',
+          'data-filename="invoice.png"',
+          'data-attachment-id="att-1"></div>',
+        ].join(" ")}
+      />,
+    );
+
+    // Chip renders the image as an <img>; the legacy grey row used a FileText icon.
+    const img = container.querySelector("img");
+    expect(img?.getAttribute("src")).toBe("/api/attachments/att-1/download");
   });
 });

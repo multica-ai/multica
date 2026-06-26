@@ -38,6 +38,9 @@ import { useAttachmentDownloadResolver } from "./attachment-download-context";
 import { useAttachmentPreview } from "./attachment-preview-modal";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { AttachmentCard } from "./attachment-card";
+// CEREBRO-PATCH(attachment-image-chip): FIR-2034 — images as compact thumbnail card behind cerebro_attachment_chips.
+import { AttachmentChip } from "@multica/cerebro-ui";
+import { useFlagValue } from "@multica/cerebro-feature-flags";
 import { HtmlAttachmentPreview } from "./html-attachment-preview";
 import { getPreviewKind, type PreviewKind } from "./utils/preview";
 import "./styles/attachment.css";
@@ -143,6 +146,8 @@ export function Attachment({
   const { resolveAttachment, openByUrl } = useAttachmentDownloadResolver();
   const download = useDownloadAttachment();
   const preview = useAttachmentPreview();
+  // CEREBRO-PATCH(attachment-image-chip): FIR-2034 — compact image card instead of the large figure.
+  const chipsEnabled = useFlagValue("cerebro_attachment_chips");
 
   const state = normalize(attachment, resolveAttachment);
   const forceKind =
@@ -176,6 +181,14 @@ export function Attachment({
   };
 
   if (kind === "image") {
+    // CEREBRO-PATCH(attachment-image-chip): FIR-2034 — route images through the unified compact card + existing preview modal.
+    if (chipsEnabled && !state.uploading)
+      return (
+        <>
+          <AttachmentChip filename={state.filename || "image"} thumbnailSrc={state.url} onActivate={openPreview} activateLabel="Preview" onRemove={editable ? onDelete : undefined} className={className} />
+          {preview.modal}
+        </>
+      );
     return (
       <>
         <ImageAttachmentView

@@ -9,11 +9,20 @@ const {
   downloadMock,
   openExternalMock,
   openByUrlMock,
+  flagState,
 } = vi.hoisted(() => ({
   getAttachmentTextContentMock: vi.fn(),
   downloadMock: vi.fn(),
   openExternalMock: vi.fn(),
   openByUrlMock: vi.fn(),
+  // cerebro_attachment_chips defaults ON (registry default); the legacy
+  // large-image-path tests flip it OFF in their own beforeEach.
+  flagState: { chips: true },
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFlagValue: (key: string) =>
+    key === "cerebro_attachment_chips" ? flagState.chips : false,
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -124,6 +133,7 @@ function renderWithQuery(ui: ReactElement) {
 beforeEach(() => {
   vi.clearAllMocks();
   resolverState.attachments = [];
+  flagState.chips = true;
 });
 
 afterEach(() => {
@@ -131,6 +141,11 @@ afterEach(() => {
 });
 
 describe("Attachment — image dispatch", () => {
+  // Legacy large-image figure (flag OFF). The chip path is covered below.
+  beforeEach(() => {
+    flagState.chips = false;
+  });
+
   it("record image renders <img> with hover toolbar (View/Download/Copy)", () => {
     const att = makeRecord();
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
@@ -228,6 +243,43 @@ describe("Attachment — image dispatch", () => {
     );
     expect(screen.queryByTitle("View")).toBeNull();
     expect(screen.queryByTitle("Download")).toBeNull();
+  });
+});
+
+describe("Attachment — image dispatch (chips on, FIR-2034)", () => {
+  it("renders a compact thumbnail chip, not the legacy figure", () => {
+    const att = makeRecord();
+    renderWithQuery(
+      <Attachment
+        attachment={{ kind: "record", attachment: att }}
+        editable
+        onDelete={vi.fn()}
+      />,
+    );
+    // Image stays an image (thumbnail), not a file box.
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(att.url);
+    // Legacy hover toolbar is gone, replaced by the unified chip affordances.
+    expect(screen.queryByTitle("View")).toBeNull();
+    expect(screen.queryByTitle("Copy link")).toBeNull();
+    expect(screen.getByTitle("Preview")).toBeTruthy();
+    expect(screen.getByTitle("Remove attachment")).toBeTruthy();
+  });
+
+  it("uploading image keeps the legacy figure (chip only after upload finishes)", () => {
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: "blob://local",
+          filename: "in-flight.png",
+          uploading: true,
+        }}
+      />,
+    );
+    // chipsEnabled && !uploading → an in-flight image still uses the figure.
+    expect(document.querySelector("img")).toBeTruthy();
+    expect(screen.queryByTitle("Remove attachment")).toBeNull();
   });
 });
 

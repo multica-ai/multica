@@ -38,7 +38,10 @@ import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import type { Attachment } from "@multica/core/types";
-import { isViewableAttachment } from "@multica/cerebro-attachments/core/viewable";
+import { isViewableAttachment, viewableKind } from "@multica/cerebro-attachments/core/viewable";
+// CEREBRO-PATCH(readonly-attachment-chip): FIR-2034 — posted images/files as unified cards behind cerebro_attachment_chips.
+import { AttachmentChip } from "@multica/cerebro-ui";
+import { useFlagValue } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(issue-link-open-mode): honor the account-level issue-link open preference.
 import { useIssueLinkOpenMode } from "@multica/cerebro-preferences/views";
 // CEREBRO-PATCH(skill-mention-readonly): render `mention://skill/<id>` links as SkillMentionChip.
@@ -296,6 +299,8 @@ function FileCardDiv({
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const download = useDownloadAttachment();
+  // CEREBRO-PATCH(readonly-attachment-chip): FIR-2034 — flag read before the early return to keep hook order stable.
+  const chipsEnabled = useFlagValue("cerebro_attachment_chips");
   const dataType = node?.properties?.dataType as string | undefined;
   if (dataType !== "fileCard") {
     return <div {...props}>{children}</div>;
@@ -329,6 +334,18 @@ function FileCardDiv({
     }
     if (href) window.open(href, "_blank", "noopener,noreferrer");
   };
+
+  // CEREBRO-PATCH(readonly-attachment-chip): FIR-2034 — posted file embeds as unified cards (image thumbnail / colour card), matching the composer.
+  if (chipsEnabled)
+    return (
+      <AttachmentChip
+        filename={filename}
+        thumbnailSrc={viewableKind("", filename) === "image" ? href : undefined}
+        onActivate={viewable ? openViewer : openDownload}
+        activateLabel={viewable ? "Open in viewer" : "Download"}
+        className="my-1"
+      />
+    );
 
   return (
     <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
@@ -376,6 +393,15 @@ const components: Partial<Components> = {
     const [lightbox, setLightbox] = useState(false);
     const imgSrc = typeof src === "string" ? src : "";
     const imgAlt = alt ?? "";
+    // CEREBRO-PATCH(readonly-attachment-chip): FIR-2034 — posted image as the compact thumbnail card + existing lightbox, matching the composer.
+    const chipsEnabled = useFlagValue("cerebro_attachment_chips");
+    if (chipsEnabled)
+      return (
+        <span className="image-node">
+          <AttachmentChip filename={imgAlt || "image"} thumbnailSrc={imgSrc} onActivate={() => setLightbox(true)} activateLabel={t(($) => $.image.view)} className="my-1" />
+          {lightbox && <ImageLightbox src={imgSrc} alt={imgAlt} onClose={() => setLightbox(false)} />}
+        </span>
+      );
 
     const handleView = () => setLightbox(true);
     const handleDownload = () => {
