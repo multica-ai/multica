@@ -270,11 +270,13 @@ describe("PatchedListItem Tab indent (MUL-3697)", () => {
 
   const pressTab = (e: Editor) => pressShortcut(e, "listItem", "Tab");
 
-  it("is a no-op with the cursor in the first item (nothing to nest under)", () => {
+  it("leaves the doc unchanged but swallows Tab in the first item (stay put, do not escape focus)", () => {
     editor = makeEditor(flatList("bulletList", "listItem"));
     editor.commands.setTextSelection(itemPos(editor, "listItem", 0));
-    // C2: startIndex === 0 with a single item -> clean false, doc unchanged.
-    expect(pressTab(editor)).toBe(false);
+    // Nothing to nest under, so the structural indent is a no-op — but the caret
+    // is in a list, so Tab is swallowed (true) instead of leaking to the browser
+    // and moving focus to other controls. The doc must be untouched.
+    expect(pressTab(editor)).toBe(true);
     expect(outline(editor.getJSON() as JsonNode)).toBe("- aaa\n- bbb\n- ccc");
   });
 

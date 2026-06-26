@@ -81,6 +81,14 @@ function sinkListItemRange(itemType: NodeType): Command {
  *
  * Tab indents the item(s) — see `sinkListItemRange` for the multi-item
  * first-item handling. Shift-Tab dedents via the stock command.
+ *
+ * Whenever the caret is inside a list item, Tab is the list's indent control
+ * and must be swallowed even when the structural indent is a no-op (first child
+ * with nothing to nest under, or already at max depth). Otherwise the unhandled
+ * Tab falls through to the browser and moves focus out of the editor to the
+ * next control. So the return value tracks "is the caret in this list?"
+ * (`editor.isActive(name)`), NOT "did the indent move anything?": indent
+ * best-effort, then swallow while in a list, fall through (focus nav) when not.
  */
 function listItemKeymap(editor: Editor, name: string) {
   return {
@@ -92,9 +100,10 @@ function listItemKeymap(editor: Editor, name: string) {
     Tab: () => {
       const itemType = editor.schema.nodes[name];
       if (!itemType) return false;
-      return sinkListItemRange(itemType)(editor.state, (tr) =>
+      sinkListItemRange(itemType)(editor.state, (tr) =>
         editor.view.dispatch(tr),
       );
+      return editor.isActive(name);
     },
     "Shift-Tab": () => editor.commands.liftListItem(name),
   };
