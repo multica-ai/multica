@@ -10,7 +10,14 @@
 // card showing its breadcrumb path and an inline ACCESS PILL summarising who
 // can reach it — "Everyone", a named group/member, or "Inherits: …" when the
 // access cascades from a parent (the default for a sub-folder). The pill opens
-// the full access editor; a Move menu re-parents the folder.
+// the full access editor.
+//
+// Re-parenting is DRAG-AND-DROP (FIR-1590 review): grab a folder by its handle
+// and drop it onto another folder card to nest it inside, or onto the "top
+// level" zone to un-nest it. Dropping onto itself or any of its own descendants
+// is rejected (would orphan/cycle) — those targets light up as invalid. The
+// move calls the same PUT endpoints behind the scenes, with the server cycle
+// guard as the final backstop.
 //
 // The platform layer (web + desktop) spreads useCerebroCollectionsSettingsTabs()
 // into <SettingsPage extraAccountTabs={...}> — the tab only appears when the
@@ -21,8 +28,21 @@ import {
   Layers,
   Folder as FolderIcon,
   ChevronDown,
-  MoveRight,
+  GripVertical,
+  ArrowUpToLine,
 } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  useDraggable,
+  useDroppable,
+  pointerWithin,
+  type DragStartEvent,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Tabs,
@@ -30,14 +50,6 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@multica/ui/components/ui/tabs";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
@@ -140,90 +152,84 @@ function AccessPill({
   );
 }
 
-function MoveFolderMenu({
-  node,
-  allFolders,
-  entityKind,
-}: {
-  node: FolderNode;
-  allFolders: CollectionFolder[];
-  entityKind?: "skill" | "autopilot";
-}) {
-  const move = useMoveCollectionFolder();
-  // A folder cannot move into itself or any descendant (would orphan/cycle).
-  const blocked = collectSubtreeIds(node);
-  const targets = allFolders.filter((f) => !blocked.has(f.id));
+// The drop target that re-parents a folder to the top level (root). Only shown
+// while a drag is in progress, so it doesn't clutter the resting tree.
+const ROOT_DROP_ID = "__collections_root__";
 
-  const onMove = (parentId: string | null) => {
-    if (parentId === node.parent_id) return; // no-op
-    move.mutate({
-      surface: node.surface,
-      folderId: node.id,
-      parentId,
-      entityKind,
-    });
-  };
-
+function RootDropZone({ dragging }: { dragging: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({ id: ROOT_DROP_ID });
+  if (!dragging) return null;
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            size="sm"
-            variant="ghost"
-            className="shrink-0 text-muted-foreground"
-            disabled={move.isPending}
-            aria-label="Move folder"
-            title="Move folder"
-          >
-            <MoveRight className="size-3.5" />
-          </Button>
-        }
-      />
-      <DropdownMenuContent align="end" className="max-h-72 overflow-auto">
-        <DropdownMenuLabel>Move to</DropdownMenuLabel>
-        <DropdownMenuItem
-          disabled={node.parent_id === null}
-          onClick={() => onMove(null)}
-        >
-          Top level (root)
-        </DropdownMenuItem>
-        {targets.length > 0 && <DropdownMenuSeparator />}
-        {targets.map((t) => (
-          <DropdownMenuItem
-            key={t.id}
-            disabled={t.id === node.parent_id}
-            onClick={() => onMove(t.id)}
-          >
-            {t.name}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "mb-1.5 flex items-center justify-center gap-2 rounded-lg border border-dashed py-2 text-xs transition-colors",
+        isOver
+          ? "border-primary bg-primary/5 text-foreground"
+          : "text-muted-foreground",
+      )}
+    >
+      <ArrowUpToLine className="size-3.5" />
+      Drop here to move to the top level
+    </div>
   );
 }
 
 function FolderCard({
   node,
-  allFolders,
   byId,
   active,
   labelFor,
-  entityKind,
+  dragging,
+  isDragSource,
+  isBlockedTarget,
   onManage,
 }: {
   node: FolderNode;
-  allFolders: CollectionFolder[];
   byId: Map<string, CollectionFolder>;
   active: boolean;
   labelFor: LabelFor;
-  entityKind?: "skill" | "autopilot";
+  // True while ANY folder in this tree is being dragged.
+  dragging: boolean;
+  // True if THIS card is the folder currently being dragged.
+  isDragSource: boolean;
+  // True if THIS card is an invalid drop target for the active drag (it is the
+  // dragged folder itself or one of its descendants).
+  isBlockedTarget: boolean;
   onManage: (folder: CollectionFolder) => void;
 }) {
   const path = folderPath(node, byId);
+  // The card is the drop target (drop ONTO a folder to nest inside it); the
+  // grip handle is the drag source. Self/descendant targets are disabled so the
+  // collision detector never reports them as a drop.
+  const drop = useDroppable({
+    id: node.id,
+    disabled: isDragSource || isBlockedTarget,
+  });
+  const drag = useDraggable({ id: node.id });
+  const showDropHint = dragging && !isDragSource && !isBlockedTarget;
+
   return (
     <div style={{ marginLeft: node.depth * 24 }}>
-      <div className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2.5">
+      <div
+        ref={drop.setNodeRef}
+        className={cn(
+          "flex items-center gap-2 rounded-lg border bg-card px-3 py-2.5 transition-colors",
+          isDragSource && "opacity-50",
+          dragging && isBlockedTarget && !isDragSource && "opacity-40",
+          showDropHint && drop.isOver && "border-primary bg-primary/5 ring-1 ring-primary",
+        )}
+      >
+        <button
+          ref={drag.setNodeRef}
+          {...drag.listeners}
+          {...drag.attributes}
+          className="shrink-0 cursor-grab touch-none rounded text-muted-foreground/50 outline-none hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+          aria-label={`Drag ${node.name} to move it into another folder`}
+          title="Drag to move this folder"
+        >
+          <GripVertical className="size-4" />
+        </button>
         <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
@@ -238,11 +244,6 @@ function FolderCard({
             </div>
           )}
         </div>
-        <MoveFolderMenu
-          node={node}
-          allFolders={allFolders}
-          entityKind={entityKind}
-        />
         <AccessPill
           folder={node}
           active={active}
@@ -275,6 +276,62 @@ function FolderTree({
     () => new Map(folders.map((f) => [f.id, f])),
     [folders],
   );
+  const nodeById = React.useMemo(
+    () => new Map(ordered.map((n) => [n.id, n])),
+    [ordered],
+  );
+
+  const move = useMoveCollectionFolder();
+  const [activeId, setActiveId] = React.useState<string | null>(null);
+  const activeNode = activeId ? (nodeById.get(activeId) ?? null) : null;
+  // A folder can't drop into itself or any descendant; pre-compute the blocked
+  // set once per drag so every card can flag itself as a valid/invalid target.
+  const blocked = React.useMemo(
+    () => (activeNode ? collectSubtreeIds(activeNode) : new Set<string>()),
+    [activeNode],
+  );
+
+  // A small activation distance lets a click on the access pill or the grip
+  // through without starting a drag, matching the inbox drag pattern.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveId(String(event.active.id));
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const id = String(event.active.id);
+    setActiveId(null);
+    const node = nodeById.get(id);
+    if (!node) return;
+    const overId = event.over ? String(event.over.id) : null;
+    if (!overId) return;
+
+    if (overId === ROOT_DROP_ID) {
+      if (node.parent_id !== null) {
+        move.mutate({
+          surface: node.surface,
+          folderId: node.id,
+          parentId: null,
+          entityKind,
+        });
+      }
+      return;
+    }
+    // Guard client-side too (the disabled droppables already prevent these,
+    // and the server enforces the cycle guard as the final backstop).
+    if (overId === id) return;
+    if (collectSubtreeIds(node).has(overId)) return;
+    if (overId === node.parent_id) return;
+    move.mutate({
+      surface: node.surface,
+      folderId: node.id,
+      parentId: overId,
+      entityKind,
+    });
+  }
 
   if (folders.length === 0) {
     return (
@@ -283,20 +340,40 @@ function FolderTree({
   }
 
   return (
-    <div className="space-y-1.5">
-      {ordered.map((node) => (
-        <FolderCard
-          key={`${node.surface}:${node.id}`}
-          node={node}
-          allFolders={folders}
-          byId={byId}
-          active={active}
-          labelFor={labelFor}
-          entityKind={entityKind}
-          onManage={onManage}
-        />
-      ))}
-    </div>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={pointerWithin}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onDragCancel={() => setActiveId(null)}
+    >
+      <RootDropZone dragging={activeId !== null} />
+      <div className="space-y-1.5">
+        {ordered.map((node) => (
+          <FolderCard
+            key={`${node.surface}:${node.id}`}
+            node={node}
+            byId={byId}
+            active={active}
+            labelFor={labelFor}
+            dragging={activeId !== null}
+            isDragSource={activeId === node.id}
+            isBlockedTarget={blocked.has(node.id)}
+            onManage={onManage}
+          />
+        ))}
+      </div>
+      <DragOverlay>
+        {activeNode ? (
+          <div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2.5 shadow-lg">
+            <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate text-sm font-medium">
+              {activeNode.name}
+            </span>
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }
 

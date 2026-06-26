@@ -89,9 +89,23 @@ export function FolderAccessEditor({
   const direct = directQuery.data ?? [];
   const inherited = (effectiveQuery.data ?? []).filter((g) => !g.is_direct);
 
+  // Inherit-by-default: a sub-folder with no access of its own inherits its
+  // parent's by default, so once we know its grants we open the Inherited tab
+  // (rather than an empty This-folder tab) — making that default visible. The
+  // user can still switch to This folder to set the folder's own access. A
+  // null `tab` means "not yet chosen by the user", so the resolved default can
+  // react to the loaded data without overriding a manual switch.
+  const [tab, setTab] = React.useState<string | null>(null);
+  const loaded = directQuery.data !== undefined;
+  const resolvedTab =
+    tab ??
+    (loaded && direct.length === 0 && inherited.length > 0
+      ? "inherited"
+      : "direct");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Access — {folderName}</DialogTitle>
           <DialogDescription>
@@ -100,7 +114,7 @@ export function FolderAccessEditor({
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="direct">
+        <Tabs value={resolvedTab} onValueChange={setTab}>
           <TabsList className="w-full">
             <TabsTrigger value="direct" className="flex-1">
               This folder
