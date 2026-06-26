@@ -409,5 +409,43 @@
     "table_cache_r": "Cache R",
     "table_cache_w": "Cache W",
     "no_data": "No usage data yet"
+  },
+  "openclawConfig": {
+    "menu_item": "Choose OpenClaw instance…",
+    "dialog_title": "Choose OpenClaw instance",
+    "dialog_description": "OpenClaw supports multiple independent instances — each one has its own agents, API keys, and conversation history. Tell this machine's daemon which instance to use. The setting is local to this machine and never leaves it.",
+    "field_label": "Instance directory",
+    "field_optional": "optional",
+    "field_placeholder": "e.g. ~/.openclaw-dev",
+    "browse_button": "Browse…",
+    "field_hint_loading": "Loading current setting…",
+    "field_hint_validating": "Validating…",
+    "field_hint_empty": "Leave blank to use OpenClaw's default instance (~/.openclaw).",
+    "field_hint_ok": "Directory exists, readable and writable.",
+    "env_wins_title": "OPENCLAW_STATE_DIR is set in the daemon's environment.",
+    "env_wins_desc": "It will override config.json at startup; effective value: {{path}}",
+    "restart_warning": "Saving will restart the daemon. In-flight tasks on this runtime will be cancelled.",
+    "recover_title": "Daemon failed to start last time",
+    "recover_desc": "The value below is what's currently in config.json — the daemon couldn't start with it. Edit it and save again.",
+    "cancel": "Cancel",
+    "save_button": "Save and restart daemon",
+    "saving": "Saving…",
+    "load_error": "Could not load OpenClaw configuration",
+    "save_error": "Could not save OpenClaw configuration",
+    "save_success": "OpenClaw instance updated.",
+    "default_state_label": "default (~/.openclaw)",
+    "desktop_only": "This action requires the Multica desktop app.",
+    "daemon_failed_title": "OpenClaw failed to start",
+    "daemon_failed_desc": "The daemon couldn't start with {{path}}. Open the OpenClaw configuration to try a different instance.",
+    "reconfigure_button": "Reconfigure",
+    "view_log_button": "View daemon log",
+    "field_error": {
+      "not_absolute": "Path must be absolute.",
+      "not_found": "Directory does not exist.",
+      "not_a_directory": "Not a directory.",
+      "not_readable": "Directory is not readable.",
+      "not_writable": "Directory is not writable.",
+      "other": "Could not validate path."
+    }
   }
 }

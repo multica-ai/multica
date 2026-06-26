@@ -6,6 +6,7 @@ import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { setupCliConfig } from "./cli-config";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
@@ -533,6 +534,7 @@ if (!gotTheLock) {
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
     setupLocalDirectory(() => mainWindow);
+    setupCliConfig();
 
     // macOS: deep link arrives via open-url event
     app.on("open-url", (_event, url) => {
