@@ -409,10 +409,11 @@ if (!gotTheLock) {
       async (
         _event,
         apiUrl: string,
+        appUrl?: string,
       ): Promise<{ ok: true } | { ok: false; error: string }> => {
         try {
           const config = parseRuntimeConfig(
-            JSON.stringify({ schemaVersion: 1, apiUrl }),
+            JSON.stringify({ schemaVersion: 1, apiUrl, appUrl }),
           );
           const path = desktopConfigPath();
           await mkdir(dirname(path), { recursive: true });

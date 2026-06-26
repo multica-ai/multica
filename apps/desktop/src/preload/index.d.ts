@@ -17,6 +17,7 @@ interface DesktopAPI {
   /** FIR-2037: persist the chosen server to ~/.multica/desktop.json. */
   setRuntimeConfig: (
     apiUrl: string,
+    appUrl?: string,
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** FIR-2037: relaunch the app so a new server config takes effect. */
   relaunchApp: () => Promise<void>;

@@ -78,8 +78,9 @@ const desktopAPI = {
    *  in main; returns an error message instead of writing an invalid config. */
   setRuntimeConfig: (
     apiUrl: string,
+    appUrl?: string,
   ): Promise<{ ok: true } | { ok: false; error: string }> =>
-    ipcRenderer.invoke("runtime-config:set", apiUrl),
+    ipcRenderer.invoke("runtime-config:set", apiUrl, appUrl),
   /** FIR-2037: relaunch the app so a new server config takes effect. */
   relaunchApp: (): Promise<void> => ipcRenderer.invoke("app:relaunch"),
   /** Listen for auth token delivered via deep link */
