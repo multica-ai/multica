@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -23,6 +25,43 @@ import (
 // chatSessionTitleMaxLen caps the rename input. Long enough to fit a
 // meaningful summary, short enough to keep the dropdown row scannable.
 const chatSessionTitleMaxLen = 200
+
+func isChatResetShortcut(content string) bool {
+	switch strings.TrimSpace(content) {
+	case "new", "/new":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *Handler) chatSessionUsesOpenCode(ctx context.Context, session db.ChatSession) (bool, error) {
+	agent, err := h.Queries.GetAgent(ctx, session.AgentID)
+	if err != nil {
+		if !isNotFound(err) {
+			return false, err
+		}
+	} else if agent.RuntimeID.Valid {
+		runtime, err := h.Queries.GetAgentRuntime(ctx, agent.RuntimeID)
+		if err == nil {
+			return runtime.Provider == "opencode", nil
+		}
+		if !isNotFound(err) {
+			return false, err
+		}
+	}
+
+	if session.RuntimeID.Valid {
+		runtime, err := h.Queries.GetAgentRuntime(ctx, session.RuntimeID)
+		if err == nil {
+			return runtime.Provider == "opencode", nil
+		}
+		if !isNotFound(err) {
+			return false, err
+		}
+	}
+	return false, nil
+}
 
 // ---------------------------------------------------------------------------
 // Chat Sessions
@@ -320,66 +359,67 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := h.TxStarter.Begin(r.Context())
+	cancelled, err := h.deleteChatSessionTx(r.Context(), session)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		if errors.Is(err, pgx.ErrNoRows) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer tx.Rollback(r.Context())
+	h.TaskService.BroadcastCancelledTasks(r.Context(), cancelled)
+	resolvedSessionID := uuidToString(session.ID)
+	h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{
+		ChatSessionID: resolvedSessionID,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) deleteChatSessionTx(ctx context.Context, session db.ChatSession) ([]db.AgentTaskQueue, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start transaction")
+	}
+	defer tx.Rollback(ctx)
 	qtx := h.Queries.WithTx(tx)
 
 	// FOR UPDATE on the chat_session row blocks any concurrent INSERT into
 	// agent_task_queue that references it (the FK validation needs a
 	// KEY SHARE lock). After we commit the delete, the blocked INSERT
 	// fails its FK check, so it can't land an orphaned task.
-	if _, err := qtx.LockChatSessionForDelete(r.Context(), session.ID); err != nil {
+	if _, err := qtx.LockChatSessionForDelete(ctx, session.ID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Already gone — treat as idempotent success.
-			w.WriteHeader(http.StatusNoContent)
-			return
+			return nil, pgx.ErrNoRows
 		}
-		writeError(w, http.StatusInternalServerError, "failed to lock chat session")
-		return
+		return nil, fmt.Errorf("failed to lock chat session")
 	}
 
-	cancelled, err := qtx.CancelAgentTasksByChatSession(r.Context(), session.ID)
+	cancelled, err := qtx.CancelAgentTasksByChatSession(ctx, session.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to cancel chat session tasks")
-		return
+		return nil, fmt.Errorf("failed to cancel chat session tasks")
 	}
 
 	// channel_chat_session_binding used to carry a chat_session FK with
 	// ON DELETE CASCADE; MUL-3515 §4 dropped every channel_* foreign key, so
 	// prune the binding here in the same tx that deletes its chat_session.
-	if err := qtx.DeleteChannelChatSessionBindingBySession(r.Context(), session.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete chat session binding")
-		return
+	if err := qtx.DeleteChannelChatSessionBindingBySession(ctx, session.ID); err != nil {
+		return nil, fmt.Errorf("failed to delete chat session binding")
 	}
 
-	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
+	if err := qtx.DeleteChatSession(ctx, db.DeleteChatSessionParams{
 		ID:          session.ID,
 		WorkspaceID: session.WorkspaceID,
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete chat session")
-		return
+		return nil, fmt.Errorf("failed to delete chat session")
 	}
 
-	if err := tx.Commit(r.Context()); err != nil {
-		slog.Warn("commit chat session delete failed", "session_id", sessionID, "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to commit chat session delete")
-		return
+	if err := tx.Commit(ctx); err != nil {
+		slog.Warn("commit chat session delete failed", "session_id", uuidToString(session.ID), "error", err)
+		return nil, fmt.Errorf("failed to commit chat session delete")
 	}
 
-	// Post-commit broadcasts. Subscribers should never observe events for a
-	// tx that didn't actually persist.
-	h.TaskService.BroadcastCancelledTasks(r.Context(), cancelled)
-
-	resolvedSessionID := uuidToString(session.ID)
-	h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{
-		ChatSessionID: resolvedSessionID,
-	})
-
-	w.WriteHeader(http.StatusNoContent)
+	return cancelled, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -392,8 +432,8 @@ type SendChatMessageRequest struct {
 }
 
 type SendChatMessageResponse struct {
-	MessageID string `json:"message_id"`
-	TaskID    string `json:"task_id"`
+	MessageID string `json:"message_id,omitempty"`
+	TaskID    string `json:"task_id,omitempty"`
 	// AttachmentIDs are the attachment rows actually bound to this message by
 	// the server. The client diffs these against the ids it requested so it
 	// can warn the user when an attachment silently failed to bind — no extra
@@ -454,6 +494,32 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if session.Status != "active" {
 		writeError(w, http.StatusBadRequest, "chat session is archived")
 		return
+	}
+
+	if len(attachmentIDs) == 0 && isChatResetShortcut(req.Content) {
+		usesOpenCode, err := h.chatSessionUsesOpenCode(r.Context(), session)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve chat runtime")
+			return
+		}
+		if usesOpenCode {
+			cancelled, err := h.deleteChatSessionTx(r.Context(), session)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			h.TaskService.BroadcastCancelledTasks(r.Context(), cancelled)
+			resolvedSessionID := uuidToString(session.ID)
+			h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{
+				ChatSessionID: resolvedSessionID,
+			})
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 	}
 
 	// Create the user message first so the daemon can always find it.
