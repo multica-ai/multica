@@ -335,10 +335,21 @@ export function CollectionsTab() {
         </p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        orientation="horizontal"
+      >
+        {/* Force a horizontal tab row in the settings context, where the
+            shared Tabs otherwise stack vertically — same override the
+            cost-optimization settings tabs use. */}
+        <TabsList className="!h-auto w-full !flex-row flex-wrap justify-start gap-1">
           {GROUPS.map((g) => (
-            <TabsTrigger key={g.group} value={g.group}>
+            <TabsTrigger
+              key={g.group}
+              value={g.group}
+              className="!w-auto !flex-none !justify-center"
+            >
               {g.group}
             </TabsTrigger>
           ))}
