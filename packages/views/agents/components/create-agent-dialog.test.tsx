@@ -38,15 +38,18 @@ vi.mock("./model-dropdown", () => ({
   ModelDropdown: () => null,
 }));
 
-const modelsCatalog: { models: RuntimeModel[]; supported: boolean } = {
-  models: [],
-  supported: true,
-};
+// Per-runtime model catalogs so a runtime/provider switch resolves a
+// different reasoning vocabulary, exercising the stale-token clearing.
+const modelsByRuntime: Record<
+  string,
+  { models: RuntimeModel[]; supported: boolean }
+> = {};
 
 vi.mock("@multica/core/runtimes", () => ({
   runtimeModelsOptions: (runtimeId: string | null | undefined) => ({
     queryKey: ["runtime-models", runtimeId ?? "none"],
-    queryFn: async () => modelsCatalog,
+    queryFn: async () =>
+      modelsByRuntime[runtimeId ?? ""] ?? { models: [], supported: true },
     enabled: Boolean(runtimeId),
     retry: false,
   }),
@@ -185,8 +188,7 @@ const openAgentRuntimePicker = () =>
 afterEach(() => {
   cleanup();
   document.body.innerHTML = "";
-  modelsCatalog.models = [];
-  modelsCatalog.supported = true;
+  for (const key of Object.keys(modelsByRuntime)) delete modelsByRuntime[key];
 });
 
 describe("CreateAgentDialog machine + agent-runtime cascade (MUL-3772)", () => {
@@ -389,32 +391,36 @@ describe("CreateAgentDialog Create gate (MUL-3772)", () => {
   });
 });
 
+function reasoningModel(
+  id: string,
+  levels: { value: string; label: string }[],
+): RuntimeModel {
+  return { id, label: id, default: true, thinking: { supported_levels: levels } };
+}
+
 describe("CreateAgentDialog reasoning picker (MUL-3772 REQ-2)", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("hides the reasoning row when the model exposes no levels", async () => {
-    modelsCatalog.models = [
-      { id: "haiku", label: "Haiku", default: true },
-    ];
+    modelsByRuntime["rt-1"] = {
+      models: [{ id: "haiku", label: "Haiku", default: true }],
+      supported: true,
+    };
     renderDialog([makeRuntime({ id: "rt-1", daemon_id: "d1" })]);
     await tick();
     expect(screen.queryByText("Reasoning")).toBeNull();
   });
 
   it("shows the row for a reasoning-capable model and submits the chosen level", async () => {
-    modelsCatalog.models = [
-      {
-        id: "opus",
-        label: "Opus",
-        default: true,
-        thinking: {
-          supported_levels: [
-            { value: "low", label: "Low" },
-            { value: "high", label: "High" },
-          ],
-        },
-      },
-    ];
+    modelsByRuntime["rt-1"] = {
+      models: [
+        reasoningModel("opus", [
+          { value: "low", label: "Low" },
+          { value: "high", label: "High" },
+        ]),
+      ],
+      supported: true,
+    };
     const { onCreate } = renderDialog([
       makeRuntime({ id: "rt-1", daemon_id: "d1" }),
     ]);
@@ -435,22 +441,104 @@ describe("CreateAgentDialog reasoning picker (MUL-3772 REQ-2)", () => {
   });
 
   it("omits thinking_level when left on follow-CLI-config", async () => {
-    modelsCatalog.models = [
-      {
-        id: "opus",
-        label: "Opus",
-        default: true,
-        thinking: {
-          supported_levels: [{ value: "high", label: "High" }],
-        },
-      },
-    ];
+    modelsByRuntime["rt-1"] = {
+      models: [reasoningModel("opus", [{ value: "high", label: "High" }])],
+      supported: true,
+    };
     const { onCreate } = renderDialog([
       makeRuntime({ id: "rt-1", daemon_id: "d1" }),
     ]);
     await screen.findByText("Reasoning");
 
     typeName();
+    fireEvent.click(screen.getByText("Create"));
+    await tick();
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate.mock.calls[0]?.[0].thinking_level).toBeUndefined();
+  });
+
+  it("clears a stale level when switching the agent runtime to another provider", async () => {
+    // Two CLIs on one machine with disjoint reasoning vocabularies. Picking a
+    // Claude-only level then switching to the Codex runtime must not carry the
+    // now provider-invalid token into the payload (the backend 400s on it).
+    modelsByRuntime["rt-claude"] = {
+      models: [
+        reasoningModel("opus", [
+          { value: "high", label: "High" },
+          { value: "max", label: "Max" },
+        ]),
+      ],
+      supported: true,
+    };
+    modelsByRuntime["rt-codex"] = {
+      models: [
+        reasoningModel("gpt5", [
+          { value: "none", label: "None" },
+          { value: "low", label: "Low" },
+        ]),
+      ],
+      supported: true,
+    };
+    const { onCreate } = renderDialog([
+      makeRuntime({
+        id: "rt-claude",
+        daemon_id: "d1",
+        provider: "claude",
+        name: "Claude (Mac)",
+        device_info: "Mac",
+      }),
+      makeRuntime({
+        id: "rt-codex",
+        daemon_id: "d1",
+        provider: "codex",
+        name: "Codex (Mac)",
+        device_info: "Mac",
+        launch_header: "codex app-server",
+      }),
+    ]);
+
+    // Seeds to Claude (provider-sorted); pick the Claude-only "Max".
+    await screen.findByText("Reasoning");
+    fireEvent.click(screen.getByText("Follow CLI config"));
+    fireEvent.click(screen.getByText("Max"));
+
+    // Switch the agent runtime to Codex — a different provider.
+    openAgentRuntimePicker();
+    fireEvent.click(screen.getByText("Codex", { selector: "span.truncate" }));
+    await tick();
+
+    // The stale "Max" is gone; the row reseeds to follow-CLI-config and the
+    // payload omits the token entirely.
+    expect(screen.queryByText("Max")).toBeNull();
+    typeName();
+    fireEvent.click(screen.getByText("Create"));
+    await tick();
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate.mock.calls[0]?.[0].runtime_id).toBe("rt-codex");
+    expect(onCreate.mock.calls[0]?.[0].thinking_level).toBeUndefined();
+  });
+
+  it("drops a duplicate-mode orphan level the current model does not advertise", async () => {
+    // Duplicate clones thinking_level "high", but the target runtime's model
+    // has no reasoning catalog — the orphan must not be submittable.
+    modelsByRuntime["rt-1"] = {
+      models: [{ id: "haiku", label: "Haiku", default: true }],
+      supported: true,
+    };
+    const template = makeTemplate({
+      runtime_id: "rt-1",
+      thinking_level: "high",
+    });
+    const { onCreate } = renderDialog(
+      [makeRuntime({ id: "rt-1", daemon_id: "d1" })],
+      template,
+    );
+
+    // Once the catalog loads, the orphan clears and the row disappears.
+    await vi.waitFor(() =>
+      expect(screen.queryByText("Reasoning")).toBeNull(),
+    );
+
     fireEvent.click(screen.getByText("Create"));
     await tick();
     expect(onCreate).toHaveBeenCalledTimes(1);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Globe, Lock } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
@@ -123,6 +123,27 @@ export function CreateAgentDialog({
   const selectedRuntimeLocked =
     selectedRuntime != null &&
     !isRuntimeUsableForUser(selectedRuntime, currentUserId);
+
+  // Reasoning/effort tokens are validated per provider on the backend, so a
+  // level chosen for one provider is invalid the moment the user switches the
+  // selected runtime to a different provider (e.g. a Codex `none` would 400 on
+  // a Claude runtime). Clear the override synchronously on a provider change so
+  // a stale token can never be submitted — this also covers the brief window
+  // before ReasoningPicker's catalog-based clear can run for a not-yet-cached
+  // runtime. The initial establishment (undefined → first provider) is skipped
+  // so a duplicate-mode pre-fill survives until the user actually changes it.
+  const prevProviderRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const provider = selectedRuntime?.provider;
+    if (provider === undefined) return;
+    if (
+      prevProviderRef.current !== undefined &&
+      prevProviderRef.current !== provider
+    ) {
+      setThinkingLevel("");
+    }
+    prevProviderRef.current = provider;
+  }, [selectedRuntime?.provider]);
 
   // Shared squad-join follow-up. Returns nothing — the caller has
   // already shown its create-success toast; we only need to surface a

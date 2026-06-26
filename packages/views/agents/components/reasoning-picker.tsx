@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Check, Sparkles } from "lucide-react";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
@@ -44,6 +44,26 @@ export function ReasoningPicker({
   );
   const models = modelsQuery.data?.models ?? [];
   const levels = resolveThinkingLevels(models, model);
+
+  // Create-flow safety net: once the catalog for the current (runtime, model)
+  // has loaded, drop a non-empty value the model no longer advertises so it
+  // can never be submitted. Without this, picking a level on one runtime and
+  // switching to a model/provider that lacks it would carry the stale token
+  // into the create payload — the backend validates effort tokens per provider
+  // and 400s an invalid one (e.g. a Codex-only `none` on a Claude runtime).
+  //
+  // Gated on loaded data (not just the empty-while-loading default) so a
+  // duplicate-mode pre-fill is never wiped before its catalog arrives. This is
+  // deliberately stricter than the inspector's ThinkingPicker, which keeps an
+  // orphan visible as a clear-only affordance: a saved agent legitimately owns
+  // its token, but the create form must not forward an unsubmittable one.
+  useEffect(() => {
+    const data = modelsQuery.data;
+    if (!data || !value) return;
+    if (resolveThinkingLevels(data.models, model).some((l) => l.value === value))
+      return;
+    onChange("");
+  }, [modelsQuery.data, model, value, onChange]);
 
   // Hidden until the model exposes reasoning levels (or a value is already
   // persisted) — mirrors ThinkingPropRow's gate so behavior matches the
