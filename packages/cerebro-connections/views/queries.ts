@@ -3,7 +3,12 @@ import { z } from "zod";
 import { api } from "@multica/core/api";
 import { parseWithFallback } from "@multica/core/api/schema";
 
-import type { Connection, CreateConnectionInput, UpdateConnectionInput } from "./types";
+import type {
+  Connection,
+  CreateConnectionInput,
+  UpdateConnectionInput,
+  ScopableArgOption,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // Schemas — lenient per CLAUDE.md "API Response Compatibility"
@@ -26,6 +31,17 @@ const EndpointPermissionSchema = z
   })
   .loose();
 
+const ScopableArgSchema = z
+  .object({
+    tool: z.string(),
+    arg: z.string(),
+    options_source_tool: z.string(),
+    group_by: z.string().optional(),
+    tag_field: z.string().optional(),
+    label: z.string().optional(),
+  })
+  .loose();
+
 const ConnectionSchema = z
   .object({
     id: z.string(),
@@ -37,10 +53,28 @@ const ConnectionSchema = z
     internal: z.boolean().default(false),
     auth_config: AuthConfigSchema.default({}),
     endpoint_permissions: z.array(EndpointPermissionSchema).default([]),
+    scopable_args: z.array(ScopableArgSchema).default([]),
+    tools: z
+      .array(z.object({ name: z.string(), description: z.string().optional() }).loose())
+      .optional(),
     enabled: z.boolean().default(true),
     created_at: z.string(),
     updated_at: z.string(),
   })
+  .loose();
+
+const ScopableArgOptionSchema = z
+  .object({
+    id: z.string(),
+    name: z.string().default(""),
+    folder: z.string().optional(),
+    folder_id: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+  })
+  .loose();
+
+const ConnectionOptionsSchema = z
+  .object({ options: z.array(ScopableArgOptionSchema).default([]) })
   .loose();
 
 const ConnectionListSchema = z
@@ -58,6 +92,7 @@ const EMPTY_CONNECTION_STUB = (wsId: string): Connection => ({
   internal: false,
   auth_config: EMPTY_AUTH,
   endpoint_permissions: [],
+  scopable_args: [],
   enabled: true,
   created_at: "",
   updated_at: "",
@@ -92,6 +127,8 @@ export type TestResult = z.infer<typeof TestResultSchema>;
 export const connectionsKeys = {
   all: (wsId: string) => ["connections", wsId] as const,
   one: (wsId: string, connId: string) => ["connections", wsId, connId] as const,
+  options: (wsId: string, connId: string, tool: string) =>
+    ["connections", wsId, connId, "options", tool] as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +165,32 @@ export function useConnections(wsId: string) {
       return parsed.connections as Connection[];
     },
     enabled: !!wsId,
+  });
+}
+
+// useConnectionOptions fetches the choices for a scopable arg's picker by
+// calling the connection's declared options-source tool (FIR-2083). Enabled only
+// when a tool is given, so the When popover can lazily fetch when opened.
+export function useConnectionOptions(
+  wsId: string,
+  connId: string,
+  tool: string,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: connectionsKeys.options(wsId, connId, tool),
+    queryFn: async (): Promise<ScopableArgOption[]> => {
+      const raw = await api.getCerebroConnectionOptions(wsId, connId, tool);
+      const parsed = parseWithFallback(
+        raw,
+        ConnectionOptionsSchema,
+        { options: [] as ScopableArgOption[] },
+        { endpoint: "GET /api/workspaces/:id/connections/:connId/options" },
+      );
+      return parsed.options as ScopableArgOption[];
+    },
+    enabled: !!wsId && !!connId && !!tool && enabled,
+    staleTime: 60_000,
   });
 }
 
@@ -203,6 +266,7 @@ export function useToggleConnection(wsId: string) {
         internal: conn.internal,
         auth_config: conn.auth_config,
         endpoint_permissions: conn.endpoint_permissions,
+        scopable_args: conn.scopable_args,
         enabled,
       };
       const raw = await api.updateCerebroConnection(wsId, conn.id, input);

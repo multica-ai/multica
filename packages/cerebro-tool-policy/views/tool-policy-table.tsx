@@ -26,8 +26,11 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronRight,
+  Database,
+  Folder,
   FolderGit2,
   Globe,
+  Loader2,
   Lock,
   Plus,
   Search,
@@ -95,6 +98,15 @@ import {
   type ToolPolicyRow,
   type ToolSetting,
 } from "../core";
+import {
+  DATA_SOURCE_ARG,
+  FOLDER_ARG,
+  groupByFolder,
+  useDataSourceScopeConfig,
+  useScopeOptions,
+  type ScopeConfig,
+  type ScopeOption,
+} from "./data-source-scope";
 import { FirtalRegistryRowConfigure } from "./firtal-registry-row-configure";
 import { ConnectionRowConfigure } from "./connection-row-configure";
 import { FirtalRegistryDataSourceConfigure } from "./firtal-registry-data-source-sheet";
@@ -244,6 +256,11 @@ export function ToolPolicyTable({
 
   // The layer this page authors, and the subject those writes target.
   const editLayer: ToolLayer = VIEW_EDIT_LAYER[view];
+
+  // The data-source scope binding (FIR-2083): which connection + tool fills the
+  // When picker for an arg-scoped row. Cheap and shared; null when no connection
+  // declares data-source scoping, in which case the arg picker simply never shows.
+  const argScopeConfig = useDataSourceScopeConfig(wsId);
 
   const rows = query.data ?? [];
   // Capability-wide rows (the flat catalog) vs. per-resource rows. A per-resource
@@ -473,6 +490,8 @@ export function ToolPolicyTable({
                           editLayer={editLayer}
                           disabled={busy}
                           onChange={(c) => applyCondition(row, c)}
+                          wsId={wsId}
+                          argScopeConfig={argScopeConfig}
                         />
                         {view === "agent" && subjectId ? (
                           <FirtalRegistryRowConfigure
@@ -571,6 +590,8 @@ export function ToolPolicyTable({
                     editLayer={editLayer}
                     disabled={busy}
                     onChange={(c) => applyCondition(row, c)}
+                    wsId={wsId}
+                    argScopeConfig={argScopeConfig}
                   />
                 </div>
               </div>
@@ -1080,9 +1101,24 @@ function normalizeHost(raw: string): string {
 // refine, so it is treated as no condition (and cleared to NULL server-side).
 export function conditionIsEmpty(c: ToolCondition | null | undefined): boolean {
   if (!c) return true;
+  const argEmpty =
+    !c.arg_allowlist || c.arg_allowlist.every((a) => a.values.length === 0);
   return (
-    c.host_allowlist.length === 0 && c.actions.length === 0 && c.expr.trim() === ""
+    c.host_allowlist.length === 0 &&
+    c.actions.length === 0 &&
+    argEmpty &&
+    c.expr.trim() === ""
   );
+}
+
+// argSummary describes a non-empty arg-allowlist for the trigger label, e.g.
+// "Finance +1" for a folder scope or "3 sources" for specific-source scope.
+function argSummary(list: ToolCondition["arg_allowlist"]): string | null {
+  const entry = (list ?? []).find((a) => a.values.length > 0);
+  if (!entry) return null;
+  const n = entry.values.length;
+  if (entry.arg === FOLDER_ARG) return n === 1 ? "1 folder" : `${n} folders`;
+  return n === 1 ? "1 source" : `${n} sources`;
 }
 
 // The Condition lives only on single-subject layers. The Group layer is a
@@ -1110,6 +1146,8 @@ export function summarizeCondition(c: ToolCondition): string {
   if (c.actions.length > 0) {
     parts.push(c.actions.length === 1 ? c.actions[0]! : `${c.actions.length} actions`);
   }
+  const arg = argSummary(c.arg_allowlist);
+  if (arg) parts.push(arg);
   if (c.expr.trim()) parts.push("CEL");
   return parts.join(" · ");
 }
@@ -1164,11 +1202,17 @@ export function ConditionControl({
   editLayer,
   disabled,
   onChange,
+  wsId,
+  argScopeConfig,
 }: {
   row: ToolPolicyRow;
   editLayer: ToolLayer;
   disabled?: boolean;
   onChange: (condition: ToolCondition | null) => void;
+  /** Workspace id, needed to fetch scope picker options (FIR-2083). */
+  wsId?: string;
+  /** The data-source scope binding for an arg-scoped row, if one applies. */
+  argScopeConfig?: ScopeConfig | null;
 }) {
   const [open, setOpen] = useState(false);
   const [hosts, setHosts] = useState<string[]>([]);
@@ -1177,6 +1221,13 @@ export function ConditionControl({
   const [hostDraft, setHostDraft] = useState("");
   const [hostError, setHostError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Argument-value allowlist picker state (FIR-2083). `argMode` chooses the
+  // scoping axis: "folder" writes a folder_id allowlist that auto-covers sources
+  // added to the folder later; "source" writes an explicit data_source_id list.
+  // `argValues` is the selected ids for the active mode.
+  const [argMode, setArgMode] = useState<"folder" | "source">("source");
+  const [argValues, setArgValues] = useState<string[]>([]);
+  const [argSearch, setArgSearch] = useState("");
 
   const ruleSetting = editLayer === "group" ? null : row.layers[editLayer];
   const hasConcreteRule =
@@ -1187,7 +1238,19 @@ export function ConditionControl({
   // The contextual facets: which structured sections are worth showing for this
   // tool. `meaningful` is the gate for whether the control appears at all.
   const facets = conditionFacets(row);
-  const meaningful = facets.host || facets.actions.length > 0 || facets.cel;
+  // The arg picker shows only when the row is arg-scoped AND a scope binding
+  // (connection + options source) was resolved for the workspace.
+  const showArg = facets.arg && !!wsId && !!argScopeConfig;
+  const meaningful =
+    facets.host || facets.actions.length > 0 || facets.cel || showArg;
+
+  // Lazily fetch the scope options only while the popover is open (one cached
+  // registry round-trip per edit session, not on every table render).
+  const { options: scopeOptions, loading: scopeLoading } = useScopeOptions(
+    wsId ?? "",
+    showArg ? argScopeConfig ?? null : null,
+    open && showArg,
+  );
 
   // Group has no single condition — show nothing there.
   if (editLayer === "group") return null;
@@ -1207,11 +1270,40 @@ export function ConditionControl({
       setExpr(current?.expr ?? "");
       setHostDraft("");
       setHostError(null);
+      setArgSearch("");
+      // Seed the arg picker from the stored allowlist: a folder_id entry → folder
+      // mode, otherwise the data_source_id entry → source mode.
+      const folderEntry = current?.arg_allowlist?.find(
+        (a) => a.arg === FOLDER_ARG && a.values.length > 0,
+      );
+      const sourceEntry = current?.arg_allowlist?.find(
+        (a) => a.arg === DATA_SOURCE_ARG && a.values.length > 0,
+      );
+      if (folderEntry) {
+        setArgMode("folder");
+        setArgValues(folderEntry.values);
+      } else {
+        setArgMode("source");
+        setArgValues(sourceEntry?.values ?? []);
+      }
       // Open the Advanced disclosure pre-expanded only when a CEL expression is
       // already set, so an existing expression is never hidden behind a click.
       setAdvancedOpen(!!current?.expr.trim());
     }
     setOpen(next);
+  }
+
+  // Switching the scope axis resets the selection — folder ids and source ids are
+  // different value spaces, so a selection never carries across modes.
+  function setArgModeReset(mode: "folder" | "source") {
+    setArgMode(mode);
+    setArgValues([]);
+  }
+
+  function toggleArgValue(id: string) {
+    setArgValues((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
   }
 
   function addHost() {
@@ -1234,7 +1326,18 @@ export function ConditionControl({
   }
 
   function save() {
-    const next: ToolCondition = { host_allowlist: hosts, actions, expr: expr.trim() };
+    // One arg-allowlist entry per condition: the gate ANDs entries, so a folder
+    // OR source rule is expressed as a single entry on the chosen axis.
+    const arg_allowlist =
+      showArg && argValues.length > 0
+        ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
+        : [];
+    const next: ToolCondition = {
+      host_allowlist: hosts,
+      actions,
+      arg_allowlist,
+      expr: expr.trim(),
+    };
     onChange(conditionIsEmpty(next) ? null : next);
     setOpen(false);
   }
@@ -1263,7 +1366,15 @@ export function ConditionControl({
     );
   }
 
-  const draftEmpty = conditionIsEmpty({ host_allowlist: hosts, actions, expr });
+  const draftEmpty = conditionIsEmpty({
+    host_allowlist: hosts,
+    actions,
+    arg_allowlist:
+      showArg && argValues.length > 0
+        ? [{ arg: argMode === "folder" ? FOLDER_ARG : DATA_SOURCE_ARG, values: argValues }]
+        : [],
+    expr,
+  });
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -1359,6 +1470,20 @@ export function ConditionControl({
             </div>
           )}
 
+          {showArg && (
+            <ArgScopePicker
+              label={argScopeConfig?.label ?? "Data sources"}
+              mode={argMode}
+              onModeChange={setArgModeReset}
+              values={argValues}
+              onToggle={toggleArgValue}
+              options={scopeOptions}
+              loading={scopeLoading}
+              search={argSearch}
+              onSearch={setArgSearch}
+            />
+          )}
+
           {facets.cel && (
             <div className="flex flex-col gap-1">
               <button
@@ -1416,6 +1541,178 @@ export function ConditionControl({
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+// ArgScopePicker is the search + multi-select for the data-source-scoping WHEN
+// term (FIR-2083). A segmented control picks the axis: "Folders" writes a
+// folder_id allowlist (auto-covers sources added to the folder later), "Sources"
+// writes an explicit data_source_id list. The gate ANDs allowlist entries, so a
+// rule scopes on exactly one axis — the segmented control keeps that invariant.
+function ArgScopePicker({
+  label,
+  mode,
+  onModeChange,
+  values,
+  onToggle,
+  options,
+  loading,
+  search,
+  onSearch,
+}: {
+  label: string;
+  mode: "folder" | "source";
+  onModeChange: (mode: "folder" | "source") => void;
+  values: string[];
+  onToggle: (id: string) => void;
+  options: ScopeOption[];
+  loading: boolean;
+  search: string;
+  onSearch: (s: string) => void;
+}) {
+  const groups = groupByFolder(options);
+  const q = search.trim().toLowerCase();
+  // Folder rows: one per real folder (a folderId), filtered by the search.
+  const folderRows = groups
+    .filter((g) => g.folderId)
+    .filter((g) => !q || g.folder.toLowerCase().includes(q));
+  // Source rows: keep the folder grouping for headings, filtered by source name,
+  // tag, or folder name so a search finds a source by any of them.
+  const sourceGroups = groups
+    .map((g) => ({
+      ...g,
+      options: g.options.filter(
+        (o) =>
+          !q ||
+          o.name.toLowerCase().includes(q) ||
+          o.folder?.toLowerCase().includes(q) ||
+          (o.tags ?? []).some((t) => t.toLowerCase().includes(q)),
+      ),
+    }))
+    .filter((g) => g.options.length > 0);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label className="flex items-center gap-1.5 text-xs">
+        <Database className="size-3.5" /> {label}
+      </Label>
+
+      {/* Segmented axis selector. */}
+      <div className="flex w-full overflow-hidden rounded-md border text-xs">
+        {(["source", "folder"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            aria-pressed={mode === m}
+            onClick={() => onModeChange(m)}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1.5 px-2 py-1.5 font-medium transition-colors",
+              mode === m
+                ? "bg-primary/10 text-primary"
+                : "bg-background text-muted-foreground hover:bg-muted",
+            )}
+          >
+            {m === "folder" ? <Folder className="size-3.5" /> : <Database className="size-3.5" />}
+            {m === "folder" ? "Folders" : "Specific sources"}
+          </button>
+        ))}
+      </div>
+
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder={mode === "folder" ? "Search folders…" : "Search sources…"}
+          className="h-8 pl-7"
+          aria-label={mode === "folder" ? "Search folders" : "Search sources"}
+        />
+      </div>
+
+      <div className="max-h-52 overflow-y-auto rounded-md border">
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-6 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" /> Loading…
+          </div>
+        ) : options.length === 0 ? (
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No options available. Check the connection's scopable argument.
+          </p>
+        ) : mode === "folder" ? (
+          folderRows.length === 0 ? (
+            <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+              No folders match.
+            </p>
+          ) : (
+            <ul className="divide-y">
+              {folderRows.map((g) => {
+                const selected = values.includes(g.folderId);
+                return (
+                  <li key={g.folderId}>
+                    <button
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => onToggle(g.folderId)}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                    >
+                      <Checkbox checked={selected} className="pointer-events-none" />
+                      <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 truncate">{g.folder}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {g.options.length}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        ) : sourceGroups.length === 0 ? (
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+            No sources match.
+          </p>
+        ) : (
+          <ul>
+            {sourceGroups.map((g) => (
+              <li key={g.folderId || g.folder}>
+                <div className="sticky top-0 bg-muted/60 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {g.folder}
+                </div>
+                <ul className="divide-y">
+                  {g.options.map((o) => {
+                    const selected = values.includes(o.id);
+                    return (
+                      <li key={o.id}>
+                        <button
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => onToggle(o.id)}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                        >
+                          <Checkbox checked={selected} className="pointer-events-none" />
+                          <span className="flex-1 truncate">{o.name}</span>
+                          {(o.tags ?? []).slice(0, 2).map((t) => (
+                            <Badge key={t} variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+                              {t}
+                            </Badge>
+                          ))}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        {mode === "folder"
+          ? "Allows every source in the selected folders — including ones added later."
+          : "Allows only the selected sources. None selected means every source."}
+      </p>
+    </div>
   );
 }
 

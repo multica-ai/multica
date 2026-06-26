@@ -50,6 +50,7 @@ type createRequest struct {
 	Internal            bool                 `json:"internal"`
 	AuthConfig          AuthConfig           `json:"auth_config"`
 	EndpointPermissions []EndpointPermission `json:"endpoint_permissions"`
+	ScopableArgs        []ScopableArg        `json:"scopable_args"`
 }
 
 type updateRequest struct {
@@ -58,6 +59,7 @@ type updateRequest struct {
 	Internal            bool                 `json:"internal"`
 	AuthConfig          AuthConfig           `json:"auth_config"`
 	EndpointPermissions []EndpointPermission `json:"endpoint_permissions"`
+	ScopableArgs        []ScopableArg        `json:"scopable_args"`
 	Enabled             bool                 `json:"enabled"`
 }
 
@@ -131,6 +133,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Internal:            req.Internal,
 		AuthConfig:          req.AuthConfig,
 		EndpointPermissions: req.EndpointPermissions,
+		ScopableArgs:        req.ScopableArgs,
 	})
 	if errors.Is(err, ErrDuplicateName) {
 		writeError(w, http.StatusConflict, "a connection with that name already exists")
@@ -175,6 +178,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		Internal:            req.Internal,
 		AuthConfig:          req.AuthConfig,
 		EndpointPermissions: req.EndpointPermissions,
+		ScopableArgs:        req.ScopableArgs,
 		Enabled:             req.Enabled,
 	})
 	if errors.Is(err, ErrNotFound) {

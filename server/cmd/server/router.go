@@ -1119,6 +1119,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection reads (any member).
 					r.Get("/connections", cerebroConnectionsHandler.List)
 					r.Get("/connections/{connId}", cerebroConnectionsHandler.Get)
+					// CEREBRO-PATCH(cerebro-connections-routes): FIR-2083 scopable-arg picker options (declared options-source tools only).
+					r.Get("/connections/{connId}/options", cerebroConnectionsHandler.Options)
 					// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 web_fetch policy read (any member).
 					r.Get("/web-fetch-policy", cerebroWebFetchPolicyHandler.Get)
 					// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent Agent Vault access read (any member).

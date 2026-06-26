@@ -158,12 +158,13 @@ describe("setToolPolicy / clearToolPolicy", () => {
       layer: "agent",
       subject_id: "a1",
       setting: "allow",
-      condition: { host_allowlist: ["firtal.com", "*.firtal.com"], actions: [], expr: "" },
+      condition: { host_allowlist: ["firtal.com", "*.firtal.com"], actions: [], arg_allowlist: [], expr: "" },
     });
     const [, init] = mockCerebroRequest.mock.calls[0]!;
     expect(JSON.parse(init.body).condition).toEqual({
       host_allowlist: ["firtal.com", "*.firtal.com"],
       actions: [],
+      arg_allowlist: [],
       expr: "",
     });
   });

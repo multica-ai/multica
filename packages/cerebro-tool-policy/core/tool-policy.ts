@@ -32,7 +32,7 @@ export type ToolEffectiveSetting = "allow" | "ask" | "deny";
  * lists only the kinds whose request attribute its gate threads, so the editor
  * never offers a structured term that can't match.
  */
-export type ConditionKind = "action" | "host" | "cel";
+export type ConditionKind = "action" | "host" | "cel" | "arg";
 
 export interface ToolPolicyEffective {
   setting: ToolEffectiveSetting;
@@ -81,7 +81,22 @@ export interface ToolPolicyLayers {
 export interface ToolCondition {
   host_allowlist: string[];
   actions: string[];
+  /**
+   * Argument-value allowlists (FIR-2083). Each entry restricts one named
+   * tool-call argument to a set of allowed values; entries AND together. This is
+   * the data-source-scoping axis — a firtal_registry rule conditioned on
+   * `data_source_id` ∈ {a chosen set} (or a folder), authored by the search +
+   * multi-select picker, so one rule whitelists a set instead of one row per
+   * source. Empty = no argument constraint.
+   */
+  arg_allowlist: ArgAllow[];
   expr: string;
+}
+
+/** One argument-value allowlist term: `arg` must be one of `values`. */
+export interface ArgAllow {
+  arg: string;
+  values: string[];
 }
 
 /**
@@ -227,10 +242,20 @@ const stringListSchema = z
   .catch([])
   .transform((xs) => xs.filter((x): x is string => typeof x === "string"));
 
+// One arg-allowlist term. A malformed entry folds to an inert {arg:"",values:[]}
+// rather than crashing the table parse — a condition never grants on its own.
+const argAllowSchema = z
+  .object({
+    arg: z.string().catch(""),
+    values: stringListSchema.default([]),
+  })
+  .catch({ arg: "", values: [] });
+
 const conditionSchema = z
   .object({
     host_allowlist: stringListSchema.default([]),
     actions: stringListSchema.default([]),
+    arg_allowlist: z.array(argAllowSchema).catch([]).default([]),
     expr: z.string().catch("").default(""),
   })
   .nullable()
@@ -252,7 +277,7 @@ const toolPolicyRowSchema = z.object({
   // omitted it" (undefined → heuristic fallback) from "no kind bites" ([]).
   // Unknown values are dropped and a malformed field folds to undefined.
   enforced_conditions: z
-    .array(z.enum(["action", "host", "cel"]))
+    .array(z.enum(["action", "host", "cel", "arg"]))
     .optional()
     .catch(undefined),
   layers: z

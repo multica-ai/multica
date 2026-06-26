@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CheckCircle2,
   ChevronRight,
@@ -30,7 +30,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { AppLink, useNavigation } from "@multica/views/navigation";
 import { PageHeader } from "@multica/views/layout/page-header";
 
-import type { Connection, ConnectionType, CreateConnectionInput, EndpointPermission, UpdateConnectionInput } from "../types";
+import type { Connection, ConnectionType, CreateConnectionInput, EndpointPermission, ScopableArg, UpdateConnectionInput } from "../types";
 import {
   useConnection,
   useCreateConnection,
@@ -97,8 +97,14 @@ interface FormBodyProps {
   initial: typeof EMPTY_FORM;
   initialAuthType: AuthType;
   initialEndpoints?: EndpointPermission[];
+  initialScopableArgs?: ScopableArg[];
   existingConn?: Connection;
-  onSave: (form: typeof EMPTY_FORM, authType: AuthType, endpoints: EndpointPermission[]) => Promise<void>;
+  onSave: (
+    form: typeof EMPTY_FORM,
+    authType: AuthType,
+    endpoints: EndpointPermission[],
+    scopableArgs: ScopableArg[],
+  ) => Promise<void>;
   isSaving: boolean;
   // Which secret fields had a value on load (server masks them as "***")
   secretsSet?: { bearerToken: boolean; apiKey: boolean; cfSecret: boolean };
@@ -109,6 +115,7 @@ function ConnectionFormBody({
   initial,
   initialAuthType,
   initialEndpoints,
+  initialScopableArgs,
   existingConn,
   onSave,
   isSaving,
@@ -121,7 +128,18 @@ function ConnectionFormBody({
   const [form, setForm] = useState(initial);
   const [authType, setAuthType] = useState<AuthType>(initialAuthType);
   const [endpoints, setEndpoints] = useState<EndpointPermission[]>(initialEndpoints ?? []);
+  const [scopableArgs, setScopableArgs] = useState<ScopableArg[]>(initialScopableArgs ?? []);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+
+  // Tool names known for this connection — the discovered list (persisted or from
+  // a fresh test) — used to populate the tool / options-source dropdowns so an
+  // admin picks from real tools instead of typing names by hand.
+  const knownToolNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const t of existingConn?.tools ?? []) if (t.name) names.add(t.name);
+    for (const t of testResult?.tools ?? []) if (t.name) names.add(t.name);
+    return [...names].sort();
+  }, [existingConn?.tools, testResult?.tools]);
 
   const testConn = useTestConnection(wsId ?? "");
 
@@ -185,13 +203,40 @@ function ConnectionFormBody({
     );
   }
 
+  function addScopableArg() {
+    setScopableArgs((prev) => [
+      ...prev,
+      { tool: "", arg: "", options_source_tool: "", group_by: "folder", tag_field: "tags" },
+    ]);
+  }
+
+  function removeScopableArg(index: number) {
+    setScopableArgs((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function setScopableArgField(index: number, field: keyof ScopableArg, value: string) {
+    setScopableArgs((prev) =>
+      prev.map((sa, i) => (i === index ? { ...sa, [field]: value } : sa)),
+    );
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     // Drop blank-path rows so an empty editor row doesn't persist as a junk endpoint.
     const cleaned = endpoints
       .map((ep) => ({ path: ep.path.trim(), methods: ep.methods }))
       .filter((ep) => ep.path !== "" && ep.methods.length > 0);
-    await onSave(form, authType, cleaned);
+    // Drop inert scopable-arg rows (the server also normalizes, but keep the
+    // payload clean): an entry needs a tool, an arg, and an options source.
+    const cleanedArgs = scopableArgs
+      .map((sa) => ({
+        ...sa,
+        tool: sa.tool.trim(),
+        arg: sa.arg.trim(),
+        options_source_tool: sa.options_source_tool.trim(),
+      }))
+      .filter((sa) => sa.tool !== "" && sa.arg !== "" && sa.options_source_tool !== "");
+    await onSave(form, authType, cleaned, cleanedArgs);
   }
 
   const backPath = wsPaths.settings();
@@ -587,6 +632,97 @@ function ConnectionFormBody({
             </div>
           )}
 
+          {/* Scopable arguments (MCP only) — declare which tool argument is the
+              scoping axis for the tool-policy "When" picker, and which tool fills
+              its choices. For the registry: query_run · data_source_id, options
+              from data_sources_list. Empty = no scoping (unchanged behavior). */}
+          {form.type === "mcp_http" && (
+            <div className="space-y-3 rounded-md border p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">Scopable arguments</p>
+                  <p className="text-xs text-muted-foreground">
+                    Declare which tool argument can be scoped from a permission rule’s
+                    “When”. The picker then offers a search + multi-select of allowed
+                    values, grouped by folder. Leave empty for no scoping.
+                    {knownToolNames.length > 0 ? (
+                      <> Discovered tools: <span className="font-mono">{knownToolNames.join(", ")}</span>.</>
+                    ) : (
+                      <> Use “Test &amp; discover” to load this connection’s tools.</>
+                    )}
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={addScopableArg} className="shrink-0">
+                  <Plus className="size-3.5 mr-1" />
+                  Add
+                </Button>
+              </div>
+
+              {scopableArgs.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">
+                  No scopable arguments. Click “Add” to declare one (e.g. query_run ·
+                  data_source_id from data_sources_list).
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {scopableArgs.map((sa, i) => (
+                    <div key={i} className="space-y-2 rounded-md border p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-muted-foreground">Scope #{i + 1}</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => removeScopableArg(i)}
+                          className="h-6 shrink-0 text-muted-foreground hover:text-destructive"
+                          aria-label="Remove scopable argument"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        <div className="flex flex-col gap-1">
+                          <Label className="text-[11px]">Tool</Label>
+                          <Input
+                            list="conn-tool-names"
+                            value={sa.tool}
+                            onChange={(e) => setScopableArgField(i, "tool", e.target.value)}
+                            placeholder="query_run"
+                            className="h-8 font-mono text-xs"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <Label className="text-[11px]">Argument</Label>
+                          <Input
+                            value={sa.arg}
+                            onChange={(e) => setScopableArgField(i, "arg", e.target.value)}
+                            placeholder="data_source_id"
+                            className="h-8 font-mono text-xs"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          <Label className="text-[11px]">Options from tool</Label>
+                          <Input
+                            list="conn-tool-names"
+                            value={sa.options_source_tool}
+                            onChange={(e) => setScopableArgField(i, "options_source_tool", e.target.value)}
+                            placeholder="data_sources_list"
+                            className="h-8 font-mono text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <datalist id="conn-tool-names">
+                    {knownToolNames.map((n) => (
+                      <option key={n} value={n} />
+                    ))}
+                  </datalist>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Enabled (edit only) */}
           {isEdit && (
             <div className="flex items-center gap-3">
@@ -629,7 +765,12 @@ export function ConnectionCreatePage() {
   const wsPaths = useWorkspacePaths();
   const create = useCreateConnection(wsId ?? "");
 
-  async function handleSave(form: typeof EMPTY_FORM, authType: AuthType, endpoints: EndpointPermission[]) {
+  async function handleSave(
+    form: typeof EMPTY_FORM,
+    authType: AuthType,
+    endpoints: EndpointPermission[],
+    scopableArgs: ScopableArg[],
+  ) {
     const input: CreateConnectionInput = {
       name: form.name,
       display_name: form.display_name,
@@ -638,6 +779,7 @@ export function ConnectionCreatePage() {
       internal: form.internal,
       auth_config: buildAuthConfig(form, authType),
       endpoint_permissions: endpoints,
+      scopable_args: scopableArgs,
     };
     await create.mutateAsync(input);
     toast.success("Connection created.");
@@ -650,8 +792,9 @@ export function ConnectionCreatePage() {
       initial={{ ...EMPTY_FORM }}
       initialAuthType="none"
       initialEndpoints={[]}
-      onSave={(form, authType, endpoints) => {
-        return handleSave(form, authType, endpoints).catch(() => {
+      initialScopableArgs={[]}
+      onSave={(form, authType, endpoints, scopableArgs) => {
+        return handleSave(form, authType, endpoints, scopableArgs).catch(() => {
           toast.error("Something went wrong. Please try again.");
         });
       }}
@@ -713,13 +856,19 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
     enabled: conn.enabled,
   };
 
-  async function handleSave(form: typeof EMPTY_FORM, authType: AuthType, endpoints: EndpointPermission[]) {
+  async function handleSave(
+    form: typeof EMPTY_FORM,
+    authType: AuthType,
+    endpoints: EndpointPermission[],
+    scopableArgs: ScopableArg[],
+  ) {
     const input: UpdateConnectionInput = {
       display_name: form.display_name,
       url: form.url,
       internal: form.internal,
       auth_config: buildAuthConfig(form, authType),
       endpoint_permissions: endpoints,
+      scopable_args: scopableArgs,
       enabled: form.enabled,
     };
     await update.mutateAsync(input);
@@ -733,10 +882,11 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
       initial={initialForm}
       initialAuthType={detectAuthType(conn.auth_config)}
       initialEndpoints={conn.endpoint_permissions ?? []}
+      initialScopableArgs={conn.scopable_args ?? []}
       existingConn={conn}
       secretsSet={secretsSet}
-      onSave={(form, authType, endpoints) => {
-        return handleSave(form, authType, endpoints).catch(() => {
+      onSave={(form, authType, endpoints, scopableArgs) => {
+        return handleSave(form, authType, endpoints, scopableArgs).catch(() => {
           toast.error("Something went wrong. Please try again.");
         });
       }}

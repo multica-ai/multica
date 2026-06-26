@@ -582,7 +582,7 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 		if !config.allows(dsID) {
 			return "", fmt.Errorf("firtal_registry: data_source_id %q is not in this agent's allowlist", dsID)
 		}
-		if err := t.chainGateDataSource(ctx, action, dsID); err != nil {
+		if err := t.chainGateDataSource(ctx, action, dsID, baseURL, apiKey); err != nil {
 			return "", err
 		}
 		return t.callExecute(ctx, baseURL, apiKey, map[string]any{
@@ -593,7 +593,7 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 		if !config.allows(dsID) {
 			return "", fmt.Errorf("firtal_registry: data_source_id %q is not in this agent's allowlist", dsID)
 		}
-		if err := t.chainGateDataSource(ctx, action, dsID); err != nil {
+		if err := t.chainGateDataSource(ctx, action, dsID, baseURL, apiKey); err != nil {
 			return "", err
 		}
 		body := map[string]any{"dataSourceId": dsID}
@@ -667,28 +667,59 @@ func (t *FirtalRegistryTool) registryGrantsEnabled(ctx context.Context) bool {
 // undecidable ⇒ fail-closed by effect), so a "conditional yes on a data source"
 // could not work. This makes the registry gate the twin of the daemon/local-CLI
 // gate for conditions.
-func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, action, dsID string) error {
+func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, action, dsID, baseURL, apiKey string) error {
 	if t.cerebro == nil || !t.registryGrantsEnabled(ctx) {
 		return nil
 	}
-	eff, err := toolpolicy.NewStoreFromQueries(t.cerebro).Resolve(ctx, toolpolicy.Query{
-		WorkspaceID:     t.tctx.WorkspaceID,
-		ToolKey:         "firtal_registry",
-		ResourcePattern: dsID,
-		AgentID:         t.tctx.AgentID,
-		UserID:          t.tctx.UserID,
-		Base:            toolpolicy.SettingAllow,
-		RequestContext:  toolpolicy.RequestContext{Action: action},
-		Eval:            t.registryPolicyCELEvaluator(ctx),
-	})
-	if err != nil {
-		// Fail closed: a resolver error on an enabled gate must not silently
-		// widen access. The legacy allowlist already passed, so this only ever
-		// blocks a source the admin opted into chain control for.
-		return fmt.Errorf("firtal_registry: permission check failed for data_source_id %q", dsID)
+	store := toolpolicy.NewStoreFromQueries(t.cerebro)
+	eval := t.registryPolicyCELEvaluator(ctx)
+	// FIR-2083: thread the called data_source_id so an argument-allowlist condition
+	// (data-source scoping) can match it. The context query keys on an EXACT
+	// resource_pattern, so two resolves are needed and the call is allowed only when
+	// BOTH pass (most restrictive):
+	//   1. The per-source override row (resource_pattern = data_source_id) — the
+	//      existing per-data-source Allow/Ask/Deny the Permissions screen authors.
+	//   2. The capability-wide scoping row (resource_pattern = "") — where a single
+	//      whitelist Allow conditioned on data_source_id ∈ {chosen set} lives, so
+	//      one rule scopes a set and a non-selected source closes to Deny. Absent
+	//      ⇒ Base=Allow, so an unconfigured registry is unchanged.
+	argValues := map[string]string{"data_source_id": dsID}
+	// FIR-2083 folder-based scoping: resolve the called source's folder so a rule
+	// conditioned on folder_id ∈ {a chosen folder} ("Finance · all") covers a NEW
+	// source dropped into that folder WITHOUT editing the rule. Best-effort: a
+	// resolution miss/error leaves folder_id unset, so a folder-allowlist term fails
+	// closed (absent arg ⇒ deny — the safe outcome for a folder rule) while a
+	// data_source_id-only rule is unaffected and keeps working through a registry
+	// hiccup. Skipped entirely when the resolver isn't wired (test fixtures pass "").
+	if baseURL != "" {
+		if folderID, err := t.resolveDataSourceFolder(ctx, baseURL, apiKey, dsID); err == nil && folderID != "" {
+			argValues["folder_id"] = folderID
+		}
 	}
-	if !eff.Allowed() {
-		return fmt.Errorf("firtal_registry: data_source_id %q is blocked by a permission rule (%s)", dsID, eff.Reason)
+	reqCtx := toolpolicy.RequestContext{
+		Action:    action,
+		ArgValues: argValues,
+	}
+	for _, resourcePattern := range []string{dsID, ""} {
+		eff, err := store.Resolve(ctx, toolpolicy.Query{
+			WorkspaceID:     t.tctx.WorkspaceID,
+			ToolKey:         "firtal_registry",
+			ResourcePattern: resourcePattern,
+			AgentID:         t.tctx.AgentID,
+			UserID:          t.tctx.UserID,
+			Base:            toolpolicy.SettingAllow,
+			RequestContext:  reqCtx,
+			Eval:            eval,
+		})
+		if err != nil {
+			// Fail closed: a resolver error on an enabled gate must not silently
+			// widen access. The legacy allowlist already passed, so this only ever
+			// blocks a source the admin opted into chain control for.
+			return fmt.Errorf("firtal_registry: permission check failed for data_source_id %q", dsID)
+		}
+		if !eff.Allowed() {
+			return fmt.Errorf("firtal_registry: data_source_id %q is blocked by a permission rule (%s)", dsID, eff.Reason)
+		}
 	}
 	return nil
 }
@@ -858,6 +889,57 @@ func (t *FirtalRegistryTool) callList(ctx context.Context, baseURL, apiKey strin
 		return "", err
 	}
 	return string(config.filterListed(body)), nil
+}
+
+// resolveDataSourceFolder fetches the folder_id of one data source for the
+// FIR-2083 folder-scoping gate. It reuses the registry list endpoint (which the
+// Phase 1 registry change extended with folder_id) and returns the folder_id of
+// the row whose id matches dsID, or "" when the source has no folder or is not in
+// the listing. The response is a bare JSON array or a {data:[…]} envelope; both
+// are handled. Errors propagate so the caller can keep the term unset (fail closed
+// for a folder rule) rather than guess. It is a separate read from callList so the
+// gate parses the raw folder_id without the agent-facing filtering/marshalling.
+func (t *FirtalRegistryTool) resolveDataSourceFolder(ctx context.Context, baseURL, apiKey, dsID string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+firtalRegistryListPath, nil)
+	if err != nil {
+		return "", fmt.Errorf("firtal_registry: build folder-resolve request: %w", err)
+	}
+	t.setRegistryHeaders(req, apiKey)
+	body, err := doRegistryRequest(req)
+	if err != nil {
+		return "", err
+	}
+	items := parseDataSourceList(body)
+	for _, item := range items {
+		if id, _ := item["id"].(string); strings.EqualFold(strings.TrimSpace(id), dsID) {
+			folderID, _ := item["folder_id"].(string)
+			return strings.TrimSpace(folderID), nil
+		}
+	}
+	return "", nil
+}
+
+// parseDataSourceList unwraps the registry list response into a slice of rows,
+// accepting both a bare JSON array and a {data:[…]} envelope. An unparseable or
+// unknown shape yields nil (no rows), so the caller treats it as "not found".
+func parseDataSourceList(raw []byte) []map[string]any {
+	var asArray []map[string]any
+	if err := json.Unmarshal(raw, &asArray); err == nil {
+		return asArray
+	}
+	var asEnvelope map[string]any
+	if err := json.Unmarshal(raw, &asEnvelope); err == nil {
+		if items, ok := asEnvelope["data"].([]any); ok {
+			out := make([]map[string]any, 0, len(items))
+			for _, item := range items {
+				if m, ok := item.(map[string]any); ok {
+					out = append(out, m)
+				}
+			}
+			return out
+		}
+	}
+	return nil
 }
 
 func (t *FirtalRegistryTool) callExecute(ctx context.Context, baseURL, apiKey string, body map[string]any) (string, error) {

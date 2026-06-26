@@ -4196,6 +4196,12 @@ export class ApiClient {
       body: JSON.stringify(body),
     });
   }
+  // CEREBRO-PATCH(cerebro-connections-options-client): FIR-2083 scopable-arg picker options.
+  async getCerebroConnectionOptions<T = unknown>(wsId: string, connId: string, tool: string): Promise<T> {
+    return this.fetch<T>(
+      `/api/workspaces/${wsId}/connections/${connId}/options?tool=${encodeURIComponent(tool)}`,
+    );
+  }
 
   // CEREBRO-PATCH(cerebro-web-fetch-policy-client): TECH-3522 per-workspace web_fetch policy methods.
   async getCerebroWebFetchPolicy<T = unknown>(wsId: string): Promise<T> {

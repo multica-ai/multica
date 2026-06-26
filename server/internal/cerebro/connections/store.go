@@ -39,10 +39,36 @@ type Connection struct {
 	// Tools is the tool list discovered the last time the connection was tested
 	// (mcp_http only). Persisted so the permissions UI can render one row per
 	// underlying tool without re-probing the server. Empty for API connections.
-	Tools     []Tool    `json:"tools"`
-	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Tools []Tool `json:"tools"`
+	// ScopableArgs declares which tool arguments are scoping axes for the
+	// tool-policy WHEN layer (FIR-2083). Empty = no scopable arguments.
+	ScopableArgs []ScopableArg `json:"scopable_args"`
+	Enabled      bool          `json:"enabled"`
+	CreatedAt    time.Time     `json:"created_at"`
+	UpdatedAt    time.Time     `json:"updated_at"`
+}
+
+// ScopableArg declares one tool argument whose value can be scoped from the
+// tool-policy WHEN layer (FIR-2083). It names the tool + argument that form the
+// scoping axis (e.g. query_run · data_source_id) and the options-source tool
+// whose result fills the search + multi-select picker (e.g. data_sources_list),
+// plus how the picker groups and tags the options. A connection with no
+// scopable arguments behaves exactly as before.
+type ScopableArg struct {
+	// Tool is the underlying tool the scoping applies to (e.g. "query_run").
+	Tool string `json:"tool"`
+	// Arg is the argument on Tool that is the scoping axis (e.g. "data_source_id").
+	Arg string `json:"arg"`
+	// OptionsSourceTool is the tool on this same connection whose result fills
+	// the picker's choices (e.g. "data_sources_list").
+	OptionsSourceTool string `json:"options_source_tool"`
+	// GroupBy names the option field the picker groups rows by (e.g. "folder").
+	// Optional; empty renders a flat list.
+	GroupBy string `json:"group_by,omitempty"`
+	// TagField names the option field carrying tags (e.g. "tags"). Optional.
+	TagField string `json:"tag_field,omitempty"`
+	// Label is an optional human label for the axis in the admin UI.
+	Label string `json:"label,omitempty"`
 }
 
 // Tool is one MCP tool exposed by a connection, persisted on the connection row.
@@ -78,6 +104,7 @@ type CreateParams struct {
 	Internal            bool
 	AuthConfig          AuthConfig
 	EndpointPermissions []EndpointPermission
+	ScopableArgs        []ScopableArg
 }
 
 // UpdateParams are the mutable fields on an existing connection.
@@ -89,6 +116,7 @@ type UpdateParams struct {
 	Internal            bool
 	AuthConfig          AuthConfig
 	EndpointPermissions []EndpointPermission
+	ScopableArgs        []ScopableArg
 	Enabled             bool
 }
 
@@ -109,7 +137,7 @@ func New(pool *pgxpool.Pool) *Store {
 func (s *Store) List(ctx context.Context, workspaceID pgtype.UUID) ([]Connection, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, workspace_id, name, display_name, type, url, internal,
-		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args
 		FROM workspace_connection
 		WHERE workspace_id = $1
 		ORDER BY created_at ASC
@@ -126,7 +154,7 @@ func (s *Store) List(ctx context.Context, workspaceID pgtype.UUID) ([]Connection
 func (s *Store) ListEnabled(ctx context.Context, workspaceID pgtype.UUID) ([]Connection, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, workspace_id, name, display_name, type, url, internal,
-		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args
 		FROM workspace_connection
 		WHERE workspace_id = $1 AND enabled = true
 		ORDER BY created_at ASC
@@ -142,7 +170,7 @@ func (s *Store) ListEnabled(ctx context.Context, workspaceID pgtype.UUID) ([]Con
 func (s *Store) Get(ctx context.Context, id, workspaceID pgtype.UUID) (Connection, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, workspace_id, name, display_name, type, url, internal,
-		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args
 		FROM workspace_connection
 		WHERE id = $1 AND workspace_id = $2
 	`, id, workspaceID)
@@ -166,13 +194,17 @@ func (s *Store) Create(ctx context.Context, p CreateParams) (Connection, error) 
 	if err != nil {
 		return Connection{}, err
 	}
+	saJSON, err := marshalScopableArgs(p.ScopableArgs)
+	if err != nil {
+		return Connection{}, err
+	}
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO workspace_connection
-		  (workspace_id, name, display_name, type, url, internal, auth_config, endpoint_permissions)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		  (workspace_id, name, display_name, type, url, internal, auth_config, endpoint_permissions, scopable_args)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, workspace_id, name, display_name, type, url, internal,
-		          auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
-	`, p.WorkspaceID, p.Name, p.DisplayName, p.Type, p.URL, p.Internal, authJSON, epJSON)
+		          auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args
+	`, p.WorkspaceID, p.Name, p.DisplayName, p.Type, p.URL, p.Internal, authJSON, epJSON, saJSON)
 	c, err := scanRow(row)
 	if err != nil && strings.Contains(err.Error(), "workspace_connection_name_unique") {
 		return Connection{}, ErrDuplicateName
@@ -190,15 +222,19 @@ func (s *Store) Update(ctx context.Context, p UpdateParams) (Connection, error) 
 	if err != nil {
 		return Connection{}, err
 	}
+	saJSON, err := marshalScopableArgs(p.ScopableArgs)
+	if err != nil {
+		return Connection{}, err
+	}
 	row := s.pool.QueryRow(ctx, `
 		UPDATE workspace_connection
 		   SET display_name = $3, url = $4, internal = $5,
 		       auth_config = $6, endpoint_permissions = $7, enabled = $8,
-		       updated_at = now()
+		       scopable_args = $9, updated_at = now()
 		 WHERE id = $1 AND workspace_id = $2
 		RETURNING id, workspace_id, name, display_name, type, url, internal,
-		          auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
-	`, p.ID, p.WorkspaceID, p.DisplayName, p.URL, p.Internal, authJSON, epJSON, p.Enabled)
+		          auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args
+	`, p.ID, p.WorkspaceID, p.DisplayName, p.URL, p.Internal, authJSON, epJSON, p.Enabled, saJSON)
 	c, err := scanRow(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Connection{}, ErrNotFound
@@ -319,7 +355,7 @@ func mcpServerEntry(c Connection, rewriter MCPURLRewriter) map[string]any {
 func (s *Store) GetEnabledByName(ctx context.Context, workspaceID pgtype.UUID, name string) (Connection, error) {
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, workspace_id, name, display_name, type, url, internal,
-		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools, scopable_args
 		FROM workspace_connection
 		WHERE workspace_id = $1 AND name = $2 AND enabled = true
 	`, workspaceID, name)
@@ -374,10 +410,11 @@ func scanRowValues(scan scanFn) (Connection, error) {
 		name, displayName, typ, url string
 		internal, enabled           bool
 		authRaw, epRaw, toolsRaw    []byte
+		scopableArgsRaw             []byte
 		createdAt, updatedAt        pgtype.Timestamptz
 	)
 	if err := scan(&id, &wsID, &name, &displayName, &typ, &url, &internal,
-		&authRaw, &epRaw, &enabled, &createdAt, &updatedAt, &toolsRaw); err != nil {
+		&authRaw, &epRaw, &enabled, &createdAt, &updatedAt, &toolsRaw, &scopableArgsRaw); err != nil {
 		return Connection{}, fmt.Errorf("connections: scan: %w", err)
 	}
 	var auth AuthConfig
@@ -392,6 +429,11 @@ func scanRowValues(scan scanFn) (Connection, error) {
 	if tools == nil {
 		tools = []Tool{}
 	}
+	var scopableArgs []ScopableArg
+	_ = json.Unmarshal(scopableArgsRaw, &scopableArgs)
+	if scopableArgs == nil {
+		scopableArgs = []ScopableArg{}
+	}
 	return Connection{
 		ID:                  util.UUIDToString(id),
 		WorkspaceID:         util.UUIDToString(wsID),
@@ -403,10 +445,48 @@ func scanRowValues(scan scanFn) (Connection, error) {
 		AuthConfig:          auth,
 		EndpointPermissions: eps,
 		Tools:               tools,
+		ScopableArgs:        scopableArgs,
 		Enabled:             enabled,
 		CreatedAt:           createdAt.Time,
 		UpdatedAt:           updatedAt.Time,
 	}, nil
+}
+
+// marshalScopableArgs serializes the scopable-args declaration for storage,
+// normalizing nil to an empty array and dropping inert entries (an entry that
+// names no tool/arg/options-source is meaningless and never persisted).
+func marshalScopableArgs(args []ScopableArg) ([]byte, error) {
+	cleaned := make([]ScopableArg, 0, len(args))
+	for _, a := range args {
+		a.Tool = strings.TrimSpace(a.Tool)
+		a.Arg = strings.TrimSpace(a.Arg)
+		a.OptionsSourceTool = strings.TrimSpace(a.OptionsSourceTool)
+		a.GroupBy = strings.TrimSpace(a.GroupBy)
+		a.TagField = strings.TrimSpace(a.TagField)
+		a.Label = strings.TrimSpace(a.Label)
+		if a.Tool == "" || a.Arg == "" || a.OptionsSourceTool == "" {
+			continue
+		}
+		cleaned = append(cleaned, a)
+	}
+	b, err := json.Marshal(cleaned)
+	if err != nil {
+		return nil, fmt.Errorf("connections: marshal scopable_args: %w", err)
+	}
+	return b, nil
+}
+
+// OptionsSourceFor returns the declared scopable argument whose options-source
+// tool matches the given tool name, reporting whether one exists. It is the
+// allowlist the options endpoint checks before relaying an MCP call so a caller
+// cannot drive an arbitrary tool through the connection's credentials.
+func (c Connection) OptionsSourceFor(optionsSourceTool string) (ScopableArg, bool) {
+	for _, a := range c.ScopableArgs {
+		if a.OptionsSourceTool == optionsSourceTool {
+			return a, true
+		}
+	}
+	return ScopableArg{}, false
 }
 
 // UpdateTools persists the tool list discovered by a connection test so the

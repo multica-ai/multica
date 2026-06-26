@@ -22,6 +22,12 @@ type RequestContext struct {
 	// Action is the verb being attempted (read/checkout/push, reveal, rotate …),
 	// for action-scoped conditions on repos and credentials.
 	Action string
+	// ArgValues carries named tool-call argument values the WHEN layer matches
+	// on (e.g. {"data_source_id": "<id>"}), for argument-allowlist conditions
+	// (FIR-2083 data-source scoping). Only arguments a gate actually threads are
+	// present; an absent argument reads as "" and so fails a non-empty allowlist
+	// closed (a nil map indexes to "" safely).
+	ArgValues map[string]string
 }
 
 // ExprEvaluator evaluates a (precompiled) CEL expression against the request
@@ -38,15 +44,50 @@ type Condition struct {
 	HostAllowlist []string `json:"host_allowlist,omitempty"`
 	// Actions, when non-empty, restricts the rule to these action verbs.
 	Actions []string `json:"actions,omitempty"`
+	// ArgAllowlist, when non-empty, requires each named tool-call argument to
+	// match one of its allowed values. Multiple entries AND together (every
+	// listed argument must be in its allowlist). It is the structured form of
+	// "this rule applies only when argument <Arg> is one of <Values>" — the
+	// data-source-scoping axis (FIR-2083): a firtal_registry rule conditioned on
+	// data_source_id ∈ {a chosen set of sources}, so one rule whitelists a set
+	// instead of one row per source. The gate threads argument values into
+	// RequestContext.ArgValues; a rule is only offered this term where the gate
+	// sets the value (see EnforcedConditionKinds), so it never silently fails to
+	// match.
+	ArgAllowlist []ArgAllow `json:"arg_allowlist,omitempty"`
 	// Expr, when non-empty, is a CEL expression evaluated against the request
 	// context via the injected ExprEvaluator. Compiled at write-time elsewhere;
 	// carried opaquely here.
 	Expr string `json:"expr,omitempty"`
 }
 
+// ArgAllow restricts a single named tool-call argument to an allowlist of
+// values. An empty Values list imposes no constraint (treated as absent).
+// Matching is case- and space-insensitive, like the host and action terms.
+type ArgAllow struct {
+	// Arg is the tool-call argument name (e.g. "data_source_id").
+	Arg string `json:"arg"`
+	// Values is the set of allowed values for Arg. The request's value for Arg
+	// must equal one of these (case-insensitively) for the term to match.
+	Values []string `json:"values,omitempty"`
+}
+
 // IsZero reports whether the condition imposes no constraint.
 func (c Condition) IsZero() bool {
-	return len(c.HostAllowlist) == 0 && len(c.Actions) == 0 && c.Expr == ""
+	return len(c.HostAllowlist) == 0 && len(c.Actions) == 0 &&
+		!hasArgConstraint(c.ArgAllowlist) && c.Expr == ""
+}
+
+// hasArgConstraint reports whether any arg-allowlist entry actually constrains
+// (a non-empty Values list). An entry with no values is inert, so a condition
+// carrying only such entries imposes nothing and is still zero.
+func hasArgConstraint(list []ArgAllow) bool {
+	for _, a := range list {
+		if len(a.Values) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Matches reports whether the request satisfies the condition's terms. It is a
@@ -61,6 +102,19 @@ func (c Condition) Matches(ctx RequestContext, eval ExprEvaluator) (bool, error)
 	}
 	if len(c.Actions) > 0 && !containsFold(c.Actions, ctx.Action) {
 		return false, nil
+	}
+	for _, a := range c.ArgAllowlist {
+		if len(a.Values) == 0 {
+			continue // inert entry imposes no constraint
+		}
+		// An absent or blank argument never satisfies a non-empty allowlist — fail
+		// closed independently of whether the allowlist itself contains "". This
+		// keeps the term safe to reuse for an argument that can legally be empty
+		// (containsFold alone would let an allowlisted "" match an absent arg).
+		v := strings.TrimSpace(ctx.ArgValues[a.Arg])
+		if v == "" || !containsFold(a.Values, v) {
+			return false, nil
+		}
 	}
 	if c.Expr != "" {
 		if eval == nil {
@@ -231,6 +285,13 @@ const (
 	// ExprEvaluator is wired at every chain gate, so it is available on every
 	// chain-gated capability.
 	ConditionKindCEL ConditionKind = "cel"
+	// ConditionKindArg is the argument-value allowlist (Condition.ArgAllowlist).
+	// Bites only where the gate threads the argument into
+	// RequestContext.ArgValues — today the firtal_registry gate, which sets
+	// data_source_id and the resolved folder_id of the called source (FIR-2083
+	// data-source scoping: a rule may scope a chosen set of sources, or a whole
+	// folder so new sources in it are auto-covered).
+	ConditionKindArg ConditionKind = "arg"
 )
 
 // EnforcedConditionKinds reports which WHEN condition kinds actually bite for a
@@ -260,6 +321,13 @@ func EnforcedConditionKinds(toolKey, source string, managedExternally bool) []Co
 	}
 	if toolKey == webFetchToolKey {
 		kinds = append(kinds, ConditionKindHost)
+	}
+	// The firtal_registry gate threads data_source_id into RequestContext.ArgValues
+	// (FIR-2083), so an argument-allowlist term bites on the registry tool and its
+	// per-data-source projection rows — letting one rule scope a chosen set of
+	// sources ("Finance · all") instead of one row per source.
+	if toolKey == RegistryToolKey || source == registryDataSourceSource {
+		kinds = append(kinds, ConditionKindArg)
 	}
 	kinds = append(kinds, ConditionKindCEL)
 	return kinds

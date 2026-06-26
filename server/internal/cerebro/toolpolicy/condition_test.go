@@ -272,17 +272,18 @@ func TestEnforcedConditionKinds(t *testing.T) {
 		managedExternally bool
 		wantAction        bool
 		wantHost          bool
+		wantArg           bool
 		wantCEL           bool
 	}{
-		{"repo checkout → action + cel", "repo.checkout", "repo", false, true, false, true},
-		{"credential reveal → action + cel", "credential.reveal", "credential", false, true, false, true},
-		{"registry tool → action + cel", RegistryToolKey, "builtin", false, true, false, true},
-		{"registry data source row → action + cel", "firtal_registry", "registry-data-source", false, true, false, true},
-		{"web_fetch → host + cel", "web_fetch", "builtin", false, false, true, true},
-		{"generic builtin → cel only", "tools:Bash", "runtime_report", false, false, false, true},
-		{"mcp tool → cel only", "mcp__slack__post", "scan", false, false, false, true},
-		{"connection tool → cel only", "connection:customer-service", "connection", false, false, false, true},
-		{"managed-externally → nothing", "manage_runtime", "platform", true, false, false, false},
+		{"repo checkout → action + cel", "repo.checkout", "repo", false, true, false, false, true},
+		{"credential reveal → action + cel", "credential.reveal", "credential", false, true, false, false, true},
+		{"registry tool → action + arg + cel", RegistryToolKey, "builtin", false, true, false, true, true},
+		{"registry data source row → action + arg + cel", "firtal_registry", "registry-data-source", false, true, false, true, true},
+		{"web_fetch → host + cel", "web_fetch", "builtin", false, false, true, false, true},
+		{"generic builtin → cel only", "tools:Bash", "runtime_report", false, false, false, false, true},
+		{"mcp tool → cel only", "mcp__slack__post", "scan", false, false, false, false, true},
+		{"connection tool → cel only", "connection:customer-service", "connection", false, false, false, false, true},
+		{"managed-externally → nothing", "manage_runtime", "platform", true, false, false, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -293,6 +294,9 @@ func TestEnforcedConditionKinds(t *testing.T) {
 			if got := has(ks, ConditionKindHost); got != tc.wantHost {
 				t.Errorf("host = %v, want %v (kinds=%v)", got, tc.wantHost, ks)
 			}
+			if got := has(ks, ConditionKindArg); got != tc.wantArg {
+				t.Errorf("arg = %v, want %v (kinds=%v)", got, tc.wantArg, ks)
+			}
 			if got := has(ks, ConditionKindCEL); got != tc.wantCEL {
 				t.Errorf("cel = %v, want %v (kinds=%v)", got, tc.wantCEL, ks)
 			}
@@ -300,5 +304,110 @@ func TestEnforcedConditionKinds(t *testing.T) {
 				t.Errorf("managed-externally must surface no kinds, got %v", ks)
 			}
 		})
+	}
+}
+
+// TestCondition_ArgAllowlist covers the FIR-2083 data-source-scoping axis: a
+// rule conditioned on a named tool-call argument being one of an allowlist of
+// values, threaded through RequestContext.ArgValues.
+func TestCondition_ArgAllowlist(t *testing.T) {
+	c := Condition{ArgAllowlist: []ArgAllow{{
+		Arg:    "data_source_id",
+		Values: []string{"finance-pnl", "finance-ar"},
+	}}}
+	ctx := func(id string) RequestContext {
+		return RequestContext{ArgValues: map[string]string{"data_source_id": id}}
+	}
+	if ok, _ := c.Matches(ctx("finance-pnl"), nil); !ok {
+		t.Fatal("a value in the allowlist should match")
+	}
+	if ok, _ := c.Matches(ctx("FINANCE-AR"), nil); !ok {
+		t.Fatal("matching must be case-insensitive")
+	}
+	if ok, _ := c.Matches(ctx("hr-salaries"), nil); ok {
+		t.Fatal("a value outside the allowlist must not match")
+	}
+	// An absent argument reads as "" and fails a non-empty allowlist closed —
+	// the gate must thread the value for the term to ever pass.
+	if ok, _ := c.Matches(RequestContext{}, nil); ok {
+		t.Fatal("a request with no ArgValues must not satisfy a non-empty allowlist")
+	}
+}
+
+// An ArgAllow entry with no Values is inert: it constrains nothing and leaves
+// the condition zero, so behaviour is preserved for rules that carry an empty
+// allowlist (e.g. a half-filled editor state).
+func TestCondition_ArgAllowlist_EmptyValuesIsInert(t *testing.T) {
+	c := Condition{ArgAllowlist: []ArgAllow{{Arg: "data_source_id"}}}
+	if !c.IsZero() {
+		t.Fatal("an arg-allowlist with no values must report IsZero")
+	}
+	if ok, err := c.Matches(RequestContext{}, nil); err != nil || !ok {
+		t.Fatalf("an inert arg term must match unconditionally, got ok=%v err=%v", ok, err)
+	}
+}
+
+// Multiple arg terms AND together, and combine with the other structured terms
+// (host/action) under the same all-must-match rule.
+func TestCondition_ArgAllowlist_AndsWithOtherTerms(t *testing.T) {
+	c := Condition{
+		Actions: []string{"execute"},
+		ArgAllowlist: []ArgAllow{{
+			Arg:    "data_source_id",
+			Values: []string{"finance-pnl"},
+		}},
+	}
+	pass := RequestContext{Action: "execute", ArgValues: map[string]string{"data_source_id": "finance-pnl"}}
+	if ok, _ := c.Matches(pass, nil); !ok {
+		t.Fatal("both action and arg satisfied should match")
+	}
+	wrongArg := RequestContext{Action: "execute", ArgValues: map[string]string{"data_source_id": "hr-salaries"}}
+	if ok, _ := c.Matches(wrongArg, nil); ok {
+		t.Fatal("action satisfied but arg outside allowlist must not match")
+	}
+	wrongAction := RequestContext{Action: "get_schema", ArgValues: map[string]string{"data_source_id": "finance-pnl"}}
+	if ok, _ := c.Matches(wrongAction, nil); ok {
+		t.Fatal("arg satisfied but action outside list must not match")
+	}
+}
+
+// The whitelist semantics from ConditionedSetting must hold for an arg term: an
+// Allow rule whose arg condition is unmet closes the gate to Deny rather than
+// falling back to Base=Allow — so a non-selected data source is actually denied.
+func TestConditionedSetting_ArgAllow_WhitelistDenies(t *testing.T) {
+	cond := &Condition{ArgAllowlist: []ArgAllow{{
+		Arg:    "data_source_id",
+		Values: []string{"finance-pnl"},
+	}}}
+	allowed := RequestContext{ArgValues: map[string]string{"data_source_id": "finance-pnl"}}
+	if got, applies := ConditionedSetting(SettingAllow, cond, allowed, nil); !applies || got != SettingAllow {
+		t.Fatalf("a selected source must stay allowed; got (%q, %v)", got, applies)
+	}
+	denied := RequestContext{ArgValues: map[string]string{"data_source_id": "hr-salaries"}}
+	if got, applies := ConditionedSetting(SettingAllow, cond, denied, nil); !applies || got != SettingDeny {
+		t.Fatalf("a non-selected source must be denied (whitelist), not fall back to base allow; got (%q, %v)", got, applies)
+	}
+}
+
+// Mia's FIR-2083 footgun note: an allowlist that contains "" must NOT let an
+// absent argument through. The arg term fails closed on a blank value regardless
+// of the allowlist contents, so the pattern is safe to reuse for an argument that
+// can legally be empty.
+func TestCondition_ArgAllowlist_BlankNeverMatches(t *testing.T) {
+	c := Condition{ArgAllowlist: []ArgAllow{{
+		Arg:    "data_source_id",
+		Values: []string{"", "finance-pnl"}, // allowlist deliberately contains ""
+	}}}
+	// Absent arg → blank → must not match even though "" is in the allowlist.
+	if ok, _ := c.Matches(RequestContext{}, nil); ok {
+		t.Fatal("a blank/absent arg must not satisfy an allowlist, even one containing \"\"")
+	}
+	// Whitespace-only value is also blank after trim.
+	if ok, _ := c.Matches(RequestContext{ArgValues: map[string]string{"data_source_id": "  "}}, nil); ok {
+		t.Fatal("a whitespace-only arg must not match")
+	}
+	// A real value still matches.
+	if ok, _ := c.Matches(RequestContext{ArgValues: map[string]string{"data_source_id": "finance-pnl"}}, nil); !ok {
+		t.Fatal("a real allowlisted value must still match")
 	}
 }

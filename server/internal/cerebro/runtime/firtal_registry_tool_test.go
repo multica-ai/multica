@@ -275,7 +275,7 @@ func TestFirtalRegistryCallRejectsMissingAction(t *testing.T) {
 // gate must allow — it never blocks a source the legacy allowlist already passed.
 func TestFirtalRegistryChainGateNoOpWithoutResolver(t *testing.T) {
 	tool := &FirtalRegistryTool{} // cerebro == nil
-	if err := tool.chainGateDataSource(context.Background(), "execute", "ds-anything"); err != nil {
+	if err := tool.chainGateDataSource(context.Background(), "execute", "ds-anything", "", ""); err != nil {
 		t.Fatalf("chainGateDataSource with no resolver must allow, got %v", err)
 	}
 }

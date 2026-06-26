@@ -99,9 +99,10 @@ type layerSettings struct {
 // WHEN layer (FIR-1609) on a rule. All fields omitempty so a row with no
 // condition serializes to null, not an empty object.
 type conditionResponse struct {
-	HostAllowlist []string `json:"host_allowlist,omitempty"`
-	Actions       []string `json:"actions,omitempty"`
-	Expr          string   `json:"expr,omitempty"`
+	HostAllowlist []string   `json:"host_allowlist,omitempty"`
+	Actions       []string   `json:"actions,omitempty"`
+	ArgAllowlist  []ArgAllow `json:"arg_allowlist,omitempty"`
+	Expr          string     `json:"expr,omitempty"`
 }
 
 // layerConditions carries the per-layer Condition for one tool, each field nil
@@ -165,9 +166,10 @@ type setRequest struct {
 // conditionRequest is the wire form of a Condition on a write. It mirrors
 // conditionResponse; an absent or all-empty condition stores NULL.
 type conditionRequest struct {
-	HostAllowlist []string `json:"host_allowlist"`
-	Actions       []string `json:"actions"`
-	Expr          string   `json:"expr"`
+	HostAllowlist []string   `json:"host_allowlist"`
+	Actions       []string   `json:"actions"`
+	ArgAllowlist  []ArgAllow `json:"arg_allowlist"`
+	Expr          string     `json:"expr"`
 }
 
 // toCondition converts the request form to the domain Condition, or nil when the
@@ -179,6 +181,7 @@ func (c *conditionRequest) toCondition() *Condition {
 	cond := &Condition{
 		HostAllowlist: c.HostAllowlist,
 		Actions:       c.Actions,
+		ArgAllowlist:  c.ArgAllowlist,
 		Expr:          c.Expr,
 	}
 	if cond.IsZero() {
@@ -516,6 +519,7 @@ func conditionPtr(conditions map[Layer]*Condition, l Layer) *conditionResponse {
 	return &conditionResponse{
 		HostAllowlist: c.HostAllowlist,
 		Actions:       c.Actions,
+		ArgAllowlist:  c.ArgAllowlist,
 		Expr:          c.Expr,
 	}
 }

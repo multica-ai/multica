@@ -109,6 +109,9 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
           internal: form.internal,
           auth_config,
           endpoint_permissions: existing!.endpoint_permissions,
+          // This compact dialog doesn't edit scopable args — preserve the stored
+          // ones so an edit here never wipes a connection's scoping config.
+          scopable_args: existing!.scopable_args ?? [],
           enabled: form.enabled,
         };
         await update.mutateAsync(input);
@@ -122,6 +125,7 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
           internal: form.internal,
           auth_config,
           endpoint_permissions: [],
+          scopable_args: [],
         };
         await create.mutateAsync(input);
         toast.success("Connection created.");

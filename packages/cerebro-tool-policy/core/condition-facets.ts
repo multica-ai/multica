@@ -29,6 +29,14 @@ export interface ConditionFacets {
   host: boolean;
   actions: string[];
   /**
+   * Whether the argument-value allowlist facet is meaningful here (FIR-2083).
+   * True only where the gate threads a scoping argument into RequestContext —
+   * today the firtal_registry tool and its per-data-source rows. The picker's
+   * options + arg name are supplied separately (the connection's scopable_args);
+   * this flag only says the facet bites.
+   */
+  arg: boolean;
+  /**
    * Whether the CEL escape hatch is meaningful here. CEL is evaluable at every
    * chain gate, so it is true on any chain-gated row — but FIR-1708 C lets the
    * server withhold it on rows the chain does not gate (managed-externally).
@@ -53,10 +61,25 @@ export function conditionFacets(row: ToolPolicyRow): ConditionFacets {
     return {
       host: enforced.includes("host"),
       actions: enforced.includes("action") ? actionPreset(row) : [],
+      arg: enforced.includes("arg"),
       cel: enforced.includes("cel"),
     };
   }
-  return { host: hasHostFacet(row), actions: actionPreset(row), cel: true };
+  return {
+    host: hasHostFacet(row),
+    actions: actionPreset(row),
+    arg: hasArgFacet(row),
+    cel: true,
+  };
+}
+
+// hasArgFacet is the heuristic fallback (older backend that omits
+// enforced_conditions): the firtal_registry tool and its per-data-source rows
+// are the only argument-scoped capability today (FIR-2083).
+function hasArgFacet(row: ToolPolicyRow): boolean {
+  return (
+    row.tool_key === "firtal_registry" || row.source === "registry-data-source"
+  );
 }
 
 // actionPreset returns the literal verb list for a tool whose resource model has
