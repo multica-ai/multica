@@ -33,6 +33,21 @@ func (f *composioFakeSDK) CreateLink(_ context.Context, _ sdk.CreateLinkRequest)
 	}
 	return &sdk.CreateLinkResponse{RedirectURL: "https://composio.example/redirect"}, nil
 }
+
+// ListConnectedAccounts echoes the requested id as an account owned by the
+// handler-test user under the notion auth config, so callback ownership
+// verification passes on the happy path.
+func (f *composioFakeSDK) ListConnectedAccounts(_ context.Context, req sdk.ListConnectedAccountsRequest) (*sdk.ListConnectedAccountsResponse, error) {
+	id := ""
+	if len(req.ConnectedAccountIDs) > 0 {
+		id = req.ConnectedAccountIDs[0]
+	}
+	return &sdk.ListConnectedAccountsResponse{Items: []sdk.ConnectedAccount{{
+		ID:           id,
+		UserID:       composioTestUserID,
+		AuthConfigID: "ac_notion",
+	}}}, nil
+}
 func (f *composioFakeSDK) RevokeConnection(_ context.Context, _ string) error       { return f.revokeErr }
 func (f *composioFakeSDK) DeleteConnectedAccount(_ context.Context, _ string) error { return nil }
 func (f *composioFakeSDK) CreateSession(_ context.Context, _ sdk.CreateSessionRequest) (*sdk.CreateSessionResponse, error) {

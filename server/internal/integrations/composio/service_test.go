@@ -30,6 +30,15 @@ type fakeSDK struct {
 	createSessErr   error
 	lastSessReq     sdk.CreateSessionRequest
 	createSessCalls int
+	// account-ownership verification (CompleteCallback). By default
+	// ListConnectedAccounts echoes the requested id with acctUserID /
+	// acctAuthConfigID so success-path tests can opt in to a matching account;
+	// acctMissing returns no items, listAccountsErr forces a transport error.
+	acctUserID       string
+	acctAuthConfigID string
+	acctMissing      bool
+	listAccountsErr  error
+	lastListAccounts sdk.ListConnectedAccountsRequest
 }
 
 func (f *fakeSDK) CreateLink(_ context.Context, req sdk.CreateLinkRequest) (*sdk.CreateLinkResponse, error) {
@@ -41,6 +50,25 @@ func (f *fakeSDK) CreateLink(_ context.Context, req sdk.CreateLinkRequest) (*sdk
 		return f.createLinkResp, nil
 	}
 	return &sdk.CreateLinkResponse{RedirectURL: "https://composio.example/redirect", ConnectedAccountID: "ca_pending"}, nil
+}
+
+func (f *fakeSDK) ListConnectedAccounts(_ context.Context, req sdk.ListConnectedAccountsRequest) (*sdk.ListConnectedAccountsResponse, error) {
+	f.lastListAccounts = req
+	if f.listAccountsErr != nil {
+		return nil, f.listAccountsErr
+	}
+	if f.acctMissing {
+		return &sdk.ListConnectedAccountsResponse{}, nil
+	}
+	id := ""
+	if len(req.ConnectedAccountIDs) > 0 {
+		id = req.ConnectedAccountIDs[0]
+	}
+	return &sdk.ListConnectedAccountsResponse{Items: []sdk.ConnectedAccount{{
+		ID:           id,
+		UserID:       f.acctUserID,
+		AuthConfigID: f.acctAuthConfigID,
+	}}}, nil
 }
 
 func (f *fakeSDK) RevokeConnection(_ context.Context, id string) error {
@@ -221,8 +249,11 @@ func TestBeginConnect_UnsupportedToolkit(t *testing.T) {
 func TestCompleteCallback_SuccessAndIdempotent(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
-	svc := newTestService(t, &fakeSDK{}, store)
 	userID := mintUUID(3)
+	// The account Composio reports for ca_123 belongs to this user under the
+	// notion auth config, so ownership verification passes.
+	sdkFake := &fakeSDK{acctUserID: util.UUIDToString(userID), acctAuthConfigID: "ac_notion"}
+	svc := newTestService(t, sdkFake, store)
 	state, _ := signState(testSecret, stateClaims{
 		UserID:      util.UUIDToString(userID),
 		ToolkitSlug: "notion",
@@ -281,6 +312,71 @@ func TestCompleteCallback_BadState(t *testing.T) {
 	}
 }
 
+// TestCompleteCallback_TamperedAccountRejected covers the PR 4608 blocker:
+// a valid, un-expired state paired with a connected_account_id that Composio
+// reports as belonging to a DIFFERENT user must be rejected, and no row written.
+func TestCompleteCallback_TamperedAccountRejected(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	userID := mintUUID(20)
+	// Composio says ca_evil belongs to someone else, not our state's user.
+	sdkFake := &fakeSDK{acctUserID: util.UUIDToString(mintUUID(99)), acctAuthConfigID: "ac_notion"}
+	svc := newTestService(t, sdkFake, store)
+	state, _ := signState(testSecret, stateClaims{
+		UserID:      util.UUIDToString(userID),
+		ToolkitSlug: "notion",
+		Exp:         time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
+	})
+	if _, err := svc.CompleteCallback(context.Background(), state, "success", "ca_evil"); !errors.Is(err, ErrAccountVerification) {
+		t.Fatalf("expected ErrAccountVerification for foreign account, got %v", err)
+	}
+	if len(store.rows) != 0 {
+		t.Fatalf("no row should be written when ownership fails, got %d", len(store.rows))
+	}
+}
+
+// TestCompleteCallback_WrongAuthConfigRejected ensures an account that exists
+// for the right user but under a different auth config is also rejected.
+func TestCompleteCallback_WrongAuthConfigRejected(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	userID := mintUUID(21)
+	sdkFake := &fakeSDK{acctUserID: util.UUIDToString(userID), acctAuthConfigID: "ac_other"}
+	svc := newTestService(t, sdkFake, store)
+	state, _ := signState(testSecret, stateClaims{
+		UserID:      util.UUIDToString(userID),
+		ToolkitSlug: "notion",
+		Exp:         time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
+	})
+	if _, err := svc.CompleteCallback(context.Background(), state, "success", "ca_x"); !errors.Is(err, ErrAccountVerification) {
+		t.Fatalf("expected ErrAccountVerification for wrong auth config, got %v", err)
+	}
+	if len(store.rows) != 0 {
+		t.Fatalf("no row should be written, got %d", len(store.rows))
+	}
+}
+
+// TestCompleteCallback_UnknownAccountRejected ensures an account id Composio
+// does not know about fails closed rather than being mirrored verbatim.
+func TestCompleteCallback_UnknownAccountRejected(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	userID := mintUUID(22)
+	sdkFake := &fakeSDK{acctMissing: true}
+	svc := newTestService(t, sdkFake, store)
+	state, _ := signState(testSecret, stateClaims{
+		UserID:      util.UUIDToString(userID),
+		ToolkitSlug: "notion",
+		Exp:         time.Unix(1_700_000_000, 0).Add(time.Minute).Unix(),
+	})
+	if _, err := svc.CompleteCallback(context.Background(), state, "success", "ca_ghost"); !errors.Is(err, ErrAccountVerification) {
+		t.Fatalf("expected ErrAccountVerification for unknown account, got %v", err)
+	}
+	if len(store.rows) != 0 {
+		t.Fatalf("no row should be written, got %d", len(store.rows))
+	}
+}
+
 func TestListConnections(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
@@ -319,6 +415,38 @@ func TestDisconnect_OwnerRevokeIdempotentAndFilter(t *testing.T) {
 	// Second disconnect is idempotent (row still owned, marks revoked again).
 	if err := svc.Disconnect(context.Background(), userID, row.ID); err != nil {
 		t.Fatalf("idempotent Disconnect: %v", err)
+	}
+}
+
+// TestDisconnect_RevokedRowNoOp covers the PR 4608 blocker: once a row is
+// locally revoked, a second DELETE must be a pure no-op and must NOT call
+// upstream again — otherwise a non-404 upstream error on the repeat would be
+// surfaced as a 502 and break idempotency.
+func TestDisconnect_RevokedRowNoOp(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	sdkFake := &fakeSDK{}
+	svc := newTestService(t, sdkFake, store)
+	userID := mintUUID(30)
+	row := seedActive(store, userID, "notion", "ca_noop")
+
+	// First disconnect revokes upstream and marks the row revoked.
+	if err := svc.Disconnect(context.Background(), userID, row.ID); err != nil {
+		t.Fatalf("first Disconnect: %v", err)
+	}
+	if len(sdkFake.revoked) != 1 {
+		t.Fatalf("expected 1 upstream revoke, got %d", len(sdkFake.revoked))
+	}
+
+	// Now make the upstream fail with a NON-404 error. A correct no-op must not
+	// touch upstream, so this error must never surface.
+	sdkFake.revokeErr = &sdk.APIError{HTTPStatus: http.StatusInternalServerError}
+	sdkFake.deleteErr = &sdk.APIError{HTTPStatus: http.StatusInternalServerError}
+	if err := svc.Disconnect(context.Background(), userID, row.ID); err != nil {
+		t.Fatalf("second Disconnect on already-revoked row should be a no-op, got %v", err)
+	}
+	if len(sdkFake.revoked) != 1 {
+		t.Errorf("second disconnect must not call upstream revoke again, revoked=%v", sdkFake.revoked)
 	}
 }
 

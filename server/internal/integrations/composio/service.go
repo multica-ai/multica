@@ -37,6 +37,11 @@ var (
 	// ErrConnectionNotFound is returned by Disconnect when the connection id
 	// does not belong to the user (or does not exist).
 	ErrConnectionNotFound = errors.New("composio: connection not found")
+	// ErrAccountVerification is returned by CompleteCallback when the
+	// connected_account_id carried on the callback cannot be confirmed (with
+	// Composio) to belong to the user/auth-config named in the signed state —
+	// i.e. a tampered or unknown account id. No local row is written.
+	ErrAccountVerification = errors.New("composio: connected account verification failed")
 )
 
 // defaultStateTTL bounds how long a connect handshake may sit between
@@ -49,6 +54,7 @@ const defaultStateTTL = 5 * time.Minute
 // *sdk.Client satisfies it.
 type SDK interface {
 	CreateLink(ctx context.Context, req sdk.CreateLinkRequest) (*sdk.CreateLinkResponse, error)
+	ListConnectedAccounts(ctx context.Context, req sdk.ListConnectedAccountsRequest) (*sdk.ListConnectedAccountsResponse, error)
 	RevokeConnection(ctx context.Context, connectedAccountID string) error
 	DeleteConnectedAccount(ctx context.Context, connectedAccountID string) error
 	CreateSession(ctx context.Context, req sdk.CreateSessionRequest) (*sdk.CreateSessionResponse, error)
@@ -249,6 +255,18 @@ func (s *Service) CompleteCallback(ctx context.Context, state, status, connected
 
 	authConfigID := s.authConfigs[claims.ToolkitSlug]
 
+	// Defense-in-depth (PR 4608 review): the signed state proves *who* started
+	// the handshake and *which* toolkit, but connected_account_id rides back as
+	// a plain query param Composio appends to our callback URL. A crafted
+	// redirect could pair a valid, un-expired state with someone else's account
+	// id and we would mirror it verbatim. Before writing, confirm with Composio
+	// that this account actually belongs to the state's user (the
+	// composio_user_id == multica user id invariant) and was created under the
+	// toolkit's auth config. Any mismatch fails closed with ErrAccountVerification.
+	if err := s.verifyAccountOwnership(ctx, connectedAccountID, claims.UserID, authConfigID); err != nil {
+		return claims.ToolkitSlug, err
+	}
+
 	if _, err := s.store.UpsertUserComposioConnection(ctx, db.UpsertUserComposioConnectionParams{
 		UserID:             userID,
 		ToolkitSlug:        claims.ToolkitSlug,
@@ -292,6 +310,16 @@ func (s *Service) Disconnect(ctx context.Context, userID, connectionID pgtype.UU
 		return ErrConnectionNotFound
 	}
 
+	// Already disconnected locally: a repeat DELETE is a pure no-op. Short-
+	// circuiting here keeps disconnect idempotent even when the upstream now
+	// answers revoke/delete with a NON-404 error (PR 4608 review): the account
+	// is already gone, so re-hitting Composio could turn a second DELETE into a
+	// 502 and break the 204-idempotent contract. The first disconnect already
+	// revoked upstream and marked the row.
+	if !strings.EqualFold(row.Status, "active") {
+		return nil
+	}
+
 	// Revoke the upstream grant first, then delete the Composio record. Both are
 	// made idempotent against a 404 so a repeated disconnect (or a connection
 	// already removed at Composio) still resolves the local row.
@@ -320,6 +348,21 @@ func (s *Service) Disconnect(ctx context.Context, userID, connectionID pgtype.UU
 // id so the session cannot surface accounts the user did not connect. This
 // helper is NOT yet wired into task dispatch (Stage 3); it exists so that wiring
 // is a pure consumer of an already-tested seam.
+//
+// Single-account constraint (v1, PR 4608 review follow-up): the MVP connect
+// flow assumes AT MOST ONE active connection per (user, toolkit) — there is no
+// UI or API to hold several, and connected_accounts is keyed by toolkit slug so
+// it physically cannot carry two accounts for the same toolkit. Should
+// duplicates ever exist, we must choose deterministically: rows arrive
+// newest-first (ListActive orders by connected_at DESC), so we keep the FIRST
+// occurrence per toolkit (the most recently connected account) instead of
+// letting a later map write silently select an older one.
+//
+// Stage 3 owns the real decision before this is wired into dispatch: either
+// enforce the single-active constraint at connect time (revoke the previous
+// active row for the same toolkit on a new connect) or extend CreateSession to
+// a multi-account request shape. Until then, newest-wins keeps behavior
+// deterministic rather than order-dependent.
 func (s *Service) CreateMCPSession(ctx context.Context, userID pgtype.UUID) (*MCPSession, error) {
 	rows, err := s.store.ListActiveUserComposioConnections(ctx, userID)
 	if err != nil {
@@ -331,6 +374,10 @@ func (s *Service) CreateMCPSession(ctx context.Context, userID pgtype.UUID) (*MC
 
 	connectedAccounts := make(map[string]any, len(rows))
 	for _, row := range rows {
+		// Keep the first (newest) account per toolkit; ignore older duplicates.
+		if _, exists := connectedAccounts[row.ToolkitSlug]; exists {
+			continue
+		}
 		connectedAccounts[row.ToolkitSlug] = row.ConnectedAccountID
 	}
 
@@ -373,6 +420,42 @@ func rowToConnection(row db.UserComposioConnection) Connection {
 	}
 	c.LastUsedAt = util.TimestampToPtr(row.LastUsedAt)
 	return c
+}
+
+// verifyAccountOwnership confirms with Composio that connectedAccountID really
+// belongs to expectedUserID and was created under expectedAuthConfigID, so a
+// tampered connected_account_id on the callback cannot smuggle another user's
+// account into the local mirror. It fails closed: an upstream error, an unknown
+// account, an owner mismatch, or an auth-config mismatch all return
+// ErrAccountVerification (upstream transport errors are wrapped for logging but
+// still block the write).
+func (s *Service) verifyAccountOwnership(ctx context.Context, connectedAccountID, expectedUserID, expectedAuthConfigID string) error {
+	resp, err := s.sdk.ListConnectedAccounts(ctx, sdk.ListConnectedAccountsRequest{
+		ConnectedAccountIDs: []string{connectedAccountID},
+	})
+	if err != nil {
+		return fmt.Errorf("composio: verify connected account: %w", err)
+	}
+	var acct *sdk.ConnectedAccount
+	for i := range resp.Items {
+		if resp.Items[i].ID == connectedAccountID {
+			acct = &resp.Items[i]
+			break
+		}
+	}
+	if acct == nil {
+		return ErrAccountVerification
+	}
+	if acct.UserID != expectedUserID {
+		return ErrAccountVerification
+	}
+	// expectedAuthConfigID is empty only if the toolkit slug somehow has no
+	// mapping (already rejected at BeginConnect); guard anyway and skip the
+	// check rather than rejecting a legitimately-mapped account.
+	if expectedAuthConfigID != "" && acct.AuthConfigID != expectedAuthConfigID {
+		return ErrAccountVerification
+	}
+	return nil
 }
 
 // isNotFound reports whether err is a Composio 404 APIError, used to make
