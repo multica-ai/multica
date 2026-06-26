@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { useWorkspaceId } from "@multica/core/hooks";
+import type { Agent } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
@@ -99,6 +100,7 @@ const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
+const EMPTY_AGENTS: Agent[] = [];
 
 function fmtMoney(n: number): string {
   if (n >= 100) return `$${n.toFixed(0)}`;
@@ -171,7 +173,7 @@ export function DashboardPage() {
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const agentsQuery = useQuery(agentListOptions(wsId));
-  const agents = agentsQuery.data ?? [];
+  const agents = agentsQuery.data ?? EMPTY_AGENTS;
 
   // Validate the picked project against the current workspace's list. A
   // stale UUID — left over from a project that's been deleted, or from the
