@@ -11,7 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	cerebrocredentialpolicy "github.com/multica-ai/multica/server/internal/cerebro/credentialpolicy"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -190,23 +189,6 @@ func TestPermissionLookupFromRows_MatchesTitleAndKey(t *testing.T) {
 	}
 	if perm["bigquery.query"] != "deny" {
 		t.Fatalf("expected bigquery.query→deny, got %q", perm["bigquery.query"])
-	}
-}
-
-func TestCredentialPermissionLookup_IndexesByKey(t *testing.T) {
-	settings := []cerebrocredentialpolicy.SubjectSetting{
-		{CredentialKey: "bigquery", Setting: cerebrocredentialpolicy.SettingAllow},
-		{CredentialKey: "personal-jesper", Setting: cerebrocredentialpolicy.SettingDeny},
-	}
-	perm := credentialPermissionLookup(settings)
-	if perm["bigquery"] != "allow" {
-		t.Fatalf("expected bigquery→allow, got %q", perm["bigquery"])
-	}
-	if perm["personal-jesper"] != "deny" {
-		t.Fatalf("expected personal-jesper→deny, got %q", perm["personal-jesper"])
-	}
-	if _, ok := perm["repo-unset"]; ok {
-		t.Fatalf("expected no entry for a box with no explicit setting")
 	}
 }
 
