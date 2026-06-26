@@ -12,6 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // runtimeProviderFailureMonitorConfig controls runtime-wide provider
@@ -90,8 +91,9 @@ func tickRuntimeProviderFailureMonitor(ctx context.Context, queries *db.Queries,
 	candidates, err := queries.SelectWorkspacesExceedingProviderFailureThreshold(
 		ctx,
 		db.SelectWorkspacesExceedingProviderFailureThresholdParams{
-			Since:     pgtype.Timestamptz{Time: since, Valid: true},
-			Threshold: cfg.Threshold,
+			Since:         pgtype.Timestamptz{Time: since, Valid: true},
+			FailureReason: taskfailure.ReasonAgentProviderCapacityOrRateLimit.String(),
+			Threshold:     cfg.Threshold,
 		},
 	)
 	if err != nil {
@@ -151,11 +153,6 @@ func emitRuntimeProviderFailureAlert(
 		return
 	}
 
-	sampleError := ""
-	if c.SampleError.Valid {
-		sampleError = c.SampleError.String
-	}
-
 	title := "Runtime provider capacity alert"
 	body := fmt.Sprintf(
 		"%d capacity/session-limit task failures were recorded in the last %s. Runtime retries and model fallback will continue, but inspect provider capacity or account limits if this repeats.",
@@ -163,14 +160,14 @@ func emitRuntimeProviderFailureAlert(
 	)
 	details, _ := json.Marshal(map[string]any{
 		"reason":            "provider_capacity_or_session_limit",
-		"failure_reason":    "agent_provider_capacity_or_rate_limit",
+		"failure_reason":    taskfailure.ReasonAgentProviderCapacityOrRateLimit.String(),
 		"failed_tasks":      c.FailedTasks,
 		"threshold":         cfg.Threshold,
 		"lookback_seconds":  int64(cfg.Lookback.Seconds()),
 		"first_failed_at":   util.TimestampToString(c.FirstFailedAt),
 		"last_failed_at":    util.TimestampToString(c.LastFailedAt),
 		"sample_task_id":    util.UUIDToString(c.SampleTaskID),
-		"sample_task_error": sampleError,
+		"sample_task_error": c.SampleError,
 	})
 
 	workspaceID := util.UUIDToString(c.WorkspaceID)

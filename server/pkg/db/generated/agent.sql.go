@@ -3199,7 +3199,7 @@ WITH provider_failures AS (
     FROM agent_task_queue atq
     JOIN agent a ON a.id = atq.agent_id
     WHERE atq.status = 'failed'
-      AND atq.failure_reason = 'agent_provider_capacity_or_rate_limit'
+      AND atq.failure_reason = $3::text
       AND atq.completed_at IS NOT NULL
       AND atq.completed_at >= $1::timestamptz
 )
@@ -3207,8 +3207,8 @@ SELECT pf.workspace_id,
        count(*)::bigint AS failed_tasks,
        min(pf.completed_at)::timestamptz AS first_failed_at,
        max(pf.completed_at)::timestamptz AS last_failed_at,
-       (array_agg(pf.id ORDER BY pf.completed_at DESC))[1] AS sample_task_id,
-       (array_agg(pf.error ORDER BY pf.completed_at DESC))[1] AS sample_error
+       ((array_agg(pf.id ORDER BY pf.completed_at DESC))[1])::uuid AS sample_task_id,
+       ((array_agg(pf.error ORDER BY pf.completed_at DESC))[1])::text AS sample_error
 FROM provider_failures pf
 WHERE NOT EXISTS (
     SELECT 1
@@ -3223,8 +3223,9 @@ ORDER BY failed_tasks DESC, pf.workspace_id ASC
 `
 
 type SelectWorkspacesExceedingProviderFailureThresholdParams struct {
-	Since     pgtype.Timestamptz `json:"since"`
-	Threshold int64              `json:"threshold"`
+	Since         pgtype.Timestamptz `json:"since"`
+	Threshold     int64              `json:"threshold"`
+	FailureReason string             `json:"failure_reason"`
 }
 
 type SelectWorkspacesExceedingProviderFailureThresholdRow struct {
@@ -3232,15 +3233,15 @@ type SelectWorkspacesExceedingProviderFailureThresholdRow struct {
 	FailedTasks   int64              `json:"failed_tasks"`
 	FirstFailedAt pgtype.Timestamptz `json:"first_failed_at"`
 	LastFailedAt  pgtype.Timestamptz `json:"last_failed_at"`
-	SampleTaskID  interface{}        `json:"sample_task_id"`
-	SampleError   interface{}        `json:"sample_error"`
+	SampleTaskID  pgtype.UUID        `json:"sample_task_id"`
+	SampleError   string             `json:"sample_error"`
 }
 
 // Runtime-wide capacity/session-limit alert candidates. The monitor emits one
 // daily inbox alert per workspace when provider capacity/rate-limit failures
 // exceed the threshold, then suppresses repeats inside the same lookback.
 func (q *Queries) SelectWorkspacesExceedingProviderFailureThreshold(ctx context.Context, arg SelectWorkspacesExceedingProviderFailureThresholdParams) ([]SelectWorkspacesExceedingProviderFailureThresholdRow, error) {
-	rows, err := q.db.Query(ctx, selectWorkspacesExceedingProviderFailureThreshold, arg.Since, arg.Threshold)
+	rows, err := q.db.Query(ctx, selectWorkspacesExceedingProviderFailureThreshold, arg.Since, arg.Threshold, arg.FailureReason)
 	if err != nil {
 		return nil, err
 	}

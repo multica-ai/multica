@@ -796,7 +796,7 @@ WITH provider_failures AS (
     FROM agent_task_queue atq
     JOIN agent a ON a.id = atq.agent_id
     WHERE atq.status = 'failed'
-      AND atq.failure_reason = 'agent_provider_capacity_or_rate_limit'
+      AND atq.failure_reason = sqlc.arg('failure_reason')::text
       AND atq.completed_at IS NOT NULL
       AND atq.completed_at >= sqlc.arg('since')::timestamptz
 )
@@ -804,8 +804,8 @@ SELECT pf.workspace_id,
        count(*)::bigint AS failed_tasks,
        min(pf.completed_at)::timestamptz AS first_failed_at,
        max(pf.completed_at)::timestamptz AS last_failed_at,
-       (array_agg(pf.id ORDER BY pf.completed_at DESC))[1] AS sample_task_id,
-       (array_agg(pf.error ORDER BY pf.completed_at DESC))[1] AS sample_error
+       ((array_agg(pf.id ORDER BY pf.completed_at DESC))[1])::uuid AS sample_task_id,
+       ((array_agg(pf.error ORDER BY pf.completed_at DESC))[1])::text AS sample_error
 FROM provider_failures pf
 WHERE NOT EXISTS (
     SELECT 1
