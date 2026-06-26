@@ -149,7 +149,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions } from "@multica/core/issues/queries";
-import { formatDateOnly } from "@multica/core/issues/date";
+import { formatDateOnly, todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date"; // CEREBRO-PATCH(due-date-shortcuts-format): FIR-2005 — add date-only helpers
 import { useDeleteIssue } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -2114,19 +2114,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                         Due date
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent>
-                        <DropdownMenuItem onClick={() => handleUpdateField({ due_date: new Date().toISOString() })}>
+                        <DropdownMenuItem onClick={() => handleUpdateField({ due_date: todayDateOnly() })}> {/* CEREBRO-PATCH(due-date-shortcuts-format): FIR-2005 — was new Date().toISOString(); server requires YYYY-MM-DD */}
                           Today
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => {
-                          const d = new Date(); d.setDate(d.getDate() + 1);
-                          handleUpdateField({ due_date: d.toISOString() });
-                        }}>
+                        <DropdownMenuItem onClick={() => handleUpdateField({ due_date: addDaysDateOnly(1) })}> {/* CEREBRO-PATCH(due-date-shortcuts-format): FIR-2005 — was d.toISOString() */}
                           Tomorrow
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => {
-                          const d = new Date(); d.setDate(d.getDate() + 7);
-                          handleUpdateField({ due_date: d.toISOString() });
-                        }}>
+                        <DropdownMenuItem onClick={() => handleUpdateField({ due_date: addDaysDateOnly(7) })}> {/* CEREBRO-PATCH(due-date-shortcuts-format): FIR-2005 — was d.toISOString() */}
                           Next week
                         </DropdownMenuItem>
                         {issue.due_date && (
