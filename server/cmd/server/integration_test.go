@@ -793,6 +793,61 @@ func TestInboxThroughRouter(t *testing.T) {
 	}
 }
 
+func TestInboxUnreadSummaryThroughRouter(t *testing.T) {
+	ctx := context.Background()
+
+	// Seed one unread inbox item for the test user in the test workspace.
+	var itemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title)
+		VALUES ($1, 'member', $2, 'issue_assigned', 'Summary fixture')
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&itemID); err != nil {
+		t.Fatalf("failed to seed inbox item: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE id = $1`, itemID)
+	})
+
+	resp := authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnreadInboxSummary: expected 200, got %d", resp.StatusCode)
+	}
+	var summary []struct {
+		WorkspaceID string `json:"workspace_id"`
+		Count       int64  `json:"count"`
+	}
+	readJSON(t, resp, &summary)
+
+	var found bool
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID {
+			found = true
+			if s.Count < 1 {
+				t.Fatalf("expected unread count >= 1 for test workspace, got %d", s.Count)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected test workspace %s in unread summary, got %+v", testWorkspaceID, summary)
+	}
+
+	// After marking it read, the workspace should drop out of the summary.
+	if _, err := testPool.Exec(ctx, `UPDATE inbox_item SET read = true WHERE id = $1`, itemID); err != nil {
+		t.Fatalf("failed to mark item read: %v", err)
+	}
+	resp = authRequest(t, "GET", "/api/inbox/unread-summary", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("UnreadInboxSummary (after read): expected 200, got %d", resp.StatusCode)
+	}
+	readJSON(t, resp, &summary)
+	for _, s := range summary {
+		if s.WorkspaceID == testWorkspaceID && s.Count > 0 {
+			t.Fatalf("expected no unread for test workspace after read, got count %d", s.Count)
+		}
+	}
+}
+
 // ---- 404 for non-existent resources ----
 
 func TestNonExistentResources(t *testing.T) {

@@ -45,6 +45,22 @@ RETURNING recipient_type, recipient_id;
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false;
 
+-- name: CountUnreadInboxByWorkspace :many
+-- Per-workspace unread (non-archived) inbox counts for a recipient member,
+-- across every workspace they currently belong to. Powers the sidebar
+-- "other workspaces have unread" dot without fetching each workspace's full
+-- inbox list. The member join keeps counts scoped to workspaces the user is
+-- still a member of, so a stale item left behind in a workspace the user
+-- has since left cannot light the dot.
+SELECT i.workspace_id, count(*) AS count
+FROM inbox_item i
+JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+WHERE i.recipient_type = 'member'
+  AND i.recipient_id = $1
+  AND i.read = false
+  AND i.archived = false
+GROUP BY i.workspace_id;
+
 -- name: MarkAllInboxRead :execrows
 UPDATE inbox_item SET read = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false AND read = false;

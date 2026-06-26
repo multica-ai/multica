@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { detail, deletePin, navigation, pins } = vi.hoisted(() => ({
+const { detail, deletePin, navigation, pins, summary } = vi.hoisted(() => ({
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
   navigation: { current: { pathname: "/acme/issues" } },
+  summary: { current: [] as { workspace_id: string; count: number }[] },
   pins: {
     current: [
       {
@@ -122,7 +123,15 @@ vi.mock("@multica/core/api", async (importOriginal) => {
     },
   };
 });
-vi.mock("@multica/core/inbox/queries", () => ({ deduplicateInboxItems: (items: unknown[]) => items, inboxKeys: { list: () => ["inbox"] } }));
+vi.mock("@multica/core/inbox/queries", () => ({
+  deduplicateInboxItems: (items: unknown[]) => items,
+  inboxKeys: { list: () => ["inbox"], unreadSummary: () => ["inbox", "unread-summary"] },
+  inboxUnreadSummaryOptions: () => ({ queryKey: ["inbox", "unread-summary"] }),
+  hasOtherWorkspaceUnread: (
+    entries: { workspace_id: string; count: number }[],
+    currentWsId: string | null,
+  ) => entries.some((s) => s.workspace_id !== currentWsId && s.count > 0),
+}));
 vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   useCreateModeStore: { getState: () => ({ lastMode: "agent" }) },
@@ -145,6 +154,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "pins") return { data: pins.current };
     if (queryKey[0] === "issue") return detail.current;
+    if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
     return { data: [] };
   },
   useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: vi.fn() }),
@@ -155,6 +165,7 @@ describe("PinRow", () => {
     deletePin.mockReset();
     navigation.current.pathname = "/acme/issues";
     detail.current = { isPending: false, isError: false, data: null, error: null };
+    summary.current = [];
   });
 
   it("unpins missing details", async () => {
@@ -192,5 +203,34 @@ describe("PinRow", () => {
       "true",
     );
     expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+  });
+});
+
+describe("workspace-switcher unread dot", () => {
+  beforeEach(() => {
+    summary.current = [];
+  });
+
+  // The dot is the only `.ring-sidebar` span in the tree (DraftDot is null
+  // when there's no draft, and there are no pending invitations here).
+  const dot = (container: HTMLElement) => container.querySelector("span.bg-brand.ring-sidebar");
+
+  it("shows a dot when another workspace has unread inbox items", () => {
+    summary.current = [{ workspace_id: "ws-2", count: 3 }];
+    const { container } = render(<AppSidebar />);
+    expect(dot(container)).not.toBeNull();
+  });
+
+  it("does not show a dot when only the active workspace has unread", () => {
+    // Active workspace is ws-1 (see useCurrentWorkspace mock).
+    summary.current = [{ workspace_id: "ws-1", count: 3 }];
+    const { container } = render(<AppSidebar />);
+    expect(dot(container)).toBeNull();
+  });
+
+  it("does not show a dot when no workspace has unread", () => {
+    summary.current = [];
+    const { container } = render(<AppSidebar />);
+    expect(dot(container)).toBeNull();
   });
 });
