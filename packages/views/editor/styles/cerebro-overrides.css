@@ -257,6 +257,23 @@
   overflow-wrap: anywhere;
 }
 
+/* CEREBRO-PATCH(attachment-chip-inline-align): FIR-2034 — in a readonly comment /
+   chat / DM body the unified attachment chips render inline (see readonly-content.tsx
+   file-card + image paths, both emit `<AttachmentChip className="my-1">`). An image
+   thumbnail and a document card are both 56px tall, but as inline-flex boxes with
+   `vertical-align: baseline` they synthesize DIFFERENT baselines — the image box
+   aligns by its bottom edge, the document card by its inner text baseline — so a row
+   of mixed attachments staggered ~17px vertically even though the heights matched.
+   Pin every chip to a single bottom edge with symmetric vertical margin so image
+   thumbnails and document cards line up exactly. Scoped to `.readonly`: the editable
+   composer / description render the same chips inside a flex row
+   (`attachment-list.tsx`), where flex items ignore `vertical-align`, so this only
+   touches the inline body that was misaligned. */
+.rich-text-editor.readonly span:has(> button.h-14) {
+  vertical-align: bottom;
+  margin-block: 4px;
+}
+
 /* CEREBRO-PATCH(editor-table-wrap): FIR-1727 follow-up — the stacked-data-table
    fix above only reaches the readonly markdown renderer (comments/chat/rendered
    docs), because it tags tables `.data-table` via a rehype plugin. The EDITABLE
