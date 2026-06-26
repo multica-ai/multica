@@ -17,6 +17,8 @@ import type {
   GroupedIssuesResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
+  SearchIssuesResponse,
+  SearchProjectsResponse,
   Squad,
   TimelineEntry,
   User,
@@ -272,6 +274,55 @@ export const ListIssuesResponseSchema = z.object({
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
+  total: 0,
+};
+
+const SearchIssueResultSchema = IssueSchema.extend({
+  match_source: z.string(),
+  matched_snippet: z.string().optional(),
+  matched_description_snippet: z.string().optional(),
+  matched_comment_snippet: z.string().optional(),
+}).loose();
+
+export const SearchIssuesResponseSchema = z.object({
+  issues: z.array(SearchIssueResultSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
+  issues: [],
+  total: 0,
+};
+
+const ProjectSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  icon: z.string().nullable(),
+  status: z.string(),
+  priority: z.string(),
+  lead_type: z.string().nullable(),
+  lead_id: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  issue_count: z.number().default(0),
+  done_count: z.number().default(0),
+  resource_count: z.number().default(0),
+}).loose();
+
+const SearchProjectResultSchema = ProjectSchema.extend({
+  match_source: z.string(),
+  matched_snippet: z.string().optional(),
+}).loose();
+
+export const SearchProjectsResponseSchema = z.object({
+  projects: z.array(SearchProjectResultSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
+  projects: [],
   total: 0,
 };
 
