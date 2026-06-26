@@ -136,14 +136,16 @@ ORDER BY created_at DESC;
 -- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, force_fresh_session, is_leader_task, handoff_note
+    trigger_summary, force_fresh_session, is_leader_task, handoff_note,
+    squad_id
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
-    sqlc.narg(handoff_note)
+    sqlc.narg(handoff_note),
+    sqlc.narg(squad_id)
 )
 RETURNING *;
 
@@ -172,15 +174,17 @@ WHERE id = $1 AND issue_id IS NULL;
 -- retried as fresh sessions so the child does not inherit a stuck agent
 -- conversation. Keep the CASE WHEN predicates in sync with
 -- resumeUnsafeFailureReason and the resume lookup blacklists. attempt is
--- incremented; max_attempts, trigger_comment_id, and is_leader_task are
--- inherited so the retried task keeps the same squad-role provenance as its
+-- incremented; max_attempts, trigger_comment_id, is_leader_task, and squad_id
+-- are inherited so the retried task keeps the same squad-role provenance as its
 -- parent and the self-trigger guard in shouldEnqueueSquadLeaderOnComment
--- continues to recognise it as a leader task.
+-- continues to recognise it as a leader task. Inheriting squad_id also keeps
+-- the squad-leader briefing injection working across retries.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
-    attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task
+    attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
+    squad_id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -189,7 +193,8 @@ SELECT
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
     p.attempt + 1, p.max_attempts, p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
-    p.is_leader_task
+    p.is_leader_task,
+    p.squad_id
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;

@@ -1325,7 +1325,7 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 		switch trigger.Source {
 		case commentTriggerSourceIssueAssignee:
 			if trigger.Squad != nil {
-				if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
+				if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
 					slog.Warn("enqueue squad leader task failed",
 						"issue_id", uuidToString(issue.ID),
 						"squad_id", uuidToString(trigger.Squad.ID),
@@ -1338,7 +1338,7 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 				slog.Warn("enqueue agent task on comment failed", "issue_id", uuidToString(issue.ID), "error", err)
 			}
 		case commentTriggerSourceMentionSquadLeader:
-			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
+			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
 				slog.Warn("enqueue squad leader mention task failed",
 					"issue_id", uuidToString(issue.ID),
 					"agent_id", uuidToString(trigger.Agent.ID),
