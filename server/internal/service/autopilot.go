@@ -246,7 +246,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 			return fmt.Errorf("autopilot creator cannot access private squad leader")
 		}
 		// CEREBRO-PATCH(autopilot-squad-leader-task): squad-created issues enqueue the squad leader role task (JEH-1916).
-		task, err = s.TaskSvc.EnqueueTaskForSquadLeaderFromComment(ctx, issue, dispatchAssignee.Agent.ID, pgtype.UUID{}, autopilotDelegationContext(ap))
+		task, err = s.TaskSvc.EnqueueTaskForSquadLeaderFromComment(ctx, issue, dispatchAssignee.Agent.ID, ap.AssigneeID, pgtype.UUID{}, autopilotDelegationContext(ap))
 	} else {
 		task, err = s.TaskSvc.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, autopilotDelegationContext(ap))
 	}

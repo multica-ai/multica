@@ -1353,6 +1353,160 @@ func (h *Handler) privateAutopilotTaskOwner(ctx context.Context, issue db.Issue,
 	return pgtype.UUID{}, false
 }
 
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID string, suppressAgentIDs []pgtype.UUID) {
+	if isNoteComment(comment.Content) {
+		return
+	}
+	triggers := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{})
+	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
+	h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
+}
+
+func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppressAgentIDs []pgtype.UUID) []commentAgentTrigger {
+	if len(triggers) == 0 || len(suppressAgentIDs) == 0 {
+		return triggers
+	}
+	suppressed := make(map[string]struct{}, len(suppressAgentIDs))
+	for _, id := range suppressAgentIDs {
+		if id.Valid {
+			suppressed[uuidToString(id)] = struct{}{}
+		}
+	}
+	if len(suppressed) == 0 {
+		return triggers
+	}
+	filtered := make([]commentAgentTrigger, 0, len(triggers))
+	for _, trigger := range triggers {
+		if _, ok := suppressed[uuidToString(trigger.Agent.ID)]; ok {
+			continue
+		}
+		filtered = append(filtered, trigger)
+	}
+	return filtered
+}
+
+func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, triggers []commentAgentTrigger) {
+	for _, trigger := range triggers {
+		switch trigger.Source {
+		case commentTriggerSourceIssueAssignee:
+			if trigger.Squad != nil {
+				if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
+					slog.Warn("enqueue squad leader task failed",
+						"issue_id", uuidToString(issue.ID),
+						"squad_id", uuidToString(trigger.Squad.ID),
+						"leader_id", uuidToString(trigger.Agent.ID),
+						"error", err)
+				}
+				continue
+			}
+			if _, err := h.TaskService.EnqueueTaskForIssue(ctx, issue, triggerCommentID); err != nil {
+				slog.Warn("enqueue agent task on comment failed", "issue_id", uuidToString(issue.ID), "error", err)
+			}
+		case commentTriggerSourceMentionSquadLeader:
+			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
+				slog.Warn("enqueue squad leader mention task failed",
+					"issue_id", uuidToString(issue.ID),
+					"agent_id", uuidToString(trigger.Agent.ID),
+					"error", err)
+			}
+		case commentTriggerSourceMentionAgent:
+			if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
+				slog.Warn("enqueue mention agent task failed",
+					"issue_id", uuidToString(issue.ID),
+					"agent_id", uuidToString(trigger.Agent.ID),
+					"error", err)
+			}
+		}
+	}
+}
+
+func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, actorType, actorID string, opts commentTriggerComputeOptions) []commentAgentTrigger {
+	if isNoteComment(content) {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	triggers := make([]commentAgentTrigger, 0, 2)
+	add := func(trigger commentAgentTrigger) {
+		id := uuidToString(trigger.Agent.ID)
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		triggers = append(triggers, trigger)
+	}
+
+	if actorType == "member" && h.shouldEnqueueOnComment(ctx, issue, actorType, actorID, opts) &&
+		!h.commentMentionsOthersButNotAssignee(content, issue) &&
+		!h.isReplyToMemberThread(ctx, parentComment, content, issue) {
+		if agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          issue.AssigneeID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err == nil {
+			add(commentAgentTrigger{Agent: agent, Source: commentTriggerSourceIssueAssignee})
+		}
+	}
+
+	if trigger, ok := h.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, actorType, actorID, opts); ok {
+		add(trigger)
+	}
+
+	for _, trigger := range h.computeMentionedAgentCommentTriggers(ctx, issue, content, parentComment, actorType, actorID, opts) {
+		add(trigger)
+	}
+
+	return triggers
+}
+
+func (h *Handler) computeAssignedSquadLeaderCommentTrigger(ctx context.Context, issue db.Issue, content, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
+		return commentAgentTrigger{}, false
+	}
+	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID:          issue.AssigneeID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return commentAgentTrigger{}, false
+	}
+	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
+		h.lastTaskWasLeader(ctx, issue.ID, squad.LeaderID) {
+		return commentAgentTrigger{}, false
+	}
+	if authorType == "member" && commentMentionsAnyone(content) {
+		return commentAgentTrigger{}, false
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          squad.LeaderID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		return commentAgentTrigger{}, false
+	}
+	if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, uuidToString(issue.WorkspaceID)) {
+		return commentAgentTrigger{}, false
+	}
+	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, squad.LeaderID, opts)
+	if err != nil || hasPending {
+		return commentAgentTrigger{}, false
+	}
+	return commentAgentTrigger{Agent: agent, Source: commentTriggerSourceIssueAssignee, Squad: &squad}, true
+}
+
+func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID, opts commentTriggerComputeOptions) (bool, error) {
+	if opts.ExcludeTriggerCommentID.Valid {
+		return h.Queries.HasPendingTaskForIssueAndAgentExcludingTriggerComment(ctx, db.HasPendingTaskForIssueAndAgentExcludingTriggerCommentParams{
+			IssueID:                 issueID,
+			AgentID:                 agentID,
+			ExcludeTriggerCommentID: opts.ExcludeTriggerCommentID,
+		})
+	}
+	return h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+}
+
 // commentMentionsOthersButNotAssignee returns true if the comment @mentions
 // anyone but does NOT @mention the issue's assignee agent. This is used to
 // suppress the on_comment trigger when the user is directing their comment at

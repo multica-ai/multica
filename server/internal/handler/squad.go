@@ -1066,10 +1066,10 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		if commentDelegation[0].err != nil {
 			enqueueErr = commentDelegation[0].err
 		} else {
-			_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeaderFromComment(ctx, issue, squad.LeaderID, triggerCommentID, commentDelegation[0].context)
+			_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeaderFromComment(ctx, issue, squad.LeaderID, squad.ID, triggerCommentID, commentDelegation[0].context)
 		}
 	} else {
-		_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, triggerCommentID)
+		_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, squad.ID, triggerCommentID)
 	}
 	if enqueueErr != nil {
 		slog.Warn("enqueue squad leader task failed",
