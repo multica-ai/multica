@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -439,14 +438,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
 
-	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY — the key the
-	// standalone SDK authenticates Composio with. When unset the whole block is
-	// skipped and the composio HTTP handlers return 503; existing deployments
-	// are unaffected. An operator opts in by setting COMPOSIO_API_KEY plus the
-	// toolkit→auth-config map (COMPOSIO_AUTH_CONFIGS_JSON, MVP: {"notion":"ac_…"})
-	// and a callback base (COMPOSIO_CALLBACK_BASE_URL, falling back to
-	// MULTICA_PUBLIC_URL). State signing uses COMPOSIO_STATE_SECRET, or a key
-	// derived from JWT_SECRET when that is unset.
+	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY — the
+	// project-scoped key the standalone SDK authenticates Composio with (sent
+	// as x-api-key; the project is resolved from the key, so NO project id is
+	// configured). When unset the whole block is skipped and the composio HTTP
+	// handlers return 503; existing deployments are unaffected. An operator opts
+	// in by setting COMPOSIO_API_KEY plus a callback base
+	// (COMPOSIO_CALLBACK_BASE_URL, falling back to MULTICA_PUBLIC_URL). The
+	// toolkit→auth-config mapping is NOT configured here — it is resolved
+	// dynamically from the project's /auth_configs at request time, so enabling
+	// a toolkit is a dashboard action, not a redeploy. State signing uses
+	// COMPOSIO_STATE_SECRET, or a key derived from JWT_SECRET when that is unset.
 	if composioAPIKey := strings.TrimSpace(os.Getenv("COMPOSIO_API_KEY")); composioAPIKey != "" {
 		sdkClient, err := composiosdk.NewClient(composiosdk.Options{APIKey: composioAPIKey})
 		if err != nil {
@@ -464,7 +466,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					StateSecret:     stateSecret,
 					CallbackBaseURL: callbackBase,
 					FrontendBaseURL: appURLFromEnv(),
-					AuthConfigs:     parseComposioAuthConfigs(os.Getenv("COMPOSIO_AUTH_CONFIGS_JSON")),
 				})
 				if serr != nil {
 					slog.Error("composio: service init failed; composio integration disabled", "error", serr)
@@ -775,6 +776,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Route("/api/integrations/composio", func(r chi.Router) {
 			r.Post("/connect/init", h.ComposioConnectInit)
 			r.Get("/callback", h.ComposioCallback)
+			r.Get("/toolkits", h.ListComposioToolkits)
 			r.Get("/connections", h.ListComposioConnections)
 			r.Delete("/connections/{id}", h.DeleteComposioConnection)
 		})
@@ -1300,24 +1302,6 @@ func cloudRuntimeFleetURLFromEnv() string {
 		return url
 	}
 	return strings.TrimSpace(os.Getenv("MULTICA_FLEET_URL"))
-}
-
-// parseComposioAuthConfigs parses COMPOSIO_AUTH_CONFIGS_JSON — a JSON object
-// mapping a toolkit slug to its Composio auth_config_id, e.g.
-// {"notion":"ac_xxx"}. Invalid JSON is logged and treated as "no toolkits
-// configured" rather than crashing boot: every BeginConnect then 400s with
-// "toolkit not supported", which is a clear operator signal.
-func parseComposioAuthConfigs(raw string) map[string]string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	var m map[string]string
-	if err := json.Unmarshal([]byte(raw), &m); err != nil {
-		slog.Warn("COMPOSIO_AUTH_CONFIGS_JSON: ignoring invalid JSON", "error", err)
-		return nil
-	}
-	return m
 }
 
 // composioStateSecret resolves the HMAC key for the connect-state. Prefers an

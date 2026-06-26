@@ -50,6 +50,23 @@ func (f *composioFakeSDK) ListConnectedAccounts(_ context.Context, req sdk.ListC
 }
 func (f *composioFakeSDK) RevokeConnection(_ context.Context, _ string) error       { return f.revokeErr }
 func (f *composioFakeSDK) DeleteConnectedAccount(_ context.Context, _ string) error { return nil }
+
+// ListAuthConfigs reports a single enabled notion auth config so BeginConnect
+// resolves notion → ac_notion and the callback's auth-config check matches.
+func (f *composioFakeSDK) ListAuthConfigs(_ context.Context, _ sdk.ListAuthConfigsRequest) (*sdk.ListAuthConfigsResponse, error) {
+	return &sdk.ListAuthConfigsResponse{Items: []sdk.AuthConfig{{
+		ID:      "ac_notion",
+		Toolkit: sdk.Toolkit{Slug: "notion"},
+		Status:  "ENABLED",
+	}}}, nil
+}
+
+func (f *composioFakeSDK) ListToolkits(_ context.Context, _ sdk.ListToolkitsRequest) (*sdk.ListToolkitsResponse, error) {
+	return &sdk.ListToolkitsResponse{Items: []sdk.Toolkit{
+		{Slug: "notion", Name: "Notion"},
+		{Slug: "github", Name: "GitHub"},
+	}}, nil
+}
 func (f *composioFakeSDK) CreateSession(_ context.Context, _ sdk.CreateSessionRequest) (*sdk.CreateSessionResponse, error) {
 	return &sdk.CreateSessionResponse{}, nil
 }
@@ -117,7 +134,6 @@ func newComposioTestHandler(t *testing.T, sdkFake composio.SDK, store composio.S
 		StateSecret:     []byte("handler-test-secret"),
 		CallbackBaseURL: "https://app.multica.ai",
 		FrontendBaseURL: "https://app.multica.ai",
-		AuthConfigs:     map[string]string{"notion": "ac_notion"},
 	})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
@@ -180,6 +196,32 @@ func TestComposio_ConnectInit(t *testing.T) {
 	h.ComposioConnectInit(w, composioReq(http.MethodPost, "/", `{}`))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("missing slug: expected 400, got %d", w.Code)
+	}
+}
+
+func TestComposio_ListToolkits(t *testing.T) {
+	h := newComposioTestHandler(t, &composioFakeSDK{}, &composioFakeStore{})
+
+	w := httptest.NewRecorder()
+	h.ListComposioToolkits(w, composioReq(http.MethodGet, "/toolkits", ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	var toolkits []ComposioToolkitResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &toolkits); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(toolkits) != 2 {
+		t.Fatalf("expected 2 toolkits, got %d", len(toolkits))
+	}
+	// notion has an enabled auth config in the fake → connectable + sorted first.
+	if toolkits[0].Slug != "notion" || !toolkits[0].Connectable {
+		t.Errorf("first toolkit = %+v, want connectable notion", toolkits[0])
+	}
+	for _, tk := range toolkits {
+		if tk.Slug == "github" && tk.Connectable {
+			t.Error("github has no auth config and must not be connectable")
+		}
 	}
 }
 

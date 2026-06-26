@@ -36,6 +36,18 @@ type ComposioConnectionResponse struct {
 	LastUsedAt  *string `json:"last_used_at"`
 }
 
+// ComposioToolkitResponse is the wire shape for one toolkit in the catalog.
+// connectable is the key UX signal: false means the project has no enabled
+// auth config for the toolkit, so the UI must not offer a working Connect
+// button (BeginConnect would 400).
+type ComposioToolkitResponse struct {
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	Logo        string `json:"logo,omitempty"`
+	Category    string `json:"category,omitempty"`
+	Connectable bool   `json:"connectable"`
+}
+
 // ComposioConnectInit (POST /api/integrations/composio/connect/init) starts a
 // hosted Composio auth flow for the requested toolkit and returns the redirect
 // URL. An unsupported toolkit slug is a 400 (the MVP only wires Notion).
@@ -131,6 +143,38 @@ func (h *Handler) ListComposioConnections(w http.ResponseWriter, r *http.Request
 			Status:      c.Status,
 			ConnectedAt: c.ConnectedAt,
 			LastUsedAt:  c.LastUsedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// ListComposioToolkits (GET /api/integrations/composio/toolkits) returns the
+// full Composio toolkit catalog for the Settings UI to render. Each entry
+// carries a `connectable` flag: only toolkits with an enabled auth config in
+// the project can actually be connected, so the UI gates its Connect button on
+// it. The catalog itself is project-global (not per-user), but the route is
+// user-scoped (requireUser) like the rest of the block.
+func (h *Handler) ListComposioToolkits(w http.ResponseWriter, r *http.Request) {
+	if h.Composio == nil {
+		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")
+		return
+	}
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	toolkits, err := h.Composio.ListToolkits(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to list composio toolkits")
+		return
+	}
+	out := make([]ComposioToolkitResponse, 0, len(toolkits))
+	for _, tk := range toolkits {
+		out = append(out, ComposioToolkitResponse{
+			Slug:        tk.Slug,
+			Name:        tk.Name,
+			Logo:        tk.LogoURL,
+			Category:    tk.Category,
+			Connectable: tk.Connectable,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

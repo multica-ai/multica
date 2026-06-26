@@ -120,6 +120,11 @@ export type {
   RedeemLarkBindingTokenResponse,
 } from "./lark";
 export type {
+  ComposioToolkit,
+  ComposioConnection,
+  ComposioConnectInitResponse,
+} from "./composio";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

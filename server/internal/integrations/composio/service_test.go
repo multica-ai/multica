@@ -39,6 +39,15 @@ type fakeSDK struct {
 	acctMissing      bool
 	listAccountsErr  error
 	lastListAccounts sdk.ListConnectedAccountsRequest
+	// auth-config resolution (BeginConnect / ListToolkits connectable flag).
+	// authConfigs nil => a default single notion→ac_notion ENABLED config so
+	// existing connect tests keep resolving; set explicitly to override.
+	authConfigs    []sdk.AuthConfig
+	authConfigsSet bool
+	listAuthErr    error
+	// toolkit catalog (ListToolkits).
+	toolkits        []sdk.Toolkit
+	listToolkitsErr error
 }
 
 func (f *fakeSDK) CreateLink(_ context.Context, req sdk.CreateLinkRequest) (*sdk.CreateLinkResponse, error) {
@@ -69,6 +78,29 @@ func (f *fakeSDK) ListConnectedAccounts(_ context.Context, req sdk.ListConnected
 		UserID:       f.acctUserID,
 		AuthConfigID: f.acctAuthConfigID,
 	}}}, nil
+}
+
+func (f *fakeSDK) ListAuthConfigs(_ context.Context, _ sdk.ListAuthConfigsRequest) (*sdk.ListAuthConfigsResponse, error) {
+	if f.listAuthErr != nil {
+		return nil, f.listAuthErr
+	}
+	items := f.authConfigs
+	if !f.authConfigsSet && items == nil {
+		items = []sdk.AuthConfig{{
+			ID:                "ac_notion",
+			Toolkit:           sdk.Toolkit{Slug: "notion"},
+			Status:            "ENABLED",
+			IsComposioManaged: true,
+		}}
+	}
+	return &sdk.ListAuthConfigsResponse{Items: items}, nil
+}
+
+func (f *fakeSDK) ListToolkits(_ context.Context, _ sdk.ListToolkitsRequest) (*sdk.ListToolkitsResponse, error) {
+	if f.listToolkitsErr != nil {
+		return nil, f.listToolkitsErr
+	}
+	return &sdk.ListToolkitsResponse{Items: f.toolkits}, nil
 }
 
 func (f *fakeSDK) RevokeConnection(_ context.Context, id string) error {
@@ -174,7 +206,6 @@ func newTestService(t *testing.T, client SDK, store Store) *Service {
 		StateSecret:     testSecret,
 		CallbackBaseURL: "https://app.multica.ai",
 		FrontendBaseURL: "https://app.multica.ai",
-		AuthConfigs:     map[string]string{"notion": "ac_notion"},
 		Now:             func() time.Time { return time.Unix(1_700_000_000, 0) },
 	})
 	if err != nil {
@@ -243,6 +274,91 @@ func TestBeginConnect_UnsupportedToolkit(t *testing.T) {
 	svc := newTestService(t, &fakeSDK{}, newFakeStore())
 	if _, err := svc.BeginConnect(context.Background(), mintUUID(1), "github"); !errors.Is(err, ErrToolkitNotSupported) {
 		t.Fatalf("expected ErrToolkitNotSupported, got %v", err)
+	}
+}
+
+// TestBeginConnect_UnsupportedWhenNoAuthConfig: with the project reporting no
+// enabled auth configs at all, even notion is not connectable.
+func TestBeginConnect_UnsupportedWhenNoAuthConfig(t *testing.T) {
+	t.Parallel()
+	sdkFake := &fakeSDK{authConfigsSet: true, authConfigs: []sdk.AuthConfig{}}
+	svc := newTestService(t, sdkFake, newFakeStore())
+	if _, err := svc.BeginConnect(context.Background(), mintUUID(1), "notion"); !errors.Is(err, ErrToolkitNotSupported) {
+		t.Fatalf("expected ErrToolkitNotSupported with no auth configs, got %v", err)
+	}
+}
+
+// TestBeginConnect_PrefersCustomAuthConfig: when a toolkit has both a
+// Composio-managed and a custom (white-label) auth config, the custom one wins.
+func TestBeginConnect_PrefersCustomAuthConfig(t *testing.T) {
+	t.Parallel()
+	sdkFake := &fakeSDK{authConfigsSet: true, authConfigs: []sdk.AuthConfig{
+		{ID: "ac_managed", Toolkit: sdk.Toolkit{Slug: "notion"}, Status: "ENABLED", IsComposioManaged: true},
+		{ID: "ac_custom", Toolkit: sdk.Toolkit{Slug: "notion"}, Status: "ENABLED", IsComposioManaged: false},
+	}}
+	svc := newTestService(t, sdkFake, newFakeStore())
+	if _, err := svc.BeginConnect(context.Background(), mintUUID(1), "notion"); err != nil {
+		t.Fatalf("BeginConnect: %v", err)
+	}
+	if sdkFake.lastCreateLink.AuthConfigID != "ac_custom" {
+		t.Errorf("auth config = %q, want ac_custom (custom preferred over managed)", sdkFake.lastCreateLink.AuthConfigID)
+	}
+}
+
+// TestListToolkits_ConnectableFlagAndOrder: every toolkit is listed, but only
+// those with an enabled auth config are connectable, and connectable ones sort
+// first.
+func TestListToolkits_ConnectableFlagAndOrder(t *testing.T) {
+	t.Parallel()
+	sdkFake := &fakeSDK{
+		authConfigsSet: true,
+		authConfigs: []sdk.AuthConfig{
+			{ID: "ac_notion", Toolkit: sdk.Toolkit{Slug: "notion"}, Status: "ENABLED"},
+		},
+		toolkits: []sdk.Toolkit{
+			{Slug: "github", Name: "GitHub", LogoURL: "https://logo/gh", Categories: []string{"dev"}},
+			{Slug: "notion", Name: "Notion", LogoURL: "https://logo/notion", Categories: []string{"productivity"}},
+			{Slug: "slack", Name: "Slack"},
+		},
+	}
+	svc := newTestService(t, sdkFake, newFakeStore())
+	tks, err := svc.ListToolkits(context.Background())
+	if err != nil {
+		t.Fatalf("ListToolkits: %v", err)
+	}
+	if len(tks) != 3 {
+		t.Fatalf("expected 3 toolkits, got %d", len(tks))
+	}
+	// Connectable (notion) sorts first.
+	if tks[0].Slug != "notion" || !tks[0].Connectable {
+		t.Errorf("first toolkit = %+v, want connectable notion", tks[0])
+	}
+	if tks[0].Name != "Notion" || tks[0].LogoURL != "https://logo/notion" || tks[0].Category != "productivity" {
+		t.Errorf("notion fields not mapped: %+v", tks[0])
+	}
+	for _, tk := range tks[1:] {
+		if tk.Connectable {
+			t.Errorf("toolkit %q should not be connectable", tk.Slug)
+		}
+	}
+}
+
+// TestListToolkits_PaginatesAndResolverErrorIsSoft: a paginated catalog is
+// fully drained, and an /auth_configs failure degrades to "nothing
+// connectable" instead of failing the whole list.
+func TestListToolkits_ResolverErrorMarksNoneConnectable(t *testing.T) {
+	t.Parallel()
+	sdkFake := &fakeSDK{
+		listAuthErr: errors.New("upstream blip"),
+		toolkits:    []sdk.Toolkit{{Slug: "notion", Name: "Notion"}},
+	}
+	svc := newTestService(t, sdkFake, newFakeStore())
+	tks, err := svc.ListToolkits(context.Background())
+	if err != nil {
+		t.Fatalf("ListToolkits should not fail on auth-config error, got %v", err)
+	}
+	if len(tks) != 1 || tks[0].Connectable {
+		t.Fatalf("expected 1 non-connectable toolkit, got %+v", tks)
 	}
 }
 
