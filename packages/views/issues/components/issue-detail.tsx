@@ -1829,107 +1829,160 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           ref={setScrollContainerEl}
           className="relative flex-1 overflow-y-auto"
         >
-        <div className="mx-auto w-full max-w-4xl px-8 py-8">
-          <TitleEditor
-            key={`title-${id}`}
-            defaultValue={issue.title}
-            placeholder={t(($) => $.detail.title_placeholder)}
-            className="w-full text-2xl font-bold leading-snug tracking-tight"
-            onBlur={(value) => {
-              const trimmed = value.trim();
-              if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
-            }}
-          />
+          {/* Workflow origin issues: full-width Execution Panorama replaces the old detail view.
+              Non-workflow issues keep the existing centered description + sub-issues + activity layout. */}
+          {issue.assignee_type === "workflow" ? (
+            <div className="px-8 py-8">
+              <TitleEditor
+                key={`title-${id}`}
+                defaultValue={issue.title}
+                placeholder={t(($) => $.detail.title_placeholder)}
+                className="w-full text-2xl font-bold leading-snug tracking-tight"
+                onBlur={(value) => {
+                  const trimmed = value.trim();
+                  if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
+                }}
+              />
 
-          {parentIssue && (
-            renderParentIssueLink(
-              "mt-2 inline-flex max-w-full items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground transition-colors group/parent",
-              <>
-                <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
-                <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-                <span className="tabular-nums shrink-0">{parentIssue.identifier}</span>
-                <span className="truncate group-hover/parent:text-foreground">
-                  {parentIssue.title}
-                </span>
-                {parentChildIssues.length > 0 && (() => {
-                  const done = parentChildIssues.filter((c) => c.status === "done").length;
-                  return (
-                    <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
-                      <ProgressRing done={done} total={parentChildIssues.length} size={11} />
-                      <span className="tabular-nums text-[10.5px] font-medium">
-                        {done}/{parentChildIssues.length}
-                      </span>
+              {parentIssue && (
+                renderParentIssueLink(
+                  "mt-2 inline-flex max-w-full items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground transition-colors group/parent",
+                  <>
+                    <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
+                    <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                    <span className="tabular-nums shrink-0">{parentIssue.identifier}</span>
+                    <span className="truncate group-hover/parent:text-foreground">
+                      {parentIssue.title}
                     </span>
-                  );
-                })()}
-              </>,
-            )
-          )}
+                    {parentChildIssues.length > 0 && (() => {
+                      const done = parentChildIssues.filter((c) => c.status === "done").length;
+                      return (
+                        <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
+                          <ProgressRing done={done} total={parentChildIssues.length} size={11} />
+                          <span className="tabular-nums text-[10.5px] font-medium">
+                            {done}/{parentChildIssues.length}
+                          </span>
+                        </span>
+                      );
+                    })()}
+                  </>,
+                )
+              )}
 
-          {originNodeRun && (
-            <div className="mt-3 flex items-center gap-3 rounded-lg border bg-card/50 px-3 py-2">
-              <span className="text-xs text-muted-foreground">
-                {t(($) => $.detail.workflow_node_label)}
-              </span>
-              <NodeRunControlActions
-                nodeRun={originNodeRun}
-                workflowId={issue?.workflow_id ?? undefined}
-                runId={issue?.workflow_run_id ?? undefined}
-                wsId={wsId}
-                size="sm"
-                alwaysShow
-              />
+              {originNodeRun && (
+                <div className="mt-3 flex items-center gap-3 rounded-lg border bg-card/50 px-3 py-2">
+                  <span className="text-xs text-muted-foreground">
+                    {t(($) => $.detail.workflow_node_label)}
+                  </span>
+                  <NodeRunControlActions
+                    nodeRun={originNodeRun}
+                    workflowId={issue?.workflow_id ?? undefined}
+                    runId={issue?.workflow_run_id ?? undefined}
+                    wsId={wsId}
+                    size="sm"
+                    alwaysShow
+                  />
+                </div>
+              )}
+
+              <div className="mt-10">
+                <ExecutionPanoramaPage
+                  workflowId={effectiveWorkflowId ?? ""}
+                  runId={effectiveWorkflowRunId ?? null}
+                  wsId={wsId}
+                />
+              </div>
             </div>
-          )}
-
-          <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
-            <ContentEditor
-              ref={descEditorRef}
-              key={id}
-              defaultValue={issue.description || ""}
-              placeholder={t(($) => $.detail.desc_placeholder)}
-              onUpdate={(md) => {
-                // Bind any pending uploads still referenced in the markdown
-                // so they appear in `issueAttachments` after refresh and the
-                // editor's text/code preview keeps working past reload.
-                const ids = descPendingAttachments
-                  .filter((a) => md.includes(a.url))
-                  .map((a) => a.id);
-                handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
-              }}
-              onUploadFile={handleDescriptionUpload}
-              debounceMs={1500}
-              currentIssueId={id}
-              attachments={descEditorAttachments}
-            />
-
-            <div className="flex items-center gap-1 mt-3">
-              <ReactionBar
-                reactions={issueReactions}
-                currentUserId={user?.id}
-                onToggle={handleToggleIssueReaction}
-                getActorName={getActorName}
+          ) : (
+            <div className="mx-auto w-full max-w-4xl px-8 py-8">
+              <TitleEditor
+                key={`title-${id}`}
+                defaultValue={issue.title}
+                placeholder={t(($) => $.detail.title_placeholder)}
+                className="w-full text-2xl font-bold leading-snug tracking-tight"
+                onBlur={(value) => {
+                  const trimmed = value.trim();
+                  if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
+                }}
               />
-              <FileUploadButton
-                size="sm"
-                onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-              />
-            </div>
-            {descDragOver && <FileDropOverlay />}
-          </div>
 
-          {/* Workflow Execution Panorama — shown when the issue is assigned to a workflow */}
-          {issue.assignee_type === "workflow" && issue.assignee_id && (
-            <div className="mt-10">
-              <ExecutionPanoramaPage
-                workflowId={issue.assignee_id}
-                runId={issue.workflow_run_id}
-                wsId={wsId}
-              />
-            </div>
-          )}
+              {parentIssue && (
+                renderParentIssueLink(
+                  "mt-2 inline-flex max-w-full items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground transition-colors group/parent",
+                  <>
+                    <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
+                    <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                    <span className="tabular-nums shrink-0">{parentIssue.identifier}</span>
+                    <span className="truncate group-hover/parent:text-foreground">
+                      {parentIssue.title}
+                    </span>
+                    {parentChildIssues.length > 0 && (() => {
+                      const done = parentChildIssues.filter((c) => c.status === "done").length;
+                      return (
+                        <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
+                          <ProgressRing done={done} total={parentChildIssues.length} size={11} />
+                          <span className="tabular-nums text-[10.5px] font-medium">
+                            {done}/{parentChildIssues.length}
+                          </span>
+                        </span>
+                      );
+                    })()}
+                  </>,
+                )
+              )}
 
-          {/* Sub-issues — Linear-style */}
+              {originNodeRun && (
+                <div className="mt-3 flex items-center gap-3 rounded-lg border bg-card/50 px-3 py-2">
+                  <span className="text-xs text-muted-foreground">
+                    {t(($) => $.detail.workflow_node_label)}
+                  </span>
+                  <NodeRunControlActions
+                    nodeRun={originNodeRun}
+                    workflowId={issue?.workflow_id ?? undefined}
+                    runId={issue?.workflow_run_id ?? undefined}
+                    wsId={wsId}
+                    size="sm"
+                    alwaysShow
+                  />
+                </div>
+              )}
+
+              <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
+                <ContentEditor
+                  ref={descEditorRef}
+                  key={id}
+                  defaultValue={issue.description || ""}
+                  placeholder={t(($) => $.detail.desc_placeholder)}
+                  onUpdate={(md) => {
+                    // Bind any pending uploads still referenced in the markdown
+                    // so they appear in `issueAttachments` after refresh and the
+                    // editor's text/code preview keeps working past reload.
+                    const ids = descPendingAttachments
+                      .filter((a) => md.includes(a.url))
+                      .map((a) => a.id);
+                    handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
+                  }}
+                  onUploadFile={handleDescriptionUpload}
+                  debounceMs={1500}
+                  currentIssueId={id}
+                  attachments={descEditorAttachments}
+                />
+
+                <div className="flex items-center gap-1 mt-3">
+                  <ReactionBar
+                    reactions={issueReactions}
+                    currentUserId={user?.id}
+                    onToggle={handleToggleIssueReaction}
+                    getActorName={getActorName}
+                  />
+                  <FileUploadButton
+                    size="sm"
+                    onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                  />
+                </div>
+                {descDragOver && <FileDropOverlay />}
+              </div>
+              {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (
             <div className="mt-6">
               <button
@@ -2150,9 +2203,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
           </div>
         </div>
+          )}
         </div>
-      </div>
-  );
+        </div>
+    );
 
   if (isMobile) {
     return (

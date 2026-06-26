@@ -6,25 +6,6 @@ import { NodeRunStatusIcon } from "./node-run-status-icon";
 import { Bot, User, Paperclip } from "lucide-react";
 import { useT } from "@multica/views/i18n";
 
-const LEFT_BORDER_COLORS: Record<string, string> = {
-  completed: "border-l-green-500",
-  critic_approved: "border-l-green-500",
-  format_checking: "border-l-blue-500",
-  working: "border-l-blue-500",
-  critic_reviewing: "border-l-blue-500",
-  pending: "border-l-amber-500",
-  format_ok: "border-l-amber-500",
-  worker_assigned: "border-l-amber-500",
-  awaiting_input: "border-l-amber-500",
-  awaiting_critic: "border-l-amber-500",
-  critic_rework: "border-l-orange-500",
-  failed: "border-l-red-500",
-  blocked: "border-l-red-500",
-  format_failed: "border-l-red-500",
-  skipped: "border-l-muted",
-  cancelled: "border-l-muted",
-};
-
 export interface RuntimeNodeCardProps {
   node: WorkflowNode;
   nodeRun: WorkflowNodeRun | null;
@@ -45,10 +26,9 @@ export function RuntimeNodeCard({
   elementRef,
 }: RuntimeNodeCardProps) {
   const { t } = useT("issues");
-  const status = nodeRun?.status;
-  const borderClass = status ? (LEFT_BORDER_COLORS[status] ?? "") : "";
-  const hasWorkerOutput = (nodeRun?.worker_output as unknown) != null;
-  const artifactCount = hasWorkerOutput ? 1 : 0;
+  const hasWorkerOutput = nodeRun?.worker_output != null;
+  const hasCriticOutput = nodeRun?.critic_output != null;
+  const artifactCount = (hasWorkerOutput ? 1 : 0) + (hasCriticOutput ? 1 : 0);
 
   return (
     <button
@@ -62,7 +42,6 @@ export function RuntimeNodeCard({
         "transition-all hover:-translate-y-0.5 hover:border-primary/45 hover:shadow-md",
         isSelected &&
           "border-primary/55 shadow-[inset_0_0_0_1px_rgba(59,130,246,0.08),0_2px_12px_rgba(15,23,42,0.06)]",
-        borderClass && `border-l-[3px] ${borderClass}`,
       )}
     >
       {/* Row 1: node title + status icon */}

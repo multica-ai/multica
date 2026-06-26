@@ -168,6 +168,7 @@
     "back_to_issues": "Back to Issues",
     "title_placeholder": "Issue title",
     "desc_placeholder": "Add description...",
+    "desc_label": "Description",
     "sub_issues_label": "Sub-issues",
     "sub_issue_of": "Sub-issue of",
     "workflow_node_label": "Workflow task",

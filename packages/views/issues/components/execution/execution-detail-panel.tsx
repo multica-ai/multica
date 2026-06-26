@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import type { WorkflowNode, WorkflowNodeRun } from "@multica/core/types";
 import { X, Bot, User } from "lucide-react";
 import { useT } from "@multica/views/i18n";
@@ -44,6 +44,19 @@ export function ExecutionDetailPanel({
         )
       : null;
 
+  // Extract error from failed/blocked node runs
+  const errorMessage = useMemo(() => {
+    if (!nodeRun || (status !== "failed" && status !== "blocked" && status !== "format_failed")) return null;
+    // Try to extract error string from worker_output or critic_output
+    const wo = nodeRun.worker_output as Record<string, unknown> | null;
+    const co = nodeRun.critic_output as Record<string, unknown> | null;
+    if (wo && typeof wo.error === "string") return wo.error;
+    if (wo && typeof wo.message === "string") return wo.message;
+    if (co && typeof co.error === "string") return co.error;
+    if (co && typeof co.message === "string") return co.message;
+    return null;
+  }, [nodeRun, status]);
+
   return (
     <>
       {/* Mask */}
@@ -72,6 +85,18 @@ export function ExecutionDetailPanel({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+          {/* Node description */}
+          {node.description && (
+            <section>
+              <h3 className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                {t(($) => $.detail.desc_label)}
+              </h3>
+              <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                {node.description}
+              </p>
+            </section>
+          )}
+
           {/* Status path visualization */}
           {status && (
             <section>
@@ -132,6 +157,18 @@ export function ExecutionDetailPanel({
                 <NodeRunStatusIcon status={nodeRun.status} className="h-3.5 w-3.5" />
               )}
             </div>
+            {nodeRun?.worker_output != null && (
+              <div className="mt-2">
+                <h4 className="text-[11px] font-medium text-muted-foreground mb-1">
+                  {t(($) => $.execution.detail_panel.worker_output)}
+                </h4>
+                <pre className="text-xs bg-muted/50 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap">
+                  {typeof nodeRun.worker_output === "string"
+                    ? nodeRun.worker_output
+                    : JSON.stringify(nodeRun.worker_output, null, 2)}
+                </pre>
+              </div>
+            )}
           </section>
 
           {/* Critic info */}
@@ -153,6 +190,18 @@ export function ExecutionDetailPanel({
                   <p className="text-xs text-muted-foreground mt-1 italic">
                     &ldquo;{nodeRun.critic_comment}&rdquo;
                   </p>
+                )}
+                {nodeRun?.critic_output != null && (
+                  <div className="mt-2">
+                    <h4 className="text-[11px] font-medium text-muted-foreground mb-1">
+                      {t(($) => $.execution.detail_panel.critic_output)}
+                    </h4>
+                    <pre className="text-xs bg-muted/50 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap">
+                      {typeof nodeRun.critic_output === "string"
+                        ? nodeRun.critic_output
+                        : JSON.stringify(nodeRun.critic_output, null, 2)}
+                    </pre>
+                  </div>
                 )}
               </>
             ) : (
@@ -202,6 +251,16 @@ export function ExecutionDetailPanel({
                       {t(($) => $.execution.detail_panel.retry_count)}
                     </dt>
                     <dd>{nodeRun.retry_count}</dd>
+                  </div>
+                )}
+                {errorMessage && (
+                  <div className="flex flex-col gap-1 pt-2 border-t border-border/50 mt-2">
+                    <dt className="text-muted-foreground">
+                      {t(($) => $.execution.detail_panel.error)}
+                    </dt>
+                    <dd className="text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
+                      {errorMessage}
+                    </dd>
                   </div>
                 )}
               </dl>
