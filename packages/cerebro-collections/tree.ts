@@ -72,3 +72,22 @@ export function collectSubtreeIds(node: FolderNode): Set<string> {
   walk(node);
   return ids;
 }
+
+// Breadcrumb path (root → … → folder) of folder names, as shown under each
+// card in the mockup ("Drive/Denmark/DK Policies"). Walks parent_id up the flat
+// list; a visited guard keeps a corrupt parent cycle from looping forever, and
+// a parent missing from the list simply ends the chain.
+export function folderPath(
+  folder: CollectionFolder,
+  byId: Map<string, CollectionFolder>,
+): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let cur: CollectionFolder | undefined = folder;
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    names.unshift(cur.name);
+    cur = cur.parent_id !== null ? byId.get(cur.parent_id) : undefined;
+  }
+  return names;
+}

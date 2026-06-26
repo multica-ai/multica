@@ -2,25 +2,28 @@
 
 // Settings → Collections (FIR-1590 → Collections). One place to see every
 // folder across both surfaces — Documents/Notes (artifact) and
-// Autopilots/Skills (entity) — as a tree of folder cards, open the per-folder
-// access editor (the "Valgt her / Arvet" editor in Danish product talk), and
-// move folders between parents. The same access editor is also reachable inline
-// from each folder interface via FolderAccessColumn; this page is the
-// consolidated admin view.
+// Autopilots/Skills (entity) — as a tree of folder cards, manage per-folder
+// access inline, and move folders between parents.
 //
-// Layout follows Jesper's mockup (FIR-1590 feedback #4): one tab per folder
-// type, and within each tab a recursive tree where every folder is a card
-// showing its access affordance and, for sub-folders, a hint that access is
-// inherited from the parent by default (feedback #3).
+// Layout follows Jesper's mockup (FIR-1590 feedback #3 + #4): one tab per
+// folder type, and within each tab a recursive tree where every folder is a
+// card showing its breadcrumb path and an inline ACCESS PILL summarising who
+// can reach it — "Everyone", a named group/member, or "Inherits: …" when the
+// access cascades from a parent (the default for a sub-folder). The pill opens
+// the full access editor; a Move menu re-parents the folder.
 //
 // The platform layer (web + desktop) spreads useCerebroCollectionsSettingsTabs()
 // into <SettingsPage extraAccountTabs={...}> — the tab only appears when the
 // cerebro_collections flag is on.
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Layers, KeyRound, FolderTree as FolderTreeIcon, MoveRight } from "lucide-react";
+import {
+  Layers,
+  Folder as FolderIcon,
+  ChevronDown,
+  MoveRight,
+} from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
-import { Badge } from "@multica/ui/components/ui/badge";
 import {
   Tabs,
   TabsList,
@@ -35,22 +38,27 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   artifactCollectionFoldersOptions,
   entityCollectionFoldersOptions,
+  folderGrantsOptions,
 } from "../queries";
 import { useMoveCollectionFolder } from "../mutations";
 import {
   buildFolderTree,
   collectSubtreeIds,
   flattenFolderTree,
+  folderPath,
   type FolderNode,
 } from "../tree";
+import { summarizeAccess, type AccessTone } from "../access-summary";
+import { useGranteeDirectory } from "./use-grantee-directory";
 import { FolderAccessEditor } from "./folder-access-editor";
 import type { CollectionFolder } from "../api";
-import type { GrantSurface } from "../types";
+import type { GranteeType, GrantSurface } from "../types";
 
 // Mirrors @multica/views ExtraSettingsTab structurally. Defined locally so this
 // entrypoint stays free of a views dependency (and the topo-sort coupling it
@@ -62,6 +70,8 @@ export interface ExtraSettingsTab {
   content: React.ReactNode;
   wide?: boolean;
 }
+
+type LabelFor = (type: GranteeType, id: string | null) => string;
 
 // The four folder groups, one per tab. entityKind is the kind the entity
 // backend keys folders by; artifact folders don't need it.
@@ -76,11 +86,58 @@ const GROUPS: {
   { group: "Skills", surface: "entity", entityKind: "skill" },
 ];
 
-interface FolderTreeProps {
-  group: string;
-  folders: CollectionFolder[];
-  entityKind?: "skill" | "autopilot";
+const TONE_DOT: Record<AccessTone, string> = {
+  everyone: "bg-emerald-500",
+  restricted: "bg-blue-500",
+  inherited: "bg-amber-500",
+  none: "bg-muted-foreground/40",
+};
+
+// The inline access pill on a folder card. Reads the folder's EFFECTIVE grants
+// (direct + inherited) and renders a one-line summary with a colored dot;
+// clicking opens the full access editor. Only fetches while its tab is active.
+function AccessPill({
+  folder,
+  active,
+  labelFor,
+  onManage,
+}: {
+  folder: CollectionFolder;
+  active: boolean;
+  labelFor: LabelFor;
   onManage: (folder: CollectionFolder) => void;
+}) {
+  const wsId = useWorkspaceId();
+  const { data: grants, isLoading } = useQuery(
+    folderGrantsOptions(wsId, folder.surface, folder.id, "effective", {
+      enabled: active,
+    }),
+  );
+  const summary = summarizeAccess(grants ?? [], labelFor);
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="shrink-0 gap-1.5 font-normal"
+      onClick={() => onManage(folder)}
+      title="Manage access"
+    >
+      <span
+        className={cn("size-2 rounded-full", TONE_DOT[summary.tone])}
+        aria-hidden
+      />
+      <span
+        className={cn(
+          "max-w-44 truncate",
+          summary.kind !== "direct" && "text-muted-foreground",
+        )}
+      >
+        {isLoading && !grants ? "…" : summary.label}
+      </span>
+      <ChevronDown className="size-3.5 text-muted-foreground" />
+    </Button>
+  );
 }
 
 function MoveFolderMenu({
@@ -116,9 +173,10 @@ function MoveFolderMenu({
             variant="ghost"
             className="shrink-0 text-muted-foreground"
             disabled={move.isPending}
+            aria-label="Move folder"
+            title="Move folder"
           >
             <MoveRight className="size-3.5" />
-            Move
           </Button>
         }
       />
@@ -148,50 +206,75 @@ function MoveFolderMenu({
 function FolderCard({
   node,
   allFolders,
+  byId,
+  active,
+  labelFor,
   entityKind,
   onManage,
 }: {
   node: FolderNode;
   allFolders: CollectionFolder[];
+  byId: Map<string, CollectionFolder>;
+  active: boolean;
+  labelFor: LabelFor;
   entityKind?: "skill" | "autopilot";
   onManage: (folder: CollectionFolder) => void;
 }) {
-  const isSubfolder = node.parent_id !== null;
+  const path = folderPath(node, byId);
   return (
-    <div
-      className="flex items-center gap-2 rounded-md border bg-card p-2"
-      style={{ marginLeft: node.depth * 20 }}
-    >
-      <FolderTreeIcon className="size-4 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm">{node.name}</div>
+    <div style={{ marginLeft: node.depth * 24 }}>
+      <div className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2.5">
+        <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="truncate text-sm font-medium">{node.name}</span>
+            <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Folder
+            </span>
+          </div>
+          {path.length > 1 && (
+            <div className="truncate text-xs text-muted-foreground">
+              {path.join(" / ")}
+            </div>
+          )}
+        </div>
+        <MoveFolderMenu
+          node={node}
+          allFolders={allFolders}
+          entityKind={entityKind}
+        />
+        <AccessPill
+          folder={node}
+          active={active}
+          labelFor={labelFor}
+          onManage={onManage}
+        />
       </div>
-      {isSubfolder && (
-        <Badge variant="secondary" className="shrink-0 font-normal">
-          Inherits access
-        </Badge>
-      )}
-      <MoveFolderMenu
-        node={node}
-        allFolders={allFolders}
-        entityKind={entityKind}
-      />
-      <Button
-        size="sm"
-        variant="outline"
-        className="shrink-0"
-        onClick={() => onManage(node)}
-      >
-        <KeyRound className="size-3.5" />
-        Manage access
-      </Button>
     </div>
   );
 }
 
-function FolderTree({ group, folders, entityKind, onManage }: FolderTreeProps) {
+function FolderTree({
+  group,
+  folders,
+  entityKind,
+  active,
+  onManage,
+}: {
+  group: string;
+  folders: CollectionFolder[];
+  entityKind?: "skill" | "autopilot";
+  active: boolean;
+  onManage: (folder: CollectionFolder) => void;
+}) {
+  // labelFor only needs the directories while this tab is open.
+  const { labelFor } = useGranteeDirectory(active);
   const tree = React.useMemo(() => buildFolderTree(folders), [folders]);
   const ordered = React.useMemo(() => flattenFolderTree(tree), [tree]);
+  const byId = React.useMemo(
+    () => new Map(folders.map((f) => [f.id, f])),
+    [folders],
+  );
 
   if (folders.length === 0) {
     return (
@@ -206,6 +289,9 @@ function FolderTree({ group, folders, entityKind, onManage }: FolderTreeProps) {
           key={`${node.surface}:${node.id}`}
           node={node}
           allFolders={folders}
+          byId={byId}
+          active={active}
+          labelFor={labelFor}
           entityKind={entityKind}
           onManage={onManage}
         />
@@ -216,6 +302,7 @@ function FolderTree({ group, folders, entityKind, onManage }: FolderTreeProps) {
 
 export function CollectionsTab() {
   const wsId = useWorkspaceId();
+  const [activeTab, setActiveTab] = React.useState("Documents");
 
   const { data: artifactFolders = [] } = useQuery(
     artifactCollectionFoldersOptions(wsId),
@@ -248,7 +335,7 @@ export function CollectionsTab() {
         </p>
       </div>
 
-      <Tabs defaultValue="Documents">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           {GROUPS.map((g) => (
             <TabsTrigger key={g.group} value={g.group}>
@@ -262,6 +349,7 @@ export function CollectionsTab() {
               group={g.group}
               folders={foldersByGroup[g.group] ?? []}
               entityKind={g.entityKind}
+              active={activeTab === g.group}
               onManage={setActive}
             />
           </TabsContent>
