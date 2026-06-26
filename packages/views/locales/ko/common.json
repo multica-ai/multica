@@ -8,7 +8,14 @@
     "just_now": "방금 전",
     "minutes_ago": "{{count}}분 전",
     "hours_ago": "{{count}}시간 전",
-    "days_ago": "{{count}}일 전"
+    "days_ago": "{{count}}일 전",
+    "months_ago": "{{count}}개월 전",
+    "years_ago": "{{count}}년 전",
+    "in_minutes": "{{count}}분 후",
+    "in_hours": "{{count}}시간 후",
+    "in_days": "{{count}}일 후",
+    "in_months": "{{count}}개월 후",
+    "in_years": "{{count}}년 후"
   },
   "lark_bind": {
     "page_title": "Lark 계정 연결",

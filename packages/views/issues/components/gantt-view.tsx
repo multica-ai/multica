@@ -8,7 +8,7 @@ import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Issue, IssueStatus } from "@multica/core/types";
-import { dateOnlyToUTCDate } from "@multica/core/issues/date";
+import { dateOnlyToUTCDate, formatDateOnly } from "@multica/core/issues/date";
 import { cn } from "@multica/ui/lib/utils";
 import {
   Tooltip,
@@ -123,7 +123,8 @@ function GanttAxis({
   todayOffsetDays: number;
   width: number;
 }) {
-  const locale = typeof navigator !== "undefined" ? navigator.language : "en";
+  const { i18n } = useT("issues");
+  const locale = i18n.language || "en";
   const totalDays = daysBetween(range.start, range.end);
 
   const monthBlocks = useMemo(() => {
@@ -315,7 +316,7 @@ function ScheduledRow({
   dayPx: number;
   totalDays: number;
 }) {
-  const { t } = useT("issues");
+  const { t, i18n } = useT("issues");
   const p = useWorkspacePaths();
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery({
@@ -349,14 +350,9 @@ function ScheduledRow({
     }
   }
 
-  const locale = typeof navigator !== "undefined" ? navigator.language : "en";
-  const fmt = (d: Date) =>
-    d.toLocaleDateString(locale, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      timeZone: "UTC",
-    });
+  const locale = i18n.language || "en";
+  const fmt = (iso: string | null) =>
+    formatDateOnly(iso, { month: "short", day: "numeric", year: "numeric" }, locale);
 
   return (
     <IssueActionsContextMenu issue={issue}>
@@ -419,7 +415,7 @@ function ScheduledRow({
                 <div className="flex flex-col gap-0.5 text-xs">
                   <span className="font-medium">{issue.title}</span>
                   <span className="text-muted-foreground">
-                    {start ? fmt(start) : "—"} → {due ? fmt(due) : "—"}
+                    {start ? fmt(issue.start_date) : "—"} → {due ? fmt(issue.due_date) : "—"}
                   </span>
                   {inverted && (
                     <span className="text-destructive">

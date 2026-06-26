@@ -41,6 +41,8 @@ import { larkInstallationsOptions, larkKeys } from "@multica/core/lark";
 import { api, ApiError } from "@multica/core/api";
 import type { LarkInstallation, LarkInstallStatusResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useFormatDateTime } from "../../common/use-format-date-time";
+import { InstantTooltip } from "../../common/instant-tooltip";
 import { useT } from "../../i18n";
 
 // MUL-3083: the Lark (international, open.larksuite.com) "connect a Bot"
@@ -220,6 +222,7 @@ function InstallationRow({
   onDisconnect: () => void;
 }) {
   const { t } = useT("settings");
+  const { formatDateTime } = useFormatDateTime();
   // The bot is bound 1:1 to a Multica Agent (per the (workspace_id,
   // agent_id) UNIQUE in lark_installation). Render the Multica agent's
   // identity here rather than the raw Lark app_id / bot_open_id — those
@@ -253,11 +256,14 @@ function InstallationRow({
               </span>
             )}
           </p>
-          <p className="text-[10px] text-muted-foreground">
+          <InstantTooltip
+            value={installation.installed_at}
+            className="block text-[10px] text-muted-foreground"
+          >
             {t(($) => $.lark.installed_at_label, {
-              when: new Date(installation.installed_at).toLocaleString(),
+              when: formatDateTime(installation.installed_at),
             })}
-          </p>
+          </InstantTooltip>
         </div>
       </div>
       {canManage && isActive && (

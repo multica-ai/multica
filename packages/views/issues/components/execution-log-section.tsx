@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask, TaskFailureReason } from "@multica/core/types";
-import { useTimeAgo } from "../../i18n";
+import { DateTime } from "../../common/date-time";
 import {
   Tooltip,
   TooltipContent,
@@ -363,11 +363,9 @@ export function ActiveTaskRow({
 
 function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
-  const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
-  const time = task.completed_at ? timeAgo(task.completed_at) : "—";
   const failureLabel =
     task.status === "failed" && task.failure_reason
       ? failureReasonLabel[task.failure_reason as TaskFailureReason]
@@ -401,7 +399,15 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       <RowStatus title={failureLabel ?? label}>
         <TaskStatusIcon status={task.status} />
         <span className="sr-only">{failureLabel ?? label}</span>
-        <span className="text-muted-foreground">{time}</span>
+        {task.completed_at ? (
+          <DateTime
+            value={task.completed_at}
+            variant="relative"
+            className="text-muted-foreground"
+          />
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
       </RowStatus>
       <RowActions>
         <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />

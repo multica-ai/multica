@@ -10,6 +10,8 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { isImeComposing } from "@multica/core/utils";
 import { useTimeAgo } from "../../i18n";
+import { DateTime } from "../../common/date-time";
+import { InstantTooltip } from "../../common/instant-tooltip";
 import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { CreateAgentDialog } from "../../agents/components/create-agent-dialog";
@@ -817,7 +819,6 @@ function SquadDetailInspector({
   onUpdateDescription: (next: string) => Promise<void>;
 }) {
   const { t } = useT("squads");
-  const timeAgo = useTimeAgo();
   const initials = squad.name
     .split(" ")
     .map((w) => w[0])
@@ -866,10 +867,10 @@ function SquadDetailInspector({
             </span>
           </InspectorRow>
           <InspectorRow label="Created">
-            <span className="text-muted-foreground">{timeAgo(squad.created_at)}</span>
+            <DateTime value={squad.created_at} variant="relative" className="text-muted-foreground" />
           </InspectorRow>
           <InspectorRow label="Updated">
-            <span className="text-muted-foreground">{timeAgo(squad.updated_at)}</span>
+            <DateTime value={squad.updated_at} variant="relative" className="text-muted-foreground" />
           </InspectorRow>
         </div>
       </div>
@@ -1265,9 +1266,11 @@ function SquadMembersTab({
                 )}
                 {showLastActive && (
                   <div className="mt-0.5 text-xs text-muted-foreground">
-                    {t(($) => $.members_tab.last_active_label, {
-                      time: timeAgo(status!.last_active_at!),
-                    })}
+                    <InstantTooltip value={status!.last_active_at!}>
+                      {t(($) => $.members_tab.last_active_label, {
+                        time: timeAgo(status!.last_active_at!),
+                      })}
+                    </InstantTooltip>
                   </div>
                 )}
               </div>

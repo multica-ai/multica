@@ -40,6 +40,7 @@ import { taskStatusConfig } from "../../config";
 import { failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
+import { InstantTooltip } from "../../../common/instant-tooltip";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 // Recent work pagination: small initial cohort to keep the section
@@ -416,12 +417,15 @@ function TaskRow({
         ? t(($) => $.tab_body.activity.source_autopilot)
         : t(($) => $.tab_body.activity.source_untracked);
 
-  const timeText =
-    timeMode === "active"
-      ? activeTaskTimeText(task, t, timeAgo)
-      : task.completed_at
-        ? timeAgo(task.completed_at)
-        : "—";
+  // One switch picks both the instant and its phrase key, so the visible text
+  // and its tooltip (full time + offset) can never point at different instants.
+  const activeTime = timeMode === "active" ? activeTaskTime(task) : null;
+  const timeText = activeTime
+    ? t(($) => $.tab_body.activity[activeTime.key], { when: timeAgo(activeTime.at) })
+    : task.completed_at
+      ? timeAgo(task.completed_at)
+      : "—";
+  const timeValue = activeTime ? activeTime.at : task.completed_at;
 
   // Failure reason. The back-end emits "" on non-failed tasks (omitempty
   // strips it on the wire) so the truthy guard is the right shape; the
@@ -500,7 +504,7 @@ function TaskRow({
           )}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-          <span>{timeText}</span>
+          <InstantTooltip value={timeValue}>{timeText}</InstantTooltip>
           {durationText && (
             <>
               <Sep />
@@ -599,17 +603,20 @@ function Sep() {
   return <span className="mx-1 text-muted-foreground/40">·</span>;
 }
 
-type AgentsT = ReturnType<typeof useT<"agents">>["t"];
-type TimeAgoFn = (dateStr: string) => string;
-
-function activeTaskTimeText(task: AgentTask, t: AgentsT, timeAgo: TimeAgoFn): string {
+// The instant an active row's time refers to, paired with its i18n phrase key.
+// Single source for both the visible "Started 2m ago" text and the tooltip's
+// exact instant — one branch set, so they cannot drift apart.
+function activeTaskTime(task: AgentTask): {
+  at: string;
+  key: "started_prefix" | "dispatched_prefix" | "queued_prefix";
+} {
   if (task.status === "running" && task.started_at) {
-    return t(($) => $.tab_body.activity.started_prefix, { when: timeAgo(task.started_at) });
+    return { at: task.started_at, key: "started_prefix" };
   }
   if (task.status === "dispatched" && task.dispatched_at) {
-    return t(($) => $.tab_body.activity.dispatched_prefix, { when: timeAgo(task.dispatched_at) });
+    return { at: task.dispatched_at, key: "dispatched_prefix" };
   }
-  return t(($) => $.tab_body.activity.queued_prefix, { when: timeAgo(task.created_at) });
+  return { at: task.created_at, key: "queued_prefix" };
 }
 
 /**

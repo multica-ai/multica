@@ -98,7 +98,7 @@ import { PageHeader } from "../../layout/page-header";
 import { ProjectIcon } from "./project-icon";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
-import { useFormatRelativeDate } from "./labels";
+import { DateTime } from "../../common/date-time";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
 
@@ -355,7 +355,6 @@ function ProjectTableRow({
   rowHref: string;
   rowLink: ReturnType<typeof useRowLink>;
 }) {
-  const formatRelativeDate = useFormatRelativeDate();
   const updateProject = useUpdateProject();
   const handleUpdate = useCallback(
     (data: UpdateProjectRequest) => updateProject.mutate({ id: project.id, ...data }),
@@ -433,7 +432,7 @@ function ProjectTableRow({
 
       {isColVisible("created") ? (
         <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
-          {formatRelativeDate(project.created_at)}
+          <DateTime value={project.created_at} variant="relative" />
         </ListGridCell>
       ) : (
         <ListGridCell className="hidden px-0 @2xl:flex" />
@@ -561,7 +560,6 @@ function ProjectCard({
 }) {
   const { t } = useT("projects");
   const wsPaths = useWorkspacePaths();
-  const formatRelativeDate = useFormatRelativeDate();
   const updateProject = useUpdateProject();
   const handleUpdate = useCallback(
     (data: UpdateProjectRequest) => updateProject.mutate({ id: project.id, ...data }),
@@ -636,7 +634,7 @@ function ProjectCard({
         <div className="flex items-center gap-2">
           <ProjectPriorityBadge project={project} handleUpdate={handleUpdate} align="start" />
           <span className="text-[10px] text-muted-foreground">
-            {formatRelativeDate(project.created_at)}
+            <DateTime value={project.created_at} variant="relative" />
           </span>
         </div>
       </div>

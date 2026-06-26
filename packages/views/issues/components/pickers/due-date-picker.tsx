@@ -6,9 +6,10 @@ import type { UpdateIssueRequest } from "@multica/core/types";
 import {
   toDateOnly,
   dateOnlyToLocalDate,
-  formatDateOnly,
   isPastDateOnly,
 } from "@multica/core/issues/date";
+import { useFormatCalendarDate } from "../../../common/use-format-calendar-date";
+import { useViewingTimezone } from "../../../common/use-viewing-timezone";
 import { Calendar } from "@multica/ui/components/ui/calendar";
 import {
   Popover,
@@ -36,9 +37,11 @@ export function DueDatePicker({
   defaultOpen?: boolean;
 }) {
   const { t } = useT("issues");
+  const formatCalendarDate = useFormatCalendarDate();
+  const viewTz = useViewingTimezone();
   const [open, setOpen] = useState(defaultOpen);
   const date = dateOnlyToLocalDate(dueDate);
-  const isOverdue = isPastDateOnly(dueDate);
+  const isOverdue = isPastDateOnly(dueDate, viewTz);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -51,7 +54,7 @@ export function DueDatePicker({
             <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
             {date ? (
               <span className={isOverdue ? "text-destructive" : ""}>
-                {formatDateOnly(dueDate, { month: "short", day: "numeric" }, "en-US")}
+                {formatCalendarDate(dueDate)}
               </span>
             ) : (
               <span className="text-muted-foreground">{t(($) => $.pickers.due_date.trigger_label)}</span>

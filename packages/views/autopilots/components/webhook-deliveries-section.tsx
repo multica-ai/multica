@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   CheckCircle2,
   XCircle,
@@ -31,6 +31,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
+import { DateTime } from "../../common/date-time";
 import { useT } from "../../i18n";
 import type {
   WebhookDelivery,
@@ -71,16 +72,6 @@ function visualForStatus(status: string): StatusVisual {
 }
 
 // --- Helpers --------------------------------------------------------------
-
-function formatDate(value: string): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 // A delivery is replayable when (a) the server allows it (signature is not
 // invalid AND the delivery itself wasn't rejected) and (b) we have something
@@ -203,9 +194,17 @@ function DeliveryRow({
             })}
           </Badge>
         )}
-        <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-          {formatDate(delivery.received_at || delivery.created_at)}
-        </span>
+        {delivery.received_at || delivery.created_at ? (
+          <DateTime
+            value={delivery.received_at || delivery.created_at}
+            variant="datetime"
+            className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums"
+          />
+        ) : (
+          <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
+            —
+          </span>
+        )}
       </button>
       {open && (
         <DeliveryDetailDialog
@@ -283,11 +282,11 @@ function DeliveryDetailDialog({
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
             <MetaRow
               label={t(($) => $.deliveries.detail.received_at)}
-              value={formatDate(full.received_at)}
+              value={full.received_at ? <DateTime value={full.received_at} variant="datetime" /> : "—"}
             />
             <MetaRow
               label={t(($) => $.deliveries.detail.last_attempt_at)}
-              value={formatDate(full.last_attempt_at)}
+              value={full.last_attempt_at ? <DateTime value={full.last_attempt_at} variant="datetime" /> : "—"}
             />
             <MetaRow
               label={t(($) => $.deliveries.detail.attempt_count)}
@@ -355,7 +354,7 @@ function MetaRow({
   mono = false,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   mono?: boolean;
 }) {
   return (
@@ -366,7 +365,7 @@ function MetaRow({
           "truncate text-foreground",
           mono && "font-mono",
         )}
-        title={value}
+        title={typeof value === "string" ? value : undefined}
       >
         {value}
       </dd>

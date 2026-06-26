@@ -30,19 +30,3 @@ export function useProjectPriorityLabels(): Record<ProjectPriority, string> {
     none: t(($) => $.priority.none),
   };
 }
-
-// "1d ago" / "3mo ago" / "Today" — relative date helper that flows through
-// i18next. Returns a function so callers keep the previous
-// `formatRelativeDate(iso)` shape.
-export function useFormatRelativeDate(): (date: string) => string {
-  const { t } = useT("projects");
-  return (date: string) => {
-    const diff = Date.now() - new Date(date).getTime();
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    if (days < 1) return t(($) => $.relative_date.today);
-    if (days === 1) return t(($) => $.relative_date.one_day_ago);
-    if (days < 30) return t(($) => $.relative_date.days_ago, { count: days });
-    const months = Math.floor(days / 30);
-    return t(($) => $.relative_date.months_ago, { count: months });
-  };
-}

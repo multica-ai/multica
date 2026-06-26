@@ -30,6 +30,7 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { formatInstantWithOffset } from "@multica/core/i18n/format-date-time";
 import type { Autopilot } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -46,6 +47,8 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { DateTime } from "../../common/date-time";
+import { HoverTooltip } from "../../common/instant-tooltip";
 import { PageHeader } from "../../layout/page-header";
 import { AutopilotDialog } from "./autopilot-dialog";
 import { AutopilotListToolbar, actorFilterValue } from "./autopilot-list-toolbar";
@@ -337,7 +340,6 @@ function runStatusDotClass(status: string | null | undefined): string {
 
 function LastRunCell({ autopilot }: { autopilot: Autopilot }) {
   const { t } = useT("autopilots");
-  const timeAgo = useTimeAgo();
   if (!autopilot.last_run_at) {
     return (
       <ListGridCell className="hidden @2xl:flex">
@@ -360,26 +362,41 @@ function LastRunCell({ autopilot }: { autopilot: Autopilot }) {
         title={knownStatus ? t(($) => $.run_status[knownStatus]) : status ?? undefined}
         className={`size-1.5 shrink-0 rounded-full ${runStatusDotClass(status)}`}
       />
-      <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-        {timeAgo(autopilot.last_run_at)}
-      </span>
+      <DateTime
+        value={autopilot.last_run_at}
+        variant="relative"
+        className="whitespace-nowrap text-xs tabular-nums text-muted-foreground"
+      />
     </ListGridCell>
   );
 }
 
 function NextRunCell({ autopilot }: { autopilot: Autopilot }) {
+  const { i18n } = useT("autopilots");
+  const timeAgo = useTimeAgo();
   const next = autopilot.next_run_at;
   return (
     <ListGridCell className="hidden @2xl:flex">
       {next ? (
-        <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-          {new Date(next).toLocaleString(undefined, {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </span>
+        // Relative time ("in 3h") is timezone-agnostic, so it sidesteps the
+        // list endpoint omitting the trigger timezone: the list's derived
+        // next_run_at is a bare UTC instant, and rendering an absolute wall
+        // clock for it would either misstate the scheduling-axis time (viewer
+        // tz) or read as the meaningless server-process offset. The hover
+        // tooltip keeps the exact instant as UTC + GMT offset — unambiguous and
+        // not mistaken for local time. The detail page, which has the trigger,
+        // shows the absolute time in the trigger timezone.
+        <HoverTooltip
+          className="whitespace-nowrap text-xs tabular-nums text-muted-foreground"
+          content={() =>
+            formatInstantWithOffset(next, {
+              locale: i18n.language || "en",
+              timeZone: "UTC",
+            })
+          }
+        >
+          {timeAgo(next)}
+        </HoverTooltip>
       ) : (
         <span className="text-xs text-muted-foreground/40">—</span>
       )}
@@ -945,7 +962,7 @@ export function AutopilotsPage() {
                       )}
                       {isColVisible("created") ? (
                         <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
-                          {new Date(autopilot.created_at).toLocaleDateString()}
+                          <DateTime value={autopilot.created_at} variant="relative" />
                         </ListGridCell>
                       ) : (
                         <ListGridCell className="hidden px-0 @2xl:flex" />

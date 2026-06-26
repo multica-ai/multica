@@ -1,24 +1,37 @@
+import { relativeTimeBucket } from "@multica/core/i18n/relative-time";
+
 /**
- * Mobile time-ago formatter. Mirrors the algorithm in
- * packages/views/inbox/components/inbox-list-item.tsx `useTimeAgo` so
- * "X minutes ago" reads identically across web/desktop and mobile (Behavioral
- * parity rule in apps/mobile/CLAUDE.md). The web version is i18n-driven via
- * useT; mobile v1 is English-only — when mobile ships i18n, mirror that
- * structure.
+ * Mobile time-ago formatter. The gradient and cutoffs are shared with
+ * web/desktop via `relativeTimeBucket` in @multica/core (Behavioral parity
+ * rule in apps/mobile/CLAUDE.md), so the labels read identically across
+ * platforms. It is symmetric: past instants read "3h ago", future ones "in
+ * 3h". Day granularity is calendar-based; the device timezone stands in for
+ * the viewer's Viewing Timezone (web reads `user.timezone`). Past the day cap
+ * the gradient continues into calendar months, then years — no absolute-date
+ * fallback. The web version is i18n-driven via useT; mobile v1 is English-only
+ * — when mobile ships i18n, map the same buckets to translations.
  */
 export function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks}w ago`;
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const bucket = relativeTimeBucket(
+    new Date(dateStr).getTime(),
+    Date.now(),
+    timeZone,
+  );
+  switch (bucket.kind) {
+    case "just_now":
+      return "Just now";
+    case "minutes":
+      return bucket.future ? `in ${bucket.count}m` : `${bucket.count}m ago`;
+    case "hours":
+      return bucket.future ? `in ${bucket.count}h` : `${bucket.count}h ago`;
+    case "days":
+      return bucket.future ? `in ${bucket.count}d` : `${bucket.count}d ago`;
+    case "months":
+      return bucket.future ? `in ${bucket.count}mo` : `${bucket.count}mo ago`;
+    case "years":
+      return bucket.future ? `in ${bucket.count}y` : `${bucket.count}y ago`;
+    default:
+      return "—";
+  }
 }

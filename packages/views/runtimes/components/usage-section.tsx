@@ -318,7 +318,8 @@ function WhenChart({
   dim: Dim;
   tz: string;
 }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
+  const locale = i18n.language || "en";
   // Heatmap is the "independent" sibling — toggled here, not part of the
   // page-level dimension segmented (per the RFC).
   const [showHeatmap, setShowHeatmap] = useState(false);
@@ -330,8 +331,8 @@ function WhenChart({
   const pricings = useCustomPricingStore((s) => s.pricings);
 
   const { dailyCostStack, dailyTokens } = useMemo(
-    () => aggregateByDate(filtered),
-    [filtered, pricings],
+    () => aggregateByDate(filtered, locale),
+    [filtered, pricings, locale],
   );
   // Weekly aggregation builds exactly N trailing calendar weeks anchored at
   // today (in the runtime tz). Buckets are pre-zeroed inside aggregateByWeek
@@ -340,8 +341,8 @@ function WhenChart({
   // aggregate surfaced old populated weeks instead of in-range empty ones.
   const weekCount = Math.max(1, Math.ceil(days / 7));
   const { weeklyTokens, weeklyCostStack } = useMemo(
-    () => aggregateByWeek(usage, tz, weekCount),
-    [usage, tz, weekCount, pricings],
+    () => aggregateByWeek(usage, tz, weekCount, locale),
+    [usage, tz, weekCount, pricings, locale],
   );
 
   const metricToggleVisible = !showHeatmap;

@@ -409,5 +409,16 @@
     "table_cache_r": "Cache R",
     "table_cache_w": "Cache W",
     "no_data": "No usage data yet"
+  },
+  "last_seen": {
+    "never": "Never",
+    "just_now": "Just now",
+    "seconds_ago": "{{count}}s ago",
+    "minutes_ago": "{{count}}m ago",
+    "minutes_seconds_ago": "{{minutes}}m {{seconds}}s ago",
+    "hours_ago": "{{count}}h ago",
+    "hours_minutes_ago": "{{hours}}h {{minutes}}m ago",
+    "days_ago": "{{count}}d ago",
+    "days_hours_ago": "{{days}}d {{hours}}h ago"
   }
 }

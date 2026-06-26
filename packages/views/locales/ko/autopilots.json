@@ -33,12 +33,6 @@
     "create_issue": "이슈 생성",
     "run_only": "실행만"
   },
-  "relative_date": {
-    "today": "오늘",
-    "one_day_ago": "1일 전",
-    "days_ago": "{{count}}일 전",
-    "months_ago": "{{count}}개월 전"
-  },
   "templates": {
     "daily_news": {
       "title": "일일 뉴스 요약",

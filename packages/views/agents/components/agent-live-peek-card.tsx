@@ -15,7 +15,8 @@ import { issueDetailOptions } from "@multica/core/issues";
 import type { AgentTask } from "@multica/core/types";
 import { AlertTriangle } from "lucide-react";
 import { AppLink } from "../../navigation";
-import { useT, useTimeAgo } from "../../i18n";
+import { useT } from "../../i18n";
+import { DateTime } from "../../common/date-time";
 import { availabilityConfig, workloadConfig } from "../presence";
 
 interface AgentLivePeekCardProps {
@@ -215,13 +216,12 @@ function LastActivityRow({
   emptyLabel: string;
   failedLabel: string;
 }) {
-  const timeAgo = useTimeAgo();
   return (
     <div className="flex items-center gap-1.5">
       <span className="w-16 shrink-0 text-muted-foreground">{label}</span>
       {task && task.completed_at ? (
         <span className="inline-flex min-w-0 items-center gap-1 truncate">
-          <span className="truncate">{timeAgo(task.completed_at)}</span>
+          <DateTime value={task.completed_at} variant="relative" className="truncate" />
           {task.status === "failed" && (
             // Failed terminal state shows here only — workload above stays a
             // clean "what's on the plate now" reading (working/queued/idle),

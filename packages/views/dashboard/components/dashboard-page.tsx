@@ -148,7 +148,8 @@ function Segmented<T extends string | number>({
  * and the runtime page using one pricing table.
  */
 export function DashboardPage() {
-  const { t } = useT("usage");
+  const { t, i18n } = useT("usage");
+  const locale = i18n.language || "en";
   const wsId = useWorkspaceId();
   const viewTZ = useViewingTimezone();
   const [dim, setDim] = useState<Dim>("daily");
@@ -251,20 +252,20 @@ export function DashboardPage() {
     [dailyUsageInWindow],
   );
   const dailyCost = useMemo(
-    () => aggregateDailyCost(dailyUsageInWindow),
-    [dailyUsageInWindow],
+    () => aggregateDailyCost(dailyUsageInWindow, locale),
+    [dailyUsageInWindow, locale],
   );
   const dailyTokens = useMemo(
-    () => aggregateDailyTokens(dailyUsageInWindow),
-    [dailyUsageInWindow],
+    () => aggregateDailyTokens(dailyUsageInWindow, locale),
+    [dailyUsageInWindow, locale],
   );
   const dailyTime = useMemo(
-    () => aggregateDailyTime(runTimeDailyInWindow),
-    [runTimeDailyInWindow],
+    () => aggregateDailyTime(runTimeDailyInWindow, locale),
+    [runTimeDailyInWindow, locale],
   );
   const dailyTasks = useMemo(
-    () => aggregateDailyTasks(runTimeDailyInWindow),
-    [runTimeDailyInWindow],
+    () => aggregateDailyTasks(runTimeDailyInWindow, locale),
+    [runTimeDailyInWindow, locale],
   );
 
   // Weekly aggregates — built from the over-fetched per-date queries so the
@@ -274,18 +275,18 @@ export function DashboardPage() {
   // instead of being dropped (MUL-2382 weekly window scoping). Week
   // boundaries follow the viewer's timezone.
   const weekly = useMemo(
-    () => aggregateByWeek(dailyUsage, viewTZ, weekCount),
-    [dailyUsage, viewTZ, weekCount],
+    () => aggregateByWeek(dailyUsage, viewTZ, weekCount, locale),
+    [dailyUsage, viewTZ, weekCount, locale],
   );
   const weeklyCost = weekly.weeklyCostStack;
   const weeklyTokens = weekly.weeklyTokens;
   const weeklyTime = useMemo(
-    () => aggregateWeeklyTime(runTimeDailyRows, viewTZ, weekCount),
-    [runTimeDailyRows, viewTZ, weekCount],
+    () => aggregateWeeklyTime(runTimeDailyRows, viewTZ, weekCount, locale),
+    [runTimeDailyRows, viewTZ, weekCount, locale],
   );
   const weeklyTasks = useMemo(
-    () => aggregateWeeklyTasks(runTimeDailyRows, viewTZ, weekCount),
-    [runTimeDailyRows, viewTZ, weekCount],
+    () => aggregateWeeklyTasks(runTimeDailyRows, viewTZ, weekCount, locale),
+    [runTimeDailyRows, viewTZ, weekCount, locale],
   );
   const agentTokenRows = useMemo(
     () => aggregateAgentTokens(byAgentUsage),

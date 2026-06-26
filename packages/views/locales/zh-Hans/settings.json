@@ -110,10 +110,9 @@
     "toast_create_failed": "创建 token 失败",
     "toast_revoked": "已吊销 token",
     "toast_revoke_failed": "吊销 token 失败",
-    "metadata_prefix": "{{prefix}}... · 创建于 {{created}} · {{lastUsed}}",
     "last_used_with_date": "最后使用 {{date}}",
     "last_used_never": "未使用",
-    "expires_with_date": " · {{date}} 过期",
+    "expires_with_date": "{{date}} 过期",
     "revoke_aria": "吊销 {{name}}",
     "revoke_tooltip": "吊销",
     "revoke_dialog": {
@@ -127,7 +126,8 @@
       "description": "立即复制你的个人访问 token——它不会再次显示。",
       "copy_tooltip": "复制 token",
       "done": "完成"
-    }
+    },
+    "created_with_date": "创建于 {{date}}"
   },
   "workspace": {
     "section_general": "通用",

@@ -33,12 +33,6 @@
     "create_issue": "创建 issue",
     "run_only": "仅运行"
   },
-  "relative_date": {
-    "today": "今天",
-    "one_day_ago": "1 天前",
-    "days_ago": "{{count}} 天前",
-    "months_ago": "{{count}} 个月前"
-  },
   "templates": {
     "daily_news": {
       "title": "每日新闻摘要",

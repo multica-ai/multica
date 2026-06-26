@@ -26,6 +26,8 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useTimeAgo } from "../../i18n";
+import { DateTime } from "../../common/date-time";
+import { InstantTooltip } from "../../common/instant-tooltip";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
@@ -711,11 +713,11 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               )}
               <span className="inline-flex items-center gap-2">
                 <span aria-hidden>·</span>
-                <span>
+                <InstantTooltip value={skill.updated_at}>
                   {t(($) => $.detail.subline.updated_label, {
                     when: timeAgo(skill.updated_at),
                   })}
-                </span>
+                </InstantTooltip>
               </span>
               {creator && (
                 <span className="inline-flex items-center gap-2">
@@ -818,7 +820,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                   {t(($) => $.detail.sidebar.created)}
                 </dt>
                 <dd className="min-w-0 flex-1">
-                  {timeAgo(skill.created_at)}
+                  <DateTime value={skill.created_at} variant="relative" />
                 </dd>
               </div>
               <div className="flex gap-2">
@@ -826,7 +828,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                   {t(($) => $.detail.sidebar.updated)}
                 </dt>
                 <dd className="min-w-0 flex-1">
-                  {timeAgo(skill.updated_at)}
+                  <DateTime value={skill.updated_at} variant="relative" />
                 </dd>
               </div>
               {creator && (

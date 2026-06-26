@@ -1,8 +1,8 @@
 "use client";
 
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { formatDateOnly } from "@multica/core/issues/date";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { useFormatCalendarDate } from "../../common/use-format-calendar-date";
 import { StatusIcon, PriorityIcon } from "../../issues/components";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@multica/core/types";
 import { getQuickCreateFailureDetail } from "./inbox-display";
@@ -35,16 +35,14 @@ export function useTypeLabels(): Record<InboxItemType, string> {
   };
 }
 
-// start_date / due_date are calendar days — format timezone-safely so the day
-// never shifts with the viewer's offset (see @multica/core/issues/date).
-function shortDate(dateStr: string): string {
-  return formatDateOnly(dateStr, { month: "short", day: "numeric" }, "en-US");
-}
-
 export function InboxDetailLabel({ item }: { item: InboxItem }) {
   const { t } = useT("inbox");
   const typeLabels = useTypeLabels();
   const { getActorName } = useActorName();
+  // start_date / due_date are calendar days — formatCalendarDate keeps them
+  // timezone-safe (the day never shifts with the viewer's offset) while using
+  // the Language locale instead of a hardcoded one.
+  const shortDate = useFormatCalendarDate();
   const details = item.details ?? {};
 
   switch (item.type) {

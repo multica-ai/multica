@@ -51,10 +51,11 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
-import { InboxListItem, useTimeAgo } from "./inbox-list-item";
+import { InboxListItem } from "./inbox-list-item";
 import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
+import { InstantTooltip } from "../../common/instant-tooltip";
 
 export function InboxPage() {
   const { t } = useT("inbox");
@@ -314,7 +315,10 @@ export function InboxPage() {
     <div className="p-6">
       <h2 className="text-lg font-semibold">{getInboxDisplayTitle(selected)}</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {typeLabels[selected.type]} · {timeAgo(selected.created_at)}
+        {typeLabels[selected.type]} ·{" "}
+        <InstantTooltip value={selected.created_at}>
+          {timeAgo(selected.created_at)}
+        </InstantTooltip>
       </p>
       {selected.body && (
         <div className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">

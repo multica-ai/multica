@@ -394,5 +394,16 @@
     "table_cache_r": "缓存读",
     "table_cache_w": "缓存写",
     "no_data": "还没有使用数据"
+  },
+  "last_seen": {
+    "never": "从未",
+    "just_now": "刚刚",
+    "seconds_ago": "{{count}} 秒前",
+    "minutes_ago": "{{count}} 分钟前",
+    "minutes_seconds_ago": "{{minutes}} 分 {{seconds}} 秒前",
+    "hours_ago": "{{count}} 小时前",
+    "hours_minutes_ago": "{{hours}} 小时 {{minutes}} 分前",
+    "days_ago": "{{count}} 天前",
+    "days_hours_ago": "{{days}} 天 {{hours}} 小时前"
   }
 }

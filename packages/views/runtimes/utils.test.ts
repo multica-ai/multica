@@ -688,6 +688,14 @@ describe("todayIso", () => {
     expect(todayIso("America/Los_Angeles")).toBe("2026-05-19");
     expect(todayIso("UTC")).toBe("2026-05-19");
   });
+
+  it("falls back to UTC instead of throwing on a stale/invalid runtime tz", () => {
+    // A stale user/runtime tz must not white-screen the usage charts; it falls
+    // back to UTC (delegated to the shared core helper) instead of RangeError.
+    vi.setSystemTime(new Date("2026-05-19T16:00:00Z"));
+    expect(() => todayIso("Not/AZone")).not.toThrow();
+    expect(todayIso("Not/AZone")).toBe("2026-05-19");
+  });
 });
 
 describe("sliceWindow (timezone-aware)", () => {
@@ -780,7 +788,7 @@ describe("aggregateByWeek", () => {
       makeUsage("2026-05-17", 0, 1_000_000),
       makeUsage("2026-05-18", 2_000_000, 0),
     ];
-    const { weeklyTokens } = aggregateByWeek(rows, "UTC", 2);
+    const { weeklyTokens } = aggregateByWeek(rows, "UTC", 2, "en");
     expect(weeklyTokens).toHaveLength(2);
     expect(weeklyTokens[0]).toMatchObject({
       weekStart: "2026-05-11",
@@ -803,7 +811,7 @@ describe("aggregateByWeek", () => {
     // 2026-05-20 is a Wednesday (Mon=05-18, Sun=05-24).
     vi.setSystemTime(new Date("2026-05-20T08:00:00Z"));
     const rows = [makeUsage("2026-05-18", 1_000_000, 0)];
-    const { weeklyTokens } = aggregateByWeek(rows, "UTC", 1);
+    const { weeklyTokens } = aggregateByWeek(rows, "UTC", 1, "en");
     expect(weeklyTokens[0]).toMatchObject({
       weekStart: "2026-05-18",
       weekEnd: "2026-05-24",
@@ -822,7 +830,7 @@ describe("aggregateByWeek", () => {
       makeUsage("2026-05-11", 1_000_000, 1_000_000),
       makeUsage("2026-05-13", 1_000_000, 1_000_000),
     ];
-    const { weeklyCostStack } = aggregateByWeek(rows, "UTC", 1);
+    const { weeklyCostStack } = aggregateByWeek(rows, "UTC", 1, "en");
     expect(weeklyCostStack).toHaveLength(1);
     expect(weeklyCostStack[0]?.total).toBeCloseTo(36, 2);
   });
@@ -841,7 +849,7 @@ describe("aggregateByWeek", () => {
     // 05-04, 05-11, 05-18). 2026-04-13 (Mon) is one week earlier — outside
     // the window. No data in any of the 5 in-range weeks.
     const rows = [makeUsage("2026-04-13", 1_000_000, 1_000_000)];
-    const { weeklyTokens, weeklyCostStack } = aggregateByWeek(rows, "UTC", 5);
+    const { weeklyTokens, weeklyCostStack } = aggregateByWeek(rows, "UTC", 5, "en");
 
     expect(weeklyTokens.map((w) => w.weekStart)).toEqual([
       "2026-04-20",
@@ -868,7 +876,7 @@ describe("aggregateByWeek", () => {
     // collapsed to a single populated bar.
     vi.setSystemTime(new Date("2026-05-19T12:00:00Z"));
     const rows = [makeUsage("2026-04-22", 1_000_000, 1_000_000)]; // week of 04-20
-    const { weeklyTokens } = aggregateByWeek(rows, "UTC", 5);
+    const { weeklyTokens } = aggregateByWeek(rows, "UTC", 5, "en");
     expect(weeklyTokens).toHaveLength(5);
     expect(weeklyTokens[0]).toMatchObject({
       weekStart: "2026-04-20",

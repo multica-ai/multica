@@ -28,6 +28,22 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
+// The card's relative "last activity" time renders <DateTime>, which reads the
+// viewer's tz from the auth store. Provide a callable store (selector +
+// getState) with a fixed tz so useViewingTimezone resolves outside a real auth
+// context.
+const userRef = vi.hoisted(
+  () => ({ current: { timezone: "UTC" } as { timezone?: string | null } }),
+);
+vi.mock("@multica/core/auth", () => {
+  type AuthState = { user: typeof userRef.current };
+  const useAuthStore = Object.assign(
+    (sel: (s: AuthState) => unknown) => sel({ user: userRef.current }),
+    { getState: () => ({ user: userRef.current }) },
+  );
+  return { useAuthStore };
+});
+
 // AppLink is just a plain anchor here — wiring the navigation adapter would
 // add nothing to these assertions.
 vi.mock("../../navigation", () => ({

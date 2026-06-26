@@ -55,11 +55,9 @@ import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
-import {
-  computeCostInWindow,
-  formatLastSeen,
-  pctChange,
-} from "../utils";
+import { computeCostInWindow, pctChange } from "../utils";
+import { useFormatLastSeen } from "../use-format-last-seen";
+import { InstantTooltip } from "../../common/instant-tooltip";
 import { splitRuntimeName } from "./runtime-machines";
 import {
   customRuntimeRegistrationFailure,
@@ -274,6 +272,7 @@ function HealthCell({
   const { t } = useT("runtimes");
   const { t: tAgents } = useT("agents");
   const labelOf = useHealthLabel();
+  const formatLastSeen = useFormatLastSeen();
   const registrationFailure = customRuntimeRegistrationFailure(runtime);
   if (registrationFailure) {
     return (
@@ -317,7 +316,10 @@ function HealthCell({
       <span className="block min-w-0 truncate text-xs">
         {labelOf(health)}
         {health !== "online" && runtime.last_seen_at && (
-          <span className="text-muted-foreground"> · {lastSeen}</span>
+          <span className="text-muted-foreground">
+            {" · "}
+            <InstantTooltip value={runtime.last_seen_at}>{lastSeen}</InstantTooltip>
+          </span>
         )}
         {!offline && active > 0 && (
           <span className="text-muted-foreground">

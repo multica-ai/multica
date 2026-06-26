@@ -65,16 +65,10 @@ import { AutopilotDialog } from "./autopilot-dialog";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 import { ProjectIcon } from "../../projects/components/project-icon";
+import { formatInstantWithOffset } from "@multica/core/i18n/format-date-time";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
+import { DateTime } from "../../common/date-time";
 import { useT } from "../../i18n";
-
-function formatDate(date: string): string {
-  return new Date(date).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 type RunStatus = "issue_created" | "running" | "skipped" | "completed" | "failed";
 
@@ -153,9 +147,11 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
           <span className="text-destructive">{run.failure_reason}</span>
         ) : null}
       </span>
-      <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-        {formatDate(run.triggered_at || run.created_at)}
-      </span>
+      <DateTime
+        value={run.triggered_at || run.created_at}
+        variant="datetime"
+        className="w-44 shrink-0 truncate text-right text-xs text-muted-foreground tabular-nums"
+      />
       {syntheticTask && !run.issue_id && (
         <TranscriptButton
           task={syntheticTask}
@@ -240,9 +236,11 @@ function SkippedRunsGroup({
           {t(($) => $.run.skipped_group.summary, { count: runs.length })}
         </span>
         {latestRun && (
-          <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-            {formatDate(latestRun.triggered_at || latestRun.created_at)}
-          </span>
+          <DateTime
+            value={latestRun.triggered_at || latestRun.created_at}
+            variant="datetime"
+            className="w-44 shrink-0 truncate text-right text-xs text-muted-foreground tabular-nums"
+          />
         )}
       </button>
       {open && (
@@ -257,7 +255,8 @@ function SkippedRunsGroup({
 }
 
 function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autopilotId: string }) {
-  const { t } = useT("autopilots");
+  const { t, i18n } = useT("autopilots");
+  const viewTz = useViewingTimezone();
   const deleteTrigger = useDeleteAutopilotTrigger();
   const rotateToken = useRotateAutopilotTriggerWebhookToken();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -369,7 +368,12 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
         )}
         {trigger.next_run_at && (
           <div className="text-xs text-muted-foreground">
-            {t(($) => $.trigger_row.next_label, { date: formatDate(trigger.next_run_at) })}
+            {t(($) => $.trigger_row.next_label, {
+              date: formatInstantWithOffset(trigger.next_run_at, {
+                locale: i18n.language || "en",
+                timeZone: trigger.timezone || viewTz,
+              }),
+            })}
           </div>
         )}
         {showWebhookUrlRow && (

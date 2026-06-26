@@ -463,8 +463,8 @@
   },
   "last_active": {
     "today": "今日",
-    "days_ago_one": "{{count}} 日前",
-    "days_ago_other": "{{count}} 日前",
+    "days_ago_one": "{{count}}日前",
+    "days_ago_other": "{{count}}日前",
     "none": "30 日間アクティビティなし"
   },
   "toolbar": {

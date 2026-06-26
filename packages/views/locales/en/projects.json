@@ -49,12 +49,6 @@
     "agents_group": "Agents",
     "no_results": "No results"
   },
-  "relative_date": {
-    "today": "Today",
-    "one_day_ago": "1d ago",
-    "days_ago": "{{count}}d ago",
-    "months_ago": "{{count}}mo ago"
-  },
   "detail": {
     "not_found": "Project not found",
     "breadcrumb_fallback": "Projects",

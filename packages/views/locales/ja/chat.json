@@ -30,12 +30,6 @@
   },
   "session_history": {
     "untitled": "無題",
-    "time": {
-      "just_now": "たった今",
-      "minutes": "{{count}}分前",
-      "hours": "{{count}}時間前",
-      "days": "{{count}}日前"
-    },
     "row_delete_aria": "チャットセッションを削除",
     "row_rename_aria": "チャットセッションの名前を変更",
     "delete_dialog": {

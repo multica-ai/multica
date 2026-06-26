@@ -12,13 +12,7 @@
   "list": {
     "empty": "暂无通知",
     "mark_done_tooltip": "标为已完成",
-    "archive_tooltip": "归档",
-    "time": {
-      "just_now": "刚刚",
-      "minutes": "{{count}} 分钟",
-      "hours": "{{count}} 小时",
-      "days": "{{count}} 天"
-    }
+    "archive_tooltip": "归档"
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",

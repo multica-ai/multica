@@ -43,10 +43,11 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
+import { DateTime } from "../../common/date-time";
+import { useFormatCalendarDate } from "../../common/use-format-calendar-date";
 import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { formatDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
@@ -82,7 +83,6 @@ import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { useTimeAgo } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
@@ -178,11 +178,6 @@ function SubscriberPopoverContent({
   );
 }
 
-function shortDate(date: string | null): string {
-  if (!date) return "—";
-  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
-}
-
 type ActivityT = ReturnType<typeof useT<"issues">>["t"];
 
 function statusLabel(status: string, t: ActivityT): string {
@@ -202,6 +197,7 @@ function priorityLabel(priority: string, t: ActivityT): string {
 function formatActivity(
   entry: TimelineEntry,
   t: ActivityT,
+  formatDate: (value: string | null | undefined) => string,
   resolveActorName?: (type: string, id: string) => string,
 ): string {
   const details = (entry.details ?? {}) as Record<string, string>;
@@ -230,13 +226,11 @@ function formatActivity(
     }
     case "start_date_changed": {
       if (!details.to) return t(($) => $.activity.start_date_removed);
-      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
-      return t(($) => $.activity.start_date_set, { date: formatted });
+      return t(($) => $.activity.start_date_set, { date: formatDate(details.to) });
     }
     case "due_date_changed": {
       if (!details.to) return t(($) => $.activity.due_date_removed);
-      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
-      return t(($) => $.activity.due_date_set, { date: formatted });
+      return t(($) => $.activity.due_date_set, { date: formatDate(details.to) });
     }
     case "title_changed":
       return t(($) => $.activity.title_renamed, {
@@ -446,7 +440,7 @@ function ActivityBlock({
   onToggleShowOlder,
   getActorName,
   t,
-  timeAgo,
+  formatDate,
 }: {
   entries: TimelineEntry[];
   expanded: boolean;
@@ -459,7 +453,7 @@ function ActivityBlock({
   onToggleShowOlder: () => void;
   getActorName: (type: string, id: string) => string;
   t: ActivityT;
-  timeAgo: (dateStr: string) => string;
+  formatDate: (value: string | null | undefined) => string;
 }) {
   if (!expanded) {
     const count = entries.length;
@@ -538,7 +532,7 @@ function ActivityBlock({
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-              <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+              <span className="truncate">{formatActivity(entry, t, formatDate, getActorName)}</span>
               {(entry.coalesced_count ?? 1) > 1 &&
                 entry.action !== "task_completed" &&
                 entry.action !== "task_failed" && (
@@ -546,18 +540,11 @@ function ActivityBlock({
                     {t(($) => $.activity.coalesced_badge, { count: entry.coalesced_count ?? 1 })}
                   </span>
                 )}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span className="ml-auto shrink-0 cursor-default">
-                      {timeAgo(entry.created_at)}
-                    </span>
-                  }
-                />
-                <TooltipContent side="top">
-                  {new Date(entry.created_at).toLocaleString()}
-                </TooltipContent>
-              </Tooltip>
+              <DateTime
+                value={entry.created_at}
+                variant="relative"
+                className="ml-auto shrink-0 cursor-default"
+              />
             </div>
           </div>
         );
@@ -696,7 +683,7 @@ interface IssueDetailProps {
 
 export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
   const { t } = useT("issues");
-  const timeAgo = useTimeAgo();
+  const formatCalendarDate = useFormatCalendarDate();
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -1618,10 +1605,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_created)}>
-            <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
+            <DateTime value={issue.created_at} variant="date" className="text-muted-foreground" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_updated)}>
-            <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
+            <DateTime value={issue.updated_at} variant="date" className="text-muted-foreground" />
           </PropRow>
         </div>}
       </div>
@@ -1755,7 +1742,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         onToggleShowOlder={() => showOlderActivities(item.id)}
         getActorName={getActorName}
         t={t}
-        timeAgo={timeAgo}
+        formatDate={formatCalendarDate}
       />
     );
   };

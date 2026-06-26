@@ -177,6 +177,17 @@ Root-level reminders:
 - Handle overflow, long text, scrolling, alignment, and spacing deliberately.
 - If a component is identical between web and desktop, it belongs in a shared package.
 
+## Time & Date Display
+
+Web/desktop time display is centralized.
+
+- Instants (`*_at` / TIMESTAMPTZ): render with `<DateTime>` from `packages/views/common/`, or `useFormatDateTime()` when a string is needed. Never inline `new Date(x).toLocaleString()` — that uses the browser timezone and bypasses the user's Viewing Timezone.
+- Calendar days (`due_date` / `start_date`): floating, no timezone conversion — `useFormatCalendarDate()` (or `formatDateOnly`, which pins UTC internally).
+- Relative time ("3h ago"): `useTimeAgo()` only; don't fork it. The gradient lives in `@multica/core/i18n/relative-time` (`relativeTimeBucket(thenMs, nowMs, timeZone)`, shared with mobile). It is symmetric — future instants read "in 3h" / "in 2mo". Sub-day is elapsed; day granularity is calendar-day in the Viewing tz (so "2d ago" matches the shown date); past 30 calendar days it continues into calendar months then years (no absolute-date fallback).
+- Instant inside a translated sentence (e.g. `Updated {{time}}`): don't split the i18n string or use `<Trans>` (breaks ja/ko word order). Wrap the rendered phrase in `<InstantTooltip value={…}>` to add the full-time tooltip.
+- Locale always comes from the Language setting via the hooks; never hardcode `"en-US"`. Timezone comes from `useViewingTimezone()`.
+- Exceptions: Scheduling-axis displays (autopilot trigger/schedule previews) render in the scheduled object's explicit timezone, not Viewing — except the autopilot list's `next_run`, where the endpoint omits the trigger timezone, so it uses relative time (timezone-agnostic) with a UTC+offset tooltip. Runtime "last seen" keeps seconds-level compound precision via `useFormatLastSeen()` (liveness), not `useTimeAgo()`.
+
 ## Testing
 
 Tests follow the code:

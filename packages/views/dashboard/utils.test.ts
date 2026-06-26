@@ -32,7 +32,7 @@ describe("aggregateDailyCost", () => {
         cache_write_tokens: 0,
         task_count: 1,
       },
-    ]);
+    ], "en");
 
     // Sort: oldest day first.
     expect(result.map((r) => r.date)).toEqual(["2026-05-09", "2026-05-10"]);
@@ -55,7 +55,7 @@ describe("aggregateDailyCost", () => {
         cache_write_tokens: 0,
         task_count: 0,
       },
-    ]);
+    ], "en");
     expect(result[0]?.total).toBe(0);
   });
 });
@@ -246,7 +246,7 @@ describe("aggregateWeeklyTime", () => {
       { date: "2026-05-17", total_seconds: 50, task_count: 0, failed_count: 0 },
       { date: "2026-05-18", total_seconds: 25, task_count: 0, failed_count: 0 },
     ];
-    const result = aggregateWeeklyTime(rows, "UTC", 2);
+    const result = aggregateWeeklyTime(rows, "UTC", 2, "en");
     expect(result).toHaveLength(2);
     expect(result[0]).toMatchObject({
       weekStart: "2026-05-11",
@@ -273,7 +273,7 @@ describe("aggregateWeeklyTime", () => {
       // in-range week (Mon=04-20) for a 5-week trailing window.
       { date: "2026-04-13", total_seconds: 999, task_count: 0, failed_count: 0 },
     ];
-    const result = aggregateWeeklyTime(rows, "UTC", 5);
+    const result = aggregateWeeklyTime(rows, "UTC", 5, "en");
     expect(result.map((w) => w.weekStart)).toEqual([
       "2026-04-20",
       "2026-04-27",
@@ -299,7 +299,7 @@ describe("aggregateWeeklyTasks", () => {
       { date: "2026-05-12", total_seconds: 0, task_count: 5, failed_count: 1 },
       { date: "2026-05-18", total_seconds: 0, task_count: 3, failed_count: 0 },
     ];
-    const result = aggregateWeeklyTasks(rows, "UTC", 2);
+    const result = aggregateWeeklyTasks(rows, "UTC", 2, "en");
     expect(result[0]).toMatchObject({
       weekStart: "2026-05-11",
       completed: 4,

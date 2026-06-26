@@ -12,13 +12,7 @@
   "list": {
     "empty": "通知はありません",
     "mark_done_tooltip": "完了にする",
-    "archive_tooltip": "アーカイブ",
-    "time": {
-      "just_now": "たった今",
-      "minutes": "{{count}}分",
-      "hours": "{{count}}時間",
-      "days": "{{count}}日"
-    }
+    "archive_tooltip": "アーカイブ"
   },
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",

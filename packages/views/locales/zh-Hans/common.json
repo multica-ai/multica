@@ -8,7 +8,14 @@
     "just_now": "刚刚",
     "minutes_ago": "{{count}} 分钟前",
     "hours_ago": "{{count}} 小时前",
-    "days_ago": "{{count}} 天前"
+    "days_ago": "{{count}} 天前",
+    "months_ago": "{{count}} 个月前",
+    "years_ago": "{{count}} 年前",
+    "in_minutes": "{{count}} 分钟后",
+    "in_hours": "{{count}} 小时后",
+    "in_days": "{{count}} 天后",
+    "in_months": "{{count}} 个月后",
+    "in_years": "{{count}} 年后"
   },
   "lark_bind": {
     "page_title": "绑定飞书账号",

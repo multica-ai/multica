@@ -110,10 +110,9 @@
     "toast_create_failed": "Failed to create token",
     "toast_revoked": "Token revoked",
     "toast_revoke_failed": "Failed to revoke token",
-    "metadata_prefix": "{{prefix}}... · Created {{created}} · {{lastUsed}}",
     "last_used_with_date": "Last used {{date}}",
     "last_used_never": "Never used",
-    "expires_with_date": " · Expires {{date}}",
+    "expires_with_date": "Expires {{date}}",
     "revoke_aria": "Revoke {{name}}",
     "revoke_tooltip": "Revoke",
     "revoke_dialog": {
@@ -127,7 +126,8 @@
       "description": "Copy your personal access token now. You won't be able to see it again.",
       "copy_tooltip": "Copy token",
       "done": "Done"
-    }
+    },
+    "created_with_date": "Created {{date}}"
   },
   "workspace": {
     "section_general": "General",

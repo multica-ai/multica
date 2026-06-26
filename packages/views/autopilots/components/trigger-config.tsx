@@ -9,6 +9,7 @@ import {
   SelectContent,
   SelectItem,
 } from "@multica/ui/components/ui/select";
+import { shortOffsetToken } from "@multica/core/i18n/format-date-time";
 import { useT } from "../../i18n";
 
 export type TriggerFrequency = "hourly" | "daily" | "weekdays" | "weekly" | "custom";
@@ -70,15 +71,9 @@ export function getLocalTimezone(): string {
 
 function getTimezoneOffset(tz: string): string {
   if (tz === "UTC") return "UTC";
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      timeZoneName: "shortOffset",
-    }).formatToParts(new Date());
-    return parts.find((p) => p.type === "timeZoneName")?.value ?? tz;
-  } catch {
-    return tz;
-  }
+  // Scheduling axis: a fixed locale (the offset token is locale-independent).
+  // Falls back to the raw tz name when the engine yields no offset token.
+  return shortOffsetToken(new Date(), "en-US", tz) || tz;
 }
 
 function getTimezoneLabel(tz: string): string {
@@ -166,6 +161,108 @@ export function parseCronExpression(cron: string, timezone: string): TriggerConf
     return { ...base, frequency: "weekly", time, daysOfWeek: days };
   }
   return { ...base, frequency: "custom" };
+}
+
+// ---------------------------------------------------------------------------
+// Next-run preview (local approximation — the server stores the authoritative
+// next_run_at). The configured time is wall-clock in cfg.timezone, so the
+// search runs on the calendar in that zone and the result is converted back to
+// an absolute instant. Computing this with the host clock (setHours/getDay)
+// would read 09:00 as the browser's 09:00, misstating the run by the
+// host↔schedule offset.
+// ---------------------------------------------------------------------------
+
+// Offset (wall − UTC, in ms) of `timeZone` at the given instant. Returns 0 for
+// an unknown zone so the preview degrades to UTC instead of throwing.
+function zoneOffsetMs(utcMs: number, timeZone: string): number {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).formatToParts(new Date(utcMs));
+    const f: Record<string, number> = {};
+    for (const p of parts) if (p.type !== "literal") f[p.type] = parseInt(p.value, 10);
+    const asUTC = Date.UTC(
+      f.year!,
+      f.month! - 1,
+      f.day!,
+      f.hour! % 24,
+      f.minute!,
+      f.second!,
+    );
+    return asUTC - utcMs;
+  } catch {
+    return 0;
+  }
+}
+
+// A Date whose UTC fields read as the wall clock in `timeZone` at `now`, so the
+// calendar search below can use getUTC*/setUTC* for tz-local arithmetic.
+function zonedCarrier(now: Date, timeZone: string): Date {
+  return new Date(now.getTime() + zoneOffsetMs(now.getTime(), timeZone));
+}
+
+// Convert a wall-clock carrier (UTC fields = wall time in `timeZone`) back to
+// the real instant. Re-checks the offset once so a DST transition between the
+// approximate and final instant is corrected.
+function carrierToInstant(carrier: Date, timeZone: string): Date {
+  const wallAsUTC = carrier.getTime();
+  const offset = zoneOffsetMs(wallAsUTC, timeZone);
+  const instant = wallAsUTC - offset;
+  const refined = zoneOffsetMs(instant, timeZone);
+  return new Date(refined === offset ? instant : wallAsUTC - refined);
+}
+
+export function computeNextRun(cfg: TriggerConfig, now: Date): Date | null {
+  const [hStr, mStr] = cfg.time.split(":");
+  const hour = parseInt(hStr ?? "9", 10);
+  const minute = parseInt(mStr ?? "0", 10);
+  const tz = cfg.timezone || "UTC";
+  const nowZoned = zonedCarrier(now, tz);
+  const next = new Date(nowZoned);
+
+  switch (cfg.frequency) {
+    case "hourly": {
+      next.setUTCMinutes(minute, 0, 0);
+      if (next <= nowZoned) next.setUTCHours(next.getUTCHours() + 1);
+      return carrierToInstant(next, tz);
+    }
+    case "daily": {
+      next.setUTCHours(hour, minute, 0, 0);
+      if (next <= nowZoned) next.setUTCDate(next.getUTCDate() + 1);
+      return carrierToInstant(next, tz);
+    }
+    case "weekdays": {
+      next.setUTCHours(hour, minute, 0, 0);
+      for (let i = 0; i < 8; i++) {
+        const dow = next.getUTCDay();
+        if (next > nowZoned && dow >= 1 && dow <= 5) return carrierToInstant(next, tz);
+        next.setUTCDate(next.getUTCDate() + 1);
+        next.setUTCHours(hour, minute, 0, 0);
+      }
+      return null;
+    }
+    case "weekly": {
+      if (cfg.daysOfWeek.length === 0) return null;
+      next.setUTCHours(hour, minute, 0, 0);
+      for (let i = 0; i < 8; i++) {
+        if (next > nowZoned && cfg.daysOfWeek.includes(next.getUTCDay())) {
+          return carrierToInstant(next, tz);
+        }
+        next.setUTCDate(next.getUTCDate() + 1);
+        next.setUTCHours(hour, minute, 0, 0);
+      }
+      return null;
+    }
+    case "custom":
+      return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

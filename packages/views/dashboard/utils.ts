@@ -41,19 +41,13 @@ export interface DailyCostStack {
   total: number;
 }
 
-function formatDateLabel(d: string): string {
-  // Anchor to local midnight so the formatted label matches the bucket the
-  // server picked (which is already in workspace time). Pasting the raw
-  // date as the body of `new Date()` would interpret it as UTC and shift
-  // by the user's offset.
-  const date = new Date(d + "T00:00:00");
-  return `${date.getMonth() + 1}/${date.getDate()}`;
-}
-
 // Per-(date, model) rows → 1 row per date with cost broken into the three
 // segments the stacked bar chart consumes. Stable sort by date asc so the
 // chart x-axis is left-to-right oldest-to-newest.
-export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack[] {
+export function aggregateDailyCost(
+  usage: DashboardUsageDaily[],
+  locale: string,
+): DailyCostStack[] {
   const map = new Map<string, { input: number; output: number; cacheWrite: number }>();
   for (const u of usage) {
     const b = estimateCostBreakdown(u);
@@ -72,7 +66,7 @@ export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack
       const cacheWrite = round(s.cacheWrite);
       return {
         date,
-        label: formatDateLabel(date),
+        label: formatShortDate(date, locale),
         input,
         output,
         cacheWrite,
@@ -87,7 +81,10 @@ export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack
 // Mirrors `aggregateByDate(...).dailyTokens` from the runtimes utils so
 // the Tokens chart on the Usage page consumes the same shape as the one
 // on the runtime-detail page.
-export function aggregateDailyTokens(usage: DashboardUsageDaily[]): DailyTokenData[] {
+export function aggregateDailyTokens(
+  usage: DashboardUsageDaily[],
+  locale: string,
+): DailyTokenData[] {
   const map = new Map<
     string,
     { input: number; output: number; cacheRead: number; cacheWrite: number }
@@ -109,7 +106,7 @@ export function aggregateDailyTokens(usage: DashboardUsageDaily[]): DailyTokenDa
     .toSorted(([a], [b]) => a.localeCompare(b))
     .map(([date, t]) => ({
       date,
-      label: formatDateLabel(date),
+      label: formatShortDate(date, locale),
       input: t.input,
       output: t.output,
       cacheRead: t.cacheRead,
@@ -249,7 +246,11 @@ interface WeekShell {
 // carries the labels and partial-week metadata the chart components consume;
 // downstream aggregators fold their own per-week values onto the matching
 // shell.
-function buildWeekShells(tz: string, weekCount: number): WeekShell[] {
+function buildWeekShells(
+  tz: string,
+  weekCount: number,
+  locale: string,
+): WeekShell[] {
   const count = Math.max(1, Math.floor(weekCount));
   const today = todayIso(tz);
   const currentWeekStart = weekStartIso(today);
@@ -267,8 +268,8 @@ function buildWeekShells(tz: string, weekCount: number): WeekShell[] {
     shells.push({
       weekStart,
       weekEnd,
-      label: formatShortDate(weekStart),
-      rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
+      label: formatShortDate(weekStart, locale),
+      rangeLabel: `${formatShortDate(weekStart, locale)} – ${formatShortDate(weekEnd, locale)}`,
       partial,
       daysCovered: partial ? elapsed : 7,
     });
@@ -288,8 +289,9 @@ export function aggregateWeeklyTime(
   rows: DashboardRunTimeDaily[],
   tz: string,
   weekCount: number,
+  locale: string,
 ): WeeklyTimeData[] {
-  const shells = buildWeekShells(tz, weekCount);
+  const shells = buildWeekShells(tz, weekCount, locale);
   const totals = new Map<string, number>();
   for (const shell of shells) totals.set(shell.weekStart, 0);
   for (const r of rows) {
@@ -304,8 +306,9 @@ export function aggregateWeeklyTasks(
   rows: DashboardRunTimeDaily[],
   tz: string,
   weekCount: number,
+  locale: string,
 ): WeeklyTasksData[] {
-  const shells = buildWeekShells(tz, weekCount);
+  const shells = buildWeekShells(tz, weekCount, locale);
   const buckets = new Map<string, { completed: number; failed: number }>();
   for (const shell of shells)
     buckets.set(shell.weekStart, { completed: 0, failed: 0 });
@@ -327,11 +330,14 @@ export function aggregateWeeklyTasks(
 // Per-date run-time rows → one row per date with `totalSeconds` for the
 // DailyTimeChart. Sorted ascending so the x-axis reads oldest-to-newest,
 // matching the cost / tokens aggregators.
-export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData[] {
+export function aggregateDailyTime(
+  rows: DashboardRunTimeDaily[],
+  locale: string,
+): DailyTimeData[] {
   return rows.toSorted((a, b) => a.date.localeCompare(b.date))
     .map((r) => ({
       date: r.date,
-      label: formatDateLabel(r.date),
+      label: formatShortDate(r.date, locale),
       totalSeconds: r.total_seconds,
     }));
 }
@@ -339,14 +345,17 @@ export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData
 // Per-date run-time rows → one row per date with `completed` and `failed`
 // counts for the DailyTasksChart's stacked bar (failed_count is a subset
 // of task_count, so completed = task_count - failed_count).
-export function aggregateDailyTasks(rows: DashboardRunTimeDaily[]): DailyTasksData[] {
+export function aggregateDailyTasks(
+  rows: DashboardRunTimeDaily[],
+  locale: string,
+): DailyTasksData[] {
   return rows.toSorted((a, b) => a.date.localeCompare(b.date))
     .map((r) => {
       const failed = r.failed_count;
       const completed = Math.max(0, r.task_count - failed);
       return {
         date: r.date,
-        label: formatDateLabel(r.date),
+        label: formatShortDate(r.date, locale),
         completed,
         failed,
       };

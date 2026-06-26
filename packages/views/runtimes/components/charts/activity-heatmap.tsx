@@ -1,7 +1,14 @@
 import { useMemo } from "react";
 import type { RuntimeUsage } from "@multica/core/types";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
-import { addDaysIso, estimateCost, todayIso, weekStartIso } from "../../utils";
+import {
+  addDaysIso,
+  estimateCost,
+  formatShortDate,
+  formatShortMonth,
+  todayIso,
+  weekStartIso,
+} from "../../utils";
 import { useT } from "../../../i18n";
 
 // 26 weeks (~6 months) gives the heatmap real presence in the wider chart
@@ -33,13 +40,6 @@ function fmtMoney(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso + "T00:00:00").toLocaleString("en", {
-    month: "short",
-    day: "numeric",
-  });
-}
-
 interface Insights {
   busiestDay: { date: string; cost: number } | null;
   busyDayName: string | null;
@@ -57,7 +57,8 @@ export function ActivityHeatmap({
   usage: RuntimeUsage[];
   tz: string;
 }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
+  const locale = i18n.language || "en";
   // Memo dep — estimateCost (called inside the body below) consults the
   // user-override store, so saving a custom rate must invalidate the cells.
   const pricings = useCustomPricingStore((s) => s.pricings);
@@ -125,12 +126,10 @@ export function ActivityHeatmap({
     const months: { label: string; week: number }[] = [];
     let lastMonth = -1;
     for (const c of cellsWithLevel) {
-      const month = new Date(c.date + "T00:00:00").getMonth();
+      const month = new Date(c.date + "T00:00:00Z").getUTCMonth();
       if (month !== lastMonth && c.dayOfWeek === 0) {
         months.push({
-          label: new Date(c.date + "T00:00:00").toLocaleString("en", {
-            month: "short",
-          }),
+          label: formatShortMonth(c.date, locale),
           week: c.week,
         });
         lastMonth = month;
@@ -189,7 +188,7 @@ export function ActivityHeatmap({
     };
 
     return { cells: cellsWithLevel, monthLabels: months, insights };
-  }, [usage, pricings, tz]);
+  }, [usage, pricings, tz, locale]);
 
   const labelWidth = 28;
   const svgWidth = labelWidth + HEATMAP_WEEKS * (CELL_SIZE + CELL_GAP);
@@ -261,7 +260,7 @@ export function ActivityHeatmap({
         </div>
       </div>
 
-      <InsightsRow insights={insights} />
+      <InsightsRow insights={insights} locale={locale} />
     </div>
   );
 }
@@ -269,7 +268,13 @@ export function ActivityHeatmap({
 // Horizontal stat strip beneath the heatmap. Mirrors the page-top KPI
 // hero pattern (label → big value → sub) but at smaller scale to stay
 // secondary. 4 columns on desktop, 2 on narrow screens.
-function InsightsRow({ insights }: { insights: Insights }) {
+function InsightsRow({
+  insights,
+  locale,
+}: {
+  insights: Insights;
+  locale: string;
+}) {
   const {
     busiestDay,
     busyDayName,
@@ -283,7 +288,7 @@ function InsightsRow({ insights }: { insights: Insights }) {
     <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-t pt-3 sm:grid-cols-4">
       <Insight
         label="Busiest day"
-        value={busiestDay ? fmtDate(busiestDay.date) : "—"}
+        value={busiestDay ? formatShortDate(busiestDay.date, locale) : "—"}
         sub={busiestDay ? fmtMoney(busiestDay.cost) : null}
       />
       <Insight

@@ -12,13 +12,7 @@
   "list": {
     "empty": "No notifications",
     "mark_done_tooltip": "Mark as done",
-    "archive_tooltip": "Archive",
-    "time": {
-      "just_now": "just now",
-      "minutes": "{{count}}m",
-      "hours": "{{count}}h",
-      "days": "{{count}}d"
-    }
+    "archive_tooltip": "Archive"
   },
   "detail": {
     "select_prompt": "Select a notification to view details",

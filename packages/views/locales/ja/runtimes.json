@@ -394,5 +394,16 @@
     "table_cache_r": "キャッシュ R",
     "table_cache_w": "キャッシュ W",
     "no_data": "まだ使用量データがありません"
+  },
+  "last_seen": {
+    "never": "なし",
+    "just_now": "たった今",
+    "seconds_ago": "{{count}}秒前",
+    "minutes_ago": "{{count}}分前",
+    "minutes_seconds_ago": "{{minutes}}分{{seconds}}秒前",
+    "hours_ago": "{{count}}時間前",
+    "hours_minutes_ago": "{{hours}}時間{{minutes}}分前",
+    "days_ago": "{{count}}日前",
+    "days_hours_ago": "{{days}}日{{hours}}時間前"
   }
 }

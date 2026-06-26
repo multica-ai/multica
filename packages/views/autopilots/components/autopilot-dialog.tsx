@@ -48,6 +48,7 @@ import {
   useUpdateAutopilotTrigger,
 } from "@multica/core/autopilots/mutations";
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
+import { safeDateTimeFormat } from "@multica/core/i18n/format-date-time";
 import { api } from "@multica/core/api";
 import type {
   AutopilotAssigneeType,
@@ -61,6 +62,7 @@ import { ProjectIcon } from "../../projects/components/project-icon";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import { SubscriberMultiSelect } from "./subscriber-multi-select";
 import {
+  computeNextRun,
   getDefaultTriggerConfig,
   getLocalTimezone,
   parseCronExpression,
@@ -155,50 +157,9 @@ const OUTPUT_MODE_ICONS: Record<AutopilotExecutionMode, typeof FilePlus2> = {
 };
 
 // ---------------------------------------------------------------------------
-// Next-run computation (local approximation — server stores the authoritative value)
+// Next-run preview helpers (computeNextRun lives in trigger-config so it is
+// unit-tested and shares the schedule-domain types)
 // ---------------------------------------------------------------------------
-
-function computeNextRun(cfg: TriggerConfig, now: Date): Date | null {
-  const [hStr, mStr] = cfg.time.split(":");
-  const hour = parseInt(hStr ?? "9", 10);
-  const minute = parseInt(mStr ?? "0", 10);
-  const next = new Date(now);
-
-  switch (cfg.frequency) {
-    case "hourly": {
-      next.setMinutes(minute, 0, 0);
-      if (next <= now) next.setHours(next.getHours() + 1);
-      return next;
-    }
-    case "daily": {
-      next.setHours(hour, minute, 0, 0);
-      if (next <= now) next.setDate(next.getDate() + 1);
-      return next;
-    }
-    case "weekdays": {
-      next.setHours(hour, minute, 0, 0);
-      for (let i = 0; i < 8; i++) {
-        const dow = next.getDay();
-        if (next > now && dow >= 1 && dow <= 5) return next;
-        next.setDate(next.getDate() + 1);
-        next.setHours(hour, minute, 0, 0);
-      }
-      return null;
-    }
-    case "weekly": {
-      if (cfg.daysOfWeek.length === 0) return null;
-      next.setHours(hour, minute, 0, 0);
-      for (let i = 0; i < 8; i++) {
-        if (next > now && cfg.daysOfWeek.includes(next.getDay())) return next;
-        next.setDate(next.getDate() + 1);
-        next.setHours(hour, minute, 0, 0);
-      }
-      return null;
-    }
-    case "custom":
-      return null;
-  }
-}
 
 function useFormatCountdown(): (target: Date, now: Date) => string {
   const { t } = useT("autopilots");
@@ -215,20 +176,24 @@ function useFormatCountdown(): (target: Date, now: Date) => string {
   };
 }
 
-function formatNextRunAbsolute(date: Date, timezone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    }).format(date);
-  } catch {
-    return date.toLocaleString();
-  }
+function formatNextRunAbsolute(
+  date: Date,
+  timezone: string,
+  locale: string,
+): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  };
+  // safeDateTimeFormat caches the formatter (this renders every ticker tick
+  // while the dialog is open) and falls back to UTC on an invalid/stale trigger
+  // timezone — deterministic, still on the scheduling axis, never the viewer's
+  // browser tz, which would misstate the scheduled wall-clock time.
+  return safeDateTimeFormat(locale, { ...opts, timeZone: timezone }).format(date);
 }
 
 // ---------------------------------------------------------------------------
@@ -923,7 +888,7 @@ function ScheduleSection({
   disabled?: boolean;
   disabledReason?: string;
 }) {
-  const { t } = useT("autopilots");
+  const { t, i18n } = useT("autopilots");
   const formatCountdown = useFormatCountdown();
   const now = useNowTicker();
   const next = useMemo(() => computeNextRun(config, now), [config, now]);
@@ -1024,7 +989,7 @@ function ScheduleSection({
             <span className="truncate">
               {t(($) => $.dialog.next_run_label)}{" "}
               <span className="text-foreground">
-                {formatNextRunAbsolute(next, config.timezone)}
+                {formatNextRunAbsolute(next, config.timezone, i18n.language || "en")}
               </span>
             </span>
             <span className="ml-auto rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground shrink-0">

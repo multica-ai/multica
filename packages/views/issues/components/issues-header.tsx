@@ -72,7 +72,9 @@ import {
   type ViewMode,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
-import { addDaysDateOnly, dateOnlyToLocalDate, formatDateOnly, toDateOnly, todayDateOnly } from "@multica/core/issues/date";
+import { addDaysDateOnlyInTimeZone, dateOnlyToLocalDate, toDateOnly, todayDateOnlyInTimeZone } from "@multica/core/issues/date";
+import { useFormatCalendarDate } from "../../common/use-format-calendar-date";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import {
   useIssuesScopeStore,
   type IssuesScope,
@@ -115,9 +117,6 @@ function getActiveFilterCount(state: {
   return count;
 }
 
-function shortDateLabel(dateOnly: string) {
-  return formatDateOnly(dateOnly, { month: "short", day: "numeric" }) || dateOnly;
-}
 
 function normalizeDateRange(from: Date, to: Date) {
   return from <= to ? [from, to] as const : [to, from] as const;
@@ -516,6 +515,10 @@ function DateSubContent({
   onChange: (filter: IssueDateFilter | null) => void;
 }) {
   const { t } = useT("issues");
+  // Range presets anchor "today" on the viewer's Viewing tz so they line up
+  // with the dates shown on the issues (spec §4); a browser-local today could
+  // drop a day across the date boundary and miss today's issues.
+  const viewTz = useViewingTimezone();
   const [field, setField] = useState<IssueDateField>(value?.field ?? "created_at");
   const [range, setRange] = useState<LocalDateRange | undefined>(() => {
     if (!value) return undefined;
@@ -532,8 +535,8 @@ function DateSubContent({
   const applyPreset = (days: 1 | 3 | 7) => {
     onChange({
       field,
-      from: addDaysDateOnly(1 - days),
-      to: todayDateOnly(),
+      from: addDaysDateOnlyInTimeZone(1 - days, viewTz),
+      to: todayDateOnlyInTimeZone(viewTz),
     });
   };
 
@@ -756,6 +759,9 @@ export function IssueDisplayControls({
   allowGantt?: boolean;
 }) {
   const { t } = useT("issues");
+  const formatCalendarDate = useFormatCalendarDate();
+  const shortDateLabel = (dateOnly: string) =>
+    formatCalendarDate(dateOnly) || dateOnly;
   const viewMode = useViewStore((s) => s.viewMode);
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);

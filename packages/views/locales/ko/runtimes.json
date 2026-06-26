@@ -409,5 +409,16 @@
     "table_cache_r": "캐시 R",
     "table_cache_w": "캐시 W",
     "no_data": "아직 사용량 데이터가 없습니다"
+  },
+  "last_seen": {
+    "never": "없음",
+    "just_now": "방금 전",
+    "seconds_ago": "{{count}}초 전",
+    "minutes_ago": "{{count}}분 전",
+    "minutes_seconds_ago": "{{minutes}}분 {{seconds}}초 전",
+    "hours_ago": "{{count}}시간 전",
+    "hours_minutes_ago": "{{hours}}시간 {{minutes}}분 전",
+    "days_ago": "{{count}}일 전",
+    "days_hours_ago": "{{days}}일 {{hours}}시간 전"
   }
 }

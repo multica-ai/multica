@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Check, ChevronDown, Globe } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { shortOffsetToken } from "@multica/core/i18n/format-date-time";
 import {
   PropertyPicker,
   PickerEmpty,
@@ -17,16 +18,9 @@ export interface TimezonePickerProps {
   className?: string;
 }
 
+// Scheduling axis: a fixed locale (the offset token is locale-independent).
 function offsetFor(tz: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz,
-      timeZoneName: "shortOffset",
-    }).formatToParts(new Date());
-    return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
-  } catch {
-    return "";
-  }
+  return shortOffsetToken(new Date(), "en-US", tz);
 }
 
 function cityLabel(tz: string): string {

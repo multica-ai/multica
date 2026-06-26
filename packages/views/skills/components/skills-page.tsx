@@ -67,7 +67,8 @@ import {
   SkillRowActions,
   type SkillActionsContext,
 } from "./skill-list-actions";
-import { useT, useTimeAgo } from "../../i18n";
+import { useT } from "../../i18n";
+import { DateTime } from "../../common/date-time";
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Tracks: [edge 0.75rem] [checkbox 1rem] [name, only fr track]
@@ -578,7 +579,6 @@ export default function SkillsPage() {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const rowLink = useRowLink();
-  const timeAgo = useTimeAgo();
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
 
   const {
@@ -912,14 +912,14 @@ export default function SkillsPage() {
                 )}
                 {isColVisible("updated") ? (
                   <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
-                    {timeAgo(row.skill.updated_at)}
+                    <DateTime value={row.skill.updated_at} variant="relative" />
                   </ListGridCell>
                 ) : (
                   <ListGridCell className="hidden px-0 @2xl:flex" />
                 )}
                 {isColVisible("created") ? (
                   <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
-                    {timeAgo(row.skill.created_at)}
+                    <DateTime value={row.skill.created_at} variant="relative" />
                   </ListGridCell>
                 ) : (
                   <ListGridCell className="hidden px-0 @2xl:flex" />

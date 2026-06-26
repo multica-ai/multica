@@ -33,12 +33,6 @@
   },
   "session_history": {
     "untitled": "제목 없음",
-    "time": {
-      "just_now": "방금 전",
-      "minutes": "{{count}}분 전",
-      "hours": "{{count}}시간 전",
-      "days": "{{count}}일 전"
-    },
     "row_delete_aria": "채팅 세션 삭제",
     "row_rename_aria": "채팅 세션 이름 변경",
     "row_stop_aria": "현재 실행 중지",

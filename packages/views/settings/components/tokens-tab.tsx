@@ -36,12 +36,17 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
+import { useFormatDateTime } from "../../common/use-format-date-time";
+import { InstantTooltip } from "../../common/instant-tooltip";
+import { useTimeAgo } from "../../i18n/use-time-ago";
 import { useT } from "../../i18n";
 
 const EXPIRY_KEYS = ["30", "90", "365", "never"] as const;
 
 export function TokensTab() {
   const { t } = useT("settings");
+  const { formatDate } = useFormatDateTime();
+  const timeAgo = useTimeAgo();
   const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
   const [tokenName, setTokenName] = useState("");
   const [tokenExpiry, setTokenExpiry] = useState("90");
@@ -159,18 +164,32 @@ export function TokensTab() {
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">{token.name}</div>
                     <div className="text-xs text-muted-foreground">
-                      {t(($) => $.tokens.metadata_prefix, {
-                        prefix: token.token_prefix,
-                        created: new Date(token.created_at).toLocaleDateString(),
-                        lastUsed: token.last_used_at
-                          ? t(($) => $.tokens.last_used_with_date, {
-                              date: new Date(token.last_used_at!).toLocaleDateString(),
-                            })
-                          : t(($) => $.tokens.last_used_never),
-                      })}
-                      {token.expires_at && t(($) => $.tokens.expires_with_date, {
-                        date: new Date(token.expires_at!).toLocaleDateString(),
-                      })}
+                      {token.token_prefix}...{" · "}
+                      <InstantTooltip value={token.created_at}>
+                        {t(($) => $.tokens.created_with_date, {
+                          date: timeAgo(token.created_at),
+                        })}
+                      </InstantTooltip>
+                      {" · "}
+                      {token.last_used_at ? (
+                        <InstantTooltip value={token.last_used_at}>
+                          {t(($) => $.tokens.last_used_with_date, {
+                            date: timeAgo(token.last_used_at),
+                          })}
+                        </InstantTooltip>
+                      ) : (
+                        t(($) => $.tokens.last_used_never)
+                      )}
+                      {token.expires_at && (
+                        <>
+                          {" · "}
+                          <InstantTooltip value={token.expires_at}>
+                            {t(($) => $.tokens.expires_with_date, {
+                              date: formatDate(token.expires_at),
+                            })}
+                          </InstantTooltip>
+                        </>
+                      )}
                     </div>
                   </div>
                   <Tooltip>

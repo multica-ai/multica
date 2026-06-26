@@ -80,6 +80,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { DateTime } from "../../common/date-time";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { useRowLink } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
@@ -988,7 +989,7 @@ export function SquadsPage() {
                     )}
                     {isColVisible("created") ? (
                       <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
-                        {new Date(squad.created_at).toLocaleDateString()}
+                        <DateTime value={squad.created_at} variant="relative" />
                       </ListGridCell>
                     ) : (
                       <ListGridCell className="hidden px-0 @2xl:flex" />

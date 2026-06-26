@@ -6,8 +6,8 @@ import type { UpdateIssueRequest } from "@multica/core/types";
 import {
   toDateOnly,
   dateOnlyToLocalDate,
-  formatDateOnly,
 } from "@multica/core/issues/date";
+import { useFormatCalendarDate } from "../../../common/use-format-calendar-date";
 import { Calendar } from "@multica/ui/components/ui/calendar";
 import {
   Popover,
@@ -39,6 +39,7 @@ export function StartDatePicker({
   defaultOpen?: boolean;
 }) {
   const { t } = useT("issues");
+  const formatCalendarDate = useFormatCalendarDate();
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
@@ -55,7 +56,7 @@ export function StartDatePicker({
             <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
             {date ? (
               <span>
-                {formatDateOnly(startDate, { month: "short", day: "numeric" }, "en-US")}
+                {formatCalendarDate(startDate)}
               </span>
             ) : (
               <span className="text-muted-foreground">{t(($) => $.pickers.start_date.trigger_label)}</span>

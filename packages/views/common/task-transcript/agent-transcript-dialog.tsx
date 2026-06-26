@@ -34,6 +34,7 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
+import { DateTime } from "../date-time";
 import { api } from "@multica/core/api";
 import { useTranscriptViewStore, type TranscriptSortDirection } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
@@ -514,12 +515,7 @@ export function AgentTranscriptDialog({
             {/* Created time */}
             {task.created_at && (
               <MetadataChip>
-                {new Date(task.created_at).toLocaleString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                <DateTime value={task.created_at} variant="datetime" />
               </MetadataChip>
             )}
           </div>
@@ -729,10 +725,6 @@ const TranscriptEventRow = ({
   const color = getEventColor(item);
   const label = getEventLabel(item);
   const summary = getEventSummary(item);
-  const date = useMemo(
-    () => (item.created_at ? new Date(item.created_at) : null),
-    [item.created_at],
-  );
 
   const hasDetail =
     (item.type === "tool_use" && item.input && Object.keys(item.input).length > 0) ||
@@ -791,14 +783,12 @@ const TranscriptEventRow = ({
           </span>
 
           {/* Timestamp */}
-          {date && (
-            <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1" title={date.toLocaleString()}>
-              {date.toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              })}
-            </span>
+          {item.created_at && (
+            <DateTime
+              value={item.created_at}
+              variant="time"
+              className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1"
+            />
           )}
         </div>
 

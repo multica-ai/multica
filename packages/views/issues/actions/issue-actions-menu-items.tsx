@@ -18,7 +18,10 @@ import {
   UserMinus,
 } from "lucide-react";
 import type { AgentTask, Issue } from "@multica/core/types";
-import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
+import {
+  todayDateOnlyInTimeZone,
+  addDaysDateOnlyInTimeZone,
+} from "@multica/core/issues/date";
 import { api } from "@multica/core/api";
 import {
   ALL_STATUSES,
@@ -44,6 +47,7 @@ import {
 } from "@multica/ui/components/ui/context-menu";
 import { copyText } from "@multica/ui/lib/clipboard";
 import type { UseIssueActionsResult } from "./use-issue-actions";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { useT } from "../../i18n";
 
 // Both Dropdown and Context menu wrappers expose an API-compatible surface
@@ -97,6 +101,9 @@ export function IssueActionsMenuItems({
   onDeletedNavigateTo,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
+  // "Today / tomorrow / next week" presets anchor on the viewer's Viewing tz so
+  // a just-set due date agrees with the Viewing-tz overdue badge (spec §4).
+  const viewTz = useViewingTimezone();
   const {
     isPinned,
     updateField,
@@ -200,13 +207,13 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.start_date)}
         </P.SubTrigger>
         <P.SubContent>
-          <P.Item onClick={() => updateField({ start_date: todayDateOnly() })}>
+          <P.Item onClick={() => updateField({ start_date: todayDateOnlyInTimeZone(viewTz) })}>
             {t(($) => $.actions.start_today)}
           </P.Item>
-          <P.Item onClick={() => updateField({ start_date: addDaysDateOnly(1) })}>
+          <P.Item onClick={() => updateField({ start_date: addDaysDateOnlyInTimeZone(1, viewTz) })}>
             {t(($) => $.actions.start_tomorrow)}
           </P.Item>
-          <P.Item onClick={() => updateField({ start_date: addDaysDateOnly(7) })}>
+          <P.Item onClick={() => updateField({ start_date: addDaysDateOnlyInTimeZone(7, viewTz) })}>
             {t(($) => $.actions.start_next_week)}
           </P.Item>
           {issue.start_date && (
@@ -227,13 +234,13 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.due_date)}
         </P.SubTrigger>
         <P.SubContent>
-          <P.Item onClick={() => updateField({ due_date: todayDateOnly() })}>
+          <P.Item onClick={() => updateField({ due_date: todayDateOnlyInTimeZone(viewTz) })}>
             {t(($) => $.actions.due_today)}
           </P.Item>
-          <P.Item onClick={() => updateField({ due_date: addDaysDateOnly(1) })}>
+          <P.Item onClick={() => updateField({ due_date: addDaysDateOnlyInTimeZone(1, viewTz) })}>
             {t(($) => $.actions.due_tomorrow)}
           </P.Item>
-          <P.Item onClick={() => updateField({ due_date: addDaysDateOnly(7) })}>
+          <P.Item onClick={() => updateField({ due_date: addDaysDateOnlyInTimeZone(7, viewTz) })}>
             {t(($) => $.actions.due_next_week)}
           </P.Item>
           {issue.due_date && (

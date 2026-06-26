@@ -475,8 +475,8 @@
   },
   "last_active": {
     "today": "Today",
-    "days_ago_one": "{{count}} day ago",
-    "days_ago_other": "{{count}} days ago",
+    "days_ago_one": "{{count}}d ago",
+    "days_ago_other": "{{count}}d ago",
     "none": "No activity (30d)"
   },
   "toolbar": {

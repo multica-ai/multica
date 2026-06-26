@@ -33,12 +33,6 @@
     "create_issue": "Create Issue",
     "run_only": "Run Only"
   },
-  "relative_date": {
-    "today": "Today",
-    "one_day_ago": "1d ago",
-    "days_ago": "{{count}}d ago",
-    "months_ago": "{{count}}mo ago"
-  },
   "templates": {
     "daily_news": {
       "title": "Daily news digest",

@@ -53,6 +53,7 @@ import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, Attachment, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { DateTime } from "../../common/date-time";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
@@ -996,7 +997,6 @@ function SessionDropdown({
   const updateSession = useUpdateChatSession();
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const queryClient = useQueryClient();
-  const formatTimeAgo = useFormatTimeAgo();
 
   // Aggregate "which sessions have an in-flight task right now". Reuses
   // the same workspace-scoped query the FAB consumes, so toggling the chat
@@ -1150,13 +1150,14 @@ function SessionDropdown({
     const isConfirmingStop = confirmingStopId === session.id && !!pendingTask;
     const isConfirmingAction = isConfirmingDelete || isConfirmingStop;
     const titleText = session.title?.trim() || t(($) => $.window.untitled);
+    const showRelativeTime = !isRunning && !showCompleted && !showUnread;
     const trailingStatus = isRunning
       ? t(($) => $.session_history.row_subtitle.working)
       : showCompleted
         ? t(($) => $.session_history.row_subtitle.completed)
         : showUnread
           ? t(($) => $.session_history.row_subtitle.new_reply)
-          : formatTimeAgo(session.updated_at);
+          : null;
 
     return (
       <div
@@ -1305,7 +1306,11 @@ function SessionDropdown({
                     className="size-1.5 rounded-full bg-brand"
                   />
                 )}
-                <span className={cn("truncate", (showUnread || showCompleted || isRunning) && "font-medium text-foreground")}>{trailingStatus}</span>
+                {showRelativeTime ? (
+                  <DateTime value={session.updated_at} variant="relative" className="truncate" />
+                ) : (
+                  <span className={cn("truncate", (showUnread || showCompleted || isRunning) && "font-medium text-foreground")}>{trailingStatus}</span>
+                )}
               </div>
               <div className="hidden h-7 items-center gap-0.5 group-hover/history-row:flex">
                 {isRunning && pendingTask && (
@@ -1517,23 +1522,6 @@ function SessionRenameInput({
   );
 }
 
-function useFormatTimeAgo(): (dateStr: string) => string {
-  const { t } = useT("chat");
-  return (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return t(($) => $.session_history.time.just_now);
-    if (diffMins < 60) return t(($) => $.session_history.time.minutes, { count: diffMins });
-    if (diffHours < 24) return t(($) => $.session_history.time.hours, { count: diffHours });
-    if (diffDays < 7) return t(($) => $.session_history.time.days, { count: diffDays });
-    return date.toLocaleDateString();
-  };
-}
 
 // Three starter prompts shown on the empty state. Each is keyed into the
 // chat namespace so labels translate per locale; the icon stays raw since

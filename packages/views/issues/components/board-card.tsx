@@ -7,7 +7,9 @@ import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
-import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
+import { isPastDateOnly } from "@multica/core/issues/date";
+import { useFormatCalendarDate } from "../../common/use-format-calendar-date";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { CalendarClock, CalendarDays } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -16,6 +18,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
+import { InstantTooltip } from "../../common/instant-tooltip";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
@@ -27,10 +30,6 @@ import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useT } from "../../i18n";
-
-function formatDate(date: string): string {
-  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
-}
 
 function descriptionPreview(markdown: string): string {
   return markdown
@@ -67,6 +66,8 @@ export const BoardCardContent = memo(function BoardCardContent({
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
+  const formatDate = useFormatCalendarDate();
+  const viewTz = useViewingTimezone();
   const storeProperties = useViewStore((s) => s.cardProperties);
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery({
@@ -259,7 +260,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                       trigger={
                         <span
                           className={`flex items-center gap-1 text-xs ${
-                            isPastDateOnly(issue.due_date)
+                            isPastDateOnly(issue.due_date, viewTz)
                               ? "text-destructive"
                               : "text-muted-foreground"
                           }`}
@@ -273,7 +274,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                 ) : (
                   <span
                     className={`flex shrink-0 items-center gap-1 text-xs ${
-                      isPastDateOnly(issue.due_date)
+                      isPastDateOnly(issue.due_date, viewTz)
                         ? "text-destructive"
                         : "text-muted-foreground"
                     }`}
@@ -292,9 +293,12 @@ export const BoardCardContent = memo(function BoardCardContent({
                 </div>
               )}
               {showUpdatedHint && (
-                <span className="shrink-0 text-xs text-muted-foreground">
+                <InstantTooltip
+                  value={issue.updated_at}
+                  className="shrink-0 text-xs text-muted-foreground"
+                >
                   {t(($) => $.card.updated_ago, { time: timeAgo(issue.updated_at) })}
-                </span>
+                </InstantTooltip>
               )}
             </div>
           )}

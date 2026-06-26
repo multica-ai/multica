@@ -12,13 +12,7 @@
   "list": {
     "empty": "알림이 없습니다",
     "mark_done_tooltip": "완료로 표시",
-    "archive_tooltip": "보관",
-    "time": {
-      "just_now": "방금 전",
-      "minutes": "{{count}}분",
-      "hours": "{{count}}시간",
-      "days": "{{count}}일"
-    }
+    "archive_tooltip": "보관"
   },
   "detail": {
     "select_prompt": "자세히 볼 알림을 선택하세요",

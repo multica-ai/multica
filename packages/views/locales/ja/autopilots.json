@@ -33,12 +33,6 @@
     "create_issue": "イシューを作成",
     "run_only": "実行のみ"
   },
-  "relative_date": {
-    "today": "今日",
-    "one_day_ago": "1 日前",
-    "days_ago": "{{count}} 日前",
-    "months_ago": "{{count}} か月前"
-  },
   "templates": {
     "daily_news": {
       "title": "日次ニュースダイジェスト",

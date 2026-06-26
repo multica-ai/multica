@@ -74,6 +74,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { DateTime } from "../../common/date-time";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
@@ -1172,9 +1173,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       )}
                       {isColVisible("created") ? (
                         <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
-                          {new Date(
-                            row.agent.created_at,
-                          ).toLocaleDateString()}
+                          <DateTime value={row.agent.created_at} variant="relative" />
                         </ListGridCell>
                       ) : (
                         <ListGridCell className="hidden px-0 @2xl:flex" />

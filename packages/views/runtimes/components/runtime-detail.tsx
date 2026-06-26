@@ -39,7 +39,8 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
-import { formatLastSeen } from "../utils";
+import { useFormatLastSeen } from "../use-format-last-seen";
+import { InstantTooltip } from "../../common/instant-tooltip";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
@@ -92,6 +93,7 @@ function useNowTick(intervalMs = 30_000): number {
 
 export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
+  const formatLastSeen = useFormatLastSeen();
   const cliVersion =
     runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) : null;
   const launchedBy =
@@ -276,9 +278,12 @@ function HeroCard({
               {runtime.name}
             </h2>
             <HealthBadge health={health} />
-            <span className="text-xs text-muted-foreground">
+            <InstantTooltip
+              value={runtime.last_seen_at}
+              className="text-xs text-muted-foreground"
+            >
               {t(($) => $.detail.last_seen, { when: lastSeen })}
-            </span>
+            </InstantTooltip>
           </div>
         </div>
       </div>

@@ -110,10 +110,9 @@
     "toast_create_failed": "トークンを作成できませんでした",
     "toast_revoked": "トークンを失効しました",
     "toast_revoke_failed": "トークンを失効できませんでした",
-    "metadata_prefix": "{{prefix}}... · 作成 {{created}} · {{lastUsed}}",
     "last_used_with_date": "最終使用 {{date}}",
     "last_used_never": "未使用",
-    "expires_with_date": " · 有効期限 {{date}}",
+    "expires_with_date": "有効期限 {{date}}",
     "revoke_aria": "{{name}} を失効",
     "revoke_tooltip": "失効",
     "revoke_dialog": {
@@ -127,7 +126,8 @@
       "description": "今すぐ個人アクセストークンをコピーしてください。再表示はできません。",
       "copy_tooltip": "トークンをコピー",
       "done": "完了"
-    }
+    },
+    "created_with_date": "作成 {{date}}"
   },
   "workspace": {
     "section_general": "一般",

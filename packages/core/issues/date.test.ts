@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   toDateOnly,
-  todayDateOnly,
-  addDaysDateOnly,
   dateOnlyToUTCDate,
   dateOnlyToLocalDate,
   formatDateOnly,
   isPastDateOnly,
+  todayDateOnlyInTimeZone,
+  addDaysDateOnlyInTimeZone,
 } from "./date";
 
 describe("issue date-only helpers", () => {
@@ -57,10 +57,43 @@ describe("issue date-only helpers", () => {
     expect(dateOnlyToLocalDate(null)).toBeUndefined();
   });
 
-  it("detects past calendar days relative to today", () => {
-    expect(isPastDateOnly(addDaysDateOnly(-1))).toBe(true);
-    expect(isPastDateOnly(todayDateOnly())).toBe(false);
-    expect(isPastDateOnly(addDaysDateOnly(1))).toBe(false);
-    expect(isPastDateOnly(null)).toBe(false);
+  it("offsets days from today in the viewer's timezone (calendar-day math)", () => {
+    const tz = "Asia/Shanghai";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const [ty, tm, td] = todayDateOnlyInTimeZone(tz).split("-").map(Number);
+    const day = (offset: number): string => {
+      const d = new Date(Date.UTC(ty!, tm! - 1, td! + offset));
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+    };
+    expect(addDaysDateOnlyInTimeZone(0, tz)).toBe(day(0));
+    expect(addDaysDateOnlyInTimeZone(1, tz)).toBe(day(1));
+    expect(addDaysDateOnlyInTimeZone(7, tz)).toBe(day(7));
+    expect(addDaysDateOnlyInTimeZone(-6, tz)).toBe(day(-6));
+    // An unknown timezone falls back to UTC instead of throwing.
+    expect(() => addDaysDateOnlyInTimeZone(1, "Not/AZone")).not.toThrow();
+  });
+
+  it("detects past calendar days relative to today in the viewer's timezone", () => {
+    const tz = "Asia/Shanghai";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    // Anchor on "today" in the viewer's tz, then walk the calendar.
+    const [ty, tm, td] = todayDateOnlyInTimeZone(tz).split("-").map(Number);
+    const day = (offset: number): string => {
+      const d = new Date(Date.UTC(ty!, tm! - 1, td! + offset));
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+    };
+    expect(isPastDateOnly(day(-1), tz)).toBe(true);
+    expect(isPastDateOnly(day(0), tz)).toBe(false);
+    expect(isPastDateOnly(day(1), tz)).toBe(false);
+    expect(isPastDateOnly(null, tz)).toBe(false);
+  });
+
+  it("anchors today in the requested timezone", () => {
+    expect(todayDateOnlyInTimeZone("UTC")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // An unknown timezone falls back to UTC instead of throwing.
+    expect(() => todayDateOnlyInTimeZone("Not/AZone")).not.toThrow();
+    expect(todayDateOnlyInTimeZone("Not/AZone")).toBe(
+      todayDateOnlyInTimeZone("UTC"),
+    );
   });
 });

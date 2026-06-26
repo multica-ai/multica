@@ -8,7 +8,14 @@
     "just_now": "just now",
     "minutes_ago": "{{count}}m ago",
     "hours_ago": "{{count}}h ago",
-    "days_ago": "{{count}}d ago"
+    "days_ago": "{{count}}d ago",
+    "months_ago": "{{count}}mo ago",
+    "years_ago": "{{count}}y ago",
+    "in_minutes": "in {{count}}m",
+    "in_hours": "in {{count}}h",
+    "in_days": "in {{count}}d",
+    "in_months": "in {{count}}mo",
+    "in_years": "in {{count}}y"
   },
   "lark_bind": {
     "page_title": "Bind your Lark account",

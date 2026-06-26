@@ -7,7 +7,7 @@ import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AppLink } from "../../navigation";
 import type { Issue } from "@multica/core/types";
-import { formatDateOnly } from "@multica/core/issues/date";
+import { useFormatCalendarDate } from "../../common/use-format-calendar-date";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -24,10 +24,6 @@ import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 export interface ChildProgress {
   done: number;
   total: number;
-}
-
-function formatDate(date: string): string {
-  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
 function ListRowContent({
@@ -49,6 +45,7 @@ function ListRowContent({
 }) {
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
+  const formatDate = useFormatCalendarDate();
   const p = useWorkspacePaths();
   const storeProperties = useViewStore((s) => s.cardProperties);
   const wsId = useWorkspaceId();

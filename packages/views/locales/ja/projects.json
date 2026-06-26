@@ -49,12 +49,6 @@
     "agents_group": "エージェント",
     "no_results": "結果なし"
   },
-  "relative_date": {
-    "today": "今日",
-    "one_day_ago": "1日前",
-    "days_ago": "{{count}}日前",
-    "months_ago": "{{count}}か月前"
-  },
   "detail": {
     "not_found": "プロジェクトが見つかりません",
     "breadcrumb_fallback": "プロジェクト",

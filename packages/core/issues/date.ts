@@ -8,6 +8,8 @@
 //
 // Pure functions only (no React / DOM) so they can be shared with mobile.
 
+import { safeDateTimeFormat } from "../i18n/format-date-time";
+
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})/;
 
 function pad(n: number): string {
@@ -21,18 +23,6 @@ function pad(n: number): string {
  */
 export function toDateOnly(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-/** Today as a "YYYY-MM-DD" string in the viewer's local calendar. */
-export function todayDateOnly(): string {
-  return toDateOnly(new Date());
-}
-
-/** "YYYY-MM-DD" of `days` from today in the viewer's local calendar. */
-export function addDaysDateOnly(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return toDateOnly(d);
 }
 
 /**
@@ -88,10 +78,67 @@ export function formatDateOnly(
   return d.toLocaleDateString(locale, { ...options, timeZone: "UTC" });
 }
 
-/** True when the calendar day is strictly before today (viewer's local day). */
-export function isPastDateOnly(value: string | null | undefined): boolean {
+/**
+ * An instant's calendar [year, month, day] in an IANA timezone. Falls back to
+ * UTC for a stale/ICU-unsupported timezone (must not throw). Single source for
+ * "what calendar day is this instant in tz X" — both overdue judgment and the
+ * relative-time day bucket build on it so they never derive "today" differently.
+ * Reuses safeDateTimeFormat's cache + UTC fallback so this path can never drift
+ * from the instant formatters' handling of a bad zone.
+ */
+export function calendarPartsInTimeZone(
+  date: Date,
+  timeZone: string,
+): [number, number, number] {
+  const parts = safeDateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (type: string) =>
+    Number(parts.find((p) => p.type === type)?.value);
+  return [get("year"), get("month"), get("day")];
+}
+
+/**
+ * Today as a "YYYY-MM-DD" string in the given IANA timezone. Falls back to UTC
+ * if the timezone is unknown (a stale/ICU-unsupported value must not throw).
+ */
+export function todayDateOnlyInTimeZone(timeZone: string): string {
+  const [y, m, d] = calendarPartsInTimeZone(new Date(), timeZone);
+  return `${y}-${pad(m)}-${pad(d)}`;
+}
+
+/**
+ * "YYYY-MM-DD" of `days` from today (negative = past) in the given IANA
+ * timezone. Anchors on today-in-tz, then shifts by whole UTC days so a DST
+ * transition never nudges the result onto a neighbouring day. Falls back to
+ * UTC for a stale/ICU-unsupported timezone (must not throw). Use instead of a
+ * browser-local "today" so a "due today / next week" preset agrees with the
+ * Viewing-tz overdue judgment (`isPastDateOnly`).
+ */
+export function addDaysDateOnlyInTimeZone(
+  days: number,
+  timeZone: string,
+): string {
+  const [y, m, d] = calendarPartsInTimeZone(new Date(), timeZone);
+  const shifted = new Date(Date.UTC(y, m - 1, d) + days * 86_400_000);
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
+}
+
+/**
+ * True when the calendar day is strictly before today, where "today" is the
+ * calendar day in the viewer's Viewing timezone — so the overdue badge agrees
+ * with the due date the viewer sees on screen. See
+ * docs/timezone-display-spec.md §4.
+ */
+export function isPastDateOnly(
+  value: string | null | undefined,
+  timeZone: string,
+): boolean {
   const d = dateOnlyToUTCDate(value);
   if (!d) return false;
-  const today = dateOnlyToUTCDate(todayDateOnly());
+  const today = dateOnlyToUTCDate(todayDateOnlyInTimeZone(timeZone));
   return today != null && d.getTime() < today.getTime();
 }

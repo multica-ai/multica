@@ -52,6 +52,7 @@ import {
   CardTitle,
 } from "@multica/ui/components/ui/card";
 import { useT } from "../i18n";
+import { useFormatDateTime } from "../common/use-format-date-time";
 import { useNavigation } from "../navigation";
 
 // 1 credit = 1_000_000 micro-credit; cents → dollars factor for the
@@ -208,6 +209,7 @@ function CheckoutSessionStatusBanner({
 
 function BalanceCard() {
   const { t } = useT("billing");
+  const { formatDateTime } = useFormatDateTime();
   const balance = useQuery(billingBalanceOptions());
 
   return (
@@ -241,7 +243,7 @@ function BalanceCard() {
               {t(($) => $.balance.meta, {
                 micro: balance.data?.balance_micro.toLocaleString() ?? 0,
                 owner: balance.data?.owner_id.slice(0, 8) ?? "",
-                updated: formatDate(balance.data?.updated_at, t),
+                updated: formatDate(balance.data?.updated_at, t, formatDateTime),
               })}
             </div>
           </div>
@@ -450,6 +452,7 @@ function TransactionsCard() {
 
 function TransactionRow({ row }: { row: BillingTransaction }) {
   const { t } = useT("billing");
+  const { formatDateTime } = useFormatDateTime();
   const credit = row.amount_micro / MICRO_PER_CREDIT;
   return (
     <li className="rounded-md border bg-background p-2.5">
@@ -477,7 +480,7 @@ function TransactionRow({ row }: { row: BillingTransaction }) {
       )}
       <div className="mt-1 font-mono text-[10px] text-muted-foreground/70">
         {t(($) => $.transactions.row_meta, {
-          date: formatDate(row.created_at, t),
+          date: formatDate(row.created_at, t, formatDateTime),
           balance: (row.balance_after / MICRO_PER_CREDIT).toLocaleString(),
           ref: row.reference_id || t(($) => $.transactions.ref_empty),
         })}
@@ -529,6 +532,7 @@ function BatchesCard() {
 
 function BatchRow({ row }: { row: BillingBatch }) {
   const { t } = useT("billing");
+  const { formatDateTime } = useFormatDateTime();
   const total = row.total_micro / MICRO_PER_CREDIT;
   const remaining = row.remaining_micro / MICRO_PER_CREDIT;
   const consumed = total - remaining;
@@ -551,7 +555,9 @@ function BatchRow({ row }: { row: BillingBatch }) {
       <div className="mt-1 text-xs text-muted-foreground">
         {t(($) => $.batches.consumed, { value: consumed.toLocaleString() })}
         {row.expires_at
-          ? t(($) => $.batches.expires_suffix, { value: formatDate(row.expires_at, t) })
+          ? t(($) => $.batches.expires_suffix, {
+              value: formatDate(row.expires_at, t, formatDateTime),
+            })
           : t(($) => $.batches.never_expires_suffix)}
       </div>
     </li>
@@ -601,6 +607,7 @@ function TopupsCard() {
 
 function TopupRow({ row }: { row: BillingTopup }) {
   const { t } = useT("billing");
+  const { formatDateTime } = useFormatDateTime();
   return (
     <li className="rounded-md border bg-background p-2.5">
       <div className="flex items-center justify-between gap-2">
@@ -633,7 +640,7 @@ function TopupRow({ row }: { row: BillingTopup }) {
       </div>
       <div className="mt-1 font-mono text-[10px] text-muted-foreground/70">
         {t(($) => $.topups.row_meta, {
-          date: formatDate(row.created_at, t),
+          date: formatDate(row.created_at, t, formatDateTime),
           checkout: row.stripe_checkout_id || t(($) => $.topups.stripe_empty),
         })}
       </div>
@@ -725,9 +732,10 @@ function formatMoney(amountCents: number, currency: string): string {
 function formatDate(
   value: string | undefined,
   t: ReturnType<typeof useT<"billing">>["t"],
+  format: (value: string) => string,
 ): string {
   if (!value) return t(($) => $.shared.date_dash);
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString();
+  // format() renders in the viewer's Viewing tz + Language locale and returns
+  // "" for an unparseable value, where we fall back to the raw string.
+  return format(value) || value;
 }

@@ -33,6 +33,7 @@ import {
 } from "@multica/ui/components/ui/select";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { DateTime } from "../../common/date-time";
 
 const CLOUD_RUNTIME_INSTANCE_TYPES = ["t4g.medium", "t4g.large"] as const;
 const DEFAULT_INSTANCE_TYPE = CLOUD_RUNTIME_INSTANCE_TYPES[0];
@@ -298,7 +299,11 @@ function CloudRuntimeNodeRow({ node, wsId }: { node: CloudRuntimeNode; wsId: str
     node.name.trim() ||
     node.instance_id.trim() ||
     t(($) => $.cloud_runtime.node_fallback_name);
-  const created = formatDateTime(node.created_at);
+  // <DateTime> hides an unparseable value, but the "/" separator beside it is a
+  // sibling — gate both on validity so a malformed created_at can't leave a
+  // dangling separator with no date after it.
+  const hasCreatedAt =
+    !!node.created_at && !Number.isNaN(new Date(node.created_at).getTime());
   return (
     <div className="rounded-md border bg-background px-3 py-2.5">
       <div className="flex min-w-0 items-start justify-between gap-3">
@@ -311,10 +316,10 @@ function CloudRuntimeNodeRow({ node, wsId }: { node: CloudRuntimeNode; wsId: str
             <span>{node.instance_type}</span>
             <span className="text-muted-foreground/40">/</span>
             <span>{node.region}</span>
-            {created && (
+            {hasCreatedAt && (
               <>
                 <span className="text-muted-foreground/40">/</span>
-                <span>{created}</span>
+                <DateTime value={node.created_at} variant="datetime" />
               </>
             )}
           </div>
@@ -385,15 +390,4 @@ function CloudRuntimeStatusBadge({ status }: { status: string }) {
 function valueOrUndefined(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
-}
-
-function formatDateTime(value: string): string | null {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
 }

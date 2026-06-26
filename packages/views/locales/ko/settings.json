@@ -110,10 +110,9 @@
     "toast_create_failed": "토큰을 만들지 못했습니다",
     "toast_revoked": "토큰을 폐기했습니다",
     "toast_revoke_failed": "토큰을 폐기하지 못했습니다",
-    "metadata_prefix": "{{prefix}}... · {{created}} 생성 · {{lastUsed}}",
     "last_used_with_date": "마지막 사용 {{date}}",
     "last_used_never": "사용된 적 없음",
-    "expires_with_date": " · {{date}} 만료",
+    "expires_with_date": "{{date}} 만료",
     "revoke_aria": "{{name}} 폐기",
     "revoke_tooltip": "폐기",
     "revoke_dialog": {
@@ -127,7 +126,8 @@
       "description": "지금 개인 액세스 토큰을 복사하세요. 다시 볼 수 없습니다.",
       "copy_tooltip": "토큰 복사",
       "done": "완료"
-    }
+    },
+    "created_with_date": "{{date}} 생성"
   },
   "workspace": {
     "section_general": "일반",

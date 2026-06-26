@@ -12,7 +12,6 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,7 +28,7 @@ import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { useTimeAgo } from "../../i18n";
+import { DateTime } from "../../common/date-time";
 import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -496,7 +495,6 @@ function CommentRow({
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
 }) {
   const { t } = useT("issues");
-  const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
 
   const edit = useEditAttachmentState(issueId, entry, onEdit);
@@ -522,18 +520,11 @@ function CommentRow({
         <span className="cursor-pointer text-sm font-medium">
           {getActorName(entry.actor_type, entry.actor_id)}
         </span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span className="text-xs text-muted-foreground cursor-default">
-                {timeAgo(entry.created_at)}
-              </span>
-            }
-          />
-          <TooltipContent side="top">
-            {new Date(entry.created_at).toLocaleString()}
-          </TooltipContent>
-        </Tooltip>
+        <DateTime
+          value={entry.created_at}
+          variant="relative"
+          className="text-xs text-muted-foreground cursor-default"
+        />
 
         {isResolution && (
           <span className="text-xs font-medium text-success">
@@ -709,7 +700,6 @@ function CommentCardImpl({
   highlightedCommentId,
 }: CommentCardProps) {
   const { t } = useT("issues");
-  const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
@@ -797,18 +787,11 @@ function CommentCardImpl({
             <span className="shrink-0 cursor-pointer text-sm font-medium">
               {getActorName(entry.actor_type, entry.actor_id)}
             </span>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="shrink-0 text-xs text-muted-foreground cursor-default">
-                    {timeAgo(entry.created_at)}
-                  </span>
-                }
-              />
-              <TooltipContent side="top">
-                {new Date(entry.created_at).toLocaleString()}
-              </TooltipContent>
-            </Tooltip>
+            <DateTime
+              value={entry.created_at}
+              variant="relative"
+              className="shrink-0 text-xs text-muted-foreground cursor-default"
+            />
 
             {!open && contentPreview && (
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">

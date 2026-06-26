@@ -4,6 +4,7 @@ import type {
   RuntimeUsageByAgent,
 } from "@multica/core/types";
 import { getCustomPricing } from "@multica/core/runtimes/custom-pricing-store";
+import { formatDateOnly, todayDateOnlyInTimeZone } from "@multica/core/issues/date";
 
 // A live local daemon re-registers itself within seconds of a server-side
 // delete (daemon self-heal, #2404), so deleting an online local runtime from
@@ -17,31 +18,9 @@ export function isSelfHealingRuntime(runtime: AgentRuntime): boolean {
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
-// Compound-unit relative timestamp ("2m 14s ago", "1d 4h ago", "6d 19h ago")
-// — gives the user enough precision to tell "just lost" from "long lost"
-// at a glance without forcing them to mouse-over for a full timestamp.
-export function formatLastSeen(lastSeenAt: string | null): string {
-  if (!lastSeenAt) return "Never";
-  const diffMs = Date.now() - new Date(lastSeenAt).getTime();
-  if (diffMs < 5_000) return "Just now";
-
-  const seconds = Math.floor(diffMs / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (minutes < 1) return `${seconds}s ago`;
-  if (hours < 1) {
-    const s = seconds % 60;
-    return s > 0 ? `${minutes}m ${s}s ago` : `${minutes}m ago`;
-  }
-  if (days < 1) {
-    const m = minutes % 60;
-    return m > 0 ? `${hours}h ${m}m ago` : `${hours}h ago`;
-  }
-  const h = hours % 24;
-  return h > 0 ? `${days}d ${h}h ago` : `${days}d ago`;
-}
+// Runtime "last seen" formatting moved to the localized `useFormatLastSeen`
+// hook (runtimes/use-format-last-seen.ts); the compound seconds/minutes
+// gradient is preserved there.
 
 // Turns the back-end's `device_info` string ("MacBook-Pro · darwin-amd64",
 // "some-host · linux-amd64") into something humans recognise. We don't have
@@ -564,7 +543,7 @@ export interface WeeklyCostStackData {
   total: number;
 }
 
-export function aggregateByDate(usage: RuntimeUsage[]): {
+export function aggregateByDate(usage: RuntimeUsage[], locale: string): {
   dailyTokens: DailyTokenData[];
   dailyCost: DailyCostData[];
   dailyCostStack: DailyCostStackData[];
@@ -614,10 +593,7 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
     modelMap.set(modelName, m);
   }
 
-  const formatLabel = (d: string) => {
-    const date = new Date(d + "T00:00:00");
-    return `${date.getMonth() + 1}/${date.getDate()}`;
-  };
+  const formatLabel = (d: string) => formatShortDate(d, locale);
 
   const dailyTokens = Array.from(dateMap.values())
     .toSorted((a, b) => a.date.localeCompare(b.date))
@@ -686,6 +662,7 @@ export function aggregateByWeek(
   usage: readonly WeeklyAggregable[],
   tz: string,
   weekCount: number,
+  locale: string,
 ): {
   weeklyTokens: WeeklyTokenData[];
   weeklyCostStack: WeeklyCostStackData[];
@@ -747,8 +724,8 @@ export function aggregateByWeek(
     return {
       weekStart,
       weekEnd,
-      label: formatShortDate(weekStart),
-      rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
+      label: formatShortDate(weekStart, locale),
+      rangeLabel: `${formatShortDate(weekStart, locale)} – ${formatShortDate(weekEnd, locale)}`,
       partial,
       daysCovered: partial ? elapsedDays : 7,
     };
@@ -814,15 +791,12 @@ function diffDaysIso(from: string, to: string): number {
 // and runtime sit in different time zones.
 // ---------------------------------------------------------------------------
 
-// Today's calendar date (YYYY-MM-DD) in the given IANA timezone. `en-CA`
-// gives ISO-shaped output without us having to assemble Intl parts by hand.
+// Today's calendar date (YYYY-MM-DD) in the given IANA timezone. Delegates to
+// the shared core helper so a stale/ICU-unsupported runtime tz falls back to
+// UTC instead of throwing (a raw Intl.DateTimeFormat would RangeError here and
+// white-screen the usage charts).
 export function todayIso(tz: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
+  return todayDateOnlyInTimeZone(tz);
 }
 
 // Pure date arithmetic on a YYYY-MM-DD string. Uses UTC under the hood so
@@ -848,15 +822,18 @@ export function weekStartIso(iso: string): string {
 }
 
 // "May 12" — short, locale-aware month/day for a YYYY-MM-DD string. Parsing
-// via UTC keeps the displayed day stable regardless of the browser's tz.
-export function formatShortDate(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1));
-  return dt.toLocaleString("en", {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
+// via UTC keeps the displayed day stable regardless of the browser's tz. The
+// locale (from the Language setting, i18n.language) is required so a caller
+// that forgets it is a compile error, not a silent English-only label.
+export function formatShortDate(iso: string, locale: string): string {
+  return formatDateOnly(iso, { month: "short", day: "numeric" }, locale);
+}
+
+// "May" — short, locale-aware month name for a YYYY-MM-DD string. UTC-anchored
+// like formatShortDate so the displayed month never shifts with the browser's
+// tz (a calendar-day label must read the same for every viewer).
+export function formatShortMonth(iso: string, locale: string): string {
+  return formatDateOnly(iso, { month: "short" }, locale);
 }
 
 // ---------------------------------------------------------------------------
