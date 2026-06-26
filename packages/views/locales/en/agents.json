@@ -236,6 +236,8 @@
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "capabilities": "Capabilities",
     "_comment_capabilities": "CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 — capabilities tab label",
+    "context": "Context",
+    "_comment_context": "CEREBRO-PATCH(agent-office-tab): FIR-1775 — Agent Office (context versioning + governance) tab label",
     "mcp_config": "MCP",
     "integrations": "Integrations",
     "discard_dialog_title": "Discard unsaved changes?",

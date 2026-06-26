@@ -17,6 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { createAgentToolsTabs } from "@multica/cerebro-agent-tools/views"; // CEREBRO-PATCH(agent-tools-tab): tab extension
 import { createAgentCapabilitiesTabs } from "@multica/cerebro-agent-capabilities/views"; // CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 tab extension
+import { createAgentContextTabs } from "@multica/cerebro-agent-context/views"; // CEREBRO-PATCH(agent-office-tab): FIR-1775 agent context versioning + governance tab
 import { providerSupportsMcpConfig } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
@@ -103,6 +104,7 @@ const detailTabs = [
   ...coreDetailTabs,
   ...createAgentToolsTabs(), // CEREBRO-PATCH(agent-tools-tab): Cerebro-owned tab
   ...createAgentCapabilitiesTabs(), // CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 Cerebro-owned tab
+  ...createAgentContextTabs(), // CEREBRO-PATCH(agent-office-tab): FIR-1775 Cerebro-owned Context (Agent Office) tab
 ];
 
 interface AgentOverviewPaneProps {

@@ -214,7 +214,9 @@
     "tools": "Tools",
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "capabilities": "Capabilities",
-    "_comment_capabilities": "CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 — capabilities tab label"
+    "_comment_capabilities": "CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 — capabilities tab label",
+    "context": "コンテキスト",
+    "_comment_context": "CEREBRO-PATCH(agent-office-tab): FIR-1775 — Agent Office (context versioning + governance) tab label"
   },
   "create_dialog": {
     "title_create": "エージェントを作成",

@@ -636,6 +636,80 @@ export interface ForkSkillRequest {
   owner_id?: string | null;
 }
 
+// CEREBRO-PATCH(agent-office-types): FIR-1775 — Agent Office. An agent's full
+// runtime context (instructions, bound skills, model, config) is versioned and
+// governed exactly like a skill. The snapshot holds custom_env key NAMES only —
+// never secret values.
+export type AgentContextChangeRequestStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "merged";
+
+export interface AgentContextSnapshot {
+  instructions: string;
+  description: string;
+  model: string;
+  thinking_level: string;
+  persona_sandbox: string;
+  mcp_config?: unknown;
+  custom_args?: unknown;
+  runtime_config?: unknown;
+  skill_ids: string[];
+  custom_env_keys: string[];
+}
+
+export interface AgentContextVersion {
+  id: string;
+  agent_id: string;
+  version: string;
+  snapshot: AgentContextSnapshot;
+  description: string;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface AgentContextChangeRequest {
+  id: string;
+  agent_id: string;
+  title: string;
+  description: string;
+  base_version: string;
+  proposed_version: string;
+  proposed_snapshot: AgentContextSnapshot;
+  status: AgentContextChangeRequestStatus;
+  proposed_by: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  review_comment: string;
+  work_session_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateAgentContextChangeRequestRequest {
+  title: string;
+  description?: string;
+  proposed_version: string;
+  /** Full replacement snapshot, or use the convenience overrides below. */
+  proposed_snapshot?: AgentContextSnapshot;
+  instructions?: string;
+  model?: string;
+  thinking_level?: string;
+  persona_sandbox?: string;
+  skill_ids?: string[];
+}
+
+export interface ReviewAgentContextChangeRequestRequest {
+  action: "approve" | "reject";
+  comment?: string;
+}
+
+export interface RollbackAgentContextRequest {
+  version: string;
+  comment?: string;
+}
+
 export interface CreateSkillRequest {
   name: string;
   description?: string;

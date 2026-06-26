@@ -51,6 +51,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
 	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 group handler import
 	cerebrogroups "github.com/multica-ai/multica/server/internal/cerebro/groups"
+	cerebroagentoffice "github.com/multica-ai/multica/server/internal/cerebro/agentoffice" // CEREBRO-PATCH(cerebro-agent-office-routes): FIR-1775 agent context versioning + governance
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy handler import
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	// CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 read-only effective runtime tool access preview.
@@ -562,6 +563,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 group permission model handler
 	cerebroGroupPermissionsHandler := cerebrogrouppermissions.New(cerebroQueries, queries, bus)
 	cerebroRolesHandler := cerebroroles.New(cerebroQueries, queries, bus) // CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject handler
+	// CEREBRO-PATCH(cerebro-agent-office-routes): FIR-1775 agent context versioning + governance handler.
+	cerebroAgentOfficeHandler := cerebroagentoffice.NewHandler(cerebroagentoffice.New(cerebroQueries, pool))
 	// CEREBRO-PATCH(cerebro-identity-handler): FIR-2523 Google Workspace identity-source handler + provisioner seam.
 	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-identity-login-sync-rollback): FIR-2724 keep BigQuery group sync out of login.
 	cerebroIdentityHandler := cerebroidentity.NewHandler(cerebroIdentityService)
@@ -1556,6 +1559,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// workspace (find-or-create by name) and creates the agent
 				// with the template's instructions in one transaction.
 				r.Post("/from-template", h.CreateAgentFromTemplate)
+				// CEREBRO-PATCH(cerebro-agent-office-routes): FIR-1775 — workspace-wide
+				// pending agent-context change requests + review action.
+				r.Get("/context/change-requests", cerebroAgentOfficeHandler.ListPendingChangeRequests)
+				r.Post("/context/change-requests/{crId}/review", cerebroAgentOfficeHandler.ReviewChangeRequest)
 				// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation endpoint
 				r.Post("/generate-avatar", cerebroAgentAvatarHandler.Generate)
 				r.Post("/backfill-avatars", cerebroAgentAvatarHandler.Backfill) // CEREBRO-PATCH(agent-avatar-backfill): async workspace avatar backfill.
@@ -1571,6 +1578,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
 					r.Post("/skills/add", h.AddAgentSkills)
+					// CEREBRO-PATCH(cerebro-agent-office-routes): FIR-1775 — per-agent
+					// context versioning + governance (versions, ownership, propose,
+					// diff, rollback).
+					r.Get("/context/versions", cerebroAgentOfficeHandler.ListVersions)
+					r.Put("/context/ownership", cerebroAgentOfficeHandler.UpdateOwnership)
+					r.Get("/context/change-requests", cerebroAgentOfficeHandler.ListChangeRequests)
+					r.Post("/context/change-requests", cerebroAgentOfficeHandler.CreateChangeRequest)
+					r.Get("/context/diff", cerebroAgentOfficeHandler.Diff)
+					r.Post("/context/rollback", cerebroAgentOfficeHandler.Rollback)
 					r.Get("/capabilities", h.GetAgentCapabilities) // CEREBRO-PATCH(agent-capabilities-card-route): TECH-3642 unified per-agent capabilities card.
 					// CEREBRO-PATCH(agent-tools-routes): cerebro tool grant admin endpoints.
 					// NOTE: GET /tools and POST /tools/{name}/invoke are registered in the

@@ -46,6 +46,9 @@ type Agent struct {
 	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
 	PersonaSandbox     pgtype.Text        `json:"persona_sandbox"`
 	SurfaceVisibility  []byte             `json:"surface_visibility"`
+	ContextOwnerID     pgtype.UUID        `json:"context_owner_id"`
+	ContextApproverIds []pgtype.UUID      `json:"context_approver_ids"`
+	ContextVersion     string             `json:"context_version"`
 }
 
 type AgentBudgetOverride struct {
@@ -56,6 +59,34 @@ type AgentBudgetOverride struct {
 	Reason          pgtype.Text        `json:"reason"`
 	SetBy           pgtype.UUID        `json:"set_by"`
 	SetAt           pgtype.Timestamptz `json:"set_at"`
+}
+
+type AgentChangeRequest struct {
+	ID               pgtype.UUID        `json:"id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	Title            string             `json:"title"`
+	Description      string             `json:"description"`
+	BaseVersion      string             `json:"base_version"`
+	ProposedVersion  string             `json:"proposed_version"`
+	ProposedSnapshot []byte             `json:"proposed_snapshot"`
+	Status           string             `json:"status"`
+	ProposedBy       pgtype.UUID        `json:"proposed_by"`
+	ReviewedBy       pgtype.UUID        `json:"reviewed_by"`
+	ReviewedAt       pgtype.Timestamptz `json:"reviewed_at"`
+	ReviewComment    string             `json:"review_comment"`
+	WorkSessionID    pgtype.UUID        `json:"work_session_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AgentContextVersion struct {
+	ID          pgtype.UUID        `json:"id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	Version     string             `json:"version"`
+	Snapshot    []byte             `json:"snapshot"`
+	Description string             `json:"description"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type AgentRuntime struct {

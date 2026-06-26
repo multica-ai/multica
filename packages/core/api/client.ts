@@ -49,6 +49,12 @@ import type {
   SkillChangeRequest,
   SkillFork,
   SkillForkParent,
+  // CEREBRO-PATCH(agent-office-api): FIR-1775 agent context governance types.
+  AgentContextVersion,
+  AgentContextChangeRequest,
+  CreateAgentContextChangeRequestRequest,
+  ReviewAgentContextChangeRequestRequest,
+  RollbackAgentContextRequest,
   UpdateSkillOwnershipRequest,
   CreateSkillChangeRequestRequest,
   ReviewSkillChangeRequestRequest,
@@ -3223,6 +3229,49 @@ export class ApiClient {
 
   async createSkillFork(id: string, data: ForkSkillRequest): Promise<Skill> {
     return this.fetch(`/api/skills/${id}/forks`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // CEREBRO-PATCH(agent-office-api): FIR-1775 — Agent Office. Version history,
+  // change requests (propose/review), and rollback for an agent's context.
+  // Backs onto server/internal/cerebro/agentoffice/handler.go.
+  async listAgentContextVersions(id: string): Promise<AgentContextVersion[]> {
+    return this.fetch(`/api/agents/${id}/context/versions`);
+  }
+
+  async listAgentContextChangeRequests(
+    id: string,
+  ): Promise<AgentContextChangeRequest[]> {
+    return this.fetch(`/api/agents/${id}/context/change-requests`);
+  }
+
+  async createAgentContextChangeRequest(
+    id: string,
+    data: CreateAgentContextChangeRequestRequest,
+  ): Promise<AgentContextChangeRequest> {
+    return this.fetch(`/api/agents/${id}/context/change-requests`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async reviewAgentContextChangeRequest(
+    crId: string,
+    data: ReviewAgentContextChangeRequestRequest,
+  ): Promise<AgentContextChangeRequest> {
+    return this.fetch(`/api/agents/context/change-requests/${crId}/review`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async rollbackAgentContext(
+    id: string,
+    data: RollbackAgentContextRequest,
+  ): Promise<AgentContextVersion> {
+    return this.fetch(`/api/agents/${id}/context/rollback`, {
       method: "POST",
       body: JSON.stringify(data),
     });
