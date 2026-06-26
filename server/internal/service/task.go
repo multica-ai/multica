@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1185,6 +1186,15 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}
 
 	if len(tasks) == 0 {
+		hasFuture, futureErr := s.Queries.HasFutureQueuedTaskForRuntime(ctx, runtimeID)
+		if futureErr != nil {
+			outcome = "error_future_check"
+			return nil, fmt.Errorf("check future queued tasks: %w", futureErr)
+		}
+		if hasFuture {
+			outcome = "future_db"
+			return nil, nil
+		}
 		s.EmptyClaim.MarkEmpty(ctx, runtimeKey, preSelectVersion)
 		outcome = "empty_db"
 		return nil, nil
@@ -1686,10 +1696,84 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 var retryableReasons = map[string]bool{
-	"runtime_offline":           true,
-	"runtime_recovery":          true,
-	"timeout":                   true,
-	"codex_semantic_inactivity": true,
+	taskfailure.ReasonRuntimeOffline.String():                   true,
+	taskfailure.ReasonRuntimeRecovery.String():                  true,
+	taskfailure.ReasonTimeout.String():                          true,
+	"codex_semantic_inactivity":                                 true,
+	taskfailure.ReasonAgentProviderCapacityOrRateLimit.String(): true,
+}
+
+var sessionLimitResetRe = regexp.MustCompile(`(?i)\bresets\s+([0-9]{1,2})(?::([0-9]{2}))?\s*([ap]m)?\s*(?:\(([^)]+)\))?`)
+
+func retryNotBefore(parent db.AgentTaskQueue, now time.Time) pgtype.Timestamptz {
+	reason := ""
+	if parent.FailureReason.Valid {
+		reason = parent.FailureReason.String
+	}
+	if reason != taskfailure.ReasonAgentProviderCapacityOrRateLimit.String() {
+		return pgtype.Timestamptz{}
+	}
+
+	retryAt := now.Add(providerCapacityRetryDelay(parent.Attempt))
+	if parent.Error.Valid {
+		if resetAt, ok := parseSessionLimitReset(parent.Error.String, now); ok && resetAt.After(retryAt) {
+			retryAt = resetAt
+		}
+	}
+	return pgtype.Timestamptz{Time: retryAt.UTC(), Valid: true}
+}
+
+func providerCapacityRetryDelay(parentAttempt int32) time.Duration {
+	switch parentAttempt {
+	case 0, 1:
+		return 30 * time.Second
+	case 2:
+		return 2 * time.Minute
+	default:
+		return 10 * time.Minute
+	}
+}
+
+func parseSessionLimitReset(errText string, now time.Time) (time.Time, bool) {
+	m := sessionLimitResetRe.FindStringSubmatch(errText)
+	if m == nil {
+		return time.Time{}, false
+	}
+	hour, err := strconv.Atoi(m[1])
+	if err != nil || hour < 0 || hour > 23 {
+		return time.Time{}, false
+	}
+	minute := 0
+	if m[2] != "" {
+		minute, err = strconv.Atoi(m[2])
+		if err != nil || minute < 0 || minute > 59 {
+			return time.Time{}, false
+		}
+	}
+	switch strings.ToLower(m[3]) {
+	case "am":
+		if hour == 12 {
+			hour = 0
+		}
+	case "pm":
+		if hour < 12 {
+			hour += 12
+		}
+	}
+	loc := time.UTC
+	if tz := strings.TrimSpace(m[4]); tz != "" {
+		loaded, err := time.LoadLocation(tz)
+		if err != nil {
+			return time.Time{}, false
+		}
+		loc = loaded
+	}
+	localNow := now.In(loc)
+	resetAt := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, loc)
+	if !resetAt.After(localNow) {
+		resetAt = resetAt.AddDate(0, 0, 1)
+	}
+	return resetAt.UTC(), true
 }
 
 func resumeUnsafeFailureReason(reason string) bool {
@@ -1710,9 +1794,6 @@ func resumeUnsafeFailureReason(reason string) bool {
 // links and, for resume-safe failures, the parent's session_id/work_dir so
 // the agent can resume the conversation when the backend supports it. Returns
 // the new task, or nil when no retry was created.
-//
-// Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
-// its own re-run cadence and we don't want to double-fire it.
 func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
 	if parent.Status != "failed" {
 		return nil, nil
@@ -1732,15 +1813,14 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		)
 		return nil, nil
 	}
-	if parent.AutopilotRunID.Valid {
-		// Autopilot has its own retry semantics; do not double-trigger.
-		return nil, nil
-	}
-	if !parent.IssueID.Valid && !parent.ChatSessionID.Valid {
+	if !parent.IssueID.Valid && !parent.ChatSessionID.Valid && !parent.AutopilotRunID.Valid {
 		return nil, nil
 	}
 
-	child, err := s.Queries.CreateRetryTask(ctx, parent.ID)
+	child, err := s.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{
+		ID:        parent.ID,
+		NotBefore: retryNotBefore(parent, time.Now()),
+	})
 	if err != nil {
 		slog.Warn("task auto-retry failed",
 			"parent_task_id", util.UUIDToString(parent.ID),
