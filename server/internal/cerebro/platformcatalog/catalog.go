@@ -844,9 +844,9 @@ var catalog = []Capability{
 		Title:       "Grant credential access",
 		Category:    CategoryCredentials,
 		Description: "Grant, deny, or clear an actor's (agent / group / user) access to a specific credential at a given layer (FIR-1479). The credential twin of \"Grant runtime tool access\". Highly sensitive.",
-		Ops: []string{
-			"PUT /api/workspaces/{id}/tool-policy",
-			"DELETE /api/workspaces/{id}/tool-policy",
+		Evidence: []string{
+			"server/internal/handler/group_permissions_cerebro.go:308", // cerebroRequireCredentialGrantPolicy
+			"server/internal/handler/group_permissions_cerebro.go:393", // RequireToolPolicyWritePolicy (credential.* branch)
 		},
 	},
 
