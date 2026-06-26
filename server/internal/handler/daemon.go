@@ -28,7 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
-
+var ErrRuntimeNotFound = errors.New("runtime not found")
 // ---------------------------------------------------------------------------
 // Daemon workspace ownership helpers
 // ---------------------------------------------------------------------------
