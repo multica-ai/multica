@@ -221,7 +221,11 @@ export function AttachmentChip({
           <img
             src={thumbnailSrc}
             alt={filename}
-            className="h-14 w-auto max-w-[160px] object-cover"
+            // Force the chip's own 56px height/width: the upstream readonly
+            // editor ships a generic `.rich-text-editor img { height:auto; margin }`
+            // rule (specificity 0-1-1) that otherwise defeats `h-14` when a
+            // posted comment body renders this chip, stretching it to ~100px.
+            className="!my-0 !h-14 !w-auto max-w-[160px] object-cover"
             draggable={false}
           />
         </button>
