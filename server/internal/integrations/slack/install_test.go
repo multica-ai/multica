@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/util"
@@ -35,38 +36,33 @@ func mustUUID(t *testing.T, s string) pgtype.UUID {
 }
 
 type fakeInstallQueries struct {
-	// existing, when set, is returned by GetChannelInstallationByAppID (else
-	// pgx.ErrNoRows — a fresh install).
-	existing     *db.ChannelInstallation
-	upsertParams db.UpsertChannelInstallationByAppIDParams
+	// existing, when set, is the agent's current row; UpsertChannelInstallation
+	// returns it (an UPDATE) so a reconnect reuses the same row id.
+	existing *db.ChannelInstallation
+	// appIDTaken makes UpsertChannelInstallation report a unique-constraint
+	// violation on the (channel_type, app_id) routing index — i.e. the pasted app
+	// is already connected to another agent / workspace.
+	appIDTaken   bool
+	upsertParams db.UpsertChannelInstallationParams
 	upsertCalled bool
-	bindParams   db.CreateChannelUserBindingParams
-	bindCalled   bool
-	deleteCalled bool
-	deleteParams db.DeleteChannelChatSessionBindingsByInstallationParams
 	rowID        pgtype.UUID
 }
 
 // WithTx returns the same fake — the fake tx is a no-op token.
 func (f *fakeInstallQueries) WithTx(_ pgx.Tx) installQueries { return f }
 
-func (f *fakeInstallQueries) GetChannelInstallationByAppID(_ context.Context, _ db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error) {
-	if f.existing == nil {
-		return db.ChannelInstallation{}, pgx.ErrNoRows
-	}
-	return *f.existing, nil
-}
-
-func (f *fakeInstallQueries) UpsertChannelInstallationByAppID(_ context.Context, arg db.UpsertChannelInstallationByAppIDParams) (db.ChannelInstallation, error) {
+func (f *fakeInstallQueries) UpsertChannelInstallation(_ context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error) {
 	f.upsertCalled = true
 	f.upsertParams = arg
-	// Simulate the query's `ON CONFLICT ... WHERE workspace_id = EXCLUDED.workspace_id`
-	// guard: an app already owned by a different workspace updates no row.
-	if f.existing != nil && f.existing.WorkspaceID != arg.WorkspaceID {
-		return db.ChannelInstallation{}, pgx.ErrNoRows
+	if f.appIDTaken {
+		return db.ChannelInstallation{}, &pgconn.PgError{Code: "23505"}
+	}
+	id := f.rowID
+	if f.existing != nil {
+		id = f.existing.ID // reconnect updates the agent's existing row in place
 	}
 	return db.ChannelInstallation{
-		ID:              f.rowID,
+		ID:              id,
 		WorkspaceID:     arg.WorkspaceID,
 		AgentID:         arg.AgentID,
 		ChannelType:     arg.ChannelType,
@@ -74,18 +70,6 @@ func (f *fakeInstallQueries) UpsertChannelInstallationByAppID(_ context.Context,
 		InstallerUserID: arg.InstallerUserID,
 		Status:          "active",
 	}, nil
-}
-
-func (f *fakeInstallQueries) CreateChannelUserBinding(_ context.Context, arg db.CreateChannelUserBindingParams) (db.ChannelUserBinding, error) {
-	f.bindCalled = true
-	f.bindParams = arg
-	return db.ChannelUserBinding{}, nil
-}
-
-func (f *fakeInstallQueries) DeleteChannelChatSessionBindingsByInstallation(_ context.Context, arg db.DeleteChannelChatSessionBindingsByInstallationParams) error {
-	f.deleteCalled = true
-	f.deleteParams = arg
-	return nil
 }
 
 func (f *fakeInstallQueries) ListChannelInstallationsByWorkspace(_ context.Context, _ db.ListChannelInstallationsByWorkspaceParams) ([]db.ChannelInstallation, error) {

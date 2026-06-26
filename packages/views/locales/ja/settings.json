@@ -339,6 +339,7 @@
     "byo_bot_token_hint": "Slack アプリ → OAuth & Permissions → Bot User OAuth Token。",
     "byo_app_token_label": "App レベルトークン（xapp-）",
     "byo_app_token_hint": "Slack アプリ → Basic Information → App-Level Tokens（スコープ connections:write）。",
+    "byo_scopes_hint": "必要な Bot スコープ：app_mentions:read、channels:history、chat:write、groups:history、im:history、mpim:history、users:read。",
     "byo_submit": "接続",
     "byo_submitting": "接続中…",
     "byo_cancel": "キャンセル",

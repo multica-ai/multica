@@ -151,7 +151,7 @@ func (h *Handler) RegisterSlackBYO(w http.ResponseWriter, r *http.Request) {
 			// The dominant non-sentinel failure here is auth.test rejecting the
 			// pasted bot token (a user error), so guide the user to recheck the
 			// tokens rather than surfacing an opaque 500.
-			writeError(w, http.StatusBadRequest, "could not verify the Slack tokens — check the bot token and app-level token, and that the app is installed to your workspace")
+			writeError(w, http.StatusBadRequest, "could not verify the Slack tokens — check the bot token and app-level token, that the app is installed to your workspace, and that it has the users:read scope")
 		}
 		return
 	}

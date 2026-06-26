@@ -107,6 +107,21 @@ func nullText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
 }
 
+// installationServesTeam reports whether an installation (its stored config) may
+// serve events from eventTeamID. Inbound routing keys on api_app_id, which
+// identifies the Slack APP, not the Slack workspace: a BYO app distributed /
+// installed into another Slack workspace emits events carrying the SAME app id.
+// So we additionally require the event's team to match the team the installed
+// bot belongs to. An installation with no recorded team (legacy) is permissive.
+func installationServesTeam(installConfigJSON json.RawMessage, eventTeamID string) bool {
+	// Read team_id directly (NOT via DecodePublicConfig, which falls back to
+	// app_id when team_id is absent — a hosted-era convenience that would defeat
+	// this check for BYO where app_id != team_id).
+	var cfg installConfig
+	_ = json.Unmarshal(installConfigJSON, &cfg)
+	return cfg.TeamID == "" || cfg.TeamID == eventTeamID
+}
+
 // ---- installation routing ----
 
 type installationResolver struct{ q *db.Queries }
@@ -129,6 +144,9 @@ func (r *installationResolver) ResolveInstallation(ctx context.Context, msg chan
 			return engine.ResolvedInstallation{}, engine.ErrInstallationNotFound
 		}
 		return engine.ResolvedInstallation{}, err
+	}
+	if !installationServesTeam(inst.Config, raw.TeamID) {
+		return engine.ResolvedInstallation{}, engine.ErrInstallationNotFound
 	}
 	return engine.ResolvedInstallation{
 		ID:              inst.ID,

@@ -110,3 +110,29 @@ func TestNewSlackResolverSet(t *testing.T) {
 		t.Error("a non-nil replier must populate ResolverSet.Replier")
 	}
 }
+
+func TestInstallationServesTeam(t *testing.T) {
+	cfg := func(team string) json.RawMessage {
+		b, _ := json.Marshal(installConfig{AppID: "A0BCXGVCS7R", TeamID: team})
+		return b
+	}
+	cases := []struct {
+		name      string
+		cfgTeam   string
+		eventTeam string
+		want      bool
+	}{
+		{"matching team", "T999", "T999", true},
+		// api_app_id alone is not enough: the same app installed into another Slack
+		// workspace emits the same app id but a different team — must not route here.
+		{"different team", "T999", "TOTHER", false},
+		{"empty event team", "T999", "", false},
+		{"legacy row without a team is permissive", "", "TANY", true},
+	}
+	for _, c := range cases {
+		if got := installationServesTeam(cfg(c.cfgTeam), c.eventTeam); got != c.want {
+			t.Errorf("%s: installationServesTeam(cfg=%q, event=%q) = %v, want %v",
+				c.name, c.cfgTeam, c.eventTeam, got, c.want)
+		}
+	}
+}

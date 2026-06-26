@@ -117,16 +117,13 @@ func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (
 		return db.ChannelInstallation{}, fmt.Errorf("encode slack installation config: %w", err)
 	}
 
-	// Persist keyed by the REAL app id (not the team id) so several BYO apps in
-	// one Slack workspace coexist. No installer auto-bind: a paste carries no
-	// authed_user, so the installer binds via the normal token flow on first
-	// message. The shared persistInstall provides the atomic cross-workspace
-	// guard and agent-move retire.
+	// Persist one bot per agent (the row is keyed by workspace + agent). The
+	// stored config carries the real app id for inbound routing; persistInstall
+	// refuses the pair if that app is already connected to another agent/workspace.
 	return s.persistInstall(ctx, installPersist{
 		wsID:        p.WorkspaceID,
 		agentID:     p.AgentID,
 		installerID: p.InitiatorID,
-		appIDKey:    appID,
 		configJSON:  cfgJSON,
 	})
 }

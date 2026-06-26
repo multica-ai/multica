@@ -416,6 +416,7 @@
     "byo_bot_token_hint": "Slack 앱 → OAuth & Permissions → Bot User OAuth Token.",
     "byo_app_token_label": "App 레벨 토큰(xapp-)",
     "byo_app_token_hint": "Slack 앱 → Basic Information → App-Level Tokens(스코프 connections:write).",
+    "byo_scopes_hint": "필요한 Bot 스코프: app_mentions:read, channels:history, chat:write, groups:history, im:history, mpim:history, users:read.",
     "byo_submit": "연결",
     "byo_submitting": "연결 중…",
     "byo_cancel": "취소",

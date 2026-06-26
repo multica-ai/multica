@@ -386,6 +386,10 @@ export function SlackAgentBindButton({
             </button>
           ) : null}
 
+          <p className="rounded-md bg-muted px-3 py-2 text-[11px] text-muted-foreground">
+            {t(($) => $.slack.byo_scopes_hint)}
+          </p>
+
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="slack-byo-bot-token">

@@ -339,6 +339,7 @@
     "byo_bot_token_hint": "Slack app → OAuth & Permissions → Bot User OAuth Token。",
     "byo_app_token_label": "App-level token（xapp-）",
     "byo_app_token_hint": "Slack app → Basic Information → App-Level Tokens（scope 选 connections:write）。",
+    "byo_scopes_hint": "需要的 Bot scopes：app_mentions:read、channels:history、chat:write、groups:history、im:history、mpim:history、users:read。",
     "byo_submit": "连接",
     "byo_submitting": "连接中…",
     "byo_cancel": "取消",

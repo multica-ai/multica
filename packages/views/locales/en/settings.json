@@ -339,6 +339,7 @@
     "byo_bot_token_hint": "Slack app → OAuth & Permissions → Bot User OAuth Token.",
     "byo_app_token_label": "App-level token (xapp-)",
     "byo_app_token_hint": "Slack app → Basic Information → App-Level Tokens (scope connections:write).",
+    "byo_scopes_hint": "Required bot scopes: app_mentions:read, channels:history, chat:write, groups:history, im:history, mpim:history, users:read.",
     "byo_submit": "Connect",
     "byo_submitting": "Connecting…",
     "byo_cancel": "Cancel",

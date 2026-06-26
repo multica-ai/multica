@@ -155,14 +155,6 @@ func TestRegisterBYO_PersistsEncryptedTokensKeyedByAppID(t *testing.T) {
 	if err != nil || appTok != "xapp-1-A0BCXGVCS7R-111-appsecret" {
 		t.Errorf("decrypted app token = %q, %v", appTok, err)
 	}
-	// A BYO paste has no authed_user, so the installer is NOT auto-bound, and a
-	// fresh install retires nothing.
-	if q.bindCalled {
-		t.Error("BYO must not auto-bind an installer (no authed_user from a paste)")
-	}
-	if q.deleteCalled {
-		t.Error("a fresh install must not retire chat-session bindings")
-	}
 }
 
 func TestRegisterBYO_InvalidTokens(t *testing.T) {
@@ -204,52 +196,55 @@ func TestRegisterBYO_AuthTestFailure(t *testing.T) {
 	}
 }
 
-func TestRegisterBYO_CrossWorkspace_Rejected(t *testing.T) {
+func TestRegisterBYO_AppAlreadyConnected_Rejected(t *testing.T) {
 	srv := authTestServer(t, true)
 	defer srv.Close()
-	// This app id is already owned by workspace W1; registering it under W2 must
-	// be refused by the upsert's atomic guard.
+	// The pasted app is already connected to another agent / workspace, so the
+	// (channel_type, app_id) routing index rejects the upsert (unique violation).
+	// We must refuse, not steal it.
 	q := &fakeInstallQueries{
-		rowID: mustUUID(t, "44444444-4444-4444-4444-444444444444"),
-		existing: &db.ChannelInstallation{
-			WorkspaceID: mustUUID(t, "11111111-1111-1111-1111-111111111111"), // W1
-			AgentID:     mustUUID(t, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-		},
-	}
-	svc := newTestInstallService(t, q)
-	svc.apiURL = srv.URL + "/"
-
-	if _, err := svc.RegisterBYO(context.Background(), byoParams(
-		"99999999-9999-9999-9999-999999999999", // W2
-		"22222222-2222-2222-2222-222222222222",
-	)); err != ErrTeamOwnedByAnotherWorkspace {
-		t.Fatalf("cross-workspace BYO = %v, want ErrTeamOwnedByAnotherWorkspace", err)
-	}
-}
-
-func TestRegisterBYO_AgentMove_RetiresStaleSessionBindings(t *testing.T) {
-	srv := authTestServer(t, true)
-	defer srv.Close()
-	// Same app already installed for agent A in this workspace; re-registering it
-	// for agent B must retire the stale chat-session bindings.
-	q := &fakeInstallQueries{
-		rowID: mustUUID(t, "44444444-4444-4444-4444-444444444444"),
-		existing: &db.ChannelInstallation{
-			WorkspaceID: mustUUID(t, "11111111-1111-1111-1111-111111111111"),
-			AgentID:     mustUUID(t, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-		},
+		rowID:      mustUUID(t, "44444444-4444-4444-4444-444444444444"),
+		appIDTaken: true,
 	}
 	svc := newTestInstallService(t, q)
 	svc.apiURL = srv.URL + "/"
 
 	if _, err := svc.RegisterBYO(context.Background(), byoParams(
 		"11111111-1111-1111-1111-111111111111",
-		"22222222-2222-2222-2222-222222222222", // agent B
-	)); err != nil {
+		"22222222-2222-2222-2222-222222222222",
+	)); err != ErrTeamOwnedByAnotherWorkspace {
+		t.Fatalf("app already connected = %v, want ErrTeamOwnedByAnotherWorkspace", err)
+	}
+}
+
+func TestRegisterBYO_ReconnectSameAgent_UpdatesRowInPlace(t *testing.T) {
+	srv := authTestServer(t, true)
+	defer srv.Close()
+	// The agent already has a Slack row (e.g. a previously-disconnected app).
+	// Re-connecting it — even with a NEW app — must UPDATE that same row in place
+	// (keyed by workspace+agent), not error on the (workspace, agent, channel)
+	// unique. The fake returns the existing row id on the upsert.
+	existingID := mustUUID(t, "55555555-5555-5555-5555-555555555555")
+	q := &fakeInstallQueries{
+		rowID: mustUUID(t, "44444444-4444-4444-4444-444444444444"),
+		existing: &db.ChannelInstallation{
+			ID:          existingID,
+			WorkspaceID: mustUUID(t, "11111111-1111-1111-1111-111111111111"),
+			AgentID:     mustUUID(t, "22222222-2222-2222-2222-222222222222"),
+		},
+	}
+	svc := newTestInstallService(t, q)
+	svc.apiURL = srv.URL + "/"
+
+	row, err := svc.RegisterBYO(context.Background(), byoParams(
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+	))
+	if err != nil {
 		t.Fatalf("RegisterBYO: %v", err)
 	}
-	if !q.deleteCalled {
-		t.Fatal("an agent change must retire the installation's chat-session bindings")
+	if row.ID != existingID {
+		t.Errorf("reconnect should reuse the agent's existing row %v, got %v", existingID, row.ID)
 	}
 }
 

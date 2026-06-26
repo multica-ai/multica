@@ -8,10 +8,10 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
-	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -27,23 +27,20 @@ import (
 var (
 	// ErrInstallationNotFound surfaces "no row matches in this workspace".
 	ErrInstallationNotFound = errors.New("slack installation not found")
-	// ErrTeamOwnedByAnotherWorkspace is returned when the Slack app is already
-	// connected to a DIFFERENT Multica workspace. A Slack app stays bound to its
-	// first Multica workspace: migrating it is an operator/support action
-	// (revoking just sets status='revoked' and keeps the row + unique index), not
-	// a silent re-install from the other workspace.
-	ErrTeamOwnedByAnotherWorkspace = errors.New("slack: this Slack app is already connected to a different Multica workspace")
+	// ErrTeamOwnedByAnotherWorkspace is returned when the pasted Slack app is
+	// already connected to a DIFFERENT agent or Multica workspace — it would
+	// collide with the (channel_type, app_id) routing index. A Slack app is one
+	// bot identity and maps to one agent; reusing it elsewhere requires
+	// disconnecting it there first.
+	ErrTeamOwnedByAnotherWorkspace = errors.New("slack: this Slack app is already connected to another agent or Multica workspace")
 )
 
 // installQueries is the slice of generated queries InstallService needs. WithTx
-// returns the same interface bound to a transaction so persistInstall can run
-// its lookup → upsert → binding cleanup → installer-bind atomically.
+// returns the same interface bound to a transaction so persistInstall runs its
+// upsert atomically (and so tests can inject a fake without a real DB).
 type installQueries interface {
 	WithTx(tx pgx.Tx) installQueries
-	GetChannelInstallationByAppID(ctx context.Context, arg db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error)
-	UpsertChannelInstallationByAppID(ctx context.Context, arg db.UpsertChannelInstallationByAppIDParams) (db.ChannelInstallation, error)
-	CreateChannelUserBinding(ctx context.Context, arg db.CreateChannelUserBindingParams) (db.ChannelUserBinding, error)
-	DeleteChannelChatSessionBindingsByInstallation(ctx context.Context, arg db.DeleteChannelChatSessionBindingsByInstallationParams) error
+	UpsertChannelInstallation(ctx context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error)
 	ListChannelInstallationsByWorkspace(ctx context.Context, arg db.ListChannelInstallationsByWorkspaceParams) ([]db.ChannelInstallation, error)
 	GetChannelInstallationInWorkspace(ctx context.Context, arg db.GetChannelInstallationInWorkspaceParams) (db.ChannelInstallation, error)
 	SetChannelInstallationStatus(ctx context.Context, arg db.SetChannelInstallationStatusParams) error
@@ -115,18 +112,28 @@ func newInstallService(q installQueries, tx engine.TxStarter, box *secretbox.Box
 // carries no authed_user, so the installer binds via the normal token flow on
 // first message).
 type installPersist struct {
-	wsID             pgtype.UUID
-	agentID          pgtype.UUID
-	installerID      pgtype.UUID
-	appIDKey         string
-	configJSON       []byte
-	installerSlackID string
+	wsID        pgtype.UUID
+	agentID     pgtype.UUID
+	installerID pgtype.UUID
+	// configJSON holds the Slack app id (config->>'app_id') used for inbound
+	// routing; the ROW itself is keyed by (workspace, agent) — one bot per agent.
+	configJSON []byte
 }
 
-// persistInstall runs the lookup → upsert → stale-binding retire → installer
-// bind in ONE transaction. The cross-workspace guard is atomic in the upsert's
-// WHERE clause: an app_id already owned by a DIFFERENT Multica workspace updates
-// no row and returns pgx.ErrNoRows, which maps to ErrTeamOwnedByAnotherWorkspace.
+// pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint violation.
+const pgUniqueViolation = "23505"
+
+// persistInstall upserts the installation keyed by (workspace_id, agent_id,
+// channel_type): ONE Slack bot per agent. Re-connecting an agent — including
+// swapping it to a NEW Slack app after a disconnect — UPDATES that agent's row
+// in place instead of colliding with the (workspace, agent, channel) unique.
+//
+// The (channel_type, app_id) routing index is the only OTHER unique constraint,
+// and it is NOT this upsert's conflict target, so a unique violation here means
+// the pasted Slack app is already connected to a DIFFERENT agent or Multica
+// workspace — refuse it (ErrTeamOwnedByAnotherWorkspace) rather than steal it.
+// No chat-session retire is needed: a row's agent_id never changes (it is part
+// of the key), so existing sessions stay valid for the same agent.
 func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (db.ChannelInstallation, error) {
 	tx, err := s.tx.Begin(ctx)
 	if err != nil {
@@ -135,23 +142,7 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
-	// Look up any existing installation under this app_id key. Drives ONLY the
-	// agent-change cleanup below — NOT the cross-workspace guard (a plain SELECT
-	// can't win the concurrent-install race; that guard is in the upsert's WHERE).
-	existing, lookupErr := qtx.GetChannelInstallationByAppID(ctx, db.GetChannelInstallationByAppIDParams{
-		ChannelType: string(TypeSlack),
-		AppID:       p.appIDKey,
-	})
-	hadExisting := lookupErr == nil
-	if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
-		return db.ChannelInstallation{}, fmt.Errorf("lookup existing slack installation: %w", lookupErr)
-	}
-
-	// app-id-keyed upsert: re-installing the same app — including to represent a
-	// different agent in the SAME workspace — updates the existing row rather than
-	// colliding with the (channel_type, app_id) index. Its ON CONFLICT update is
-	// fenced to the same Multica workspace (the atomic cross-workspace guard).
-	inst, err := qtx.UpsertChannelInstallationByAppID(ctx, db.UpsertChannelInstallationByAppIDParams{
+	inst, err := qtx.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
 		WorkspaceID:     p.wsID,
 		AgentID:         p.agentID,
 		ChannelType:     string(TypeSlack),
@@ -159,51 +150,12 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 		InstallerUserID: p.installerID,
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
 			return db.ChannelInstallation{}, ErrTeamOwnedByAnotherWorkspace
 		}
 		return db.ChannelInstallation{}, fmt.Errorf("upsert slack installation: %w", err)
 	}
-
-	// Agent change within the same workspace: each existing chat_session is
-	// permanently tied to the agent it was created under (session.go reuses a
-	// session purely by (installation_id, channel_chat_id)), so without this a
-	// moved bot's existing DMs / threads would keep routing to the OLD agent
-	// (Elon review). Retire the stale chat-session bindings so the next inbound
-	// message creates a fresh session under the new agent. User bindings stay
-	// valid (same users, same workspace) and are intentionally kept.
-	if hadExisting && existing.AgentID != p.agentID {
-		if err := qtx.DeleteChannelChatSessionBindingsByInstallation(ctx, db.DeleteChannelChatSessionBindingsByInstallationParams{
-			InstallationID: inst.ID,
-			ChannelType:    string(TypeSlack),
-		}); err != nil {
-			return db.ChannelInstallation{}, fmt.Errorf("retire stale chat-session bindings: %w", err)
-		}
-	}
-
-	// Auto-bind the installer to their Slack user id so their own first DM /
-	// mention is not dropped as unbound — mirroring Feishu's installer auto-bind.
-	// Skipped when installerSlackID is empty. An id already bound to a DIFFERENT
-	// Multica user is a benign skip (the gated upsert returns no rows); a real DB
-	// error poisons the tx and must abort the whole install.
-	if p.installerSlackID != "" {
-		if _, err := qtx.CreateChannelUserBinding(ctx, db.CreateChannelUserBindingParams{
-			WorkspaceID:    p.wsID,
-			MulticaUserID:  p.installerID,
-			InstallationID: inst.ID,
-			ChannelType:    string(TypeSlack),
-			ChannelUserID:  p.installerSlackID,
-			Config:         []byte(`{}`),
-		}); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				s.logger.WarnContext(ctx, "slack: installer already bound to a different user; skipping auto-bind",
-					"installation_id", util.UUIDToString(inst.ID))
-			} else {
-				return db.ChannelInstallation{}, fmt.Errorf("bind installer: %w", err)
-			}
-		}
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return db.ChannelInstallation{}, fmt.Errorf("commit slack install: %w", err)
 	}
