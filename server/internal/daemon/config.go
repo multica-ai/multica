@@ -251,11 +251,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
-	// Antigravity has no `--model` flag and ModelSelectionSupported returns
-	// false for it (see server/pkg/agent/models.go). Pass an empty modelEnv
-	// so we don't seed AgentEntry.Model from an environment variable that
-	// the backend would silently ignore, and don't lead users to set it.
-	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", ""); ok {
+	// agy 1.0.6 added a `--model` flag (MUL-3125), so Antigravity now takes a
+	// model env like every other backend. MULTICA_ANTIGRAVITY_MODEL seeds the
+	// daemon-wide default; its value is the exact `agy models` display string
+	// (e.g. "Claude Opus 4.6 (Thinking)"), not a provider/model slug.
+	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
 	}
 	// CEREBRO-PATCH(daemon-config-firtal-gateway): FIR-2453 — register the managed Firtal Data Registry gateway runtime when MULTICA_RUNTIME_TYPE=firtal-registry + gateway URL/key are set.
