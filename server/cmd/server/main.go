@@ -34,8 +34,30 @@ var (
 
 func newNamedRedisClient(base *redis.Options, suffix string) *redis.Client {
 	opts := *base
-	opts.ClientName = redisClientName(opts.ClientName, suffix)
+	if redisClientNameDisabled() {
+		// Managed Redis (GCP Memorystore, AWS ElastiCache in restricted-command
+		// configs) blocks the CLIENT command. go-redis issues CLIENT SETNAME on
+		// connection init whenever ClientName != "", so that handshake fails and
+		// every Redis-backed feature (realtime fanout, model-list reply, rate
+		// limiting) errors. Leaving ClientName empty suppresses the handshake so
+		// managed Redis works. See #4627.
+		opts.ClientName = ""
+	} else {
+		opts.ClientName = redisClientName(opts.ClientName, suffix)
+	}
 	return redis.NewClient(&opts)
+}
+
+// redisClientNameDisabled reports whether the operator opted out of setting a
+// Redis client name (REDIS_DISABLE_CLIENT_NAME=true|1), needed for managed
+// Redis that blocks the CLIENT command and therefore CLIENT SETNAME.
+func redisClientNameDisabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("REDIS_DISABLE_CLIENT_NAME"))) {
+	case "true", "1":
+		return true
+	default:
+		return false
+	}
 }
 
 func redisClientName(existing, suffix string) string {

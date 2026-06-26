@@ -157,6 +157,7 @@ Public auth endpoints — `/auth/send-code`, `/auth/verify-code`, `/auth/google`
 | Variable | Default | Description |
 |---|---|---|
 | `REDIS_URL` | empty | Redis connection URL (for example `redis://localhost:6379/0`). When unset, rate limiting on auth endpoints is disabled. The same Redis is also used by the realtime hub fan-out, the PAT cache, and the daemon-token cache — they all fall back to in-memory / direct-DB mode when unset |
+| `REDIS_DISABLE_CLIENT_NAME` | empty | Set to `true` (or `1`) for **managed Redis that blocks the `CLIENT` command** (GCP Memorystore, AWS ElastiCache in restricted-command configs). By default the backend sets a per-connection client name, which makes go-redis issue `CLIENT SETNAME` on connect; on those providers that handshake fails and every Redis-backed feature (realtime fan-out, model-list reply, rate limiting) errors. Enabling this skips the client name so managed Redis works |
 | `RATE_LIMIT_AUTH` | `5` | Max requests per IP per minute against `/auth/send-code` and `/auth/google` |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | Max requests per IP per minute against `/auth/verify-code` |
 | `RATE_LIMIT_TRUSTED_PROXIES` | empty | Comma-separated CIDRs whose `X-Forwarded-For` header the limiter is allowed to trust. Empty (the default) means **never trust XFF** — the limiter only uses the direct connection's `RemoteAddr` |
