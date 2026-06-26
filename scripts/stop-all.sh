@@ -118,6 +118,38 @@ kill_port "$PORT"
 # 停止前端
 kill_port "$FRONTEND_PORT"
 
+# ── 清理前端 dev 缓存 ─────────────────────────────────
+
+info "清理前端开发缓存..."
+
+# Turborepo 缓存
+if [ -d "$ROOT_DIR/.turbo" ]; then
+  rm -rf "$ROOT_DIR/.turbo"
+  ok "Turborepo 缓存已清理 (.turbo)"
+fi
+
+# Next.js 构建缓存 (apps/web, apps/docs)
+for app_dir in "$ROOT_DIR/apps/web/.next" "$ROOT_DIR/apps/docs/.next"; do
+  if [ -d "$app_dir" ]; then
+    rm -rf "$app_dir"
+    ok "$(basename "$(dirname "$app_dir")")/.next 缓存已清理"
+  fi
+done
+
+# ESLint 缓存
+for eslint_cache in "$ROOT_DIR/apps/desktop/.eslintcache" "$ROOT_DIR/apps/web/.eslintcache"; do
+  if [ -f "$eslint_cache" ]; then
+    rm -f "$eslint_cache"
+    ok "$(basename "$(dirname "$eslint_cache")")/.eslintcache 已清理"
+  fi
+done
+
+# Vite 缓存 (desktop)
+if [ -d "$ROOT_DIR/apps/desktop/.vite" ]; then
+  rm -rf "$ROOT_DIR/apps/desktop/.vite"
+  ok "desktop/.vite 缓存已清理"
+fi
+
 echo ""
-ok "所有服务已停止"
+ok "所有服务已停止，开发缓存已清理"
 echo ""
