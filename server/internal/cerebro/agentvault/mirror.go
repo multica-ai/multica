@@ -40,6 +40,33 @@ type BoxGrant struct {
 	Role string
 }
 
+// VaultResourcePrefix is the tool-policy ResourcePattern prefix that names an
+// Agent Vault vault DIRECTLY (FIR-1739 v1, vault-level): a `credential.reveal`
+// Allow on `agentvault-vault:<vault>` grants the agent that whole vault. This is
+// the authoring path that replaces the standalone access box — the vault is
+// picked in the Permissions row itself, sourced live from Agent Vault. Unlike
+// `cerebro-credential:<uuid>` it needs no cerebro_credential registry row (and
+// no MULTICA_CREDENTIALS_KEY), because the secret already lives in Agent Vault.
+//
+// Per-KEY selection within a vault is a tracked follow-up (FIR-2108): Agent
+// Vault scopes per vault today, so vault-level is the only granularity that can
+// be truly enforced now.
+const VaultResourcePrefix = "agentvault-vault:"
+
+// VaultFromResourcePattern returns the vault name when pattern names an Agent
+// Vault vault directly (`agentvault-vault:<vault>`), and ok=false otherwise.
+// Pure and trims surrounding space so a blank vault never projects.
+func VaultFromResourcePattern(pattern string) (vault string, ok bool) {
+	if !strings.HasPrefix(pattern, VaultResourcePrefix) {
+		return "", false
+	}
+	v := strings.TrimSpace(strings.TrimPrefix(pattern, VaultResourcePrefix))
+	if v == "" {
+		return "", false
+	}
+	return v, true
+}
+
 // CredentialGrantSource yields the credential boxes an agent is explicitly
 // granted through the unified tool-policy chain. It returns an empty slice (not
 // an error) when cerebro_credential_chain_grant is OFF for the workspace, so the

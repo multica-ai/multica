@@ -8,3 +8,11 @@ export interface AgentVaultAccess {
   role: AgentVaultRole;
   updated_at: string;
 }
+
+// One Agent Vault box as listed by GET /api/workspaces/{id}/agentvault/vaults
+// (FIR-1739 v1). Used to populate the vault-picker on the credential Permissions
+// row; only id + name are surfaced.
+export interface AgentVaultBox {
+  id: string;
+  name: string;
+}

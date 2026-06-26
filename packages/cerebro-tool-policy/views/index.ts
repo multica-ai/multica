@@ -47,3 +47,9 @@ export {
   CerebroTestAsUserMenuItem,
   CerebroTestAsUserDialogHost,
 } from "./cerebro-test-as-user-menu";
+export {
+  CredentialVaultPicker,
+  CREDENTIAL_REVEAL_TOOL_KEY,
+  VAULT_RESOURCE_PREFIX,
+  type CredentialVaultPickerProps,
+} from "./credential-vault-picker";

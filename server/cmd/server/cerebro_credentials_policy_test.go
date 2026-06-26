@@ -1,10 +1,48 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
+
+// TestVaultResourceDisjointFromCredentialScopes is the FIR-1739 v1 safety guard.
+// The vault-level path authors `credential.reveal` Allow on `agentvault-vault:<vault>`,
+// sharing the SAME ToolKey that multicaCredentialPolicy.Check resolves the chain
+// with. Check matches resource_pattern by EQUALITY (never glob) and only ever
+// builds two scopes — `cerebro-credential:<uuid>` (id) and
+// `cerebro-credential-type:<type>` (type). This test pins that the vault prefix
+// can never collide with either scope, so:
+//   - a vault grant can never leak into a registry-credential reveal decision
+//     (Check never queries an agentvault-vault: resource), and
+//   - a credential id/type resource is never mistaken for a vault by the
+//     connector's VaultFromResourcePattern.
+// If anyone renames a prefix and the two namespaces start overlapping, this
+// fails — exactly the cross-contamination the equality match exists to prevent.
+func TestVaultResourceDisjointFromCredentialScopes(t *testing.T) {
+	// The two scopes Check builds (cerebro_credentials_policy.go), verbatim shape.
+	idResource := "cerebro-credential:" + "1b9d0c7e-0000-0000-0000-000000000000"
+	typeResource := "cerebro-credential-type:" + "api_key"
+
+	// A credential id/type resource must NOT be read as a vault grant.
+	for _, r := range []string{idResource, typeResource} {
+		if v, ok := agentvault.VaultFromResourcePattern(r); ok {
+			t.Errorf("VaultFromResourcePattern(%q) = (%q, true); a credential scope must not project as a vault", r, v)
+		}
+	}
+
+	// A vault resource must NOT carry either credential scope prefix.
+	vaultResource := agentvault.VaultResourcePrefix + "bigquery"
+	if strings.HasPrefix(vaultResource, "cerebro-credential:") ||
+		strings.HasPrefix(vaultResource, "cerebro-credential-type:") {
+		t.Errorf("vault resource %q collides with a credential scope prefix", vaultResource)
+	}
+	if v, ok := agentvault.VaultFromResourcePattern(vaultResource); !ok || v != "bigquery" {
+		t.Errorf("VaultFromResourcePattern(%q) = (%q, %v); want (bigquery, true)", vaultResource, v, ok)
+	}
+}
 
 // TestFoldCredentialCap_TightenOnly is the security invariant for FIR-1609 Phase
 // 7: the unified tool-policy chain is layered on top of the deny-by-default grant

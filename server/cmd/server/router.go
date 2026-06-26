@@ -1125,6 +1125,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/web-fetch-policy", cerebroWebFetchPolicyHandler.Get)
 					// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent Agent Vault access read (any member).
 					r.Get("/agentvault/access", cerebroAgentVaultHandler.List)
+					// CEREBRO-PATCH(cerebro-agentvault-vaults-route): FIR-1739 v1 list Agent Vault boxes for the credential Permissions vault-picker (any member, read-only).
+					r.Get("/agentvault/vaults", cerebroAgentVaultHandler.Vaults)
 					// CEREBRO-PATCH(workspace-mcp-http): TECH-3405 workspace-scoped MCP endpoint for Connections.
 					r.Post("/mcp", h.WorkspaceMCP)
 					// CEREBRO-PATCH(cerebro-test-as-user): FIR-1771 Test as user — resolve another user+agent's tool verdict (gated by tools:test-as-user).

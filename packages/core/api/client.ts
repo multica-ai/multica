@@ -4232,6 +4232,10 @@ export class ApiClient {
       body: JSON.stringify(body),
     });
   }
+  // CEREBRO-PATCH(cerebro-agentvault-client): FIR-1739 v1 list the Agent Vault boxes for the credential Permissions vault-picker (read-only).
+  async listCerebroAgentVaultVaults<T = unknown>(wsId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/agentvault/vaults`);
+  }
 
   // CEREBRO-PATCH(cerebro-wakeup-sidebar): list and cancel agent wakeups per issue for the sidebar.
   async listIssueWakeups(issueId: string, state = "pending"): Promise<{

@@ -114,6 +114,19 @@ func (s *chainCredentialGrantSource) GrantedBoxes(ctx context.Context, workspace
 		if set.ToolKey != credentialBrokerAction || set.Setting != toolpolicy.SettingAllow {
 			continue
 		}
+		// FIR-1739 v1 (vault-level): the resource may name an Agent Vault vault
+		// DIRECTLY (`agentvault-vault:<vault>`) — the authoring path picked in the
+		// Permissions row, no cerebro_credential registry row needed. Projected
+		// straight through; per-key within a vault is the FIR-2108 follow-up.
+		if vault, isVault := agentvault.VaultFromResourcePattern(set.ResourcePattern); isVault {
+			key := agentvault.VaultResourcePrefix + vault
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, agentvault.BoxGrant{Vault: vault, Role: "read-only"})
+			continue
+		}
 		if !strings.HasPrefix(set.ResourcePattern, credentialIDResourcePrefix) {
 			continue // type-scope or non-credential resource — not a single box
 		}

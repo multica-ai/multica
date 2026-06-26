@@ -1125,12 +1125,6 @@ importers:
 
   packages/cerebro-agent-tools:
     dependencies:
-      '@multica/cerebro-agentvault':
-        specifier: workspace:*
-        version: link:../cerebro-agentvault
-      '@multica/cerebro-credentials':
-        specifier: workspace:*
-        version: link:../cerebro-credentials
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
@@ -3876,6 +3870,9 @@ importers:
 
   packages/cerebro-tool-policy:
     dependencies:
+      '@multica/cerebro-agentvault':
+        specifier: workspace:*
+        version: link:../cerebro-agentvault
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags

@@ -10,9 +10,8 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   SimpleToolPolicyTable,
   ToolPolicyTabs,
+  CredentialVaultPicker,
 } from "@multica/cerebro-tool-policy/views";
-import { AgentVaultAccessPanel } from "@multica/cerebro-agentvault/views";
-import { AgentCredentialGrantsPanel } from "@multica/cerebro-credentials/views";
 import { AgentToolsCard } from "./components/agent-tools-card";
 
 export interface AgentDetailTabExtension {
@@ -62,13 +61,12 @@ export function CerebroToolsTab({
   // stays the explicit power-view: when its flag is on it wins, so turning
   // cerebro_tool_policy back on restores the full Effective chain.
   const simpleToolPolicy = useFeatureFlag("cerebro_simple_tool_policy");
-  // TECH-3196: when on, append the per-agent Agent Vault access table below the
-  // tools content so admins control which secret boxes this agent may use.
+  // FIR-1739 v1: when on, append the credential vault-picker below the tools
+  // content. It authors credential access as an ordinary Permissions rule
+  // (credential.reveal Allow on agentvault-vault:<name>, agent layer) — the rule
+  // the Agent Vault connector enforces — replacing the two former standalone
+  // panels (agentvault-access-panel + agent-credential-grants-panel).
   const agentVault = useFeatureFlag("cerebro_agent_vault");
-  // FIR-1479: when on, append the credentials column — the per-actor credential
-  // grant table next to the tools table — so admins set which boxes the agent may
-  // reach via the credential-policy chain. Default off; dark until enabled.
-  const credentialsPerActor = useFeatureFlag("cerebro_credentials_per_actor");
 
   const { data: runtimes = [] } = useQuery({
     queryKey: runtimeListKey(wsId),
@@ -114,24 +112,21 @@ export function CerebroToolsTab({
     );
   }
 
-  if (!agentVault && !credentialsPerActor) {
+  if (!agentVault) {
     return content;
   }
   return (
     <div className="flex flex-col gap-6">
       {content}
-      {credentialsPerActor && (
-        <section className="flex flex-col gap-3">
-          <h3 className="text-sm font-medium">Credentials</h3>
-          <AgentCredentialGrantsPanel agentId={agent.id} />
-        </section>
-      )}
-      {agentVault && (
-        <section className="flex flex-col gap-3">
-          <h3 className="text-sm font-medium">Agent Vault</h3>
-          <AgentVaultAccessPanel agentId={agent.id} agentName={agent.name} />
-        </section>
-      )}
+      <section className="flex flex-col gap-3">
+        <h3 className="text-sm font-medium">Credentials</h3>
+        <CredentialVaultPicker
+          wsId={wsId}
+          agentId={agent.id}
+          runtimeId={agent.runtime_id}
+          userId={agent.owner_id}
+        />
+      </section>
     </div>
   );
 }

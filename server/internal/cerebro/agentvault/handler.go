@@ -13,6 +13,7 @@ package agentvault
 // router group.
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -25,13 +26,30 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// Handler exposes the access store over HTTP.
-type Handler struct {
-	store *Store
+// vaultLister lists the Agent Vault boxes a member can author a grant against.
+// Implemented by *Client; left nil when Agent Vault is not configured (no admin
+// creds) so the vaults endpoint degrades to an empty list instead of erroring.
+type vaultLister interface {
+	ListVaults(ctx context.Context) ([]Vault, error)
 }
 
-// NewHandler constructs a Handler over a Store built from the given pool.
-func NewHandler(pool *pgxpool.Pool) *Handler { return &Handler{store: NewStore(pool)} }
+// Handler exposes the access store over HTTP.
+type Handler struct {
+	store  *Store
+	vaults vaultLister
+}
+
+// NewHandler constructs a Handler over a Store built from the given pool. When
+// Agent Vault admin creds are present it also builds a client so the read-only
+// vaults endpoint can list boxes for the Permissions vault-picker; otherwise the
+// endpoint serves an empty list.
+func NewHandler(pool *pgxpool.Pool) *Handler {
+	h := &Handler{store: NewStore(pool)}
+	if cfg, ok := LoadConfig(); ok {
+		h.vaults = NewClient(cfg)
+	}
+	return h
+}
 
 type accessWriteRequest struct {
 	AgentID string `json:"agent_id"`
@@ -58,6 +76,31 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		rows = []Access{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"access": rows})
+}
+
+// Vaults — GET /api/workspaces/{id}/agentvault/vaults
+// Read-only: lists the Agent Vault boxes a member can grant an actor against in
+// the credential Permissions row (resource `agentvault-vault:<name>`). Any
+// authenticated member may read (same as access List). Returns an empty list —
+// not an error — when Agent Vault is not configured, so the picker degrades to
+// "no vaults available" rather than breaking the Permissions screen.
+func (h *Handler) Vaults(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.workspaceID(w, r); !ok {
+		return
+	}
+	if h.vaults == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"vaults": []Vault{}})
+		return
+	}
+	vaults, err := h.vaults.ListVaults(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if vaults == nil {
+		vaults = []Vault{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"vaults": vaults})
 }
 
 // Set — PUT /api/workspaces/{id}/agentvault/access

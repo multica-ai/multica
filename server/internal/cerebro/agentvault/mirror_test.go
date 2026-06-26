@@ -151,3 +151,30 @@ func TestReconcileAgentAccess_BlankAndDefaultRole(t *testing.T) {
 		t.Errorf("rows = %v, want {alpha: read-only}", store.rows)
 	}
 }
+
+func TestVaultFromResourcePattern(t *testing.T) {
+	cases := []struct {
+		name      string
+		pattern   string
+		wantVault string
+		wantOK    bool
+	}{
+		{"plain vault", "agentvault-vault:bigquery", "bigquery", true},
+		{"trims surrounding space", "agentvault-vault:  cloudflare  ", "cloudflare", true},
+		{"blank after prefix is not a grant", "agentvault-vault:   ", "", false},
+		{"empty after prefix is not a grant", "agentvault-vault:", "", false},
+		{"credential-id resource is not a vault", "cerebro-credential:1b9d-uuid", "", false},
+		{"type resource is not a vault", "cerebro-credential-type:api_key", "", false},
+		{"unrelated resource", "repo:firtal/cerebro", "", false},
+		{"empty pattern", "", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			vault, ok := VaultFromResourcePattern(c.pattern)
+			if ok != c.wantOK || vault != c.wantVault {
+				t.Fatalf("VaultFromResourcePattern(%q) = (%q, %v); want (%q, %v)",
+					c.pattern, vault, ok, c.wantVault, c.wantOK)
+			}
+		})
+	}
+}

@@ -32,6 +32,34 @@ type VaultAccess struct {
 	Role  string `json:"role"`
 }
 
+// Vault is one Agent Vault box as listed by GET /v1/vaults. Only the two fields
+// the credential Permissions vault-picker needs are decoded — the Agent Vault
+// response also carries role/membership/pending_proposals/credential_store,
+// which the picker deliberately ignores. Verified against agent-vault
+// handleVaultList -> {"vaults":[{id,name,...}]}.
+type Vault struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ListVaults returns the Agent Vault boxes visible to the admin identity. The
+// backend logs in as the instance owner, so this is every vault on the instance
+// (owners see all; non-owners see only granted ones). Used read-only to populate
+// the vault picker on the credential Permissions row (FIR-1739 v1, vault-level).
+func (c *Client) ListVaults(ctx context.Context) ([]Vault, error) {
+	adminTok, err := c.login(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Vaults []Vault `json:"vaults"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/v1/vaults", adminTok, nil, &out); err != nil {
+		return nil, fmt.Errorf("agentvault list vaults: %w", err)
+	}
+	return out.Vaults, nil
+}
+
 // login authenticates as the instance owner and returns a bearer token.
 // Verified against the live instance: POST /v1/auth/login -> {token, expires_at}.
 func (c *Client) login(ctx context.Context) (string, error) {
