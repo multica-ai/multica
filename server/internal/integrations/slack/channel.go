@@ -20,12 +20,11 @@ const TypeSlack channel.Type = "slack"
 // a message around 40k characters; we chunk below that with headroom.
 const maxMessageRunes = 38000
 
-// slackSender posts agent replies back to Slack via chat.postMessage. Under the
-// multi-tenant B2 model inbound runs on ONE deployment-level Socket Mode
-// connection (see AppConnector), so the per-installation half left here is the
-// OUTBOUND sender only: it holds the per-installation bot token (xoxb-) the
-// reply must be sent with. The installation identity (workspace / agent /
-// installer) is resolved per message by the Router, so it is absent here.
+// slackSender posts agent replies back to Slack via chat.postMessage. It is the
+// OUTBOUND half: it holds the per-installation bot token (xoxb-) the reply must
+// be sent with (inbound runs on the per-installation Socket Mode connection in
+// slack_channel.go). The installation identity (workspace / agent / installer)
+// is resolved per message by the Router, so it is absent here.
 type slackSender struct {
 	creds  credentials
 	api    *slack.Client

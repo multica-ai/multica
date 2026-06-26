@@ -155,7 +155,21 @@ func (h *Handler) RegisterSlackBYO(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// Broadcast so every open client (Settings, Agent Integrations, other tabs)
+	// invalidates its installations query and shows the new bot — matching the
+	// revoke event and Lark's install semantics. The installer's own tab also
+	// invalidates locally, but other clients rely on this event.
+	h.publishSlackInstallationCreated(row, userID)
 	writeJSON(w, http.StatusOK, slackInstallationToResponse(row))
+}
+
+// publishSlackInstallationCreated emits slack_installation:created for a newly
+// connected bot. The realtime layer fans it out to the workspace; the web app
+// listens on slack_installation:* to invalidate the installations query.
+func (h *Handler) publishSlackInstallationCreated(row db.ChannelInstallation, actorID string) {
+	h.publish(protocol.EventSlackInstallationCreated, uuidToString(row.WorkspaceID), "user", actorID, map[string]any{
+		"id": uuidToString(row.ID),
+	})
 }
 
 // RevokeSlackInstallation (DELETE /api/workspaces/{id}/slack/installations/{installationId})

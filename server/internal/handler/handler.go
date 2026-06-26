@@ -172,10 +172,9 @@ type Handler struct {
 	// delivering events, to flush debounced run triggers and join in-flight
 	// reply goroutines. Built unconditionally (even without Lark).
 	ChannelRouter *engine.Router
-	// SlackInstall owns the Slack OAuth self-serve install lifecycle (begin /
-	// callback / list / revoke) and the at-rest encryption of the per-workspace
-	// bot token (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set;
-	// InstallSupported() additionally requires the OAuth client credentials.
+	// SlackInstall owns the bring-your-own-app Slack install lifecycle (register
+	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
+	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.
 	SlackInstall *slack.InstallService
 	// SlackBindingTokens mints/redeems the user-binding tokens behind the
 	// "link your Slack account" prompt (MUL-3666). Nil unless Slack is

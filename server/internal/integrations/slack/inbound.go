@@ -11,12 +11,10 @@ import (
 )
 
 // This file holds the platform-neutral translation from a Slack Events API
-// payload to the engine's normalized channel.InboundMessage. Under the B2
-// multi-tenant model the live receive loop is owned by the deployment-level
-// AppConnector (one Socket Mode connection for every installed workspace), so
-// these are free functions parameterized by the per-team bot identity rather
-// than methods on a per-installation channel: the connector resolves the
-// installed bot's user id from the inbound team_id and threads it through here.
+// payload to the engine's normalized channel.InboundMessage. These are free
+// functions parameterized by the bot identity rather than methods on the
+// channel, so the per-installation Socket Mode connection (slack_channel.go)
+// threads in its own installed bot's user id when translating each event.
 
 // slackRawEvent carries the Slack-specific fields the cross-platform envelope
 // does not — read back only inside the Slack resolvers (team_id routes the

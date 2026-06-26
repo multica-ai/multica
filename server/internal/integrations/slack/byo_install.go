@@ -42,19 +42,18 @@ type RegisterBYOParams struct {
 
 // RegisterBYO installs a user-supplied ("bring your own") Slack app for an agent.
 // The user creates their own Slack app, installs it to their workspace, and
-// pastes its bot token (xoxb-) + app-level token (xapp-). Unlike the hosted
-// OAuth path there is NO code exchange: we validate the bot token live via
-// auth.test (which also yields the team id + bot user id), parse the real Slack
-// app id out of the app-level token, encrypt BOTH tokens at rest, and persist a
-// per-app installation keyed by that real app id.
+// pastes its bot token (xoxb-) + app-level token (xapp-). There is NO OAuth code
+// exchange: we validate the bot token live via auth.test (which also yields the
+// team id + bot user id), prove the bot + app tokens belong to the SAME app,
+// parse the real Slack app id out of the app-level token, encrypt BOTH tokens at
+// rest, and persist the installation.
 //
 // Because each BYO app is a distinct Slack app — a distinct bot identity — the
-// SAME Slack workspace can host several of them, one per agent (the whole point
-// of BYO; the hosted B2 model is capped at one agent per workspace). Real app
-// ids ("A…") never collide with the team ids ("T…") the hosted path stores at
-// config->>'app_id', so hosted and BYO installations share the unique index
-// without a schema change. The dedicated Socket Mode connection that consumes
-// the stored app token lives in the connector (separate change); this method
+// SAME Slack workspace can host several of them, one per agent. The stored
+// config carries the real app id for inbound routing; persistInstall keys the
+// row by (workspace, agent) and refuses the pair if that app id is already
+// connected to another agent/workspace. The dedicated Socket Mode connection
+// that consumes the stored app token lives in slack_channel.go; this method
 // only persists the installation.
 func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (db.ChannelInstallation, error) {
 	botToken := strings.TrimSpace(p.BotToken)
