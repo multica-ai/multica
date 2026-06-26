@@ -36,14 +36,35 @@ describe("worktree-dev-env", () => {
     expect(offsetForPath("/tmp/foo")).toBe(427878967 % 1000);
   });
 
-  it("renderer port is 5173 + offset", () => {
-    expect(rendererPortForPath("/tmp/foo")).toBe(5173 + (427878967 % 1000));
+  it("renderer port is 5174 + offset (5173 reserved for the primary checkout)", () => {
+    expect(rendererPortForPath("/tmp/foo")).toBe(5174 + (427878967 % 1000));
   });
 
-  it("slugifies the worktree folder name", () => {
-    expect(appSuffixForPath("/work/MUL-3724_Desktop")).toBe("mul-3724-desktop");
-    expect(appSuffixForPath("/work/feat/some thing")).toBe("some-thing");
-    expect(appSuffixForPath("/work/___")).toBe("worktree");
+  it("never reuses 5173 even when the offset is 0", () => {
+    // POSIX cksum("/tmp/multica-3494") === 1189739000, % 1000 === 0
+    expect(offsetForPath("/tmp/multica-3494")).toBe(0);
+    expect(rendererPortForPath("/tmp/multica-3494")).toBe(5174);
+    expect(rendererPortForPath("/tmp/multica-3494")).not.toBe(5173);
+  });
+
+  it("suffix is '<folder>-<offset>' so it stays recognizable and unique", () => {
+    expect(appSuffixForPath("/work/MUL-3724_Desktop")).toBe(
+      `mul-3724-desktop-${offsetForPath("/work/MUL-3724_Desktop")}`,
+    );
+    expect(appSuffixForPath("/work/feat/some thing")).toBe(
+      `some-thing-${offsetForPath("/work/feat/some thing")}`,
+    );
+    // empty/non-ascii slug falls back to "worktree", still disambiguated by offset
+    expect(appSuffixForPath("/work/___")).toBe(`worktree-${offsetForPath("/work/___")}`);
+  });
+
+  it("disambiguates worktrees that share a folder name at different paths", () => {
+    // Same basename "multica", different parent dirs → different offsets/suffixes,
+    // so each gets its own single-instance lock.
+    expect(offsetForPath("/tmp/a/multica")).not.toBe(offsetForPath("/tmp/b/multica"));
+    expect(appSuffixForPath("/tmp/a/multica")).not.toBe(
+      appSuffixForPath("/tmp/b/multica"),
+    );
   });
 
   it("auto-isolates a linked worktree (.git is a file)", () => {

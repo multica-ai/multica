@@ -496,10 +496,12 @@ own desktop dev instance at once — no extra setup. From a linked worktree it
 derives, from the worktree path (same `cksum % 1000` offset as the backend /
 frontend ports in `.env.worktree`):
 
-- `DESKTOP_RENDERER_PORT` = `5173 + offset` — its own Vite dev server
-- `DESKTOP_APP_SUFFIX` = the worktree folder name — its own single-instance
-  lock / `userData`, and an app named `Multica Canary <folder>` so it is
-  distinguishable in Cmd+Tab
+- `DESKTOP_RENDERER_PORT` = `5174 + offset` — its own Vite dev server (`5174`
+  base leaves `5173` for the primary checkout, even when `offset` is `0`)
+- `DESKTOP_APP_SUFFIX` = `<folder>-<offset>` — its own single-instance lock /
+  `userData`, and an app named `Multica Canary <folder>-<offset>` so it is
+  distinguishable in Cmd+Tab. The offset keeps it unique across worktrees that
+  share a folder name at different paths.
 
 The primary checkout is left untouched (`5173`, `Multica Canary`). Set either
 env var explicitly to override the derived value. Which backend each instance

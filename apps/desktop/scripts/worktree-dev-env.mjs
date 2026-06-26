@@ -16,12 +16,15 @@
 import { statSync } from "node:fs";
 import { basename, join } from "node:path";
 
-const RENDERER_PORT_BASE = 5173;
+// Worktree renderer ports start at 5174 so they never reuse 5173 — the primary
+// checkout's default — even when a worktree's offset is 0 (e.g. POSIX cksum of
+// "/tmp/multica-3494" is 1189739000, and 1189739000 % 1000 === 0). Range 5174–6173.
+const RENDERER_PORT_BASE = 5174;
 const OFFSET_MODULO = 1000;
 
 // POSIX cksum (CRC-32), kept byte-compatible with `cksum(1)` so the offset
 // matches scripts/init-worktree-env.sh — a worktree's backend (18080+offset),
-// frontend (13000+offset) and desktop renderer (5173+offset) ports all share
+// frontend (13000+offset) and desktop renderer (5174+offset) ports all share
 // one offset. Verified against coreutils: cksum of "/tmp/foo" → 427878967.
 function cksumTable() {
   const table = new Uint32Array(256);
@@ -60,15 +63,20 @@ export function rendererPortForPath(path) {
   return RENDERER_PORT_BASE + offsetForPath(path);
 }
 
-// Worktree folder name → a readable, filesystem-safe suffix. The dev app then
-// shows e.g. "Multica Canary mul-3724" in Cmd+Tab and gets its own userData /
-// single-instance lock under that name.
+// Worktree → a readable, unique, filesystem-safe suffix "<folder>-<offset>".
+// The dev app then shows e.g. "Multica Canary mul-3724-194" in Cmd+Tab and gets
+// its own userData / single-instance lock under that name. The offset is what
+// makes the lock unique: the folder name alone collides for worktrees that share
+// a basename at different paths (e.g. /a/multica vs /b/multica) or whose names
+// slug to the same fallback — those would share one lock and the second Electron
+// would still be blocked.
 export function appSuffixForPath(path) {
-  const slug = basename(path)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || "worktree";
+  const slug =
+    basename(path)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "worktree";
+  return `${slug}-${offsetForPath(path)}`;
 }
 
 // A linked git worktree has a `.git` FILE (a "gitdir:" pointer); the primary
