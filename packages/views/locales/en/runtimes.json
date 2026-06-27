@@ -274,7 +274,6 @@
     "col_health": "Health",
     "col_owner": "Owner",
     "col_agents": "Agents",
-    "col_workload": "Workload",
     "col_cost": "Cost · 7d",
     "_comment_account_col": "CEREBRO-PATCH(runtime-list-account-column): col_account replaces upstream col_cli (FIR-2308)",
     "col_account": "Account",

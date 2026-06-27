@@ -313,6 +313,7 @@ export default function SkillsPage() {
           ? membersById.get(skill.created_by) ?? null
           : null,
         runtime,
+        originType: origin.type,
         canEdit: canEditSkill(skill, {
           userId: currentUserId,
           role: myRole,

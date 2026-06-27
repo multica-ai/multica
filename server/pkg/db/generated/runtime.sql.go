@@ -16,7 +16,7 @@ UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE (runtime_id = ANY($1::uuid[]) OR agent_id = ANY($2::uuid[]))
   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, title, model_override
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, initiator_user_id, squad_id, handoff_note, prepare_lease_expires_at, title, model_override
 `
 
 type CancelAgentTasksByRuntimeOrAgentParams struct {
@@ -78,6 +78,10 @@ func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg Canc
 			&i.SourceTaskID,
 			&i.DelegationSource,
 			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.SquadID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
 			&i.Title,
 			&i.ModelOverride,
 		); err != nil {
@@ -165,7 +169,7 @@ WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, title, model_override
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, initiator_user_id, squad_id, handoff_note, prepare_lease_expires_at, title, model_override
 `
 
 // Marks dispatched/running/waiting_local_directory tasks as failed when
@@ -211,6 +215,10 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQ
 			&i.SourceTaskID,
 			&i.DelegationSource,
 			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.SquadID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
 			&i.Title,
 			&i.ModelOverride,
 		); err != nil {
@@ -225,7 +233,7 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQ
 }
 
 const findLegacyRuntimesByDaemonID = `-- name: FindLegacyRuntimesByDaemonID :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 WHERE workspace_id = $1
   AND provider = $2
   AND LOWER(daemon_id) = LOWER($3)
@@ -278,6 +286,7 @@ func (q *Queries) FindLegacyRuntimesByDaemonID(ctx context.Context, arg FindLega
 			&i.LegacyDaemonID,
 			&i.SandboxEnabled,
 			&i.Visibility,
+			&i.ProfileID,
 			&i.PausedAt,
 			&i.UnpauseAt,
 			&i.PauseReason,
@@ -348,7 +357,7 @@ func (q *Queries) ForceOfflineRuntimesByIDs(ctx context.Context, runtimeIds []pg
 }
 
 const getAgentRuntime = `-- name: GetAgentRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 WHERE id = $1
 `
 
@@ -372,6 +381,7 @@ func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRun
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
@@ -388,7 +398,7 @@ func (q *Queries) GetAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRun
 }
 
 const getAgentRuntimeForWorkspace = `-- name: GetAgentRuntimeForWorkspace :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -417,6 +427,7 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
@@ -433,7 +444,7 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 }
 
 const listAgentRuntimes = `-- name: ListAgentRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -465,6 +476,7 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 			&i.LegacyDaemonID,
 			&i.SandboxEnabled,
 			&i.Visibility,
+			&i.ProfileID,
 			&i.PausedAt,
 			&i.UnpauseAt,
 			&i.PauseReason,
@@ -488,7 +500,7 @@ func (q *Queries) ListAgentRuntimes(ctx context.Context, workspaceID pgtype.UUID
 }
 
 const listAgentRuntimesByOwner = `-- name: ListAgentRuntimesByOwner :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC
 `
@@ -524,6 +536,7 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 			&i.LegacyDaemonID,
 			&i.SandboxEnabled,
 			&i.Visibility,
+			&i.ProfileID,
 			&i.PausedAt,
 			&i.UnpauseAt,
 			&i.PauseReason,
@@ -547,7 +560,7 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 }
 
 const listAllAgentRuntimes = `-- name: ListAllAgentRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 ORDER BY created_at ASC
 `
 
@@ -580,6 +593,7 @@ func (q *Queries) ListAllAgentRuntimes(ctx context.Context) ([]AgentRuntime, err
 			&i.LegacyDaemonID,
 			&i.SandboxEnabled,
 			&i.Visibility,
+			&i.ProfileID,
 			&i.PausedAt,
 			&i.UnpauseAt,
 			&i.PauseReason,
@@ -630,7 +644,7 @@ func (q *Queries) ListArchivedAgentIDsByRuntime(ctx context.Context, runtimeID p
 }
 
 const lockAgentRuntime = `-- name: LockAgentRuntime :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 WHERE id = $1
 FOR UPDATE
 `
@@ -669,6 +683,7 @@ func (q *Queries) LockAgentRuntime(ctx context.Context, id pgtype.UUID) (AgentRu
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
@@ -688,7 +703,7 @@ const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 // Used on the offline→online transition (and on first heartbeat after
@@ -714,6 +729,7 @@ func (q *Queries) MarkAgentRuntimeOnline(ctx context.Context, id pgtype.UUID) (A
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
@@ -1016,7 +1032,7 @@ const updateAgentRuntimePersonaSandbox = `-- name: UpdateAgentRuntimePersonaSand
 UPDATE agent_runtime
 SET persona_sandbox = NULLIF($2, ''), updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 type UpdateAgentRuntimePersonaSandboxParams struct {
@@ -1047,6 +1063,7 @@ func (q *Queries) UpdateAgentRuntimePersonaSandbox(ctx context.Context, arg Upda
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
@@ -1066,7 +1083,7 @@ const updateAgentRuntimeSandbox = `-- name: UpdateAgentRuntimeSandbox :one
 UPDATE agent_runtime
 SET sandbox_enabled = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 type UpdateAgentRuntimeSandboxParams struct {
@@ -1096,6 +1113,7 @@ func (q *Queries) UpdateAgentRuntimeSandbox(ctx context.Context, arg UpdateAgent
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
@@ -1115,7 +1133,7 @@ const updateAgentRuntimeSandboxPolicy = `-- name: UpdateAgentRuntimeSandboxPolic
 UPDATE agent_runtime
 SET sandbox_policy = COALESCE($2, '{}'::jsonb), updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 type UpdateAgentRuntimeSandboxPolicyParams struct {
@@ -1145,6 +1163,7 @@ func (q *Queries) UpdateAgentRuntimeSandboxPolicy(ctx context.Context, arg Updat
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
@@ -1164,7 +1183,7 @@ const updateAgentRuntimeToolsConfig = `-- name: UpdateAgentRuntimeToolsConfig :o
 UPDATE agent_runtime
 SET tools_config = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 type UpdateAgentRuntimeToolsConfigParams struct {
@@ -1198,6 +1217,7 @@ func (q *Queries) UpdateAgentRuntimeToolsConfig(ctx context.Context, arg UpdateA
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
@@ -1217,7 +1237,7 @@ const updateAgentRuntimeVisibility = `-- name: UpdateAgentRuntimeVisibility :one
 UPDATE agent_runtime
 SET visibility = $1, updated_at = now()
 WHERE id = $2
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 type UpdateAgentRuntimeVisibilityParams struct {
@@ -1249,6 +1269,7 @@ func (q *Queries) UpdateAgentRuntimeVisibility(ctx context.Context, arg UpdateAg
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
@@ -1277,7 +1298,7 @@ INSERT INTO agent_runtime (
     owner_id,
     last_seen_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
-ON CONFLICT (workspace_id, daemon_id, provider)
+ON CONFLICT (workspace_id, daemon_id, provider) WHERE profile_id IS NULL
 DO UPDATE SET
     name = EXCLUDED.name,
     runtime_mode = EXCLUDED.runtime_mode,
@@ -1287,7 +1308,7 @@ DO UPDATE SET
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count, (xmax = 0) AS inserted
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count, (xmax = 0) AS inserted
 `
 
 type UpsertAgentRuntimeParams struct {
@@ -1319,6 +1340,7 @@ type UpsertAgentRuntimeRow struct {
 	LegacyDaemonID   pgtype.Text        `json:"legacy_daemon_id"`
 	SandboxEnabled   pgtype.Bool        `json:"sandbox_enabled"`
 	Visibility       string             `json:"visibility"`
+	ProfileID        pgtype.UUID        `json:"profile_id"`
 	PausedAt         pgtype.Timestamptz `json:"paused_at"`
 	UnpauseAt        pgtype.Timestamptz `json:"unpause_at"`
 	PauseReason      pgtype.Text        `json:"pause_reason"`
@@ -1337,6 +1359,10 @@ type UpsertAgentRuntimeRow struct {
 // that updated an existing row (false). Analytics reads this to fire
 // runtime_registered/runtime_ready only on first-time registration.
 // CEREBRO-PATCH(runtime-timezone-drop): runtime timezone was removed by migration 104; viewing tz now lives on user rows.
+// Built-in runtimes carry no profile_id. The arbiter is the partial unique
+// index from migration 121 (WHERE profile_id IS NULL); the predicate must be
+// spelled out so Postgres selects that partial index, not the custom-runtime
+// one on (workspace_id, daemon_id, profile_id).
 func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntimeParams) (UpsertAgentRuntimeRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentRuntime,
 		arg.WorkspaceID,
@@ -1367,6 +1393,135 @@ func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntime
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
+		&i.PausedAt,
+		&i.UnpauseAt,
+		&i.PauseReason,
+		&i.CurrentAccountID,
+		&i.PresentationMode,
+		&i.PersonaSandbox,
+		&i.Capabilities,
+		&i.CliVersion,
+		&i.ToolsConfig,
+		&i.SandboxPolicy,
+		&i.AutoPauseCount,
+		&i.Inserted,
+	)
+	return i, err
+}
+
+const upsertAgentRuntimeWithProfile = `-- name: UpsertAgentRuntimeWithProfile :one
+INSERT INTO agent_runtime (
+    workspace_id,
+    daemon_id,
+    name,
+    runtime_mode,
+    provider,
+    status,
+    device_info,
+    metadata,
+    owner_id,
+    profile_id,
+    last_seen_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+ON CONFLICT (workspace_id, daemon_id, profile_id) WHERE profile_id IS NOT NULL
+DO UPDATE SET
+    name = EXCLUDED.name,
+    runtime_mode = EXCLUDED.runtime_mode,
+    provider = EXCLUDED.provider,
+    status = EXCLUDED.status,
+    device_info = EXCLUDED.device_info,
+    metadata = EXCLUDED.metadata,
+    owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
+    last_seen_at = now(),
+    updated_at = now()
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count, (xmax = 0) AS inserted
+`
+
+type UpsertAgentRuntimeWithProfileParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	DaemonID    pgtype.Text `json:"daemon_id"`
+	Name        string      `json:"name"`
+	RuntimeMode string      `json:"runtime_mode"`
+	Provider    string      `json:"provider"`
+	Status      string      `json:"status"`
+	DeviceInfo  string      `json:"device_info"`
+	Metadata    []byte      `json:"metadata"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+	ProfileID   pgtype.UUID `json:"profile_id"`
+}
+
+type UpsertAgentRuntimeWithProfileRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	DaemonID         pgtype.Text        `json:"daemon_id"`
+	Name             string             `json:"name"`
+	RuntimeMode      string             `json:"runtime_mode"`
+	Provider         string             `json:"provider"`
+	Status           string             `json:"status"`
+	DeviceInfo       string             `json:"device_info"`
+	Metadata         []byte             `json:"metadata"`
+	LastSeenAt       pgtype.Timestamptz `json:"last_seen_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	OwnerID          pgtype.UUID        `json:"owner_id"`
+	LegacyDaemonID   pgtype.Text        `json:"legacy_daemon_id"`
+	SandboxEnabled   pgtype.Bool        `json:"sandbox_enabled"`
+	Visibility       string             `json:"visibility"`
+	ProfileID        pgtype.UUID        `json:"profile_id"`
+	PausedAt         pgtype.Timestamptz `json:"paused_at"`
+	UnpauseAt        pgtype.Timestamptz `json:"unpause_at"`
+	PauseReason      pgtype.Text        `json:"pause_reason"`
+	CurrentAccountID pgtype.UUID        `json:"current_account_id"`
+	PresentationMode string             `json:"presentation_mode"`
+	PersonaSandbox   pgtype.Text        `json:"persona_sandbox"`
+	Capabilities     []byte             `json:"capabilities"`
+	CliVersion       pgtype.Text        `json:"cli_version"`
+	ToolsConfig      []byte             `json:"tools_config"`
+	SandboxPolicy    []byte             `json:"sandbox_policy"`
+	AutoPauseCount   int32              `json:"auto_pause_count"`
+	Inserted         bool               `json:"inserted"`
+}
+
+// Custom-runtime registration: a daemon resolved a workspace runtime_profile's
+// command_name on PATH and is registering an instance of it. The arbiter is the
+// partial unique index from migration 120 (WHERE profile_id IS NOT NULL), so a
+// single daemon can host the built-in provider AND any number of custom
+// profiles of the same protocol family. provider stays the protocol family so
+// task routing (agent.New(provider)) is unchanged; profile_id is the stable
+// identity. (xmax = 0) AS inserted mirrors UpsertAgentRuntime.
+func (q *Queries) UpsertAgentRuntimeWithProfile(ctx context.Context, arg UpsertAgentRuntimeWithProfileParams) (UpsertAgentRuntimeWithProfileRow, error) {
+	row := q.db.QueryRow(ctx, upsertAgentRuntimeWithProfile,
+		arg.WorkspaceID,
+		arg.DaemonID,
+		arg.Name,
+		arg.RuntimeMode,
+		arg.Provider,
+		arg.Status,
+		arg.DeviceInfo,
+		arg.Metadata,
+		arg.OwnerID,
+		arg.ProfileID,
+	)
+	var i UpsertAgentRuntimeWithProfileRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.SandboxEnabled,
+		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,

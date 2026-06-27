@@ -68,6 +68,7 @@ func (s *AutopilotService) DispatchAutopilot(
 	source string,
 	payload []byte,
 ) (*db.AutopilotRun, error) {
+	plannedAt := plannedAtFromPayload(payload)
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
 	}
@@ -85,7 +86,8 @@ func (s *AutopilotService) DispatchAutopilot(
 		Status:         initialStatus,
 		TriggerPayload: payload,
 		// CEREBRO-PATCH(autopilot-squad-run-attribution): preserve squad attribution on runs (JEH-1916).
-		SquadID: autopilotSquadID(autopilot),
+		SquadID:   autopilotSquadID(autopilot),
+		PlannedAt: plannedAt,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
@@ -135,6 +137,91 @@ func (s *AutopilotService) DispatchAutopilot(
 	})
 
 	return &run, nil
+}
+
+func (s *AutopilotService) DispatchAutopilotForPlan(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	plannedAt time.Time,
+) (*db.AutopilotRun, error) {
+	if !triggerID.Valid {
+		return nil, fmt.Errorf("dispatch for plan: trigger_id is required")
+	}
+	if plannedAt.IsZero() {
+		return nil, fmt.Errorf("dispatch for plan: planned_at is required")
+	}
+	plannedTS := pgtype.Timestamptz{Time: plannedAt.UTC(), Valid: true}
+
+	existing, err := s.Queries.GetAutopilotRunByTriggerAndPlanned(ctx, db.GetAutopilotRunByTriggerAndPlannedParams{
+		TriggerID: triggerID,
+		PlannedAt: plannedTS,
+	})
+	switch {
+	case err == nil && isAutopilotRunComplete(existing):
+		return &existing, nil
+	case err == nil:
+		slog.Warn("autopilot dispatch for plan: recovering partial run",
+			"run_id", util.UUIDToString(existing.ID),
+			"trigger_id", util.UUIDToString(triggerID),
+			"planned_at", plannedAt.UTC().Format(time.RFC3339),
+			"status", existing.Status,
+			"issue_set", existing.IssueID.Valid,
+			"task_set", existing.TaskID.Valid,
+		)
+		if err := s.Queries.RecoverPartialAutopilotRun(ctx, existing.ID); err != nil {
+			return nil, fmt.Errorf("dispatch for plan: recover partial run: %w", err)
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return nil, fmt.Errorf("dispatch for plan: lookup existing run: %w", err)
+	}
+	payload = appendPlannedAtPayload(payload, plannedAt)
+	return s.DispatchAutopilot(ctx, autopilot, triggerID, source, payload)
+}
+
+func isAutopilotRunComplete(run db.AutopilotRun) bool {
+	switch run.Status {
+	case "completed", "failed", "skipped":
+		return true
+	case "issue_created":
+		return run.IssueID.Valid
+	case "running":
+		return run.TaskID.Valid
+	default:
+		return false
+	}
+}
+
+func appendPlannedAtPayload(payload []byte, plannedAt time.Time) []byte {
+	data := map[string]any{}
+	if len(payload) > 0 {
+		_ = json.Unmarshal(payload, &data)
+	}
+	data["planned_at"] = plannedAt.UTC().Format(time.RFC3339Nano)
+	out, err := json.Marshal(data)
+	if err != nil {
+		return payload
+	}
+	return out
+}
+
+func plannedAtFromPayload(payload []byte) pgtype.Timestamptz {
+	if len(payload) == 0 {
+		return pgtype.Timestamptz{}
+	}
+	var data struct {
+		PlannedAt string `json:"planned_at"`
+	}
+	if err := json.Unmarshal(payload, &data); err != nil || data.PlannedAt == "" {
+		return pgtype.Timestamptz{}
+	}
+	t, err := time.Parse(time.RFC3339Nano, data.PlannedAt)
+	if err != nil {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: t.UTC(), Valid: true}
 }
 
 // dispatchCreateIssue creates an issue and enqueues a task for the agent.
@@ -235,7 +322,6 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	})
 	s.captureIssueCreatedFromAutopilot(ap, run, issue, dispatchAssignee.Agent.ID)
 
-
 	// CEREBRO-PATCH(autopilot-handoff-provenance): propagate autopilot human origin so create-issue agent handoffs trigger (JEH-1518).
 	var task db.AgentTaskQueue
 	if dispatchAssignee.IssueAssigneeType == "squad" {
@@ -246,7 +332,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 			return fmt.Errorf("autopilot creator cannot access private squad leader")
 		}
 		// CEREBRO-PATCH(autopilot-squad-leader-task): squad-created issues enqueue the squad leader role task (JEH-1916).
-		task, err = s.TaskSvc.EnqueueTaskForSquadLeaderFromComment(ctx, issue, dispatchAssignee.Agent.ID, pgtype.UUID{}, autopilotDelegationContext(ap))
+		task, err = s.TaskSvc.EnqueueTaskForSquadLeaderFromComment(ctx, issue, dispatchAssignee.Agent.ID, ap.AssigneeID, pgtype.UUID{}, autopilotDelegationContext(ap))
 	} else {
 		task, err = s.TaskSvc.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, autopilotDelegationContext(ap))
 	}
@@ -307,14 +393,12 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, reason)}
 	}
 
-
 	delegation := autopilotDelegationContext(ap)
 
 	// Fail-closed private-leader gate for squad autopilots.
 	if ap.AssigneeType == "squad" && agent.Visibility == "private" && !s.canCreatorAccessPrivateLeader(ctx, ap, agent) {
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "creator cannot access private squad leader")}
 	}
-
 
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
 		AgentID:        agent.ID,
@@ -704,6 +788,7 @@ func (s *AutopilotService) recordSkippedRun(
 		Status:         "skipped",
 		TriggerPayload: payload,
 		SquadID:        autopilotSquadID(autopilot),
+		PlannedAt:      plannedAtFromPayload(payload),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create skipped run: %w", err)

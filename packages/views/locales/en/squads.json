@@ -3,11 +3,29 @@
     "title": "Squads",
     "new_button": "New Squad",
     "empty_no_squads": "No squads yet. Create one to get started.",
-    "empty_no_match": "No squads match your filters."
+    "empty_no_match": "No squads match your filters.",
+    "table": {
+      "name": "Squad",
+      "leader": "Leader",
+      "members": "Members",
+      "creator": "Created by",
+      "created": "Created"
+    },
+    "no_matches": "No squads match",
+    "row_menu": "Squad actions",
+    "archive_action": "Archive"
   },
   "inspector": {
     "details_section": "Details",
     "archive_button": "Archive"
+  },
+  "archive_dialog": {
+    "title": "Archive this squad?",
+    "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
+    "cancel": "Cancel",
+    "confirm": "Archive",
+    "archiving": "Archiving…",
+    "success": "Squad archived"
   },
   "name_editor": {
     "cancel": "Cancel"
@@ -66,11 +84,20 @@
     "unsaved_changes": "Unsaved changes",
     "save_button": "Save"
   },
-  "archive_dialog": {
-    "title": "Archive this squad?",
-    "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
-    "cancel": "Cancel",
-    "confirm": "Archive",
-    "archiving": "Archiving…"
+  "scope": {
+    "mine": "Mine",
+    "all": "All"
+  },
+  "toolbar": {
+    "display": "Display",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns",
+    "result_count_title": "Matching squads / all squads",
+    "filter_label": "Filter",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters"
   }
 }

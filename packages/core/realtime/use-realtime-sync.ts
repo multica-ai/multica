@@ -12,8 +12,6 @@ import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
-// CEREBRO-PATCH(realtime-handlers): cerebro WS handlers registered from cerebro-realtime
-import { registerCerebroHandlers } from "@multica/cerebro-realtime";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
@@ -30,6 +28,7 @@ import {
   onIssueUpdated,
   onIssueDeleted,
   onIssueLabelsChanged,
+  onIssueMetadataChanged,
 } from "../issues/ws-updaters";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
@@ -38,9 +37,12 @@ import {
   notificationPreferenceKeys,
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import {
+  showWebNotification,
+  type SystemNotificationPayload,
+} from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
-import { channelKeys } from "../channels/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
@@ -52,6 +54,7 @@ import type {
   IssueCreatedPayload,
   IssueDeletedPayload,
   IssueLabelsChangedPayload,
+  IssueMetadataChangedPayload,
   InboxNewPayload,
   InboxItem,
   NotificationPreferenceResponse,
@@ -85,6 +88,14 @@ import type {
 const chatWsLogger = createLogger("chat.ws");
 
 const logger = createLogger("realtime-sync");
+
+export function invalidateChatMessageQueries(
+  qc: QueryClient,
+  sessionId: string,
+) {
+  qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+  qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+}
 
 export function applyChatDoneToCache(
   qc: QueryClient,
@@ -123,8 +134,7 @@ export function applyChatDoneToCache(
   qc.setQueryData(chatKeys.pendingTask(sessionId), {});
   // Authoritative refetch reconciles redaction / migrations / clients
   // that took the fallback branch above.
-  qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-  qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+  invalidateChatMessageQueries(qc, sessionId);
   qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
 }
 
@@ -256,33 +266,35 @@ export async function handleInboxNew(
       // Fall through with default behavior.
     }
   }
-  const desktopAPI = (
-    globalThis as unknown as {
-      desktopAPI?: {
-        showNotification?: (payload: {
-          slug: string;
-          itemId: string;
-          issueKey: string;
-          title: string;
-          body: string;
-        }) => void;
-      };
-    }
-  ).desktopAPI;
   // `issueKey` matches the inbox page's URL selector (issue id when the
   // item is attached to an issue, otherwise the inbox item id). `itemId`
   // is the inbox row's own id, needed to fire markInboxRead on click.
   // A null slug (workspace list unavailable / item from a workspace this
   // client can't see) still shows the banner — the user should learn about
   // the inbox item — but with an empty slug so the click is a no-op
-  // (DesktopInboxBridge ignores empty slugs) instead of routing wrong.
-  desktopAPI?.showNotification?.({
+  // (the inbox bridge ignores empty slugs) instead of routing wrong.
+  const payload: SystemNotificationPayload = {
     slug: slug ?? "",
     itemId: item.id,
     issueKey: item.issue_id ?? item.id,
     title: item.title,
     body: item.body ?? "",
-  });
+  };
+  const desktopAPI = (
+    globalThis as unknown as {
+      desktopAPI?: {
+        showNotification?: (payload: SystemNotificationPayload) => void;
+      };
+    }
+  ).desktopAPI;
+  if (desktopAPI?.showNotification) {
+    // Desktop: native OS banner rendered by the Electron main process.
+    desktopAPI.showNotification(payload);
+    return;
+  }
+  // Web: the browser Notification API. No-op without granted permission or on
+  // SSR — the in-app inbox + unread badge still reflect the new item.
+  showWebNotification(payload);
 }
 
 /**
@@ -297,6 +309,7 @@ export function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
@@ -308,22 +321,38 @@ export function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
   }
-  // CEREBRO-PATCH(reconnect-timeline-invalidate): timeline cache is keyed by issueId, not wsId, so the workspace sweep above misses it; on reconnect a dropped comment:created leaves the timeline "fresh" and the new comment never appears when the user clicks in from the inbox (FIR-1941).
-  qc.invalidateQueries({ queryKey: ["issues", "timeline"] });
-  // CEREBRO-PATCH(reconnect-wakeup-invalidate): FIR-1677 — the inbox wakeup list has its own key (not under inboxKeys.all), so the wsId sweep above misses it; refresh it on reconnect so a wakeup scheduled while offline still surfaces the row as Running.
+  // Per-issue caches are keyed without wsId, so the issueKeys.all(wsId)
+  // prefix above does not reach them. They rely entirely on WS events for
+  // freshness (staleTime: Infinity), so events missed while disconnected
+  // left them stale until a full reload — the inbox showed an agent's new
+  // comment while the issue timeline didn't (#3953). Inactive caches only
+  // get marked stale here and refetch on next mount; the one mounted issue
+  // refetches immediately, same as its own useWSReconnect already does.
+  qc.invalidateQueries({ queryKey: issueKeys.timelineAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.reactionsAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+  // CEREBRO-PATCH(reconnect-wakeup-invalidate): FIR-1677 — the inbox wakeup list has its own top-level key, missed by the wsId sweep.
   if (wsId) qc.invalidateQueries({ queryKey: ["cerebro-inbox-wakeups", wsId] });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
-export function invalidateTaskLifecycleQueries(qc: QueryClient, wsId: string) {
-  // CEREBRO-PATCH(inbox-active-run-realtime): task lifecycle events also drive inbox run pips (JEH-1425).
+export function invalidateTaskLifecycleQueries(
+  qc: QueryClient,
+  wsId: string,
+): void {
   qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
   qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
   qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
   qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
-  qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
+  qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
   qc.invalidateQueries({ queryKey: inboxKeys.activeIssueTasks(wsId) });
-  // CEREBRO-PATCH(inbox-wakeup-realtime): FIR-1677 — an agent that finishes a run usually schedules its next wakeup in the same turn; refresh the inbox wakeup list (key mirrors @multica/cerebro-inbox use-inbox-wakeups.ts) so the row moves to Running instead of dropping to Waiting.
+  qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
+  invalidateSquadMemberStatusQueries(qc, wsId);
+  qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreviewAll() });
+  // CEREBRO-PATCH(inbox-wakeup-realtime): FIR-1677 — a finishing agent usually schedules its next wakeup in the same turn; refresh the inbox wakeup list so the row moves to Running instead of dropping to Waiting.
   qc.invalidateQueries({ queryKey: ["cerebro-inbox-wakeups", wsId] });
 }
 
@@ -476,7 +505,25 @@ export function useRealtimeSync(
       task: () => {
         const wsId = getCurrentWsId();
         if (!wsId) return;
-        invalidateTaskLifecycleQueries(qc, wsId);
+        qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+        // 30d activity series shares the same lifecycle signal — any task
+        // completion / failure shifts the histogram. (Dispatch alone
+        // doesn't change a completed_at-anchored series, but invalidating
+        // here keeps the WS-handler shape uniform; the resulting refetch
+        // is cheap.) Both the list (trailing 7d slice) and the detail
+        // panel read off this single cache.
+        qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
+        // 30-day run count likewise increments per task lifecycle event.
+        qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
+        // Per-agent task list (Activity tab "Recent work"). Prefix match
+        // catches every agent's list — the per-agent detail key sits
+        // under agentTasks/<wsId>/<agentId>.
+        qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
+        // Per-issue task list (issue-detail Execution log). Prefix match
+        // across all issues — keeps the contract "any task: event makes
+        // every list-of-tasks query stale" so cache stays fresh even
+        // when the relevant component isn't currently mounted.
+        qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
         // Per-issue token usage card (issue-detail right rail). Same
         // shape as the tasks invalidation above — any task lifecycle
         // event shifts the aggregated usage numbers.
@@ -484,6 +531,21 @@ export function useRealtimeSync(
         // Squad members-status reads the same task lifecycle to flip
         // working ↔ idle for each agent member.
         invalidateSquadMemberStatusQueries(qc, wsId);
+        // Comment trigger previews answer "who would a send wake right
+        // now" — the pending-task dedup guard makes that answer
+        // queue-dependent, so any task lifecycle change must refresh an
+        // open composer's chips (e.g. an agent finishing its run becomes
+        // triggerable again mid-typing).
+        qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreviewAll() });
+        // Issue-trigger previews (assign/status/create/batch) are deliberately
+        // NOT invalidated here. Unlike comment triggers, the assign source
+        // (create / assignee change) cancels existing tasks before enqueuing, so
+        // a task event can never change its verdict; only the status source's
+        // pending dedup could, and that preview is advisory — the write path
+        // re-evaluates authoritatively, so a rare stale label is harmless.
+        // Refetching every mounted preview on every workspace task event caused
+        // visible flicker, so the preview now refetches only on input change
+        // (signature), mirroring its query design (MUL-3375).
       },
     };
 
@@ -503,7 +565,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
-      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "issue_metadata:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -539,11 +601,14 @@ export function useRealtimeSync(
     // Instead, both mutations and WS handlers use dedup checks to be idempotent.
 
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
-      const { issue } = p as IssueUpdatedPayload;
+      const payload = p as IssueUpdatedPayload;
+      const { issue } = payload;
       if (!issue?.id) return;
       const wsId = getCurrentWsId();
       if (wsId) {
-        onIssueUpdated(qc, wsId, issue);
+        onIssueUpdated(qc, wsId, issue, {
+          assigneeChanged: payload.assignee_changed,
+        });
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);
         }
@@ -574,6 +639,13 @@ export function useRealtimeSync(
       if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? []);
     });
 
+    const unsubIssueMetadataChanged = ws.on("issue_metadata:changed", (p) => {
+      const { issue_id, metadata } = p as IssueMetadataChangedPayload;
+      if (!issue_id) return;
+      const wsId = getCurrentWsId();
+      if (wsId) onIssueMetadataChanged(qc, wsId, issue_id, metadata ?? {});
+    });
+
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
       const { item } = p as InboxNewPayload;
       if (!item) return;
@@ -602,32 +674,20 @@ export function useRealtimeSync(
         refetchType: "none",
       });
     };
-    const invalidateChannelList = () => {
-      const wsId = getCurrentWsId();
-      if (wsId) qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
-    };
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) {
-        invalidateTimeline(comment.issue_id);
-        // CEREBRO-PATCH(channel-unread-detail-sync): JEH-1249 keep channel detail unread_count in sync.
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.detail(wsId, comment.issue_id) });
-      }
-      invalidateChannelList();
+      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
       const { comment } = p as CommentUpdatedPayload;
       if (comment?.issue_id) invalidateTimeline(comment.issue_id);
-      invalidateChannelList();
     });
 
     const unsubCommentDeleted = ws.on("comment:deleted", (p) => {
       const { issue_id } = p as CommentDeletedPayload;
       if (issue_id) invalidateTimeline(issue_id);
-      invalidateChannelList();
     });
 
     const unsubCommentResolved = ws.on("comment:resolved", (p) => {
@@ -814,7 +874,7 @@ export function useRealtimeSync(
     const unsubChatMessage = ws.on("chat:message", (p) => {
       const payload = p as { chat_session_id: string };
       chatWsLogger.info("chat:message (global)", { chat_session_id: payload.chat_session_id });
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
@@ -928,6 +988,9 @@ export function useRealtimeSync(
     //   2. another tab / admin / system cancels — this is the only path that
     //      drops the pending pill in those cases. Without it the pill spins
     //      forever in the second-tab scenario.
+    // CancelTask also persists a best-effort assistant snapshot when the
+    // stopped chat task had already streamed transcript rows, so refresh the
+    // message page along with clearing pending.
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
       const payload = p as TaskCancelledPayload;
       if (!payload.chat_session_id) return;
@@ -936,6 +999,7 @@ export function useRealtimeSync(
         chat_session_id: payload.chat_session_id,
       });
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       invalidatePendingAggregate();
     });
 
@@ -969,7 +1033,7 @@ export function useRealtimeSync(
       // this branch only flipped pending — the comment "No new message"
       // was true then, but FailTask now persists a row.
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
@@ -1031,15 +1095,13 @@ export function useRealtimeSync(
       }
     });
 
-    // CEREBRO-PATCH(realtime-handlers): cerebro WS handlers registered from cerebro-realtime
-    const unsubCerebro = registerCerebroHandlers(ws, qc);
-
     return () => {
       unsubAny();
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();
       unsubIssueLabelsChanged();
+      unsubIssueMetadataChanged();
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();
@@ -1074,7 +1136,6 @@ export function useRealtimeSync(
       unsubChatSessionRead();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
-      unsubCerebro();
       timers.forEach(clearTimeout);
       timers.clear();
     };

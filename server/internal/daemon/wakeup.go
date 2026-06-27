@@ -18,7 +18,11 @@ import (
 
 var errRuntimeSetChanged = errors.New("runtime set changed")
 
-func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- struct{}) {
+type taskWakeup struct {
+	runtimeID string
+}
+
+func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- taskWakeup) {
 	backoff := time.Second
 	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
 	defer unsub()
@@ -68,7 +72,7 @@ func jitterDuration(d time.Duration) time.Duration {
 	return d + delta
 }
 
-func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- struct{}, runtimeSetCh <-chan struct{}) error {
+func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []string, taskWakeups chan<- taskWakeup, runtimeSetCh <-chan struct{}) error {
 	wsURL, err := taskWakeupURL(d.cfg.ServerBaseURL, runtimeIDs)
 	if err != nil {
 		return err
@@ -87,9 +91,6 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	if d.client.os != "" {
 		headers.Set("X-Client-OS", d.client.os)
 	}
-	// CEREBRO-PATCH(cf-access-client): carry the Cloudflare Access service-token on
-	// the wakeup websocket handshake so it passes the wall like the HTTP requests.
-	d.client.cfHeaderToken().Apply(headers)
 
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
@@ -102,6 +103,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	defer d.clearWSHeartbeatAcks()
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
+	signalTaskWakeup(taskWakeups, "")
 
 	// Serialize all writes through a single channel: the gorilla/websocket
 	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
@@ -117,17 +119,6 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	writes := make(chan []byte, writeBufSize)
 	writerDone := make(chan struct{})
 	go d.runWSWriter(conn, writes, writerDone)
-	// CEREBRO-PATCH(daemon-ws-write-accessor): publish the writes channel so cerebro_terminal.go can enqueue term frames; cleared on disconnect.
-	// CEREBRO-PATCH(daemon-ws-write-accessor-signal-order): wsWrites must be stored BEFORE signalTaskWakeup so cerebroAttachTerminal never sees a nil channel.
-	d.wsWrites.Store(&writes)
-	defer d.wsWrites.Store(nil)
-	// CEREBRO-PATCH(daemon-cerebro-term-reattach): re-emit every in-flight attach frame so all active interactive tasks (not just the latest) get a broker session after a reconnect.
-	for _, af := range d.snapshotCerebroAttaches() {
-		d.enqueueCerebroFrame(af)
-	}
-	// CEREBRO-PATCH(daemon-cerebro-term-buffer): flush output buffered during the WS outage, in order, after the attach frames re-adopt the sessions (TECH-3388).
-	d.drainAllCerebroTermBuffers()
-	signalTaskWakeup(taskWakeups)
 
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	hbDone := make(chan struct{})
@@ -268,7 +259,7 @@ func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatRespons
 	d.handleHeartbeatActions(ctx, ack.RuntimeID, ack)
 }
 
-func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- struct{}) error {
+func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- taskWakeup) error {
 	conn.SetReadLimit(64 * 1024)
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -292,7 +283,18 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 			if payload.RuntimeID != "" {
 				d.logger.Debug("task wakeup received", "runtime_id", payload.RuntimeID, "task_id", payload.TaskID)
 			}
-			signalTaskWakeup(taskWakeups)
+			signalTaskWakeup(taskWakeups, payload.RuntimeID)
+		case protocol.EventDaemonRuntimeProfilesChanged:
+			var payload protocol.RuntimeProfilesChangedPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				d.logger.Debug("runtime profile refresh websocket invalid payload", "error", err)
+				continue
+			}
+			if payload.WorkspaceID == "" {
+				d.logger.Debug("runtime profile refresh websocket missing workspace_id")
+				continue
+			}
+			go d.handleRuntimeProfilesChanged(payload)
 		case protocol.EventDaemonHeartbeatAck:
 			var ack HeartbeatResponse
 			if err := json.Unmarshal(msg.Payload, &ack); err != nil {
@@ -300,16 +302,25 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				continue
 			}
 			d.handleWSHeartbeatAck(context.Background(), &ack)
-		// CEREBRO-PATCH(daemon-tool-scan-now): FIR-2230 admin-triggered immediate scan.
-		case protocol.EventDaemonToolScanRequested:
-			d.handleToolScanRequested(msg.Payload)
 		}
 	}
 }
 
-func signalTaskWakeup(taskWakeups chan<- struct{}) {
+func (d *Daemon) handleRuntimeProfilesChanged(payload protocol.RuntimeProfilesChangedPayload) {
+	if payload.WorkspaceID == "" {
+		return
+	}
+	if err := d.refreshWorkspaceRuntimeProfiles(d.recoveryContext(), payload.WorkspaceID); err != nil {
+		d.logger.Debug("runtime profile refresh websocket hint failed",
+			"workspace_id", payload.WorkspaceID,
+			"runtime_profile_id", payload.RuntimeProfileID,
+			"error", err)
+	}
+}
+
+func signalTaskWakeup(taskWakeups chan<- taskWakeup, runtimeID string) {
 	select {
-	case taskWakeups <- struct{}{}:
+	case taskWakeups <- taskWakeup{runtimeID: runtimeID}:
 	default:
 	}
 }

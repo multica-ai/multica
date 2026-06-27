@@ -138,7 +138,12 @@ agent instructions. The briefing includes:
 - Squad Instructions, only when `instructions` is non-empty.
 
 Roster entries include member name, member type, mention markdown, and non-empty
-role. Archived agent members are skipped from the briefing roster.
+role. For agent members the roster also lists their assigned skills
+(`skills: a, b`, or `no skills assigned` when the agent has none) so the leader
+can delegate by capability instead of guessing from the role label; human
+members carry no skills segment. Builtin `multica-*` skills are not listed —
+only the workspace skills explicitly attached to the agent. Archived agent
+members are skipped from the briefing roster.
 
 ## Issue assignment behavior
 

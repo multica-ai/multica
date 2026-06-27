@@ -32,15 +32,15 @@ const (
 	// subscribes by `task:` prefix and invalidates the workspace task
 	// snapshot, so the granularity here is "what does the user want to see
 	// change" — not "every internal status flip".
-	EventTaskQueued                  = "task:queued"                    // ∅ → queued (enqueue / retry create)
-	EventTaskDispatch                = "task:dispatch"                  // queued → dispatched (daemon claim)
-	EventTaskRunning                 = "task:running"                   // dispatched → running (daemon started)
-	EventTaskWaitingLocalDirectory   = "task:waiting_local_directory"   // dispatched → waiting_local_directory (daemon parked on a busy local_directory path)
-	EventTaskProgress                = "task:progress"
-	EventTaskCompleted               = "task:completed"                 // running → completed
-	EventTaskFailed                  = "task:failed"                    // running → failed
-	EventTaskMessage                 = "task:message"
-	EventTaskCancelled               = "task:cancelled"                 // * → cancelled
+	EventTaskQueued                = "task:queued"                  // ∅ → queued (enqueue / retry create)
+	EventTaskDispatch              = "task:dispatch"                // queued → dispatched (daemon claim)
+	EventTaskRunning               = "task:running"                 // dispatched → running (daemon started)
+	EventTaskWaitingLocalDirectory = "task:waiting_local_directory" // dispatched → waiting_local_directory (daemon parked on a busy local_directory path)
+	EventTaskProgress              = "task:progress"
+	EventTaskCompleted             = "task:completed" // running → completed
+	EventTaskFailed                = "task:failed"    // running → failed
+	EventTaskMessage               = "task:message"
+	EventTaskCancelled             = "task:cancelled" // * → cancelled
 
 	// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — a skill notification
 	// (change request / fork / agent-assigned) ready to be routed through the
@@ -134,10 +134,11 @@ const (
 	EventSquadDeleted = "squad:deleted"
 
 	// Daemon events
-	EventDaemonHeartbeat     = "daemon:heartbeat"
-	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
-	EventDaemonRegister      = "daemon:register"
-	EventDaemonTaskAvailable = "daemon:task_available"
+	EventDaemonHeartbeat              = "daemon:heartbeat"
+	EventDaemonHeartbeatAck           = "daemon:heartbeat_ack"
+	EventDaemonRegister               = "daemon:register"
+	EventDaemonTaskAvailable          = "daemon:task_available"
+	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
 	// CEREBRO-PATCH(daemon-tool-scan-now): FIR-2230 — server→daemon push asking
 	// for an immediate MCP tools/list scan instead of waiting for the daemon's
 	// next scheduled heartbeat scan.

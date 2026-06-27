@@ -33,7 +33,7 @@ func (f *fakeDispatcher) EnqueueTaskForMention(_ context.Context, _ db.Issue, ag
 	return db.AgentTaskQueue{}, nil
 }
 
-func (f *fakeDispatcher) EnqueueChatTask(_ context.Context, _ db.ChatSession) (db.AgentTaskQueue, error) {
+func (f *fakeDispatcher) EnqueueChatTask(_ context.Context, _ db.ChatSession, _ pgtype.UUID) (db.AgentTaskQueue, error) {
 	f.chatTasks++
 	return db.AgentTaskQueue{}, nil
 }

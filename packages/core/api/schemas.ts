@@ -15,17 +15,23 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
-  // CEREBRO-PATCH(issue-dependencies): dependency response type for the schema.
   IssueDependenciesResponse,
   ListIssuesResponse,
+  ListWebhookDeliveriesResponse,
   Squad,
   TimelineEntry,
   User,
+  WebhookDelivery,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
 export interface AppConfigResponse {
   cdn_domain: string;
+  // True when the CDN domain serves private content via time-bounded signed
+  // URLs (CloudFront signing) — raw storage URLs on that domain are NOT
+  // publicly fetchable and must not be used as native media sources
+  // (MUL-3254). Older servers omit the field; treat that as false.
+  cdn_signed?: boolean;
   allow_signup: boolean;
   google_client_id?: string;
   posthog_key?: string;
@@ -85,10 +91,18 @@ const AttachmentSchema = z.object({
 // in a new tab — `download_url` and `url` — must be strings, otherwise we'd
 // happily `window.open(undefined)`. `filename` gates the toast/title and is
 // also enforced so a missing value falls back to the empty record below.
+//
+// `markdown_url` is parsed lenient: a server old enough to predate
+// MUL-3192 omits the field, in which case the schema defaults it to "".
+// Callers that need to persist a URL into markdown should go through the
+// `useFileUpload` helper (which falls back to the legacy
+// `attachmentDownloadPath` shape when `markdown_url` is empty), so the
+// empty-string default does not silently break any persistence path.
 export const AttachmentResponseSchema = z.object({
   id: z.string(),
   url: z.string(),
   download_url: z.string(),
+  markdown_url: z.string().optional().default(""),
   filename: z.string(),
   chat_session_id: z.string().nullable().optional(),
   chat_message_id: z.string().nullable().optional(),
@@ -106,6 +120,7 @@ export const EMPTY_ATTACHMENT: Attachment = {
   filename: "",
   url: "",
   download_url: "",
+  markdown_url: "",
   content_type: "",
   size_bytes: 0,
   created_at: "",
@@ -132,6 +147,7 @@ const TimelineEntrySchema = z.object({
   comment_type: z.string().optional(),
   reactions: z.array(ReactionSchema).optional(),
   attachments: z.array(AttachmentSchema).optional(),
+  source_task_id: z.string().nullable().optional(),
   coalesced_count: z.number().optional(),
 }).loose();
 
@@ -153,8 +169,202 @@ const BooleanWithDefaultSchema = (fallback: boolean) =>
     z.boolean().default(fallback),
   );
 
+// CEREBRO-PATCH(agent-tools-schema): JEH-1359 — accept both current `name`
+// rows and older `tool_name` rows so installed clients survive server drift.
+const AgentToolSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object") return value;
+  const row = value as Record<string, unknown>;
+  const { tool_name: toolName, ...rest } = row;
+  return {
+    ...rest,
+    name: typeof row.name === "string" ? row.name : toolName,
+  };
+}, z.object({
+  name: z.string(),
+  description: z.string().default(""),
+  status: z
+    .enum(["implemented", "newly_implemented", "explicitly_excluded"])
+    .catch("implemented"),
+  enabled: BooleanWithDefaultSchema(false),
+  config: z.record(z.string(), z.unknown()).default({}),
+}).loose());
+
+export const AgentToolsListSchema = z.array(AgentToolSchema);
+
+// CEREBRO-PATCH(runtime-tools-schema): JEH-1710 — runtime tool inventory +
+// grants. Keep source/policy strings open-ended so new backend values render
+// through the UI's fallback branches instead of failing validation.
+const RuntimeToolSchema = z.object({
+  id: z.string().default(""),
+  runtime_id: z.string().default(""),
+  name: z.string(),
+  source: z.string().default("cloud"),
+  mcp_server_name: z.string().default(""),
+  description: z.string().default(""),
+  enabled: BooleanWithDefaultSchema(false),
+  last_scanned_at: z.string().nullable().default(null),
+}).loose();
+
+export const RuntimeToolsListSchema = z.array(RuntimeToolSchema);
+
+const RuntimeToolEffectiveAccessSchema = z.object({
+  descriptor: z.object({
+    tool_key: z.string().default(""),
+    display_name: z.string().default(""),
+    description: z.string().optional(),
+    source: z.string().default(""),
+    risk_class: z.string().default(""),
+    protocols: z.array(z.string()).default([]),
+    recommended_default_policy: z.string().default(""),
+  }).loose(),
+  inventory: z.object({
+    runtime_id: z.string().default(""),
+    tool_name: z.string().default(""),
+    source: z.string().default(""),
+    mcp_server_name: z.string().optional(),
+    enabled: BooleanWithDefaultSchema(false),
+  }).loose(),
+  policy: z.object({
+    effective: z.string().default(""),
+    reason: z.string().default(""),
+    decided_by: z.string().optional(),
+    capped_by: z.string().optional(),
+  }).loose(),
+  runtime_grant: z.object({
+    effective: z.string().default(""),
+    reason: z.string().default(""),
+  }).loose(),
+  protocol: z.object({
+    effective: z.string().default(""),
+    required_protocols: z.array(z.string()).default([]),
+    runtime_protocols: z.array(z.string()).default([]),
+    selected_protocol: z.string().optional(),
+    supports_ask: BooleanWithDefaultSchema(false),
+    unsupported_message: z.string().optional(),
+  }).loose(),
+  credential: z.object({
+    effective: z.string().default(""),
+    reason: z.string().default(""),
+  }).loose(),
+  exposure_effective: z.object({
+    effective: BooleanWithDefaultSchema(false),
+    reason: z.string().default(""),
+  }).loose(),
+  layers: z.record(z.string(), z.string()).optional(),
+}).loose();
+
+export const RuntimeToolEffectiveAccessListSchema = z.array(
+  RuntimeToolEffectiveAccessSchema,
+);
+
+const RuntimeToolGroupGrantSchema = z.object({
+  runtime_id: z.string().default(""),
+  tool_name: z.string().default(""),
+  group_id: z.string().default(""),
+  group_name: z.string().default(""),
+  granted_at: z.string().default(""),
+}).loose();
+
+const RuntimeToolUserGrantSchema = z.object({
+  runtime_id: z.string().default(""),
+  tool_name: z.string().default(""),
+  user_id: z.string().default(""),
+  user_name: z.string().default(""),
+  user_email: z.string().default(""),
+  user_avatar_url: z.string().default(""),
+  granted_at: z.string().default(""),
+}).loose();
+
+export const RuntimeToolGrantsSchema = z.object({
+  group_grants: z.array(RuntimeToolGroupGrantSchema).default([]),
+  user_grants: z.array(RuntimeToolUserGrantSchema).default([]),
+}).loose();
+
+const CapabilitySubjectSchema = z.object({
+  type: z.string().default("workspace"),
+  id: z.string().default(""),
+  display_name: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+}).loose();
+
+const CapabilitySchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  key: z.string().default(""),
+  title: z.string().default(""),
+  category: z.string().default(""),
+  description: z.string().default(""),
+  source: z.string().default(""),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  owners: z.array(CapabilitySubjectSchema).default([]),
+  users: z.array(CapabilitySubjectSchema).default([]),
+  reporters: z.array(CapabilitySubjectSchema).default([]),
+  first_seen_at: z.string().default(""),
+  last_reported_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const CapabilityListResponseSchema = z.object({
+  capabilities: z.array(CapabilitySchema).default([]),
+}).loose();
+
+// CEREBRO-PATCH(agent-avatar-backfill-schema): admin avatar rollout status.
+export const AgentAvatarBackfillStatusSchema = z.object({
+  workspace_id: z.string().default(""),
+  status: z.string().default("idle"),
+  missing: z.number().default(0),
+  total: z.number().default(0),
+  generated: z.number().default(0),
+  skipped: z.number().default(0),
+  failed: z.number().default(0),
+  errors: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_AGENT_AVATAR_BACKFILL_STATUS: AgentAvatarBackfillStatus = {
+  workspace_id: "",
+  status: "idle",
+  missing: 0,
+  total: 0,
+  generated: 0,
+  skipped: 0,
+  failed: 0,
+  errors: [],
+};
+
+// CEREBRO-PATCH(issue-dependencies-schema): blocks / blocked-by / related.
+const IssueDependencyRefSchema = z.object({
+  id: z.string(),
+  identifier: z.string().default(""),
+  title: z.string().default(""),
+  status: z.string().default("todo"),
+}).loose();
+
+export const IssueDependenciesResponseSchema = z.object({
+  blocks: z.array(IssueDependencyRefSchema).default([]),
+  blocked_by: z.array(IssueDependencyRefSchema).default([]),
+  related: z.array(IssueDependencyRefSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_DEPENDENCIES: IssueDependenciesResponse = {
+  blocks: [],
+  blocked_by: [],
+  related: [],
+};
+
+export const OnboardingRuntimeBootstrapResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  issue_id: z.string().default(""),
+}).loose();
+
+export const OnboardingNoRuntimeBootstrapResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  issue_id: z.string().default(""),
+}).loose();
+
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
+  cdn_signed: BooleanWithDefaultSchema(false),
   allow_signup: BooleanWithDefaultSchema(true),
   google_client_id: OptionalStringSchema,
   posthog_key: OptionalStringSchema,
@@ -167,6 +377,7 @@ export const AppConfigSchema = z.object({
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
   cdn_domain: "",
+  cdn_signed: false,
   allow_signup: true,
   google_client_id: "",
   daemon_server_url: "",
@@ -186,9 +397,34 @@ export const CommentSchema = z.object({
   attachments: z.array(AttachmentSchema).default([]),
   created_at: z.string(),
   updated_at: z.string(),
+  source_task_id: z.string().nullable().optional(),
 }).loose();
 
 export const CommentsListSchema = z.array(CommentSchema);
+
+const CommentTriggerPreviewAgentSchema = z.object({
+  id: z.string(),
+  name: z.string().default(""),
+  avatar_url: z.string().optional(),
+  source: z.string().default(""),
+  reason: z.string().default(""),
+}).loose();
+
+export const CommentTriggerPreviewSchema = z.object({
+  agents: z.array(CommentTriggerPreviewAgentSchema).default([]),
+}).loose();
+
+const IssueTriggerPreviewItemSchema = z.object({
+  issue_id: z.string(),
+  agent_id: z.string().default(""),
+  source: z.string().default(""),
+  handoff_supported: z.boolean().default(false),
+}).loose();
+
+export const IssueTriggerPreviewSchema = z.object({
+  triggers: z.array(IssueTriggerPreviewItemSchema).default([]),
+  total_count: z.number().default(0),
+}).loose();
 
 // Metadata is primitive-only by API/DB contract. Stay lenient on shape:
 // unknown keys land as `unknown` to a caller, but the field itself defaults
@@ -200,8 +436,6 @@ export const IssueSchema = z.object({
   workspace_id: z.string(),
   number: z.number(),
   identifier: z.string(),
-  // CEREBRO-PATCH(core-issue-kind-schema): core Issue now carries channel/dm kind.
-  kind: z.enum(["issue", "channel", "dm"]).catch("issue"),
   title: z.string(),
   description: z.string().nullable(),
   status: z.string(),
@@ -213,6 +447,9 @@ export const IssueSchema = z.object({
   parent_issue_id: z.string().nullable(),
   project_id: z.string().nullable(),
   position: z.number(),
+  // Older backends predate `stage`; default to null so a missing field parses
+  // cleanly into the non-optional Issue.stage (number | null).
+  stage: z.number().nullable().default(null),
   start_date: z.string().nullable().default(null),
   due_date: z.string().nullable(),
   metadata: IssueMetadataSchema,
@@ -262,7 +499,6 @@ export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
 
-// CEREBRO-PATCH(cloud-runtime-bootstrap): parse Fleet proxy responses defensively for desktop/web clients.
 export const CloudRuntimeNodeSchema = z.object({
   id: z.string(),
   owner_id: z.string(),
@@ -299,207 +535,45 @@ export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
   updated_at: "",
 };
 
-// CEREBRO-PATCH(agent-tools-schema): JEH-1353/1359 — tool grant list response shape.
-// name/description come from the server-side tool registry; enabled from the
-// agent_tool_grant row (or false when no row exists yet).
-const AgentToolSchema = z.preprocess((value) => {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const row = value as Record<string, unknown>;
-    if (typeof row.name !== "string" && typeof row.tool_name === "string") {
-      const { tool_name: toolName, ...rest } = row;
-      return { ...rest, name: toolName };
-    }
-  }
-  return value;
-}, z.object({
-  name: z.string().min(1),
-  description: z.string().default(""),
-  status: z.enum(["implemented", "newly_implemented", "explicitly_excluded"]).default("implemented"), // CEREBRO-PATCH(agent-tools-status): preserve explicit exclusion state at the API boundary.
-  enabled: z.boolean().default(false),
-  config: z.record(z.string(), z.unknown()).optional().default({}),
-}).loose());
-
-export const AgentToolsListSchema = z.array(AgentToolSchema).default([]);
-
-// CEREBRO-PATCH(runtime-tools-schema): JEH-1710 — runtime-level tool inventory
-// and grant shapes. Lenient on strings so an unknown `source` value still
-// parses and renders with a generic fallback (the switch in the UI has a
-// default branch per API Response Compatibility rules).
-const RuntimeToolViewSchema = z.object({
-  id: z.string().default(""),
-  runtime_id: z.string().default(""),
-  name: z.string().min(1),
-  source: z.string().default("mcp"),
-  mcp_server_name: z.string().optional().default(""),
-  description: z.string().default(""),
-  enabled: z.boolean().default(false),
-  last_scanned_at: z.string().nullable().optional().default(null),
-}).loose();
-
-export const RuntimeToolsListSchema = z.array(RuntimeToolViewSchema).default([]);
-
-// CEREBRO-PATCH(runtime-agnostic-tool-access-schema): TECH-3071 read-only
-// server-computed effective access preview for runtime tools.
-const RuntimeToolStringStateSchema = z.object({
-  effective: z.string().default("unknown"),
-  reason: z.string().default(""),
-}).loose();
-
-const RuntimeToolEffectiveAccessSchema = z.object({
-  descriptor: z.object({
-    tool_key: z.string().default(""),
-    display_name: z.string().default(""),
-    description: z.string().optional().default(""),
-    source: z.string().default("platform"),
-    risk_class: z.string().default("read"),
-    protocols: z.array(z.string()).default([]),
-    recommended_default_policy: z.string().default("allow"),
-  }).loose(),
-  inventory: z.object({
-    runtime_id: z.string().default(""),
-    tool_name: z.string().default(""),
-    source: z.string().default("cloud"),
-    mcp_server_name: z.string().optional().default(""),
-    enabled: z.boolean().default(false),
-  }).loose(),
-  policy: RuntimeToolStringStateSchema.extend({
-    decided_by: z.string().optional().default(""),
-    capped_by: z.string().optional().default(""),
-  }).loose(),
-  runtime_grant: RuntimeToolStringStateSchema,
-  protocol: RuntimeToolStringStateSchema.extend({
-    required_protocols: z.array(z.string()).default([]),
-    runtime_protocols: z.array(z.string()).default([]),
-    selected_protocol: z.string().optional().default(""),
-    supports_ask: z.boolean().default(false),
-    unsupported_message: z.string().optional().default(""),
-  }).loose(),
-  credential: RuntimeToolStringStateSchema,
-  exposure_effective: z.object({
-    effective: z.boolean().default(false),
-    reason: z.string().default(""),
-  }).loose(),
-  layers: z.record(z.string(), z.string()).optional().default({}),
-}).loose();
-
-export const RuntimeToolEffectiveAccessListSchema = z.array(RuntimeToolEffectiveAccessSchema).default([]);
-
-const RuntimeToolGroupGrantSchema = z.object({
-  runtime_id: z.string().default(""),
-  tool_name: z.string().min(1),
-  group_id: z.string().min(1),
-  group_name: z.string().default(""),
-  granted_at: z.string().default(""),
-}).loose();
-
-const RuntimeToolUserGrantSchema = z.object({
-  runtime_id: z.string().default(""),
-  tool_name: z.string().min(1),
-  user_id: z.string().min(1),
-  user_name: z.string().default(""),
-  user_email: z.string().default(""),
-  user_avatar_url: z.string().optional().default(""),
-  granted_at: z.string().default(""),
-}).loose();
-
-export const RuntimeToolGrantsSchema = z.object({
-  group_grants: z.array(RuntimeToolGroupGrantSchema).default([]),
-  user_grants: z.array(RuntimeToolUserGrantSchema).default([]),
-}).loose();
-
-// CEREBRO-PATCH(capability-register-schema): FIR-2129 capability register schema.
-const CapabilitySubjectSchema = z.object({
-  type: z.enum(["member", "agent", "group", "runtime", "workspace"]),
-  id: z.string().default(""),
-  display_name: z.string().optional().default(""),
-  metadata: z.record(z.string(), z.unknown()).optional().default({}),
-}).loose();
-
-const CapabilitySchema = z.object({
-  id: z.string().default(""),
-  workspace_id: z.string().default(""),
-  key: z.string().default(""),
-  title: z.string().default(""),
-  category: z.string().default(""),
-  description: z.string().default(""),
-  source: z.string().default("report"),
-  metadata: z.record(z.string(), z.unknown()).default({}),
-  owners: z.array(CapabilitySubjectSchema).default([]),
-  users: z.array(CapabilitySubjectSchema).default([]),
-  reporters: z.array(CapabilitySubjectSchema).default([]),
-  first_seen_at: z.string().default(""),
-  last_reported_at: z.string().default(""),
-  updated_at: z.string().default(""),
-}).loose();
-
-export const CapabilityListResponseSchema = z.object({
-  capabilities: z.array(CapabilitySchema).default([]),
-}).loose();
-
-export const OnboardingRuntimeBootstrapResponseSchema = z.object({
-  workspace_id: z.string(),
-  agent_id: z.string(),
-  issue_id: z.string(),
-}).loose();
-
-export const OnboardingNoRuntimeBootstrapResponseSchema = z.object({
-  workspace_id: z.string(),
-  issue_id: z.string(),
-}).loose();
-
-// CEREBRO-PATCH(agent-tool-overrides-schema): JEH-1710 bid 4 — per-agent override
-// rows. enabled=true forces the tool on for this agent; enabled=false forces it
-// off; absence of a row means inherit-from-runtime.
-const AgentToolOverrideSchema = z.object({
-  agent_id: z.string().default(""),
-  tool_name: z.string().min(1),
-  enabled: z.boolean().default(false),
-  updated_at: z.string().default(""),
-}).loose();
-
-export const AgentToolOverrideListSchema = z.array(AgentToolOverrideSchema).default([]);
-
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
 //
 // The dashboard hits three independent rollup endpoints. Each returns a flat
 // array, and every field is consumed by chart / KPI math — a missing number
 // silently degrades to NaN downstream, so we coerce missing numbers to 0.
-// String fields stay lenient (no enum narrowing) to survive future model /
-// agent ID drift.
+// String fields default to "" (no enum narrowing) to survive future model /
+// agent ID drift, and so a single null from tz-aware SQL bucketing fails
+// only that row instead of dropping the whole array to the `[]` fallback.
 // ---------------------------------------------------------------------------
 
 const DashboardUsageDailySchema = z.object({
-  date: z.string(),
-  model: z.string(),
+  date: z.string().default(""),
+  provider: z.string().default(""),
+  model: z.string().default(""),
   input_tokens: z.number().default(0),
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
-  // CEREBRO-PATCH(task-usage-gateway-cost): real gateway charge (cents); 0 when
-  // absent so the cost utils fall back to the token estimate (FIR-2405).
-  cost_cents: z.number().default(0),
   task_count: z.number().default(0),
 }).loose();
 
 export const DashboardUsageDailyListSchema = z.array(DashboardUsageDailySchema);
 
 const DashboardUsageByAgentSchema = z.object({
-  agent_id: z.string(),
-  model: z.string(),
+  agent_id: z.string().default(""),
+  provider: z.string().default(""),
+  model: z.string().default(""),
   input_tokens: z.number().default(0),
   output_tokens: z.number().default(0),
   cache_read_tokens: z.number().default(0),
   cache_write_tokens: z.number().default(0),
-  // CEREBRO-PATCH(task-usage-gateway-cost): real gateway charge (cents); 0 when absent.
-  cost_cents: z.number().default(0),
   task_count: z.number().default(0),
 }).loose();
 
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
 
 const DashboardAgentRunTimeSchema = z.object({
-  agent_id: z.string(),
+  agent_id: z.string().default(""),
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
@@ -508,13 +582,130 @@ const DashboardAgentRunTimeSchema = z.object({
 export const DashboardAgentRunTimeListSchema = z.array(DashboardAgentRunTimeSchema);
 
 const DashboardRunTimeDailySchema = z.object({
-  date: z.string(),
+  date: z.string().default(""),
   total_seconds: z.number().default(0),
   task_count: z.number().default(0),
   failed_count: z.number().default(0),
 }).loose();
 
 export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySchema);
+
+// ---------------------------------------------------------------------------
+// Runtime usage schemas — the runtime-detail page's four usage endpoints
+// (`/api/runtimes/:id/usage*`). Same leniency rules as the dashboard
+// schemas above: numbers default to 0, strings to "", `.loose()` passes
+// unknown fields.
+// ---------------------------------------------------------------------------
+
+const RuntimeUsageSchema = z.object({
+  runtime_id: z.string().default(""),
+  date: z.string().default(""),
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+}).loose();
+
+export const RuntimeUsageListSchema = z.array(RuntimeUsageSchema);
+
+const RuntimeHourlyActivitySchema = z.object({
+  hour: z.number().default(0),
+  count: z.number().default(0),
+}).loose();
+
+export const RuntimeHourlyActivityListSchema = z.array(RuntimeHourlyActivitySchema);
+
+const RuntimeUsageByAgentSchema = z.object({
+  agent_id: z.string().default(""),
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+}).loose();
+
+export const RuntimeUsageByAgentListSchema = z.array(RuntimeUsageByAgentSchema);
+
+const RuntimeUsageByHourSchema = z.object({
+  hour: z.number().default(0),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+}).loose();
+
+export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
+
+// ---------------------------------------------------------------------------
+// Task cancellation (`POST /api/tasks/:id/cancel`)
+//
+// This response is consumed directly by chat recovery. The embedded task
+// object stays loose so daemon/runtime fields can drift, but the optional
+// `cancelled_chat_message` payload must be well-formed before the UI deletes
+// a message from cache or restores text into the input.
+// ---------------------------------------------------------------------------
+
+const AgentTaskResponseSchema = z.object({
+  id: z.string(),
+  agent_id: z.string().default(""),
+  runtime_id: z.string().default(""),
+  issue_id: z.string().default(""),
+  status: z.string().default("cancelled"),
+  priority: z.number().default(0),
+  dispatched_at: z.string().nullable().default(null),
+  started_at: z.string().nullable().default(null),
+  completed_at: z.string().nullable().default(null),
+  result: z.unknown().default(null),
+  error: z.string().nullable().default(null),
+  failure_reason: z.string().optional(),
+  created_at: z.string().default(""),
+  chat_session_id: z.string().optional(),
+  autopilot_run_id: z.string().optional(),
+  parent_task_id: z.string().optional(),
+  attempt: z.number().optional(),
+  trigger_comment_id: z.string().optional(),
+  trigger_summary: z.string().optional(),
+  handoff_note: z.string().optional(),
+  kind: z.string().optional(),
+  work_dir: z.string().optional(),
+  relative_work_dir: z.string().optional(),
+}).loose();
+
+const CancelledChatMessageSchema = z.object({
+  chat_session_id: z.string(),
+  message_id: z.string(),
+  content: z.string(),
+  restore_to_input: z.boolean().default(false),
+  // Attachments detached from the deleted message so a restored draft can
+  // re-bind them on re-send. Absent on servers that predate the field.
+  attachments: z.array(AttachmentSchema).optional(),
+}).loose();
+
+export const CancelTaskResponseSchema = AgentTaskResponseSchema.extend({
+  cancelled_chat_message: CancelledChatMessageSchema.nullish()
+    .transform((value) => value ?? undefined),
+}).loose();
+
+export const EMPTY_CANCEL_TASK_RESPONSE = {
+  id: "",
+  agent_id: "",
+  runtime_id: "",
+  issue_id: "",
+  status: "cancelled",
+  priority: 0,
+  dispatched_at: null,
+  started_at: null,
+  completed_at: null,
+  result: null,
+  error: null,
+  created_at: "",
+};
 
 // ---------------------------------------------------------------------------
 // Agent template catalog — `/api/agent-templates*` and the
@@ -769,12 +960,53 @@ export const ListWebhookDeliveriesResponseSchema = z.object({
 
 export const WebhookDeliveryResponseSchema = WebhookDeliverySchema;
 
-export const EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE = {
+export const EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE: ListWebhookDeliveriesResponse = {
   deliveries: [],
   total: 0,
 };
 
-export const EMPTY_WEBHOOK_DELIVERY = {
+// ---------------------------------------------------------------------------
+// Autopilot list schema. Enums (`status`, `execution_mode`, `trigger_kinds`,
+// `last_run_status`) stay `z.string()` so future server-side values degrade
+// to a generic UI fallback. The three derived fields (trigger_kinds /
+// next_run_at / last_run_status) are list-endpoint-only and absent on older
+// servers — optional by contract, the list renders "—" without them.
+// ---------------------------------------------------------------------------
+
+const AutopilotListItemSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  description: z.string().nullable().optional(),
+  project_id: z.string().nullable().optional(),
+  // Older servers (pre-MUL-2429) omit assignee_type; "agent" is the
+  // documented default.
+  assignee_type: z.string().default("agent"),
+  assignee_id: z.string(),
+  status: z.string(),
+  execution_mode: z.string(),
+  issue_title_template: z.string().nullable().optional(),
+  created_by_type: z.string(),
+  created_by_id: z.string(),
+  last_run_at: z.string().nullable().optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  trigger_kinds: z.array(z.string()).optional(),
+  next_run_at: z.string().nullable().optional(),
+  last_run_status: z.string().nullable().optional(),
+}).loose();
+
+export const ListAutopilotsResponseSchema = z.object({
+  autopilots: z.array(AutopilotListItemSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_AUTOPILOTS_RESPONSE = {
+  autopilots: [],
+  total: 0,
+};
+
+export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
   id: "",
   workspace_id: "",
   autopilot_id: "",
@@ -814,10 +1046,11 @@ export const UserSchema = z.object({
   avatar_url: z.string().nullable().default(null),
   onboarded_at: z.string().nullable().default(null),
   onboarding_questionnaire: z.record(z.string(), z.unknown()).default({}),
+  preferences: z.record(z.string(), z.unknown()).default({}),
   starter_content_state: z.string().nullable().default(null),
   language: z.string().nullable().default(null),
-  timezone: z.string().nullable().default(null), // CEREBRO-PATCH(user-timezone-schema): server emits timezone in UserResponse.
   profile_description: z.string().default(""),
+  timezone: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -827,62 +1060,15 @@ export const EMPTY_USER: User = {
   name: "",
   email: "",
   avatar_url: null,
-  preferences: {},
   onboarded_at: null,
   onboarding_questionnaire: {},
+  preferences: {},
   starter_content_state: null,
   language: null,
-  timezone: null, // CEREBRO-PATCH(user-timezone-schema): keep fallback aligned with User.
   profile_description: "",
+  timezone: null,
   created_at: "",
   updated_at: "",
-};
-
-// CEREBRO-PATCH(agent-avatar-backfill): schema for admin avatar backfill progress.
-export const AgentAvatarBackfillStatusSchema = z.object({
-  workspace_id: z.string().default(""),
-  status: z.string().default("idle"),
-  missing: z.number().default(0),
-  total: z.number().default(0),
-  generated: z.number().default(0),
-  skipped: z.number().default(0),
-  failed: z.number().default(0),
-  errors: z.array(z.string()).default([]),
-}).loose();
-
-export const EMPTY_AGENT_AVATAR_BACKFILL_STATUS: AgentAvatarBackfillStatus = {
-  workspace_id: "",
-  status: "idle",
-  missing: 0,
-  total: 0,
-  generated: 0,
-  skipped: 0,
-  failed: 0,
-  errors: [],
-};
-
-// ---------------------------------------------------------------------------
-// CEREBRO-PATCH(issue-dependencies): schema + fallback for the grouped
-// blocks / blocked-by / related dependencies endpoint. Refs stay `.loose()` so
-// a future server-side field on a ref (e.g. priority) doesn't drop the row.
-// ---------------------------------------------------------------------------
-const IssueDependencyRefSchema = z.object({
-  id: z.string(),
-  identifier: z.string(),
-  title: z.string(),
-  status: z.string(),
-}).loose();
-
-export const IssueDependenciesResponseSchema = z.object({
-  blocks: z.array(IssueDependencyRefSchema).default([]),
-  blocked_by: z.array(IssueDependencyRefSchema).default([]),
-  related: z.array(IssueDependencyRefSchema).default([]),
-}).loose();
-
-export const EMPTY_ISSUE_DEPENDENCIES: IssueDependenciesResponse = {
-  blocks: [],
-  blocked_by: [],
-  related: [],
 };
 
 // ---------------------------------------------------------------------------

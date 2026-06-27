@@ -1,5 +1,7 @@
 import type {
   Issue,
+  IssueAssigneeType,
+  IssueStatus,
   CreateIssueRequest,
   UpdateIssueRequest,
   GroupedIssuesResponse,
@@ -127,6 +129,7 @@ import type {
   IssueLabelsResponse,
   // CEREBRO-PATCH(issue-dependencies): dependencies response type.
   IssueDependenciesResponse,
+  IssueTriggerPreviewResponse,
   PinnedItem,
   CreatePinRequest,
   PinnedItemType,
@@ -227,6 +230,8 @@ import {
   AppConfigSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
+  ListAutopilotsResponseSchema,
+  EMPTY_LIST_AUTOPILOTS_RESPONSE,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   OnboardingNoRuntimeBootstrapResponseSchema,
@@ -3159,6 +3164,16 @@ export class ApiClient {
     });
   }
 
+  // Incremental attach: POST /skills/add only inserts the given ids (the
+  // server upserts with ON CONFLICT DO NOTHING), so callers don't need to
+  // read the agent's current skill set first.
+  async addAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/skills/add`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   // Skill ownership / versioning / change requests / forks (JEH-216)
   async updateSkillOwnership(id: string, data: UpdateSkillOwnershipRequest): Promise<Skill> {
     return this.fetch(`/api/skills/${id}/ownership`, {
@@ -3261,6 +3276,7 @@ export class ApiClient {
       return null;
     }
   }
+
 
   // Personal Access Tokens
   async listPersonalAccessTokens(): Promise<PersonalAccessToken[]> {
@@ -3777,6 +3793,25 @@ export class ApiClient {
     });
   }
 
+  async previewIssueTrigger(body: {
+    issueIds?: string[];
+    isCreate?: boolean;
+    assigneeType?: IssueAssigneeType | null;
+    assigneeId?: string | null;
+    status?: IssueStatus;
+  }): Promise<IssueTriggerPreviewResponse> {
+    return this.fetch("/api/issues/preview-trigger", {
+      method: "POST",
+      body: JSON.stringify({
+        issue_ids: body.issueIds,
+        is_create: body.isCreate,
+        assignee_type: body.assigneeType,
+        assignee_id: body.assigneeId,
+        status: body.status,
+      }),
+    });
+  }
+
   // Pins
   async listPins(): Promise<PinnedItem[]> {
     return this.fetch("/api/pins");
@@ -3865,7 +3900,13 @@ export class ApiClient {
   async listAutopilots(params?: { status?: string }): Promise<ListAutopilotsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/autopilots?${search}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots?${search}`);
+    return parseWithFallback(
+      raw,
+      ListAutopilotsResponseSchema,
+      EMPTY_LIST_AUTOPILOTS_RESPONSE as ListAutopilotsResponse,
+      { endpoint: "GET /api/autopilots" },
+    );
   }
 
   async getAutopilot(id: string): Promise<GetAutopilotResponse> {

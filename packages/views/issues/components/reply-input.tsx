@@ -270,6 +270,8 @@ function ReplyInput({
                     debounceMs={100}
                     currentIssueId={issueId}
                     submitOnEnter={submitOnEnter}
+                    enableSlashCommands
+                    slashCommandMode="command"
                   />
                 </div>
               </div>

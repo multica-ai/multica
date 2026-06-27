@@ -73,6 +73,7 @@ export type WSEventType =
   | "label:updated"
   | "label:deleted"
   | "issue_labels:changed"
+  | "issue_metadata:changed"
   | "pin:created"
   | "pin:deleted"
   | "pin:reordered"
@@ -136,6 +137,7 @@ export interface IssueCreatedPayload {
 
 export interface IssueUpdatedPayload {
   issue: Issue;
+  assignee_changed?: boolean;
 }
 
 export interface IssueDeletedPayload {
@@ -145,6 +147,11 @@ export interface IssueDeletedPayload {
 export interface IssueLabelsChangedPayload {
   issue_id: string;
   labels: Label[];
+}
+
+export interface IssueMetadataChangedPayload {
+  issue_id: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface AgentStatusPayload {
@@ -444,6 +451,7 @@ export interface WSEventPayloadMap {
   "issue:updated": IssueUpdatedPayload;
   "issue:deleted": IssueDeletedPayload;
   "issue_labels:changed": IssueLabelsChangedPayload;
+  "issue_metadata:changed": IssueMetadataChangedPayload;
   "issue_reaction:added": IssueReactionAddedPayload;
   "issue_reaction:removed": IssueReactionRemovedPayload;
   "comment:created": CommentCreatedPayload;

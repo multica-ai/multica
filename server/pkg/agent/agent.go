@@ -25,8 +25,9 @@ type Backend interface {
 
 // ExecOptions configures a single execution.
 type ExecOptions struct {
-	Cwd   string
-	Model string
+	Cwd        string
+	Model      string
+	ThreadName string
 	// SystemPrompt is consumed only by providers that can pass or safely inline
 	// developer/system instructions. Hermes ACP intentionally ignores it and
 	// relies on cwd-scoped context files such as AGENTS.md instead.
@@ -38,6 +39,7 @@ type ExecOptions struct {
 	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
 	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
 	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	OpenclawMode              string
 	// CEREBRO-PATCH(agent-local-mcp-runtimes): FIR-1459 - local runtimes consume workspace MCP tool deny tokens differently.
 	DisallowedMCPTools []string // Claude-style mcp__<server>__<tool> deny tokens from workspace tool policy
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
@@ -183,6 +185,11 @@ func New(agentType string, cfg Config) (Backend, error) {
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity, firtal-gateway, openai-eu, firtal-local)", agentType)
 	}
+}
+
+func IsSupportedType(agentType string) bool {
+	_, err := New(agentType, Config{Logger: slog.Default()})
+	return err == nil
 }
 
 // DetectVersion runs the agent CLI with --version and returns the output.

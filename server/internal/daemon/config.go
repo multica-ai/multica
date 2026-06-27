@@ -59,7 +59,7 @@ const (
 	// until upstream multica-ai/multica#3574 merges, then dropped on sync.
 	// DefaultMaxToolCallDuration is the per-tool-call hard cap.
 	// set 0 to disable.
-	DefaultMaxToolCallDuration = 30 * time.Minute
+	DefaultMaxToolCallDuration     = 30 * time.Minute
 	DefaultRuntimeName             = "Local Agent"
 	DefaultWorkspaceSyncInterval   = 30 * time.Second
 	DefaultHealthPort              = 19514
@@ -90,6 +90,7 @@ type Config struct {
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity, firtal-gateway
+	ProfileCommandOverrides        map[string]string     // runtime_profile_id -> absolute command path override
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -107,11 +108,12 @@ type Config struct {
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
-	AgentToolWatchdog time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
+	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
 	// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — see upstream PR multica-ai/multica#3574.
 	MaxToolCallDuration time.Duration // force-stop a run when a single tool call stays in-flight (tool_use with no tool_result) longer than this (0 = disabled)
 	ClaudeArgs          []string
 	CodexArgs           []string
+	CodebuddyArgs       []string
 
 	// CEREBRO-PATCH(daemon-config): cerebro sandbox config (EnableSandbox,
 	// SandboxAllowlist) is embedded so callers continue to access fields
@@ -251,11 +253,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
-	// Antigravity has no `--model` flag and ModelSelectionSupported returns
-	// false for it (see server/pkg/agent/models.go). Pass an empty modelEnv
-	// so we don't seed AgentEntry.Model from an environment variable that
-	// the backend would silently ignore, and don't lead users to set it.
-	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", ""); ok {
+	// agy 1.0.6 added a `--model` flag (MUL-3125), so Antigravity now takes a
+	// model env like every other backend. MULTICA_ANTIGRAVITY_MODEL seeds the
+	// daemon-wide default; its value is the exact `agy models` display string
+	// (e.g. "Claude Opus 4.6 (Thinking)"), not a provider/model slug.
+	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
 	}
 	// CEREBRO-PATCH(daemon-config-firtal-gateway): FIR-2453 — register the managed Firtal Data Registry gateway runtime when MULTICA_RUNTIME_TYPE=firtal-registry + gateway URL/key are set.
@@ -497,7 +499,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		AgentIdleWatchdog:              agentIdleWatchdog,
-		AgentToolWatchdog:    agentToolWatchdog,
+		AgentToolWatchdog:              agentToolWatchdog,
 		// CEREBRO-PATCH(daemon-per-tool-call-timeout): FIR-2610 — upstream PR multica-ai/multica#3574.
 		MaxToolCallDuration: maxToolCallDuration,
 		ClaudeArgs:          claudeArgs,

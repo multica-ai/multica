@@ -162,7 +162,7 @@ export function createRuntimeColumns({
     },
     {
       id: "workload",
-      header: () => t(($) => $.list.col_workload),
+      header: () => t(($) => $.list.col_health),
       size: COL_WIDTHS.workload,
       cell: ({ row }) => {
         const health = deriveRuntimeHealth(row.original.runtime, now);

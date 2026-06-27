@@ -113,8 +113,14 @@ interface ContentEditorProps {
   /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
   mentionMode?: "default" | "context";
   mentionContextItems?: MentionItem[];
-  /** Enable the chat-only `/` skill picker. Defaults false. */
+  /** Enable the `/` command picker. Defaults false. */
   enableSlashCommands?: boolean;
+  /**
+   * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
+   * lists the active agent's skills (chat); "command" shows the fixed built-in
+   * command menu (issue comments), e.g. /note.
+   */
+  slashCommandMode?: "skill" | "command";
   /**
    * CEREBRO-PATCH(input-autofocus): JEH-756 — when true, focus the editor
    * once it finishes initialising. The focus call is owned by ContentEditor
@@ -185,6 +191,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionMode = "default",
       mentionContextItems,
       enableSlashCommands = false,
+      slashCommandMode = "skill",
       onEditorReady, // CEREBRO-PATCH(content-editor-on-editor-ready): TECH-3637.
       onCommentOnSelection, // CEREBRO-PATCH(content-editor-comment-on-selection): TECH-3637.
       hideDictationMic = false, // CEREBRO-PATCH(content-editor-dictation-mic): FIR-1637.
@@ -278,6 +285,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         enableSlashCommands,
+        slashCommandMode,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;

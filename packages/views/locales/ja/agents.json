@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "自分のもの",
-    "all": "すべて"
+    "all": "すべて",
+    "archived": "アーカイブ済み"
   },
   "sort": {
     "label_recent": "最近のアクティビティ",
@@ -59,7 +60,11 @@
     "workload": "作業量",
     "runtime": "ランタイム",
     "activity_7d": "アクティビティ（7日）",
-    "runs": "実行"
+    "runs": "実行",
+    "last_active": "最終アクティブ",
+    "model": "モデル",
+    "created": "作成日時",
+    "owner": "オーナー"
   },
   "row": {
     "you": "あなた",
@@ -67,7 +72,9 @@
     "no_description": "説明なし",
     "fallback_runtime_cloud": "クラウド",
     "fallback_runtime_local": "ローカル",
-    "actions_aria": "行の操作"
+    "actions_aria": "行の操作",
+    "task_count_one": "{{count}} 件のタスク",
+    "task_count_other": "{{count}} 件のタスク"
   },
   "activity_tooltip": {
     "created_today": "今日作成",
@@ -75,9 +82,7 @@
     "last_7_days": "過去7日",
     "no_activity": "アクティビティなし",
     "runs_other": "{{count}} 回実行",
-    "failed_suffix": " · {{count}} 回失敗（{{percent}}%）",
-    "created_days_ago_one": "Created {{count}} day ago",
-    "runs_one": "{{count}} run"
+    "failed_suffix": " · {{count}} 回失敗（{{percent}}%）"
   },
   "row_actions": {
     "cancel_all_tasks": "すべてのタスクをキャンセル",
@@ -103,9 +108,7 @@
     "archive_dialog_title": "\"{{name}}\" をアーカイブしますか？",
     "archive_dialog_description": "このエージェントは割り当てやメンションができなくなり、アクティブなタスクはすべてキャンセルされます。履歴はすべて保持され、後で復元できます。",
     "archive_dialog_cancel": "キャンセル",
-    "archive_dialog_confirm": "アーカイブ",
-    "cancelled_tasks_toast_one": "Cancelled {{count}} task",
-    "cancel_dialog_impact_one": "This will cancel {{summary}} task."
+    "archive_dialog_confirm": "アーカイブ"
   },
   "detail": {
     "back_to_agents": "エージェント",
@@ -215,7 +218,7 @@
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "capabilities": "Capabilities",
     "_comment_capabilities": "CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 — capabilities tab label",
-    "context": "コンテキスト",
+    "context": "Context",
     "_comment_context": "CEREBRO-PATCH(agent-office-tab): FIR-1775 — Agent Office (context versioning + governance) tab label"
   },
   "create_dialog": {
@@ -259,8 +262,7 @@
       "list_loading": "読み込み中...",
       "list_empty_default": "利用可能なスキルがありません。",
       "list_no_match": "一致するスキルがありません。",
-      "search_placeholder": "スキルを検索...",
-      "selected_one": "{{count}} selected — click to edit"
+      "search_placeholder": "スキルを検索..."
     },
     "avatar": {
       "change_aria": "アバターを変更",
@@ -300,8 +302,7 @@
       "reveal_action": "表示して編集",
       "revealing": "表示中...",
       "reveal_failed_toast": "環境変数の値を読み込めませんでした",
-      "empty_editable": "設定された環境変数はありません。起動時にエージェントへ注入する変数を追加してください。",
-      "not_revealed_title_one": "{{count}} variable configured"
+      "empty_editable": "設定された環境変数はありません。起動時にエージェントへ注入する変数を追加してください。"
     },
     "custom_args": {
       "intro": "起動時にエージェントコマンドの末尾に追加される CLI 引数です。複数トークンのフラグは1行にまとめられ、CLI に渡される前に空白で分割されます。",
@@ -340,8 +341,7 @@
       "add_dialog_confirm_default": "追加",
       "add_dialog_confirm_other": "スキル {{count}} 件を追加",
       "add_dialog_cancel": "キャンセル",
-      "add_failed_toast": "スキルを追加できませんでした",
-      "add_dialog_confirm_one": "Add {{count}} skill"
+      "add_failed_toast": "スキルを追加できませんでした"
     },
     "integrations": {
       "intro": "このエージェントを外部のチャットプラットフォームに接続し、普段使っているツールから直接やり取りできるようにします。",
@@ -385,8 +385,6 @@
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
       "queued_prefix": "{{when}} に待機開始",
-      "subtitle_active_one": "{{count}} active task",
-      "runs_one": "run",
       "_comment_retry": "CEREBRO-PATCH(activity-tab-retry): FIR-2592 — retry affordance on failed/cancelled runs in Recent Work.",
       "retry_task_aria": "Retry run",
       "retry_task_tooltip": "Retry run",
@@ -485,9 +483,7 @@
     "no_data": "記録された実行データがありません。",
     "sort_label": "並び替え",
     "sort_chronological": "古い順",
-    "sort_newest_first": "新しい順",
-    "tool_calls_one": "{{count}} tool call",
-    "events_one": "{{count}} events"
+    "sort_newest_first": "新しい順"
   },
   "task_failure": {
     "agent_error": "エージェント実行エラー",
@@ -502,8 +498,34 @@
     "section_remote": "リモート",
     "section_cloud": "クラウド",
     "agent_count_other": "エージェント {{count}} 件",
-    "empty": "まだマシンがありません",
-    "agent_count_one": "{{count}} agent"
+    "empty": "まだマシンがありません"
+  },
+  "last_active": {
+    "today": "今日",
+    "days_ago_one": "{{count}} 日前",
+    "days_ago_other": "{{count}} 日前",
+    "none": "30 日間アクティビティなし"
+  },
+  "toolbar": {
+    "result_count_title": "該当エージェント / スコープ内全体",
+    "filter_label": "フィルター",
+    "filter_active_count_one": "{{count}} 件のフィルター",
+    "filter_active_count_other": "{{count}} 件のフィルター",
+    "clear_filters": "フィルターをクリア",
+    "section_availability": "可用性",
+    "section_runtime": "ランタイム",
+    "display": "表示",
+    "sort_by": "並び替え",
+    "direction_asc": "昇順",
+    "direction_desc": "降順",
+    "section_columns": "列",
+    "section_owner": "オーナー",
+    "section_model": "モデル"
+  },
+  "actions": {
+    "selected_one": "{{count}} 件選択中",
+    "selected_other": "{{count}} 件選択中",
+    "clear_selection": "選択を解除"
   },
   "avatar_backfill": {
     "_comment": "CEREBRO-PATCH(agent-avatar-backfill): admin action for missing avatars + regenerate-all (FIR-2321).",

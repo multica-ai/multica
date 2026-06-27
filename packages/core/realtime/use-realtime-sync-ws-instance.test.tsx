@@ -103,9 +103,10 @@ describe("useRealtimeSync — ws instance change", () => {
 
     // Should have called invalidateQueries for all workspace-scoped keys
     // CEREBRO-PATCH(reconnect-wakeup-invalidate): FIR-1677 adds the inbox
-    // wakeup-list key to the reconnect sweep, so the count is now
-    // (15 workspace-scoped + 1 cerebro-inbox-wakeups + 1 workspaceKeys.list() = 17).
-    expect(invalidateSpy).toHaveBeenCalledTimes(17);
+    // wakeup-list key to the reconnect sweep. After cherry-pick 1485f43df added
+    // squads + 6 per-issue caches, the count is now:
+    // (15 wsId-scoped + 6 per-issue + 1 cerebro-inbox-wakeups + 1 workspaceKeys.list() = 23).
+    expect(invalidateSpy).toHaveBeenCalledTimes(23);
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {

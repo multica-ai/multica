@@ -263,7 +263,7 @@ export function ActorIssuesPanel({
             )}
           </div>
         )}
-        {viewMode === "list" && <BatchActionToolbar />}
+        {viewMode === "list" && <BatchActionToolbar issues={issues} />}
       </div>
     </ViewStoreProvider>
   );

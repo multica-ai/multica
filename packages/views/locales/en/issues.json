@@ -464,6 +464,7 @@
     "trigger_comment": "Comment trigger",
     "trigger_initial": "Initial run",
     "_comment_runtime_pause_queued": "CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717 execution-log queued status detail when the runtime is paused",
+    "trigger_handoff_prefix": "Handoff: ",
     "status_queued": "Queued",
     "status_queued_runtime_paused": "Queued — {{detail}}",
     "status_dispatched": "Starting",

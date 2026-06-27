@@ -71,12 +71,16 @@ export const issueKeys = {
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
   /** Full-issue timeline (single TanStack Query, no cursor). */
+  timelineAll: () => ["issues", "timeline"] as const,
   timeline: (issueId: string) =>
-    ["issues", "timeline", issueId] as const,
-  reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
+    [...issueKeys.timelineAll(), issueId] as const,
+  reactionsAll: () => ["issues", "reactions"] as const,
+  reactions: (issueId: string) => [...issueKeys.reactionsAll(), issueId] as const,
+  subscribersAll: () => ["issues", "subscribers"] as const,
   subscribers: (issueId: string) =>
-    ["issues", "subscribers", issueId] as const,
-  usage: (issueId: string) => ["issues", "usage", issueId] as const,
+    [...issueKeys.subscribersAll(), issueId] as const,
+  usageAll: () => ["issues", "usage"] as const,
+  usage: (issueId: string) => [...issueKeys.usageAll(), issueId] as const,
   // CEREBRO-PATCH(issue-comment-cost-query-key): FIR-39 — per-comment cost
   // badge keyed as a child of usage() on purpose: the existing task-lifecycle
   // invalidation (use-realtime-sync invalidates the `["issues", "usage"]`
@@ -86,7 +90,11 @@ export const issueKeys = {
   /** Issue-level attachments — used by the description editor so its
    *  inline file-card / image NodeViews can re-sign download URLs at
    *  click time. */
-  attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
+  attachmentsAll: () => ["issues", "attachments"] as const,
+  attachments: (issueId: string) => [...issueKeys.attachmentsAll(), issueId] as const,
+  commentTriggerPreviewAll: () => ["issues", "comment-trigger-preview"] as const,
+  issueTriggerPreview: (signature: string) =>
+    ["issues", "trigger-preview", signature] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => ["issues", "tasks", issueId] as const,
   /** Prefix-match key for invalidating tasks across all issues — used by

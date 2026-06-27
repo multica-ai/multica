@@ -2,6 +2,8 @@ package protocol
 
 import "encoding/json"
 
+const DaemonCapabilitySkillBundlesV1 = "skill_bundles_v1"
+
 // Message is the envelope for all WebSocket messages.
 type Message struct {
 	Type    string          `json:"type"`
@@ -30,6 +32,11 @@ type ToolScanRequestedPayload struct {
 	RuntimeID string `json:"runtime_id"`
 }
 
+type RuntimeProfilesChangedPayload struct {
+	WorkspaceID      string `json:"workspace_id"`
+	RuntimeProfileID string `json:"runtime_profile_id,omitempty"`
+}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`
@@ -47,14 +54,15 @@ type TaskCompletedPayload struct {
 
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)
 type TaskMessagePayload struct {
-	TaskID  string         `json:"task_id"`
-	IssueID string         `json:"issue_id,omitempty"`
-	Seq     int            `json:"seq"`
-	Type    string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
-	Tool    string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
-	Content string         `json:"content,omitempty"` // text content
-	Input   map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
-	Output  string         `json:"output,omitempty"`  // tool output (tool_result only)
+	TaskID    string         `json:"task_id"`
+	IssueID   string         `json:"issue_id,omitempty"`
+	Seq       int            `json:"seq"`
+	Type      string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
+	Tool      string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
+	Content   string         `json:"content,omitempty"` // text content
+	Input     map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
+	Output    string         `json:"output,omitempty"`  // tool output (tool_result only)
+	CreatedAt string         `json:"created_at,omitempty"`
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.
@@ -158,6 +166,7 @@ type DaemonHeartbeatAckPayload struct {
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
 	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
+	FeatureFlags            map[string]bool                         `json:"feature_flags,omitempty"`
 	// PendingLocalSkillImports carries multiple import requests in a single
 	// heartbeat so the daemon can process them concurrently. Old daemons
 	// that don't know this field silently ignore it (standard JSON behavior)

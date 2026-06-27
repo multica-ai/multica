@@ -484,8 +484,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Enqueue a chat task after the message exists.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session)
+	// Enqueue a chat task after the message exists. For web chat the sender is
+	// the authenticated request user (sessions are creator-only), so they are
+	// the task initiator — surfaced to the agent under `## Task Initiator`.
+	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
 		return

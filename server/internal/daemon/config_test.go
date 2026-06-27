@@ -93,6 +93,7 @@ func TestFirtalGatewayAgentEntrySkipsForUnknownRuntimeType(t *testing.T) {
 func TestFirtalGatewayAgentEntryFailsFastWhenRuntimeTypeSetWithoutKey(t *testing.T) {
 	t.Setenv("MULTICA_RUNTIME_TYPE", "firtal-registry")
 	t.Setenv("FIRTAL_REGISTRY_URL", "https://registry.example.com")
+	t.Setenv("FIRTAL_REGISTRY_KEY", "")
 
 	_, _, err := firtalGatewayAgentEntry()
 	if err == nil {
@@ -102,6 +103,7 @@ func TestFirtalGatewayAgentEntryFailsFastWhenRuntimeTypeSetWithoutKey(t *testing
 
 func TestFirtalGatewayAgentEntryFailsFastWhenRuntimeTypeSetWithoutURL(t *testing.T) {
 	t.Setenv("MULTICA_RUNTIME_TYPE", "firtal-registry")
+	t.Setenv("FIRTAL_REGISTRY_URL", "")
 	t.Setenv("FIRTAL_REGISTRY_KEY", "rk_test")
 
 	_, _, err := firtalGatewayAgentEntry()

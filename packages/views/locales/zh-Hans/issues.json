@@ -464,6 +464,7 @@
     "trigger_comment": "评论触发",
     "trigger_initial": "首次运行",
     "_comment_runtime_pause_queued": "CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717 execution-log queued status detail when the runtime is paused",
+    "trigger_handoff_prefix": "交接：",
     "status_queued": "排队中",
     "status_queued_runtime_paused": "排队中 — {{detail}}",
     "status_dispatched": "启动中",

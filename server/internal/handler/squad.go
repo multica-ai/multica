@@ -1002,6 +1002,24 @@ func (h *Handler) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db
 	return h.isSquadLeaderReady(ctx, issue)
 }
 
+// commentRoutesViaMention returns true when the comment will route work via
+// the @mention trigger path — either through its own routing mention, or by
+// inheriting the parent (thread root) mentions on a plain reply (see
+// shouldInheritParentMentions). The squad-leader skip rule treats inherited
+// mentions identically to direct ones: if the @mention path is going to fire,
+// the leader stays out of the way so the same comment never enqueues two
+// agents for the same intent (MUL-3744).
+func commentRoutesViaMention(content string, parentComment *db.Comment, authorType string) bool {
+	if commentMentionsAnyone(content) {
+		return true
+	}
+	own := util.ParseMentions(content)
+	if !shouldInheritParentMentions(parentComment, own, authorType) {
+		return false
+	}
+	return commentMentionsAnyone(parentComment.Content)
+}
+
 // isSquadLeaderReady returns true when the issue is assigned to a squad whose
 // leader agent can accept work right now. Readiness criteria (archived,
 // runtime bound, runtime online) are shared with the autopilot admission
@@ -1066,10 +1084,10 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		if commentDelegation[0].err != nil {
 			enqueueErr = commentDelegation[0].err
 		} else {
-			_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeaderFromComment(ctx, issue, squad.LeaderID, triggerCommentID, commentDelegation[0].context)
+			_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeaderFromComment(ctx, issue, squad.LeaderID, squad.ID, triggerCommentID, commentDelegation[0].context)
 		}
 	} else {
-		_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, triggerCommentID)
+		_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, squad.ID, triggerCommentID)
 	}
 	if enqueueErr != nil {
 		slog.Warn("enqueue squad leader task failed",

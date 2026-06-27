@@ -46,7 +46,7 @@ WITH next_task AS (
 UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
 WHERE id = (SELECT id FROM next_task)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, title, model_override
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, initiator_user_id, squad_id, handoff_note, prepare_lease_expires_at, title, model_override
 `
 
 // Claims the next queued task for a Firtal gateway cloud runtime. The cloud
@@ -98,6 +98,10 @@ func (q *Queries) ClaimFirtalGatewayTask(ctx context.Context, runtimeID pgtype.U
 		&i.SourceTaskID,
 		&i.DelegationSource,
 		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.SquadID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
 		&i.Title,
 		&i.ModelOverride,
 	)
@@ -105,7 +109,7 @@ func (q *Queries) ClaimFirtalGatewayTask(ctx context.Context, runtimeID pgtype.U
 }
 
 const listFirtalGatewayRuntimes = `-- name: ListFirtalGatewayRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 WHERE provider = $1
   AND daemon_id = $2
   AND status = 'online'
@@ -143,6 +147,7 @@ func (q *Queries) ListFirtalGatewayRuntimes(ctx context.Context, arg ListFirtalG
 			&i.LegacyDaemonID,
 			&i.SandboxEnabled,
 			&i.Visibility,
+			&i.ProfileID,
 			&i.PausedAt,
 			&i.UnpauseAt,
 			&i.PauseReason,

@@ -17,11 +17,11 @@ import { useT } from "../../i18n";
 // ModelDropdown renders a searchable, creatable model picker for an agent.
 // It fetches the supported-model catalog from the selected runtime — the
 // daemon enumerates models on demand via heartbeat piggyback. Providers
-// that don't honour per-agent model selection at runtime (currently
-// antigravity — `agy` has no `--model` flag and reads selection from
-// its own settings) return supported=false, and the dropdown renders
-// disabled with an explanation instead of silently accepting a value
-// the backend would ignore.
+// whose runtime ignores per-agent model selection return supported=false,
+// and the dropdown renders disabled with an explanation instead of silently
+// accepting a value the backend would ignore. No built-in provider does so
+// today — Antigravity gained `--model` in agy 1.0.6 — but the path stays for
+// any future model-less runtime.
 export function ModelDropdown({
   runtimeId,
   runtimeOnline,

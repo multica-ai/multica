@@ -123,6 +123,12 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 
 func applyAll(ctx context.Context, pool *pgxpool.Pool, files []string) error {
 	for _, file := range files {
+		version := strings.TrimSuffix(filepath.Base(file), ".up.sql")
+		if hook, ok := preMigrationHooks[version]; ok {
+			if err := hook(ctx, pool); err != nil {
+				return fmt.Errorf("pre-migration hook %s: %w", version, err)
+			}
+		}
 		sql, err := os.ReadFile(file)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", file, err)
@@ -262,9 +268,9 @@ func TestConstraintInvariants(t *testing.T) {
 func findMigrationsDir(t *testing.T) string {
 	t.Helper()
 	candidates := []string{
-		"../../migrations",   // when running `go test ./cmd/migrate/...` from server/
-		"server/migrations",  // when running from repo root
-		"migrations",         // when running from server/cmd/migrate
+		"../../migrations",  // when running `go test ./cmd/migrate/...` from server/
+		"server/migrations", // when running from repo root
+		"migrations",        // when running from server/cmd/migrate
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {

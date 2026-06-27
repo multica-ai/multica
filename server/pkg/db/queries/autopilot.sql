@@ -3,10 +3,35 @@
 -- =====================
 
 -- name: ListAutopilots :many
-SELECT * FROM autopilot
-WHERE workspace_id = $1
-  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
-ORDER BY created_at DESC;
+-- List rows carry three derived columns the list UI needs (trigger badges,
+-- next run, last-run outcome) so the page never has to N+1 into the detail
+-- endpoint. trigger_kinds/next_run_at only consider ENABLED triggers — the
+-- columns answer "how does this fire today", not "what is configured".
+-- last_run_status is COALESCEd to '' (never ran) because sqlc cannot infer
+-- nullability through a scalar subquery; the handler maps '' back to omitted.
+SELECT
+  sqlc.embed(a),
+  (
+    SELECT array_agg(DISTINCT t.kind ORDER BY t.kind)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled
+  )::text[] AS trigger_kinds,
+  (
+    SELECT min(t.next_run_at)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled AND t.kind = 'schedule'
+  )::timestamptz AS next_run_at,
+  COALESCE((
+    SELECT r.status
+    FROM autopilot_run r
+    WHERE r.autopilot_id = a.id
+    ORDER BY r.triggered_at DESC
+    LIMIT 1
+  ), '')::text AS last_run_status
+FROM autopilot a
+WHERE a.workspace_id = $1
+  AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status'))
+ORDER BY a.created_at DESC;
 
 -- name: GetAutopilot :one
 SELECT * FROM autopilot
@@ -162,12 +187,33 @@ RETURNING *;
 -- parent autopilot has assignee_type='squad', NULL otherwise. The executing
 -- agent_id on agent_task_queue still records who actually ran the work
 -- (the squad leader); squad_id lets reports group by squad without a join.
+--
+-- planned_at carries the canonical UTC fire time for scheduled triggers
+-- (source='schedule'); it stays NULL for manual / webhook / api sources
+-- which have no canonical occurrence. Combined with the partial unique
+-- index uq_autopilot_run_trigger_planned, this gives dispatch-layer
+-- idempotency: a stale-steal retry at the same plan_time cannot create
+-- a second run for the same (trigger_id, planned_at) pair.
 INSERT INTO autopilot_run (
-    autopilot_id, trigger_id, source, status, trigger_payload, squad_id
+    autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
-    sqlc.narg('squad_id')
+    sqlc.narg('squad_id'), sqlc.narg('planned_at')
 ) RETURNING *;
+
+-- name: GetAutopilotRunByTriggerAndPlanned :one
+SELECT * FROM autopilot_run
+WHERE trigger_id = $1
+  AND planned_at = $2
+LIMIT 1;
+
+-- name: RecoverPartialAutopilotRun :exec
+UPDATE autopilot_run
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'recovered partial dispatch (crashed before downstream creation)',
+    planned_at = NULL
+WHERE id = $1;
 
 -- name: GetAutopilotRun :one
 SELECT * FROM autopilot_run
@@ -241,6 +287,36 @@ WHERE t.autopilot_id = a.id
   AND t.next_run_at <= now()
   AND a.status = 'active'
 RETURNING t.*, a.workspace_id AS autopilot_workspace_id;
+
+-- name: ListSchedulableAutopilotTriggers :many
+-- Lists every schedule trigger the autopilot_schedule_dispatch JobSpec
+-- should consider this tick. Returns just the columns the scheduler's
+-- scope provider + PlansForScope hook need; the full trigger row is
+-- re-loaded by the handler so a trigger update between scope-list and
+-- handler-run sees the latest enabled / cron values.
+--
+-- last_fired_at is read so the planner hook can anchor cold-start
+-- enumeration on the most recent successful fire (set by either the
+-- legacy goroutine before the new scheduler took over, or the new
+-- scheduler's own post-dispatch advance — AdvanceTriggerNextRun, falling
+-- back to TouchAutopilotTriggerFiredAt on a cron parse error). Without it,
+-- a trigger that was created days ago and fired by the legacy code
+-- looks like a brand-new trigger to the new scheduler on first tick
+-- and the half-open `(created_at, now]` enumeration replays the most
+-- recent already-fired occurrence — exactly the post-deploy
+-- spurious-fire reported on MUL-3551 dev.
+--
+-- Filters out webhook / api triggers, disabled triggers, paused/archived
+-- autopilots, and any trigger missing its cron expression. ORDER BY id
+-- keeps the per-tick scope list stable across replicas.
+SELECT t.id, t.autopilot_id, t.cron_expression, t.timezone, t.created_at, t.last_fired_at
+FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.kind = 'schedule'
+  AND t.enabled = TRUE
+  AND a.status = 'active'
+  AND t.cron_expression IS NOT NULL
+ORDER BY t.id;
 
 -- =====================
 -- Task Queue (run_only mode)
@@ -347,21 +423,40 @@ RETURNING *;
 -- =====================
 
 -- name: ListAutopilotsForUser :many
-SELECT * FROM autopilot
-WHERE workspace_id = sqlc.arg('workspace_id')::uuid
-  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+SELECT
+  sqlc.embed(a),
+  (
+    SELECT array_agg(DISTINCT t.kind ORDER BY t.kind)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled
+  )::text[] AS trigger_kinds,
+  (
+    SELECT min(t.next_run_at)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled AND t.kind = 'schedule'
+  )::timestamptz AS next_run_at,
+  COALESCE((
+    SELECT r.status
+    FROM autopilot_run r
+    WHERE r.autopilot_id = a.id
+    ORDER BY r.triggered_at DESC
+    LIMIT 1
+  ), '')::text AS last_run_status
+FROM autopilot a
+WHERE a.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status'))
   AND (
-        (is_private = TRUE AND created_by_type = 'member' AND created_by_id = sqlc.arg('user_id')::uuid)
+        (a.is_private = TRUE AND a.created_by_type = 'member' AND a.created_by_id = sqlc.arg('user_id')::uuid)
      OR (is_private = FALSE AND (
-            scope = 'workspace'
-         OR (scope = 'personal' AND owner_user_id = sqlc.arg('user_id')::uuid)
-         OR (scope = 'group'    AND (
-                group_id = ANY(sqlc.arg('user_group_ids')::uuid[])
+            a.scope = 'workspace'
+         OR (a.scope = 'personal' AND a.owner_user_id = sqlc.arg('user_id')::uuid)
+         OR (a.scope = 'group'    AND (
+                a.group_id = ANY(sqlc.arg('user_group_ids')::uuid[])
              OR sqlc.arg('is_admin')::boolean
             ))
         ))
   )
-ORDER BY created_at DESC;
+ORDER BY a.created_at DESC;
 
 -- name: SetAutopilotScope :exec
 -- Applied right after CreateAutopilot when the requester picks a non-workspace
