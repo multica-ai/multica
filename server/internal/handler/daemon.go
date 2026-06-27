@@ -197,10 +197,11 @@ type DaemonRegisterRequest struct {
 }
 
 type daemonWorkspaceReposResponse struct {
-	WorkspaceID  string          `json:"workspace_id"`
-	Repos        []RepoData      `json:"repos"`
-	ReposVersion string          `json:"repos_version"`
-	Settings     json.RawMessage `json:"settings,omitempty"`
+	WorkspaceID      string          `json:"workspace_id"`
+	Repos            []RepoData      `json:"repos"`
+	ReposVersion     string          `json:"repos_version"`
+	Settings         json.RawMessage `json:"settings,omitempty"`
+	GitLabAccessToken *string        `json:"gitlab_access_token,omitempty"`
 }
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
@@ -755,7 +756,25 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings))
+	resp := workspaceReposResponse(workspaceID, ws.Repos, ws.Settings)
+
+	// Populate GitLab access token if a connection exists for this workspace.
+	if h.GitLabBox != nil {
+		wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+		if !ok {
+			return
+		}
+		conn, err := h.Queries.GetFirstGitLabConnectionByWorkspace(r.Context(), wsUUID)
+		if err == nil {
+			plain, err := h.GitLabBox.Open([]byte(conn.AccessToken))
+			if err == nil {
+				tok := string(plain)
+				resp.GitLabAccessToken = &tok
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
