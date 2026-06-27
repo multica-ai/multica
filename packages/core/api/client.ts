@@ -114,9 +114,9 @@ import type {
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
-  ListForgejoConnectionsResponse,
-  ConnectForgejoRequest,
-  ConnectForgejoResponse,
+  ListVCSConnectionsResponse,
+  ConnectVCSRequest,
+  ConnectVCSResponse,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
@@ -2413,23 +2413,23 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
   }
 
-  // Forgejo integration
-  async listForgejoConnections(workspaceId: string): Promise<ListForgejoConnectionsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/forgejo/connections`);
+  // VCS integration (Forgejo / Gitea / GitLab)
+  async listVCSConnections(workspaceId: string): Promise<ListVCSConnectionsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/vcs/connections`);
   }
 
-  async connectForgejo(
+  async connectVCS(
     workspaceId: string,
-    body: ConnectForgejoRequest,
-  ): Promise<ConnectForgejoResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/forgejo/connections`, {
+    body: ConnectVCSRequest,
+  ): Promise<ConnectVCSResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/vcs/connections`, {
       method: "POST",
       body: JSON.stringify(body),
     });
   }
 
-  async deleteForgejoConnection(workspaceId: string, connectionId: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/forgejo/connections/${connectionId}`, {
+  async deleteVCSConnection(workspaceId: string, connectionId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/vcs/connections/${connectionId}`, {
       method: "DELETE",
     });
   }
