@@ -434,6 +434,39 @@ type GithubPullRequestCheckSuite struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type GitlabConnection struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Namespace      string             `json:"namespace"`
+	NamespaceType  string             `json:"namespace_type"`
+	AvatarUrl      pgtype.Text        `json:"avatar_url"`
+	AccessToken    string             `json:"access_token"`
+	TokenExpiresAt pgtype.Timestamptz `json:"token_expires_at"`
+	ConnectedByID  pgtype.UUID        `json:"connected_by_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type GitlabMergeRequest struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ConnectionID    pgtype.UUID        `json:"connection_id"`
+	ProjectPath     string             `json:"project_path"`
+	MrIid           int32              `json:"mr_iid"`
+	Title           string             `json:"title"`
+	State           string             `json:"state"`
+	HtmlUrl         string             `json:"html_url"`
+	SourceBranch    pgtype.Text        `json:"source_branch"`
+	AuthorUsername  pgtype.Text        `json:"author_username"`
+	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
+	MergedAt        pgtype.Timestamptz `json:"merged_at"`
+	ClosedAt        pgtype.Timestamptz `json:"closed_at"`
+	MrCreatedAt     pgtype.Timestamptz `json:"mr_created_at"`
+	MrUpdatedAt     pgtype.Timestamptz `json:"mr_updated_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -494,6 +527,13 @@ type IssueLabel struct {
 	Color       string             `json:"color"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type IssueMergeRequest struct {
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	MergeRequestID pgtype.UUID        `json:"merge_request_id"`
+	CloseIntent    bool               `json:"close_intent"`
+	LinkedAt       pgtype.Timestamptz `json:"linked_at"`
 }
 
 type IssuePullRequest struct {
