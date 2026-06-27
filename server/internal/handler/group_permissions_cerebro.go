@@ -19,8 +19,12 @@
 package handler
 
 import (
+	"bytes" // CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 buffer+restore the tool-policy write body to probe its tool_key.
 	"context"
+	"encoding/json" // CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 decode the tool_key off the tool-policy write body.
+	"io"            // CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 read the tool-policy write body once before restoring it.
 	"net/http"
+	"strings" // CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 credential.* tool_key prefix check.
 
 	"github.com/go-chi/chi/v5" // CEREBRO-PATCH(connections-manage-policy-gate): TECH-3513 URL param read for the connections policy middleware.
 	"github.com/jackc/pgx/v5/pgtype"
@@ -277,6 +281,124 @@ func (h *Handler) RequireConnectionsManagePolicy(param string) func(http.Handler
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !h.cerebroRequireConnectionsPolicy(w, r, chi.URLParam(r, param)) {
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// cerebroRequireCredentialGrantPolicy gates credential.* tool-policy writes on the
+// manage_credential_access capability ("Grant credential access"), resolved through
+// the unified tool-policy chain (workspace > group > user) — the credential twin of
+// cerebroRequireConnectionsPolicy (FIR-1479). Jesper's rule: anyone holding "Grant
+// credential access" may author a credential row + its vault/key When-condition, not
+// only workspace owners/admins (who alone author the platform/repo/tool rows).
+//
+// The chain is consulted unconditionally (like the connections and local-runtime
+// gates), so it is live regardless of CEREBRO_APPROVAL_GATE_ENABLED. Base = Allow +
+// admin bypass preserve owner/admin authority 1:1 (they pass with no stored rows); an
+// admin tightens a group/member to Ask/Deny to restrict. Ask has no inbox path here,
+// so anything other than Allow blocks.
+//
+// nil-queries fails open for the same reason as cerebroRequireConnectionsPolicy:
+// upstream-only test fixtures must keep working.
+//
+// CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 credential-row writes gated on manage_credential_access.
+func (h *Handler) cerebroRequireCredentialGrantPolicy(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
+	if h.CerebroQueries == nil {
+		return true
+	}
+	viewer, ok := h.cerebroGroupViewer(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if viewer.IsAdmin {
+		return true
+	}
+	wsUUID, perr := util.ParseUUID(workspaceID)
+	if perr != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return false
+	}
+	eff, err := toolpolicy.NewStoreFromQueries(h.CerebroQueries).Resolve(r.Context(), toolpolicy.Query{
+		WorkspaceID: wsUUID,
+		ToolKey:     "manage_credential_access",
+		UserID:      viewer.UserID,
+		Base:        toolpolicy.SettingAllow,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return false
+	}
+	if eff.Setting != toolpolicy.SettingAllow {
+		writeError(w, http.StatusForbidden, "granting credential access is not allowed for you — ask a workspace admin")
+		return false
+	}
+	return true
+}
+
+// requireWorkspaceOwnerAdmin blocks the request unless the caller is a workspace
+// owner or admin. It mirrors the RequireWorkspaceRoleFromURL(... "owner","admin")
+// middleware that previously guarded every /tool-policy write, but as an inline
+// predicate so RequireToolPolicyWritePolicy can branch on it per tool_key.
+//
+// CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 inline owner/admin predicate for non-credential tool-policy writes.
+func (h *Handler) requireWorkspaceOwnerAdmin(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
+	viewer, ok := h.cerebroGroupViewer(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if !viewer.IsAdmin {
+		writeError(w, http.StatusForbidden, "editing tool policy is restricted to workspace owners and admins")
+		return false
+	}
+	return true
+}
+
+// toolPolicyWriteIsCredential reports whether the in-flight /tool-policy write targets
+// a credential.* tool_key. For DELETE the key is a query param; for PUT it lives in the
+// JSON body, which is read once and restored (io.NopCloser) so the downstream handler
+// can decode it again. Any read/parse failure returns false — fail-closed to the
+// owner/admin gate, so the looser credential path is never reached by accident.
+//
+// CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 read tool_key to route the write gate.
+func (h *Handler) toolPolicyWriteIsCredential(r *http.Request) bool {
+	if r.Method == http.MethodDelete {
+		return strings.HasPrefix(r.URL.Query().Get("tool_key"), "credential.")
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var probe struct {
+		ToolKey string `json:"tool_key"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return false
+	}
+	return strings.HasPrefix(probe.ToolKey, "credential.")
+}
+
+// RequireToolPolicyWritePolicy gates a /tool-policy write per tool_key. FIR-1479 folds
+// credential authoring onto the shared tool-policy endpoint, but credential rows must be
+// settable by anyone holding manage_credential_access — not only owners/admins, who
+// alone author the platform/repo/tool rows. So this middleware routes:
+//
+//   - credential.* keys → cerebroRequireCredentialGrantPolicy (manage_credential_access)
+//   - every other key   → requireWorkspaceOwnerAdmin (today's behavior, unchanged)
+//
+// CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 per-key tool-policy write gate.
+func (h *Handler) RequireToolPolicyWritePolicy(param string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			workspaceID := chi.URLParam(r, param)
+			if h.toolPolicyWriteIsCredential(r) {
+				if !h.cerebroRequireCredentialGrantPolicy(w, r, workspaceID) {
+					return
+				}
+			} else if !h.requireWorkspaceOwnerAdmin(w, r, workspaceID) {
 				return
 			}
 			next.ServeHTTP(w, r)

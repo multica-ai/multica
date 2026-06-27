@@ -236,14 +236,15 @@ func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.Store.Table(r.Context(), TableQuery{
-		WorkspaceID:     workspaceID,
-		RuntimeID:       runtimeID,
-		AgentID:         agentID,
-		UserID:          userID,
-		GroupIDs:        groupIDs,
-		SystemID:        systemID,
-		Base:            base,
-		IncludePlatform: h.Store.PlatformCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
+		WorkspaceID:        workspaceID,
+		RuntimeID:          runtimeID,
+		AgentID:            agentID,
+		UserID:             userID,
+		GroupIDs:           groupIDs,
+		SystemID:           systemID,
+		Base:               base,
+		IncludePlatform:    h.Store.PlatformCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
+		IncludeCredentials: h.Store.CredentialAuthoringEnabled(r.Context(), workspaceID, member.UserID),
 	})
 	if err != nil {
 		h.serverError(w, r, "list tool policy table", err)

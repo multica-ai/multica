@@ -26,7 +26,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
-	cerebrocredentialpolicy "github.com/multica-ai/multica/server/internal/cerebro/credentialpolicy"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -149,16 +148,14 @@ type AgentCapabilityConnection struct {
 // AgentCapabilityCredential names a credential bound to the agent (what it has
 // ACCESS to). Secret values are never included — only name, type, and hint.
 //
-// Permission is the per-actor credential-grant verdict (FIR-1479) pinned directly
-// on this agent for the credential box of the same name (credential_key). It is
-// populated only when the cerebro_credentials_per_actor flag is on for the
-// workspace, and only for boxes the agent layer has an explicit setting on;
-// otherwise it is empty (omitted). It mirrors AgentCapabilityTool.Permission.
+// The per-actor credential verdict is NOT stamped here: credential access is
+// authored on the unified tool-policy chain (the permissions interface
+// credential rows, FIR-1479), so the resolved verdict belongs to that surface,
+// not to a parallel per-credential read on this card.
 type AgentCapabilityCredential struct {
 	Name        string `json:"name"`
 	Type        string `json:"type"`
 	Description string `json:"description,omitempty"`
-	Permission  string `json:"permission,omitempty"` // allow | deny | inherit | "" (flag off / no row)
 }
 
 // AgentCapabilityInfisicalSecret names one Infisical folder the agent's runtime
@@ -323,13 +320,6 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// ACCESS — stamp each bound credential with its per-actor grant verdict
-	// (FIR-1479). Mirrors how AgentCapabilityTool.Permission is filled from the
-	// tool-policy table, but reads the credential-policy agent layer. Gated: when
-	// cerebro_credentials_per_actor is off, credentials are not yet a live
-	// permission type, so Permission stays empty and the card looks unchanged.
-	h.stampCredentialPermissions(r, agent.WorkspaceID, agent.ID, out.Credentials)
-
 	// ACCESS — Infisical folders this agent may read (paths only).
 	if folders, err := h.listAgentInfisicalFolders(r, agent.ID); err == nil {
 		for _, f := range folders {
@@ -358,43 +348,6 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 	out.Limits = buildAgentCapabilityLimits(agent.RuntimeConfig, agent.McpConfig)
 
 	writeJSON(w, http.StatusOK, out)
-}
-
-// stampCredentialPermissions fills the Permission field on each bound credential
-// with the per-actor grant pinned directly on this agent (FIR-1479 agent layer),
-// matching credential box by name (credential_key). It is a no-op unless the
-// cerebro_credentials_per_actor flag is on for the workspace — the same gate the
-// credential-grant write endpoints enforce — so the card stays unchanged while
-// the feature is dark. Any lookup error leaves Permission empty (the card still
-// renders); the verdict is advisory display, never an access decision.
-func (h *Handler) stampCredentialPermissions(r *http.Request, workspaceID, agentID pgtype.UUID, creds []AgentCapabilityCredential) {
-	if len(creds) == 0 || h.CerebroQueries == nil {
-		return
-	}
-	if !h.credentialsPerActorEnabled(r, workspaceID) {
-		return
-	}
-	store := cerebrocredentialpolicy.NewStoreFromQueries(h.CerebroQueries)
-	settings, err := store.ListForSubject(r.Context(), workspaceID, cerebrocredentialpolicy.LayerAgent, agentID)
-	if err != nil {
-		return
-	}
-	perms := credentialPermissionLookup(settings)
-	for i := range creds {
-		if p, ok := perms[creds[i].Name]; ok {
-			creds[i].Permission = p
-		}
-	}
-}
-
-// credentialPermissionLookup indexes the agent-layer explicit settings by
-// credential_key so each bound credential can be stamped in one pass.
-func credentialPermissionLookup(settings []cerebrocredentialpolicy.SubjectSetting) map[string]string {
-	m := make(map[string]string, len(settings))
-	for _, s := range settings {
-		m[s.CredentialKey] = string(s.Setting)
-	}
-	return m
 }
 
 // builtinSkillCardDescription resolves a one-line description for a built-in

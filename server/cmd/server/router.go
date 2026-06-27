@@ -961,12 +961,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			agentToolScope := middleware.AllowTaskScopeForAgent("id")
 			r.With(agentToolScope).Get("/api/agents/{id}/tools", h.ListAgentTools)
 			r.With(agentToolScope).Post("/api/agents/{id}/tools/{name}/invoke", h.InvokeAgentTool)
-			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess)              // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
-			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/tool-grants", h.AddAgentToolGrant)                  // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
-			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/tool-grants", h.RemoveAgentToolGrant)             // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
-			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/credential-grants", h.ListAgentCredentialGrants)     // CEREBRO-PATCH(cerebro-agent-credential-grant-write): FIR-1479 agent-centric credential grant write (flag-gated).
-			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/credential-grants", h.AddAgentCredentialGrant)      // CEREBRO-PATCH(cerebro-agent-credential-grant-write): FIR-1479 agent-centric credential grant write (flag-gated).
-			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/credential-grants", h.RemoveAgentCredentialGrant) // CEREBRO-PATCH(cerebro-agent-credential-grant-write): FIR-1479 agent-centric credential grant write (flag-gated).
+			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess)  // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
+			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/tool-grants", h.AddAgentToolGrant)      // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
+			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/tool-grants", h.RemoveAgentToolGrant) // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
 
 			// Issue routes registered flat (not via r.Route) so they
 			// share the chi routing tree with the user-only sibling
@@ -1165,9 +1162,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/groups", cerebroGroupsHandler.Create)
 					// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role create requires admin/owner.
 					r.Post("/roles", cerebroRolesHandler.Create)
-					// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 per-tool policy writes (admin/owner only).
-					r.Put("/tool-policy", cerebroToolPolicyHandler.Set)
-					r.Delete("/tool-policy", cerebroToolPolicyHandler.Clear)
+					// CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 tool-policy writes moved to the per-key capability gate below.
 					// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 web_fetch policy write (admin/owner only).
 					r.Put("/web-fetch-policy", cerebroWebFetchPolicyHandler.Set)
 					// CEREBRO-PATCH(connections-manage-policy-gate): TECH-3513 connection writes moved to the manage_connections capability gate below.
@@ -1205,6 +1200,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/connections/test", cerebroConnectionsHandler.Test) // connection reachability + MCP tool discovery.
 					r.Put("/connections/{connId}", cerebroConnectionsHandler.Update)
 					r.Delete("/connections/{connId}", cerebroConnectionsHandler.Delete)
+				})
+				// CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 — tool-policy writes are
+				// gated per tool_key: credential.* rows need the manage_credential_access capability
+				// (anyone with "Grant credential access"), every other key still needs owner/admin.
+				// The middleware reads tool_key off the request and routes to the right gate, so the
+				// single shared /tool-policy endpoint keeps its owner/admin authority for platform/
+				// repo/tool rows while opening credential rows to capability holders.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Use(h.RequireToolPolicyWritePolicy("id"))
+					r.Put("/tool-policy", cerebroToolPolicyHandler.Set)
+					r.Delete("/tool-policy", cerebroToolPolicyHandler.Clear)
 				})
 				// CEREBRO-PATCH(workspace-copy-routes): TECH-3582 — non-destructive copy of an
 				// entity into another workspace. Owner/admin only; never mutates the source.
@@ -2042,8 +2049,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// CEREBRO-PATCH(cerebro-sessions-routes): FIR-1741 issue comment sessions REST surface.
 			r.Route("/api/cerebro/issues/{issueId}/sessions", func(r chi.Router) {
 				r.Get("/", cerebroSessionsHandler.List)
-				r.Get("/context-usage", cerebroSessionsHandler.ContextUsage)       // CEREBRO-PATCH(cerebro-session-context-usage): FIR-1709 active-session context-window measurement.
-				r.Get("/usage-breakdown", cerebroSessionsHandler.UsageBreakdown)                // CEREBRO-PATCH(cerebro-session-usage-breakdown): FIR-1931 per-session cost/token/cache sheet.
+				r.Get("/context-usage", cerebroSessionsHandler.ContextUsage)                   // CEREBRO-PATCH(cerebro-session-context-usage): FIR-1709 active-session context-window measurement.
+				r.Get("/usage-breakdown", cerebroSessionsHandler.UsageBreakdown)               // CEREBRO-PATCH(cerebro-session-usage-breakdown): FIR-1931 per-session cost/token/cache sheet.
 				r.Get("/{sessionId}/context-timeline", cerebroSessionsHandler.ContextTimeline) // CEREBRO-PATCH(cerebro-session-context-timeline): FIR-1931 per-run context development curve.
 				r.Post("/start-fresh", cerebroSessionsHandler.StartFresh)
 				r.Patch("/{sessionId}", cerebroSessionsHandler.Update)

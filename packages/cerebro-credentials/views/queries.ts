@@ -144,29 +144,7 @@ export const credentialKeys = {
     ["credentials", wsId, credId, "audit"] as const,
   bindings: (wsId: string, credId: string) =>
     ["credentials", wsId, credId, "bindings"] as const,
-  agentGrants: (agentId: string) =>
-    ["credentials", "agent-grants", agentId] as const,
 };
-
-// ---------------------------------------------------------------------------
-// FIR-1479 per-actor credential grants — the explicit allow/deny an agent holds
-// at the agent layer, edited from the permissions interface credentials column.
-// Lenient schema per API Response Compatibility: setting stays a string so an
-// unknown server enum downgrades instead of throwing.
-// ---------------------------------------------------------------------------
-
-const AgentCredentialGrantSchema = z
-  .object({
-    credential: z.string().default(""),
-    setting: z.string().default(""),
-  })
-  .loose();
-
-const AgentCredentialGrantsSchema = z
-  .object({ grants: z.array(AgentCredentialGrantSchema).default([]) })
-  .loose();
-
-export type AgentCredentialGrant = z.infer<typeof AgentCredentialGrantSchema>;
 
 export function useCredentialsList(wsId: string) {
   return useQuery({
@@ -284,56 +262,6 @@ export function useCredentialAudit(wsId: string, credId: string | null) {
         { endpoint: "GET /api/workspaces/:id/credentials/:credId/audit" },
       );
       return parsed.audit.map(toUIAudit);
-    },
-  });
-}
-
-// useAgentCredentialGrants returns the agent's explicit per-credential settings
-// (agent layer). The endpoint 404s when cerebro_credentials_per_actor is off; the
-// fallback ({} → []) keeps the column empty instead of throwing in that case.
-export function useAgentCredentialGrants(agentId: string) {
-  return useQuery({
-    queryKey: credentialKeys.agentGrants(agentId),
-    enabled: !!agentId,
-    queryFn: async (): Promise<AgentCredentialGrant[]> => {
-      const raw = await api.listAgentCredentialGrants(agentId);
-      const parsed = parseWithFallback<{ grants: AgentCredentialGrant[] }>(
-        raw,
-        AgentCredentialGrantsSchema,
-        { grants: [] },
-        { endpoint: "GET /api/agents/:id/credential-grants" },
-      );
-      return parsed.grants;
-    },
-  });
-}
-
-// useSetAgentCredentialGrant grants (allow by default, or an explicit deny) an
-// agent access to one credential box at the agent layer.
-export function useSetAgentCredentialGrant(agentId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (vars: { credential: string; setting?: "allow" | "deny" }) =>
-      api.setAgentCredentialGrant(agentId, vars),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: credentialKeys.agentGrants(agentId),
-      });
-    },
-  });
-}
-
-// useClearAgentCredentialGrant clears the agent-layer setting for one box so it
-// reverts to the deny-by-default base (no access).
-export function useClearAgentCredentialGrant(agentId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (credential: string) =>
-      api.clearAgentCredentialGrant(agentId, credential),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: credentialKeys.agentGrants(agentId),
-      });
     },
   });
 }

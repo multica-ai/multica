@@ -970,30 +970,6 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(cerebro-agent-credential-grants-client): FIR-1479 per-actor
-  // credential-grant authoring — list, grant, and revoke an agent's explicit
-  // access to a credential box. Mirrors the tool-grant client; the endpoints are
-  // gated server-side by cerebro_credentials_per_actor (404 when off). Callers
-  // schema-validate the list response (see cerebro-credentials queries.ts).
-  async listAgentCredentialGrants<T = unknown>(agentId: string): Promise<T> {
-    return this.fetch<T>(`/api/agents/${agentId}/credential-grants`);
-  }
-  async setAgentCredentialGrant<T = unknown>(
-    agentId: string,
-    body: { credential: string; setting?: "allow" | "deny" },
-  ): Promise<T> {
-    return this.fetch<T>(`/api/agents/${agentId}/credential-grants`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-  async clearAgentCredentialGrant(agentId: string, credential: string): Promise<void> {
-    await this.fetch<void>(`/api/agents/${agentId}/credential-grants`, {
-      method: "DELETE",
-      body: JSON.stringify({ credential }),
-    });
-  }
-
   // CEREBRO-PATCH(cerebro-groups-client): JEH-1006 workspace groups CRUD + member management.
   // Endpoints are mounted by `cerebro-groups-routes` in server/cmd/server/router.go.
   // Server paths are NOT under /api/cerebro/* — they live on the generic
