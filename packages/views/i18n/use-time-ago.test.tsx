@@ -82,17 +82,21 @@ describe("useTimeAgo", () => {
     expect(timeAgo("2026-06-15T12:00:00Z")).toBe("in 3mo"); // +3 calendar months
   });
 
-  it("renders imminent future instants as 'soon' only with soonForFuture", () => {
+  it("renders imminent scheduled runs as 'soon' only with scheduled", () => {
     const plain = renderHook(() => useTimeAgo(), { wrapper: wrapper("en") });
-    // Without the option a sub-minute future instant stays "just now".
+    // Without the option a sub-minute future instant stays "just now" and an
+    // overdue slot reads as relative past.
     expect(plain.result.current("2026-03-15T12:00:30Z")).toBe("just now"); // +30s
+    expect(plain.result.current("2026-03-15T11:55:00Z")).toBe("5m ago"); // -5m
 
-    const soon = renderHook(() => useTimeAgo({ soonForFuture: true }), {
+    const soon = renderHook(() => useTimeAgo({ scheduled: true }), {
       wrapper: wrapper("en"),
     });
+    // Sub-minute-away future → "soon" instead of the direction-less "just now".
     expect(soon.result.current("2026-03-15T12:00:30Z")).toBe("soon"); // +30s
-    // A past sub-minute instant keeps "just now" even with the option.
-    expect(soon.result.current("2026-03-15T11:59:30Z")).toBe("just now"); // -30s
+    // Overdue slot the scheduler hasn't advanced yet → imminent, not "Xm ago".
+    expect(soon.result.current("2026-03-15T11:55:00Z")).toBe("soon"); // -5m
+    expect(soon.result.current("2026-03-15T11:59:30Z")).toBe("soon"); // -30s
   });
 
   it("localizes the labels via the Language setting", () => {

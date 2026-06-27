@@ -10,20 +10,24 @@ import { useT } from "./use-t";
 // "in 3h". Day granularity is calendar-based in the viewer's Viewing Timezone;
 // past the day cap it continues into calendar months, then years — there is no
 // absolute-date fallback.
-// `soonForFuture`: a sub-minute gap buckets to the direction-less "just now"
-// (it absorbs clock skew either way). For a genuinely scheduled future instant
-// — the autopilot next run — that past-tense label reads wrong, so callers can
-// opt into rendering imminent future times as "soon" instead.
-export function useTimeAgo(opts?: { soonForFuture?: boolean }) {
+// `scheduled`: the instant is a scheduled run — the autopilot next run. Render
+// it from the scheduler's view: an already-due slot the scheduler hasn't
+// advanced yet (next_run_at in the past) is imminent, not bygone, so it reads
+// "soon" rather than a misleading "Xm ago"; likewise a sub-minute-away future
+// run reads "soon" instead of the direction-less "just now" (which otherwise
+// absorbs clock skew either way).
+export function useTimeAgo(opts?: { scheduled?: boolean }) {
   const { t } = useT("common");
   const timeZone = useViewingTimezone();
   return (dateStr: string): string => {
     const then = new Date(dateStr).getTime();
     const now = Date.now();
+    // Overdue scheduled slot the scheduler hasn't rolled forward yet → imminent.
+    if (opts?.scheduled && then <= now) return t(($) => $.time.soon);
     const bucket = relativeTimeBucket(then, now, timeZone);
     switch (bucket.kind) {
       case "just_now":
-        return opts?.soonForFuture && then > now
+        return opts?.scheduled && then > now
           ? t(($) => $.time.soon)
           : t(($) => $.time.just_now);
       case "minutes":

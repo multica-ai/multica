@@ -374,11 +374,14 @@ function LastRunCell({ autopilot }: { autopilot: Autopilot }) {
   );
 }
 
-function NextRunCell({ autopilot }: { autopilot: Autopilot }) {
+export function NextRunCell({ autopilot }: { autopilot: Autopilot }) {
   const { t, i18n } = useT("autopilots");
-  // next_run_at is always a scheduled future instant, so render imminent runs
-  // as "soon" rather than the direction-less "just now".
-  const timeAgo = useTimeAgo({ soonForFuture: true });
+  // next_run_at is a scheduled instant; `scheduled` renders imminent runs as
+  // "soon" — both a sub-minute-away future and an overdue slot the scheduler
+  // hasn't advanced yet. A still-past next_run_at would otherwise read "Xm ago",
+  // misreading an about-to-fire run as a previous one; the in-flight run shows
+  // in the Last run column, so this column stays purely about scheduling.
+  const timeAgo = useTimeAgo({ scheduled: true });
   const next = autopilot.next_run_at;
   // A paused autopilot won't fire, so any computed next_run_at is moot — surface
   // the paused state here instead of a misleading countdown. Mirror the amber
