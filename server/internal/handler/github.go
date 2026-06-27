@@ -57,9 +57,9 @@ type GitHubInstallationResponse struct {
 
 type GitHubPullRequestResponse struct {
 	ID string `json:"id"`
-	// Provider is the forge this PR was mirrored from: "github" or "forgejo".
-	// The frontend uses it to pick the host icon and treat the row's check
-	// data appropriately (Forgejo PRs report no checks today).
+	// Provider is the forge this PR was mirrored from: "github", "forgejo",
+	// "gitea", or "gitlab". The frontend uses it to pick the host icon and
+	// label (e.g. GitLab "merge request").
 	Provider        string  `json:"provider"`
 	WorkspaceID     string  `json:"workspace_id"`
 	RepoOwner       string  `json:"repo_owner"`
@@ -578,16 +578,17 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	for _, row := range rows {
 		out = append(out, issuePullRequestRowToResponse(row))
 	}
-	// Forgejo PRs share the same card list. They are stored in their own
-	// tables (no check-suite model), so they merge in here mapped to the same
-	// response shape; the combined list is re-sorted newest-first.
-	fjRows, err := h.Queries.ListForgejoPullRequestsByIssue(r.Context(), issue.ID)
+	// PRs from token-based forges (Forgejo / Gitea / GitLab) share the same
+	// card list. They live in their own provider-tagged tables, so they merge
+	// in here mapped to the same response shape; the combined list is re-sorted
+	// newest-first.
+	vcsRows, err := h.Queries.ListVCSPullRequestsByIssue(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
 		return
 	}
-	for _, row := range fjRows {
-		out = append(out, forgejoPullRequestRowToResponse(row))
+	for _, row := range vcsRows {
+		out = append(out, vcsPullRequestRowToResponse(row))
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].PRCreatedAt > out[j].PRCreatedAt
