@@ -10,7 +10,6 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   SimpleToolPolicyTable,
   ToolPolicyTabs,
-  CredentialVaultPicker,
 } from "@multica/cerebro-tool-policy/views";
 import { AgentToolsCard } from "./components/agent-tools-card";
 
@@ -61,12 +60,6 @@ export function CerebroToolsTab({
   // stays the explicit power-view: when its flag is on it wins, so turning
   // cerebro_tool_policy back on restores the full Effective chain.
   const simpleToolPolicy = useFeatureFlag("cerebro_simple_tool_policy");
-  // FIR-1739 v1: when on, append the credential vault-picker below the tools
-  // content. It authors credential access as an ordinary Permissions rule
-  // (credential.reveal Allow on agentvault-vault:<name>, agent layer) — the rule
-  // the Agent Vault connector enforces — replacing the two former standalone
-  // panels (agentvault-access-panel + agent-credential-grants-panel).
-  const agentVault = useFeatureFlag("cerebro_agent_vault");
 
   const { data: runtimes = [] } = useQuery({
     queryKey: runtimeListKey(wsId),
@@ -112,21 +105,5 @@ export function CerebroToolsTab({
     );
   }
 
-  if (!agentVault) {
-    return content;
-  }
-  return (
-    <div className="flex flex-col gap-6">
-      {content}
-      <section className="flex flex-col gap-3">
-        <h3 className="text-sm font-medium">Credentials</h3>
-        <CredentialVaultPicker
-          wsId={wsId}
-          agentId={agent.id}
-          runtimeId={agent.runtime_id}
-          userId={agent.owner_id}
-        />
-      </section>
-    </div>
-  );
+  return content;
 }
