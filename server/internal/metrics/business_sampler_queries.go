@@ -107,14 +107,16 @@ func (c *BusinessSamplerCollector) queryTaskQueued(
 	const stmt = `
 SELECT
   CASE
-    WHEN chat_session_id IS NOT NULL THEN 'chat'
-    WHEN autopilot_run_id IS NOT NULL THEN 'autopilot'
-    WHEN issue_id IS NOT NULL THEN 'issue'
+    WHEN atq.chat_session_id IS NOT NULL THEN 'chat'
+    WHEN atq.autopilot_run_id IS NOT NULL THEN 'autopilot'
+    WHEN i.origin_type = 'autopilot' THEN 'autopilot_issue'
+    WHEN atq.issue_id IS NOT NULL THEN 'issue'
     ELSE 'other'
   END AS source,
   count(*) AS n
-FROM agent_task_queue
-WHERE status = 'queued'
+FROM agent_task_queue atq
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE atq.status = 'queued'
 GROUP BY 1
 LIMIT 100
 `
@@ -158,6 +160,7 @@ SELECT
   CASE
     WHEN atq.chat_session_id IS NOT NULL THEN 'chat'
     WHEN atq.autopilot_run_id IS NOT NULL THEN 'autopilot'
+    WHEN i.origin_type = 'autopilot' THEN 'autopilot_issue'
     WHEN atq.issue_id IS NOT NULL THEN 'issue'
     ELSE 'other'
   END AS source,
@@ -165,6 +168,7 @@ SELECT
   count(*) AS n
 FROM in_flight atq
 LEFT JOIN agent_runtime ar ON ar.id = atq.runtime_id
+LEFT JOIN issue i ON i.id = atq.issue_id
 GROUP BY 1, 2
 LIMIT 100
 `
@@ -196,16 +200,18 @@ func (c *BusinessSamplerCollector) queryTaskStuck(
 	stmt := `
 SELECT
   CASE
-    WHEN chat_session_id IS NOT NULL THEN 'chat'
-    WHEN autopilot_run_id IS NOT NULL THEN 'autopilot'
-    WHEN issue_id IS NOT NULL THEN 'issue'
+    WHEN atq.chat_session_id IS NOT NULL THEN 'chat'
+    WHEN atq.autopilot_run_id IS NOT NULL THEN 'autopilot'
+    WHEN i.origin_type = 'autopilot' THEN 'autopilot_issue'
+    WHEN atq.issue_id IS NOT NULL THEN 'issue'
     ELSE 'other'
   END AS source,
   count(*) AS n
-FROM agent_task_queue
-WHERE status = 'running'
-  AND started_at IS NOT NULL
-  AND started_at < now() - interval '` + stuckRunningInterval + `'
+FROM agent_task_queue atq
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE atq.status = 'running'
+  AND atq.started_at IS NOT NULL
+  AND atq.started_at < now() - interval '` + stuckRunningInterval + `'
 GROUP BY 1
 LIMIT 100
 `

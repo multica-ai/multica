@@ -47,11 +47,17 @@ func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *
 // It creates a run and either creates an issue or enqueues a direct agent task
 // depending on execution_mode.
 //
-// Before any work is queued we run an admission check against the assignee
-// agent's runtime: if it is not online, we record a `skipped` run with a
-// failure_reason and return without enqueueing. This is the "触发时准入" gate
-// from MUL-1899 — without it a paused laptop / offline daemon causes scheduled
-// autopilots to pile thousands of doomed tasks onto agent_task_queue.
+// Before run_only work is queued we run an admission check against the
+// assignee agent's runtime: if it is not online, we record a `skipped` run
+// with a failure_reason and return without enqueueing. This is the "触发时准入"
+// gate from MUL-1899 — without it a paused laptop / offline daemon causes
+// scheduled autopilots to pile thousands of invisible doomed direct tasks onto
+// agent_task_queue.
+//
+// create_issue dispatch still uses the same admission path for hard-invalid
+// assignees (missing / archived / no runtime / inaccessible private leader),
+// but it allows an offline runtime through so the visible issue and queued task
+// exist for delayed claim when the runtime comes back online.
 //
 // When assignee_type='squad' the gate runs against the squad leader (Path A
 // from MUL-2429: Autopilot-on-squad ≈ Autopilot-on-leader), so an offline or
@@ -158,14 +164,11 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 //   - It is in a terminal state (completed / failed / skipped). Nothing
 //     more to do downstream; the caller can return it as-is.
 //
-//   - It is in-flight in a state whose downstream side effect is
-//     observable:
+//   - It is issue_created with a valid issue_id — the issue exists and the
+//     issue-event listener owns task creation from here.
 //
-//     * issue_created with a valid issue_id — the issue exists and
-//       the issue-event listener owns task creation from here.
-//
-//     * running with a valid task_id — the task is queued, the
-//       listener will close the run when the task terminates.
+//   - It is running with a valid task_id — the task is queued, and the
+//     listener will close the run when the task terminates.
 //
 // Anything else — most importantly issue_created/running with NULL
 // issue_id/task_id, or the brief 'pending' state — is a partial run:
@@ -197,7 +200,8 @@ func (s *AutopilotService) dispatchAutopilot(
 	payload []byte,
 	plannedAt pgtype.Timestamptz,
 ) (*db.AutopilotRun, error) {
-	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
+	allowOfflineRuntime := autopilot.ExecutionMode == "create_issue"
+	if reason, skip := s.shouldSkipDispatch(ctx, autopilot, allowOfflineRuntime); skip {
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, reason)
 	}
 
@@ -809,7 +813,10 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 // Returns (reason, true) when dispatching now would only enqueue a doomed
 // task — i.e. the assignee (or, for squad autopilots, the squad leader) is
 // gone, archived, has no runtime bound, or its runtime is not currently
-// online. Returns ("", false) on the happy path.
+// online. For create_issue callers, allowOfflineRuntime=true lets runtime
+// offline/starting states through while still rejecting hard-invalid assignees:
+// the resulting issue is visible durable work, and the queued task can be
+// claimed when the runtime returns. Returns ("", false) on the happy path.
 //
 // Errors are split into two classes:
 //   - pgx.ErrNoRows / errSquadArchived (the row truly doesn't exist or is
@@ -820,7 +827,7 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 //     scheduled run. Migration 096 removed the agent FK on autopilot, so an
 //     agent assignee being missing is now a real condition the gate must
 //     handle (previously cascade-deleted).
-func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot) (string, bool) {
+func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot, allowOfflineRuntime bool) (string, bool) {
 	if !ap.AssigneeID.Valid {
 		return "autopilot has no assignee", true
 	}
@@ -868,6 +875,9 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 		return "", false
 	}
 	if !ready {
+		if allowOfflineRuntime && strings.HasPrefix(reason, "agent runtime is ") {
+			return "", false
+		}
 		return formatAdmissionReason(ap, reason), true
 	}
 	// Private-agent gate at the autopilot layer. Caller identity = the

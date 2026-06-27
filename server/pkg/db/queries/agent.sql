@@ -516,11 +516,17 @@ RETURNING *;
 -- name: ExpireStaleQueuedTasks :many
 -- Fails tasks that have been sitting in 'queued' for longer than the TTL.
 -- This is the cleanup arm of the MUL-1899 "queued backlog" fix: even with the
--- new dispatch-time admission gate that refuses to enqueue when the runtime
--- is offline, we still need to drain the historical 87k+ doomed rows and
--- handle edge cases where a runtime goes offline AFTER a task is already
+-- run_only dispatch-time admission gate that refuses to enqueue when the
+-- runtime is offline, we still need to drain the historical 87k+ doomed rows
+-- and handle edge cases where a runtime goes offline AFTER a task is already
 -- queued (the admission check protects new enqueues, not in-flight queue
 -- depth).
+--
+-- create_issue autopilots are intentionally excluded. Their issue row is the
+-- durable audit artifact, and the linked queued task is the delayed-claim path
+-- for employee machines that come back online hours later. Expiring those rows
+-- would recreate the silent daily-report loss in a different form: the issue
+-- would remain, but no runtime could claim it without manual recreation.
 --
 -- Concurrency safety: the daemon's claim path may race with this sweeper to
 -- transition the same row out of 'queued'. We protect against that two
@@ -537,10 +543,15 @@ RETURNING *;
 -- the DB when the backlog is large — the sweeper drains the rest on
 -- subsequent ticks.
 WITH victims AS (
-    SELECT id FROM agent_task_queue
-    WHERE status = 'queued'
-      AND created_at < now() - make_interval(secs => @ttl_secs::double precision)
-    ORDER BY created_at ASC
+    SELECT t.id FROM agent_task_queue t
+    WHERE t.status = 'queued'
+      AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
+      AND NOT EXISTS (
+        SELECT 1 FROM issue i
+        WHERE i.id = t.issue_id
+          AND i.origin_type = 'autopilot'
+      )
+    ORDER BY t.created_at ASC
     LIMIT @max_per_tick::int
     FOR UPDATE SKIP LOCKED
 )
@@ -554,6 +565,11 @@ FROM victims v
 WHERE t.id = v.id
   AND t.status = 'queued'
   AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
+  AND NOT EXISTS (
+    SELECT 1 FROM issue i
+    WHERE i.id = t.issue_id
+      AND i.origin_type = 'autopilot'
+  )
 RETURNING t.*;
 
 -- name: CancelAgentTask :one

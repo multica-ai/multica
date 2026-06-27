@@ -528,7 +528,10 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 		t.Fatalf("failed to find test agent: %v", err)
 	}
 
-	// One ancient queued task (should expire) and one fresh queued task (should not).
+	// One ancient queued task (should expire), one fresh queued task (should
+	// not), and one ancient autopilot-created issue task (should stay queued
+	// so an offline create_issue autopilot remains claimable when its runtime
+	// returns).
 	// Constraint: idx_one_pending_task_per_issue_agent → use distinct issues.
 	mkIssue := func(label string) string {
 		var issueID string
@@ -548,12 +551,34 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	}
 	oldIssueID := mkIssue("Queued TTL test (old)")
 	freshIssueID := mkIssue("Queued TTL test (fresh)")
+	autopilotIssueID := mkIssue("Queued TTL test (autopilot issue)")
+	var autopilotID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (
+			workspace_id, title, assignee_type, assignee_id, status,
+			execution_mode, issue_title_template, created_by_type, created_by_id
+		)
+		SELECT $1, 'Queued TTL test autopilot', 'agent', $2, 'active',
+			'create_issue', 'Queued TTL test autopilot', 'member', m.user_id
+		FROM member m WHERE m.workspace_id = $1 LIMIT 1
+		RETURNING id
+	`, testWorkspaceID, agentID).Scan(&autopilotID); err != nil {
+		t.Fatalf("failed to create autopilot: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue
+		SET origin_type = 'autopilot', origin_id = $2
+		WHERE id = $1
+	`, autopilotIssueID, autopilotID); err != nil {
+		t.Fatalf("failed to stamp autopilot issue origin: %v", err)
+	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`, oldIssueID, freshIssueID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id IN ($1, $2)`, oldIssueID, freshIssueID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2, $3)`, oldIssueID, freshIssueID, autopilotIssueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id IN ($1, $2, $3)`, oldIssueID, freshIssueID, autopilotIssueID)
+		testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 	})
 
-	var oldTaskID, freshTaskID string
+	var oldTaskID, freshTaskID, autopilotTaskID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
 		VALUES ($1, $2, $3, 'queued', 0, now() - interval '5 hours')
@@ -567,6 +592,13 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 		RETURNING id
 	`, agentID, runtimeID, freshIssueID).Scan(&freshTaskID); err != nil {
 		t.Fatalf("failed to insert fresh queued task: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		VALUES ($1, $2, $3, 'queued', 0, now() - interval '5 hours')
+		RETURNING id
+	`, agentID, runtimeID, autopilotIssueID).Scan(&autopilotTaskID); err != nil {
+		t.Fatalf("failed to insert autopilot queued task: %v", err)
 	}
 
 	queries := db.New(testPool)
@@ -610,6 +642,16 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	}
 	if freshStatus != "queued" {
 		t.Fatalf("fresh task: expected status=queued, got %q", freshStatus)
+	}
+
+	var autopilotStatus string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status FROM agent_task_queue WHERE id = $1
+	`, autopilotTaskID).Scan(&autopilotStatus); err != nil {
+		t.Fatalf("failed to read autopilot task: %v", err)
+	}
+	if autopilotStatus != "queued" {
+		t.Fatalf("autopilot issue task: expected status=queued, got %q", autopilotStatus)
 	}
 }
 

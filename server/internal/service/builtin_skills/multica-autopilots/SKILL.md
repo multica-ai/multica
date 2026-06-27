@@ -23,13 +23,17 @@ Do not run `trigger`, `delete`, `trigger-delete`, or `trigger-rotate-url` to tes
 
 An autopilot is not an agent. It is a rule that dispatches work to an agent, or to a squad's leader agent.
 
-The chain is: trigger fires (`schedule`, `webhook`, or `manual`) -> `autopilot_run` row -> `execution_mode` decides output -> assignee readiness check -> issue/task execution -> run status sync.
+The chain is: trigger fires (`schedule`, `webhook`, or `manual`) -> admission check -> `autopilot_run` row -> `execution_mode` decides output -> issue/task execution -> run status sync.
 
 Execution modes:
 
 - `create_issue` creates a Multica issue, making the run visible as issue state.
+  It still rejects hard-invalid assignees, but an offline runtime is allowed so
+  the assigned issue/task can wait for the runtime to come back online.
 - `run_only` creates an agent task directly. No issue is created; any durable
-  report location has to come from other task context or instructions.
+  report location has to come from other task context or instructions. Because
+  it has no issue artifact, `run_only` is skipped when the target runtime is
+  offline at dispatch time.
 
 `issue-title-template` only supports `{{date}}`. Do not invent `{{trigger_id}}`, `{{branch}}`, or other variables.
 
