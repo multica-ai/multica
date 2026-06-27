@@ -59,6 +59,7 @@ function LoginPageContent() {
   const qc = useQueryClient();
   const { t } = useT("auth");
   const googleClientId = useConfigStore((state) => state.googleClientId);
+  const gitLabEnabled = useConfigStore((state) => state.gitLabEnabled);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -209,6 +210,9 @@ function LoginPageContent() {
           : undefined
       }
       onTokenObtained={setLoggedInCookie}
+      onGitLabLogin={
+        gitLabEnabled ? () => { window.location.href = "/auth/gitlab"; } : undefined
+      }
       extra={
         <span className="text-xs text-muted-foreground">
           {t(($) => $.web.prefer_desktop)}{" "}

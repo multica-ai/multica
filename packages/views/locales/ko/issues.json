@@ -493,5 +493,16 @@
     "row_backlog_hint": "에이전트를 대기 상태로 유지",
     "row_todo_label": "할 일",
     "row_todo_hint": "에이전트 시작"
+  },
+  "merge_requests": {
+    "title": "병합 요청",
+    "show_more": "{{count}}개 더 보기",
+    "show_less": "접기",
+    "state": {
+      "open": "열림",
+      "merged": "병합됨",
+      "closed": "닫힘",
+      "locked": "잠김"
+    }
   }
 }

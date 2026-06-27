@@ -475,5 +475,16 @@
     "row_backlog_hint": "エージェントを一時停止のままにします",
     "row_todo_label": "未着手",
     "row_todo_hint": "エージェントを開始します"
+  },
+  "merge_requests": {
+    "title": "マージリクエスト",
+    "show_more": "さらに {{count}} 件を表示",
+    "show_less": "折りたたむ",
+    "state": {
+      "open": "オープン",
+      "merged": "マージ済み",
+      "closed": "クローズ済み",
+      "locked": "ロック済み"
+    }
   }
 }

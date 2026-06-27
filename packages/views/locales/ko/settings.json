@@ -33,6 +33,7 @@
       "general": "일반",
       "repositories": "저장소",
       "github": "GitHub",
+      "gitlab": "GitLab",
       "integrations": "연동",
       "labs": "실험실",
       "members": "멤버"
@@ -258,6 +259,18 @@
       "check_now": "지금 확인",
       "checking": "확인 중..."
     }
+  },
+  "gitlab": {
+    "title": "GitLab",
+    "description": "GitLab 네임스페이스를 연결하여 이슈에서 병합 요청을 추적하세요.",
+    "connect": "GitLab 연결",
+    "connected_as": "{{namespace}}(으)로 연결됨",
+    "disconnect": "연결 해제",
+    "disconnect_confirm_title": "GitLab 연결을 해제하시겠습니까?",
+    "disconnect_confirm_description": "기존 MR 링크는 유지되지만 새 이벤트는 처리되지 않습니다.",
+    "disconnect_confirm_cancel": "취소",
+    "disconnect_confirm_action": "연결 해제",
+    "not_configured": "이 서버에는 GitLab 통합이 구성되어 있지 않습니다."
   },
   "members": {
     "section_title": "멤버 ({{count}})",

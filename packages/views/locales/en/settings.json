@@ -33,6 +33,7 @@
       "general": "General",
       "repositories": "Repositories",
       "github": "GitHub",
+      "gitlab": "GitLab",
       "integrations": "Integrations",
       "labs": "Labs",
       "members": "Members"
@@ -333,6 +334,18 @@
       "check_now": "Check now",
       "checking": "Checking…"
     }
+  },
+  "gitlab": {
+    "title": "GitLab",
+    "description": "Connect your GitLab namespace to track merge requests on issues.",
+    "connect": "Connect GitLab",
+    "connected_as": "Connected as {{namespace}}",
+    "disconnect": "Disconnect",
+    "disconnect_confirm_title": "Disconnect GitLab?",
+    "disconnect_confirm_description": "Existing MR links will remain but new events will not be processed.",
+    "disconnect_confirm_cancel": "Cancel",
+    "disconnect_confirm_action": "Disconnect",
+    "not_configured": "GitLab integration is not configured on this server."
   },
   "members": {
     "section_title": "Members ({{count}})",
