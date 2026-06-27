@@ -334,6 +334,8 @@ export function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
   qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
   qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+  // CEREBRO-PATCH(reconnect-wakeup-invalidate): FIR-1677 — the inbox wakeup list has its own top-level key, missed by the wsId sweep.
+  if (wsId) qc.invalidateQueries({ queryKey: ["cerebro-inbox-wakeups", wsId] });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
@@ -346,9 +348,12 @@ export function invalidateTaskLifecycleQueries(
   qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
   qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+  qc.invalidateQueries({ queryKey: inboxKeys.activeIssueTasks(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
   invalidateSquadMemberStatusQueries(qc, wsId);
   qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreviewAll() });
+  // CEREBRO-PATCH(inbox-wakeup-realtime): FIR-1677 — a finishing agent usually schedules its next wakeup in the same turn; refresh the inbox wakeup list so the row moves to Running instead of dropping to Waiting.
+  qc.invalidateQueries({ queryKey: ["cerebro-inbox-wakeups", wsId] });
 }
 
 function invalidateSquadMemberStatusQueries(qc: QueryClient, wsId: string): void {
