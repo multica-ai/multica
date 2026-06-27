@@ -114,6 +114,9 @@ import type {
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
+  ListForgejoConnectionsResponse,
+  ConnectForgejoRequest,
+  ConnectForgejoResponse,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
@@ -2408,6 +2411,27 @@ export class ApiClient {
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
     return this.fetch(`/api/issues/${issueId}/pull-requests`);
+  }
+
+  // Forgejo integration
+  async listForgejoConnections(workspaceId: string): Promise<ListForgejoConnectionsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/forgejo/connections`);
+  }
+
+  async connectForgejo(
+    workspaceId: string,
+    body: ConnectForgejoRequest,
+  ): Promise<ConnectForgejoResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/forgejo/connections`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteForgejoConnection(workspaceId: string, connectionId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/forgejo/connections/${connectionId}`, {
+      method: "DELETE",
+    });
   }
 
   // Lark integration

@@ -121,6 +121,12 @@ export type {
   GitHubConnectResponse,
 } from "./github";
 export type {
+  ForgejoConnection,
+  ListForgejoConnectionsResponse,
+  ConnectForgejoRequest,
+  ConnectForgejoResponse,
+} from "./forgejo";
+export type {
   LarkInstallation,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,

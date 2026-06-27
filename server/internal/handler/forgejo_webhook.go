@@ -175,7 +175,13 @@ func (h *Handler) handleForgejoPullRequestEvent(ctx context.Context, conn db.For
 	for _, c := range extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body) {
 		closingIdents[c] = struct{}{}
 	}
-	preserveCloseIntent := p.Action != "closed" && (state == "merged" || state == "closed")
+	// Once a terminal event has been delivered, later edits must not rewrite
+	// the merge-time close decision. Forgejo delivers the terminal event as
+	// action "closed" (with pull_request.merged distinguishing merge from
+	// plain close); some versions also emit "merged", so treat both as
+	// terminal to avoid freezing close_intent one event too early.
+	terminalAction := p.Action == "closed" || p.Action == "merged"
+	preserveCloseIntent := !terminalAction && (state == "merged" || state == "closed")
 	prefix := h.getIssuePrefix(ctx, conn.WorkspaceID)
 	reevalIssues := make([]db.Issue, 0, len(idents))
 	for _, id := range idents {
