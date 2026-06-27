@@ -104,6 +104,10 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
 	signalTaskWakeup(taskWakeups, "")
+	// WS ack state was cleared on the prior connection's teardown; send HTTP
+	// heartbeats immediately so the server sees liveness without waiting for
+	// the next heartbeatLoop tick (up to HeartbeatInterval).
+	d.kickHeartbeatsAfterWSReconnect(ctx, runtimeIDs)
 
 	// Serialize all writes through a single channel: the gorilla/websocket
 	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
@@ -322,6 +326,23 @@ func signalTaskWakeup(taskWakeups chan<- taskWakeup, runtimeID string) {
 	select {
 	case taskWakeups <- taskWakeup{runtimeID: runtimeID}:
 	default:
+	}
+}
+
+// kickHeartbeatsAfterWSReconnect sends one immediate HTTP heartbeat per
+// runtime after the task-wakeup WebSocket (re)connects. The prior connection's
+// defer clearWSHeartbeatAcks() drops WS freshness marks, but the HTTP
+// heartbeat loop only fires on its periodic ticker — so without this kick
+// the server may not observe liveness for up to HeartbeatInterval after
+// reconnect. That widens the window where server-side task state changes
+// (e.g. cancellation during a disconnect) are visible only via the slower
+// handleTask status poll.
+func (d *Daemon) kickHeartbeatsAfterWSReconnect(ctx context.Context, runtimeIDs []string) {
+	for _, rid := range runtimeIDs {
+		if ctx.Err() != nil {
+			return
+		}
+		d.runHeartbeatTick(ctx, rid)
 	}
 }
 

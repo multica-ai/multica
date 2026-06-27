@@ -1,7 +1,12 @@
 package daemon
 
 import (
+	"context"
+	"encoding/json"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -43,6 +48,36 @@ func TestTaskWakeupURL(t *testing.T) {
 				t.Fatalf("taskWakeupURL() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestKickHeartbeatsAfterWSReconnect verifies that reconnect triggers an
+// immediate HTTP heartbeat when WS freshness marks were cleared.
+func TestKickHeartbeatsAfterWSReconnect(t *testing.T) {
+	var calls atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/heartbeat", func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	d := New(Config{HeartbeatInterval: 15 * time.Second}, slog.Default())
+	d.client = NewClient(srv.URL)
+
+	d.kickHeartbeatsAfterWSReconnect(context.Background(), []string{"rt-1", "rt-2"})
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("expected 2 immediate heartbeats, got %d", got)
+	}
+
+	// When WS recently acked, runHeartbeatTick is a no-op for HTTP.
+	d.recordWSHeartbeatAck("rt-1")
+	calls.Store(0)
+	d.kickHeartbeatsAfterWSReconnect(context.Background(), []string{"rt-1", "rt-2"})
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("expected 1 HTTP heartbeat (rt-2 only), got %d", got)
 	}
 }
 
