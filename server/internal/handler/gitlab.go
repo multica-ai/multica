@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -439,6 +440,9 @@ func (h *Handler) ListGitLabConnections(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	member, _ := middleware.MemberFromContext(r.Context())
+	canManage := roleAllowed(member.Role, "owner", "admin")
+
 	conns, err := h.Queries.ListGitLabConnectionsByWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list connections")
@@ -451,7 +455,7 @@ func (h *Handler) ListGitLabConnections(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, ListGitLabConnectionsResponse{
 		Connections: resp,
 		Configured:  isGitLabConfigured(),
-		CanManage:   true, // caller already passed admin middleware
+		CanManage:   canManage,
 	})
 }
 
@@ -551,9 +555,9 @@ func gitlabFetchUser(ctx context.Context, token string) (gitlabUserInfo, error) 
 	}, nil
 }
 
-// ListMergeRequestsForIssue (GET /api/issues/{issueId}/merge-requests)
+// ListMergeRequestsForIssue (GET /api/issues/{id}/merge-requests)
 func (h *Handler) ListMergeRequestsForIssue(w http.ResponseWriter, r *http.Request) {
-	issueID := chi.URLParam(r, "issueId")
+	issueID := chi.URLParam(r, "id")
 	issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue id")
 	if !ok {
 		return
