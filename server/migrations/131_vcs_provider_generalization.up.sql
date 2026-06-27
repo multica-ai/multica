@@ -1,12 +1,12 @@
 -- Generalize the Forgejo-only tables into a provider-tagged set shared by all
--- token-based Git forges (Forgejo, Gitea, GitLab). GitHub keeps its own tables
+-- token-based Git providers (Forgejo, Gitea, GitLab). GitHub keeps its own tables
 -- (App installations + check suites are too different). The forgejo_* tables
 -- were introduced in 128-130 and carry no production data that predates this,
 -- so a rename + provider column is safe.
 --
 -- vcs_commit_status.state now stores the NORMALIZED vocabulary
 -- (passed | failed | pending) produced by the provider adapters, rather than a
--- raw forge-specific status, so the aggregation query is provider-independent.
+-- raw provider-specific status, so the aggregation query is provider-independent.
 
 ALTER TABLE forgejo_connection RENAME TO vcs_connection;
 ALTER TABLE vcs_connection

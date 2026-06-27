@@ -1,11 +1,11 @@
-// Package vcs is the provider abstraction for token-based Git forges that
+// Package vcs is the provider abstraction for token-based Git providers that
 // Multica mirrors pull requests and CI status from: Forgejo, Gitea (Forgejo's
 // upstream, wire-identical), and GitLab. GitHub is intentionally NOT a vcs
 // provider — its App/installation model and check_suite CI differ enough that
 // it keeps its own handler (server/internal/handler/github.go).
 //
 // Each provider only contributes the parts that actually differ between
-// forges: how a webhook is authenticated, how its event/payload shapes map to
+// providers: how a webhook is authenticated, how its event/payload shapes map to
 // the normalized PR/CI structs below, and how a token is validated. The shared
 // storage, issue auto-link / auto-close, and broadcast logic live once in the
 // handler layer and consume the normalized types.
@@ -107,7 +107,7 @@ type Account struct {
 	Login string
 }
 
-// Provider is the per-forge adapter. Implementations are stateless and cheap
+// Provider is the per-provider adapter. Implementations are stateless and cheap
 // to construct; the registry holds one instance per kind.
 type Provider interface {
 	Kind() Kind

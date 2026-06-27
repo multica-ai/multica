@@ -1,16 +1,16 @@
 ---
-title: Self-hosted Git forges
+title: Self-hosted Git providers
 description: Connect a self-hosted Forgejo, Gitea, or GitLab instance per workspace so pull/merge requests that reference an issue identifier auto-attach to that issue, move it to Done on merge, and show CI status.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica connects to a self-hosted Git forge per workspace: **Forgejo**, **Gitea**, or **GitLab**. Once connected, any pull request (GitLab: merge request) whose branch name, title, or body contains an issue identifier (for example `MUL-123`) is **auto-linked** to that [issue](/issues), appears under **Pull requests** in the issue sidebar, and — when merged with a closing keyword — moves the issue to **Done**. CI for the head commit shows as a checks bar on the card.
+Multica connects to a self-hosted Git provider per workspace: **Forgejo**, **Gitea**, or **GitLab**. Once connected, any pull request (GitLab: merge request) whose branch name, title, or body contains an issue identifier (for example `MUL-123`) is **auto-linked** to that [issue](/issues), appears under **Pull requests** in the issue sidebar, and — when merged with a closing keyword — moves the issue to **Done**. CI for the head commit shows as a checks bar on the card.
 
-These forges run alongside GitHub: a workspace can use any combination.
+These providers run alongside GitHub: a workspace can use any combination.
 
 <Callout type="info">
-Unlike GitHub, these forges have no "App" model. Each workspace stores its own instance URL plus an access token, and registers a webhook on its repository or organisation. The token and webhook secret are encrypted at rest.
+Unlike GitHub, these providers have no "App" model. Each workspace stores its own instance URL plus an access token, and registers a webhook on its repository or organisation. The token and webhook secret are encrypted at rest.
 </Callout>
 
 ## Prerequisites (server)
@@ -29,10 +29,10 @@ Set `MULTICA_PUBLIC_URL` to the server's public base URL so Multica can show a r
 
 ## Connect a workspace
 
-1. Create an access token in your forge with read access to the repositories you want mirrored:
+1. Create an access token in your provider with read access to the repositories you want mirrored:
    - **Forgejo / Gitea**: Settings → Applications.
    - **GitLab**: a personal (or group/project) access token with the `read_api` scope.
-2. In Multica, open **Settings → Integrations → Git forges**.
+2. In Multica, open **Settings → Integrations → Git providers**.
 3. Choose the **provider**, enter the instance URL (for example `https://forgejo.example.com`) and the access token, then **Connect**. Multica validates the token against the instance before saving.
 4. Copy the **webhook URL** and **webhook secret** shown after connecting.
 
@@ -61,10 +61,10 @@ Multica authenticates every delivery against the stored secret, so a webhook wit
 
 ## What gets mirrored
 
-- **Pull / merge requests** — open, closed, merged, and draft state, author, branch, and (where the forge provides them) diff stats.
+- **Pull / merge requests** — open, closed, merged, and draft state, author, branch, and (where the provider supplies them) diff stats.
 - **Issue links** — identifiers in the title, body, or branch link the PR to the issue. A closing keyword (`Closes`/`Fixes`/`Resolves MUL-123`) on a merged PR moves the issue to **Done** once no linked PR is still open.
 - **CI** — Forgejo/Gitea commit statuses and GitLab pipelines aggregate into a passed/failed/pending checks bar for the head commit.
 
 ## Agents opening pull requests
 
-Creating PRs needs no forge configuration in Multica. Agents check out repositories in the runtime and push branches and open PRs using the runtime host's own Git credentials. To let agents work against a forge, ensure the daemon host can authenticate to it — for example an SSH deploy key, or a token in the host's Git credential helper — and add the repository URL as usual. Repository checkout works with any Git URL, so no provider-specific wiring is required.
+Creating PRs needs no provider configuration in Multica. Agents check out repositories in the runtime and push branches and open PRs using the runtime host's own Git credentials. To let agents work against a provider, ensure the daemon host can authenticate to it — for example an SSH deploy key, or a token in the host's Git credential helper — and add the repository URL as usual. Repository checkout works with any Git URL, so no provider-specific wiring is required.

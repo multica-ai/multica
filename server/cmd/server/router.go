@@ -568,7 +568,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 
 	// VCS at-rest encryption: the box encrypts per-workspace access tokens and
-	// webhook secrets for token-based forges (Forgejo / Gitea / GitLab).
+	// webhook secrets for token-based providers (Forgejo / Gitea / GitLab).
 	// Without it, connect/webhook handlers return 503 (so a misconfigured
 	// self-host never stores plaintext secrets).
 	if vcsKey, err := secretbox.LoadKey("MULTICA_VCS_SECRET_KEY"); err == nil {
@@ -716,7 +716,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// browser redirect; the workspace/agent/initiator are recovered from the
 	// sealed state). It exchanges the code, upserts the install, then bounces
 	// the browser back to Settings → Integrations.
-	// VCS webhook for token-based forges (Forgejo / Gitea / GitLab). No Multica
+	// VCS webhook for token-based providers (Forgejo / Gitea / GitLab). No Multica
 	// auth — authenticated per-connection by the provider's signature scheme;
 	// the connection id in the path selects the workspace, provider, and
 	// decryption secret.

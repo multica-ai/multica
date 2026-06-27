@@ -20,7 +20,7 @@ import (
 
 // ── Response shapes ─────────────────────────────────────────────────────────
 
-// VCSConnectionResponse is the JSON shape for a stored Git-forge connection.
+// VCSConnectionResponse is the JSON shape for a stored Git provider connection.
 // Secrets are never included; the webhook secret is returned exactly once at
 // create time via VCSConnectResponse.
 type VCSConnectionResponse struct {
@@ -35,7 +35,7 @@ type VCSConnectionResponse struct {
 }
 
 // VCSConnectResponse embeds the stored connection plus the one-time plaintext
-// webhook secret the user must paste into the forge (the HMAC secret for
+// webhook secret the user must paste into the provider (the HMAC secret for
 // Forgejo/Gitea, the X-Gitlab-Token value for GitLab). Not retrievable after.
 type VCSConnectResponse struct {
 	VCSConnectionResponse
@@ -129,7 +129,7 @@ type connectVCSRequest struct {
 }
 
 // ConnectVCS (POST /workspaces/{id}/vcs/connections) validates the supplied
-// instance URL + token against the live forge for the chosen provider, mints a
+// instance URL + token against the live instance for the chosen provider, mints a
 // webhook secret, stores both secrets encrypted, and returns the connection
 // plus the one-time webhook secret. Reconnecting the same instance rotates it.
 func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
@@ -168,10 +168,10 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 	account, err := provider.ValidateToken(r.Context(), instanceURL, token)
 	if err != nil {
 		if errors.Is(err, vcs.ErrUnauthorized) {
-			writeError(w, http.StatusBadRequest, "the forge rejected the access token")
+			writeError(w, http.StatusBadRequest, "the provider rejected the access token")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "could not reach the forge instance")
+		writeError(w, http.StatusBadGateway, "could not reach the provider instance")
 		return
 	}
 

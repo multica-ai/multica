@@ -1,8 +1,8 @@
 /**
- * Token-based Git forge integration types (Forgejo, Gitea, GitLab). Unlike
+ * Token-based Git provider integration types (Forgejo, Gitea, GitLab). Unlike
  * GitHub there is no App/installation model: each workspace stores a
- * token-based connection to a forge instance. Pull requests mirrored from any
- * of these forges surface through the shared GitHubPullRequest shape, tagged
+ * token-based connection to a provider instance. Pull requests mirrored from any
+ * of these providers surface through the shared GitHubPullRequest shape, tagged
  * with the matching `provider`.
  */
 
@@ -16,7 +16,7 @@ export interface VCSConnection {
   instance_url: string;
   /** Login (user or org) the stored access token authenticates as. */
   account_login: string;
-  /** Absolute webhook endpoint to register on the forge. Empty when the server
+  /** Absolute webhook endpoint to register on the provider. Empty when the server
    * has no public URL configured; the UI then prefixes `webhook_path`. */
   webhook_url: string;
   webhook_path: string;
@@ -39,7 +39,7 @@ export interface ConnectVCSRequest {
 }
 
 export interface ConnectVCSResponse extends VCSConnection {
-  /** One-time plaintext webhook secret to paste into the forge (HMAC secret
+  /** One-time plaintext webhook secret to paste into the provider (HMAC secret
    * for Forgejo/Gitea, X-Gitlab-Token value for GitLab). Not retrievable
    * afterwards (stored encrypted); reconnecting rotates it. */
   webhook_secret: string;

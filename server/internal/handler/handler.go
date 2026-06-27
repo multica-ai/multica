@@ -210,7 +210,6 @@ type Handler struct {
 	// unless Slack is configured; GetChatChannelHistory then reports "no channel
 	// integration". A future platform satisfies the same reader interface.
 	SlackHistory ChatChannelHistoryReader
-<<<<<<< HEAD
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in
@@ -218,7 +217,7 @@ type Handler struct {
 	// Config); when unconfigured its Enabled() reports false and callers fall
 	// back silently.
 	LLM *llm.Client
-	// VCSSecretBox encrypts/decrypts per-workspace Git-forge access tokens and
+	// VCSSecretBox encrypts/decrypts per-workspace Git provider access tokens and
 	// webhook secrets at rest (Forgejo / Gitea / GitLab). Nil when
 	// MULTICA_VCS_SECRET_KEY is unset; the connect/webhook handlers return 503
 	// in that case so a misconfigured self-host deployment surfaces a clear

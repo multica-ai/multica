@@ -81,9 +81,9 @@ func vcsPullRequestRowToResponse(p db.ListVCSPullRequestsByIssueRow) GitHubPullR
 // ── Webhook ─────────────────────────────────────────────────────────────────
 
 // HandleVCSWebhook (POST /api/webhooks/vcs/{connectionId}) authenticates and
-// mirrors webhooks from any token-based forge. The connection id in the path
+// mirrors webhooks from any token-based Git provider. The connection id in the path
 // selects the workspace, the provider, and the decryption secret; the provider
-// adapter handles the forge-specific signature scheme, event header, and
+// adapter handles the provider-specific signature scheme, event header, and
 // payload shape, returning normalized events to the shared mirror logic below.
 func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 	if !h.isVCSConfigured() {
@@ -140,7 +140,7 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 			h.mirrorVCSCIStatus(r.Context(), conn, st)
 		}
 	default:
-		// Acknowledge unmodelled events so the forge doesn't flag the hook.
+		// Acknowledge unmodelled events so the provider doesn't flag the hook.
 	}
 	w.WriteHeader(http.StatusAccepted)
 }
@@ -182,7 +182,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	resp := vcsPullRequestToResponse(pr)
 
 	// Auto-link to issues by identifiers in title/body/branch. Connecting a
-	// forge is the opt-in, so there is no separate per-workspace flag. The
+	// a provider is the opt-in, so there is no separate per-workspace flag. The
 	// issue-side machinery is shared with GitHub.
 	linkedIssueIDs := make([]string, 0)
 	idents := extractIdentifiers(ev.Title, ev.Body, ev.Branch)

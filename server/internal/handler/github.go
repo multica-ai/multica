@@ -57,7 +57,7 @@ type GitHubInstallationResponse struct {
 
 type GitHubPullRequestResponse struct {
 	ID string `json:"id"`
-	// Provider is the forge this PR was mirrored from: "github", "forgejo",
+	// Provider is the Git provider this PR was mirrored from: "github", "forgejo",
 	// "gitea", or "gitlab". The frontend uses it to pick the host icon and
 	// label (e.g. GitLab "merge request").
 	Provider        string  `json:"provider"`
@@ -578,7 +578,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	for _, row := range rows {
 		out = append(out, issuePullRequestRowToResponse(row))
 	}
-	// PRs from token-based forges (Forgejo / Gitea / GitLab) share the same
+	// PRs from token-based providers (Forgejo / Gitea / GitLab) share the same
 	// card list. They live in their own provider-tagged tables, so they merge
 	// in here mapped to the same response shape; the combined list is re-sorted
 	// newest-first.
