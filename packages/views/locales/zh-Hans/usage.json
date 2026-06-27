@@ -46,7 +46,8 @@
     "header_cost": "费用",
     "header_time": "运行时长",
     "header_tasks": "任务数",
-    "no_data": "所选时间范围内暂无智能体活动。"
+    "no_data": "所选时间范围内暂无智能体活动。",
+    "deleted_agent": "已删除的智能体"
   },
   "empty": {
     "title": "暂无消耗数据",

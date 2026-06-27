@@ -401,6 +401,7 @@
     "cost_by_caption_agent_other": "{{count}} agents on this runtime",
     "cost_by_caption_model_one": "{{count}} model used",
     "cost_by_caption_model_other": "{{count}} models used",
+    "deleted_agent": "Deleted agent",
     "daily_breakdown_toggle": "Daily breakdown table",
     "table_date": "Date",
     "table_model": "Model",

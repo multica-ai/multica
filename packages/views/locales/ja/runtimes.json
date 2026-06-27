@@ -386,6 +386,7 @@
     "cost_by_tab_model": "モデル別",
     "cost_by_caption_agent_other": "このランタイムのエージェント {{count}} 個",
     "cost_by_caption_model_other": "使用されたモデル {{count}} 個",
+    "deleted_agent": "削除済みエージェント",
     "daily_breakdown_toggle": "日別内訳テーブル",
     "table_date": "日付",
     "table_model": "モデル",

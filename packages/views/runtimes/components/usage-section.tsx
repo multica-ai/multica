@@ -28,7 +28,7 @@ import {
   type CostByKey,
 } from "../utils";
 import { KpiCard } from "./shared";
-import { ActorAvatar } from "../../common/actor-avatar";
+import { AgentUsageCell } from "../../common/agent-usage-cell";
 import {
   DailyCostChart,
   DailyTokensChart,
@@ -621,7 +621,8 @@ function CostByBlock({
   });
 
   const wsId = useWorkspaceId();
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: agents = [], isSuccess: agentsLoaded } =
+    useQuery(agentListOptions(wsId));
 
   const byAgent = useMemo(
     () => aggregateCostByAgent(byAgentRows),
@@ -663,17 +664,14 @@ function CostByBlock({
         {tab === "agent" && (
           <CostByList
             rows={byAgent}
-            renderKey={(key) => {
-              const agent = agents.find((a) => a.id === key);
-              return (
-                <div className="flex min-w-0 items-center gap-2">
-                  <ActorAvatar actorType="agent" actorId={key} size={22} enableHoverCard />
-                  <span className="cursor-pointer truncate text-sm font-medium">
-                    {agent?.name ?? key}
-                  </span>
-                </div>
-              );
-            }}
+            renderKey={(key) => (
+              <AgentUsageCell
+                agentId={key}
+                agent={agents.find((a) => a.id === key)}
+                agentsLoaded={agentsLoaded}
+                deletedLabel={t(($) => $.usage.deleted_agent)}
+              />
+            )}
           />
         )}
         {tab === "model" && (

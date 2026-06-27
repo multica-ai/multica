@@ -46,7 +46,8 @@
     "header_cost": "비용",
     "header_time": "시간",
     "header_tasks": "작업",
-    "no_data": "이 기간에는 에이전트 활동이 없습니다."
+    "no_data": "이 기간에는 에이전트 활동이 없습니다.",
+    "deleted_agent": "삭제된 에이전트"
   },
   "empty": {
     "title": "아직 사용량이 없습니다",

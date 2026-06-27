@@ -46,7 +46,8 @@
     "header_cost": "Cost",
     "header_time": "Time",
     "header_tasks": "Tasks",
-    "no_data": "No agent activity in this window."
+    "no_data": "No agent activity in this window.",
+    "deleted_agent": "Deleted agent"
   },
   "empty": {
     "title": "No usage yet",

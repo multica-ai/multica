@@ -401,6 +401,7 @@
     "cost_by_caption_agent_other": "이 런타임의 에이전트 {{count}}개",
     "cost_by_caption_model_one": "사용된 모델 {{count}}개",
     "cost_by_caption_model_other": "사용된 모델 {{count}}개",
+    "deleted_agent": "삭제된 에이전트",
     "daily_breakdown_toggle": "일별 상세 테이블",
     "table_date": "날짜",
     "table_model": "모델",

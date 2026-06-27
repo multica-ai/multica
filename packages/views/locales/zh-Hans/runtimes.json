@@ -386,6 +386,7 @@
     "cost_by_tab_model": "按模型",
     "cost_by_caption_agent_other": "{{count}} 个智能体使用此运行时",
     "cost_by_caption_model_other": "{{count}} 个模型已使用",
+    "deleted_agent": "已删除的智能体",
     "daily_breakdown_toggle": "每日明细表",
     "table_date": "日期",
     "table_model": "模型",

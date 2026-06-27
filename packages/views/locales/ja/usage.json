@@ -46,7 +46,8 @@
     "header_cost": "コスト",
     "header_time": "時間",
     "header_tasks": "タスク",
-    "no_data": "この期間にエージェントの活動はありません。"
+    "no_data": "この期間にエージェントの活動はありません。",
+    "deleted_agent": "削除済みエージェント"
   },
   "empty": {
     "title": "まだ使用量はありません",

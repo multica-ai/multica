@@ -36,7 +36,7 @@ import {
   WeeklyTasksChart,
 } from "../../runtimes/components/charts";
 import { ProjectIcon } from "../../projects/components/project-icon";
-import { ActorAvatar } from "../../common/actor-avatar";
+import { AgentUsageCell } from "../../common/agent-usage-cell";
 import {
   addDaysIso,
   aggregateByWeek,
@@ -53,7 +53,6 @@ import {
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
   computeDailyTotals,
-  filterKnownAgentRows,
   formatDuration,
   mergeAgentDashboardRows,
   type AgentDashboardRow,
@@ -314,20 +313,6 @@ export function DashboardPage() {
     [agentTokenRows, runTimeRows],
   );
 
-  // Hide rollup rows for agents that were hard-deleted from the workspace —
-  // they'd otherwise show up as a bare UUID on the leaderboard (MUL-3771).
-  // Archived agents stay (the agent list is fetched with archived included);
-  // only truly-removed agents drop out. Skip filtering until the agent list
-  // has loaded so a slow agents fetch doesn't transiently blank the list.
-  const knownAgentIds = useMemo(
-    () => (agentsQuery.isSuccess ? new Set(agents.map((a) => a.id)) : null),
-    [agentsQuery.isSuccess, agents],
-  );
-  const visibleAgentRows = useMemo(
-    () => filterKnownAgentRows(agentRows, knownAgentIds),
-    [agentRows, knownAgentIds],
-  );
-
   return (
     <div className="flex h-full flex-col">
       {/* h-auto + min-h-12 + flex-wrap: the toolbar (project filter,
@@ -429,8 +414,9 @@ export function DashboardPage() {
               {/* Per-agent leaderboard — user picks the ranking metric;
                   the progress bar and column emphasis follow the metric. */}
               <Leaderboard
-                rows={visibleAgentRows}
+                rows={agentRows}
                 agents={agents}
+                agentsLoaded={agentsQuery.isSuccess}
                 lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
               />
             </>
@@ -640,10 +626,12 @@ const SORT_METRIC: Record<LeaderboardSort, (r: AgentDashboardRow) => number> = {
 function Leaderboard({
   rows,
   agents,
+  agentsLoaded,
   lessThanMinuteLabel,
 }: {
   rows: AgentDashboardRow[];
   agents: { id: string; name: string }[];
+  agentsLoaded: boolean;
   lessThanMinuteLabel: string;
 }) {
   const { t } = useT("usage");
@@ -671,6 +659,13 @@ function Leaderboard({
     const metric = SORT_METRIC[sortBy];
     return sortedRows.reduce((m, r) => Math.max(m, metric(r)), 0);
   }, [sortedRows, sortBy]);
+
+  // Resolve each row's agent in O(1); a per-row `agents.find` would be
+  // O(rows×agents) on every re-sort.
+  const agentById = useMemo(
+    () => new Map(agents.map((a) => [a.id, a])),
+    [agents],
+  );
 
   // Active column gets foreground text; others stay muted. Helps the user
   // see "this is what the bar is measuring" at a glance.
@@ -704,7 +699,7 @@ function Leaderboard({
           </div>
           <div className="divide-y">
             {sortedRows.map((row) => {
-              const agent = agents.find((a) => a.id === row.agentId);
+              const agent = agentById.get(row.agentId);
               const value = SORT_METRIC[sortBy](row);
               const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
               return (
@@ -712,17 +707,12 @@ function Leaderboard({
                   key={row.agentId}
                   className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2"
                 >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <ActorAvatar
-                      actorType="agent"
-                      actorId={row.agentId}
-                      size={22}
-                      enableHoverCard
-                    />
-                    <span className="cursor-pointer truncate text-sm font-medium">
-                      {agent?.name ?? row.agentId}
-                    </span>
-                  </div>
+                  <AgentUsageCell
+                    agentId={row.agentId}
+                    agent={agent}
+                    agentsLoaded={agentsLoaded}
+                    deletedLabel={t(($) => $.leaderboard.deleted_agent)}
+                  />
                   <div className="relative h-2 overflow-hidden rounded-full bg-muted">
                     <div
                       className="h-full rounded-full bg-chart-1 transition-[width] duration-300 ease-out"
