@@ -204,6 +204,50 @@ type Autopilot struct {
 	IsPrivate          bool               `json:"is_private"`
 }
 
+type AgentToolGrant struct {
+	ID         pgtype.UUID        `json:"id"`
+	AgentID    pgtype.UUID        `json:"agent_id"`
+	ToolName   string             `json:"tool_name"`
+	ConfigJson []byte             `json:"config_json"`
+	Enabled    bool               `json:"enabled"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type Artifact struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	Kind            string             `json:"kind"`
+	Title           string             `json:"title"`
+	Body            string             `json:"body"`
+	Metadata        []byte             `json:"metadata"`
+	AuthorType      string             `json:"author_type"`
+	AuthorID        pgtype.UUID        `json:"author_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	FolderID        pgtype.UUID        `json:"folder_id"`
+	Format          string             `json:"format"`
+	FileUrl         pgtype.Text        `json:"file_url"`
+	FileSizeBytes   pgtype.Int8        `json:"file_size_bytes"`
+	OriginIssueID   pgtype.UUID        `json:"origin_issue_id"`
+	RequesterUserID pgtype.UUID        `json:"requester_user_id"`
+	NoteTypeID      pgtype.UUID        `json:"note_type_id"`
+	PeriodKey       pgtype.Text        `json:"period_key"`
+}
+
+type ArtifactFolder struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ParentID    pgtype.UUID        `json:"parent_id"`
+	Name        string             `json:"name"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Kind        string             `json:"kind"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
+	Visibility  string             `json:"visibility"`
+}
+
 type AutopilotRun struct {
 	ID             pgtype.UUID        `json:"id"`
 	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
