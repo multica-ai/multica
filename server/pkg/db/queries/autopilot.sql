@@ -187,12 +187,33 @@ RETURNING *;
 -- parent autopilot has assignee_type='squad', NULL otherwise. The executing
 -- agent_id on agent_task_queue still records who actually ran the work
 -- (the squad leader); squad_id lets reports group by squad without a join.
+--
+-- planned_at carries the canonical UTC fire time for scheduled triggers
+-- (source='schedule'); it stays NULL for manual / webhook / api sources
+-- which have no canonical occurrence. Combined with the partial unique
+-- index uq_autopilot_run_trigger_planned, this gives dispatch-layer
+-- idempotency: a stale-steal retry at the same plan_time cannot create
+-- a second run for the same (trigger_id, planned_at) pair.
 INSERT INTO autopilot_run (
-    autopilot_id, trigger_id, source, status, trigger_payload, squad_id
+    autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
-    sqlc.narg('squad_id')
+    sqlc.narg('squad_id'), sqlc.narg('planned_at')
 ) RETURNING *;
+
+-- name: GetAutopilotRunByTriggerAndPlanned :one
+SELECT * FROM autopilot_run
+WHERE trigger_id = $1
+  AND planned_at = $2
+LIMIT 1;
+
+-- name: RecoverPartialAutopilotRun :exec
+UPDATE autopilot_run
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'recovered partial dispatch (crashed before downstream creation)',
+    planned_at = NULL
+WHERE id = $1;
 
 -- name: GetAutopilotRun :one
 SELECT * FROM autopilot_run

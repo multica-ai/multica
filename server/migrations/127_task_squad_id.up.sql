@@ -13,12 +13,12 @@
 -- observable behavior as "injection condition not matched". No stale briefing
 -- is ever emitted.
 ALTER TABLE agent_task_queue
-    ADD COLUMN squad_id UUID NULL;
+    ADD COLUMN IF NOT EXISTS squad_id UUID NULL;
 
 -- Partial index over leader-task rows only: small, high hit-rate. It serves
 -- admin / debug queries ("which leader tasks is this squad currently
 -- running"). The daemon claim path does NOT use it — that goes through the
 -- task_id primary-key path.
-CREATE INDEX agent_task_queue_squad_id_idx
+CREATE INDEX IF NOT EXISTS agent_task_queue_squad_id_idx
     ON agent_task_queue (squad_id)
     WHERE squad_id IS NOT NULL;

@@ -9,4 +9,4 @@
 -- the brief simply omits the `## Task Initiator` section in that case. See
 -- MUL-2645.
 ALTER TABLE agent_task_queue
-    ADD COLUMN initiator_user_id UUID REFERENCES "user"(id) ON DELETE SET NULL;
+    ADD COLUMN IF NOT EXISTS initiator_user_id UUID REFERENCES "user"(id) ON DELETE SET NULL;

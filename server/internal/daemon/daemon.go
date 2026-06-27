@@ -1259,7 +1259,22 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 // idempotent. Called from runTask before the agent spawns so
 // `multica repo checkout` accepts project-only URLs without an extra round
 // trip back to GetWorkspaceRepos (which doesn't carry project resources).
-func (d *Daemon) registerTaskRepos(workspaceID, taskID string, repos []RepoData) {
+func (d *Daemon) registerTaskRepos(workspaceID string, args ...any) {
+	taskID := ""
+	var repos []RepoData
+	switch len(args) {
+	case 1:
+		if v, ok := args[0].([]RepoData); ok {
+			repos = v
+		}
+	default:
+		if v, ok := args[0].(string); ok {
+			taskID = v
+		}
+		if v, ok := args[1].([]RepoData); ok {
+			repos = v
+		}
+	}
 	if len(repos) == 0 {
 		return
 	}
@@ -1326,6 +1341,32 @@ func (d *Daemon) registerTaskRepos(workspaceID, taskID string, repos []RepoData)
 			d.syncWorkspaceRepos(workspaceID, toSync)
 		}()
 	}
+}
+
+func (d *Daemon) repoGrantsEnabled(workspaceID string) bool {
+	d.mu.Lock()
+	ws := d.workspaces[workspaceID]
+	d.mu.Unlock()
+	if ws == nil || len(ws.settings) == 0 {
+		return false
+	}
+	var settings struct {
+		RepoGrantsEnabled bool `json:"repo_grants_enabled"`
+	}
+	if err := json.Unmarshal(ws.settings, &settings); err != nil {
+		return false
+	}
+	return settings.RepoGrantsEnabled
+}
+
+func resolveTaskModel(task Task, entry AgentEntry) string {
+	if task.ModelOverride != "" {
+		return task.ModelOverride
+	}
+	if task.Agent != nil && task.Agent.Model != "" {
+		return task.Agent.Model
+	}
+	return entry.Model
 }
 
 func (d *Daemon) taskRepoDefaultRef(workspaceID, taskID, repoURL string) string {
@@ -3178,7 +3219,7 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kiro", "kimi":
+	case "openclaw", "opencode", "hermes", "kiro", "kimi":
 		return true
 	default:
 		return false
@@ -4102,6 +4143,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	// AgentToolWatchdog budget instead of treating that silence as a hang.
 	var inFlightTools atomic.Int32
 	var idleWatchdogFired atomic.Bool
+	var toolCallWatchdogFired atomic.Bool
 	// idleWatchdogThreshold records (as nanos) which silence budget actually
 	// tripped the watchdog — the idle window or the larger in-flight-tool
 	// window — so the failure message reports the real duration.
@@ -4110,6 +4152,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	idleWindow := d.cfg.AgentIdleWatchdog
 	if idleWindow > 0 {
 		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
+	}
+	if d.cfg.MaxToolCallDuration > 0 {
+		go d.runToolCallWatchdog(agentCtx, d.cfg.MaxToolCallDuration, &lastActivityAt, &inFlightTools, &toolCallWatchdogFired, agentCancel, taskLog, taskID)
 	}
 
 	go func() {
@@ -4288,7 +4333,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 
 	select {
 	case result := <-session.Result:
-		if idleWatchdogFired.Load() {
+		if toolCallWatchdogFired.Load() {
+			result.Status = "tool_timeout"
+			if result.Error == "" {
+				result.Error = toolCallWatchdogReason(d.cfg.MaxToolCallDuration)
+			}
+		} else if idleWatchdogFired.Load() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
 			// Re-tag it as "idle_watchdog" so runTask routes the
@@ -4305,6 +4355,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		// context.Canceled. Check this BEFORE the generic cancelled/timeout
 		// classifiers so a watchdog-induced stop isn't misreported as
 		// "task cancelled by server".
+		if toolCallWatchdogFired.Load() {
+			return agent.Result{
+				Status: "tool_timeout",
+				Error:  toolCallWatchdogReason(d.cfg.MaxToolCallDuration),
+			}, toolCount.Load(), nil
+		}
 		if idleWatchdogFired.Load() {
 			return agent.Result{
 				Status: "idle_watchdog",
@@ -4334,6 +4390,45 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 // drain-timeout branch in executeAndDrain emit identical wording.
 func idleWatchdogReason(window time.Duration) string {
 	return fmt.Sprintf("agent produced no new messages for %s and message queue was empty; force-stopped by idle watchdog", window)
+}
+
+func toolCallWatchdogReason(window time.Duration) string {
+	return fmt.Sprintf("tool call exceeded MaxToolCallDuration (%s); force-stopped by tool-call watchdog", window)
+}
+
+func (d *Daemon) runToolCallWatchdog(agentCtx context.Context, window time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, cancel context.CancelFunc, taskLog *slog.Logger, taskID string) {
+	interval := window / 2
+	if window >= time.Minute && interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+	if interval <= 0 {
+		interval = window
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-agentCtx.Done():
+			return
+		case <-ticker.C:
+			if inFlightTools.Load() <= 0 {
+				continue
+			}
+			last := time.Unix(0, lastActivityAt.Load())
+			if time.Since(last) < window {
+				continue
+			}
+			if fired.CompareAndSwap(false, true) {
+				taskLog.Warn("tool-call watchdog firing: tool in flight too long, force-stopping run",
+					"task", taskID,
+					"idle_for", time.Since(last).Round(time.Millisecond),
+					"threshold", window,
+					"in_flight_tools", inFlightTools.Load())
+				cancel()
+			}
+			return
+		}
+	}
 }
 
 // runIdleWatchdog ticks until either agentCtx is cancelled or the backend has
@@ -4427,6 +4522,9 @@ func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {
 		existing.OutputTokens += u.OutputTokens
 		existing.CacheReadTokens += u.CacheReadTokens
 		existing.CacheWriteTokens += u.CacheWriteTokens
+		existing.CostCents += u.CostCents
+		existing.ContextInputTokens += u.ContextInputTokens
+		existing.ContextCacheReadTokens += u.ContextCacheReadTokens
 		merged[model] = existing
 	}
 	return merged

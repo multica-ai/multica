@@ -21,8 +21,8 @@
 -- profile_id IS NOT NULL.
 
 ALTER TABLE agent_runtime
-    DROP CONSTRAINT agent_runtime_workspace_id_daemon_id_provider_key;
+    DROP CONSTRAINT IF EXISTS agent_runtime_workspace_id_daemon_id_provider_key;
 
-CREATE UNIQUE INDEX agent_runtime_workspace_daemon_provider_key
+CREATE UNIQUE INDEX IF NOT EXISTS agent_runtime_workspace_daemon_provider_key
     ON agent_runtime (workspace_id, daemon_id, provider)
     WHERE profile_id IS NULL;

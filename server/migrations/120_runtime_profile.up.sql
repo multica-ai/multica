@@ -29,7 +29,7 @@
 -- arguments that EVERY agent on this runtime must inherit to enter a
 -- compatible mode (advanced/optional, defaults to an empty array).
 
-CREATE TABLE runtime_profile (
+CREATE TABLE IF NOT EXISTS runtime_profile (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     -- Owning workspace. Plain UUID; integrity (and cleanup on workspace
     -- delete) is enforced in the application layer, not by a DB FK.
@@ -65,7 +65,7 @@ CREATE TABLE runtime_profile (
     UNIQUE (workspace_id, display_name)
 );
 
-CREATE INDEX idx_runtime_profile_workspace ON runtime_profile(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_runtime_profile_workspace ON runtime_profile(workspace_id);
 
 -- Stable profile identity on the runtime instance row. NULL = built-in runtime
 -- (registered the legacy way); non-NULL = a registered instance of a custom
@@ -73,11 +73,11 @@ CREATE INDEX idx_runtime_profile_workspace ON runtime_profile(workspace_id);
 -- cleanup of these rows when a profile is deleted, is the application layer's
 -- responsibility (PR2).
 ALTER TABLE agent_runtime
-    ADD COLUMN profile_id UUID;
+    ADD COLUMN IF NOT EXISTS profile_id UUID;
 
 -- Custom-runtime uniqueness: one instance per (workspace, daemon, profile).
 -- Partial so it never touches built-in rows (profile_id IS NULL) and never
 -- conflicts with the legacy (workspace_id, daemon_id, provider) constraint.
-CREATE UNIQUE INDEX agent_runtime_workspace_daemon_profile_key
+CREATE UNIQUE INDEX IF NOT EXISTS agent_runtime_workspace_daemon_profile_key
     ON agent_runtime (workspace_id, daemon_id, profile_id)
     WHERE profile_id IS NOT NULL;

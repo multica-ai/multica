@@ -356,6 +356,7 @@ type TaskAgentData struct {
 	InfisicalSecrets map[string]string `json:"infisical_secrets,omitempty"`
 	Model            string            `json:"model,omitempty"`
 	ThinkingLevel    string            `json:"thinking_level,omitempty"`
+	OwnerID          string            `json:"owner_id,omitempty"`
 	// CEREBRO-PATCH(agent-capabilities-claim): workspace capability policy passed to daemon sandbox.
 	SandboxAllowlist []string `json:"sandbox_allowlist,omitempty"`
 }

@@ -253,6 +253,10 @@ func (c *blockingLookupRepoCache) CreateWorktree(repocache.WorktreeParams) (*rep
 	return nil, nil
 }
 
+func (c *blockingLookupRepoCache) WithRepoLock(_ string, fn func() error) error {
+	return fn()
+}
+
 func (c *blockingLookupRepoCache) waitForLookup(t *testing.T) {
 	t.Helper()
 	select {

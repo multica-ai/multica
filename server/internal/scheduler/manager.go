@@ -135,6 +135,10 @@ func (m *Manager) RunOnce(ctx context.Context) error {
 	return nil
 }
 
+func (m *Manager) runOnce(ctx context.Context) error {
+	return m.RunOnce(ctx)
+}
+
 // runJob iterates the scopes for a single job and processes each due
 // plan according to the catch-up mode.
 func (m *Manager) runJob(ctx context.Context, job *JobSpec, now time.Time) error {

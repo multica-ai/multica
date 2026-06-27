@@ -12,4 +12,4 @@
 --
 -- Stages are 1-based; the CHECK keeps the column clean (NULL or >= 1) so the
 -- "unstaged" sentinel stays unambiguous.
-ALTER TABLE issue ADD COLUMN stage INTEGER CHECK (stage IS NULL OR stage >= 1);
+ALTER TABLE issue ADD COLUMN IF NOT EXISTS stage INTEGER CHECK (stage IS NULL OR stage >= 1);

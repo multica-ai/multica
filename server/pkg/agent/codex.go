@@ -777,6 +777,10 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 					"last_activity", lastSemanticActivityDescription,
 				)
 			case <-semanticTimer.C:
+				if firstTurnStarted && !firstTurnProgressObserved {
+					resetTimer(semanticTimer, firstTurnNoProgressTimeout)
+					continue
+				}
 				waitingForTurn = false
 				finalStatus = "timeout"
 				timeoutDiagnostic = codexTimeoutDiagnostic{
@@ -999,11 +1003,10 @@ func codexFirstTurnNoProgressTimeout(semanticInactivityTimeout time.Duration) ti
 	if semanticInactivityTimeout <= 0 || semanticInactivityTimeout > defaultCodexFirstTurnNoProgressTimeout {
 		return defaultCodexFirstTurnNoProgressTimeout
 	}
-	scaled := semanticInactivityTimeout * 4 / 5
-	if scaled <= 0 {
-		return semanticInactivityTimeout
+	if semanticInactivityTimeout < 2*time.Second {
+		return 2 * time.Second
 	}
-	return scaled
+	return semanticInactivityTimeout
 }
 
 func isCodexFirstTurnProgressActivity(activity string) bool {

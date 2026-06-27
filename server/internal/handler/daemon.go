@@ -19,12 +19,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/pricing"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
@@ -177,10 +179,11 @@ type DaemonRegisterRequest struct {
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
 	Runtimes        []struct {
-		Name    string `json:"name"`
-		Type    string `json:"type"`
-		Version string `json:"version"` // agent CLI version (claude/codex)
-		Status  string `json:"status"`
+		Name         string         `json:"name"`
+		Type         string         `json:"type"`
+		Version      string         `json:"version"` // agent CLI version (claude/codex)
+		Status       string         `json:"status"`
+		Capabilities map[string]any `json:"capabilities,omitempty"`
 		// ProfileID, when non-empty, marks this as an instance of a custom
 		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
 		// Type carries the protocol family for both built-in and custom rows
@@ -466,6 +469,30 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		if runtime.Capabilities != nil {
+			if raw, err := json.Marshal(runtime.Capabilities); err == nil {
+				if err := h.Queries.UpdateAgentRuntimeCapabilities(r.Context(), db.UpdateAgentRuntimeCapabilitiesParams{
+					ID:           registered.ID,
+					Capabilities: raw,
+				}); err == nil {
+					registered.Capabilities = raw
+				} else {
+					slog.Warn("failed to persist runtime capabilities", "runtime_id", uuidToString(registered.ID), "error", err)
+				}
+			}
+		}
+		if strings.TrimSpace(req.CLIVersion) != "" {
+			cliVersion := strToText(strings.TrimSpace(req.CLIVersion))
+			if err := h.Queries.UpdateAgentRuntimeCliVersion(r.Context(), db.UpdateAgentRuntimeCliVersionParams{
+				ID:         registered.ID,
+				CliVersion: cliVersion,
+			}); err == nil {
+				registered.CliVersion = cliVersion
+			} else {
+				slog.Warn("failed to persist runtime cli_version", "runtime_id", uuidToString(registered.ID), "error", err)
+			}
+		}
+
 		// Inserted is false for normal daemon reconnects/upserts, so
 		// runtime_ready is a first-ready-per-runtime-row signal.
 		if inserted {
@@ -738,8 +765,11 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 }
 
 type DaemonHeartbeatRequest struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	RuntimeID           string                           `json:"runtime_id"`
+	SupportsBatchImport bool                             `json:"supports_batch_import,omitempty"`
+	Account             *protocol.DaemonHeartbeatAccount `json:"account,omitempty"`
+	CLIVersion          string                           `json:"cli_version,omitempty"`
+	Capabilities        map[string]any                   `json:"capabilities,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -870,7 +900,38 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	authMs = time.Since(start).Milliseconds()
 
-	ack, m, err := h.processHeartbeat(r.Context(), rt, req.SupportsBatchImport)
+	if strings.TrimSpace(req.CLIVersion) != "" {
+		if err := h.Queries.UpdateAgentRuntimeCliVersion(r.Context(), db.UpdateAgentRuntimeCliVersionParams{
+			ID:         runtimeUUID,
+			CliVersion: strToText(strings.TrimSpace(req.CLIVersion)),
+		}); err != nil {
+			outcome = "error_update"
+			slog.Warn("heartbeat: failed to update runtime cli_version", "runtime_id", req.RuntimeID, "error", err)
+			writeError(w, http.StatusInternalServerError, "heartbeat failed")
+			return
+		}
+	}
+	if req.Capabilities != nil {
+		raw, err := json.Marshal(req.Capabilities)
+		if err != nil {
+			outcome = "bad_body"
+			writeError(w, http.StatusBadRequest, "invalid capabilities")
+			return
+		}
+		if err := h.Queries.UpdateAgentRuntimeCapabilities(r.Context(), db.UpdateAgentRuntimeCapabilitiesParams{
+			ID:           runtimeUUID,
+			Capabilities: raw,
+		}); err != nil {
+			outcome = "error_update"
+			slog.Warn("heartbeat: failed to update runtime capabilities", "runtime_id", req.RuntimeID, "error", err)
+			writeError(w, http.StatusInternalServerError, "heartbeat failed")
+			return
+		}
+		rt.CliVersion = strToText(strings.TrimSpace(req.CLIVersion))
+		rt.Capabilities = raw
+	}
+
+	ack, m, err := h.processHeartbeat(r.Context(), rt, req.SupportsBatchImport, req.Account)
 	updateMs = m.UpdateMs
 	probeModelMs = m.ProbeModelMs
 	popModelMs = m.PopModelMs
@@ -906,6 +967,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(ack.PendingLocalSkillImports) > 0 {
 		resp["pending_local_skill_imports"] = ack.PendingLocalSkillImports
+	}
+	if ack.CerebroAccountID != "" {
+		resp["cerebro_account_id"] = ack.CerebroAccountID
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -943,7 +1007,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if !identity.AllowsWorkspace(uuidToString(rt.WorkspaceID)) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
-	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport)
+	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport, nil)
 	return ack, err
 }
 
@@ -1004,7 +1068,7 @@ type heartbeatMetrics struct {
 // the WebSocket daemon:heartbeat path: records liveness and pulls any pending
 // actions queued for the runtime. Auth and request decoding live in the
 // caller because they differ between transports.
-func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supportsBatchImport bool, account *protocol.DaemonHeartbeatAccount) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
 	var m heartbeatMetrics
 	runtimeID := uuidToString(rt.ID)
 
@@ -1021,6 +1085,7 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 		RuntimeID: runtimeID,
 		Status:    "ok",
 	}
+	ack.CerebroAccountID = h.recordHeartbeatAccount(ctx, rt, account)
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
 	hasUpdate, probeUpdateErr := h.UpdateStore.HasPending(probeUpdateCtx, runtimeID)
@@ -1314,6 +1379,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			McpConfig:     mcpConfig,
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
+			OwnerID:       uuidToString(agent.OwnerID),
 			RuntimeConfig: runtimeConfig,
 		}
 	}
@@ -1479,6 +1545,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if task.TriggerCommentID.Valid {
 			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
 				resp.TriggerCommentContent = comment.Content
+				resp.TriggerCommentCreatedAt = comment.CreatedAt.Time.UTC().Format(time.RFC3339)
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
 					resp.TriggerThreadID = uuidToString(comment.ParentID)
@@ -1637,7 +1704,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
+				resp.ChatMessages = parts
 				resp.ChatMessage = strings.Join(parts, "\n\n")
+				historyStart := 0
+				if len(msgs) > 30 {
+					historyStart = len(msgs) - 30
+				}
+				resp.ChatHistory = make([]ChatHistoryMessage, 0, len(msgs)-historyStart)
+				for _, m := range msgs[historyStart:] {
+					if strings.TrimSpace(m.Content) == "" {
+						continue
+					}
+					resp.ChatHistory = append(resp.ChatHistory, ChatHistoryMessage{
+						Role:    m.Role,
+						Content: m.Content,
+					})
+				}
 				if strings.TrimSpace(resp.ThreadName) == "" {
 					resp.ThreadName = resp.ChatMessage
 				}
@@ -1809,6 +1891,26 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid && !hasQuickCreate {
+		outcome = "orphan_task"
+		errMsg := "orphan task has no issue, chat session, autopilot run, or quick-create context"
+		slog.Warn("task claim: orphan task failed and skipped",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", runtimeID,
+			"workspace_id", runtimeWorkspaceID,
+		)
+		if _, ferr := h.TaskService.FailTask(r.Context(), task.ID, errMsg, "", "", "orphan_task"); ferr != nil {
+			slog.Error("task claim: failed to mark orphan task failed",
+				"task_id", uuidToString(task.ID),
+				"error", ferr,
+			)
+			writeError(w, http.StatusInternalServerError, "failed to mark orphan task failed")
+			return
+		}
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
+		return
+	}
+
 	// Workspace isolation check: the daemon uses this response's workspace_id
 	// as the only authority for MULTICA_WORKSPACE_ID in the agent env. An
 	// empty value would make the CLI silently fall back to the user-global
@@ -1866,7 +1968,29 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// fall back to a member/owner credential. MUL-3292.
 	// Token expires after the queue/runtime upper bound (24h) so it survives
 	// long-running tasks but cannot outlive a forgotten one.
-	if !runtime.OwnerID.Valid {
+	tokenUserID := runtime.OwnerID
+	if !tokenUserID.Valid && resp.Agent != nil && resp.Agent.OwnerID != "" {
+		tokenUserID = parseUUID(resp.Agent.OwnerID)
+	}
+	if !tokenUserID.Valid && task.AgentID.Valid {
+		if agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          task.AgentID,
+			WorkspaceID: parseUUID(resp.WorkspaceID),
+		}); err == nil {
+			tokenUserID = agent.OwnerID
+		}
+	}
+	if !tokenUserID.Valid {
+		if members, err := h.Queries.ListMembers(r.Context(), parseUUID(resp.WorkspaceID)); err == nil {
+			for _, member := range members {
+				if member.UserID.Valid {
+					tokenUserID = member.UserID
+					break
+				}
+			}
+		}
+	}
+	if !tokenUserID.Valid {
 		outcome = "error_token"
 		slog.Error("task claim: runtime owner missing; cancelling task to avoid unscoped agent credentials",
 			"task_id", uuidToString(task.ID),
@@ -1893,7 +2017,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		TaskID:      task.ID,
 		AgentID:     task.AgentID,
 		WorkspaceID: parseUUID(resp.WorkspaceID),
-		UserID:      runtime.OwnerID,
+		UserID:      tokenUserID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
 	}); terr != nil {
 		outcome = "error_token"
@@ -2207,9 +2331,70 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
+		h.recordUsageBudgetAndAccount(r.Context(), task, u)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (h *Handler) recordUsageBudgetAndAccount(ctx context.Context, task db.AgentTaskQueue, usage TaskUsagePayload) {
+	if !task.RuntimeID.Valid || !task.AgentID.Valid {
+		return
+	}
+	rt, err := h.Queries.GetAgentRuntime(ctx, task.RuntimeID)
+	if err != nil || !rt.WorkspaceID.Valid {
+		if err != nil {
+			slog.Warn("usage rollup: load runtime failed",
+				"task_id", uuidToString(task.ID),
+				"runtime_id", uuidToString(task.RuntimeID),
+				"error", err)
+		}
+		return
+	}
+
+	cents := pricing.ComputeCents(usage.Model, pricing.Usage{
+		InputTokens:      usage.InputTokens,
+		OutputTokens:     usage.OutputTokens,
+		CacheReadTokens:  usage.CacheReadTokens,
+		CacheWriteTokens: usage.CacheWriteTokens,
+	})
+	if cents > 0 {
+		now := time.Now().UTC()
+		dayStart := pgtype.Date{Time: time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC), Valid: true}
+		monthStart := pgtype.Date{Time: time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC), Valid: true}
+		for _, p := range []db.IncrementBudgetStateParams{
+			{WorkspaceID: rt.WorkspaceID, ScopeType: "agent", ScopeID: task.AgentID, WindowType: "day", WindowStart: dayStart, CentsSpent: cents},
+			{WorkspaceID: rt.WorkspaceID, ScopeType: "agent", ScopeID: task.AgentID, WindowType: "month", WindowStart: monthStart, CentsSpent: cents},
+			{WorkspaceID: rt.WorkspaceID, ScopeType: "workspace", ScopeID: rt.WorkspaceID, WindowType: "day", WindowStart: dayStart, CentsSpent: cents},
+			{WorkspaceID: rt.WorkspaceID, ScopeType: "workspace", ScopeID: rt.WorkspaceID, WindowType: "month", WindowStart: monthStart, CentsSpent: cents},
+		} {
+			if err := h.Queries.IncrementBudgetState(ctx, p); err != nil {
+				slog.Warn("usage rollup: budget increment failed",
+					"task_id", uuidToString(task.ID),
+					"scope_type", p.ScopeType,
+					"window_type", p.WindowType,
+					"error", err)
+			}
+		}
+	}
+
+	if h.CerebroQueries == nil || !rt.CurrentAccountID.Valid {
+		return
+	}
+	tokens := usage.InputTokens + usage.OutputTokens + usage.CacheReadTokens + usage.CacheWriteTokens
+	if tokens <= 0 {
+		return
+	}
+	if err := h.CerebroQueries.InsertCerebroAccountTokenUsage(ctx, cerebrodb.InsertCerebroAccountTokenUsageParams{
+		AccountID:   rt.CurrentAccountID,
+		WorkspaceID: rt.WorkspaceID,
+		Tokens:      tokens,
+	}); err != nil {
+		slog.Warn("usage rollup: account token usage failed",
+			"task_id", uuidToString(task.ID),
+			"account_id", uuidToString(rt.CurrentAccountID),
+			"error", err)
+	}
 }
 
 // GetTaskStatus returns the current status of a task.
