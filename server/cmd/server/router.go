@@ -565,6 +565,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		}
 	} else {
 		slog.Info("composio integration disabled (COMPOSIO_API_KEY not set)")
+	// GitLab integration token encryption. Nil when GITLAB_SECRET_KEY is unset;
+	// the GitLab OAuth handlers return a clear error in that case.
+	if gitlabKey, err := secretbox.LoadKey("GITLAB_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(gitlabKey)
+		if err != nil {
+			slog.Error("gitlab: secretbox.New failed; GitLab OAuth disabled", "error", err)
+		} else {
+			h.GitLabBox = box
+			slog.Info("gitlab integration enabled")
+		}
 	}
 
 	if opts.HeartbeatScheduler != nil {
@@ -700,6 +710,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// browser redirect; the workspace/agent/initiator are recovered from the
 	// sealed state). It exchanges the code, upserts the install, then bounces
 	// the browser back to Settings → Integrations.
+	// GitLab webhook (no Multica auth — authenticated via X-Gitlab-Token
+	// shared secret) and OAuth callback.
+	r.Post("/api/webhooks/gitlab", h.HandleGitLabWebhook)
+	r.Get("/api/gitlab/setup", h.GitLabSetupCallback)
 	// Stripe webhook (no Multica auth — Stripe signs the raw body
 	// with a shared secret, the multica-cloud upstream verifies. We
 	// only forward the bytes + the Stripe-Signature header; see
@@ -849,6 +863,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
+				})
+
+				// GitLab integration — listing is member-visible; connect/disconnect
+				// require admin.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/gitlab/connections", h.ListGitLabConnections)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Get("/gitlab/connect", h.GitLabConnect)
+					r.Delete("/gitlab/connections/{connectionId}", h.DeleteGitLabConnection)
 				})
 
 				// Lark integration. Every endpoint here only requires
@@ -1018,6 +1044,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/metadata/{key}", h.SetIssueMetadataKey)
 					r.Delete("/metadata/{key}", h.DeleteIssueMetadataKey)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
+					r.Get("/merge-requests", h.ListMergeRequestsForIssue)
 				})
 			})
 

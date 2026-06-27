@@ -142,4 +142,8 @@ const (
 	// invalidate the Slack installations query on either.
 	EventSlackInstallationCreated = "slack_installation:created"
 	EventSlackInstallationRevoked = "slack_installation:revoked"
+	// GitLab integration events.
+	EventGitLabConnectionCreated   = "gitlab_connection:created"
+	EventGitLabConnectionDeleted   = "gitlab_connection:deleted"
+	EventGitLabMergeRequestUpdated = "gitlab_merge_request:updated"
 )
