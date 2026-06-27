@@ -85,6 +85,49 @@
       "label": "显示系统通知",
       "hint": "App 未获得焦点时，新的收件箱条目通过操作系统弹出通知横幅。"
     },
+    "sound": {
+      "title": "声音提醒",
+      "description": "需要你操作时在浏览器中播放短促提示音。首次播放前需在页面任意位置点击或按键以解锁浏览器音频。",
+      "global_toggle": "启用声音",
+      "volume": "音量",
+      "theme": "声音主题",
+      "theme_default": "默认",
+      "theme_soft": "柔和",
+      "theme_alert": "醒目",
+      "scenes_description": "以下场景播放声音：",
+      "scenes": {
+        "issue_done": {
+          "label": "Issue 完成时",
+          "description": "你关注的 issue 被标记为已完成"
+        },
+        "issue_blocked": {
+          "label": "Issue 被阻塞（需要我处理）",
+          "description": "某个 issue 被阻塞，等待你的操作"
+        },
+        "child_blocked": {
+          "label": "子任务出现卡点",
+          "description": "你关注的父 issue 下某个子 issue 遇到阻塞"
+        },
+        "in_review": {
+          "label": "等待我审核",
+          "description": "有 issue 进入待审核状态且分配给你"
+        },
+        "mention_decision": {
+          "label": "Agent @我请求决策",
+          "description": "Agent 在评论中 @你 请求做出决策"
+        },
+        "task_failed": {
+          "label": "Agent 执行失败",
+          "description": "Agent 任务执行出错，需要你介入处理"
+        },
+        "pr_reviewer": {
+          "label": "PR reviewer 状态",
+          "description": "有 Pull Request 请求你的 review"
+        }
+      },
+      "preview": "预览声音",
+      "pr_reviewer_disabled_tooltip": "待 GitHub 集成就绪后启用"
+    },
     "browser": {
       "label": "浏览器通知",
       "hint": "允许当前浏览器为新的收件箱条目弹出通知横幅。",

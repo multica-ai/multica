@@ -84,10 +84,61 @@ import type {
   ChatMessagesPage,
   InvitationCreatedPayload,
 } from "../types";
+import { soundManager } from "../sound/sound-manager";
+import { SOUND_PRIORITY, type SoundType } from "../sound/sound-definitions";
 
 const chatWsLogger = createLogger("chat.ws");
 
 const logger = createLogger("realtime-sync");
+
+// --- Notification sound dedup state (module-level — one AudioContext per page) ---
+
+const DEDUP_WINDOW_MS = 500;
+
+let dedupPending: SoundType | null = null;
+let dedupTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Deduped sound playback. Notifications arriving within DEDUP_WINDOW_MS are
+ * merged: only the highest-priority sound in the window plays.
+ */
+function enqueueNotificationSound(sound: SoundType, volume: number, theme: string): void {
+  if (dedupPending !== null) {
+    const currentPri = SOUND_PRIORITY[dedupPending] ?? 0;
+    const newPri = SOUND_PRIORITY[sound] ?? 0;
+    if (newPri <= currentPri) return;
+    // Higher priority — replace pending
+    dedupPending = sound;
+    return;
+  }
+
+  dedupPending = sound;
+  if (dedupTimer !== null) clearTimeout(dedupTimer);
+  dedupTimer = setTimeout(() => {
+    const finalSound = dedupPending;
+    dedupPending = null;
+    dedupTimer = null;
+    if (finalSound) {
+      soundManager.play(
+        finalSound,
+        volume,
+        theme as "default" | "soft" | "alert",
+      );
+    }
+  }, DEDUP_WINDOW_MS);
+}
+
+/**
+ * Read notification preferences from React Query cache.
+ * Returns null when cache is cold (initial load before first fetch resolves).
+ */
+function readSoundPrefs(qc: QueryClient, wsId: string): NotificationPreferenceResponse | null {
+  return (
+    qc.getQueryData<NotificationPreferenceResponse>(
+      notificationPreferenceKeys.all(wsId),
+    ) ?? null
+  );
+}
 
 export function invalidateChatMessageQueries(
   qc: QueryClient,
@@ -578,6 +629,16 @@ export function useRealtimeSync(
       // cache) AND the chat-specific ws.on() handlers below. The two
       // channels are independent — onAny dispatch and ws.on are separate
       // subscriptions.
+      // Notification events — purely client-side sound playback, no cache
+      // invalidation needed.
+      "notification:issue_done",
+      "notification:issue_blocked",
+      "notification:child_blocked",
+      "notification:in_review",
+      "notification:parent_chain_done",
+      "notification:task_failed",
+      "notification:stage_closed",
+      "notification:mention_decision",
     ]);
 
     const unsubAny = ws.onAny((msg) => {
@@ -1086,6 +1147,111 @@ export function useRealtimeSync(
       }
     });
 
+    // --- Notification sound handlers ---
+    //
+    // These are the client-side DEFENSIVE path (design doc §implementation
+    // notes item 1). The server has already checked preferences and decided
+    // whether to push the event. Here we re-read the local cache to guard
+    // against stale-preference races (user changed settings in another tab
+    // and the server pushed before the new pref propagated). If cache is
+    // stale or doesn't match, the sound is silently dropped.
+
+    const unsubNotifIssueDone = ws.on("notification:issue_done", () => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      const prefs = readSoundPrefs(qc, wsId);
+      if (!prefs) return;
+      const p = prefs.preferences;
+      if (p.sound_enabled === "muted") return;
+      if (p.sound_issue_done === "muted") return;
+      soundManager.init();
+      enqueueNotificationSound("complete", p.sound_volume ?? 70, p.sound_theme ?? "default");
+    });
+
+    const unsubNotifParentChainDone = ws.on("notification:parent_chain_done", () => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      const prefs = readSoundPrefs(qc, wsId);
+      if (!prefs) return;
+      const p = prefs.preferences;
+      if (p.sound_enabled === "muted") return;
+      if (p.sound_issue_done === "muted") return;
+      soundManager.init();
+      enqueueNotificationSound("complete", p.sound_volume ?? 70, p.sound_theme ?? "default");
+    });
+
+    const unsubNotifStageClosed = ws.on("notification:stage_closed", () => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      const prefs = readSoundPrefs(qc, wsId);
+      if (!prefs) return;
+      const p = prefs.preferences;
+      if (p.sound_enabled === "muted") return;
+      if (p.sound_child_blocked === "muted") return;
+      soundManager.init();
+      enqueueNotificationSound("complete", p.sound_volume ?? 70, p.sound_theme ?? "default");
+    });
+
+    const unsubNotifIssueBlocked = ws.on("notification:issue_blocked", () => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      const prefs = readSoundPrefs(qc, wsId);
+      if (!prefs) return;
+      const p = prefs.preferences;
+      if (p.sound_enabled === "muted") return;
+      if (p.sound_blocked === "muted") return;
+      soundManager.init();
+      enqueueNotificationSound("blocked", p.sound_volume ?? 70, p.sound_theme ?? "default");
+    });
+
+    const unsubNotifChildBlocked = ws.on("notification:child_blocked", () => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      const prefs = readSoundPrefs(qc, wsId);
+      if (!prefs) return;
+      const p = prefs.preferences;
+      if (p.sound_enabled === "muted") return;
+      if (p.sound_child_blocked === "muted") return;
+      soundManager.init();
+      enqueueNotificationSound("blocked", p.sound_volume ?? 70, p.sound_theme ?? "default");
+    });
+
+    const unsubNotifInReview = ws.on("notification:in_review", () => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      const prefs = readSoundPrefs(qc, wsId);
+      if (!prefs) return;
+      const p = prefs.preferences;
+      if (p.sound_enabled === "muted") return;
+      if (p.sound_in_review === "muted") return;
+      soundManager.init();
+      enqueueNotificationSound("action_required", p.sound_volume ?? 70, p.sound_theme ?? "default");
+    });
+
+    const unsubNotifMentionDecision = ws.on("notification:mention_decision", () => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      const prefs = readSoundPrefs(qc, wsId);
+      if (!prefs) return;
+      const p = prefs.preferences;
+      if (p.sound_enabled === "muted") return;
+      if (p.sound_mention_decision === "muted") return;
+      soundManager.init();
+      enqueueNotificationSound("action_required", p.sound_volume ?? 70, p.sound_theme ?? "default");
+    });
+
+    const unsubNotifTaskFailed = ws.on("notification:task_failed", () => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      const prefs = readSoundPrefs(qc, wsId);
+      if (!prefs) return;
+      const p = prefs.preferences;
+      if (p.sound_enabled === "muted") return;
+      if (p.sound_task_failed === "muted") return;
+      soundManager.init();
+      enqueueNotificationSound("attention", p.sound_volume ?? 70, p.sound_theme ?? "default");
+    });
+
     return () => {
       unsubAny();
       unsubIssueUpdated();
@@ -1127,6 +1293,14 @@ export function useRealtimeSync(
       unsubChatSessionRead();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
+      unsubNotifIssueDone();
+      unsubNotifParentChainDone();
+      unsubNotifStageClosed();
+      unsubNotifIssueBlocked();
+      unsubNotifChildBlocked();
+      unsubNotifInReview();
+      unsubNotifMentionDecision();
+      unsubNotifTaskFailed();
       timers.forEach(clearTimeout);
       timers.clear();
     };

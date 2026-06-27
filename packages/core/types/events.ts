@@ -79,7 +79,15 @@ export type WSEventType =
   | "github_installation:deleted"
   | "pull_request:linked"
   | "pull_request:updated"
-  | "pull_request:unlinked";
+  | "pull_request:unlinked"
+  | "notification:issue_done"
+  | "notification:issue_blocked"
+  | "notification:child_blocked"
+  | "notification:in_review"
+  | "notification:parent_chain_done"
+  | "notification:task_failed"
+  | "notification:stage_closed"
+  | "notification:mention_decision";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -475,6 +483,16 @@ export interface WSEventPayloadMap {
   "pull_request:linked": unknown;
   "pull_request:updated": unknown;
   "pull_request:unlinked": unknown;
+  // Notification events — payload carries the server's pre-computed sound
+  // decision plus metadata for client-side defensive re-check.
+  "notification:issue_done": unknown;
+  "notification:issue_blocked": unknown;
+  "notification:child_blocked": unknown;
+  "notification:in_review": unknown;
+  "notification:parent_chain_done": unknown;
+  "notification:task_failed": unknown;
+  "notification:stage_closed": unknown;
+  "notification:mention_decision": unknown;
 }
 
 /**

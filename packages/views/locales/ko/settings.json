@@ -85,6 +85,49 @@
       "label": "시스템 알림 표시",
       "hint": "앱에 포커스가 없을 때 새 인박스 항목에 대해 운영체제 배너를 표시합니다."
     },
+    "sound": {
+      "title": "Sound Notifications",
+      "description": "Play a short sound in your browser when action is needed. Requires a single click or keypress anywhere on the page to unlock browser audio.",
+      "global_toggle": "Enable sound",
+      "volume": "Volume",
+      "theme": "Sound theme",
+      "theme_default": "Default",
+      "theme_soft": "Soft",
+      "theme_alert": "Alert",
+      "scenes_description": "Play a sound for the following events:",
+      "scenes": {
+        "issue_done": {
+          "label": "Issue completed",
+          "description": "An issue you follow was moved to Done"
+        },
+        "issue_blocked": {
+          "label": "Issue blocked (needs me)",
+          "description": "An issue is blocked and waiting on your action"
+        },
+        "child_blocked": {
+          "label": "Sub-task blocked",
+          "description": "A child issue under a parent you follow hit a blocker"
+        },
+        "in_review": {
+          "label": "Waiting for my review",
+          "description": "An issue is in review and assigned to you"
+        },
+        "mention_decision": {
+          "label": "Agent @mentions me for a decision",
+          "description": "An agent is asking you to make a decision"
+        },
+        "task_failed": {
+          "label": "Agent task failed",
+          "description": "An agent task ended with an error and needs attention"
+        },
+        "pr_reviewer": {
+          "label": "PR reviewer status",
+          "description": "Pull request review requested from you"
+        }
+      },
+      "preview": "Preview sound",
+      "pr_reviewer_disabled_tooltip": "Waiting for GitHub integration to be ready"
+    },
     "browser": {
       "label": "브라우저 알림",
       "hint": "이 브라우저에서 새 인박스 항목에 대한 알림 배너를 표시하도록 허용합니다.",

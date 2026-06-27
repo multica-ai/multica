@@ -10,6 +10,7 @@ import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
 import { BrowserNotificationSetting } from "./browser-notification-setting";
+import { SoundSettings } from "./sound-settings";
 
 // Inbox event groups rendered in the per-event toggle list. `system_notifications`
 // is a sibling preference key but lives in its own section below.
@@ -86,6 +87,9 @@ export function NotificationsTab() {
           </CardContent>
         </Card>
       </section>
+
+      {/* Sound Notifications — inserted between Inbox and System sections */}
+      <SoundSettings />
 
       <section className="space-y-4">
         <div>
