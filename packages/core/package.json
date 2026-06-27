@@ -33,6 +33,7 @@
     "./issues": "./issues/index.ts",
     "./issues/queries": "./issues/queries.ts",
     "./issues/mutations": "./issues/mutations.ts",
+    "./issues/batch": "./issues/batch.ts",
     "./issues/timeline-sort": "./issues/timeline-sort.ts",
     "./issues/date": "./issues/date.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",

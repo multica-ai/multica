@@ -474,6 +474,20 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+func writeMeasuredJSON(w http.ResponseWriter, status int, v any) (int, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return 0, err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, writeErr := w.Write(b)
+	if writeErr != nil {
+		return len(b), writeErr
+	}
+	return len(b), nil
+}
+
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }

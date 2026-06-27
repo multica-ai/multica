@@ -106,6 +106,7 @@ type AgentRuntime struct {
 	LegacyDaemonID   pgtype.Text        `json:"legacy_daemon_id"`
 	SandboxEnabled   pgtype.Bool        `json:"sandbox_enabled"`
 	Visibility       string             `json:"visibility"`
+	ProfileID        pgtype.UUID        `json:"profile_id"`
 	PausedAt         pgtype.Timestamptz `json:"paused_at"`
 	UnpauseAt        pgtype.Timestamptz `json:"unpause_at"`
 	PauseReason      pgtype.Text        `json:"pause_reason"`
@@ -156,52 +157,12 @@ type AgentTaskQueue struct {
 	SourceTaskID          pgtype.UUID        `json:"source_task_id"`
 	DelegationSource      pgtype.Text        `json:"delegation_source"`
 	WaitReason            pgtype.Text        `json:"wait_reason"`
-	Title                 pgtype.Text        `json:"title"`
-	ModelOverride         pgtype.Text        `json:"model_override"`
 	InitiatorUserID       pgtype.UUID        `json:"initiator_user_id"`
+	SquadID               pgtype.UUID        `json:"squad_id"`
 	HandoffNote           pgtype.Text        `json:"handoff_note"`
 	PrepareLeaseExpiresAt pgtype.Timestamptz `json:"prepare_lease_expires_at"`
-	SquadID               pgtype.UUID        `json:"squad_id"`
-}
-
-type Attachment struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	CommentID      pgtype.UUID        `json:"comment_id"`
-	UploaderType   string             `json:"uploader_type"`
-	UploaderID     pgtype.UUID        `json:"uploader_id"`
-	Filename       string             `json:"filename"`
-	Url            string             `json:"url"`
-	ContentType    string             `json:"content_type"`
-	SizeBytes      int64              `json:"size_bytes"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
-	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
-	Classification string             `json:"classification"`
-}
-
-type Autopilot struct {
-	ID                 pgtype.UUID        `json:"id"`
-	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
-	Title              string             `json:"title"`
-	Description        pgtype.Text        `json:"description"`
-	AssigneeID         pgtype.UUID        `json:"assignee_id"`
-	Status             string             `json:"status"`
-	ExecutionMode      string             `json:"execution_mode"`
-	IssueTitleTemplate pgtype.Text        `json:"issue_title_template"`
-	CreatedByType      string             `json:"created_by_type"`
-	CreatedByID        pgtype.UUID        `json:"created_by_id"`
-	LastRunAt          pgtype.Timestamptz `json:"last_run_at"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	AssigneeType       string             `json:"assignee_type"`
-	ProjectID          pgtype.UUID        `json:"project_id"`
-	Scope              string             `json:"scope"`
-	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
-	GroupID            pgtype.UUID        `json:"group_id"`
-	Model              pgtype.Text        `json:"model"`
-	IsPrivate          bool               `json:"is_private"`
+	Title                 pgtype.Text        `json:"title"`
+	ModelOverride         pgtype.Text        `json:"model_override"`
 }
 
 type AgentToolGrant struct {
@@ -246,6 +207,46 @@ type ArtifactFolder struct {
 	Kind        string             `json:"kind"`
 	OwnerID     pgtype.UUID        `json:"owner_id"`
 	Visibility  string             `json:"visibility"`
+}
+
+type Attachment struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	CommentID      pgtype.UUID        `json:"comment_id"`
+	UploaderType   string             `json:"uploader_type"`
+	UploaderID     pgtype.UUID        `json:"uploader_id"`
+	Filename       string             `json:"filename"`
+	Url            string             `json:"url"`
+	ContentType    string             `json:"content_type"`
+	SizeBytes      int64              `json:"size_bytes"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	Classification string             `json:"classification"`
+}
+
+type Autopilot struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Title              string             `json:"title"`
+	Description        pgtype.Text        `json:"description"`
+	AssigneeID         pgtype.UUID        `json:"assignee_id"`
+	Status             string             `json:"status"`
+	ExecutionMode      string             `json:"execution_mode"`
+	IssueTitleTemplate pgtype.Text        `json:"issue_title_template"`
+	CreatedByType      string             `json:"created_by_type"`
+	CreatedByID        pgtype.UUID        `json:"created_by_id"`
+	LastRunAt          pgtype.Timestamptz `json:"last_run_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	AssigneeType       string             `json:"assignee_type"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	Scope              string             `json:"scope"`
+	OwnerUserID        pgtype.UUID        `json:"owner_user_id"`
+	GroupID            pgtype.UUID        `json:"group_id"`
+	Model              pgtype.Text        `json:"model"`
+	IsPrivate          bool               `json:"is_private"`
 }
 
 type AutopilotRun struct {
@@ -1409,6 +1410,7 @@ type Issue struct {
 	Kind               string             `json:"kind"`
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
+	Stage              pgtype.Int4        `json:"stage"`
 	IsPrivate          bool               `json:"is_private"`
 	Classification     string             `json:"classification"`
 }
@@ -1635,6 +1637,21 @@ type PushSubscription struct {
 	UserAgent  pgtype.Text        `json:"user_agent"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
+}
+
+type RuntimeProfile struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	DisplayName    string             `json:"display_name"`
+	ProtocolFamily string             `json:"protocol_family"`
+	CommandName    string             `json:"command_name"`
+	Description    pgtype.Text        `json:"description"`
+	FixedArgs      []byte             `json:"fixed_args"`
+	Visibility     string             `json:"visibility"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	Enabled        bool               `json:"enabled"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type RuntimeSetupToken struct {
@@ -2016,6 +2033,7 @@ type WorkspaceConnection struct {
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	Tools               []byte             `json:"tools"`
+	ScopableArgs        []byte             `json:"scopable_args"`
 }
 
 type WorkspaceInvitation struct {

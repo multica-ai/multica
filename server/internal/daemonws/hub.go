@@ -21,11 +21,59 @@ const (
 
 // ClientIdentity captures the already-authenticated daemon connection scope.
 type ClientIdentity struct {
-	DaemonID      string
-	UserID        string
+	DaemonID string
+	UserID   string
+	// WorkspaceID is the legacy single-workspace scope used by older callers
+	// and daemon-token auth. New code should populate WorkspaceIDs from the
+	// runtime rows authorized for this connection.
 	WorkspaceID   string
+	WorkspaceIDs  []string
 	RuntimeIDs    []string
 	ClientVersion string
+}
+
+func (i ClientIdentity) AuthorizedWorkspaceIDs() []string {
+	seen := make(map[string]struct{}, len(i.WorkspaceIDs)+1)
+	out := make([]string, 0, len(i.WorkspaceIDs)+1)
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for _, id := range i.WorkspaceIDs {
+		add(id)
+	}
+	if len(out) == 0 {
+		add(i.WorkspaceID)
+	}
+	return out
+}
+
+func (i ClientIdentity) PrimaryWorkspaceID() string {
+	ids := i.AuthorizedWorkspaceIDs()
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[0]
+}
+
+func (i ClientIdentity) AllowsWorkspace(workspaceID string) bool {
+	ids := i.AuthorizedWorkspaceIDs()
+	if len(ids) == 0 {
+		return true
+	}
+	for _, id := range ids {
+		if id == workspaceID {
+			return true
+		}
+	}
+	return false
 }
 
 type client struct {
@@ -71,6 +119,7 @@ func (c *client) markSeen(eventID string) bool {
 // scope) and return the ack payload to send back. Returning an error skips
 // the ack and is logged at debug level.
 type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
+
 // CEREBRO-PATCH(ws-heartbeat-handler-payload): JEH-997 takes the full
 
 // MessageKindRecorder is the optional metric hook called once per inbound

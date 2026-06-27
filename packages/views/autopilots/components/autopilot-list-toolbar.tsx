@@ -181,7 +181,7 @@ export function AutopilotListToolbar({
     lastRun: t(($) => $.page.table.last_run),
     nextRun: t(($) => $.page.table.next_run),
     mode: t(($) => $.page.table.mode),
-    creator: t(($) => $.page.table.created_by),
+    creator: t(($) => $.page.table.created),
     created: t(($) => $.page.table.created),
   };
   const sortLabel = SORT_LABELS[sortField];

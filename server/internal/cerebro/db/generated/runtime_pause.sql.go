@@ -82,7 +82,7 @@ SELECT
 FROM agent_task_queue p
 LEFT JOIN agent a ON a.id = p.agent_id
 WHERE p.id = $1
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, title, model_override
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, initiator_user_id, squad_id, handoff_note, prepare_lease_expires_at, title, model_override
 `
 
 // Like CreateRetryTask but resets the attempt counter to 1. Used when
@@ -130,6 +130,10 @@ func (q *Queries) CreateResumeFromPauseTask(ctx context.Context, id pgtype.UUID)
 		&i.SourceTaskID,
 		&i.DelegationSource,
 		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.SquadID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
 		&i.Title,
 		&i.ModelOverride,
 	)
@@ -245,7 +249,7 @@ func (q *Queries) IncrementAutoPauseCount(ctx context.Context, id pgtype.UUID) (
 }
 
 const listResumableTasksForRuntime = `-- name: ListResumableTasksForRuntime :many
-SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.original_user_id, t.delegating_agent_id, t.source_task_id, t.delegation_source, t.wait_reason, t.title, t.model_override FROM agent_task_queue t
+SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.original_user_id, t.delegating_agent_id, t.source_task_id, t.delegation_source, t.wait_reason, t.initiator_user_id, t.squad_id, t.handoff_note, t.prepare_lease_expires_at, t.title, t.model_override FROM agent_task_queue t
 WHERE t.runtime_id = $1
   AND t.status = 'failed'
   AND (
@@ -336,6 +340,10 @@ func (q *Queries) ListResumableTasksForRuntime(ctx context.Context, arg ListResu
 			&i.SourceTaskID,
 			&i.DelegationSource,
 			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.SquadID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
 			&i.Title,
 			&i.ModelOverride,
 		); err != nil {
@@ -350,7 +358,7 @@ func (q *Queries) ListResumableTasksForRuntime(ctx context.Context, arg ListResu
 }
 
 const listRuntimesDueForUnpause = `-- name: ListRuntimesDueForUnpause :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 WHERE paused_at IS NOT NULL
   AND unpause_at IS NOT NULL
   AND unpause_at <= now()
@@ -384,6 +392,7 @@ func (q *Queries) ListRuntimesDueForUnpause(ctx context.Context) ([]AgentRuntime
 			&i.LegacyDaemonID,
 			&i.SandboxEnabled,
 			&i.Visibility,
+			&i.ProfileID,
 			&i.PausedAt,
 			&i.UnpauseAt,
 			&i.PauseReason,
@@ -414,7 +423,7 @@ SET paused_at    = COALESCE(paused_at, now()),
     pause_reason = $3,
     updated_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 type PauseAgentRuntimeParams struct {
@@ -450,6 +459,7 @@ func (q *Queries) PauseAgentRuntime(ctx context.Context, arg PauseAgentRuntimePa
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,
@@ -530,7 +540,7 @@ SET status         = 'failed',
     failure_reason = 'runtime_paused'
 WHERE runtime_id = $1
   AND status IN ('dispatched', 'running')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, title, model_override
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, initiator_user_id, squad_id, handoff_note, prepare_lease_expires_at, title, model_override
 `
 
 // Called when a runtime is paused: marks any in-flight (dispatched/running)
@@ -578,6 +588,10 @@ func (q *Queries) SuspendActiveTasksForRuntime(ctx context.Context, runtimeID pg
 			&i.SourceTaskID,
 			&i.DelegationSource,
 			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.SquadID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
 			&i.Title,
 			&i.ModelOverride,
 		); err != nil {
@@ -598,7 +612,7 @@ SET paused_at    = NULL,
     pause_reason = NULL,
     updated_at   = now()
 WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
+RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
 `
 
 // Clears all pause fields. Idempotent on already-unpaused runtimes.
@@ -622,6 +636,7 @@ func (q *Queries) UnpauseAgentRuntime(ctx context.Context, id pgtype.UUID) (Agen
 		&i.LegacyDaemonID,
 		&i.SandboxEnabled,
 		&i.Visibility,
+		&i.ProfileID,
 		&i.PausedAt,
 		&i.UnpauseAt,
 		&i.PauseReason,

@@ -47,7 +47,7 @@ import {
   type SkillSortField,
 } from "@multica/core/skills/stores";
 import { useT } from "../../i18n";
-import type { SkillRow } from "./skills-page";
+import type { SkillRow } from "./skill-columns";
 
 export type OriginType = SkillOriginType;
 

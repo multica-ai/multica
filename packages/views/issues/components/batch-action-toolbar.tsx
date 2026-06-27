@@ -24,7 +24,7 @@ import { useT } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
 
 export function BatchActionToolbar({
-  issues,
+  issues = [],
   placement = "fixed-bottom",
 }: {
   /**
@@ -33,7 +33,7 @@ export function BatchActionToolbar({
    * reflect the real common status / priority / assignee of the selected
    * issues, mirroring how the skill list filters its rows by `selectedIds`.
    */
-  issues: Issue[];
+  issues?: Issue[];
   /**
    * "fixed-bottom" — floats at the bottom of the viewport (default; used by
    * full-screen issue lists).
@@ -160,7 +160,7 @@ export function BatchActionToolbar({
 
         {/* Status */}
         <StatusPicker
-          status={common.status}
+          status={common.status ?? "todo"}
           onUpdate={handleBatchStatus}
           open={statusOpen}
           onOpenChange={setStatusOpen}
@@ -171,7 +171,7 @@ export function BatchActionToolbar({
 
         {/* Priority */}
         <PriorityPicker
-          priority={common.priority}
+          priority={common.priority ?? "none"}
           onUpdate={handleBatchUpdate}
           open={priorityOpen}
           onOpenChange={setPriorityOpen}
@@ -184,7 +184,6 @@ export function BatchActionToolbar({
         <AssigneePicker
           assigneeType={common.assignee?.type ?? null}
           assigneeId={common.assignee?.id ?? null}
-          mixed={common.assignee === null}
           onUpdate={handleBatchAssignee}
           open={assigneeOpen}
           onOpenChange={setAssigneeOpen}
@@ -233,4 +232,3 @@ export function BatchActionToolbar({
     </>
   );
 }
-

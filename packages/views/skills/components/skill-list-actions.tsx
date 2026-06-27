@@ -46,7 +46,7 @@ import {
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
-import type { SkillRow } from "./skills-page";
+import type { SkillRow } from "./skill-columns";
 
 // Shared context the row kebab and the batch toolbar both need. Assembled
 // once at the page level.

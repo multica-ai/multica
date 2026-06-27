@@ -8,7 +8,6 @@ import {
   ArrowUp,
   CalendarDays,
   ChartGantt,
-  Check,
   ChevronDown,
   CircleDot,
   Columns3,
@@ -25,7 +24,6 @@ import {
   UserMinus,
   UserPen,
   Waves,
-  ChartGantt,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {

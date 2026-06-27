@@ -114,6 +114,7 @@ export function applyChatDoneToCache(
       task_id: taskId,
       created_at: payload.created_at ?? new Date().toISOString(),
       elapsed_ms: payload.elapsed_ms ?? null,
+      responded_at: null,
     };
     qc.setQueryData<ChatMessage[] | undefined>(
       chatKeys.messages(sessionId),
@@ -301,7 +302,7 @@ export async function handleInboxNew(
  * new WSClient instance is detected (workspace switch) to recover events
  * missed while disconnected.
  */
-function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
+export function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   const wsId = getCurrentWsId();
   if (wsId) {
     qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
@@ -334,6 +335,20 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
   qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+}
+
+export function invalidateTaskLifecycleQueries(
+  qc: QueryClient,
+  wsId: string,
+): void {
+  qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+  qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
+  qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
+  qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
+  invalidateSquadMemberStatusQueries(qc, wsId);
+  qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreviewAll() });
 }
 
 function invalidateSquadMemberStatusQueries(qc: QueryClient, wsId: string): void {

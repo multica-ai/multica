@@ -1308,6 +1308,24 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 // CEREBRO-PATCH(note-comment-prefix): MUL-3115 — comments prefixed with /note skip agent triggering on all trigger paths.
 const noteCommentPrefix = "/note"
 
+type commentAgentTriggerSource string
+
+const (
+	commentTriggerSourceIssueAssignee      commentAgentTriggerSource = "issue_assignee"
+	commentTriggerSourceMentionAgent       commentAgentTriggerSource = "mention_agent"
+	commentTriggerSourceMentionSquadLeader commentAgentTriggerSource = "mention_squad_leader"
+)
+
+type commentAgentTrigger struct {
+	Agent  db.Agent
+	Source commentAgentTriggerSource
+	Squad  *db.Squad
+}
+
+type commentTriggerComputeOptions struct {
+	ExcludeTriggerCommentID pgtype.UUID
+}
+
 func isNoteComment(content string) bool {
 	trimmed := strings.TrimLeft(content, " \t\r\n")
 	firstToken := trimmed
@@ -1436,7 +1454,7 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		triggers = append(triggers, trigger)
 	}
 
-	if actorType == "member" && h.shouldEnqueueOnComment(ctx, issue, actorType, actorID, opts) &&
+	if actorType == "member" && h.shouldEnqueueOnComment(ctx, issue, actorType, actorID) &&
 		!h.commentMentionsOthersButNotAssignee(content, issue) &&
 		!h.isReplyToMemberThread(ctx, parentComment, content, issue) {
 		if agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
@@ -1667,6 +1685,77 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 	return parentComment.AuthorType == "member"
 }
 
+func (h *Handler) computeMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string, opts commentTriggerComputeOptions) []commentAgentTrigger {
+	wsID := uuidToString(issue.WorkspaceID)
+	mentions := util.ParseMentions(content)
+	if shouldInheritParentMentions(parentComment, mentions, authorType) {
+		mentions = util.ParseMentions(parentComment.Content)
+	}
+	triggers := make([]commentAgentTrigger, 0, len(mentions))
+	seen := make(map[string]struct{}, len(mentions))
+	add := func(trigger commentAgentTrigger) {
+		id := uuidToString(trigger.Agent.ID)
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		triggers = append(triggers, trigger)
+	}
+	for _, m := range mentions {
+		if m.Type == "squad" {
+			squadUUID := parseUUID(m.ID)
+			squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+				ID:          squadUUID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil {
+				continue
+			}
+			leaderID := squad.LeaderID
+			if authorType == "agent" && authorID == uuidToString(leaderID) &&
+				h.lastTaskWasLeader(ctx, issue.ID, leaderID) {
+				continue
+			}
+			agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+				ID:          leaderID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+				continue
+			}
+			if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
+				continue
+			}
+			hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, leaderID, opts)
+			if err != nil || hasPending {
+				continue
+			}
+			add(commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionSquadLeader, Squad: &squad})
+			continue
+		}
+		if m.Type != "agent" {
+			continue
+		}
+		agentUUID := parseUUID(m.ID)
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          agentUUID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+			continue
+		}
+		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
+			continue
+		}
+		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts)
+		if err != nil || hasPending {
+			continue
+		}
+		add(commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent})
+	}
+	return triggers
+}
+
 // enqueueMentionedAgentTasks parses @agent mentions from comment content and
 // enqueues a task for each mentioned agent. When parentComment is non-nil
 // (i.e. the comment is a reply), mentions from the parent (thread root) are
@@ -1755,9 +1844,9 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 			}
 			// CEREBRO-PATCH(mention-delegation-legacy-test): direct helper tests pass no delegation context; production missing provenance is still blocked by delegationErr above.
 			if delegation.OriginalUserID.Valid {
-				_, err = h.TaskService.EnqueueTaskForSquadLeaderFromComment(ctx, issue, leaderID, comment.ID, delegation)
+				_, err = h.TaskService.EnqueueTaskForSquadLeaderFromComment(ctx, issue, leaderID, squad.ID, comment.ID, delegation)
 			} else {
-				_, err = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, leaderID, comment.ID)
+				_, err = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, leaderID, squad.ID, comment.ID)
 			}
 			if err != nil {
 				slog.Warn("enqueue squad leader mention task failed", "issue_id", uuidToString(issue.ID), "squad_id", m.ID, "error", err)

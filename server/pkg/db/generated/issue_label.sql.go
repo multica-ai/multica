@@ -267,7 +267,7 @@ func (q *Queries) ListLabelsForIssues(ctx context.Context, arg ListLabelsForIssu
 }
 
 const listNonTerminalIssuesWithLabelName = `-- name: ListNonTerminalIssuesWithLabelName :many
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.kind, i.start_date, i.metadata, i.is_private, i.classification
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.kind, i.start_date, i.metadata, i.stage, i.is_private, i.classification
 FROM issue i
 JOIN issue_to_label il ON il.issue_id = i.id
 JOIN issue_label l ON l.id = il.label_id
@@ -314,6 +314,7 @@ func (q *Queries) ListNonTerminalIssuesWithLabelName(ctx context.Context, labelN
 			&i.Kind,
 			&i.StartDate,
 			&i.Metadata,
+			&i.Stage,
 			&i.IsPrivate,
 			&i.Classification,
 		); err != nil {

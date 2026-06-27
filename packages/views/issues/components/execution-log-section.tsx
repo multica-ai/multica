@@ -25,6 +25,7 @@ import {
 // CEREBRO-PATCH(interrupted-not-failed): a run stopped by a daemon restart / runtime pause / rate-limit is auto-retried, not broken — render it amber, not red "Failed".
 import { isInterruptionReason } from "@multica/cerebro-runtime/views";
 import { useT } from "../../i18n";
+import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
 
 // Right-panel section that lists every agent run for this issue. Active
 // runs sit at the top (always visible when present); past runs (terminal

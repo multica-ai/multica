@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   Agent,
+  AgentAvatarBackfillStatus,
   AgentTemplate,
   AgentTemplateSummary,
   Attachment,
@@ -10,11 +11,11 @@ import type {
   BillingPriceTier,
   BillingTopupsPage,
   BillingTransactionsPage,
-  CancelTaskResponse,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
+  IssueDependenciesResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
   Squad,
@@ -167,6 +168,199 @@ const BooleanWithDefaultSchema = (fallback: boolean) =>
     (value) => (typeof value === "boolean" ? value : undefined),
     z.boolean().default(fallback),
   );
+
+// CEREBRO-PATCH(agent-tools-schema): JEH-1359 — accept both current `name`
+// rows and older `tool_name` rows so installed clients survive server drift.
+const AgentToolSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object") return value;
+  const row = value as Record<string, unknown>;
+  const { tool_name: toolName, ...rest } = row;
+  return {
+    ...rest,
+    name: typeof row.name === "string" ? row.name : toolName,
+  };
+}, z.object({
+  name: z.string(),
+  description: z.string().default(""),
+  status: z
+    .enum(["implemented", "newly_implemented", "explicitly_excluded"])
+    .catch("implemented"),
+  enabled: BooleanWithDefaultSchema(false),
+  config: z.record(z.string(), z.unknown()).default({}),
+}).loose());
+
+export const AgentToolsListSchema = z.array(AgentToolSchema);
+
+// CEREBRO-PATCH(runtime-tools-schema): JEH-1710 — runtime tool inventory +
+// grants. Keep source/policy strings open-ended so new backend values render
+// through the UI's fallback branches instead of failing validation.
+const RuntimeToolSchema = z.object({
+  id: z.string().default(""),
+  runtime_id: z.string().default(""),
+  name: z.string(),
+  source: z.string().default("cloud"),
+  mcp_server_name: z.string().default(""),
+  description: z.string().default(""),
+  enabled: BooleanWithDefaultSchema(false),
+  last_scanned_at: z.string().nullable().default(null),
+}).loose();
+
+export const RuntimeToolsListSchema = z.array(RuntimeToolSchema);
+
+const RuntimeToolEffectiveAccessSchema = z.object({
+  descriptor: z.object({
+    tool_key: z.string().default(""),
+    display_name: z.string().default(""),
+    description: z.string().optional(),
+    source: z.string().default(""),
+    risk_class: z.string().default(""),
+    protocols: z.array(z.string()).default([]),
+    recommended_default_policy: z.string().default(""),
+  }).loose(),
+  inventory: z.object({
+    runtime_id: z.string().default(""),
+    tool_name: z.string().default(""),
+    source: z.string().default(""),
+    mcp_server_name: z.string().optional(),
+    enabled: BooleanWithDefaultSchema(false),
+  }).loose(),
+  policy: z.object({
+    effective: z.string().default(""),
+    reason: z.string().default(""),
+    decided_by: z.string().optional(),
+    capped_by: z.string().optional(),
+  }).loose(),
+  runtime_grant: z.object({
+    effective: z.string().default(""),
+    reason: z.string().default(""),
+  }).loose(),
+  protocol: z.object({
+    effective: z.string().default(""),
+    required_protocols: z.array(z.string()).default([]),
+    runtime_protocols: z.array(z.string()).default([]),
+    selected_protocol: z.string().optional(),
+    supports_ask: BooleanWithDefaultSchema(false),
+    unsupported_message: z.string().optional(),
+  }).loose(),
+  credential: z.object({
+    effective: z.string().default(""),
+    reason: z.string().default(""),
+  }).loose(),
+  exposure_effective: z.object({
+    effective: BooleanWithDefaultSchema(false),
+    reason: z.string().default(""),
+  }).loose(),
+  layers: z.record(z.string(), z.string()).optional(),
+}).loose();
+
+export const RuntimeToolEffectiveAccessListSchema = z.array(
+  RuntimeToolEffectiveAccessSchema,
+);
+
+const RuntimeToolGroupGrantSchema = z.object({
+  runtime_id: z.string().default(""),
+  tool_name: z.string().default(""),
+  group_id: z.string().default(""),
+  group_name: z.string().default(""),
+  granted_at: z.string().default(""),
+}).loose();
+
+const RuntimeToolUserGrantSchema = z.object({
+  runtime_id: z.string().default(""),
+  tool_name: z.string().default(""),
+  user_id: z.string().default(""),
+  user_name: z.string().default(""),
+  user_email: z.string().default(""),
+  user_avatar_url: z.string().default(""),
+  granted_at: z.string().default(""),
+}).loose();
+
+export const RuntimeToolGrantsSchema = z.object({
+  group_grants: z.array(RuntimeToolGroupGrantSchema).default([]),
+  user_grants: z.array(RuntimeToolUserGrantSchema).default([]),
+}).loose();
+
+const CapabilitySubjectSchema = z.object({
+  type: z.string().default("workspace"),
+  id: z.string().default(""),
+  display_name: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+}).loose();
+
+const CapabilitySchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  key: z.string().default(""),
+  title: z.string().default(""),
+  category: z.string().default(""),
+  description: z.string().default(""),
+  source: z.string().default(""),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  owners: z.array(CapabilitySubjectSchema).default([]),
+  users: z.array(CapabilitySubjectSchema).default([]),
+  reporters: z.array(CapabilitySubjectSchema).default([]),
+  first_seen_at: z.string().default(""),
+  last_reported_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const CapabilityListResponseSchema = z.object({
+  capabilities: z.array(CapabilitySchema).default([]),
+}).loose();
+
+// CEREBRO-PATCH(agent-avatar-backfill-schema): admin avatar rollout status.
+export const AgentAvatarBackfillStatusSchema = z.object({
+  workspace_id: z.string().default(""),
+  status: z.string().default("idle"),
+  missing: z.number().default(0),
+  total: z.number().default(0),
+  generated: z.number().default(0),
+  skipped: z.number().default(0),
+  failed: z.number().default(0),
+  errors: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_AGENT_AVATAR_BACKFILL_STATUS: AgentAvatarBackfillStatus = {
+  workspace_id: "",
+  status: "idle",
+  missing: 0,
+  total: 0,
+  generated: 0,
+  skipped: 0,
+  failed: 0,
+  errors: [],
+};
+
+// CEREBRO-PATCH(issue-dependencies-schema): blocks / blocked-by / related.
+const IssueDependencyRefSchema = z.object({
+  id: z.string(),
+  identifier: z.string().default(""),
+  title: z.string().default(""),
+  status: z.string().default("todo"),
+}).loose();
+
+export const IssueDependenciesResponseSchema = z.object({
+  blocks: z.array(IssueDependencyRefSchema).default([]),
+  blocked_by: z.array(IssueDependencyRefSchema).default([]),
+  related: z.array(IssueDependencyRefSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_DEPENDENCIES: IssueDependenciesResponse = {
+  blocks: [],
+  blocked_by: [],
+  related: [],
+};
+
+export const OnboardingRuntimeBootstrapResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  issue_id: z.string().default(""),
+}).loose();
+
+export const OnboardingNoRuntimeBootstrapResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  issue_id: z.string().default(""),
+}).loose();
 
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
@@ -498,7 +692,7 @@ export const CancelTaskResponseSchema = AgentTaskResponseSchema.extend({
     .transform((value) => value ?? undefined),
 }).loose();
 
-export const EMPTY_CANCEL_TASK_RESPONSE: CancelTaskResponse = {
+export const EMPTY_CANCEL_TASK_RESPONSE = {
   id: "",
   agent_id: "",
   runtime_id: "",
@@ -840,6 +1034,7 @@ export const UserSchema = z.object({
   avatar_url: z.string().nullable().default(null),
   onboarded_at: z.string().nullable().default(null),
   onboarding_questionnaire: z.record(z.string(), z.unknown()).default({}),
+  preferences: z.record(z.string(), z.unknown()).default({}),
   starter_content_state: z.string().nullable().default(null),
   language: z.string().nullable().default(null),
   profile_description: z.string().default(""),
@@ -855,6 +1050,7 @@ export const EMPTY_USER: User = {
   avatar_url: null,
   onboarded_at: null,
   onboarding_questionnaire: {},
+  preferences: {},
   starter_content_state: null,
   language: null,
   profile_description: "",

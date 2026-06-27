@@ -18,15 +18,132 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
+	"github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type daemonRepoCapabilityRequest struct {
+	URL        string `json:"url"`
+	Capability string `json:"capability"`
+	AgentID    string `json:"agent_id"`
+}
+
+func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Request) {
+	workspaceID := strings.TrimSpace(chi.URLParam(r, "workspaceId"))
+	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	var req daemonRepoCapabilityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	repoURL := strings.TrimSpace(req.URL)
+	if repoURL == "" {
+		writeError(w, http.StatusBadRequest, "url is required")
+		return
+	}
+	capability := strings.TrimSpace(req.Capability)
+	if capability == "" {
+		capability = "repo.checkout"
+	}
+	agentID := pgtype.UUID{}
+	if strings.TrimSpace(req.AgentID) != "" {
+		agentID, ok = parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
+		if !ok {
+			return
+		}
+	}
+	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	if store == nil {
+		store = toolpolicy.NewStoreFromQueries(cerebrodb.New(h.DB))
+	}
+	eff, err := store.Resolve(r.Context(), toolpolicy.Query{
+		WorkspaceID:     wsUUID,
+		ToolKey:         capability,
+		ResourcePattern: repoURL,
+		AgentID:         agentID,
+		RequestContext: toolpolicy.RequestContext{
+			Host:   toolpolicy.HostOf(repoURL),
+			Action: toolpolicy.ActionOf(capability),
+		},
+		Eval: h.daemonPolicyCELEvaluator(r.Context(), wsUUID),
+		Base: toolpolicy.SettingAllow,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return
+	}
+	switch eff.Setting {
+	case toolpolicy.SettingDeny:
+		writeJSON(w, http.StatusOK, map[string]any{"allowed": false, "decision": "deny", "reason": eff.Reason})
+	case toolpolicy.SettingAsk:
+		if h.ApprovalGate == nil || !agentID.Valid {
+			writeJSON(w, http.StatusOK, map[string]any{"allowed": false, "decision": "pending", "reason": eff.Reason})
+			return
+		}
+		allowed, decision, approvalID, err := h.repoCheckoutAsk(r.Context(), wsUUID, agentID, repoURL, capability, eff.Reason)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not create approval request")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"allowed": allowed, "decision": decision, "approval_id": uuidToString(approvalID), "reason": eff.Reason})
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"allowed": true, "decision": "allow", "reason": eff.Reason})
+	}
+}
+
+type runtimeCapabilitiesRefreshRequest struct {
+	CLIVersion   string          `json:"cli_version"`
+	Capabilities json.RawMessage `json:"capabilities"`
+}
+
+func (h *Handler) RefreshRuntimeCapabilities(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	rt, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
+		return
+	}
+	var req runtimeCapabilitiesRefreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Capabilities) > 0 {
+		if err := h.Queries.UpdateAgentRuntimeCapabilities(r.Context(), db.UpdateAgentRuntimeCapabilitiesParams{
+			ID:           rt.ID,
+			Capabilities: []byte(req.Capabilities),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update capabilities")
+			return
+		}
+	}
+	if strings.TrimSpace(req.CLIVersion) != "" {
+		if err := h.Queries.UpdateAgentRuntimeCliVersion(r.Context(), db.UpdateAgentRuntimeCliVersionParams{
+			ID:         rt.ID,
+			CliVersion: pgtype.Text{String: strings.TrimSpace(req.CLIVersion), Valid: true},
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update cli version")
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
 
 // repoCheckoutAsk resolves a repo checkout that hit "Ask" against the shared
 // inbox and reports the outcome the daemon should act on: allowed plus a

@@ -203,7 +203,7 @@ func CanTrigger(view AutopilotView, viewer Viewer) bool {
 // ListForUser executes the scope-aware list query, returning [] when no rows
 // match. Wraps db.Queries.ListAutopilotsForUser so the call site in the
 // upstream handler is a single line.
-func ListForUser(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, viewer Viewer, status pgtype.Text) ([]db.Autopilot, error) {
+func ListForUser(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, viewer Viewer, status pgtype.Text) ([]db.ListAutopilotsForUserRow, error) {
 	groups := viewer.GroupIDs
 	if groups == nil {
 		groups = []pgtype.UUID{}

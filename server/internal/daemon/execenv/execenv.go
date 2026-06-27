@@ -18,6 +18,7 @@ import (
 type RepoContextForEnv struct {
 	URL         string // remote URL
 	Description string // optional repo description
+	Ref         string // optional branch/tag/SHA
 }
 
 // ProjectResourceForEnv describes a single resource attached to the issue's
@@ -34,13 +35,14 @@ type ProjectResourceForEnv struct {
 
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
-	WorkspacesRoot string // base path for all envs (e.g., ~/multica_workspaces)
-	WorkspaceID    string // workspace UUID — tasks are grouped under this
-	TaskID         string // task UUID — used for directory name
-	AgentName      string // for git branch naming only
-	Provider       string // agent provider (determines runtime config and skill injection paths)
-	CodexVersion   string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin    string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	WorkspacesRoot  string // base path for all envs (e.g., ~/multica_workspaces)
+	WorkspaceID     string // workspace UUID — tasks are grouped under this
+	TaskID          string // task UUID — used for directory name
+	AgentName       string // for git branch naming only
+	Provider        string // agent provider (determines runtime config and skill injection paths)
+	CodexVersion    string // detected Codex CLI version (only used when Provider == "codex")
+	OpenclawBin     string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	OpenclawGateway OpenclawGatewayPin
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Only OpenClaw consumes it here today; other
@@ -85,6 +87,7 @@ type TaskContextForEnv struct {
 	AutopilotSource         string
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
+	HandoffNote             string
 	// CEREBRO-PATCH(execenv-user-profile-prompt): compiled user
 	// communication profile (JEH-304); empty if user has no profile.
 	UserProfilePrompt string
@@ -152,6 +155,7 @@ type Environment struct {
 	// OPENCLAW_CONFIG_PATH on the openclaw subprocess so its native skill
 	// scanner pins workspaceDir to WorkDir.
 	OpenclawConfigPath string
+	CursorDataDir      string
 	// OpenclawIncludeRoot is the directory of the user's active OpenClaw
 	// config (set only for openclaw provider with an on-disk user config).
 	// The daemon must prepend it to OPENCLAW_INCLUDE_ROOTS so OpenClaw is
@@ -274,10 +278,11 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 // the per-provider knobs (CodexVersion, OpenclawBin) so callers can pass
 // the same resolved binary path on both first-run and reuse paths.
 type ReuseParams struct {
-	WorkDir      string
-	Provider     string
-	CodexVersion string // only used when Provider == "codex"
-	OpenclawBin  string // only used when Provider == "openclaw"; empty = PATH lookup
+	WorkDir         string
+	Provider        string
+	CodexVersion    string // only used when Provider == "codex"
+	OpenclawBin     string // only used when Provider == "openclaw"; empty = PATH lookup
+	OpenclawGateway OpenclawGatewayPin
 	// McpConfig is the agent's saved `mcp_config` JSON. Reused on reuse so a
 	// freshly-saved managed set re-materialises into the wrapper before the
 	// task starts — without this a stale wrapper from a prior run would keep

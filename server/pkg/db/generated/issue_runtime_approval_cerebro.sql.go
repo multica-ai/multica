@@ -13,7 +13,7 @@ import (
 
 const getOpenRuntimeApprovalIssue = `-- name: GetOpenRuntimeApprovalIssue :one
 
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, start_date, metadata, is_private, classification FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, start_date, metadata, stage, is_private, classification FROM issue
 WHERE workspace_id = $1
   AND origin_type = 'runtime_approval'
   AND origin_id = $2
@@ -65,6 +65,7 @@ func (q *Queries) GetOpenRuntimeApprovalIssue(ctx context.Context, arg GetOpenRu
 		&i.Kind,
 		&i.StartDate,
 		&i.Metadata,
+		&i.Stage,
 		&i.IsPrivate,
 		&i.Classification,
 	)

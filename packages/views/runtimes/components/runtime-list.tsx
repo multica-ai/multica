@@ -51,7 +51,6 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { AppLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
@@ -269,14 +268,13 @@ const COST_CELL_DAYS = 14;
 
 export function CostCell({ runtimeId }: { runtimeId: string }) {
   const { t } = useT("runtimes");
-  const tz = useViewingTimezone();
   const { data: usage = [] } = useQuery(
-    runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
+    runtimeUsageOptions(runtimeId, COST_CELL_DAYS),
   );
-  const cost7d = useMemo(() => computeCostInWindow(usage, 7, tz), [usage, tz]);
+  const cost7d = useMemo(() => computeCostInWindow(usage, 7), [usage]);
   const costPrev7d = useMemo(
-    () => computeCostInWindow(usage, 7, tz, 7),
-    [usage, tz],
+    () => computeCostInWindow(usage, 7, 7),
+    [usage],
   );
   const delta = pctChange(cost7d, costPrev7d);
 

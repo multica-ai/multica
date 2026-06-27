@@ -2147,12 +2147,14 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 // ReportTaskUsage stores per-task token usage. Called independently of
 // complete/fail so usage is captured even when tasks fail or are blocked.
 type TaskUsagePayload struct {
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
-	InputTokens      int64  `json:"input_tokens"`
-	OutputTokens     int64  `json:"output_tokens"`
-	CacheReadTokens  int64  `json:"cache_read_tokens"`
-	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	Provider               string `json:"provider"`
+	Model                  string `json:"model"`
+	InputTokens            int64  `json:"input_tokens"`
+	OutputTokens           int64  `json:"output_tokens"`
+	CacheReadTokens        int64  `json:"cache_read_tokens"`
+	CacheWriteTokens       int64  `json:"cache_write_tokens"`
+	ContextInputTokens     int64  `json:"context_input_tokens,omitempty"`
+	ContextCacheReadTokens int64  `json:"context_cache_read_tokens,omitempty"`
 }
 
 func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {

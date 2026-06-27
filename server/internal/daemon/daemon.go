@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/traceupload"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -171,9 +172,21 @@ type Daemon struct {
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
+	versionProbes *versionProbeCache
+
+	accountIdentities *accountIdentityCache
+	traceUploaderMu   sync.Mutex
+	traceUploader     *traceupload.Manager
+	toolScanState     *runtimeToolScanState
 
 	wsHBMu      sync.RWMutex         // guards wsHBLastAck
 	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
+
+	wsWrites              atomic.Pointer[chan []byte]
+	cerebroTermSinkMu     sync.RWMutex
+	cerebroTermSinks      map[string]func(string)
+	cerebroActiveAttaches map[string][]byte
+	cerebroTermBuffers    map[string][][]byte
 
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
@@ -257,7 +270,13 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		profileLaunchSpecs:        make(map[string]profileLaunchSpec),
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentVersions:             make(map[string]string),
+		versionProbes:             newVersionProbeCache(),
+		accountIdentities:         newAccountIdentityCache(),
+		toolScanState:             newRuntimeToolScanState(),
 		wsHBLastAck:               make(map[string]time.Time),
+		cerebroTermSinks:          make(map[string]func(string)),
+		cerebroActiveAttaches:     make(map[string][]byte),
+		cerebroTermBuffers:        make(map[string][][]byte),
 		activeEnvRoots:            make(map[string]int),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
@@ -1537,7 +1556,7 @@ func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceI
 	return nil
 }
 
-func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL string) error {
+func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL string, extra ...string) error {
 	if d.repoCache == nil {
 		return fmt.Errorf("repo cache not initialized")
 	}

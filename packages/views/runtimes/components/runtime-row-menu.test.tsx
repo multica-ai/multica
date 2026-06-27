@@ -76,7 +76,7 @@ vi.mock("./shared", () => ({
   useHealthLabel: () => () => "Online",
 }));
 
-import { CliCell, RuntimeRowMenu, type RuntimeRow } from "./runtime-list";
+import { RuntimeRowMenu, type RuntimeRow } from "./runtime-list";
 
 function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
   return {

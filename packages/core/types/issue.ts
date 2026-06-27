@@ -41,6 +41,18 @@ export interface IssueDependenciesResponse {
   related: IssueDependencyRef[];
 }
 
+export interface IssueTriggerPreviewItem {
+  issue_id: string;
+  agent_id: string;
+  source: string;
+  handoff_supported: boolean;
+}
+
+export interface IssueTriggerPreviewResponse {
+  triggers: IssueTriggerPreviewItem[];
+  total_count: number;
+}
+
 export interface Issue {
   id: string;
   workspace_id: string;

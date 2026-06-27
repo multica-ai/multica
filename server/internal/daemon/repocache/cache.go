@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 )
 
 // gitEnv returns an environment for git subprocesses that contact remotes.
@@ -149,9 +148,20 @@ func (c *Cache) Lookup(workspaceID, url string) string {
 	return ""
 }
 
+// WithRepoLock serializes caller-supplied mutations on a bare repo against all
+// other same-repo operations that use the cache's lock.
+func (c *Cache) WithRepoLock(barePath string, fn func() error) error {
+	repoLock := c.lockForRepo(barePath)
+	repoLock.Lock()
+	defer repoLock.Unlock()
+	return fn()
+}
+
 // Fetch runs `git fetch origin` on a cached bare clone to get latest refs.
 func (c *Cache) Fetch(barePath string) error {
-	return gitFetch(barePath)
+	return c.WithRepoLock(barePath, func() error {
+		return gitFetch(barePath)
+	})
 }
 
 // bareDirName returns a filesystem-safe, collision-free directory name for
@@ -683,7 +693,7 @@ func getRemoteDefaultBranch(barePath string) string {
 	// 2) Common default branch names under the origin namespace.
 	for _, candidate := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master"} {
 		cmd := exec.Command("git", "-C", barePath, "rev-parse", "--verify", candidate)
-	
+
 		if err := cmd.Run(); err == nil {
 			return candidate
 		}
@@ -698,7 +708,7 @@ func getRemoteDefaultBranch(barePath string) string {
 	if bareRef != "" {
 		originRef := "refs/remotes/origin/" + strings.TrimPrefix(bareRef, "refs/heads/")
 		cmd := exec.Command("git", "-C", barePath, "rev-parse", "--verify", originRef)
-	
+
 		if err := cmd.Run(); err == nil {
 			return originRef
 		}

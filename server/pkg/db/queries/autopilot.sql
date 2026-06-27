@@ -402,21 +402,40 @@ RETURNING *;
 -- =====================
 
 -- name: ListAutopilotsForUser :many
-SELECT * FROM autopilot
-WHERE workspace_id = sqlc.arg('workspace_id')::uuid
-  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+SELECT
+  sqlc.embed(a),
+  (
+    SELECT array_agg(DISTINCT t.kind ORDER BY t.kind)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled
+  )::text[] AS trigger_kinds,
+  (
+    SELECT min(t.next_run_at)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled AND t.kind = 'schedule'
+  )::timestamptz AS next_run_at,
+  COALESCE((
+    SELECT r.status
+    FROM autopilot_run r
+    WHERE r.autopilot_id = a.id
+    ORDER BY r.triggered_at DESC
+    LIMIT 1
+  ), '')::text AS last_run_status
+FROM autopilot a
+WHERE a.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status'))
   AND (
-        (is_private = TRUE AND created_by_type = 'member' AND created_by_id = sqlc.arg('user_id')::uuid)
+        (a.is_private = TRUE AND a.created_by_type = 'member' AND a.created_by_id = sqlc.arg('user_id')::uuid)
      OR (is_private = FALSE AND (
-            scope = 'workspace'
-         OR (scope = 'personal' AND owner_user_id = sqlc.arg('user_id')::uuid)
-         OR (scope = 'group'    AND (
-                group_id = ANY(sqlc.arg('user_group_ids')::uuid[])
+            a.scope = 'workspace'
+         OR (a.scope = 'personal' AND a.owner_user_id = sqlc.arg('user_id')::uuid)
+         OR (a.scope = 'group'    AND (
+                a.group_id = ANY(sqlc.arg('user_group_ids')::uuid[])
              OR sqlc.arg('is_admin')::boolean
             ))
         ))
   )
-ORDER BY created_at DESC;
+ORDER BY a.created_at DESC;
 
 -- name: SetAutopilotScope :exec
 -- Applied right after CreateAutopilot when the requester picks a non-workspace

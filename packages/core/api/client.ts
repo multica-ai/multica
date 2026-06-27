@@ -1,5 +1,7 @@
 import type {
   Issue,
+  IssueAssigneeType,
+  IssueStatus,
   CreateIssueRequest,
   UpdateIssueRequest,
   GroupedIssuesResponse,
@@ -127,6 +129,7 @@ import type {
   IssueLabelsResponse,
   // CEREBRO-PATCH(issue-dependencies): dependencies response type.
   IssueDependenciesResponse,
+  IssueTriggerPreviewResponse,
   PinnedItem,
   CreatePinRequest,
   PinnedItemType,
@@ -3811,6 +3814,25 @@ export class ApiClient {
     });
     return parseWithFallback(raw, IssueDependenciesResponseSchema, EMPTY_ISSUE_DEPENDENCIES, {
       endpoint: "removeRelated",
+    });
+  }
+
+  async previewIssueTrigger(body: {
+    issueIds?: string[];
+    isCreate?: boolean;
+    assigneeType?: IssueAssigneeType | null;
+    assigneeId?: string | null;
+    status?: IssueStatus;
+  }): Promise<IssueTriggerPreviewResponse> {
+    return this.fetch("/api/issues/preview-trigger", {
+      method: "POST",
+      body: JSON.stringify({
+        issue_ids: body.issueIds,
+        is_create: body.isCreate,
+        assignee_type: body.assigneeType,
+        assignee_id: body.assigneeId,
+        status: body.status,
+      }),
     });
   }
 
