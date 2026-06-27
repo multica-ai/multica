@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -55,7 +56,11 @@ type GitHubInstallationResponse struct {
 }
 
 type GitHubPullRequestResponse struct {
-	ID              string  `json:"id"`
+	ID string `json:"id"`
+	// Provider is the forge this PR was mirrored from: "github" or "forgejo".
+	// The frontend uses it to pick the host icon and treat the row's check
+	// data appropriately (Forgejo PRs report no checks today).
+	Provider        string  `json:"provider"`
 	WorkspaceID     string  `json:"workspace_id"`
 	RepoOwner       string  `json:"repo_owner"`
 	RepoName        string  `json:"repo_name"`
@@ -127,6 +132,7 @@ func githubInstallationToBroadcast(i db.GithubInstallation) GitHubInstallationRe
 func githubPullRequestToResponse(p db.GithubPullRequest) GitHubPullRequestResponse {
 	return GitHubPullRequestResponse{
 		ID:              uuidToString(p.ID),
+		Provider:        "github",
 		WorkspaceID:     uuidToString(p.WorkspaceID),
 		RepoOwner:       p.RepoOwner,
 		RepoName:        p.RepoName,
@@ -155,6 +161,7 @@ func githubPullRequestToResponse(p db.GithubPullRequest) GitHubPullRequestRespon
 func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow) GitHubPullRequestResponse {
 	return GitHubPullRequestResponse{
 		ID:               uuidToString(p.ID),
+		Provider:         "github",
 		WorkspaceID:      uuidToString(p.WorkspaceID),
 		RepoOwner:        p.RepoOwner,
 		RepoName:         p.RepoName,
@@ -571,6 +578,20 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	for _, row := range rows {
 		out = append(out, issuePullRequestRowToResponse(row))
 	}
+	// Forgejo PRs share the same card list. They are stored in their own
+	// tables (no check-suite model), so they merge in here mapped to the same
+	// response shape; the combined list is re-sorted newest-first.
+	fjRows, err := h.Queries.ListForgejoPullRequestsByIssue(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
+		return
+	}
+	for _, row := range fjRows {
+		out = append(out, forgejoPullRequestToResponse(row))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].PRCreatedAt > out[j].PRCreatedAt
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
 }
 

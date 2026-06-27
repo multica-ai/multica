@@ -715,6 +715,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// browser redirect; the workspace/agent/initiator are recovered from the
 	// sealed state). It exchanges the code, upserts the install, then bounces
 	// the browser back to Settings → Integrations.
+	// Forgejo webhook (no Multica auth — authenticated via the per-connection
+	// X-Gitea-Signature HMAC; the connection id in the path selects the
+	// workspace and decryption secret).
+	r.Post("/api/webhooks/forgejo/{connectionId}", h.HandleForgejoWebhook)
 	// Stripe webhook (no Multica auth — Stripe signs the raw body
 	// with a shared secret, the multica-cloud upstream verifies. We
 	// only forward the bytes + the Stripe-Signature header; see

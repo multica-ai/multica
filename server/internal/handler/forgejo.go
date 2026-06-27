@@ -76,6 +76,37 @@ func (h *Handler) forgejoConnectionToResponse(c db.ForgejoConnection) ForgejoCon
 	}
 }
 
+// forgejoPullRequestToResponse maps a stored Forgejo PR onto the shared PR
+// response shape so web/desktop render Forgejo and GitHub PRs through one card
+// pipeline. Forgejo has no check-suite model yet, so check fields are zero and
+// ChecksConclusion is nil (the frontend hides the checks bar); mergeable_state
+// is likewise unset.
+func forgejoPullRequestToResponse(p db.ForgejoPullRequest) GitHubPullRequestResponse {
+	return GitHubPullRequestResponse{
+		ID:               uuidToString(p.ID),
+		Provider:         "forgejo",
+		WorkspaceID:      uuidToString(p.WorkspaceID),
+		RepoOwner:        p.RepoOwner,
+		RepoName:         p.RepoName,
+		Number:           p.PrNumber,
+		Title:            p.Title,
+		State:            p.State,
+		HtmlURL:          p.HtmlUrl,
+		Branch:           textToPtr(p.Branch),
+		AuthorLogin:      textToPtr(p.AuthorLogin),
+		AuthorAvatarURL:  textToPtr(p.AuthorAvatarUrl),
+		MergedAt:         timestampToPtr(p.MergedAt),
+		ClosedAt:         timestampToPtr(p.ClosedAt),
+		PRCreatedAt:      timestampToString(p.PrCreatedAt),
+		PRUpdatedAt:      timestampToString(p.PrUpdatedAt),
+		MergeableState:   nil,
+		ChecksConclusion: nil,
+		Additions:        p.Additions,
+		Deletions:        p.Deletions,
+		ChangedFiles:     p.ChangedFiles,
+	}
+}
+
 // sealForgejoSecret encrypts plaintext and returns base64 ciphertext, matching
 // the at-rest encoding used by the Slack/Feishu adapters.
 func (h *Handler) sealForgejoSecret(plaintext string) (string, error) {

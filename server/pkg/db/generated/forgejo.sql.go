@@ -74,6 +74,69 @@ func (q *Queries) GetForgejoConnectionForWorkspace(ctx context.Context, arg GetF
 	return i, err
 }
 
+const getForgejoIssuePullRequestCloseAggregate = `-- name: GetForgejoIssuePullRequestCloseAggregate :one
+SELECT
+    COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
+    COALESCE(SUM(CASE WHEN pr.state = 'merged' AND ipr.close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
+FROM forgejo_pull_request pr
+JOIN issue_forgejo_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE ipr.issue_id = $1
+`
+
+type GetForgejoIssuePullRequestCloseAggregateRow struct {
+	OpenCount                  int64 `json:"open_count"`
+	MergedWithCloseIntentCount int64 `json:"merged_with_close_intent_count"`
+}
+
+// Mirrors GetIssuePullRequestCloseAggregate for Forgejo PRs: counts in-flight
+// (open/draft) linked PRs and merged PRs that declared close intent. The
+// webhook auto-advances the issue when open_count = 0 AND
+// merged_with_close_intent_count > 0.
+func (q *Queries) GetForgejoIssuePullRequestCloseAggregate(ctx context.Context, issueID pgtype.UUID) (GetForgejoIssuePullRequestCloseAggregateRow, error) {
+	row := q.db.QueryRow(ctx, getForgejoIssuePullRequestCloseAggregate, issueID)
+	var i GetForgejoIssuePullRequestCloseAggregateRow
+	err := row.Scan(&i.OpenCount, &i.MergedWithCloseIntentCount)
+	return i, err
+}
+
+const linkIssueToForgejoPullRequest = `-- name: LinkIssueToForgejoPullRequest :exec
+
+INSERT INTO issue_forgejo_pull_request (
+    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
+) VALUES (
+    $1, $2, $4, $5, $3
+)
+ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
+    close_intent = CASE
+        WHEN $6 THEN issue_forgejo_pull_request.close_intent
+        ELSE EXCLUDED.close_intent
+    END
+`
+
+type LinkIssueToForgejoPullRequestParams struct {
+	IssueID             pgtype.UUID `json:"issue_id"`
+	PullRequestID       pgtype.UUID `json:"pull_request_id"`
+	CloseIntent         bool        `json:"close_intent"`
+	LinkedByType        pgtype.Text `json:"linked_by_type"`
+	LinkedByID          pgtype.UUID `json:"linked_by_id"`
+	PreserveCloseIntent bool        `json:"preserve_close_intent"`
+}
+
+// =====================
+// Issue ↔ Forgejo PR link
+// =====================
+func (q *Queries) LinkIssueToForgejoPullRequest(ctx context.Context, arg LinkIssueToForgejoPullRequestParams) error {
+	_, err := q.db.Exec(ctx, linkIssueToForgejoPullRequest,
+		arg.IssueID,
+		arg.PullRequestID,
+		arg.CloseIntent,
+		arg.LinkedByType,
+		arg.LinkedByID,
+		arg.PreserveCloseIntent,
+	)
+	return err
+}
+
 const listForgejoConnectionsByWorkspace = `-- name: ListForgejoConnectionsByWorkspace :many
 
 SELECT id, workspace_id, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at FROM forgejo_connection
@@ -107,6 +170,83 @@ func (q *Queries) ListForgejoConnectionsByWorkspace(ctx context.Context, workspa
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listForgejoPullRequestsByIssue = `-- name: ListForgejoPullRequestsByIssue :many
+SELECT pr.id, pr.workspace_id, pr.connection_id, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state, pr.html_url, pr.branch, pr.author_login, pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at, pr.pr_updated_at, pr.additions, pr.deletions, pr.changed_files, pr.created_at, pr.updated_at
+FROM forgejo_pull_request pr
+JOIN issue_forgejo_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE ipr.issue_id = $1
+ORDER BY pr.pr_created_at DESC
+`
+
+// Forgejo has no check-suite model yet, so check counts are reported as 0;
+// the response mapper sets ChecksConclusion to nil (frontend hides the bar).
+func (q *Queries) ListForgejoPullRequestsByIssue(ctx context.Context, issueID pgtype.UUID) ([]ForgejoPullRequest, error) {
+	rows, err := q.db.Query(ctx, listForgejoPullRequestsByIssue, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ForgejoPullRequest{}
+	for rows.Next() {
+		var i ForgejoPullRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ConnectionID,
+			&i.RepoOwner,
+			&i.RepoName,
+			&i.PrNumber,
+			&i.Title,
+			&i.State,
+			&i.HtmlUrl,
+			&i.Branch,
+			&i.AuthorLogin,
+			&i.AuthorAvatarUrl,
+			&i.MergedAt,
+			&i.ClosedAt,
+			&i.PrCreatedAt,
+			&i.PrUpdatedAt,
+			&i.Additions,
+			&i.Deletions,
+			&i.ChangedFiles,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueIDsForForgejoPullRequest = `-- name: ListIssueIDsForForgejoPullRequest :many
+SELECT issue_id FROM issue_forgejo_pull_request
+WHERE pull_request_id = $1
+`
+
+func (q *Queries) ListIssueIDsForForgejoPullRequest(ctx context.Context, pullRequestID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listIssueIDsForForgejoPullRequest, pullRequestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var issue_id pgtype.UUID
+		if err := rows.Scan(&issue_id); err != nil {
+			return nil, err
+		}
+		items = append(items, issue_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -159,6 +299,109 @@ func (q *Queries) UpsertForgejoConnection(ctx context.Context, arg UpsertForgejo
 		&i.AccessTokenEncrypted,
 		&i.WebhookSecretEncrypted,
 		&i.ConnectedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertForgejoPullRequest = `-- name: UpsertForgejoPullRequest :one
+
+INSERT INTO forgejo_pull_request (
+    workspace_id, connection_id, repo_owner, repo_name, pr_number,
+    title, state, html_url, branch, author_login, author_avatar_url,
+    merged_at, closed_at, pr_created_at, pr_updated_at,
+    additions, deletions, changed_files
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $14, $15, $16,
+    $17, $18, $9, $10,
+    $11, $12, $13
+)
+ON CONFLICT (connection_id, repo_owner, repo_name, pr_number) DO UPDATE SET
+    workspace_id      = EXCLUDED.workspace_id,
+    title             = EXCLUDED.title,
+    state             = EXCLUDED.state,
+    html_url          = EXCLUDED.html_url,
+    branch            = EXCLUDED.branch,
+    author_login      = EXCLUDED.author_login,
+    author_avatar_url = EXCLUDED.author_avatar_url,
+    merged_at         = EXCLUDED.merged_at,
+    closed_at         = EXCLUDED.closed_at,
+    pr_updated_at     = EXCLUDED.pr_updated_at,
+    additions         = EXCLUDED.additions,
+    deletions         = EXCLUDED.deletions,
+    changed_files     = EXCLUDED.changed_files,
+    updated_at        = now()
+RETURNING id, workspace_id, connection_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at
+`
+
+type UpsertForgejoPullRequestParams struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ConnectionID    pgtype.UUID        `json:"connection_id"`
+	RepoOwner       string             `json:"repo_owner"`
+	RepoName        string             `json:"repo_name"`
+	PrNumber        int32              `json:"pr_number"`
+	Title           string             `json:"title"`
+	State           string             `json:"state"`
+	HtmlUrl         string             `json:"html_url"`
+	PrCreatedAt     pgtype.Timestamptz `json:"pr_created_at"`
+	PrUpdatedAt     pgtype.Timestamptz `json:"pr_updated_at"`
+	Additions       int32              `json:"additions"`
+	Deletions       int32              `json:"deletions"`
+	ChangedFiles    int32              `json:"changed_files"`
+	Branch          pgtype.Text        `json:"branch"`
+	AuthorLogin     pgtype.Text        `json:"author_login"`
+	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
+	MergedAt        pgtype.Timestamptz `json:"merged_at"`
+	ClosedAt        pgtype.Timestamptz `json:"closed_at"`
+}
+
+// =====================
+// Forgejo Pull Request
+// =====================
+func (q *Queries) UpsertForgejoPullRequest(ctx context.Context, arg UpsertForgejoPullRequestParams) (ForgejoPullRequest, error) {
+	row := q.db.QueryRow(ctx, upsertForgejoPullRequest,
+		arg.WorkspaceID,
+		arg.ConnectionID,
+		arg.RepoOwner,
+		arg.RepoName,
+		arg.PrNumber,
+		arg.Title,
+		arg.State,
+		arg.HtmlUrl,
+		arg.PrCreatedAt,
+		arg.PrUpdatedAt,
+		arg.Additions,
+		arg.Deletions,
+		arg.ChangedFiles,
+		arg.Branch,
+		arg.AuthorLogin,
+		arg.AuthorAvatarUrl,
+		arg.MergedAt,
+		arg.ClosedAt,
+	)
+	var i ForgejoPullRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ConnectionID,
+		&i.RepoOwner,
+		&i.RepoName,
+		&i.PrNumber,
+		&i.Title,
+		&i.State,
+		&i.HtmlUrl,
+		&i.Branch,
+		&i.AuthorLogin,
+		&i.AuthorAvatarUrl,
+		&i.MergedAt,
+		&i.ClosedAt,
+		&i.PrCreatedAt,
+		&i.PrUpdatedAt,
+		&i.Additions,
+		&i.Deletions,
+		&i.ChangedFiles,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
