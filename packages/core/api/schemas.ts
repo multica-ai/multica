@@ -44,6 +44,9 @@ export interface AppConfigResponse {
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
   feature_flags?: Record<string, boolean>;
+  // True when the server has GitLab OAuth configured. Older servers omit the
+  // field; treat that as false so the login button stays hidden by default.
+  gitlab_enabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import type { User } from "@multica/core/types";
 import { useT } from "../i18n";
+import { GitLabMark } from "../settings/components/gitlab-mark";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -56,6 +57,8 @@ interface LoginPageProps {
   onTokenObtained?: () => void;
   /** Override Google login handler (e.g. desktop opens browser externally). When provided, renders the Google button even if `google` config is omitted. */
   onGoogleLogin?: () => void;
+  /** Override GitLab login handler. When provided, renders the GitLab button. */
+  onGitLabLogin?: () => void;
   /** Slot rendered at the bottom of the sign-in card, below the
    *  Google button. The web shell uses it for a "Prefer the desktop
    *  app?" prompt; desktop omits it (a download prompt inside the app
@@ -104,6 +107,7 @@ export function LoginPage({
   cliCallback,
   onTokenObtained,
   onGoogleLogin,
+  onGitLabLogin,
   extra,
 }: LoginPageProps) {
   const { t } = useT("auth");
@@ -488,6 +492,33 @@ export function LoginPage({
                   />
                 </svg>
                 {t(($) => $.signin.google)}
+              </Button>
+            </>
+          )}
+          {onGitLabLogin && (
+            <>
+              {!google && !onGoogleLogin && (
+                <div className="relative w-full">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-card px-2 text-muted-foreground">
+                      {t(($) => $.signin.divider)}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                size="lg"
+                onClick={onGitLabLogin}
+                disabled={loading}
+              >
+                <GitLabMark className="mr-2 h-4 w-4" />
+                {t(($) => $.signin.gitlab)}
               </Button>
             </>
           )}
