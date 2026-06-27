@@ -98,6 +98,64 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
+  # Fork-only: mirror the CLI binaries to the PUBLIC homebrew-tap release so
+  # local runtimes self-update. GoReleaser uploads the per-os/arch CLI
+  # archives + checksums.txt to THIS repo's GitHub Release, but firtal-cerebro
+  # is private — and the fork self-updater (server/internal/cli/update.go via
+  # internal/cerebro/forkdist) downloads those assets UNAUTHENTICATED from the
+  # public firtal-group/homebrew-tap releases. Without this mirror the tap goes
+  # stale and `multica update` on local Macs is stuck on the last hand-mirrored
+  # version (the recurring breakage behind FIR-2107). The GoReleaser `brews:`
+  # block only publishes the Homebrew formula, not these release assets, so the
+  # mirror is a separate step. Needs HOMEBREW_TAP_GITHUB_TOKEN with
+  # contents:write on firtal-group/homebrew-tap; skips gracefully when the
+  # secret is absent, exactly like the `--skip=homebrew` path above.
+  tap-mirror:
+    needs: [verify, release]
+    if: github.repository_owner == 'firtal-group'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tap token presence
+        id: tok
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::HOMEBREW_TAP_GITHUB_TOKEN not set — skipping public-tap binary mirror. Local runtimes will NOT self-update past the last hand-mirrored release until this secret is configured (FIR-2107)."
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download CLI assets from this repo's release
+        if: steps.tok.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.verify.outputs.tag_name }}
+        run: |
+          mkdir -p dist-tap && cd dist-tap
+          # The forkdist updater looks up `multica-cli-<ver>-<os>-<arch>` and the
+          # `multica_<os>_<arch>` legacy name; both, plus checksums.txt, ship here.
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'multica-cli-*' --pattern 'multica_*' --pattern 'checksums.txt'
+          echo "Downloaded:" && ls -1
+
+      - name: Mirror to the public homebrew-tap release
+        if: steps.tok.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          TAG: ${{ needs.verify.outputs.tag_name }}
+        run: |
+          cd dist-tap
+          notes="CLI binaries for the fork self-update channel, mirrored automatically from the firtal-cerebro release of ${TAG} so \`multica update\` on local runtimes self-heals (see .github/workflows/release.yml, tap-mirror job; FIR-2107)."
+          if gh release view "$TAG" --repo firtal-group/homebrew-tap >/dev/null 2>&1; then
+            gh release upload "$TAG" --repo firtal-group/homebrew-tap --clobber ./*
+          else
+            gh release create "$TAG" --repo firtal-group/homebrew-tap \
+              --title "$TAG" --notes "$notes" ./*
+          fi
+          echo "Mirrored ${TAG} CLI assets to firtal-group/homebrew-tap"
+
   # Multi-arch images are built natively per platform on dedicated runners
   # (amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm) and merged into a
   # manifest list. This avoids QEMU emulation, which was making the Next.js
