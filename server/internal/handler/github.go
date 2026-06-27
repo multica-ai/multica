@@ -587,7 +587,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	for _, row := range fjRows {
-		out = append(out, forgejoPullRequestToResponse(row))
+		out = append(out, forgejoPullRequestRowToResponse(row))
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].PRCreatedAt > out[j].PRCreatedAt

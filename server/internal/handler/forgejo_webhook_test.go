@@ -57,12 +57,16 @@ func seedForgejoConnection(t *testing.T, ctx context.Context, box *secretbox.Box
 }
 
 func forgejoWebhookRequest(connID, secret string, raw []byte) *http.Request {
+	return forgejoWebhookRequestEvent(connID, secret, "pull_request", raw)
+}
+
+func forgejoWebhookRequestEvent(connID, secret, event string, raw []byte) *http.Request {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(raw)
 	sig := hex.EncodeToString(mac.Sum(nil))
 
 	req := httptest.NewRequest("POST", "/api/webhooks/forgejo/"+connID, bytes.NewReader(raw))
-	req.Header.Set("X-Gitea-Event", "pull_request")
+	req.Header.Set("X-Gitea-Event", event)
 	req.Header.Set("X-Gitea-Signature", sig)
 
 	rctx := chi.NewRouteContext()
@@ -148,6 +152,78 @@ func TestHandleForgejoWebhook_MirrorsAndClosesIssue(t *testing.T) {
 	}
 	if updated.Status != "done" {
 		t.Errorf("expected issue status 'done', got %q", updated.Status)
+	}
+}
+
+func TestHandleForgejoWebhook_CommitStatusMirrors(t *testing.T) {
+	ctx := context.Background()
+	box := withForgejoBox(t)
+	connID, secret := seedForgejoConnection(t, ctx, box)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Forgejo CI status test",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_forgejo_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM forgejo_commit_status WHERE sha = $1`, "deadbeef")
+		testPool.Exec(ctx, `DELETE FROM forgejo_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM forgejo_connection WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	// Open a PR with head sha "deadbeef", linked to the issue.
+	prBody, _ := json.Marshal(map[string]any{
+		"action": "opened",
+		"number": 11,
+		"pull_request": map[string]any{
+			"number":     11,
+			"html_url":   "https://forgejo.test/acme/widget/pulls/11",
+			"title":      created.Identifier + " add feature",
+			"state":      "open",
+			"created_at": "2026-04-28T00:00:00Z",
+			"updated_at": "2026-04-28T00:00:00Z",
+			"head":       map[string]any{"ref": "feat", "sha": "deadbeef"},
+			"user":       map[string]any{"username": "octo"},
+		},
+		"repository": map[string]any{"name": "widget", "owner": map[string]any{"username": "acme"}},
+	})
+	w = httptest.NewRecorder()
+	testHandler.HandleForgejoWebhook(w, forgejoWebhookRequest(connID, secret, prBody))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("pr webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	// Deliver a successful commit status for that head sha.
+	statusBody, _ := json.Marshal(map[string]any{
+		"sha":     "deadbeef",
+		"context": "ci/woodpecker",
+		"state":   "success",
+	})
+	w = httptest.NewRecorder()
+	testHandler.HandleForgejoWebhook(w, forgejoWebhookRequestEvent(connID, secret, "status", statusBody))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	rows, err := testHandler.Queries.ListForgejoPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListForgejoPullRequestsByIssue: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 PR row, got %d", len(rows))
+	}
+	if rows[0].ChecksTotal != 1 || rows[0].ChecksPassed != 1 {
+		t.Errorf("expected 1 passed check, got total=%d passed=%d failed=%d pending=%d",
+			rows[0].ChecksTotal, rows[0].ChecksPassed, rows[0].ChecksFailed, rows[0].ChecksPending)
 	}
 }
 

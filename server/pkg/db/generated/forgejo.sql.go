@@ -178,24 +178,78 @@ func (q *Queries) ListForgejoConnectionsByWorkspace(ctx context.Context, workspa
 }
 
 const listForgejoPullRequestsByIssue = `-- name: ListForgejoPullRequestsByIssue :many
-SELECT pr.id, pr.workspace_id, pr.connection_id, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state, pr.html_url, pr.branch, pr.author_login, pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at, pr.pr_updated_at, pr.additions, pr.deletions, pr.changed_files, pr.created_at, pr.updated_at
+WITH checks AS (
+    SELECT
+        pr.id AS pr_id,
+        COUNT(*)::bigint AS total,
+        SUM(CASE WHEN cs.state IN ('failure','error') THEN 1 ELSE 0 END)::bigint AS failed,
+        SUM(CASE WHEN cs.state IN ('success','warning') THEN 1 ELSE 0 END)::bigint AS passed,
+        SUM(CASE WHEN cs.state NOT IN ('failure','error','success','warning') THEN 1 ELSE 0 END)::bigint AS pending
+    FROM forgejo_pull_request pr
+    JOIN issue_forgejo_pull_request ipr ON ipr.pull_request_id = pr.id
+    JOIN forgejo_commit_status cs
+        ON cs.connection_id = pr.connection_id
+       AND cs.sha = pr.head_sha
+       AND pr.head_sha <> ''
+    WHERE ipr.issue_id = $1
+    GROUP BY pr.id
+)
+SELECT
+    pr.id, pr.workspace_id, pr.connection_id, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state, pr.html_url, pr.branch, pr.author_login, pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at, pr.pr_updated_at, pr.additions, pr.deletions, pr.changed_files, pr.created_at, pr.updated_at, pr.head_sha,
+    COALESCE(c.total, 0)::bigint   AS checks_total,
+    COALESCE(c.passed, 0)::bigint  AS checks_passed,
+    COALESCE(c.failed, 0)::bigint  AS checks_failed,
+    COALESCE(c.pending, 0)::bigint AS checks_pending
 FROM forgejo_pull_request pr
 JOIN issue_forgejo_pull_request ipr ON ipr.pull_request_id = pr.id
+LEFT JOIN checks c ON c.pr_id = pr.id
 WHERE ipr.issue_id = $1
 ORDER BY pr.pr_created_at DESC
 `
 
-// Forgejo has no check-suite model yet, so check counts are reported as 0;
-// the response mapper sets ChecksConclusion to nil (frontend hides the bar).
-func (q *Queries) ListForgejoPullRequestsByIssue(ctx context.Context, issueID pgtype.UUID) ([]ForgejoPullRequest, error) {
+type ListForgejoPullRequestsByIssueRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ConnectionID    pgtype.UUID        `json:"connection_id"`
+	RepoOwner       string             `json:"repo_owner"`
+	RepoName        string             `json:"repo_name"`
+	PrNumber        int32              `json:"pr_number"`
+	Title           string             `json:"title"`
+	State           string             `json:"state"`
+	HtmlUrl         string             `json:"html_url"`
+	Branch          pgtype.Text        `json:"branch"`
+	AuthorLogin     pgtype.Text        `json:"author_login"`
+	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
+	MergedAt        pgtype.Timestamptz `json:"merged_at"`
+	ClosedAt        pgtype.Timestamptz `json:"closed_at"`
+	PrCreatedAt     pgtype.Timestamptz `json:"pr_created_at"`
+	PrUpdatedAt     pgtype.Timestamptz `json:"pr_updated_at"`
+	Additions       int32              `json:"additions"`
+	Deletions       int32              `json:"deletions"`
+	ChangedFiles    int32              `json:"changed_files"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	HeadSha         string             `json:"head_sha"`
+	ChecksTotal     int64              `json:"checks_total"`
+	ChecksPassed    int64              `json:"checks_passed"`
+	ChecksFailed    int64              `json:"checks_failed"`
+	ChecksPending   int64              `json:"checks_pending"`
+}
+
+// Aggregates each PR's commit statuses for its CURRENT head sha into
+// passed/failed/pending counts. forgejo_commit_status holds one row per
+// (connection, sha, context), so a simple count by state-class is correct —
+// no per-context DISTINCT needed. Statuses for an old head sha stay stored but
+// are excluded by the head_sha join, so a stale run can't pollute the bar.
+func (q *Queries) ListForgejoPullRequestsByIssue(ctx context.Context, issueID pgtype.UUID) ([]ListForgejoPullRequestsByIssueRow, error) {
 	rows, err := q.db.Query(ctx, listForgejoPullRequestsByIssue, issueID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ForgejoPullRequest{}
+	items := []ListForgejoPullRequestsByIssueRow{}
 	for rows.Next() {
-		var i ForgejoPullRequest
+		var i ListForgejoPullRequestsByIssueRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -218,10 +272,49 @@ func (q *Queries) ListForgejoPullRequestsByIssue(ctx context.Context, issueID pg
 			&i.ChangedFiles,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.HeadSha,
+			&i.ChecksTotal,
+			&i.ChecksPassed,
+			&i.ChecksFailed,
+			&i.ChecksPending,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueIDsForForgejoPRHead = `-- name: ListIssueIDsForForgejoPRHead :many
+SELECT DISTINCT ipr.issue_id
+FROM forgejo_pull_request pr
+JOIN issue_forgejo_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.connection_id = $1 AND pr.head_sha = $2 AND pr.head_sha <> ''
+`
+
+type ListIssueIDsForForgejoPRHeadParams struct {
+	ConnectionID pgtype.UUID `json:"connection_id"`
+	HeadSha      string      `json:"head_sha"`
+}
+
+// Issues linked to any Forgejo PR whose head sha matches the given status, so
+// a commit-status event can fan out a PR-card refresh to the right issues.
+func (q *Queries) ListIssueIDsForForgejoPRHead(ctx context.Context, arg ListIssueIDsForForgejoPRHeadParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listIssueIDsForForgejoPRHead, arg.ConnectionID, arg.HeadSha)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var issue_id pgtype.UUID
+		if err := rows.Scan(&issue_id); err != nil {
+			return nil, err
+		}
+		items = append(items, issue_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -252,6 +345,46 @@ func (q *Queries) ListIssueIDsForForgejoPullRequest(ctx context.Context, pullReq
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertForgejoCommitStatus = `-- name: UpsertForgejoCommitStatus :exec
+INSERT INTO forgejo_commit_status (
+    connection_id, sha, context, state, target_url, description, updated_at
+) VALUES (
+    $1, $2, $3, $4, $6, $7, $5
+)
+ON CONFLICT (connection_id, sha, context) DO UPDATE SET
+    state       = EXCLUDED.state,
+    target_url  = EXCLUDED.target_url,
+    description = EXCLUDED.description,
+    updated_at  = EXCLUDED.updated_at
+WHERE EXCLUDED.updated_at >= forgejo_commit_status.updated_at
+`
+
+type UpsertForgejoCommitStatusParams struct {
+	ConnectionID pgtype.UUID        `json:"connection_id"`
+	Sha          string             `json:"sha"`
+	Context      string             `json:"context"`
+	State        string             `json:"state"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TargetUrl    pgtype.Text        `json:"target_url"`
+	Description  pgtype.Text        `json:"description"`
+}
+
+// One row per (connection, sha, context); a redelivery or a state transition
+// overwrites in place. updated_at guards against an older event overwriting a
+// newer one for the same context.
+func (q *Queries) UpsertForgejoCommitStatus(ctx context.Context, arg UpsertForgejoCommitStatusParams) error {
+	_, err := q.db.Exec(ctx, upsertForgejoCommitStatus,
+		arg.ConnectionID,
+		arg.Sha,
+		arg.Context,
+		arg.State,
+		arg.UpdatedAt,
+		arg.TargetUrl,
+		arg.Description,
+	)
+	return err
 }
 
 const upsertForgejoConnection = `-- name: UpsertForgejoConnection :one
@@ -311,12 +444,12 @@ INSERT INTO forgejo_pull_request (
     workspace_id, connection_id, repo_owner, repo_name, pr_number,
     title, state, html_url, branch, author_login, author_avatar_url,
     merged_at, closed_at, pr_created_at, pr_updated_at,
-    additions, deletions, changed_files
+    additions, deletions, changed_files, head_sha
 ) VALUES (
     $1, $2, $3, $4, $5,
-    $6, $7, $8, $14, $15, $16,
-    $17, $18, $9, $10,
-    $11, $12, $13
+    $6, $7, $8, $15, $16, $17,
+    $18, $19, $9, $10,
+    $11, $12, $13, $14
 )
 ON CONFLICT (connection_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     workspace_id      = EXCLUDED.workspace_id,
@@ -332,8 +465,9 @@ ON CONFLICT (connection_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     additions         = EXCLUDED.additions,
     deletions         = EXCLUDED.deletions,
     changed_files     = EXCLUDED.changed_files,
+    head_sha          = EXCLUDED.head_sha,
     updated_at        = now()
-RETURNING id, workspace_id, connection_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at
+RETURNING id, workspace_id, connection_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, additions, deletions, changed_files, created_at, updated_at, head_sha
 `
 
 type UpsertForgejoPullRequestParams struct {
@@ -350,6 +484,7 @@ type UpsertForgejoPullRequestParams struct {
 	Additions       int32              `json:"additions"`
 	Deletions       int32              `json:"deletions"`
 	ChangedFiles    int32              `json:"changed_files"`
+	HeadSha         string             `json:"head_sha"`
 	Branch          pgtype.Text        `json:"branch"`
 	AuthorLogin     pgtype.Text        `json:"author_login"`
 	AuthorAvatarUrl pgtype.Text        `json:"author_avatar_url"`
@@ -375,6 +510,7 @@ func (q *Queries) UpsertForgejoPullRequest(ctx context.Context, arg UpsertForgej
 		arg.Additions,
 		arg.Deletions,
 		arg.ChangedFiles,
+		arg.HeadSha,
 		arg.Branch,
 		arg.AuthorLogin,
 		arg.AuthorAvatarUrl,
@@ -404,6 +540,7 @@ func (q *Queries) UpsertForgejoPullRequest(ctx context.Context, arg UpsertForgej
 		&i.ChangedFiles,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HeadSha,
 	)
 	return i, err
 }

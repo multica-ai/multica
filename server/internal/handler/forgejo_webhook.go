@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -114,6 +115,8 @@ func (h *Handler) HandleForgejoWebhook(w http.ResponseWriter, r *http.Request) {
 	switch event {
 	case "pull_request":
 		h.handleForgejoPullRequestEvent(r.Context(), conn, body)
+	case "status":
+		h.handleForgejoStatusEvent(r.Context(), conn, body)
 	default:
 		// Acknowledge unmodelled events so Forgejo doesn't flag the hook.
 	}
@@ -156,6 +159,7 @@ func (h *Handler) handleForgejoPullRequestEvent(ctx context.Context, conn db.For
 		Additions:       p.PullRequest.Additions,
 		Deletions:       p.PullRequest.Deletions,
 		ChangedFiles:    p.PullRequest.ChangedFiles,
+		HeadSha:         p.PullRequest.Head.Sha,
 	})
 	if err != nil {
 		slog.Warn("forgejo: upsert pr failed", "err", err)
@@ -228,6 +232,63 @@ func (h *Handler) handleForgejoPullRequestEvent(ctx context.Context, conn db.For
 		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
+}
+
+// fjStatusPayload is the subset of the Forgejo "status" (commit status)
+// webhook payload we mirror. Forgejo has no GitHub check_suite/app envelope;
+// CI reports a state per (sha, context). The state vocabulary is
+// pending | success | error | failure | warning.
+type fjStatusPayload struct {
+	SHA         string `json:"sha"`
+	Context     string `json:"context"`
+	State       string `json:"state"`
+	TargetURL   string `json:"target_url"`
+	Description string `json:"description"`
+}
+
+// handleForgejoStatusEvent records a commit status and refreshes the PR cards
+// of every issue linked to a PR whose head sha matches. The status row is
+// stored regardless of whether a matching PR exists yet, so a status that
+// arrives before its PR is mirrored attaches as soon as the PR's head_sha
+// lands (the list query joins on sha).
+func (h *Handler) handleForgejoStatusEvent(ctx context.Context, conn db.ForgejoConnection, body []byte) {
+	var p fjStatusPayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		slog.Warn("forgejo: bad status payload", "err", err)
+		return
+	}
+	if p.SHA == "" || p.State == "" {
+		return
+	}
+
+	if err := h.Queries.UpsertForgejoCommitStatus(ctx, db.UpsertForgejoCommitStatusParams{
+		ConnectionID: conn.ID,
+		Sha:          p.SHA,
+		Context:      p.Context,
+		State:        p.State,
+		TargetUrl:    ptrToText(strPtrOrNil(p.TargetURL)),
+		Description:  ptrToText(strPtrOrNil(p.Description)),
+		UpdatedAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	}); err != nil {
+		slog.Warn("forgejo: upsert commit status failed", "err", err)
+		return
+	}
+
+	// Fan out a PR-list refresh to every issue whose linked PR has this head.
+	issueIDs, err := h.Queries.ListIssueIDsForForgejoPRHead(ctx, db.ListIssueIDsForForgejoPRHeadParams{
+		ConnectionID: conn.ID,
+		HeadSha:      p.SHA,
+	})
+	if err != nil {
+		slog.Warn("forgejo: lookup issues for status failed", "err", err)
+		return
+	}
+	workspaceID := uuidToString(conn.WorkspaceID)
+	for _, issueID := range issueIDs {
+		h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
+			"issue_id": uuidToString(issueID),
+		})
+	}
 }
 
 // forgejoRepoOwner extracts the repo owner login, tolerating the field-name
