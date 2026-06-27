@@ -1,5 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import { issueKeys } from "./queries";
+import { issueKeys, invalidateFilteredIssueLists } from "./queries";
 import { labelKeys } from "../labels/queries";
 import { projectKeys } from "../projects/queries";
 import {
@@ -19,6 +19,7 @@ export function onIssueCreated(
   for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
     if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
   }
+  invalidateFilteredIssueLists(qc, wsId);
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
@@ -102,12 +103,12 @@ export function onIssueUpdated(
   for (const [key, data] of listQueries) {
     if (data) patchOrRefetchCounts(key, data);
   }
-  // The workspace board (issueKeys.list) is NOT filtered: an issue is always a
-  // member, so patchIssueInBuckets above is a complete surgical reconcile —
-  // cross-status move, same-column reorder, and field updates all land in the
-  // right bucket/slot. The old `if (position) invalidateQueries(list)` re-pulled
-  // the entire board on top of that, which is the full-list refetch that made a
-  // drag (local or echoed back over WS) flicker. It is pure redundancy here.
+  invalidateFilteredIssueLists(qc, wsId);
+  // The unfiltered workspace board can be patched surgically: an issue is always
+  // a member, so cross-status moves, same-column reorders, and field updates all
+  // land in the right bucket/slot. Filtered workspace list variants are
+  // invalidated above because a blind patch cannot know whether priority,
+  // assignee, project, or label filters still include the row.
   //
   // myAll (My Issues / Project / actor lists) IS filtered. Surgically patch the
   // cards that already live in those caches too, so a non-membership change
@@ -184,6 +185,7 @@ export function onIssueLabelsChanged(
   for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { labels }));
   }
+  invalidateFilteredIssueLists(qc, wsId);
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, labels } : old,
   );

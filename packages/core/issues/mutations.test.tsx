@@ -451,6 +451,30 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
   });
+
+  it("invalidates filtered workspace lists when filter membership can change", async () => {
+    const filteredKey = issueKeys.listSorted(WS_ID, sort, { priorities: ["high"] });
+    qc.setQueryData<ListIssuesCache>(filteredKey, {
+      byStatus: {
+        todo: {
+          issues: [makeIssue(1, { priority: "high" })],
+          total: 1,
+        },
+      },
+    });
+    updateIssue.mockResolvedValue(makeIssue(1, { priority: "low" }));
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: "issue-1", priority: "low" });
+    });
+
+    expect(qc.getQueryState(filteredKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(wsKey)?.isInvalidated).toBe(false);
+  });
 });
 
 describe("useUpdateIssue — detaching a sub-issue prunes the old parent's children cache", () => {
@@ -673,6 +697,33 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
 
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
     expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
+  });
+
+  it("invalidates filtered workspace lists when batch updates can change membership", async () => {
+    const filteredKey = issueKeys.listSorted(WS_ID, sort, { project_ids: ["project-1"] });
+    qc.setQueryData<ListIssuesCache>(filteredKey, {
+      byStatus: {
+        todo: {
+          issues: [makeIssue(1, { project_id: "project-1" })],
+          total: 1,
+        },
+      },
+    });
+    batchUpdateIssues.mockResolvedValue({ updated: 1 });
+
+    const { result } = renderHook(() => useBatchUpdateIssues(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        ids: ["issue-1"],
+        updates: { project_id: "project-9" },
+      });
+    });
+
+    expect(qc.getQueryState(filteredKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(wsKey)?.isInvalidated).toBe(false);
   });
 });
 

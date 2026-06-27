@@ -134,6 +134,22 @@ export const issueKeys = {
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
 };
 
+function isIssueListPrefix(wsId: string, queryKey: readonly unknown[]) {
+  const prefix = issueKeys.list(wsId);
+  return prefix.every((part, index) => Object.is(queryKey[index], part));
+}
+
+export function isFilteredIssueListKey(wsId: string, queryKey: readonly unknown[]) {
+  const prefix = issueKeys.list(wsId);
+  return isIssueListPrefix(wsId, queryKey) && queryKey.length === prefix.length + 2;
+}
+
+export function invalidateFilteredIssueLists(qc: QueryClient, wsId: string) {
+  qc.invalidateQueries({
+    predicate: (query) => isFilteredIssueListKey(wsId, query.queryKey),
+  });
+}
+
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
   | "assignee_id"
