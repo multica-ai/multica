@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -199,7 +200,12 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// title inert and gives the platform a single place to apply the loop
 	// and idempotency guards.
 	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment, actorType, actorID)
-}
+
+		// OXY-588: Emit notification:stage_closed for member-type users
+		// who watch the parent (creator + subscribers). The
+		// NotificationDispatcher will handle WS push + inbox creation.
+		h.emitStageClosedNotification(ctx, parent, issue, comment)
+	}
 
 // isTerminalChildStatus reports whether a child issue status counts as
 // "finished" for stage-barrier purposes. Cancelled counts as terminal: a
@@ -564,4 +570,38 @@ func childAssigneeIsSquad(child db.Issue, squadID pgtype.UUID) bool {
 		return false
 	}
 	return uuidToString(child.AssigneeID) == uuidToString(squadID)
+}
+
+// emitStageClosedNotification publishes a notification:stage_closed event
+// on the event bus so that the NotificationDispatcher can push sound + inbox
+// items to member-type watchers of the parent issue.
+//
+// This is called from notifyParentOfChildDone after the system comment and
+// assignee trigger have been dispatched. It is best-effort — failure to
+// emit the event does not roll back the status change or the comment.
+func (h *Handler) emitStageClosedNotification(ctx context.Context, parent, child db.Issue, comment db.Comment) {
+	parentID := uuidToString(parent.ID)
+	childID := uuidToString(child.ID)
+	workspaceID := uuidToString(parent.WorkspaceID)
+
+	closedStage := int32(0)
+	if child.Stage.Valid {
+		closedStage = child.Stage.Int32
+	}
+
+	h.Bus.Publish(events.Event{
+		Type:        protocol.EventNotificationStageClosed,
+		WorkspaceID: workspaceID,
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"parent_id":    parentID,
+			"child_id":     childID,
+			"comment_id":   uuidToString(comment.ID),
+			"parent_title": parent.Title,
+			"child_title":  child.Title,
+			"parent_status": parent.Status,
+			"stage":         closedStage,
+		},
+	})
 }

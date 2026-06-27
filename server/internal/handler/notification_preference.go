@@ -18,12 +18,33 @@ import (
 // preferences map so a single endpoint covers all user notification
 // preferences.
 var validNotifGroups = map[string]bool{
+	// Existing inbox preference groups
 	"assignments":          true,
 	"status_changes":       true,
 	"comments":             true,
 	"updates":              true,
 	"agent_activity":       true,
 	"system_notifications": true,
+
+	// New sound preference keys (OXY-588)
+	"sound_enabled":          true,
+	"sound_issue_done":       true,
+	"sound_child_blocked":    true,
+	"sound_blocked":          true,
+	"sound_in_review":        true,
+	"sound_mention_decision": true,
+	"sound_task_failed":      true,
+	"sound_volume":           true,
+	"sound_theme":            true,
+
+	// New decision-bottleneck notification keys (OXY-588)
+	"notify_issue_done":        true,
+	"notify_issue_blocked":     true,
+	"notify_in_review":         true,
+	"notify_child_blocked":     true,
+	"notify_parent_chain_done": true,
+	"notify_task_failed":       true,
+	"notify_mention_decision":  true,
 }
 
 // validNotifValues is the set of allowed preference values per group.

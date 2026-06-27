@@ -2604,6 +2604,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// fails best-effort.
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
+		// Emit notification events for the new status (OXY-588).
+		h.emitStatusNotificationEvents(r.Context(), prevIssue, issue)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -3096,6 +3098,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
+			// Emit notification events for the new status (OXY-588).
+			h.emitStatusNotificationEvents(r.Context(), prevIssue, issue)
 		}
 
 		updated++
@@ -3169,4 +3173,82 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+}
+
+// emitStatusNotificationEvents publishes notification:* events on the event bus
+// when an issue transitions into a decision-bottleneck or completion status.
+// This is the trigger layer for the OXY-588 notification pipeline.
+func (h *Handler) emitStatusNotificationEvents(ctx context.Context, prev, issue db.Issue) {
+	wsID := uuidToString(issue.WorkspaceID)
+	actorType := issue.CreatorType
+	actorID := uuidToString(issue.CreatorID)
+	// Use empty actor since this is a system-driven notification, not a user action.
+	// The original status-change actor is already captured in the issue:updated event.
+
+	switch issue.Status {
+	case "done":
+		h.publish(protocol.EventNotificationIssueDone, wsID, actorType, actorID, map[string]any{
+			"issue_id":  uuidToString(issue.ID),
+			"status":    issue.Status,
+		})
+		// If this issue has children and ALL of them are terminal, also emit
+		// parent_chain_done. Best-effort: if ListChildIssues fails, skip.
+		children, err := h.Queries.ListChildIssues(ctx, issue.ID)
+		if err == nil && len(children) > 0 {
+			allTerminal := true
+			for _, c := range children {
+				if !isTerminalChildStatus(c.Status) {
+					allTerminal = false
+					break
+				}
+			}
+			if allTerminal {
+				h.publish(protocol.EventNotificationParentChainDone, wsID, actorType, actorID, map[string]any{
+					"issue_id":   uuidToString(issue.ID),
+					"status":     issue.Status,
+					"child_count": len(children),
+				})
+			}
+		}
+
+	case "blocked":
+		h.publish(protocol.EventNotificationIssueBlocked, wsID, actorType, actorID, map[string]any{
+			"issue_id":  uuidToString(issue.ID),
+			"status":    issue.Status,
+			"waiting_on": readMetadataKey(issue.Metadata, "waiting_on"),
+			"blocked_reason": readMetadataKey(issue.Metadata, "blocked_reason"),
+		})
+		// If this issue has a parent, also emit child_blocked
+		if issue.ParentIssueID.Valid {
+			h.publish(protocol.EventNotificationChildBlocked, wsID, actorType, actorID, map[string]any{
+				"issue_id":   uuidToString(issue.ID),
+				"parent_id":  uuidToString(issue.ParentIssueID),
+				"status":     issue.Status,
+				"waiting_on": readMetadataKey(issue.Metadata, "waiting_on"),
+				"blocked_reason": readMetadataKey(issue.Metadata, "blocked_reason"),
+			})
+		}
+
+	case "in_review":
+		h.publish(protocol.EventNotificationInReview, wsID, actorType, actorID, map[string]any{
+			"issue_id":  uuidToString(issue.ID),
+			"status":    issue.Status,
+		})
+	}
+}
+
+// readMetadataKey reads a single key from the issue metadata JSONB column.
+// Returns empty string when metadata is nil, malformed, or key is absent.
+func readMetadataKey(raw []byte, key string) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
 }

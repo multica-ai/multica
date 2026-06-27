@@ -134,4 +134,17 @@ const (
 	// deleting the row; the audit trail is preserved.
 	EventLarkInstallationCreated = "lark_installation:created"
 	EventLarkInstallationRevoked = "lark_installation:revoked"
+
+	// Notification events (OXY-588). These are published by handlers when
+	// issue state transitions occur and consumed by the NotificationDispatcher
+	// to push real-time alerts to member users.
+	EventNotificationIssueDone       = "notification:issue_done"
+	EventNotificationChildBlocked    = "notification:child_blocked"
+	EventNotificationIssueBlocked    = "notification:issue_blocked"
+	EventNotificationInReview        = "notification:in_review"
+	EventNotificationParentChainDone = "notification:parent_chain_done"
+	EventNotificationTaskFailed      = "notification:task_failed"
+	EventNotificationStageClosed     = "notification:stage_closed"
+	EventNotificationBlockedTimeout  = "notification:blocked_timeout"
+	EventNotificationMentionDecision = "notification:mention_decision"
 )
