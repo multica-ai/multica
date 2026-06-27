@@ -567,6 +567,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("composio integration disabled (COMPOSIO_API_KEY not set)")
 	}
 
+	// Forgejo at-rest encryption: the box encrypts per-workspace access tokens
+	// and webhook secrets. Without it, connect/webhook handlers return 503 (so
+	// a misconfigured self-host never stores plaintext secrets).
+	if forgejoKey, err := secretbox.LoadKey("MULTICA_FORGEJO_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(forgejoKey)
+		if err != nil {
+			slog.Error("forgejo: secretbox.New failed; forgejo integration disabled", "error", err)
+		} else {
+			h.ForgejoSecretBox = box
+			slog.Info("forgejo integration enabled")
+		}
+	} else {
+		slog.Info("forgejo integration disabled (MULTICA_FORGEJO_SECRET_KEY not set)")
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -816,6 +831,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the handler strips the management handle and adds a
 					// can_manage hint so the UI can gate connect/disconnect.
 					r.Get("/github/installations", h.ListGitHubInstallations)
+					// Forgejo connections — member-visible for the same reason
+					// as GitHub installations; connect/disconnect are admin-gated
+					// in the group below.
+					r.Get("/forgejo/connections", h.ListForgejoConnections)
 					// Custom runtime profiles — listing/reading is member-visible
 					// (the Runtime page renders for everyone; create/edit/delete
 					// are admin-gated below).
@@ -849,6 +868,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
+					// Forgejo connect / disconnect (admin-only).
+					r.Post("/forgejo/connections", h.ConnectForgejo)
+					r.Delete("/forgejo/connections/{connectionId}", h.DeleteForgejoConnection)
 				})
 
 				// Lark integration. Every endpoint here only requires

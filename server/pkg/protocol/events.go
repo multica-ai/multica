@@ -126,6 +126,10 @@ const (
 	EventPullRequestUpdated        = "pull_request:updated"
 	EventPullRequestUnlinked       = "pull_request:unlinked"
 
+	// Forgejo integration events
+	EventForgejoConnectionCreated = "forgejo_connection:created"
+	EventForgejoConnectionDeleted = "forgejo_connection:deleted"
+
 	// Lark integration events. `created` covers both first-install
 	// (UNIQUE on (workspace_id, agent_id) means at most one row per
 	// agent) and re-install via UpsertLarkInstallation — front-ends
