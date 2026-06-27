@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -45,12 +44,12 @@ type RedeemedBindingToken struct {
 // Implementations MUST be idempotent on (installation_id, lark_open_id):
 // a re-install by the same user should not error.
 //
-// `qtx` is the *db.Queries handle to run the bind against. The caller
-// opens the transaction so the installation insert and the binding
-// write commit together; nil means "use the service's own
+// `qtx` is the channel-backed handle to run the bind against. The
+// caller opens the transaction so the installation insert and the
+// binding write commit together; nil means "use the service's own
 // (non-transactional) queries handle".
 type InstallerBinder interface {
-	BindInstallerTx(ctx context.Context, qtx *db.Queries, p InstallerBindParams) error
+	BindInstallerTx(ctx context.Context, qtx *ChannelStore, p InstallerBindParams) error
 }
 
 // InstallerBindParams carries the inputs InstallerBinder needs. Kept
@@ -72,7 +71,7 @@ type InstallerBindParams struct {
 // failed bind never burns a token, and a successful bind never
 // leaves a consumed-but-unused token behind.
 type BindingTokenService struct {
-	queries *db.Queries
+	queries *ChannelStore
 	tx      TxStarter
 	now     func() time.Time
 }
@@ -86,9 +85,10 @@ func NewBindingTokenService(queries *db.Queries, tx TxStarter) *BindingTokenServ
 }
 
 // NewBindingTokenServiceWithClock is the seam for tests; production
-// callers should use NewBindingTokenService.
+// callers should use NewBindingTokenService. queries is wrapped in a
+// ChannelStore so lark_* calls resolve to channel_* rows (MUL-3515).
 func NewBindingTokenServiceWithClock(queries *db.Queries, tx TxStarter, now func() time.Time) *BindingTokenService {
-	return &BindingTokenService{queries: queries, tx: tx, now: now}
+	return &BindingTokenService{queries: NewChannelStore(queries), tx: tx, now: now}
 }
 
 // Mint creates a new single-use binding token and returns the raw
@@ -104,11 +104,11 @@ func (s *BindingTokenService) Mint(ctx context.Context, workspaceID, installatio
 	hash := hashToken(raw)
 	expiresAt := s.now().Add(BindingTokenTTL)
 
-	if _, err := s.queries.CreateLarkBindingToken(ctx, db.CreateLarkBindingTokenParams{
+	if _, err := s.queries.CreateLarkBindingToken(ctx, CreateBindingTokenParams{
 		TokenHash:      hash,
 		WorkspaceID:    workspaceID,
 		InstallationID: installationID,
-		LarkOpenID:     string(openID),
+		ChannelUserID:  string(openID),
 		ExpiresAt:      pgtype.Timestamptz{Time: expiresAt, Valid: true},
 	}); err != nil {
 		return BindingToken{}, fmt.Errorf("persist token: %w", err)
@@ -161,27 +161,32 @@ func (s *BindingTokenService) RedeemAndBind(ctx context.Context, raw string, mul
 		return RedeemedBindingToken{}, fmt.Errorf("consume token: %w", err)
 	}
 
-	_, err = qtx.CreateLarkUserBinding(ctx, db.CreateLarkUserBindingParams{
+	// Explicit membership gate. The lark_user_binding -> member FK that
+	// used to reject a non-member redeemer is gone (MUL-3515 §4), so we
+	// check it here. Returning before Commit rolls the consume back, so
+	// a non-member's attempt does not burn the token — same outcome the
+	// FK violation produced.
+	isMember, err := qtx.IsWorkspaceMember(ctx, row.WorkspaceID, multicaUserID)
+	if err != nil {
+		return RedeemedBindingToken{}, fmt.Errorf("check membership: %w", err)
+	}
+	if !isMember {
+		return RedeemedBindingToken{}, ErrBindingNotWorkspaceMember
+	}
+
+	_, err = qtx.CreateLarkUserBinding(ctx, CreateUserBindingParams{
 		WorkspaceID:    row.WorkspaceID,
 		MulticaUserID:  multicaUserID,
 		InstallationID: row.InstallationID,
-		LarkOpenID:     row.LarkOpenID,
+		ChannelUserID:  row.ChannelUserID,
 	})
 	if err != nil {
 		// pgx.ErrNoRows here means the conflict row exists but its
 		// multica_user_id differs from ours, so the WHERE clause on
 		// the ON CONFLICT DO UPDATE rejected the rebind. See the
-		// comment on CreateLarkUserBinding in queries/lark.sql.
+		// comment on CreateChannelUserBinding in queries/channel.sql.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return RedeemedBindingToken{}, ErrBindingAlreadyAssigned
-		}
-		// 23503 is foreign_key_violation. The relevant FK here is
-		// lark_user_binding_member_fk (workspace_id, multica_user_id)
-		// → member; tripping it means the redeemer is not a member
-		// of the token's workspace.
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return RedeemedBindingToken{}, ErrBindingNotWorkspaceMember
 		}
 		return RedeemedBindingToken{}, fmt.Errorf("create binding: %w", err)
 	}
@@ -192,7 +197,7 @@ func (s *BindingTokenService) RedeemAndBind(ctx context.Context, raw string, mul
 	return RedeemedBindingToken{
 		WorkspaceID:    row.WorkspaceID,
 		InstallationID: row.InstallationID,
-		LarkOpenID:     OpenID(row.LarkOpenID),
+		LarkOpenID:     OpenID(row.ChannelUserID),
 	}, nil
 }
 
@@ -228,24 +233,30 @@ func (s *BindingTokenService) RedeemAndBind(ctx context.Context, raw string, mul
 // frontend surfaces it as "this Lark account is bound elsewhere",
 // preventing one workspace admin from silently rebinding another's
 // PersonalAgent install.
-func (s *BindingTokenService) BindInstallerTx(ctx context.Context, qtx *db.Queries, p InstallerBindParams) error {
+func (s *BindingTokenService) BindInstallerTx(ctx context.Context, qtx *ChannelStore, p InstallerBindParams) error {
 	q := qtx
 	if q == nil {
 		q = s.queries
 	}
-	_, err := q.CreateLarkUserBinding(ctx, db.CreateLarkUserBindingParams{
+	// Explicit membership gate, replacing the removed member FK
+	// (MUL-3515 §4): the installer must be a member of the workspace
+	// they are binding into.
+	isMember, err := q.IsWorkspaceMember(ctx, p.WorkspaceID, p.MulticaUserID)
+	if err != nil {
+		return fmt.Errorf("check membership: %w", err)
+	}
+	if !isMember {
+		return ErrBindingNotWorkspaceMember
+	}
+	_, err = q.CreateLarkUserBinding(ctx, CreateUserBindingParams{
 		WorkspaceID:    p.WorkspaceID,
 		MulticaUserID:  p.MulticaUserID,
 		InstallationID: p.InstallationID,
-		LarkOpenID:     string(p.LarkOpenID),
+		ChannelUserID:  string(p.LarkOpenID),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrBindingAlreadyAssigned
-		}
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return ErrBindingNotWorkspaceMember
 		}
 		return fmt.Errorf("bind installer: %w", err)
 	}
@@ -267,10 +278,11 @@ var ErrBindingTokenInvalid = errors.New("binding token invalid or expired")
 // cannot be used to grab an already-bound open_id from another user.
 var ErrBindingAlreadyAssigned = errors.New("lark open_id is already bound to a different user")
 
-// ErrBindingNotWorkspaceMember is returned by RedeemAndBind when the
-// redeemer is not (or no longer) a member of the token's workspace,
-// detected as a foreign-key violation against member(workspace_id,
-// user_id). Translated to 403 at the HTTP boundary.
+// ErrBindingNotWorkspaceMember is returned by RedeemAndBind and
+// BindInstallerTx when the user is not (or no longer) a member of the
+// target workspace, detected by an explicit IsWorkspaceMember check
+// (MUL-3515 §4 removed the member FK that used to enforce this).
+// Translated to 403 at the HTTP boundary.
 var ErrBindingNotWorkspaceMember = errors.New("redeemer is not a workspace member")
 
 func randomToken(n int) (string, error) {

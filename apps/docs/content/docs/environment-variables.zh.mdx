@@ -184,8 +184,18 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 工具在途时的静默上限：某个工具调用发出后长时间无任何输出（疑似卡死的子进程）这么久就 force-stop。`0` = 关闭该兜底（在途工具永不被停）|
 | `MULTICA_<PROVIDER>_PATH` | 对应 CLI 名 | 各 AI 编程工具的可执行文件路径（如 `MULTICA_CLAUDE_PATH`）|
 | `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI 编程工具的默认模型 |
+| `MULTICA_<PROVIDER>_ARGS` | 空 | 守护进程级的默认 CLI 参数，作用于该后端的每个任务，并排在各智能体自身的 `custom_args` 之前。支持 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS` |
 
 完整解释每个参数对守护进程行为的影响，见 [守护进程与运行时](/daemon-runtimes)。
+
+### 默认智能体参数（`MULTICA_<PROVIDER>_ARGS`）
+
+为某个后端设置一层**全机队默认**的 CLI 参数——可以方便地给一台守护进程上的所有智能体应用一个默认的成本或资源基线（例如 `--max-turns`），而不必逐个修改每个智能体的 `custom_args`。这是一层默认值，而不是不可突破的硬上限：每个智能体自己的 `custom_args` 会追加在后面，并可以覆盖它（见下方**优先级**）。
+
+- **优先级：** 默认参数先生效，随后追加各智能体自己的 `custom_args`。对于带取值的参数，由下游 CLI 自己的参数解析器决定最终生效值（多数工具采用「后者覆盖」），因此单个智能体可以调高某个守护进程默认值，但在智能体没有覆盖的地方，默认值依然生效。
+- **解析：** 取值按 POSIX shell-word 规则切分，因此引号可用——`MULTICA_CLAUDE_ARGS='--append-system-prompt "multi word"'` 会解析为两个 token。
+- **安全：** 默认参数层和各智能体的 `custom_args` 层都会经过同一套 blocked-flags 过滤，因此协议关键标志（如 Claude 的 `-p`、`--output-format`、`--input-format`、`--permission-mode`、`--mcp-config`，以及 Codex 的 `--listen`）无法从任何一层注入。
+- **未设置 / 为空** 表示不改变行为。
 
 ## 前端访问控制
 

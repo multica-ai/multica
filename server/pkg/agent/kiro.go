@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -106,6 +107,8 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var outputMu sync.Mutex
 	var output strings.Builder
 	var streamingCurrentTurn atomic.Bool
+	var sawCompletedGoalComplete atomic.Bool
+	var goalCompleteCallIDs sync.Map
 
 	promptDone := make(chan hermesPromptResult, 1)
 
@@ -123,6 +126,14 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			}
 			if msg.Type == MessageToolUse {
 				msg.Tool = kiroToolNameFromTitle(msg.Tool)
+				if msg.Tool == "goal_complete" && msg.CallID != "" {
+					goalCompleteCallIDs.Store(msg.CallID, struct{}{})
+				}
+			}
+			if msg.Type == MessageToolResult {
+				if _, ok := goalCompleteCallIDs.LoadAndDelete(msg.CallID); ok {
+					sawCompletedGoalComplete.Store(msg.Status == "completed")
+				}
 			}
 			if msg.Type == MessageText {
 				outputMu.Lock()
@@ -307,7 +318,11 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kiro session/prompt failed: %v", err)
-				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+				if sawCompletedGoalComplete.Load() && isKiroGoalCompleteCloseError(err) {
+					b.cfg.Logger.Warn("kiro session/prompt failed after goal_complete; preserving completed task status", "error", err)
+					finalStatus = "completed"
+					finalError = ""
+				} else if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
 					// See the hermes backend: the runtime echoes the
 					// requested id back from session/resume even when
 					// the session is gone, so the stale id only fails
@@ -383,6 +398,20 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func isKiroGoalCompleteCloseError(err error) bool {
+	var rpcErr *acpRPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	if rpcErr.Method != "session/prompt" || rpcErr.Code != -32603 {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(rpcErr.Message), "Internal error") {
+		return false
+	}
+	return strings.Contains(strings.ToLower(rpcErr.Data), "failed to generate a response")
 }
 
 func kiroToolNameFromTitle(title string) string {

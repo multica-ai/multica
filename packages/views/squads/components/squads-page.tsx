@@ -81,7 +81,7 @@ import {
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
-import { AppLink } from "../../navigation";
+import { useRowLink } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
@@ -314,10 +314,7 @@ function SquadRowActions({ squad }: { squad: Squad }) {
   const [archiveOpen, setArchiveOpen] = useState(false);
   return (
     <span
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
+      onClick={(e) => e.stopPropagation()}
       className="flex items-center"
     >
       <DropdownMenu>
@@ -754,6 +751,7 @@ export function SquadsPage() {
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id ?? "";
   const p = useWorkspacePaths();
+  const rowLink = useRowLink();
   const currentUser = useAuthStore((s) => s.user);
 
   const { data: squads = [], isLoading } = useQuery({
@@ -960,7 +958,8 @@ export function SquadsPage() {
                 rows.map((squad) => (
                   <ListGridRow
                     key={squad.id}
-                    render={<AppLink href={p.squadDetail(squad.id)} />}
+                    className="cursor-pointer"
+                    {...rowLink(p.squadDetail(squad.id))}
                   >
                     <NameCell squad={squad} />
                     <LeaderCell

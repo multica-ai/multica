@@ -1,6 +1,5 @@
 "use client";
 
-import { cloneElement } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 
 import { cn } from "../../lib/utils";
@@ -161,39 +160,29 @@ function ListGridBody({
 // extra runway keeps both off the final row's kebab.
 export const LIST_GRID_BOTTOM_CLEARANCE = 64;
 
-interface ListGridRowProps extends React.HTMLAttributes<HTMLElement> {
-  /**
-   * Base UI-style render prop: pass an element (e.g. `<AppLink href={...} />`)
-   * to use it as the row root; the row classes and cells are merged onto it.
-   */
-  render?: React.ReactElement<{
-    className?: string;
-    children?: React.ReactNode;
-  }>;
-}
+// A row is a plain `<div>`, never an `<a>` — so interactive cells (checkbox,
+// kebab, inline editors) are valid siblings, not interactive content nested
+// inside an anchor (which is invalid HTML and made native navigation fire on
+// every child click). Whole-row navigation is a MOUSE convenience layered on
+// via `onClick`/`onAuxClick` (see views `useRowLink`); the keyboard- and
+// screen-reader-accessible link, plus right-click "open in new tab", live on
+// the real `<AppLink>` inside the name cell. Interactive cells call
+// `stopPropagation` so clicking them never triggers the row's navigation.
+type ListGridRowProps = React.HTMLAttributes<HTMLDivElement>;
 
-function ListGridRow({ render, className, children, ...props }: ListGridRowProps) {
-  const rowClassName = cn(
-    "group/row col-span-full grid h-12 grid-cols-subgrid items-center transition-colors hover:bg-accent/40",
-    className,
-  );
-  const content = (
-    <>
+function ListGridRow({ className, children, ...props }: ListGridRowProps) {
+  return (
+    <div
+      role="row"
+      className={cn(
+        "group/row col-span-full grid h-12 grid-cols-subgrid items-center transition-colors hover:bg-accent/40",
+        className,
+      )}
+      {...props}
+    >
       <span aria-hidden="true" />
       {children}
       <span aria-hidden="true" />
-    </>
-  );
-  if (render) {
-    return cloneElement(
-      render,
-      { ...props, className: cn(rowClassName, render.props.className) },
-      content,
-    );
-  }
-  return (
-    <div className={rowClassName} {...props}>
-      {content}
     </div>
   );
 }

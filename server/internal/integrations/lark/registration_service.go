@@ -106,7 +106,7 @@ type RegistrationService struct {
 	cfg         RegistrationServiceConfig
 	client      *RegistrationClient
 	api         APIClient
-	queries     *db.Queries
+	queries     *ChannelStore
 	tx          TxStarter
 	installs    *InstallationService
 	binder      InstallerBinder
@@ -167,7 +167,7 @@ func NewRegistrationService(
 		cfg:         cfg.withDefaults(),
 		client:      client,
 		api:         api,
-		queries:     queries,
+		queries:     NewChannelStore(queries),
 		tx:          tx,
 		installs:    installs,
 		binder:      binder,
@@ -563,7 +563,7 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	defer tx.Rollback(ctx)
 	qtx := s.queries.WithTx(tx)
 
-	inst, err := qtx.UpsertLarkInstallation(ctx, db.UpsertLarkInstallationParams{
+	inst, err := qtx.UpsertLarkInstallation(ctx, UpsertInstallationParams{
 		WorkspaceID:        sess.workspaceID,
 		AgentID:            sess.agentID,
 		AppID:              res.ClientID,

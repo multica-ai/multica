@@ -1,8 +1,10 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,9 +24,10 @@ func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
 	var messages []Message
 
 	c := &codexClient{
-		cfg:     Config{Logger: slog.Default()},
-		stdin:   fs,
-		pending: make(map[int]*pendingRPC),
+		cfg:         Config{Logger: slog.Default()},
+		stdin:       fs,
+		pending:     make(map[int]*pendingRPC),
+		processDone: make(chan struct{}),
 		onMessage: func(msg Message) {
 			mu.Lock()
 			messages = append(messages, msg)
@@ -201,6 +204,101 @@ func TestCodexHandleServerRequestMCPElicitation(t *testing.T) {
 	}
 }
 
+func TestCodexHandleServerRequestPermissionsApproval(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	c.handleLine(`{"jsonrpc":"2.0","id":14,"method":"item/permissions/requestApproval","params":{"permissions":{"network":{"enabled":true},"fileSystem":{"read":["/tmp/repo"],"write":["/tmp/repo"]}}}}`)
+
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(lines))
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["id"] != float64(14) {
+		t.Fatalf("expected id=14, got %v", resp["id"])
+	}
+	result, ok := resp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result object, got response: %v", resp)
+	}
+	if result["scope"] != "turn" {
+		t.Fatalf("expected scope=turn, got %v", result["scope"])
+	}
+	permissions, ok := result["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected permissions object, got %v", result["permissions"])
+	}
+	network, ok := permissions["network"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected network permissions object, got %v", permissions["network"])
+	}
+	if network["enabled"] != true {
+		t.Fatalf("expected network.enabled=true, got %v", network["enabled"])
+	}
+	fileSystem, ok := permissions["fileSystem"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected fileSystem permissions object, got %v", permissions["fileSystem"])
+	}
+	if got := fileSystem["read"].([]any)[0]; got != "/tmp/repo" {
+		t.Fatalf("expected fileSystem.read to round-trip, got %v", got)
+	}
+}
+
+func TestCodexPermissionsApprovalResponseDropsUnknownKeysAndLogs(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	resp := codexPermissionsApprovalResponse(
+		json.RawMessage(`{"permissions":{"network":{"enabled":true},"gpu":{"enabled":true}}}`),
+		logger,
+	)
+
+	if resp["scope"] != "turn" {
+		t.Fatalf("expected scope=turn, got %v", resp["scope"])
+	}
+	perms, ok := resp["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected permissions object, got %v", resp["permissions"])
+	}
+	if _, ok := perms["network"]; !ok {
+		t.Fatalf("expected network permission to be granted, got %v", perms)
+	}
+	if _, ok := perms["gpu"]; ok {
+		t.Fatalf("expected unrecognized key gpu to be dropped, got %v", perms)
+	}
+	if !strings.Contains(buf.String(), "gpu") {
+		t.Fatalf("expected dropped key to be logged, got %q", buf.String())
+	}
+}
+
+func TestCodexPermissionsApprovalResponseMalformedParamsLogs(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	resp := codexPermissionsApprovalResponse(json.RawMessage(`{"permissions":"not-an-object"}`), logger)
+
+	if resp["scope"] != "turn" {
+		t.Fatalf("expected scope=turn, got %v", resp["scope"])
+	}
+	perms, ok := resp["permissions"].(map[string]any)
+	if !ok || len(perms) != 0 {
+		t.Fatalf("expected empty permissions on malformed params, got %v", resp["permissions"])
+	}
+	if !strings.Contains(buf.String(), "failed to parse") {
+		t.Fatalf("expected parse failure to be logged, got %q", buf.String())
+	}
+}
+
 func TestCodexHandleServerRequestUnknownReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -229,6 +327,9 @@ func TestCodexHandleServerRequestUnknownReturnsError(t *testing.T) {
 	}
 	if errObj["code"] != float64(-32601) {
 		t.Fatalf("expected error code -32601, got %v", errObj["code"])
+	}
+	if got := c.getTurnError(); !strings.Contains(got, "some/unknown/method") {
+		t.Fatalf("expected turn error to include unsupported request method, got %q", got)
 	}
 }
 
@@ -763,6 +864,55 @@ func TestCodexCloseAllPending(t *testing.T) {
 	}
 }
 
+func TestCodexRequestFailsImmediatelyAfterProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.markProcessExited(errCodexProcessExited)
+
+	_, err := c.request(context.Background(), "thread/start", map[string]any{})
+	if !errors.Is(err, errCodexProcessExited) {
+		t.Fatalf("request error = %v, want errCodexProcessExited", err)
+	}
+	if lines := fs.Lines(); len(lines) != 0 {
+		t.Fatalf("request should not write after process exit, wrote %d lines", len(lines))
+	}
+}
+
+func TestCodexRequestPrefersContextCancellationOverProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	processExitMarked := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if len(fs.Lines()) >= 1 {
+				cancel()
+				c.markProcessExited(errCodexProcessExited)
+				processExitMarked <- nil
+				return
+			}
+			if time.Now().After(deadline) {
+				processExitMarked <- fmt.Errorf("timed out waiting for request write")
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	_, err := c.request(ctx, "thread/start", map[string]any{})
+	if markErr := <-processExitMarked; markErr != nil {
+		t.Fatal(markErr)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("request error = %v, want context.Canceled", err)
+	}
+}
+
 func TestCodexHandleInvalidJSON(t *testing.T) {
 	t.Parallel()
 
@@ -1080,6 +1230,61 @@ func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	}
 }
 
+func TestCodexStartOrResumeThreadDoesNotFallBackAfterProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	processExitMarked := make(chan error, 1)
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if len(fs.Lines()) >= 1 {
+				c.markProcessExited(errCodexProcessExited)
+				processExitMarked <- nil
+				return
+			}
+			if time.Now().After(deadline) {
+				processExitMarked <- fmt.Errorf("timed out waiting for thread/resume request")
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	threadID, resumed, err := c.startOrResumeThread(
+		ctx,
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_stale"},
+		slog.Default(),
+	)
+	if markErr := <-processExitMarked; markErr != nil {
+		t.Fatal(markErr)
+	}
+	if !errors.Is(err, errCodexProcessExited) {
+		t.Fatalf("startOrResumeThread error = %v, want errCodexProcessExited", err)
+	}
+	if threadID != "" {
+		t.Fatalf("threadID = %q, want empty", threadID)
+	}
+	if resumed {
+		t.Fatal("resumed should be false on process exit")
+	}
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected only thread/resume request, got %d lines: %v", len(lines), lines)
+	}
+	var req struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if req.Method != "thread/resume" {
+		t.Fatalf("request method = %q, want thread/resume", req.Method)
+	}
+}
+
 func TestCodexStartOrResumeThreadFallsBackWhenResumeReturnsNoID(t *testing.T) {
 	t.Parallel()
 
@@ -1331,6 +1536,185 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		if !strings.Contains(result.Error, want) {
 			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
 		}
+	}
+}
+
+func TestCodexExecuteFailsWhenProcessExitsDuringActiveTurn(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-crash"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-crash","turn":{"id":"turn-crash"}}}'`+"\n"+
+		`echo 'fatal: app-server crashed after turn/start' >&2`+"\n"+
+		`exit 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	if result.Status != "failed" {
+		t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "codex process exited") {
+		t.Fatalf("expected process-exit error, got %q", result.Error)
+	}
+	if !strings.Contains(result.Error, "fatal: app-server crashed after turn/start") {
+		t.Fatalf("expected stderr tail in error, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, "timeout") {
+		t.Fatalf("process exit should fail fast instead of timeout, got %q", result.Error)
+	}
+}
+func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos
+	// globally, so running concurrently with other codex Execute tests
+	// would shrink their grace window too and risk flakes.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Regression for GH#4520. On `thread/resume`, the fake codex emits a
+	// single stdout line larger than the daemon's bufio.Scanner cap (10 MB),
+	// which trips "bufio.Scanner: token too long" in the reader goroutine.
+	// Pre-fix, drainAndWait then hung forever on cmd.Wait(): the reader had
+	// stopped consuming the pipe, codex was blocked writing into a full
+	// stdout buffer, stdin.Close never unblocked codex, and the deferred
+	// cancel() ran AFTER drainAndWait in the LIFO defer order. The failed
+	// Result therefore never reached the outer daemon and its
+	// fresh-session fallback never fired.
+	//
+	// Post-fix, drainAndWait does graceful-then-cancel in two bounded phases
+	// (see codex.go), and cmd.Cancel group-SIGKILLs the codex tree so the
+	// process exits even when stdin EOF isn't sufficient. We verify the
+	// failed Result reaches the caller within a small bound and carries an
+	// empty SessionID so the outer daemon's PriorSessionID-with-empty-
+	// SessionID fallback can retry a fresh session.
+	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		// Emit a > 10 MB single line with no embedded newline. printf
+		// avoids the trailing newline echo would add; head + tr generates
+		// the bulk payload in pure POSIX shell. The scanner errors out at
+		// 10 MB even though we write 11 MB.
+		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
+		`head -c 11000000 /dev/zero | tr '\0' 'x'`+"\n"+
+		`printf '"}}\n'`+"\n"+
+		// Hold the process open without reading more stdin. Pre-fix this
+		// hangs cmd.Wait() because codex never sees stdin EOF (it isn't
+		// in a read syscall) and the stdout pipe stays full. Cleanup must
+		// fall back to the group-SIGKILL path to make progress.
+		`sleep 30`+"\n")
+
+	start := time.Now()
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Cwd:                       t.TempDir(),
+		ResumeSessionID:           "thr_prior",
+		Timeout:                   30 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	elapsed := time.Since(start)
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q, elapsed=%s)",
+			result.Status, result.Error, elapsed)
+	}
+	if !strings.Contains(result.Error, "token too long") {
+		t.Fatalf("expected error to surface scanner overflow cause, got %q",
+			result.Error)
+	}
+	// Empty SessionID is the contract the outer daemon fallback relies on
+	// (daemon.go: result.Status == "failed" && PriorSessionID != "" &&
+	// result.SessionID == "" → retry fresh). Verify thread/resume failure
+	// preserves that contract.
+	if result.SessionID != "" {
+		t.Fatalf("expected empty SessionID so outer fallback retries fresh, got %q",
+			result.SessionID)
+	}
+	// With the shrunken 500 ms grace, two bounded phases plus the SIGKILL
+	// round-trip should complete in ~1-2 s. Pre-fix this test would block
+	// until the executeFakeCodex 10 s outer timeout and fail with "timeout
+	// waiting for result". We assert a much tighter bound so a future
+	// regression cannot quietly slip back up to 10 s.
+	if elapsed > 5*time.Second {
+		t.Fatalf("cleanup took %s, expected < 5s with shrunken grace (bug regressed?)",
+			elapsed)
+	}
+}
+
+
+func TestCodexExecuteSurfacesUnsupportedServerRequestOnInterruptedTurn(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-request"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-request","turn":{"id":"turn-request"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":99,"method":"item/tool/call","params":{"threadId":"thr-request","turnId":"turn-request","callId":"call-1","namespace":null,"tool":"custom","arguments":{}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-request","turn":{"id":"turn-request","status":"interrupted"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	if result.Status != "aborted" {
+		t.Fatalf("expected aborted, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "unsupported codex app-server request: item/tool/call") {
+		t.Fatalf("expected unsupported request error, got %q", result.Error)
+	}
+}
+
+func TestCodexExecuteTimeoutWinsOverProcessExitDuringActiveTurn(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-timeout"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-timeout","turn":{"id":"turn-timeout"}}}'`+"\n"+
+		`read line`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 30 * time.Second,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "codex timed out after") {
+		t.Fatalf("expected timeout error, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, "codex process exited") {
+		t.Fatalf("timeout should win over process EOF, got %q", result.Error)
 	}
 }
 

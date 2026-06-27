@@ -348,6 +348,14 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// channel_chat_session_binding used to carry a chat_session FK with
+	// ON DELETE CASCADE; MUL-3515 §4 dropped every channel_* foreign key, so
+	// prune the binding here in the same tx that deletes its chat_session.
+	if err := qtx.DeleteChannelChatSessionBindingBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session binding")
+		return
+	}
+
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,
 		WorkspaceID: session.WorkspaceID,
@@ -386,6 +394,16 @@ type SendChatMessageRequest struct {
 type SendChatMessageResponse struct {
 	MessageID string `json:"message_id"`
 	TaskID    string `json:"task_id"`
+	// AttachmentIDs are the attachment rows actually bound to this message by
+	// the server. The client diffs these against the ids it requested so it
+	// can warn the user when an attachment silently failed to bind — no extra
+	// round-trip needed. No `omitempty`: a send that requested attachments but
+	// bound none must serialize `[]` (not be omitted), otherwise the client
+	// can't tell "all binds failed" from "older server without this field" and
+	// would silently skip the very warning this exists for. When no
+	// attachments were requested the value is nil → `null`, which the client's
+	// guard short-circuits on the requested-ids check.
+	AttachmentIDs []string `json:"attachment_ids"`
 	// CreatedAt anchors the chat StatusPill timer the instant the user
 	// hits send. Without it the front-end falls back to its local clock
 	// and the timer "snaps backwards" later when WS events deliver the
@@ -449,26 +467,37 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Back-fill chat_message_id on attachments that were uploaded against
-	// this session while the user was composing. The query only touches rows
-	// where chat_session_id matches AND chat_message_id IS NULL, so it cannot
-	// rebind an attachment that already belongs to an earlier message.
+	// Back-fill chat_message_id on attachments the sender uploaded while
+	// composing. New clients upload workspace-scoped unattached rows and bind
+	// them here; older clients may still upload against the chat_session_id.
+	// The query accepts both shapes, but only for this workspace, this actor,
+	// and rows that are not already linked to an issue/comment/message.
+	var boundAttachmentIDs []string
 	if len(attachmentIDs) > 0 {
-		if err := h.Queries.LinkAttachmentsToChatMessage(r.Context(), db.LinkAttachmentsToChatMessageParams{
+		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		bound, err := h.Queries.LinkAttachmentsToChatMessage(r.Context(), db.LinkAttachmentsToChatMessageParams{
 			ChatMessageID: msg.ID,
 			ChatSessionID: session.ID,
-			Column3:       attachmentIDs,
-		}); err != nil {
+			WorkspaceID:   session.WorkspaceID,
+			UploaderType:  actorType,
+			UploaderID:    parseUUID(actorID),
+			AttachmentIds: attachmentIDs,
+		})
+		if err != nil {
 			// Don't fail the send — the message content is already saved and
 			// the attachments remain on the session (still downloadable).
 			slog.Warn("link chat attachments failed", "error", err, "message_id", uuidToString(msg.ID))
+		}
+		boundAttachmentIDs = make([]string, 0, len(bound))
+		for _, id := range bound {
+			boundAttachmentIDs = append(boundAttachmentIDs, uuidToString(id))
 		}
 	}
 
 	// Enqueue a chat task after the message exists. For web chat the sender is
 	// the authenticated request user (sessions are creator-only), so they are
 	// the task initiator — surfaced to the agent under `## Task Initiator`.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID))
+	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID), false)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
 		return
@@ -516,9 +545,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
-		MessageID: uuidToString(msg.ID),
-		TaskID:    uuidToString(task.ID),
-		CreatedAt: timestampToString(task.CreatedAt),
+		MessageID:     uuidToString(msg.ID),
+		TaskID:        uuidToString(task.ID),
+		CreatedAt:     timestampToString(task.CreatedAt),
+		AttachmentIDs: boundAttachmentIDs,
 	})
 }
 
@@ -714,10 +744,11 @@ type PendingChatTaskItem struct {
 }
 
 type CancelledChatMessageResponse struct {
-	ChatSessionID  string `json:"chat_session_id"`
-	MessageID      string `json:"message_id"`
-	Content        string `json:"content"`
-	RestoreToInput bool   `json:"restore_to_input"`
+	ChatSessionID  string               `json:"chat_session_id"`
+	MessageID      string               `json:"message_id"`
+	Content        string               `json:"content"`
+	RestoreToInput bool                 `json:"restore_to_input"`
+	Attachments    []AttachmentResponse `json:"attachments,omitempty"`
 }
 
 type CancelTaskByUserResponse struct {
@@ -914,11 +945,16 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		AgentTaskResponse: taskToResponse(cancelled.Task, workspaceID),
 	}
 	if cancelled.CancelledChatMessage != nil {
+		attachments := make([]AttachmentResponse, 0, len(cancelled.CancelledChatMessage.Attachments))
+		for _, a := range cancelled.CancelledChatMessage.Attachments {
+			attachments = append(attachments, h.attachmentToResponse(a))
+		}
 		resp.CancelledChatMessage = &CancelledChatMessageResponse{
 			ChatSessionID:  cancelled.CancelledChatMessage.ChatSessionID,
 			MessageID:      cancelled.CancelledChatMessage.MessageID,
 			Content:        cancelled.CancelledChatMessage.Content,
 			RestoreToInput: cancelled.CancelledChatMessage.RestoreToInput,
+			Attachments:    attachments,
 		}
 	}
 

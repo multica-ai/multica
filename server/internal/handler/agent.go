@@ -206,6 +206,7 @@ func preserveMaskedGatewayToken(incoming any, persistedRuntimeConfig []byte) {
 type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
+	Ref         string `json:"ref,omitempty"`
 }
 
 // ProjectResourceData is the wire shape for a project resource included in a
@@ -233,28 +234,29 @@ type AgentTaskResponse struct {
 	// as `## Workspace Context` so every agent running in this workspace —
 	// regardless of issue / chat / autopilot / quick-create — sees the same
 	// shared context. Empty when the workspace owner hasn't set it.
-	WorkspaceContext string                `json:"workspace_context,omitempty"`
-	ThreadName       string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
-	Status           string                `json:"status"`
-	Priority         int32                 `json:"priority"`
-	DispatchedAt     *string               `json:"dispatched_at"`
-	StartedAt        *string               `json:"started_at"`
-	CompletedAt      *string               `json:"completed_at"`
-	Result           any                   `json:"result"`
-	Error            *string               `json:"error"`
-	FailureReason    string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt          int32                 `json:"attempt"`
-	MaxAttempts      int32                 `json:"max_attempts"`
-	ParentTaskID     *string               `json:"parent_task_id,omitempty"`
-	Agent            *TaskAgentData        `json:"agent,omitempty"`
-	Repos            []RepoData            `json:"repos,omitempty"`
-	ProjectID        string                `json:"project_id,omitempty"`        // issue's project, when present
-	ProjectTitle     string                `json:"project_title,omitempty"`     // for surfacing in agent context
-	ProjectResources []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
-	CreatedAt        string                `json:"created_at"`
-	PriorSessionID   string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir     string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
-	WorkDir          string                `json:"work_dir,omitempty"`         // local working directory pinned for this task; populated once the daemon reports it
+	WorkspaceContext   string                `json:"workspace_context,omitempty"`
+	ThreadName         string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	Status             string                `json:"status"`
+	Priority           int32                 `json:"priority"`
+	DispatchedAt       *string               `json:"dispatched_at"`
+	StartedAt          *string               `json:"started_at"`
+	CompletedAt        *string               `json:"completed_at"`
+	Result             any                   `json:"result"`
+	Error              *string               `json:"error"`
+	FailureReason      string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt            int32                 `json:"attempt"`
+	MaxAttempts        int32                 `json:"max_attempts"`
+	ParentTaskID       *string               `json:"parent_task_id,omitempty"`
+	Agent              *TaskAgentData        `json:"agent,omitempty"`
+	Repos              []RepoData            `json:"repos,omitempty"`
+	ProjectID          string                `json:"project_id,omitempty"`          // issue's project, when present
+	ProjectTitle       string                `json:"project_title,omitempty"`       // for surfacing in agent context
+	ProjectDescription string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
+	ProjectResources   []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
+	CreatedAt          string                `json:"created_at"`
+	PriorSessionID     string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
+	PriorWorkDir       string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	WorkDir            string                `json:"work_dir,omitempty"`         // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
 	// the UI. For standard tasks it strips the daemon's workspaces root so
 	// the user sees `<wsUUID>/<taskShort>/workdir`; for local_directory
@@ -285,6 +287,7 @@ type AgentTaskResponse struct {
 	AutopilotTriggerPayload  json.RawMessage      `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
 	QuickCreatePrompt        string               `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
 	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
+	HandoffNote              string               `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the run's opening prompt + issue_context.md (omitempty so old daemons ignore it)
 	SquadID                  string               `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
 	SquadName                string               `json:"squad_name,omitempty"`                  // display name for the picker squad
 	ParentIssueID            string               `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
@@ -320,9 +323,9 @@ type AgentTaskResponse struct {
 	// this (agent_id, task_id) pair at claim time and treats any request
 	// authenticated with it as actor=agent, regardless of headers — so the
 	// agent process cannot use it to read another agent's secrets via the
-	// env-management endpoint. Empty when the runtime has no owning user
-	// (cloud / system runtimes that pre-date per-task tokens); in that case
-	// the daemon falls back to its own credential. See MUL-2600.
+	// env-management endpoint. Claim fails closed when the runtime has no
+	// owning user; the daemon must not fall back to its own credential. See
+	// MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
 }
 
@@ -341,15 +344,16 @@ type ChatAttachmentMeta struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID            string                   `json:"id"`
-	Name          string                   `json:"name"`
-	Instructions  string                   `json:"instructions"`
-	Skills        []service.AgentSkillData `json:"skills,omitempty"`
-	CustomEnv     map[string]string        `json:"custom_env,omitempty"`
-	CustomArgs    []string                 `json:"custom_args,omitempty"`
-	McpConfig     json.RawMessage          `json:"mcp_config,omitempty"`
-	Model         string                   `json:"model,omitempty"`
-	ThinkingLevel string                   `json:"thinking_level,omitempty"`
+	ID            string                      `json:"id"`
+	Name          string                      `json:"name"`
+	Instructions  string                      `json:"instructions"`
+	Skills        []service.AgentSkillData    `json:"skills,omitempty"`
+	SkillRefs     []service.AgentSkillRefData `json:"skill_refs,omitempty"`
+	CustomEnv     map[string]string           `json:"custom_env,omitempty"`
+	CustomArgs    []string                    `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage             `json:"mcp_config,omitempty"`
+	Model         string                      `json:"model,omitempty"`
+	ThinkingLevel string                      `json:"thinking_level,omitempty"`
 	// RuntimeConfig is the agent's saved runtime_config JSON as-is. The
 	// daemon decodes it per-provider — e.g. the openclaw backend reads
 	// `mode` + `gateway.*` to choose between embedded and gateway routing
@@ -377,6 +381,10 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.WorkDir.Valid {
 		workDir = t.WorkDir.String
 	}
+	handoffNote := ""
+	if t.HandoffNote.Valid {
+		handoffNote = t.HandoffNote.String
+	}
 	return AgentTaskResponse{
 		ID:               uuidToString(t.ID),
 		AgentID:          uuidToString(t.AgentID),
@@ -397,6 +405,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		CreatedAt:        timestampToString(t.CreatedAt),
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
+		HandoffNote:      handoffNote,
 		WorkDir:          workDir,
 		RelativeWorkDir:  relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		// Surface task source so the UI can distinguish issue-linked tasks
@@ -1059,6 +1068,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// request doesn't move the agent, we still need to load the *current*
 	// runtime to validate a thinking_level change. Resolve once and reuse.
 	targetRuntimeID := existing.RuntimeID
+	targetProvider := ""
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -1086,6 +1096,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
+		targetProvider = runtime.Provider
 	}
 	if req.Visibility != nil {
 		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}
@@ -1098,6 +1109,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
+	} else if req.RuntimeID != nil && existing.Model.Valid && agent.ModelKnownIncompatibleWithProvider(targetProvider, existing.Model.String) {
+		// Model is runtime-native. When moving an agent across known provider
+		// families and the caller did not choose a replacement model, clear the
+		// old value so the new runtime falls back to its own default instead of
+		// receiving an obvious foreign model ID (e.g. Claude Code -> Codex).
+		// Unknown/custom model strings are preserved by the helper.
+		params.Model = pgtype.Text{String: "", Valid: true}
 	}
 
 	// thinking_level handling (MUL-2339). Tri-state semantics:
@@ -1121,10 +1139,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			// Need the target runtime's provider to validate. Re-fetch only when
 			// we haven't already loaded it above (i.e. the request didn't change
 			// runtime_id), to keep the no-change path one DB roundtrip.
-			provider, ok := h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
-			if !ok {
-				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
-				return
+			provider := targetProvider
+			if provider == "" {
+				var ok bool
+				provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+				if !ok {
+					writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
+					return
+				}
 			}
 			if !agent.IsKnownThinkingValue(provider, value) {
 				writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider))
@@ -1140,10 +1162,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		// literal-invalid, never silently coerce. The caller can either
 		// pass `thinking_level: ""` to clear or pick a value valid for the
 		// new runtime.
-		provider, ok := h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
-		if !ok {
-			writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
-			return
+		provider := targetProvider
+		if provider == "" {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
+				return
+			}
 		}
 		if !agent.IsKnownThinkingValue(provider, existing.ThinkingLevel.String) {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf(

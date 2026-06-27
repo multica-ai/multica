@@ -72,7 +72,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { AppLink, useNavigation } from "../../navigation";
+import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
@@ -295,7 +295,6 @@ function CheckboxCell({
         type="button"
         aria-pressed={checked}
         onClick={(e) => {
-          e.preventDefault();
           e.stopPropagation();
           onToggle();
         }}
@@ -795,6 +794,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
+  const rowLink = useRowLink();
   const qc = useQueryClient();
   const currentUser = useAuthStore((s) => s.user);
 
@@ -1124,12 +1124,10 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                   return (
                     <ListGridRow
                       key={row.agent.id}
-                      className={`h-16 ${
+                      className={`h-16 cursor-pointer ${
                         selectedIds.has(row.agent.id) ? "bg-accent/30" : ""
                       }`}
-                      render={
-                        <AppLink href={paths.agentDetail(row.agent.id)} />
-                      }
+                      {...rowLink(paths.agentDetail(row.agent.id))}
                     >
                       <CheckboxCell
                         checked={selectedIds.has(row.agent.id)}
@@ -1183,11 +1181,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       )}
                       <ListGridCell className="justify-end px-0">
                         <span
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }}
-                          className="flex items-center opacity-0 transition-opacity group-hover/row:opacity-100"
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center"
                         >
                           <AgentRowActions
                             agent={row.agent}

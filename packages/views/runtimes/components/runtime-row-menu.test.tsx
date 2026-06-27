@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import type { AgentRuntime } from "@multica/core/types";
+import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
@@ -39,6 +39,13 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
 vi.mock("@multica/core/runtimes", () => ({
   deriveRuntimeHealth: () => "online",
   runtimeUsageOptions: () => ({ kind: "usage" }),
+  runtimeProfileListOptions: () => ({ kind: "runtime-profiles" }),
+  parseRuntimeProfileBoundConflict: () => null,
+  useDeleteRuntimeProfile: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
 }));
 
 vi.mock("@multica/core/agents", () => ({
@@ -99,9 +106,32 @@ function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
   };
 }
 
-function makeRow(runtime: AgentRuntime, canDelete = true): RuntimeRow {
+function makeProfile(overrides: Partial<RuntimeProfile> = {}): RuntimeProfile {
+  return {
+    id: "profile-1",
+    workspace_id: "ws-1",
+    display_name: "Custom Codex",
+    protocol_family: "codex",
+    command_name: "custom-codex",
+    description: null,
+    fixed_args: [],
+    visibility: "workspace",
+    created_by: "user-1",
+    enabled: true,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeRow(
+  runtime: AgentRuntime,
+  canDelete = true,
+  profile: RuntimeProfile | null = null,
+): RuntimeRow {
   return {
     runtime,
+    profile,
     ownerMember: null,
     workload: { agentIds: [], runningCount: 0, queuedCount: 0 },
     canDelete,
@@ -118,6 +148,7 @@ function renderActionsCell(row: RuntimeRow) {
       <QueryClientProvider client={qc}>
         <RuntimeRowMenu
           runtime={row.runtime}
+          profile={row.profile}
           wsId="ws-1"
           canDelete={row.canDelete}
         />
@@ -129,13 +160,14 @@ function renderActionsCell(row: RuntimeRow) {
 describe("runtime list row menu", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("hides the kebab menu for an online local runtime (self-healing)", () => {
-    // Deleting an online local runtime is a no-op (daemon re-registers in
-    // seconds), so the row menu drops the only action — Delete — entirely.
+  it("renders the kebab menu for an online local runtime (self-healing is no longer hidden)", () => {
+    // MUL-3352: hiding the kebab on a self-healing row left owners reading
+    // it as a missing permission. The action stays available; the dialog
+    // surfaces the self-heal warning instead.
     renderActionsCell(
       makeRow(makeRuntime({ runtime_mode: "local", status: "online" })),
     );
-    expect(screen.queryByLabelText("Row actions")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Row actions")).toBeInTheDocument();
   });
 
   it("renders the kebab menu for an offline local runtime", () => {
@@ -148,6 +180,18 @@ describe("runtime list row menu", () => {
   it("renders the kebab menu for a cloud runtime regardless of status", () => {
     renderActionsCell(
       makeRow(makeRuntime({ runtime_mode: "cloud", status: "online" })),
+    );
+    expect(screen.getByLabelText("Row actions")).toBeInTheDocument();
+  });
+
+  it("renders the kebab menu for a custom runtime when the profile is available", () => {
+    const profile = makeProfile();
+    renderActionsCell(
+      makeRow(
+        makeRuntime({ runtime_mode: "local", profile_id: profile.id }),
+        true,
+        profile,
+      ),
     );
     expect(screen.getByLabelText("Row actions")).toBeInTheDocument();
   });

@@ -44,7 +44,7 @@ import {
   type ListGridSortDirection,
 } from "@multica/ui/components/ui/list-grid";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { AppLink } from "../../navigation";
+import { useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PageHeader } from "../../layout/page-header";
 import { AutopilotDialog } from "./autopilot-dialog";
@@ -222,7 +222,6 @@ function CheckboxCell({
         type="button"
         aria-pressed={checked}
         onClick={(e) => {
-          e.preventDefault();
           e.stopPropagation();
           onToggle();
         }}
@@ -602,6 +601,7 @@ export function AutopilotsPage() {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
+  const rowLink = useRowLink();
   const {
     data: autopilots = [],
     isLoading,
@@ -903,14 +903,10 @@ export function AutopilotsPage() {
                   return (
                     <ListGridRow
                       key={autopilot.id}
-                      className={
-                        selectedIds.has(autopilot.id)
-                          ? "bg-accent/30"
-                          : undefined
-                      }
-                      render={
-                        <AppLink href={wsPaths.autopilotDetail(autopilot.id)} />
-                      }
+                      className={`cursor-pointer ${
+                        selectedIds.has(autopilot.id) ? "bg-accent/30" : ""
+                      }`}
+                      {...rowLink(wsPaths.autopilotDetail(autopilot.id))}
                     >
                       <CheckboxCell
                         checked={selectedIds.has(autopilot.id)}

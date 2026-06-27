@@ -42,11 +42,106 @@ func TestCommentMentionsAnyone(t *testing.T) {
 	}
 }
 
+// TestCommentRoutesViaMention covers the parent-aware variant that drives the
+// squad-leader skip rule on REPLY (MUL-3744). It is a pure helper test that
+// runs without a database connection.
+func TestCommentRoutesViaMention(t *testing.T) {
+	memberRoot := func(body string) *db.Comment {
+		return &db.Comment{AuthorType: "member", Content: body}
+	}
+	agentRoot := func(body string) *db.Comment {
+		return &db.Comment{AuthorType: "agent", Content: body}
+	}
+
+	cases := []struct {
+		name       string
+		content    string
+		parent     *db.Comment
+		authorType string
+		want       bool
+	}{
+		{
+			name:       "own agent mention counts",
+			content:    "[@A](mention://agent/11111111-1111-1111-1111-111111111111) please",
+			parent:     nil,
+			authorType: "member",
+			want:       true,
+		},
+		{
+			name:       "plain top-level comment does not route",
+			content:    "please take a look",
+			parent:     nil,
+			authorType: "member",
+			want:       false,
+		},
+		{
+			name:       "plain reply to member parent with @agent inherits",
+			content:    "any update?",
+			parent:     memberRoot("[@A](mention://agent/11111111-1111-1111-1111-111111111111) handle this"),
+			authorType: "member",
+			want:       true,
+		},
+		{
+			name:       "plain reply to member parent with no routing mention does not inherit",
+			content:    "any update?",
+			parent:     memberRoot("see [MUL-1](mention://issue/33333333-3333-3333-3333-333333333333)"),
+			authorType: "member",
+			want:       false,
+		},
+		{
+			name:       "plain reply to agent parent does not inherit",
+			content:    "any update?",
+			parent:     agentRoot("[@A](mention://agent/11111111-1111-1111-1111-111111111111) handle this"),
+			authorType: "member",
+			want:       false,
+		},
+		{
+			name:       "agent reply never inherits",
+			content:    "noted",
+			parent:     memberRoot("[@A](mention://agent/11111111-1111-1111-1111-111111111111) handle this"),
+			authorType: "agent",
+			want:       false,
+		},
+		{
+			name:       "reply with own mention does not inherit",
+			content:    "[@B](mention://agent/22222222-2222-2222-2222-222222222222) over to you",
+			parent:     memberRoot("[@A](mention://agent/11111111-1111-1111-1111-111111111111) handle this"),
+			authorType: "member",
+			want:       true,
+		},
+		{
+			name:       "plain reply to member parent with @all inherits",
+			content:    "any update?",
+			parent:     memberRoot("[@all](mention://all/all) heads up"),
+			authorType: "member",
+			want:       true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := commentRoutesViaMention(tc.content, tc.parent, tc.authorType); got != tc.want {
+				t.Fatalf("commentRoutesViaMention(%q, parent=%+v, %s) = %v, want %v",
+					tc.content, tc.parent, tc.authorType, got, tc.want)
+			}
+		})
+	}
+}
+
 // shouldEnqueueSquadLeaderOnCommentForTest reports whether the shared comment
 // trigger computation would wake the issue's assigned squad leader — the
-// boolean view these integration tests assert on.
+// boolean view these integration tests assert on. Use
+// shouldEnqueueSquadLeaderOnReplyForTest when the scenario is a reply that
+// might inherit parent mentions.
 func shouldEnqueueSquadLeaderOnCommentForTest(ctx context.Context, issue db.Issue, content, authorType, authorID string) bool {
-	_, ok := testHandler.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, authorType, authorID, commentTriggerComputeOptions{})
+	_, ok := testHandler.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, nil, authorType, authorID, commentTriggerComputeOptions{})
+	return ok
+}
+
+// shouldEnqueueSquadLeaderOnReplyForTest is the reply variant: it threads the
+// parent comment into computeAssignedSquadLeaderCommentTrigger so the helper
+// can see inherited routing mentions (MUL-3744).
+func shouldEnqueueSquadLeaderOnReplyForTest(ctx context.Context, issue db.Issue, content string, parent *db.Comment, authorType, authorID string) bool {
+	_, ok := testHandler.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, parent, authorType, authorID, commentTriggerComputeOptions{})
 	return ok
 }
 
@@ -293,7 +388,23 @@ func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T)
 // The matching unit test above exercises the helper in isolation; this
 // test catches a class of regression where someone refactors comment.go
 // to pass the parent's content (or the merged thread content) by mistake.
-func TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention(t *testing.T) {
+// TestCreateComment_SquadLeaderSkipHonorsInheritedMention drives the full
+// CreateComment handler to lock the call-site wiring (comment.go) for the
+// squad-leader-skip rule across the reply path. Specifically it proves that:
+//
+//   - A member top-level comment that @mentions another agent does NOT
+//     enqueue the squad leader (the mentioned agent owns the next step).
+//   - A subsequent member REPLY in the same thread that has no mentions of
+//     its own does NOT re-wake the squad leader either, because the
+//     @mention path inherits the parent's mention and routes the reply to
+//     the originally mentioned agent. Without this rule the reply
+//     double-triggers — leader via this branch AND the mentioned agent via
+//     parent-mention inheritance (MUL-3744).
+//
+// The matching unit test above exercises the helper in isolation; this
+// test catches a class of regression where someone refactors comment.go
+// to drop the parent-aware leader-skip check.
+func TestCreateComment_SquadLeaderSkipHonorsInheritedMention(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -345,15 +456,31 @@ func TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention(t *testing.T) {
 		t.Fatalf("after parent (@OtherAgent): expected 1 OtherAgent task (mention path), got %d", got)
 	}
 
-	// 2. Member posts a reply in the same thread with NO mentions.
-	//    The leader-skip helper must inspect only the reply's body (empty),
-	//    NOT the parent's @OtherAgent mention. Leader must wake up.
+	// 2. Mark OtherAgent's parent task done so the @mention dedup
+	//    (HasPendingTaskForIssueAndAgent) does not mask whether the reply
+	//    re-fires the mention path via inheritance.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET status = 'completed'
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, fx.OtherID); err != nil {
+		t.Fatalf("complete OtherAgent parent task: %v", err)
+	}
+
+	// 3. Member posts a reply in the same thread with NO mentions.
+	//    The leader-skip helper must see that the parent's @OtherAgent
+	//    mention is inherited into the @mention path, and stay out of the
+	//    way. Result:
+	//      - leader: still 0 queued tasks (no double-trigger)
+	//      - OtherAgent: re-queued via inherited mention (one new task)
 	postMemberComment(map[string]any{
 		"content":   "any update?",
 		"parent_id": parent.ID,
 	})
-	if got := countQueued(fx.LeaderID); got != 1 {
-		t.Fatalf("after plain reply: expected 1 leader task (no parent inheritance), got %d", got)
+	if got := countQueued(fx.LeaderID); got != 0 {
+		t.Fatalf("after plain reply: expected 0 leader tasks (inherited mention routes), got %d (MUL-3744)", got)
+	}
+	if got := countQueued(fx.OtherID); got != 1 {
+		t.Fatalf("after plain reply: expected 1 OtherAgent task (inherited mention path), got %d", got)
 	}
 }
 

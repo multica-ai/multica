@@ -564,6 +564,31 @@ describe("Attachment — file-card dispatch", () => {
     expect(document.querySelector("img")).toBeNull();
   });
 
+  it("url-only stable attachment download file-card resolves to record and downloads by id", () => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const href = `/api/attachments/${id}/download`;
+    resolverState.attachments = [
+      makeRecord({
+        id,
+        filename: "manual.pdf",
+        content_type: "application/pdf",
+        url: "/uploads/manual.pdf",
+        markdown_url: href,
+        download_url: href,
+      }),
+    ];
+
+    renderWithQuery(
+      <Attachment
+        attachment={{ kind: "url", url: href, filename: "manual.pdf" }}
+      />,
+    );
+
+    expect(screen.getByText("manual.pdf")).toBeTruthy();
+    fireEvent.mouseDown(screen.getByTitle("Download"));
+    expect(downloadMock).toHaveBeenCalledWith(id);
+  });
+
   it("uploading file-card surfaces the uploading template, no Preview/Download", () => {
     renderWithQuery(
       <Attachment

@@ -37,6 +37,26 @@ DELETE FROM github_installation WHERE id = $1 AND workspace_id = $2;
 DELETE FROM github_installation WHERE installation_id = $1
 RETURNING id, workspace_id;
 
+-- name: UpsertPendingGitHubInstallation :one
+INSERT INTO github_pending_installation (
+    installation_id, account_login, account_type, account_avatar_url
+) VALUES (
+    $1, $2, $3, sqlc.narg('account_avatar_url')
+)
+ON CONFLICT (installation_id) DO UPDATE SET
+    account_login = EXCLUDED.account_login,
+    account_type = EXCLUDED.account_type,
+    account_avatar_url = EXCLUDED.account_avatar_url,
+    updated_at = now()
+RETURNING *;
+
+-- name: DeletePendingGitHubInstallation :exec
+DELETE FROM github_pending_installation WHERE installation_id = $1;
+
+-- name: GetPendingGitHubInstallation :one
+SELECT * FROM github_pending_installation WHERE installation_id = $1
+;
+
 -- =====================
 -- GitHub Pull Request
 -- =====================
@@ -190,6 +210,47 @@ ON CONFLICT (pr_id, suite_id) DO UPDATE SET
     status     = EXCLUDED.status,
     updated_at = EXCLUDED.updated_at
 WHERE EXCLUDED.updated_at >= github_pull_request_check_suite.updated_at;
+
+-- =====================
+-- GitHub pending check_suite (out-of-order arrival stash)
+-- =====================
+
+-- name: UpsertPendingCheckSuite :exec
+-- Stashes a check_suite event whose PR row is not yet mirrored. Replayed
+-- (and deleted) by DrainPendingCheckSuitesForPR once the matching
+-- `pull_request` webhook lands. ON CONFLICT keeps the newest payload
+-- for the same (workspace, repo, pr_number, suite_id) — repeated
+-- deliveries while the PR is still missing are idempotent. The
+-- suite_updated_at guard mirrors UpsertPullRequestCheckSuite so an older
+-- event arriving after a newer one cannot overwrite the newer payload.
+INSERT INTO github_pending_check_suite (
+    workspace_id, installation_id, repo_owner, repo_name, pr_number,
+    suite_id, head_sha, app_id, conclusion, status, suite_updated_at
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, sqlc.narg('conclusion'), $9, $10
+)
+ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number, suite_id) DO UPDATE SET
+    installation_id  = EXCLUDED.installation_id,
+    head_sha         = EXCLUDED.head_sha,
+    app_id           = EXCLUDED.app_id,
+    conclusion       = EXCLUDED.conclusion,
+    status           = EXCLUDED.status,
+    suite_updated_at = EXCLUDED.suite_updated_at,
+    received_at      = now()
+WHERE EXCLUDED.suite_updated_at >= github_pending_check_suite.suite_updated_at;
+
+-- name: DrainPendingCheckSuitesForPR :many
+-- Atomically reads + deletes all pending suites for the given PR address.
+-- Caller replays each row through UpsertPullRequestCheckSuite. RETURNING
+-- gives us the payloads we need without a separate SELECT, so two parallel
+-- handlers racing on the same PR can't double-apply the same row.
+DELETE FROM github_pending_check_suite
+WHERE workspace_id = $1
+  AND repo_owner   = $2
+  AND repo_name    = $3
+  AND pr_number    = $4
+RETURNING suite_id, head_sha, app_id, conclusion, status, suite_updated_at;
 
 -- =====================
 -- Issue ↔ Pull Request link

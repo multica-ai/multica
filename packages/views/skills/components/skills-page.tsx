@@ -50,7 +50,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
-import { AppLink, useNavigation } from "../../navigation";
+import { useNavigation, useRowLink } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
 import { readOrigin, type OriginInfo } from "../lib/origin";
@@ -213,9 +213,9 @@ function PageHeaderBar({
 // Hover-revealed multi-select checkbox. Same pattern as SkillPickerList:
 // the shadcn Checkbox is presentational only (`pointer-events-none`, so the
 // Base UI button can never swallow the click) and the wrapping <button> owns
-// the interaction — preventDefault kills the row link's native navigation
-// (the cell lives inside an <a>), stopPropagation keeps AppLink's push from
-// firing, and the manual toggle drives the state.
+// the toggle. It stops click propagation so toggling never triggers the
+// row's whole-row navigation (see `useRowLink`) — no preventDefault needed,
+// the row is a plain <div>, not an <a>.
 function CheckboxCell({
   checked,
   onToggle,
@@ -229,7 +229,6 @@ function CheckboxCell({
         type="button"
         aria-pressed={checked}
         onClick={(e) => {
-          e.preventDefault();
           e.stopPropagation();
           onToggle();
         }}
@@ -578,6 +577,7 @@ export default function SkillsPage() {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
+  const rowLink = useRowLink();
   const timeAgo = useTimeAgo();
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
 
@@ -885,10 +885,10 @@ export default function SkillsPage() {
                 return (
               <ListGridRow
                 key={row.skill.id}
-                className={
-                  selectedIds.has(row.skill.id) ? "bg-accent/30" : undefined
-                }
-                render={<AppLink href={paths.skillDetail(row.skill.id)} />}
+                className={`cursor-pointer ${
+                  selectedIds.has(row.skill.id) ? "bg-accent/30" : ""
+                }`}
+                {...rowLink(paths.skillDetail(row.skill.id))}
               >
                 <CheckboxCell
                   checked={selectedIds.has(row.skill.id)}

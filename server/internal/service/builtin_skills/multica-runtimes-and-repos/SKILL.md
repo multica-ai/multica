@@ -40,13 +40,14 @@ multica runtime list --output json
 multica runtime usage <runtime-id> --output json
 multica runtime activity <runtime-id> --output json
 multica runtime update <runtime-id> --target-version <version> --output json
+multica runtime delete <runtime-id>
 multica repo checkout <url>
 multica repo checkout <url> --ref <branch-or-sha>
 ```
 
-`runtime update` is a write. `repo checkout` creates a git worktree in the task working directory.
+`runtime update` and `runtime delete` are writes. `runtime delete` removes a runtime registration; if active agents are still bound, it refuses unless the user explicitly passes `--cascade`, which archives those agents and cancels their queued/running tasks before deleting the runtime. `repo checkout` creates a git worktree in the task working directory.
 
-`repo checkout` requires `MULTICA_DAEMON_PORT`; it is intended to run inside a daemon task. If absent, you are not in the normal agent checkout path.
+`repo checkout` requires `MULTICA_DAEMON_PORT`; it is intended to run inside a daemon task. If absent, you are not in the normal agent checkout path. When a project `github_repo` resource has `resource_ref.ref`, `repo checkout <url>` uses that ref by default for the current task; an explicit `repo checkout <url> --ref <branch-or-sha>` overrides it.
 
 ## Debugging an agent that did not run
 
@@ -68,7 +69,7 @@ The runtime brief lists repos available to this task. Treat that list as the aut
 Workspace repos and project resources are not the same thing:
 
 - workspace repo metadata can appear in workspace context;
-- `github_repo` project resources are durable project context and can affect future tasks;
+- `github_repo` project resources are durable project context and can affect future tasks; optional `resource_ref.ref` pins the default checkout ref for tasks in that project;
 - `local_directory` resources point at a path owned by a daemon and carry local-machine assumptions.
 
 Do not add a project resource just because `repo checkout` failed. First determine whether the user asked for durable project context or just a task checkout.

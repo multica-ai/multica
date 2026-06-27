@@ -442,6 +442,62 @@ func newDownloadRequest(t *testing.T, attachmentID, workspaceID string) (*http.R
 	return req, httptest.NewRecorder()
 }
 
+func requireAttachmentPreviewCSP(t *testing.T, header http.Header, extraAncestors ...string) {
+	t.Helper()
+	csp := header.Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("Content-Security-Policy header is missing")
+	}
+	for _, directive := range []string{
+		"default-src 'none'",
+		"frame-ancestors 'self'",
+		"object-src 'none'",
+		"base-uri 'none'",
+		"form-action 'none'",
+	} {
+		if !strings.Contains(csp, directive) {
+			t.Fatalf("Content-Security-Policy missing %q; got %q", directive, csp)
+		}
+	}
+	for _, ancestor := range extraAncestors {
+		if !strings.Contains(csp, ancestor) {
+			t.Fatalf("Content-Security-Policy missing frame ancestor %q; got %q", ancestor, csp)
+		}
+	}
+	if strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Fatalf("Content-Security-Policy still blocks same-origin previews: %q", csp)
+	}
+}
+
+func TestAttachmentPreviewCSPHeader_AllowsConfiguredFrontendOrigins(t *testing.T) {
+	csp := attachmentPreviewCSPHeader([]string{
+		"https://app.example.test",
+		" https://App.Example.Test/some/path ",
+		"http://localhost:3000",
+		"*",
+		"javascript:alert(1)",
+		"not a url",
+	})
+
+	for _, want := range []string{
+		"frame-ancestors 'self' https://app.example.test http://localhost:3000",
+		"default-src 'none'",
+		"object-src 'none'",
+	} {
+		if !strings.Contains(csp, want) {
+			t.Fatalf("Content-Security-Policy missing %q; got %q", want, csp)
+		}
+	}
+	for _, reject := range []string{"*", "javascript:", "not a url", "some/path"} {
+		if strings.Contains(csp, reject) {
+			t.Fatalf("Content-Security-Policy includes rejected source %q; got %q", reject, csp)
+		}
+	}
+	if strings.Count(csp, "https://app.example.test") != 1 {
+		t.Fatalf("Content-Security-Policy should dedupe origins; got %q", csp)
+	}
+}
+
 func newDownloadRouter() http.Handler {
 	// Mirrors the production router after MUL-3130: the download
 	// route is registered under Auth-only with no
@@ -505,6 +561,7 @@ func TestDownloadAttachment_CloudFrontRedirectSignsAttachmentDisposition(t *test
 	origSigner := testHandler.CFSigner
 	testHandler.Storage = &mockStorage{}
 	testHandler.cfg.AttachmentDownloadMode = "cloudfront"
+	testHandler.cfg.AttachmentFrameAncestors = []string{"https://app.example.test"}
 	testHandler.CFSigner = testCloudFrontSigner(t)
 	t.Cleanup(func() {
 		testHandler.Storage = origStorage
@@ -515,6 +572,7 @@ func TestDownloadAttachment_CloudFrontRedirectSignsAttachmentDisposition(t *test
 	id := seedAttachmentURL(t, "https://static.example.test/downloads/cloudfront.md", "cloud front.md", "text/markdown", 10)
 
 	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	testHandler.DownloadAttachment(w, req)
 
 	if w.Code != http.StatusFound {
@@ -531,6 +589,7 @@ func TestDownloadAttachment_CloudFrontRedirectSignsAttachmentDisposition(t *test
 	if got := parsed.Query().Get("Key-Pair-Id"); got != "KTEST" {
 		t.Fatalf("Key-Pair-Id = %q", got)
 	}
+	requireAttachmentPreviewCSP(t, w.Header(), "https://app.example.test")
 }
 
 func TestDownloadAttachment_BareNavigationWithWorkspaceSlugQueryPassesMiddleware(t *testing.T) {
@@ -684,6 +743,7 @@ func TestDownloadAttachment_AutoInternalEndpointProxies(t *testing.T) {
 	origSigner := testHandler.CFSigner
 	testHandler.Storage = store
 	testHandler.cfg.AttachmentDownloadMode = "auto"
+	testHandler.cfg.AttachmentFrameAncestors = []string{"https://app.example.test"}
 	testHandler.CFSigner = nil
 	t.Cleanup(func() {
 		testHandler.Storage = origStorage
@@ -697,6 +757,7 @@ func TestDownloadAttachment_AutoInternalEndpointProxies(t *testing.T) {
 	id := seedAttachmentURL(t, "http://rustfs:9000/test-bucket/"+key, "report.txt", "text/plain", int64(len(body)))
 
 	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	testHandler.DownloadAttachment(w, req)
 
 	if w.Code != http.StatusOK {
@@ -717,6 +778,7 @@ func TestDownloadAttachment_AutoInternalEndpointProxies(t *testing.T) {
 	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
 	}
+	requireAttachmentPreviewCSP(t, w.Header(), "https://app.example.test")
 	if len(store.presignCalls) != 0 {
 		t.Fatalf("internal endpoint should not presign, calls=%v", store.presignCalls)
 	}
@@ -729,6 +791,7 @@ func TestDownloadAttachment_AutoPublicEndpointPresigns(t *testing.T) {
 	origSigner := testHandler.CFSigner
 	testHandler.Storage = store
 	testHandler.cfg.AttachmentDownloadMode = "auto"
+	testHandler.cfg.AttachmentFrameAncestors = []string{"https://app.example.test"}
 	testHandler.CFSigner = nil
 	t.Cleanup(func() {
 		testHandler.Storage = origStorage
@@ -740,6 +803,7 @@ func TestDownloadAttachment_AutoPublicEndpointPresigns(t *testing.T) {
 	id := seedAttachmentURL(t, "https://s3.example.com/test-bucket/"+key, "public.txt", "text/plain", 10)
 
 	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	testHandler.DownloadAttachment(w, req)
 
 	if w.Code != http.StatusFound {
@@ -762,6 +826,7 @@ func TestDownloadAttachment_AutoPublicEndpointPresigns(t *testing.T) {
 	if len(store.presignDispositions) != 1 || store.presignDispositions[0] != `attachment; filename="public.txt"` {
 		t.Fatalf("presign dispositions = %v", store.presignDispositions)
 	}
+	requireAttachmentPreviewCSP(t, w.Header(), "https://app.example.test")
 }
 
 func TestDownloadAttachment_ExplicitProxyStreamsPublicEndpoint(t *testing.T) {
@@ -795,6 +860,7 @@ func TestDownloadAttachment_ExplicitProxyStreamsPublicEndpoint(t *testing.T) {
 	if got := w.Header().Get("Content-Disposition"); got != `inline; filename="image.png"` {
 		t.Fatalf("Content-Disposition = %q", got)
 	}
+	requireAttachmentPreviewCSP(t, w.Header())
 	if len(store.presignCalls) != 0 {
 		t.Fatalf("forced proxy should not presign, calls=%v", store.presignCalls)
 	}
@@ -833,6 +899,7 @@ func TestGetAttachmentContent_HappyPath_Markdown(t *testing.T) {
 	id := seedPreviewAttachment(t, store, "preview-md-key.md", "preview.md", "text/markdown", body)
 
 	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 	testHandler.GetAttachmentContent(w, req)
 
 	if w.Code != http.StatusOK {
@@ -850,6 +917,7 @@ func TestGetAttachmentContent_HappyPath_Markdown(t *testing.T) {
 	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
 	}
+	requireAttachmentPreviewCSP(t, w.Header())
 }
 
 // Even when http.DetectContentType returned "text/plain" instead of "text/markdown"

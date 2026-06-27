@@ -471,11 +471,10 @@ export function DeleteSkillsDialog({
 // Row kebab
 // ---------------------------------------------------------------------------
 
-// Lives inside the row <a>; the wrapper span intercepts clicks so opening
-// the menu neither navigates (preventDefault kills the anchor's native
-// navigation) nor triggers AppLink's push (stopPropagation). Dialog and menu
-// contents are portaled, but their React events still bubble through this
-// span — which is exactly what keeps them from reaching the row link.
+// The row is a plain `<div>` whose whole-row navigation is a mouse `onClick`
+// (see `useRowLink`), not an ancestor `<a>`. The wrapper span stops click
+// propagation so opening this menu never navigates the row — just
+// stopPropagation, no preventDefault (there is no native anchor to cancel).
 export function SkillRowActions({
   row,
   ctx,
@@ -489,10 +488,7 @@ export function SkillRowActions({
 
   return (
     <span
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
+      onClick={(e) => e.stopPropagation()}
       className="flex items-center"
     >
       <DropdownMenu>

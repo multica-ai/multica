@@ -135,9 +135,10 @@ function useSetStatus() {
 }
 
 // ---------------------------------------------------------------------------
-// Row kebab — lives inside the row <a>; the wrapper span intercepts clicks
-// so opening the menu neither navigates nor triggers AppLink's push (same
-// pattern as the skills list).
+// Row kebab — the row is a plain `<div>` whose whole-row navigation is a mouse
+// `onClick` (see `useRowLink`), not an ancestor `<a>`. The wrapper span stops
+// click propagation so opening this menu never navigates the row — just
+// stopPropagation, no preventDefault (same pattern as the skills list).
 // ---------------------------------------------------------------------------
 
 export function AutopilotRowActions({ row }: { row: Autopilot }) {
@@ -147,10 +148,7 @@ export function AutopilotRowActions({ row }: { row: Autopilot }) {
 
   return (
     <span
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
+      onClick={(e) => e.stopPropagation()}
       className="flex items-center"
     >
       <DropdownMenu>

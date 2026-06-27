@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -47,6 +50,22 @@ const (
 	codexGracefulShutdownTimeout = 10 * time.Second
 )
 
+// codexGracefulShutdownTimeoutNanos optionally overrides
+// codexGracefulShutdownTimeout for tests, in nanoseconds. Zero or negative
+// values keep the production default. Tests for the cleanup-on-scanner-
+// overflow path (#4520) use it to shrink the grace window from 10 s to a
+// few hundred ms so the regression runs in a normal `go test` budget
+// instead of burning two full grace windows per cleanup phase. Mirrors
+// the opencodeTerminateGraceNanos hook.
+var codexGracefulShutdownTimeoutNanos atomic.Int64
+
+func codexGracefulShutdown() time.Duration {
+	if n := codexGracefulShutdownTimeoutNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return codexGracefulShutdownTimeout
+}
+
 // CodexSemanticInactivityMarker prefixes timeout errors emitted when Codex
 // stops making semantic progress while the process is still alive.
 const CodexSemanticInactivityMarker = "codex semantic inactivity timeout"
@@ -56,6 +75,8 @@ const CodexSemanticInactivityMarker = "codex semantic inactivity timeout"
 const CodexFirstTurnNoProgressMarker = "codex app-server no progress timeout"
 
 const codexModelCatalogRefreshTimeoutSignal = "failed to refresh available models: timeout waiting for child process to exit"
+
+var errCodexProcessExited = errors.New("codex process exited")
 
 type codexTimeoutKind int
 
@@ -544,6 +565,26 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
 	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
 	hideAgentWindow(cmd)
+	// Run codex in its own process group so a cancel-on-stuck cleanup
+	// reaches the whole tree — the codex Node wrapper plus the native
+	// Rust app-server it spawns — not just the direct child. Without
+	// this, killing the leader leaves grandchildren as orphans that
+	// keep consuming memory until the OS reaps them; see #4520, where a
+	// scanner overflow during thread/resume otherwise leaked Codex
+	// processes indefinitely. configureProcessGroup is a no-op on
+	// Windows.
+	configureProcessGroup(cmd)
+	// Override the default exec.CommandContext cancel behaviour. The
+	// default sends SIGKILL only to cmd.Process (the leader); we instead
+	// signal the whole process group so descendants die too. Returning
+	// nil keeps exec from logging a spurious error; cmd.WaitDelay below
+	// still backstops cmd.Wait() if the kill leaves an open pipe.
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			signalProcessGroup(cmd.Process, syscall.SIGKILL)
+		}
+		return nil
+	}
 	// Bound the wait after the context is cancelled so a stuck child (or an
 	// open pipe held by a grandchild) can't hang cmd.Wait() forever. Matches
 	// the other long-lived backends (claude, copilot, cursor, …).
@@ -589,6 +630,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		cfg:                  b.cfg,
 		stdin:                stdin,
 		pending:              make(map[int]*pendingRPC),
+		processDone:          make(chan struct{}),
 		notificationProtocol: "unknown",
 		onMessage: func(msg Message) {
 			logCodexAgentMessage(b.cfg.Logger, msg)
@@ -625,7 +667,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			}
 			c.handleLine(line)
 		}
-		c.closeAllPending(fmt.Errorf("codex process exited"))
+		if err := scanner.Err(); err != nil {
+			c.markProcessExited(fmt.Errorf("%w: %v", errCodexProcessExited, err))
+			return
+		}
+		c.markProcessExited(errCodexProcessExited)
 	}()
 
 	// drainAndWait closes stdin so codex shuts down, then joins cmd.Wait().
@@ -636,11 +682,89 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	// code that reads stderrBuf.Tail() must call drainAndWait() first.
 	// sync.Once makes it safe to call from both error paths and the deferred
 	// cleanup.
+	//
+	// drainAndWait is also the cleanup safety net for the scanner-overflow
+	// path (#4520). When codex emits a single stdout line larger than the
+	// scanner's MaxScanTokenSize, the reader goroutine returns with
+	// scanner.Err() set, fails all in-flight RPCs via markProcessExited, and
+	// closes readerDone — but the codex child process is still alive and is
+	// now blocked trying to write the rest of the oversized line into a
+	// stdout pipe nobody is reading. A naive stdin.Close()+cmd.Wait() then
+	// hangs forever: codex never reaches its stdin-read syscall, so it never
+	// sees EOF, never exits, and cmd.Wait() never returns. The lifecycle
+	// goroutine therefore never sends a failed Result, the outer daemon
+	// blocks on its result channel, and the higher-level fresh-session
+	// fallback never fires.
+	//
+	// To stay correct under both clean shutdown and the stuck-child case,
+	// drainAndWait runs in two bounded phases:
+	//
+	//  1. Close stdin and wait for the reader goroutine to finish, capped by
+	//     codexGracefulShutdownTimeout. The reader exits when codex closes
+	//     stdout on its own (clean shutdown — gives OTEL batch exporters a
+	//     chance to flush) OR when the scanner errors out (overflow case —
+	//     readerDone is already closed and the select returns immediately).
+	//     Per os/exec docs, calling cmd.Wait() while reads are still
+	//     in-flight on a StdoutPipe-returned pipe is incorrect because Wait
+	//     closes the pipe and turns pending reads into spurious errors, so
+	//     we must wait for the reader first.
+	//
+	//  2. Wait for cmd.Wait() to return, capped by another
+	//     codexGracefulShutdownTimeout. Normally this returns immediately
+	//     because the process has already exited. In the stuck-child case
+	//     the process is still alive — we cancel the runCtx, which fires
+	//     cmd.Cancel (the group-SIGKILL helper installed above), and
+	//     cmd.WaitDelay then guarantees cmd.Wait() returns even if pipes
+	//     stay open.
 	var waitOnce sync.Once
 	drainAndWait := func() {
 		waitOnce.Do(func() {
 			stdin.Close()
-			_ = cmd.Wait()
+
+			grace := codexGracefulShutdown()
+
+			// Phase 1: let the reader finish before invoking cmd.Wait().
+			select {
+			case <-readerDone:
+				// reader drained cleanly (codex shutdown closed stdout)
+				// or aborted early (e.g. scanner overflow). Either way it
+				// is now safe to call cmd.Wait().
+			case <-time.After(grace):
+				// codex did not close stdout within the grace window. Force
+				// the shutdown via context cancellation — cmd.Cancel
+				// group-kills the tree, the reader unblocks when stdout
+				// EOFs, and we proceed to phase 2.
+				b.cfg.Logger.Warn("codex did not close stdout after stdin EOF; forcing shutdown",
+					"pid", cmd.Process.Pid,
+					"grace", grace.String(),
+				)
+				cancel()
+				<-readerDone
+			}
+
+			// Phase 2: bound cmd.Wait() in case the process is still alive
+			// (scanner-overflow case: reader exited early on its own while
+			// codex stayed blocked writing into a full stdout pipe).
+			waitCh := make(chan struct{})
+			go func() {
+				_ = cmd.Wait()
+				close(waitCh)
+			}()
+			select {
+			case <-waitCh:
+				// reaped cleanly.
+			case <-time.After(grace):
+				b.cfg.Logger.Warn("codex process still alive after reader exited; forcing shutdown",
+					"pid", cmd.Process.Pid,
+					"grace", grace.String(),
+				)
+				cancel()
+				// WaitDelay (10s) is the final backstop: even if the
+				// group-kill races with an open pipe held by a
+				// descendant, cmd.Wait() returns within WaitDelay of the
+				// cancel.
+				<-waitCh
+			}
 		})
 	}
 
@@ -739,20 +863,38 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 		waitingForTurn := true
 		var timeoutDiagnostic codexTimeoutDiagnostic
+		var processExitErr error
+		finishTurn := func(aborted bool) {
+			waitingForTurn = false
+			switch {
+			case aborted:
+				finalStatus = "aborted"
+				if errMsg := c.getTurnError(); errMsg != "" {
+					finalError = errMsg
+				} else {
+					finalError = "turn was aborted"
+				}
+			default:
+				if errMsg := c.getTurnError(); errMsg != "" {
+					finalStatus = "failed"
+					finalError = errMsg
+				}
+			}
+		}
+		finishRunContextDone := func() {
+			waitingForTurn = false
+			if runCtx.Err() == context.DeadlineExceeded {
+				finalStatus = "timeout"
+				finalError = fmt.Sprintf("codex timed out after %s", timeout)
+			} else {
+				finalStatus = "aborted"
+				finalError = "execution cancelled"
+			}
+		}
 		for waitingForTurn {
 			select {
 			case aborted := <-turnDone:
-				waitingForTurn = false
-				switch {
-				case aborted:
-					finalStatus = "aborted"
-					finalError = "turn was aborted"
-				default:
-					if errMsg := c.getTurnError(); errMsg != "" {
-						finalStatus = "failed"
-						finalError = errMsg
-					}
-				}
+				finishTurn(aborted)
 			case activity := <-semanticActivityCh:
 				lastSemanticActivity = time.Now()
 				lastSemanticActivityDescription = activity
@@ -803,13 +945,23 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 					"idle_for", time.Since(lastSemanticActivity).Round(time.Millisecond).String(),
 				)
 			case <-runCtx.Done():
-				waitingForTurn = false
-				if runCtx.Err() == context.DeadlineExceeded {
-					finalStatus = "timeout"
-					finalError = fmt.Sprintf("codex timed out after %s", timeout)
-				} else {
-					finalStatus = "aborted"
-					finalError = "execution cancelled"
+				finishRunContextDone()
+			case <-c.processDone:
+				select {
+				case aborted := <-turnDone:
+					finishTurn(aborted)
+				default:
+					if runCtx.Err() != nil {
+						finishRunContextDone()
+					} else {
+						waitingForTurn = false
+						finalStatus = "failed"
+						processExitErr = c.getProcessErr()
+						if processExitErr == nil {
+							processExitErr = errCodexProcessExited
+						}
+						finalError = processExitErr.Error()
+					}
 				}
 			}
 		}
@@ -817,26 +969,16 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		duration := time.Since(startTime)
 		b.cfg.Logger.Info("codex finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		// Close stdin to signal the app-server to exit. Prefer letting codex
-		// shut down on its own: a clean exit runs codex's shutdown path, which
-		// force-flushes its OTEL batch exporters — killing it immediately (via
-		// cancel → SIGKILL) drops the task's buffered telemetry. Give it a
-		// bounded grace period; only force-cancel if it doesn't exit, so the
-		// reader goroutine can never block forever on scanner.Scan().
-		stdin.Close()
-		select {
-		case <-readerDone:
-			// codex closed stdout on its own — clean shutdown, telemetry flushed.
-		case <-time.After(codexGracefulShutdownTimeout):
-			b.cfg.Logger.Warn("codex did not exit after stdin close; forcing shutdown",
-				"pid", cmd.Process.Pid,
-				"grace", codexGracefulShutdownTimeout.String(),
-			)
-			cancel()
-			<-readerDone
-		}
+		// Run cleanup. drainAndWait handles the graceful-then-cancel pattern
+		// in two bounded phases (see its declaration): wait for the reader,
+		// then wait for cmd.Wait(), force-cancelling either if the grace
+		// window expires. A clean shutdown lets codex flush OTEL telemetry;
+		// a stuck process is killed via the process-group SIGKILL.
 		drainAndWait()
 
+		if processExitErr != nil {
+			finalError = withAgentStderr(processExitErr.Error(), "codex", stderrBuf.Tail())
+		}
 		if timeoutDiagnostic.Kind != codexTimeoutNone {
 			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), execPath, cmd.Env, b.cfg.Logger)
 			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, stderrBuf.Tail())
@@ -887,11 +1029,12 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 // startOrResumeThread picks between Codex's thread/resume and thread/start
 // based on opts.ResumeSessionID. When a prior thread ID is provided it first
-// tries thread/resume; any error (unknown thread, schema mismatch, transport
-// failure) is logged and the method falls back to thread/start so the task
-// still executes. The returned threadID is what subsequent turn/start calls
-// must reference, and resumed indicates whether the prior thread was picked
-// up (only useful for logging).
+// tries thread/resume; recoverable protocol errors (unknown thread, schema
+// mismatch) fall back to thread/start so the task still executes, while
+// transport/process failures fail fast because the app-server can no longer
+// answer a fresh start request. The returned threadID is what subsequent
+// turn/start calls must reference, and resumed indicates whether the prior
+// thread was picked up (only useful for logging).
 func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions, logger *slog.Logger) (string, bool, error) {
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
@@ -915,6 +1058,10 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 			}
 			logger.Warn("codex thread/resume returned no thread ID; falling back to thread/start", "prior_thread_id", priorThreadID)
 		} else {
+			if isCodexTransportError(err) {
+				logger.Warn("codex thread/resume failed due to transport error; not falling back to thread/start", "prior_thread_id", priorThreadID, "error", err)
+				return "", false, fmt.Errorf("codex thread/resume failed: %w", err)
+			}
 			logger.Warn("codex thread/resume failed; falling back to thread/start", "prior_thread_id", priorThreadID, "error", err)
 		}
 	}
@@ -1156,6 +1303,8 @@ type codexClient struct {
 	mu                 sync.Mutex
 	nextID             int
 	pending            map[int]*pendingRPC
+	processDone        chan struct{}
+	processErr         error
 	threadID           string
 	turnID             string
 	onMessage          func(Message)
@@ -1201,7 +1350,19 @@ type rpcResult struct {
 }
 
 func (c *codexClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
+	if c.processErr != nil {
+		err := c.processErr
+		c.mu.Unlock()
+		return nil, err
+	}
+	if c.processDone == nil {
+		c.processDone = make(chan struct{})
+	}
+	processDone := c.processDone
 	c.nextID++
 	id := c.nextID
 	pr := &pendingRPC{ch: make(chan rpcResult, 1), method: method}
@@ -1239,6 +1400,18 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 	select {
 	case res := <-pr.ch:
 		return res.result, res.err
+	case <-processDone:
+		c.mu.Lock()
+		delete(c.pending, id)
+		err := c.processErr
+		c.mu.Unlock()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if err == nil {
+			err = errCodexProcessExited
+		}
+		return nil, err
 	case <-ctx.Done():
 		c.mu.Lock()
 		delete(c.pending, id)
@@ -1289,6 +1462,40 @@ func (c *codexClient) closeAllPending(err error) {
 		pr.ch <- rpcResult{err: err}
 		delete(c.pending, id)
 	}
+}
+
+func (c *codexClient) markProcessExited(err error) {
+	if err == nil {
+		err = errCodexProcessExited
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.processErr == nil {
+		c.processErr = err
+		if c.processDone != nil {
+			close(c.processDone)
+		}
+	}
+	for id, pr := range c.pending {
+		pr.ch <- rpcResult{err: err}
+		delete(c.pending, id)
+	}
+}
+
+func (c *codexClient) getProcessErr() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.processErr
+}
+
+func isCodexTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errCodexProcessExited) {
+		return true
+	}
+	return strings.HasPrefix(err.Error(), "write ")
 }
 
 func (c *codexClient) handleLine(line string) {
@@ -1362,11 +1569,56 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 		c.respond(id, map[string]any{"decision": "accept"})
 	case "item/fileChange/requestApproval", "applyPatchApproval":
 		c.respond(id, map[string]any{"decision": "accept"})
+	case "item/permissions/requestApproval":
+		c.respond(id, codexPermissionsApprovalResponse(raw["params"], c.cfg.Logger))
 	case "mcpServer/elicitation/request":
 		c.respond(id, map[string]any{"action": "accept", "content": nil, "_meta": nil})
 	default:
+		msg := fmt.Sprintf("unsupported codex app-server request: %s", method)
 		c.cfg.Logger.Warn("codex: unhandled server request", "method", method, "id", id)
-		c.respondError(id, -32601, fmt.Sprintf("unhandled server request: %s", method))
+		c.setTurnError(msg)
+		c.respondError(id, -32601, msg)
+	}
+}
+
+// codexPermissionsApprovalResponse builds the auto-grant reply for a Codex
+// item/permissions/requestApproval server request. In daemon mode there is no
+// human to approve, so we echo back the requested network / fileSystem profile
+// and scope it to the current turn, mirroring the other auto-accept branches in
+// handleServerRequest.
+//
+// The grant is intentionally limited to the network / fileSystem keys we
+// understand. A parse failure and any dropped key are logged so that a future
+// app-server protocol that adds a new permission shape is visible in daemon
+// logs instead of being silently narrowed away.
+func codexPermissionsApprovalResponse(params json.RawMessage, logger *slog.Logger) map[string]any {
+	var payload struct {
+		Permissions map[string]any `json:"permissions"`
+	}
+	if err := json.Unmarshal(params, &payload); err != nil && logger != nil {
+		logger.Warn("codex: failed to parse permission approval request; granting empty turn-scoped profile", "error", err)
+	}
+
+	granted := map[string]any{}
+	var dropped []string
+	for key, value := range payload.Permissions {
+		switch key {
+		case "network", "fileSystem":
+			if value != nil {
+				granted[key] = value
+			}
+		default:
+			dropped = append(dropped, key)
+		}
+	}
+	if len(dropped) > 0 && logger != nil {
+		sort.Strings(dropped)
+		logger.Warn("codex: dropping unrecognized permission keys from approval request; add explicit handling if the app-server protocol expanded", "keys", dropped)
+	}
+
+	return map[string]any{
+		"permissions": granted,
+		"scope":       "turn",
 	}
 }
 

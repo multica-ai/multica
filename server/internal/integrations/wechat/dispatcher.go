@@ -26,7 +26,7 @@ type DispatcherQueries interface {
 }
 
 type ChatTaskEnqueuer interface {
-	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID) (db.AgentTaskQueue, error)
+	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error)
 }
 
 type Dispatcher struct {
@@ -139,7 +139,7 @@ func (d *Dispatcher) Handle(ctx context.Context, msg InboundMessage) (DispatchRe
 
 	// 6. Enqueue chat task
 	if d.TaskService != nil {
-		_, err = d.TaskService.EnqueueChatTask(ctx, session, binding.MulticaUserID)
+		_, err = d.TaskService.EnqueueChatTask(ctx, session, binding.MulticaUserID, false)
 		if err != nil {
 			d.logger().Warn("wechat: enqueue chat task failed", "error", err)
 			if errors.Is(err, errChatTaskAgentNoRuntime) {

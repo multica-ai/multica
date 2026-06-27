@@ -2,11 +2,19 @@ package main
 
 import (
 	"net"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
+
+func TestMain(m *testing.M) {
+	os.Unsetenv("MULTICA_AGENT_ID")
+	os.Unsetenv("MULTICA_TASK_ID")
+	os.Unsetenv("MULTICA_TOKEN")
+	os.Exit(m.Run())
+}
 
 // testCmd returns a minimal cobra.Command with the --profile persistent flag
 // registered, matching the rootCmd setup used in production.
@@ -117,6 +125,50 @@ func TestResolveCallbackBinding(t *testing.T) {
 				t.Errorf("bind addr = %q, want %q", gotBind, tc.wantBind)
 			}
 		})
+	}
+}
+
+func TestBrowserLoginInstructionsSSHRemoteHint(t *testing.T) {
+	const loginURL = "https://multica.ai/login?cli_callback=http%3A%2F%2Flocalhost%3A43689%2Fcallback"
+
+	got := browserLoginInstructions(loginURL, "localhost", 43689, true)
+	if !strings.Contains(got, "ssh -L 43689:127.0.0.1:43689 <user>@<remote-host>") {
+		t.Fatalf("remote SSH instructions missing tunnel command:\n%s", got)
+	}
+	if !strings.Contains(got, loginURL) {
+		t.Fatalf("instructions missing login URL:\n%s", got)
+	}
+
+	got = browserLoginInstructions(loginURL, "localhost", 43689, false)
+	if strings.Contains(got, "ssh -L") {
+		t.Fatalf("local instructions should not include SSH tunnel command:\n%s", got)
+	}
+
+	got = browserLoginInstructions(loginURL, "192.168.1.25", 43689, true)
+	if strings.Contains(got, "ssh -L") {
+		t.Fatalf("non-loopback callback should not include SSH tunnel command:\n%s", got)
+	}
+}
+
+func TestCallbackHostFlagValueReadsParentSetupFlag(t *testing.T) {
+	var got string
+	setup := &cobra.Command{Use: "setup"}
+	setup.Flags().String(callbackHostFlag, "", "")
+	cloud := &cobra.Command{
+		Use: "cloud",
+		Run: func(cmd *cobra.Command, args []string) {
+			got = callbackHostFlagValue(cmd)
+		},
+	}
+	cloud.Flags().String(callbackHostFlag, "", "")
+	setup.AddCommand(cloud)
+	setup.SetArgs([]string{"--callback-host", "10.0.0.5", "cloud"})
+
+	if err := setup.Execute(); err != nil {
+		t.Fatalf("execute setup cloud: %v", err)
+	}
+	if got != "10.0.0.5" {
+		t.Fatalf("callback host = %q, want parent flag value", got)
 	}
 }
 

@@ -621,6 +621,19 @@ function EditorBubbleMenu({
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <HeadingDropdown editor={editor} onOpenChange={handleMenuOpenChange} activeLevel={fmt.heading1 ? 1 : fmt.heading2 ? 2 : fmt.heading3 ? 3 : undefined} />
             <ListDropdown editor={editor} onOpenChange={handleMenuOpenChange} isBullet={fmt.bulletList} isOrdered={fmt.orderedList} isTask={fmt.taskList} />
+            {/* Dedicated one-click toggle for checkbox task lists — turns the
+                current line(s) into a `- [ ]` task item or back to a paragraph.
+                The same toggle also lives in the List dropdown, but a direct
+                button keeps the common "make this a checklist" action one tap
+                away instead of two. */}
+            <Tooltip>
+              <TooltipTrigger render={
+                <Toggle size="sm" pressed={fmt.taskList} onPressedChange={() => editor.chain().focus().toggleTaskList().run()} onMouseDown={(e) => e.preventDefault()} />
+              }>
+                <ListTodo className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={8}>{t(($) => $.bubble_menu.task_list)}</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger render={
                 <Toggle size="sm" pressed={fmt.blockquote} onPressedChange={() => editor.chain().focus().toggleBlockquote().run()} onMouseDown={(e) => e.preventDefault()} />

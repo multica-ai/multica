@@ -123,6 +123,81 @@ func TestSendChatMessage_LinksAttachments(t *testing.T) {
 	}
 }
 
+// TestSendChatMessage_LinksUnattachedAttachments verifies the new compose
+// path: upload creates a workspace-scoped unattached attachment, and chat send
+// binds it to both the session and the user message.
+func TestSendChatMessage_LinksUnattachedAttachments(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	defer func() { testHandler.Storage = origStorage }()
+
+	agentID := createHandlerTestAgent(t, "ChatSendUnattachedAttachAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, _ := writer.CreateFormFile("file", "send-unattached.png")
+	part.Write([]byte("\x89PNG\r\n\x1a\nbytes"))
+	writer.Close()
+
+	uploadReq := httptest.NewRequest("POST", "/api/upload-file", &body)
+	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
+	uploadReq.Header.Set("X-User-ID", testUserID)
+	uploadReq.Header.Set("X-Workspace-ID", testWorkspaceID)
+
+	uploadW := httptest.NewRecorder()
+	testHandler.UploadFile(uploadW, uploadReq)
+	if uploadW.Code != http.StatusOK {
+		t.Fatalf("upload precondition: %d %s", uploadW.Code, uploadW.Body.String())
+	}
+	var uploadResp AttachmentResponse
+	if err := json.Unmarshal(uploadW.Body.Bytes(), &uploadResp); err != nil {
+		t.Fatalf("decode upload: %v", err)
+	}
+	attachmentID := uploadResp.ID
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, attachmentID)
+	})
+	if uploadResp.ChatSessionID != nil {
+		t.Fatalf("pre-send chat_session_id should be nil, got %v", *uploadResp.ChatSessionID)
+	}
+	if uploadResp.ChatMessageID != nil {
+		t.Fatalf("pre-send chat_message_id should be nil, got %v", *uploadResp.ChatMessageID)
+	}
+
+	sendReq := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{
+		"content":        "look at this ![](" + uploadResp.MarkdownURL + ")",
+		"attachment_ids": []string{attachmentID},
+	})
+	sendReq = withURLParam(sendReq, "sessionId", sessionID)
+	sendReq = withChatTestWorkspaceCtx(t, sendReq)
+	sendW := httptest.NewRecorder()
+	testHandler.SendChatMessage(sendW, sendReq)
+	if sendW.Code != http.StatusCreated {
+		t.Fatalf("SendChatMessage: expected 201, got %d: %s", sendW.Code, sendW.Body.String())
+	}
+
+	var sendResp SendChatMessageResponse
+	if err := json.Unmarshal(sendW.Body.Bytes(), &sendResp); err != nil {
+		t.Fatalf("decode send: %v", err)
+	}
+
+	var dbSessionID, dbMessageID *string
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT chat_session_id::text, chat_message_id::text FROM attachment WHERE id = $1`,
+		attachmentID,
+	).Scan(&dbSessionID, &dbMessageID); err != nil {
+		t.Fatalf("query attachment: %v", err)
+	}
+	if dbSessionID == nil || *dbSessionID != sessionID {
+		t.Fatalf("chat_session_id mismatch: want %s, got %v", sessionID, dbSessionID)
+	}
+	if dbMessageID == nil || *dbMessageID != sendResp.MessageID {
+		t.Fatalf("chat_message_id mismatch: want %s, got %v", sendResp.MessageID, dbMessageID)
+	}
+}
+
 // TestUpdateChatSession_RenamesTitle confirms PATCH writes the new title,
 // returns the updated row, and the server-side row reflects it.
 func TestUpdateChatSession_RenamesTitle(t *testing.T) {
@@ -367,5 +442,66 @@ func TestListChatMessagesPage_RejectsInvalidLimit(t *testing.T) {
 	testHandler.ListChatMessagesPage(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("ListChatMessagesPage invalid limit: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestDeleteChatSession_PrunesChannelChatSessionBinding verifies the
+// application-layer replacement for the channel_chat_session_binding
+// chat_session-FK cascade (MUL-3515 §4): deleting a chat session prunes its
+// channel binding in the same tx that deletes the session row.
+func TestDeleteChatSession_PrunesChannelChatSessionBinding(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatDeleteBindingAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	ctx := context.Background()
+
+	const appID = "cli_chat_delete_binding"
+	const channelChatID = "oc_chat_delete_binding"
+
+	// channel_* rows have no FK to chat_session/workspace (MUL-3515 §4), so
+	// they outlive the helper's chat_session cleanup; clear by deterministic
+	// key before and after.
+	cleanChannel := func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM channel_chat_session_binding WHERE channel_chat_id = $1`, channelChatID)
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM channel_installation WHERE channel_type = 'feishu' AND config->>'app_id' = $1`, appID)
+	}
+	cleanChannel()
+	t.Cleanup(cleanChannel)
+
+	var installID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4)
+RETURNING id
+`, testWorkspaceID, agentID, appID, testUserID).Scan(&installID); err != nil {
+		t.Fatalf("insert channel_installation: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+VALUES ($1, $2, 'feishu', $3, 'p2p')
+`, sessionID, installID, channelChatID); err != nil {
+		t.Fatalf("insert channel_chat_session_binding: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/chat/sessions/"+sessionID, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req = withURLParam(req, "sessionId", sessionID)
+	req = withChatTestWorkspaceCtx(t, req)
+	w := httptest.NewRecorder()
+	testHandler.DeleteChatSession(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteChatSession: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var bindingExists bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM channel_chat_session_binding WHERE channel_chat_id = $1)`, channelChatID).Scan(&bindingExists); err != nil {
+		t.Fatalf("query chat session binding: %v", err)
+	}
+	if bindingExists {
+		t.Fatal("deleted chat session's channel_chat_session_binding was not pruned")
 	}
 }

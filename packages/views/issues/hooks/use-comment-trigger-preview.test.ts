@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@multica/core/api";
+import type { CommentTriggerPreviewAgent } from "@multica/core/types";
 import {
   commentTriggerPreviewSignature,
   isNoteCommentDraft,
@@ -16,6 +17,18 @@ vi.mock("@multica/core/api", () => ({
 }));
 
 const previewCommentTriggers = vi.mocked(api.previewCommentTriggers);
+const waltAgent: CommentTriggerPreviewAgent = {
+  id: "00000000-0000-0000-0000-000000000001",
+  name: "Walt",
+  source: "issue_assignee",
+  reason: "",
+};
+const kimAgent: CommentTriggerPreviewAgent = {
+  id: "00000000-0000-0000-0000-000000000002",
+  name: "Kim",
+  source: "mention_agent",
+  reason: "",
+};
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -104,6 +117,76 @@ describe("useCommentTriggerPreview", () => {
       content,
       "parent-1",
       "comment-2",
+    );
+  });
+
+  it("does not show previous agents while parent context changes", async () => {
+    previewCommentTriggers
+      .mockResolvedValueOnce({ agents: [waltAgent] })
+      .mockReturnValueOnce(new Promise(() => {}));
+
+    const { result, rerender } = renderHook(
+      ({ parentId }) =>
+        useCommentTriggerPreview({
+          issueId: "issue-1",
+          parentId,
+          content: "plain reply",
+        }),
+      {
+        wrapper: createWrapper(),
+        initialProps: { parentId: "walt-thread" },
+      },
+    );
+
+    await advancePreviewDebounce();
+    await vi.waitFor(() => {
+      expect(result.current.agents).toEqual([waltAgent]);
+    });
+
+    rerender({ parentId: "kim-thread" });
+    await act(async () => {});
+
+    expect(result.current.agents).toEqual([]);
+    expect(previewCommentTriggers).toHaveBeenLastCalledWith(
+      "issue-1",
+      "plain reply",
+      "kim-thread",
+      undefined,
+    );
+  });
+
+  it("keeps previous agents while the same context refetches", async () => {
+    previewCommentTriggers
+      .mockResolvedValueOnce({ agents: [waltAgent] })
+      .mockReturnValueOnce(new Promise(() => {}));
+
+    const { result, rerender } = renderHook(
+      ({ content }) =>
+        useCommentTriggerPreview({
+          issueId: "issue-1",
+          parentId: "same-thread",
+          content,
+        }),
+      {
+        wrapper: createWrapper(),
+        initialProps: { content: `[@Walt](mention://agent/${waltAgent.id})` },
+      },
+    );
+
+    await advancePreviewDebounce();
+    await vi.waitFor(() => {
+      expect(result.current.agents).toEqual([waltAgent]);
+    });
+
+    rerender({ content: `[@Kim](mention://agent/${kimAgent.id})` });
+    await advancePreviewDebounce();
+
+    expect(result.current.agents).toEqual([waltAgent]);
+    expect(previewCommentTriggers).toHaveBeenLastCalledWith(
+      "issue-1",
+      `[@Kim](mention://agent/${kimAgent.id})`,
+      "same-thread",
+      undefined,
     );
   });
 

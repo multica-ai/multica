@@ -15,13 +15,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/mention"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -83,9 +83,11 @@ func truncateForSummary(s string, maxRunes int) string {
 const (
 	taskAnalyticsContextCacheMax = 4096
 	// claimResponseRecoveryWindow must exceed daemon client.Timeout for
-	// /tasks/claim (30s) plus /tasks/{id}/start (30s) plus scheduling slack, so
-	// an in-flight StartTask cannot be reclaimed and double-dispatched.
+	// /tasks/claim (30s) plus /tasks/{id}/start (30s) plus scheduling slack.
+	// Longer pre-start work is protected by prepareLeaseDuration instead of
+	// stretching this global crash-recovery window.
 	claimResponseRecoveryWindow = 90 * time.Second
+	prepareLeaseDuration        = 45 * time.Second
 )
 
 // buildCommentTriggerSummary fetches the comment content and truncates
@@ -435,7 +437,15 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false)
+	return s.enqueueIssueTask(ctx, issue, commentID, false, "")
+}
+
+// EnqueueTaskForIssueWithHandoff is the assign/promote variant that carries a
+// handoff note into the run's opening context (MUL-3375). The note rides a
+// dedicated task column; the daemon renders it via the assignment-handoff
+// branch. Empty note behaves exactly like EnqueueTaskForIssue.
+func (s *TaskService) EnqueueTaskForIssueWithHandoff(ctx context.Context, issue db.Issue, handoffNote string) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, handoffNote)
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
@@ -443,7 +453,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // daemon claim handler skips the (agent_id, issue_id) resume lookup — the
 // user already judged the prior output bad, a fresh agent session is the
 // expected behavior.
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -471,6 +481,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		TriggerCommentID:  triggerCommentID,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		HandoffNote:       pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -498,7 +509,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "")
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -507,11 +518,23 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 // acting as the squad's leader (skip) from one posted while it was acting
 // as a worker (do not skip). This matters for agents that are simultaneously
 // the leader and a worker of the same squad — see migration 090.
-func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false)
+//
+// squadID is stamped onto the task's squad_id column so the daemon claim
+// handler can locate the squad and inject its briefing regardless of how the
+// leader task was triggered (comment @squad, issue assign, autopilot,
+// sub-issue done callback). See migration 127.
+func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "")
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, forceFreshSession bool) (db.AgentTaskQueue, error) {
+// EnqueueTaskForSquadLeaderWithHandoff is the assign/promote variant carrying a
+// handoff note into the leader run's opening context (MUL-3375). Empty note
+// behaves exactly like EnqueueTaskForSquadLeader.
+func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, handoffNote string) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote)
+}
+
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -535,6 +558,8 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		IsLeaderTask:      pgtype.Bool{Bool: isLeader, Valid: isLeader},
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		HandoffNote:       pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
+		SquadID:           squadID,
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -708,7 +733,11 @@ var ErrChatTaskAgentNoRuntime = errors.New("chat task: agent has no runtime")
 // passes the request user; the lark dispatcher passes the inbound sender of the
 // latest message in the silence window. Stored on the task so the daemon brief
 // can attribute the run to the right person. See MUL-2645.
-func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+//
+// forceFreshSession applies only to the task created by this call. The daemon
+// uses it to skip prior chat-session resume for this dispatch without clearing
+// the chat session's stored resume pointer for future normal messages.
+func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -727,6 +756,10 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		Priority:        2, // medium priority for chat
 		ChatSessionID:   chatSession.ID,
 		InitiatorUserID: initiatorUserID,
+		ForceFreshSession: pgtype.Bool{
+			Bool:  forceFreshSession,
+			Valid: true,
+		},
 	})
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -826,6 +859,10 @@ type CancelledChatMessageResult struct {
 	MessageID      string
 	Content        string
 	RestoreToInput bool
+	// Attachments are the rows detached from the deleted user message so they
+	// survive the ON DELETE CASCADE and can re-bind when the restored draft is
+	// re-sent.
+	Attachments []db.Attachment
 }
 
 type CancelTaskResult struct {
@@ -885,6 +922,13 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 			return fmt.Errorf("list cancelled chat task messages: %w", err)
 		}
 		if len(messages) == 0 {
+			// Detach attachments BEFORE deleting the user message — the
+			// attachment FK is ON DELETE CASCADE, so deleting first would
+			// destroy rows the restored draft needs to re-bind.
+			detached, err := qtx.DetachAttachmentsFromUserChatMessageByTask(ctx, task.ID)
+			if err != nil {
+				return fmt.Errorf("detach cancelled chat message attachments: %w", err)
+			}
 			deleted, err := qtx.DeleteUserChatMessageByTask(ctx, task.ID)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
@@ -897,6 +941,7 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 				MessageID:      util.UUIDToString(deleted.ID),
 				Content:        deleted.Content,
 				RestoreToInput: true,
+				Attachments:    detached,
 			}
 			return nil
 		}
@@ -928,51 +973,70 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	var (
 		outcome                                                              = "unknown"
 		getAgentMs, countRunningMs, claimAgentMs, updateStatusMs, dispatchMs int64
+		claimed                                                              *db.AgentTaskQueue
 	)
 	defer func() {
 		s.maybeLogClaimSlow(agentID, outcome, start, getAgentMs, countRunningMs, claimAgentMs, updateStatusMs, dispatchMs)
 	}()
 
-	t0 := start
-	agent, err := s.Queries.GetAgent(ctx, agentID)
-	getAgentMs = time.Since(t0).Milliseconds()
-	if err != nil {
-		outcome = "error_get_agent"
-		return nil, fmt.Errorf("agent not found: %w", err)
-	}
-
-	t0 = time.Now()
-	running, err := s.Queries.CountRunningTasks(ctx, agentID)
-	countRunningMs = time.Since(t0).Milliseconds()
-	if err != nil {
-		outcome = "error_count_running"
-		return nil, fmt.Errorf("count running tasks: %w", err)
-	}
-	if running >= int64(agent.MaxConcurrentTasks) {
-		slog.Debug("task claim: no capacity", "agent_id", util.UUIDToString(agentID), "running", running, "max", agent.MaxConcurrentTasks)
-		outcome = "no_capacity"
-		return nil, nil // No capacity
-	}
-
-	t0 = time.Now()
-	task, err := s.Queries.ClaimAgentTask(ctx, agentID)
-	claimAgentMs = time.Since(t0).Milliseconds()
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			slog.Debug("task claim: no tasks available", "agent_id", util.UUIDToString(agentID))
-			outcome = "no_tasks"
-			return nil, nil // No tasks available
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		t0 := time.Now()
+		agent, err := qtx.GetAgentForClaimUpdate(ctx, agentID)
+		getAgentMs = time.Since(t0).Milliseconds()
+		if err != nil {
+			outcome = "error_get_agent"
+			return fmt.Errorf("agent not found: %w", err)
 		}
-		outcome = "error_claim"
-		return nil, fmt.Errorf("claim task: %w", err)
+
+		t0 = time.Now()
+		running, err := qtx.CountRunningTasks(ctx, agentID)
+		countRunningMs = time.Since(t0).Milliseconds()
+		if err != nil {
+			outcome = "error_count_running"
+			return fmt.Errorf("count running tasks: %w", err)
+		}
+		if running >= int64(agent.MaxConcurrentTasks) {
+			slog.Debug("task claim: no capacity", "agent_id", util.UUIDToString(agentID), "running", running, "max", agent.MaxConcurrentTasks)
+			outcome = "no_capacity"
+			return nil
+		}
+
+		t0 = time.Now()
+		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
+			AgentID:          agentID,
+			PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
+		})
+		claimAgentMs = time.Since(t0).Milliseconds()
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				slog.Debug("task claim: no tasks available", "agent_id", util.UUIDToString(agentID))
+				outcome = "no_tasks"
+				return nil
+			}
+			outcome = "error_claim"
+			return fmt.Errorf("claim task: %w", err)
+		}
+
+		claimedTask := task
+		claimed = &claimedTask
+		return nil
+	})
+	if err != nil {
+		if outcome == "unknown" {
+			outcome = "error_transaction"
+		}
+		return nil, err
+	}
+	if claimed == nil {
+		return nil, nil
 	}
 
-	slog.Info("task claimed", "task_id", util.UUIDToString(task.ID), "agent_id", util.UUIDToString(agentID))
-	s.captureTaskDispatched(ctx, task)
+	slog.Info("task claimed", "task_id", util.UUIDToString(claimed.ID), "agent_id", util.UUIDToString(agentID))
+	s.captureTaskDispatched(ctx, *claimed)
 
 	// Refresh agent status from active tasks. This avoids a stale unconditional
 	// working write racing after a just-cancelled claim.
-	t0 = time.Now()
+	t0 := time.Now()
 	s.ReconcileAgentStatus(ctx, agentID)
 	updateStatusMs = time.Since(t0).Milliseconds()
 
@@ -980,11 +1044,11 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	// re-query issue/chat_session/autopilot_run, so it can also be a real
 	// contributor to claim latency.
 	t0 = time.Now()
-	s.broadcastTaskDispatch(ctx, task)
+	s.broadcastTaskDispatch(ctx, *claimed)
 	dispatchMs = time.Since(t0).Milliseconds()
 
 	outcome = "claimed"
-	return &task, nil
+	return claimed, nil
 }
 
 // ClaimTaskForRuntime claims the next runnable task for a runtime while
@@ -1026,6 +1090,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
 		RuntimeID:         runtimeID,
 		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
+		PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
 	})
 	if err == nil {
 		outcome = "reclaimed_dispatched"
@@ -1143,6 +1208,20 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	return &task, nil
 }
 
+// ExtendTaskPrepareLease keeps a claimed-but-not-started task protected while
+// the daemon resolves cached inputs and prepares the execution environment.
+func (s *TaskService) ExtendTaskPrepareLease(ctx context.Context, taskID, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	task, err := s.Queries.ExtendAgentTaskPrepareLease(ctx, db.ExtendAgentTaskPrepareLeaseParams{
+		ID:        taskID,
+		RuntimeID: runtimeID,
+		LeaseSecs: prepareLeaseDuration.Seconds(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("extend task prepare lease: %w", err)
+	}
+	return &task, nil
+}
+
 // MarkTaskWaitingLocalDirectory parks a dispatched task in the
 // waiting_local_directory state while the daemon waits for another in-flight
 // task to release the project_resource path lock. reason carries a short
@@ -1152,8 +1231,9 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID pgtype.UUID, reason string) (*db.AgentTaskQueue, error) {
 	reason = strings.TrimSpace(reason)
 	task, err := s.Queries.MarkAgentTaskWaitingLocalDirectory(ctx, db.MarkAgentTaskWaitingLocalDirectoryParams{
-		ID:         taskID,
-		WaitReason: pgtype.Text{String: reason, Valid: reason != ""},
+		ID:               taskID,
+		WaitReason:       pgtype.Text{String: reason, Valid: reason != ""},
+		PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("mark task waiting_local_directory: %w", err)
@@ -1284,7 +1364,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 							"agent_id", util.UUIDToString(task.AgentID),
 						)
 					} else {
-						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID)
+						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID, pgtype.UUID{})
 					}
 				}
 			}
@@ -1445,7 +1525,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
 	}
 
 	// Mirror the issue fallback for chat tasks: write an assistant
@@ -1613,6 +1693,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	var (
 		agentID  pgtype.UUID
 		isLeader bool
+		squadID  pgtype.UUID
 	)
 	if sourceTaskID.Valid {
 		sourceTask, err := s.Queries.GetAgentTask(ctx, sourceTaskID)
@@ -1624,6 +1705,10 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		}
 		agentID = sourceTask.AgentID
 		isLeader = sourceTask.IsLeaderTask
+		// Carry the source task's squad provenance so a rerun of a leader
+		// task still injects the squad briefing at claim time (see migration
+		// 127 / daemon claim handler).
+		squadID = sourceTask.SquadID
 		// Inherit trigger provenance so a per-row rerun of a comment- or
 		// mention-triggered task stays a comment-triggered task. Without
 		// this the daemon's buildCommentPrompt path is skipped (it keys on
@@ -1644,6 +1729,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 			}
 			agentID = squad.LeaderID
 			isLeader = true
+			squadID = issue.AssigneeID
 		default:
 			return nil, fmt.Errorf("issue is not assigned to an agent or squad")
 		}
@@ -1667,7 +1753,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader)
+	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID)
 	if err != nil {
 		return nil, err
 	}
@@ -1688,12 +1774,12 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 // stays in sync; otherwise (squad member, prior assignee that has since been
 // reassigned, mention agent) we use the mention path with the same
 // force_fresh_session=true contract.
-func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true)
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, "")
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, true)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID, true, "")
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of
@@ -1879,19 +1965,116 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 	return result
 }
 
+// LoadAgentSkillBundles returns every skill visible to an agent, including
+// built-ins, with stable bundle hashes and lightweight refs for slim claims.
+func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData) {
+	skills := s.LoadAgentSkills(ctx, agentID)
+	skills = append(skills, s.BuiltinSkills()...)
+	return BuildAgentSkillBundles(skills)
+}
+
+func BuildAgentSkillBundles(skills []AgentSkillData) ([]AgentSkillData, []AgentSkillRefData) {
+	bundles := make([]AgentSkillData, 0, len(skills))
+	refs := make([]AgentSkillRefData, 0, len(skills))
+	for _, skill := range skills {
+		source := skill.Source
+		id := skill.ID
+		if source == "" {
+			if id == "" {
+				source = skillbundle.SourceBuiltin
+			} else {
+				source = skillbundle.SourceWorkspace
+			}
+		}
+		if id == "" && source == skillbundle.SourceBuiltin {
+			id = "builtin:" + skill.Name
+		}
+		skill.Source = source
+		skill.ID = id
+
+		files := make([]skillbundle.File, 0, len(skill.Files))
+		for _, file := range skill.Files {
+			files = append(files, skillbundle.File{Path: file.Path, Content: file.Content})
+		}
+		manifest := skillbundle.BuildManifest(skillbundle.Skill{
+			ID:          skill.ID,
+			Source:      skill.Source,
+			Name:        skill.Name,
+			Description: skill.Description,
+			Content:     skill.Content,
+			Files:       files,
+		})
+		skill.Hash = manifest.Hash
+		skill.SizeBytes = manifest.SizeBytes
+		fileRefsByPath := make(map[string]skillbundle.FileRef, len(manifest.Files))
+		for _, file := range manifest.Files {
+			fileRefsByPath[file.Path] = file
+		}
+		for i := range skill.Files {
+			if ref, ok := fileRefsByPath[skill.Files[i].Path]; ok {
+				skill.Files[i].SHA256 = ref.SHA256
+				skill.Files[i].SizeBytes = ref.SizeBytes
+			}
+		}
+		bundles = append(bundles, skill)
+
+		refFiles := make([]AgentSkillFileRefData, 0, len(manifest.Files))
+		for _, file := range manifest.Files {
+			refFiles = append(refFiles, AgentSkillFileRefData{
+				Path:      file.Path,
+				SHA256:    file.SHA256,
+				SizeBytes: file.SizeBytes,
+			})
+		}
+		refs = append(refs, AgentSkillRefData{
+			ID:          skill.ID,
+			Source:      skill.Source,
+			Name:        skill.Name,
+			Description: skill.Description,
+			Hash:        manifest.Hash,
+			SizeBytes:   manifest.SizeBytes,
+			FileCount:   manifest.FileCount,
+			Files:       refFiles,
+		})
+	}
+	return bundles, refs
+}
+
 // AgentSkillData represents a skill for task execution responses.
 type AgentSkillData struct {
 	ID          string               `json:"id"`
+	Source      string               `json:"source,omitempty"`
 	Name        string               `json:"name"`
 	Description string               `json:"description,omitempty"`
+	Hash        string               `json:"hash,omitempty"`
+	SizeBytes   int64                `json:"size_bytes,omitempty"`
 	Content     string               `json:"content"`
 	Files       []AgentSkillFileData `json:"files,omitempty"`
 }
 
 // AgentSkillFileData represents a supporting file within a skill.
 type AgentSkillFileData struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+	SHA256    string `json:"sha256,omitempty"`
+	SizeBytes int64  `json:"size_bytes,omitempty"`
+}
+
+type AgentSkillRefData struct {
+	ID          string                  `json:"id"`
+	Source      string                  `json:"source"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description,omitempty"`
+	Hash        string                  `json:"hash"`
+	SizeBytes   int64                   `json:"size_bytes"`
+	FileCount   int                     `json:"file_count"`
+	Files       []AgentSkillFileRefData `json:"files,omitempty"`
+}
+
+type AgentSkillFileRefData struct {
+	Path      string `json:"path"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"size_bytes"`
 }
 
 // computeChatElapsedMs returns the wall-clock duration from task creation
@@ -2097,7 +2280,7 @@ func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
 	return ws.IssuePrefix
 }
 
-func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID pgtype.UUID) {
+func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) {
 	if content == "" {
 		return
 	}
@@ -2118,16 +2301,15 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			rootComment = &root
 		}
 	}
-	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
-	content = mention.ExpandIssueIdentifiers(ctx, s.Queries, issue.WorkspaceID, content)
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:     issueID,
-		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  "agent",
-		AuthorID:    agentID,
-		Content:     content,
-		Type:        commentType,
-		ParentID:    parentID,
+		IssueID:      issueID,
+		WorkspaceID:  issue.WorkspaceID,
+		AuthorType:   "agent",
+		AuthorID:     agentID,
+		Content:      content,
+		Type:         commentType,
+		ParentID:     parentID,
+		SourceTaskID: sourceTaskID,
 	})
 	if err != nil {
 		return
@@ -2139,14 +2321,15 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		ActorID:     util.UUIDToString(agentID),
 		Payload: map[string]any{
 			"comment": map[string]any{
-				"id":          util.UUIDToString(comment.ID),
-				"issue_id":    util.UUIDToString(comment.IssueID),
-				"author_type": comment.AuthorType,
-				"author_id":   util.UUIDToString(comment.AuthorID),
-				"content":     comment.Content,
-				"type":        comment.Type,
-				"parent_id":   util.UUIDToPtr(comment.ParentID),
-				"created_at":  comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+				"id":             util.UUIDToString(comment.ID),
+				"issue_id":       util.UUIDToString(comment.IssueID),
+				"author_type":    comment.AuthorType,
+				"author_id":      util.UUIDToString(comment.AuthorID),
+				"content":        comment.Content,
+				"type":           comment.Type,
+				"parent_id":      util.UUIDToPtr(comment.ParentID),
+				"source_task_id": util.UUIDToPtr(comment.SourceTaskID),
+				"created_at":     comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
 			},
 			"issue_title":  issue.Title,
 			"issue_status": issue.Status,

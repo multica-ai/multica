@@ -2,13 +2,19 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
-import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus, useResolveComment } from "./mutations";
+import {
+  useBatchUpdateIssues,
+  useLoadMoreByAssigneeGroup,
+  useLoadMoreByStatus,
+  useResolveComment,
+  useUpdateIssue,
+} from "./mutations";
 import {
   issueKeys,
   type IssueSortParam,
@@ -46,6 +52,7 @@ function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
     parent_issue_id: null,
     project_id: null,
     position: idx,
+    stage: null,
     start_date: null,
     due_date: null,
     labels: [],
@@ -311,6 +318,361 @@ describe("useLoadMoreByAssigneeGroup", () => {
       "issue-1",
       "issue-2",
     ]);
+  });
+});
+
+describe("useUpdateIssue — optimistic move keeps every bucketed board in sync", () => {
+  const sort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
+  const myScope = "assigned";
+  const myFilter = { assignee_id: "user-1" };
+  const wsKey = issueKeys.listSorted(WS_ID, sort);
+  // My-Issues AND the Project board both ride this myList cache; a move that
+  // only patched the workspace cache snaps back on those boards.
+  const myKey = issueKeys.myListSorted(WS_ID, myScope, myFilter, sort);
+
+  let qc: QueryClient;
+  let updateIssue: ReturnType<typeof vi.fn<(id: string, data: unknown) => Promise<Issue>>>;
+
+  function makeBucketed(): ListIssuesCache {
+    return {
+      byStatus: {
+        todo: { issues: [makeIssue(1)], total: 1 },
+        in_progress: { issues: [], total: 0 },
+      },
+    };
+  }
+
+  function bucketIds(
+    key: readonly unknown[],
+    status: "todo" | "in_progress",
+  ): string[] {
+    const c = qc.getQueryData<ListIssuesCache>(key);
+    return (c?.byStatus[status]?.issues ?? []).map((i) => i.id);
+  }
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    updateIssue = vi.fn();
+    setApiInstance({ updateIssue } as unknown as ApiClient);
+    qc.setQueryData<ListIssuesCache>(wsKey, makeBucketed());
+    qc.setQueryData<ListIssuesCache>(myKey, makeBucketed());
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("optimistically moves the card in both the workspace and myList caches", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((r) => {
+        resolve = r;
+      }),
+    );
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", status: "in_progress", position: 5 });
+    });
+
+    // Optimistic state — the regression: myList must move too, not just ws.
+    for (const key of [wsKey, myKey]) {
+      expect(bucketIds(key, "todo")).toEqual([]);
+      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+    }
+
+    await act(async () => {
+      resolve(makeIssue(1, { status: "in_progress", position: 5 }));
+    });
+
+    // Authoritative settle keeps the card in place in both caches.
+    for (const key of [wsKey, myKey]) {
+      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+    }
+  });
+
+  it("rolls both caches back when the request fails", async () => {
+    updateIssue.mockRejectedValue(new Error("boom"));
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current
+        .mutateAsync({ id: "issue-1", status: "in_progress", position: 5 })
+        .catch(() => {});
+    });
+
+    for (const key of [wsKey, myKey]) {
+      expect(bucketIds(key, "todo")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "in_progress")).toEqual([]);
+    }
+  });
+
+  it("does not invalidate the board list on settle (no refetch flicker)", async () => {
+    updateIssue.mockResolvedValue(makeIssue(1, { status: "in_progress", position: 5 }));
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: "issue-1", status: "in_progress", position: 5 });
+    });
+
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    // The board list + myList are reconciled surgically, never refetched.
+    expect(invalidatedKeys).not.toContainEqual(issueKeys.list(WS_ID));
+    expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
+  });
+
+  it("invalidates myAll on settle when project_id changes (drops the issue from the old project's list)", async () => {
+    // A project move makes the issue leave the old project's filtered list. The
+    // surgical patch is filter-blind (it never removes a card that no longer
+    // matches the list filter), so onSettled must refetch myAll to drop it —
+    // unlike a status-only move, which deliberately does not (MUL-3669 / #4548).
+    updateIssue.mockResolvedValue(makeIssue(1, { project_id: "project-9" }));
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: "issue-1", project_id: "project-9" });
+    });
+
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
+  });
+});
+
+describe("useUpdateIssue — detaching a sub-issue prunes the old parent's children cache", () => {
+  const PARENT_ID = "parent-1";
+  const childKey = issueKeys.children(WS_ID, PARENT_ID);
+
+  let qc: QueryClient;
+  let updateIssue: ReturnType<typeof vi.fn<(id: string, data: unknown) => Promise<Issue>>>;
+
+  function childIds(): string[] {
+    return (qc.getQueryData<Issue[]>(childKey) ?? []).map((c) => c.id);
+  }
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    updateIssue = vi.fn();
+    setApiInstance({ updateIssue } as unknown as ApiClient);
+    // Seed the detail cache so onMutate resolves the old parent from the
+    // freshest source, plus the parent's children list rendered by the
+    // sub-issues section.
+    const child = makeIssue(1, { parent_issue_id: PARENT_ID, stage: 2 });
+    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, child.id), child);
+    qc.setQueryData<Issue[]>(childKey, [
+      child,
+      makeIssue(2, { parent_issue_id: PARENT_ID }),
+    ]);
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("optimistically removes the issue from the old parent's children array", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((r) => {
+        resolve = r;
+      }),
+    );
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", parent_issue_id: null, stage: null });
+    });
+
+    // Pruned immediately so the parent's sub-issues list drops it now, not
+    // after the settle refetch; the sibling is untouched.
+    expect(childIds()).toEqual(["issue-2"]);
+
+    await act(async () => {
+      resolve(makeIssue(1, { parent_issue_id: null, stage: null }));
+    });
+    expect(childIds()).not.toContain("issue-1");
+  });
+
+  it("restores the old parent's children when the request fails", async () => {
+    updateIssue.mockRejectedValue(new Error("boom"));
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current
+        .mutateAsync({ id: "issue-1", parent_issue_id: null, stage: null })
+        .catch(() => {});
+    });
+
+    expect(childIds()).toEqual(["issue-1", "issue-2"]);
+  });
+
+  it("keeps the issue under its parent for a non-reparenting update", async () => {
+    updateIssue.mockResolvedValue(
+      makeIssue(1, { parent_issue_id: PARENT_ID, status: "done" }),
+    );
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", status: "done" });
+    });
+
+    // A status-only change patches in place — never prunes the relationship.
+    expect(childIds()).toEqual(["issue-1", "issue-2"]);
+  });
+});
+
+describe("useBatchUpdateIssues — optimistic patch covers filtered boards too", () => {
+  const sort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
+  const myScope = "assigned";
+  const myFilter = { assignee_id: "user-1" };
+  const wsKey = issueKeys.listSorted(WS_ID, sort);
+  const myKey = issueKeys.myListSorted(WS_ID, myScope, myFilter, sort);
+
+  let qc: QueryClient;
+  let batchUpdateIssues: ReturnType<
+    typeof vi.fn<(ids: string[], updates: unknown) => Promise<{ updated: number }>>
+  >;
+
+  function makeBucketed(): ListIssuesCache {
+    return {
+      byStatus: {
+        todo: { issues: [makeIssue(1)], total: 1 },
+        in_progress: { issues: [], total: 0 },
+      },
+    };
+  }
+
+  function bucketIds(key: readonly unknown[], status: "todo" | "in_progress"): string[] {
+    const c = qc.getQueryData<ListIssuesCache>(key);
+    return (c?.byStatus[status]?.issues ?? []).map((i) => i.id);
+  }
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    batchUpdateIssues = vi.fn();
+    setApiInstance({ batchUpdateIssues } as unknown as ApiClient);
+    qc.setQueryData<ListIssuesCache>(wsKey, makeBucketed());
+    qc.setQueryData<ListIssuesCache>(myKey, makeBucketed());
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("optimistically patches BOTH the workspace and myList caches (not just ws)", async () => {
+    let resolve!: (r: { updated: number }) => void;
+    batchUpdateIssues.mockReturnValue(
+      new Promise<{ updated: number }>((r) => {
+        resolve = r;
+      }),
+    );
+
+    const { result } = renderHook(() => useBatchUpdateIssues(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ ids: ["issue-1"], updates: { status: "in_progress" } });
+    });
+
+    // The regression Howard flagged: batch must move the card on the myList
+    // board too, not only the workspace board. onMutate awaits cancelQueries,
+    // so the optimistic patch lands a microtask later — wait for it.
+    await waitFor(() => {
+      for (const key of [wsKey, myKey]) {
+        expect(bucketIds(key, "todo")).toEqual([]);
+        expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+      }
+    });
+
+    await act(async () => {
+      resolve({ updated: 1 });
+    });
+
+    for (const key of [wsKey, myKey]) {
+      expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
+    }
+  });
+
+  it("rolls both caches back when the request fails", async () => {
+    batchUpdateIssues.mockRejectedValue(new Error("boom"));
+
+    const { result } = renderHook(() => useBatchUpdateIssues(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current
+        .mutateAsync({ ids: ["issue-1"], updates: { status: "in_progress" } })
+        .catch(() => {});
+    });
+
+    for (const key of [wsKey, myKey]) {
+      expect(bucketIds(key, "todo")).toEqual(["issue-1"]);
+      expect(bucketIds(key, "in_progress")).toEqual([]);
+    }
+  });
+
+  it("does not invalidate the board list on settle (no refetch flicker)", async () => {
+    batchUpdateIssues.mockResolvedValue({ updated: 1 });
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+
+    const { result } = renderHook(() => useBatchUpdateIssues(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ ids: ["issue-1"], updates: { status: "in_progress" } });
+    });
+
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(invalidatedKeys).not.toContainEqual(issueKeys.list(WS_ID));
+  });
+
+  it("invalidates myAll on settle when project_id changes (drops moved issues from the old project's list)", async () => {
+    // Mirrors useUpdateIssue: a batch that moves issues between projects must
+    // refetch myAll so they leave the old project's filtered list, even though a
+    // status-only batch deliberately does not (MUL-3669 / #4548).
+    batchUpdateIssues.mockResolvedValue({ updated: 1 });
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+
+    const { result } = renderHook(() => useBatchUpdateIssues(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        ids: ["issue-1"],
+        updates: { project_id: "project-9" },
+      });
+    });
+
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
   });
 });
 

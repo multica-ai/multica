@@ -5,6 +5,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
 import { HelpLauncher } from "./help-launcher";
+import { JoinDiscordCard } from "./join-discord-card";
 import {
   DndContext,
   PointerSensor,
@@ -69,7 +70,7 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
+import { inboxKeys, deduplicateInboxItems, inboxUnreadSummaryOptions, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
 import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
@@ -100,6 +101,7 @@ const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
+const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>> = [];
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
@@ -286,7 +288,7 @@ function PinRow({
     if (issueQuery.isPending) return <PinSkeleton />;
     if (issueQuery.isError || !issueQuery.data) return null;
     const issue = issueQuery.data;
-    const label = issue.identifier ? `${issue.identifier} ${issue.title}` : issue.title;
+    const label = issue.title;
     const iconNode = (
       /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
       <StatusIcon status={issue.status} className="!size-3.5 shrink-0" />
@@ -363,6 +365,20 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
     [inboxItems],
   );
+  // Cross-workspace unread summary backs the workspace-switcher dot. One
+  // shared cache entry across workspaces; gated on an active workspace since
+  // the endpoint resolves through the workspace-member middleware.
+  const { data: unreadSummary = EMPTY_INBOX_SUMMARY } = useQuery({
+    ...inboxUnreadSummaryOptions(),
+    enabled: !!wsId,
+  });
+  const otherWorkspaceUnread = React.useMemo(
+    () => hasOtherWorkspaceUnread(unreadSummary, wsId),
+    [unreadSummary, wsId],
+  );
+  // Which workspaces have unread, so the switcher dropdown can point at the
+  // specific one(s) rather than just the aggregate avatar dot.
+  const unreadWsIds = React.useMemo(() => unreadWorkspaceIds(unreadSummary), [unreadSummary]);
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
   const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
@@ -373,6 +389,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
+  const getPinHref = useCallback(
+    (pin: PinnedItem) => (pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)),
+    [p],
+  );
 
   // Local presentational copy of pinnedItems for drop-animation stability.
   // Follows TQ at rest; frozen during a drag gesture so a mid-drag cache
@@ -390,6 +410,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     setLocalPinnedWsId(wsId ?? null);
   }, [wsId]);
   const visiblePinned = localPinnedWsId === (wsId ?? null) ? localPinned : EMPTY_PINS;
+  const isActivePinnedRoute = visiblePinned.some((pin) => pathname === getPinHref(pin));
 
   const handleDragStart = useCallback(() => {
     isDraggingRef.current = true;
@@ -480,7 +501,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuButton>
                       <span className="relative">
                         <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="sm" />
-                        {myInvitations.length > 0 && (
+                        {/* Shared brand dot: a pending invitation OR another
+                            workspace with unread inbox items. The active
+                            workspace's own unread stays on the Inbox nav count
+                            (below), so it is deliberately excluded here. */}
+                        {(myInvitations.length > 0 || otherWorkspaceUnread) && (
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
                       </span>
@@ -527,6 +552,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       >
                         <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
                         <span className="flex-1 truncate">{ws.name}</span>
+                        {/* Points at the specific workspace holding unread
+                            inbox items. Sits in the same right-edge slot as the
+                            active-workspace check; the active workspace is
+                            excluded (its unread is the Inbox nav count), so dot
+                            and check never collide on one row. */}
+                        {ws.id !== workspace?.id && unreadWsIds.has(ws.id) && (
+                          <span className="size-2 rounded-full bg-brand" />
+                        )}
                         {ws.id === workspace?.id && (
                           <Check className="h-3.5 w-3.5 text-primary" />
                         )}
@@ -664,7 +697,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <PinRow
                               key={pin.id}
                               pin={pin}
-                              href={pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)}
+                              href={getPinHref(pin)}
                               pathname={pathname}
                               onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                               wsId={wsId ?? ""}
@@ -685,7 +718,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <SidebarMenu className="gap-0.5">
                 {workspaceNav.map((item) => {
                   const href = p[item.key]();
-                  const isActive = isNavActive(pathname, href);
+                  const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
@@ -732,6 +765,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
+          <JoinDiscordCard />
           <div className="flex justify-end">
             <HelpLauncher />
           </div>

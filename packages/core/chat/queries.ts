@@ -1,5 +1,6 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
+import type { TaskMessagePayload } from "../types/events";
 
 // NOTE on workspace scoping:
 // `wsId` is used only as part of queryKey for cache isolation per workspace.
@@ -93,6 +94,29 @@ export function taskMessagesOptions(taskId: string) {
     enabled: isTaskMessageTaskId(taskId),
     staleTime: Infinity,
   });
+}
+
+/**
+ * Merge task-message batches into one seq-ordered, seq-deduplicated list for
+ * the shared `["task-messages", taskId]` cache. Existing entries win on
+ * conflict, and the original array reference is preserved when nothing new
+ * arrives so React Query observers don't re-render on duplicate events.
+ *
+ * Both the realtime `task:message` handler (a single payload) and the
+ * transcript backfill (a full refetch) write this cache. Routing both through
+ * one helper keeps a forced backfill from blind-replacing a seq the WebSocket
+ * already delivered — and keeps a late WS event from being lost to an
+ * in-flight backfill.
+ */
+export function mergeTaskMessagesBySeq(
+  existing: readonly TaskMessagePayload[],
+  incoming: readonly TaskMessagePayload[],
+): TaskMessagePayload[] {
+  if (incoming.length === 0) return existing as TaskMessagePayload[];
+  const knownSeqs = new Set(existing.map((m) => m.seq));
+  const fresh = incoming.filter((m) => !knownSeqs.has(m.seq));
+  if (fresh.length === 0) return existing as TaskMessagePayload[];
+  return [...existing, ...fresh].sort((a, b) => a.seq - b.seq);
 }
 
 /**

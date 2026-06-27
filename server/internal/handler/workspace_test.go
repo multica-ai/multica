@@ -200,6 +200,15 @@ VALUES ($1, $2, 'owner')
 `, wsID, testUserID); err != nil {
 		t.Fatalf("create owner member: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO github_pending_check_suite (
+	workspace_id, installation_id, repo_owner, repo_name, pr_number,
+	suite_id, head_sha, app_id, status, suite_updated_at
+)
+VALUES ($1, 123456789, 'multica-ai', 'multica', 3366, 987654321, 'abc123', 15368, 'completed', now())
+`, wsID); err != nil {
+		t.Fatalf("create pending check suite: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
@@ -216,6 +225,14 @@ VALUES ($1, $2, 'owner')
 	}
 	if exists {
 		t.Fatal("workspace still exists after owner DELETE")
+	}
+
+	var pendingCount int
+	if err := testPool.QueryRow(ctx, `SELECT COUNT(*) FROM github_pending_check_suite WHERE workspace_id = $1`, wsID).Scan(&pendingCount); err != nil {
+		t.Fatalf("verify pending check suites: %v", err)
+	}
+	if pendingCount != 0 {
+		t.Fatalf("pending check suites were not cleaned up for deleted workspace: %d", pendingCount)
 	}
 }
 
@@ -577,6 +594,86 @@ func TestDeleteMember_RevokesTargetRuntimes(t *testing.T) {
 	}
 
 	assertRevoked(t, fx)
+}
+
+// TestDeleteMember_PrunesChannelUserBindings verifies the application-layer
+// replacement for the channel_user_binding member-FK cascade (MUL-3515 §4):
+// removing a member prunes that member's channel bindings, in the same tx as
+// the member-row delete, while leaving a remaining member's binding intact.
+func TestDeleteMember_PrunesChannelUserBindings(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-revoke-binding", "daemon-revoke-binding")
+	ctx := context.Background()
+
+	const appID = "cli_revoke_binding"
+	const removedOpenID = "ou_revoke_binding_removed"
+	const keepOpenID = "ou_revoke_binding_keep"
+
+	// channel_* rows have no FK to workspace (MUL-3515 §4), so the fixture's
+	// workspace-delete cleanup never reaches them; clear by deterministic key
+	// both before (in case a prior run was killed mid-test) and after.
+	cleanChannel := func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM channel_user_binding WHERE channel_user_id = ANY($1)`,
+			[]string{removedOpenID, keepOpenID})
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM channel_installation WHERE channel_type = 'feishu' AND config->>'app_id' = $1`, appID)
+	}
+	cleanChannel()
+	t.Cleanup(cleanChannel)
+
+	var installID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4)
+RETURNING id
+`, fx.WorkspaceID, fx.AgentID, appID, testUserID).Scan(&installID); err != nil {
+		t.Fatalf("insert channel_installation: %v", err)
+	}
+
+	// Binding for the member being removed — must be pruned.
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id, channel_type, channel_user_id)
+VALUES ($1, $2, $3, 'feishu', $4)
+`, fx.WorkspaceID, fx.TargetUserID, installID, removedOpenID); err != nil {
+		t.Fatalf("insert removed-member binding: %v", err)
+	}
+
+	// Binding for the requester (an owner who stays) — must survive, proving
+	// the prune is scoped to the removed user, not the whole workspace.
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id, channel_type, channel_user_id)
+VALUES ($1, $2, $3, 'feishu', $4)
+`, fx.WorkspaceID, testUserID, installID, keepOpenID); err != nil {
+		t.Fatalf("insert remaining-member binding: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
+	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
+	testHandler.DeleteMember(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var removedExists bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM channel_user_binding WHERE channel_user_id = $1)`, removedOpenID).Scan(&removedExists); err != nil {
+		t.Fatalf("query removed-member binding: %v", err)
+	}
+	if removedExists {
+		t.Fatal("removed member's channel_user_binding was not pruned")
+	}
+
+	var keepExists bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM channel_user_binding WHERE channel_user_id = $1)`, keepOpenID).Scan(&keepExists); err != nil {
+		t.Fatalf("query remaining-member binding: %v", err)
+	}
+	if !keepExists {
+		t.Fatal("remaining member's channel_user_binding was wrongly pruned")
+	}
 }
 
 // TestLeaveWorkspace_RevokesOwnRuntimes is the self-removal counterpart: when

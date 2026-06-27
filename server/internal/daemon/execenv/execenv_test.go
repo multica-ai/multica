@@ -149,14 +149,15 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	workspacesRoot := t.TempDir()
 
 	taskCtx := TaskContextForEnv{
-		IssueID:      "11111111-2222-3333-4444-555555555555",
-		ProjectID:    "22222222-3333-4444-5555-666666666666",
-		ProjectTitle: "Agent UX 2026",
+		IssueID:            "11111111-2222-3333-4444-555555555555",
+		ProjectID:          "22222222-3333-4444-5555-666666666666",
+		ProjectTitle:       "Agent UX 2026",
+		ProjectDescription: "Always write copy in British English. Ship behind a feature flag.",
 		ProjectResources: []ProjectResourceForEnv{
 			{
 				ID:           "33333333-4444-5555-6666-777777777777",
 				ResourceType: "github_repo",
-				ResourceRef:  json.RawMessage(`{"url":"https://github.com/multica-ai/multica","default_branch_hint":"main"}`),
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/multica-ai/multica","ref":"release/v2","default_branch_hint":"main"}`),
 			},
 		},
 	}
@@ -180,9 +181,10 @@ func TestPrepareWithProjectResources(t *testing.T) {
 		t.Fatalf("failed to read resources.json: %v", err)
 	}
 	var got struct {
-		ProjectID    string `json:"project_id"`
-		ProjectTitle string `json:"project_title"`
-		Resources    []struct {
+		ProjectID          string `json:"project_id"`
+		ProjectTitle       string `json:"project_title"`
+		ProjectDescription string `json:"project_description"`
+		Resources          []struct {
 			ID           string          `json:"id"`
 			ResourceType string          `json:"resource_type"`
 			ResourceRef  json.RawMessage `json:"resource_ref"`
@@ -196,6 +198,9 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	}
 	if got.ProjectTitle != taskCtx.ProjectTitle {
 		t.Errorf("resources.json project_title = %q, want %q", got.ProjectTitle, taskCtx.ProjectTitle)
+	}
+	if got.ProjectDescription != taskCtx.ProjectDescription {
+		t.Errorf("resources.json project_description = %q, want %q", got.ProjectDescription, taskCtx.ProjectDescription)
 	}
 	if len(got.Resources) != 1 || got.Resources[0].ResourceType != "github_repo" {
 		t.Fatalf("resources.json resources mismatch: %+v", got.Resources)
@@ -213,9 +218,11 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	for _, want := range []string{
 		"## Project Context",
 		"Agent UX 2026",
+		"Always write copy in British English. Ship behind a feature flag.",
 		"GitHub repo",
 		"https://github.com/multica-ai/multica",
-		"default branch: `main`",
+		"checkout ref: `release/v2`",
+		"default branch hint: `main`",
 		".multica/project/resources.json",
 	} {
 		if !strings.Contains(s, want) {
@@ -284,7 +291,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	taskCtx := TaskContextForEnv{
 		IssueID: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
 		Repos: []RepoContextForEnv{
-			{URL: "https://github.com/org/backend"},
+			{URL: "https://github.com/org/backend", Ref: "release/v2"},
 			{URL: "https://github.com/org/frontend"},
 		},
 	}
@@ -327,6 +334,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	for _, want := range []string{
 		"multica repo checkout",
 		"https://github.com/org/backend",
+		"default ref: `release/v2`",
 		"https://github.com/org/frontend",
 	} {
 		if !strings.Contains(s, want) {
@@ -801,6 +809,46 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
+	t.Parallel()
+
+	providers := []struct {
+		name string
+		file string
+	}{
+		{"claude", "CLAUDE.md"},
+		{"codex", "AGENTS.md"},
+		{"opencode", "AGENTS.md"},
+		{"hermes", "AGENTS.md"},
+	}
+
+	for _, tc := range providers {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if _, err := InjectRuntimeConfig(dir, tc.name, TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+				t.Fatalf("InjectRuntimeConfig failed: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, tc.file))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.file, err)
+			}
+			s := string(data)
+			for _, want := range []string{
+				"## Background Task Safety",
+				"Do NOT end your turn while background tasks",
+				"wait for a future notification/reminder",
+				"run the work synchronously instead",
+			} {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s missing background task safety text %q\n---\n%s", tc.file, want, s)
+				}
+			}
+		})
+	}
+}
+
 func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -865,44 +913,6 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		if strings.Contains(s, banned) {
 			t.Errorf("AGENTS.md should not inject non-core command %q\n---\n%s", banned, s)
 		}
-	}
-}
-
-func TestInjectRuntimeConfigGemini(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID:     "test-issue-id",
-		AgentSkills: []SkillContextForEnv{{Name: "Writing", Content: "Write clearly."}},
-	}
-
-	if _, err := InjectRuntimeConfig(dir, "gemini", ctx); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-
-	content, err := os.ReadFile(filepath.Join(dir, "GEMINI.md"))
-	if err != nil {
-		t.Fatalf("failed to read GEMINI.md: %v", err)
-	}
-
-	s := string(content)
-	for _, want := range []string{
-		"Multica Agent Runtime",
-		"multica issue get",
-		"Writing",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("GEMINI.md missing %q", want)
-		}
-	}
-
-	// Should not write CLAUDE.md or AGENTS.md for gemini provider.
-	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
-		t.Error("gemini provider should not create CLAUDE.md")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); !os.IsNotExist(err) {
-		t.Error("gemini provider should not create AGENTS.md")
 	}
 }
 
@@ -1226,6 +1236,33 @@ func TestWriteContextFilesKiroNativeSkills(t *testing.T) {
 	}
 }
 
+func TestWriteContextFilesQoderNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "qoder-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "qoder", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".qoder", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .qoder/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error("expected .agent_context/skills/ to NOT exist for Qoder provider")
+	}
+}
+
 func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -1272,6 +1309,36 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	}
 
 	if _, err := InjectRuntimeConfig(dir, "kiro", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "Coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md missing native skill discovery hint")
+	}
+}
+
+func TestInjectRuntimeConfigQoder(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "qoder", ctx); err != nil {
 		t.Fatalf("InjectRuntimeConfig failed: %v", err)
 	}
 
@@ -1489,7 +1556,7 @@ func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 	t.Cleanup(func() { runtimeGOOS = saved })
 
 	for _, host := range []string{"linux", "darwin", "windows"} {
-		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor", "gemini"} {
+		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor"} {
 			t.Run(provider+"/"+host, func(t *testing.T) {
 				runtimeGOOS = host
 				dir := t.TempDir()
@@ -1500,9 +1567,6 @@ func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 				configFile := "CLAUDE.md"
 				if provider != "claude" {
 					configFile = "AGENTS.md"
-				}
-				if provider == "gemini" {
-					configFile = "GEMINI.md"
 				}
 				data, err := os.ReadFile(filepath.Join(dir, configFile))
 				if err != nil {
@@ -1550,14 +1614,19 @@ func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin pins that the
-// "## Comment Formatting" section emits the quoted-HEREDOC stdin mandate on
-// non-Windows hosts for EVERY provider, not just Codex. Post-MUL-2904 the
-// guardrail is provider-agnostic because the corruption is shell-driven; the
-// quoted delimiter is what blocks backtick / `$()` substitution in the body.
+// TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile pins that the
+// "## Comment Formatting" section emits the file-first mandate on non-Windows
+// hosts for EVERY provider (post-#4182). The previous quoted-HEREDOC
+// `--content-stdin` rule was kept for years to defend against backtick / `$()`
+// substitution in the body (MUL-2904), but the heredoc/flag boundary turned out
+// to be its own structural bug: when a model wrapped extra flags around the
+// heredoc on `multica issue create`, the flags were silently swallowed into
+// stdin (OXY-78, OXY-76). The file path defeats both classes — the body never
+// reaches the shell, and all flags live on one shell-token line — and converges
+// the Linux/macOS template with the long-standing Windows file-only path.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
-func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin(t *testing.T) {
+func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 	saved := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = saved })
 	runtimeGOOS = "linux"
@@ -1583,20 +1652,27 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin(t *testing.T) 
 
 			for _, want := range []string{
 				"## Comment Formatting",
-				"always use `--content-stdin` with a HEREDOC",
-				"even for short single-line replies",
-				"<<'COMMENT'",
+				"always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`",
+				"#4182",
 				"Never use inline `--content` for agent-authored comments",
 				"Keep the same `--parent` value",
+				"rm ./reply.md",
 				"do not rely on `\\n` escapes",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing comment-formatting guidance %q\n---\n%s", fileName, want, s)
 				}
 			}
-			// The heading is no longer Codex-scoped.
-			if strings.Contains(s, "Codex-Specific Comment Formatting") {
-				t.Errorf("%s still carries the old Codex-scoped heading\n---\n%s", fileName, s)
+
+			// The previous mandate (#1795 / #1851 / MUL-2904) must NOT remain.
+			for _, banned := range []string{
+				"always use `--content-stdin` with a HEREDOC, even for short single-line replies",
+				"<<'COMMENT'",
+				"Codex-Specific Comment Formatting",
+			} {
+				if strings.Contains(s, banned) {
+					t.Errorf("%s still carries pre-#4182 stdin mandate %q\n---\n%s", fileName, banned, s)
+				}
 			}
 		})
 	}
@@ -3737,10 +3813,14 @@ func TestInjectRuntimeConfigCommentTriggerColdStartRead(t *testing.T) {
 	for _, want := range []string{
 		"Read the triggering conversation first",
 		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
+		"multica issue comment list " + issueID + " --recent 10 --output json",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("comment-triggered Workflow missing cold-start read %q\n---\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "--recent 20") {
+		t.Errorf("comment-triggered Workflow still uses recent 20\n---\n%s", s)
 	}
 	if strings.Contains(s, "new comment(s) since your last run") {
 		t.Errorf("cold-start workflow must not render the since-delta hint\n---\n%s", s)
@@ -3820,11 +3900,9 @@ func TestInjectRuntimeConfigCommentTriggerResumedNoDeltaRead(t *testing.T) {
 }
 
 // TestInjectRuntimeConfigAssignmentTriggerMentionsRecent pins that the
-// assignment-triggered Workflow keeps full-history reading as the mandatory
-// default (the agent must still ingest earlier comments — that rule was
-// added in MUL-1124) but ALSO points at `--recent N` as the long-issue
-// alternative. Without this, the prompt would still be the only place
-// telling the agent about --recent on busy issues.
+// assignment-triggered Workflow keeps comment catch-up mandatory while bounding
+// the mandatory first read to the recent active-thread window. Older context
+// stays reachable through explicit pagination.
 func TestInjectRuntimeConfigAssignmentTriggerMentionsRecent(t *testing.T) {
 	t.Parallel()
 
@@ -3838,29 +3916,37 @@ func TestInjectRuntimeConfigAssignmentTriggerMentionsRecent(t *testing.T) {
 	}
 	s := string(data)
 
-	// Mandatory full-history rule (MUL-1124) must stay.
+	// Mandatory comment catch-up must stay, but the required first read is
+	// bounded to recent active threads instead of the full flat timeline.
 	for _, want := range []string{
-		"multica issue comment list issue-1 --output json",
+		"multica issue comment list issue-1 --recent 10 --output json",
 		"this is mandatory, not optional",
 		"Skipping this step is the most common cause",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("assignment Workflow regressed mandatory-history rule, missing %q\n---\n%s", want, s)
+			t.Errorf("assignment Workflow regressed mandatory recent-first catch-up, missing %q\n---\n%s", want, s)
 		}
 	}
-	// AND --recent must be offered as the long-issue alternative.
+	// Older context must remain reachable through pagination.
 	for _, want := range []string{
-		"--recent 20 --output json",
 		"Next thread cursor:",
+		"--before",
+		"--before-id",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("assignment Workflow missing --recent guidance %q\n---\n%s", want, s)
+			t.Errorf("assignment Workflow missing older-history pagination guidance %q\n---\n%s", want, s)
 		}
 	}
-	// The previous wording framed `--recent` as a replacement ("you may
-	// switch to ..."), which conflicts with the mandatory full-history
-	// rule. Pin that the replacement semantics never reappears — `--recent`
-	// is a paging strategy, not a shortcut.
+	for _, banned := range []string{
+		"multica issue comment list issue-1 --output json",
+		"read the full comment history",
+		"read the full history page-by-page",
+		"`--recent` is a way to read the full history",
+	} {
+		if strings.Contains(s, banned) {
+			t.Errorf("assignment Workflow still carries full-flat mandatory phrasing %q\n---\n%s", banned, s)
+		}
+	}
 	for _, banned := range []string{
 		"you may switch to",
 		"switch to `--recent",
@@ -4072,17 +4158,16 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 
 // TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged guarantees
 // that the new metadata wiring does not break the codex-specific comment
-// formatting rules (HEREDOC on Linux, --content-file on Windows). The
+// formatting rules (--content-file on every host, post-#4182). The
 // comment-formatting block lives below the metadata write step in the
 // workflow, so any reordering or accidental absorption of the codex
 // section would surface here.
 func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: mutates the package-level runtimeGOOS.
 	oldGOOS := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = oldGOOS })
 
-	t.Run("linux_heredoc", func(t *testing.T) {
+	t.Run("linux_content_file", func(t *testing.T) {
 		runtimeGOOS = "linux"
 		dir := t.TempDir()
 		ctx := TaskContextForEnv{
@@ -4105,9 +4190,9 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		if !strings.Contains(s, "multica issue metadata list issue-md-codex --output json") {
 			t.Fatalf("metadata list step missing\n---\n%s", s)
 		}
-		// ...AND the codex-specific stdin-only rule is still emitted.
-		if !strings.Contains(s, "always use `--content-stdin` with a HEREDOC") {
-			t.Fatalf("codex linux HEREDOC rule missing\n---\n%s", s)
+		// ...AND the post-#4182 file-first rule is still emitted on Linux.
+		if !strings.Contains(s, "always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`") {
+			t.Fatalf("codex linux --content-file rule missing\n---\n%s", s)
 		}
 		// ...AND the per-turn reply instruction still points at this
 		// turn's trigger comment id.
