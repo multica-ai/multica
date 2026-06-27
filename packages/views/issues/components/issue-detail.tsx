@@ -1612,9 +1612,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${pullRequestsOpen ? "rotate-90" : ""}`} />
           </button>
           {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
-          {pullRequestsOpen && <div className="pl-2"><MergeRequestList issueId={id} /></div>}
         </div>
       )}
+      {/* GitLab MRs are shown independently of the GitHub PR sidebar toggle.
+          MergeRequestList returns null when there are no linked MRs, so no
+          extra gate is needed. */}
+      <MergeRequestList issueId={id} />
 
       {/* Details */}
       <div>

@@ -709,12 +709,17 @@ func (h *Handler) GitLabCallback(w http.ResponseWriter, r *http.Request) {
 		"redirect_uri":  {callbackURL},
 	}
 	resp, err := http.PostForm(gitlabBaseURL()+"/oauth/token", params)
-	if err != nil || resp.StatusCode != http.StatusOK {
+	if err != nil {
 		slog.Warn("gitlab: token exchange failed on login callback", "err", err)
 		http.Redirect(w, r, failURL, http.StatusFound)
 		return
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		slog.Warn("gitlab: token exchange non-200 on login callback", "status", resp.StatusCode)
+		http.Redirect(w, r, failURL, http.StatusFound)
+		return
+	}
 	var tok struct {
 		AccessToken string `json:"access_token"`
 	}

@@ -31,7 +31,8 @@ func gitlabAPIURL() string  { return gitlabBaseURL() + "/api/v4" }
 func isGitLabConfigured() bool {
 	return os.Getenv("GITLAB_URL") != "" &&
 		os.Getenv("GITLAB_APP_ID") != "" &&
-		os.Getenv("GITLAB_APP_SECRET") != ""
+		os.Getenv("GITLAB_APP_SECRET") != "" &&
+		os.Getenv("GITLAB_WEBHOOK_SECRET") != ""
 }
 
 func gitlabWebhookSecret() string { return strings.TrimSpace(os.Getenv("GITLAB_WEBHOOK_SECRET")) }
@@ -282,7 +283,9 @@ func (h *Handler) handleGitLabMergeRequestEvent(ctx context.Context, body []byte
 	}
 
 	// Auto-advance issues when MR merges with close intent and no open MRs remain.
-	if state == "merged" {
+	// Gate on action=="merge" to avoid re-running on subsequent update webhooks
+	// for an already-merged MR.
+	if state == "merged" && p.ObjectAttributes.Action == "merge" {
 		h.maybeAdvanceIssuesOnGitLabMerge(ctx, mr, workspaceID)
 	}
 
@@ -307,7 +310,7 @@ func (h *Handler) maybeAdvanceIssuesOnGitLabMerge(ctx context.Context, mr db.Git
 			if err != nil {
 				continue
 			}
-			h.advanceIssueToDone(ctx, issue, workspaceID)
+			h.advanceIssueToDone(ctx, issue, workspaceID, "gitlab_mr_merged")
 		}
 	}
 }
@@ -351,7 +354,7 @@ func (h *Handler) GitLabConnect(w http.ResponseWriter, r *http.Request) {
 		"state":         {state},
 	}
 	oauthURL := gitlabBaseURL() + "/oauth/authorize?" + params.Encode()
-	writeJSON(w, http.StatusOK, map[string]any{"url": oauthURL, "configured": true})
+	http.Redirect(w, r, oauthURL, http.StatusFound)
 }
 
 // GitLabSetupCallback (GET /api/gitlab/setup) handles the OAuth redirect.
@@ -405,6 +408,10 @@ func (h *Handler) GitLabSetupCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Best-effort capture of the connecting user (may be nil if the public
+	// callback was hit without a session — X-User-ID is set by auth middleware
+	// which is not applied to this public route). Either way we save the row
+	// so the workspace owner sees the connection on next reload.
 	connectedBy := pgtype.UUID{}
 	if userID := requestUserID(r); userID != "" {
 		if u, err := parseStrictUUID(userID); err == nil {
@@ -573,4 +580,3 @@ func (h *Handler) ListMergeRequestsForIssue(w http.ResponseWriter, r *http.Reque
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"merge_requests": resp})
 }
-

@@ -195,11 +195,11 @@ type DaemonRegisterRequest struct {
 }
 
 type daemonWorkspaceReposResponse struct {
-	WorkspaceID      string          `json:"workspace_id"`
-	Repos            []RepoData      `json:"repos"`
-	ReposVersion     string          `json:"repos_version"`
-	Settings         json.RawMessage `json:"settings,omitempty"`
-	GitLabAccessToken *string        `json:"gitlab_access_token,omitempty"`
+	WorkspaceID       string          `json:"workspace_id"`
+	Repos             []RepoData      `json:"repos"`
+	ReposVersion      string          `json:"repos_version"`
+	Settings          json.RawMessage `json:"settings,omitempty"`
+	GitLabAccessToken *string         `json:"gitlab_access_token,omitempty"`
 }
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
