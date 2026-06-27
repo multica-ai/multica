@@ -226,7 +226,7 @@ Other locale files (`zh-Hans`, `ja`, `ko`) get English fallback strings for now.
 
 ### Feature gating
 
-GitLab tab and login button render only when the server advertises GitLab is configured. One boolean added to the auth/workspace config response. Avoids showing a connect button that would 404.
+GitLab tab and login button render only when the server advertises GitLab is configured. A `gitlab_enabled: boolean` field is added to the existing server config response (the same endpoint the frontend already fetches for feature flags / auth methods). Avoids showing a connect button that would 404.
 
 ---
 
