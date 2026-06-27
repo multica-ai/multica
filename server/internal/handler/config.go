@@ -24,6 +24,10 @@ type AppConfig struct {
 	// toggle signup or wire Google OAuth.
 	AllowSignup    bool   `json:"allow_signup"`
 	GoogleClientID string `json:"google_client_id,omitempty"`
+	// GitLabEnabled is true when GITLAB_URL + GITLAB_APP_ID + GITLAB_APP_SECRET are set.
+	// Controls whether the frontend shows the "Sign in with GitLab" button and
+	// the GitLab settings tab.
+	GitLabEnabled bool `json:"gitlab_enabled,omitempty"`
 	// WorkspaceCreationDisabled mirrors the server-side
 	// DISABLE_WORKSPACE_CREATION env var so the UI can hide every
 	// "Create workspace" affordance on self-hosted instances. Omitted
@@ -61,6 +65,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
+	config.GitLabEnabled = isGitLabConfigured()
 
 	// Re-read from env on every request so operators can rotate keys via
 	// secret refresh without a server restart.
