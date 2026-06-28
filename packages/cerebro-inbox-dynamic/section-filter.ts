@@ -6,7 +6,7 @@
 // action-based section kinds.
 import { classifyInboxAction, inboxActionOrderIndex } from "@multica/cerebro-inbox";
 import type { InboxActionContext, InboxActionCategory } from "@multica/cerebro-inbox";
-import type { InboxItem, ChatSession, Channel, Project } from "@multica/core/types";
+import type { InboxItem, ChatSession, Channel, Project, IssueStatus } from "@multica/core/types";
 import type {
   InboxSectionConfig,
   FilterCondition,
@@ -92,6 +92,13 @@ export function entryIsRunning(entry: DynInboxEntry, ctx: SectionFilterContext):
   }
   if (entry.kind === "chat") return ctx.action.chatRunStates.has(entry.session.id);
   return false;
+}
+
+// FIR-1917 — the issue_status field on a notif/thread entry. Returns null for
+// chat and channel rows (they carry no issue status).
+export function entryIssueStatus(entry: DynInboxEntry): IssueStatus | null {
+  if (entry.kind === "notif" || entry.kind === "thread") return entry.item.issue_status ?? null;
+  return null;
 }
 
 export function entryProjectId(entry: DynInboxEntry): string | null {
@@ -188,6 +195,8 @@ function matchesFilters(
 function isIncompleteCondition(cond: FilterCondition): boolean {
   if (cond.field === "kind") return !cond.entryKind;
   if (cond.field === "project") return !cond.projectId;
+  // FIR-1917 — a status condition with no values chosen yet is incomplete.
+  if (cond.field === "status") return !cond.statusValues || cond.statusValues.length === 0;
   return false;
 }
 
@@ -240,6 +249,13 @@ function conditionPredicate(
         return ctx.subProjectIds.get(cond.projectId)?.has(pid) ?? false;
       }
       return false;
+    }
+    // FIR-1917 — issue status multi-select. Non-issue rows (chat, channel) have
+    // no status so they never match a status condition.
+    case "status": {
+      if (!cond.statusValues || cond.statusValues.length === 0) return true;
+      const status = entryIssueStatus(entry);
+      return status !== null && cond.statusValues.includes(status);
     }
     default:
       return true;
