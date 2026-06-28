@@ -1791,6 +1791,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// channel (remove own subscription) and delete it for everyone.
 				r.Post("/{id}/leave", channelListenSvc.LeaveChannelHandler)
 				r.Delete("/{id}", channelListenSvc.DeleteChannelHandler)
+				// CEREBRO-PATCH(channel-group-kind): FIR-2159 — convert a group to a named channel.
+				r.Post("/{id}/convert", channelListenSvc.ConvertToChannelHandler)
 			})
 
 			// Workspace-wide agent task snapshot for presence derivation:

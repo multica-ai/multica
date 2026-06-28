@@ -116,6 +116,12 @@ func (h *Handler) ListPins(w http.ResponseWriter, r *http.Request) {
 				continue // Skip orphaned DMs (no peer found — viewer not a participant or peer deleted)
 			}
 			pr.Title = peerName
+		case "group": // CEREBRO-PATCH(channel-group-kind): FIR-2159 — a group pins like a DM; its title is participant-derived client-side.
+			issue, err := h.Queries.GetIssue(r.Context(), p.ItemID)
+			if err != nil || issue.Kind != ChannelKindGroup {
+				continue // Skip deleted or kind-changed items
+			}
+			pr.Title = issue.Title
 		}
 		resp = append(resp, pr)
 	}
@@ -135,10 +141,10 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch req.ItemType {
-	case "issue", "project", "channel", "dm":
+	case "issue", "project", "channel", "dm", "group": // CEREBRO-PATCH(channel-group-kind): FIR-2159
 		// ok
 	default:
-		writeError(w, http.StatusBadRequest, "item_type must be 'issue', 'project', 'channel' or 'dm'")
+		writeError(w, http.StatusBadRequest, "item_type must be 'issue', 'project', 'channel', 'dm' or 'group'")
 		return
 	}
 	if req.ItemID == "" {
@@ -174,8 +180,8 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "project not found")
 			return
 		}
-	case "channel", "dm":
-		// Channels/DMs are issues underneath. Require the requester to be a
+	case "channel", "dm", "group": // CEREBRO-PATCH(channel-group-kind): FIR-2159
+		// Channels/DMs/groups are issues underneath. Require the requester to be a
 		// participant (subscriber) — non-participants must not be able to pin.
 		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 			ID: parseUUID(req.ItemID), WorkspaceID: parseUUID(workspaceID),
@@ -185,7 +191,8 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if (req.ItemType == "channel" && issue.Kind != ChannelKindChannel) ||
-			(req.ItemType == "dm" && issue.Kind != ChannelKindDM) {
+			(req.ItemType == "dm" && issue.Kind != ChannelKindDM) ||
+			(req.ItemType == "group" && issue.Kind != ChannelKindGroup) { // CEREBRO-PATCH(channel-group-kind): FIR-2159
 			writeError(w, http.StatusNotFound, req.ItemType+" not found")
 			return
 		}

@@ -1,4 +1,4 @@
-export type PinnedItemType = "issue" | "project" | "channel" | "dm";
+export type PinnedItemType = "issue" | "project" | "channel" | "dm" | "group"; // CEREBRO-PATCH(channel-group-kind): FIR-2159
 
 /**
  * Pin metadata only. Title / status / identifier / icon are NOT here —

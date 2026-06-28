@@ -1631,7 +1631,11 @@ function matchesView(
       // Chat sessions are 1:1 agent chats — group them with DMs since
       // mentally the user's "DM" view is "every 1:1 thread I have".
       if (entry.kind === "chat") return true;
-      return entry.kind === "channel" && entry.channel.kind === "dm";
+      // CEREBRO-PATCH(channel-group-kind): FIR-2159 — groups sit with DMs, never in channels.
+      return (
+        entry.kind === "channel" &&
+        (entry.channel.kind === "dm" || entry.channel.kind === "group")
+      );
     case "muted":
       // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — only notifs have muted_until.
       // CEREBRO-PATCH(channel-muted-filter): TECH-3352 — snoozed channels too.

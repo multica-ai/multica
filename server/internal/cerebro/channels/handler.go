@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -16,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // AgentListenModeResponse is the row shape returned by the listing endpoint
@@ -432,6 +434,74 @@ func (s *Service) DeleteChannelHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// convertToChannelRequest is the body for POST /api/channels/{id}/convert.
+type convertToChannelRequest struct {
+	Name string `json:"name"`
+}
+
+// ConvertToChannelHandler handles POST /api/channels/{id}/convert. FIR-2159 —
+// the deliberate "Convert to channel" step in the Slack model: it promotes a
+// group (multi-party, participant-named, sitting with DMs) into a named,
+// permanent channel that lives in the channel list. Any member participant may
+// convert. A name is required — naming is the whole point of the conversion.
+func (s *Service) ConvertToChannelHandler(w http.ResponseWriter, r *http.Request) {
+	channelID, ok := s.requireChannelMember(w, r)
+	if !ok {
+		return
+	}
+	userID := r.Header.Get("X-User-ID")
+
+	var req convertToChannelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required to convert a group to a channel")
+		return
+	}
+
+	promoted, err := s.Queries.ConvertGroupToChannel(r.Context(), db.ConvertGroupToChannelParams{
+		ID:    channelID,
+		Title: req.Name,
+	})
+	if err != nil {
+		// ErrNoRows = the issue was not a group (already a channel, or a 1:1 dm).
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusConflict, "only a group can be converted to a channel")
+			return
+		}
+		slog.Error("channel convert failed", "channel_id", util.UUIDToString(channelID), "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to convert group to channel")
+		return
+	}
+
+	// channel:updated tells every connected member-client to refetch the channel
+	// list, so the inbox moves the row from the DM/group section into the channel
+	// list and the detail view re-renders kind-specific (channel) UI.
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventChannelUpdated,
+		WorkspaceID: middleware.WorkspaceIDFromContext(r.Context()),
+		ActorType:   "member",
+		ActorID:     userID,
+		Payload: map[string]any{
+			"channel_id":    util.UUIDToString(promoted.ID),
+			"kind":          promoted.Kind,
+			"title":         promoted.Title,
+			"promoted_from": "group",
+			"promoted_to":   "channel",
+		},
+		AudienceUserIDs: s.memberAudience(r.Context(), channelID),
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"channel_id": util.UUIDToString(promoted.ID),
+		"kind":       promoted.Kind,
+		"title":      promoted.Title,
+	})
+}
+
 func (s *Service) requireChannelMember(w http.ResponseWriter, r *http.Request) (pgtype.UUID, bool) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
@@ -456,7 +526,7 @@ func (s *Service) requireChannelMember(w http.ResponseWriter, r *http.Request) (
 		writeError(w, http.StatusNotFound, "channel not found")
 		return pgtype.UUID{}, false
 	}
-	if issue.Kind != "channel" && issue.Kind != "dm" {
+	if issue.Kind != "channel" && issue.Kind != "dm" && issue.Kind != "group" { // FIR-2159: groups are messaging issues too
 		writeError(w, http.StatusNotFound, "channel not found")
 		return pgtype.UUID{}, false
 	}

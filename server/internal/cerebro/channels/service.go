@@ -37,7 +37,9 @@ const ListenModeMentionOnly = "mention_only"
 // 'mention_only' (TECH-3691 — agents stay quiet in a multi-party channel
 // until explicitly @-mentioned).
 func defaultListenMode(kind string) string {
-	if kind == "channel" {
+	// FIR-2159: a group is multi-party like a channel, so agents stay quiet
+	// until @-mentioned; only a 1:1 dm defaults to answering every message.
+	if kind == "channel" || kind == "group" {
 		return ListenModeMentionOnly
 	}
 	return ListenModeAlways
@@ -123,7 +125,7 @@ func (s *Service) EnqueueChannelListenerTasks(
 	parentComment *db.Comment,
 	authorType, authorID string,
 ) {
-	if issue.Kind != "channel" && issue.Kind != "dm" {
+	if issue.Kind != "channel" && issue.Kind != "dm" && issue.Kind != "group" { // CEREBRO-PATCH(channel-group-kind): FIR-2159
 		return
 	}
 	// Restrict to member-authored comments. Letting agent comments fan out to
@@ -455,7 +457,7 @@ func (s *Service) MaybeUnarchiveForUser(
 	if err != nil {
 		return
 	}
-	if issue.Kind != "channel" && issue.Kind != "dm" {
+	if issue.Kind != "channel" && issue.Kind != "dm" && issue.Kind != "group" { // CEREBRO-PATCH(channel-group-kind): FIR-2159
 		return
 	}
 	_, archived, err := s.GetChannelArchivedAt(ctx, channelID, userID)
@@ -682,7 +684,7 @@ func (s *Service) PromoteDMOnMention(
 		}
 	}
 
-	promoted, err := s.Queries.PromoteDMToChannel(ctx, db.PromoteDMToChannelParams{
+	promoted, err := s.Queries.PromoteDMToGroup(ctx, db.PromoteDMToGroupParams{
 		ID:    issue.ID,
 		Title: titleArg,
 	})
@@ -696,7 +698,7 @@ func (s *Service) PromoteDMOnMention(
 			return
 		}
 		promoted = issue
-		promoted.Kind = "channel"
+		promoted.Kind = "group"
 	}
 
 	// Audience: every member subscriber (now includes any freshly-added
@@ -716,7 +718,8 @@ func (s *Service) PromoteDMOnMention(
 			"channel_id":    util.UUIDToString(promoted.ID),
 			"kind":          promoted.Kind,
 			"title":         promoted.Title,
-			"promoted_from": "dm",
+			"promoted_from": "dm", // FIR-2159: a DM now promotes to a group, not a channel
+			"promoted_to":   "group",
 		},
 		AudienceUserIDs: audience,
 	})

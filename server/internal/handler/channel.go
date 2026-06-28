@@ -29,6 +29,11 @@ const ChannelKindChannel = "channel"
 // ChannelKindDM is a 1:1 direct message between two members.
 const ChannelKindDM = "dm"
 
+// ChannelKindGroup is a multi-party conversation with no fixed name (its title
+// is derived from participants, like a DM) that sits with DMs rather than in
+// the channel list, and can be converted to a channel. CEREBRO-PATCH(channel-group-kind): FIR-2159
+const ChannelKindGroup = "group"
+
 // ChannelMember is one participant in a channel — a workspace member or agent.
 type ChannelMember struct {
 	UserType string `json:"user_type"`
@@ -99,8 +104,8 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Kind != ChannelKindChannel && req.Kind != ChannelKindDM {
-		writeError(w, http.StatusBadRequest, "kind must be 'channel' or 'dm'")
+	if req.Kind != ChannelKindChannel && req.Kind != ChannelKindDM && req.Kind != ChannelKindGroup { // CEREBRO-PATCH(channel-group-kind): FIR-2159
+		writeError(w, http.StatusBadRequest, "kind must be 'channel', 'dm' or 'group'")
 		return
 	}
 
@@ -145,6 +150,11 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusInternalServerError, "failed to look up existing DM")
+			return
+		}
+	} else if req.Kind == ChannelKindGroup { // CEREBRO-PATCH(channel-group-kind): FIR-2159 — group is multi-party, unnamed; its title is participant-derived
+		if len(req.MemberIDs)+len(req.AgentIDs) < 1 {
+			writeError(w, http.StatusBadRequest, "a group requires at least one other participant")
 			return
 		}
 	} else {
@@ -384,7 +394,7 @@ func (h *Handler) GetChannel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
-	if issue.Kind != ChannelKindChannel && issue.Kind != ChannelKindDM {
+	if issue.Kind != ChannelKindChannel && issue.Kind != ChannelKindDM && issue.Kind != ChannelKindGroup { // CEREBRO-PATCH(channel-group-kind): FIR-2159
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
@@ -424,7 +434,7 @@ func (h *Handler) MarkChannelRead(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
-	if issue.Kind != ChannelKindChannel && issue.Kind != ChannelKindDM {
+	if issue.Kind != ChannelKindChannel && issue.Kind != ChannelKindDM && issue.Kind != ChannelKindGroup { // CEREBRO-PATCH(channel-group-kind): FIR-2159
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}

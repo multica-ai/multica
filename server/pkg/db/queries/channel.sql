@@ -12,7 +12,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 FROM issue i
 JOIN issue_subscriber s ON s.issue_id = i.id
 WHERE i.workspace_id = $1
-  AND i.kind IN ('channel', 'dm')
+  AND i.kind IN ('channel', 'dm', 'group') -- CEREBRO-PATCH(channel-group-kind): FIR-2159
   AND s.user_type = 'member'
   AND s.user_id = $2
 ORDER BY i.updated_at DESC;
@@ -91,21 +91,34 @@ WHERE recipient_type = 'member'
   AND (details->>'thread_root_id') IS NULL;
 
 -- CEREBRO-PATCH(sqlc-channel-dm-promote): JEH-1131 — DM auto-promotion
--- on third-party mention. The PromoteDMToChannel and
+-- on third-party mention. The PromoteDMToGroup, ConvertGroupToChannel and
 -- ListChannelParticipantNames queries below are cerebro-only; upstream
 -- never needs to flip kind on an existing channel-table row.
--- name: PromoteDMToChannel :one
--- JEH-1131. Flips a DM-kind issue to channel kind in one statement. The
--- WHERE clause makes it idempotent: a second call (or a call on an issue
--- that was already a channel) returns no row, which the service treats as
--- a no-op. Title is only filled when it's currently empty so a user-renamed
--- channel (shouldn't happen on a DM today, but cheap to defend) is preserved.
+-- name: PromoteDMToGroup :one
+-- FIR-2159. Flips a DM-kind issue to group kind in one statement when a third
+-- party joins. The WHERE clause makes it idempotent: a second call (or a call
+-- on an issue that is no longer a DM) returns no row, which the service treats
+-- as a no-op. Title is only filled when currently empty so a user-set title is
+-- preserved. A group keeps its participant-derived title, exactly like a DM.
 UPDATE issue
-SET kind = 'channel',
+SET kind = 'group',
     title = CASE WHEN title = '' THEN COALESCE(sqlc.narg('title'), '') ELSE title END,
     updated_at = now()
 WHERE id = $1
   AND kind = 'dm'
+RETURNING *;
+
+-- name: ConvertGroupToChannel :one
+-- FIR-2159. The deliberate "Convert to channel" step: flips a group-kind issue
+-- to channel kind and sets the user-chosen name. Idempotent — a second call (or
+-- a call on an issue that is not a group) returns no row. The name is always
+-- written because converting is the moment the conversation earns a fixed name.
+UPDATE issue
+SET kind = 'channel',
+    title = $2,
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'group'
 RETURNING *;
 
 -- CEREBRO-PATCH(fir-125-channel-cli): workspace-level channel/DM listing for analytics
@@ -118,7 +131,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.created_at, i.updated_at, i.number
 FROM issue i
 WHERE i.workspace_id = $1
-  AND i.kind IN ('channel', 'dm')
+  AND i.kind IN ('channel', 'dm', 'group') -- CEREBRO-PATCH(channel-group-kind): FIR-2159
 ORDER BY i.updated_at DESC;
 
 -- name: ListChannelParticipantNames :many

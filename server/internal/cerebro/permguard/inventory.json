@@ -693,6 +693,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/channels/{id}/convert",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/chat/sessions/",
       "gate": "workspace_member"
     },

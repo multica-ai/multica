@@ -211,6 +211,7 @@ function pinHref(p: ReturnType<typeof useWorkspacePaths>, pin: PinnedItem): stri
     case "issue":
     case "channel":
     case "dm":
+    case "group": // CEREBRO-PATCH(channel-group-kind): FIR-2159 — groups route via issueDetail like dm/channel.
       return p.issueDetail(pin.item_id);
   }
 }
@@ -356,7 +357,8 @@ function PinRow({
     if (pin.item_type === "channel") {
       label = `#${issue.title}`;
       iconNode = <Hash className="!size-3.5 shrink-0" />;
-    } else if (pin.item_type === "dm") {
+    } else if (pin.item_type === "dm" || pin.item_type === "group") {
+      // CEREBRO-PATCH(channel-group-kind): FIR-2159 — groups render like DMs (avatar, no #).
       label = issue.title;
       iconNode = (
         <ActorAvatar name={issue.title} initials={(issue.title || "?").charAt(0).toUpperCase()} size={14} />

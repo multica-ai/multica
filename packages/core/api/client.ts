@@ -275,6 +275,11 @@ const AdminChannelMessageSearchResponseSchema = z.object({ messages: z.array(z.o
 export type AdminChannelMessageSearchResponse = z.infer<typeof AdminChannelMessageSearchResponseSchema>;
 const EMPTY_ADMIN_CHANNEL_MESSAGE_SEARCH: AdminChannelMessageSearchResponse = { messages: [], total: 0 };
 
+// CEREBRO-PATCH(channel-group-kind): FIR-2159 — group→channel convert response schema + fallback.
+const ConvertGroupToChannelResponseSchema = z.object({ channel_id: z.string(), kind: z.string().default("channel"), title: z.string().default("") }).loose();
+export type ConvertGroupToChannelResponse = z.infer<typeof ConvertGroupToChannelResponseSchema>;
+const EMPTY_CONVERT_GROUP_TO_CHANNEL: ConvertGroupToChannelResponse = { channel_id: "", kind: "channel", title: "" };
+
 // CEREBRO-PATCH(note-search-client): FIR-2022 — notes/documents search (title + body + comments) response schema + type.
 const NoteSearchResponseSchema = z.object({ results: z.array(z.object({ id: z.string(), workspace_id: z.string().default(""), kind: z.string().default(""), title: z.string().default(""), folder_id: z.string().nullable().optional(), issue_id: z.string().nullable().optional(), project_id: z.string().nullable().optional(), owner_id: z.string().nullable().optional(), visibility: z.string().nullable().optional(), updated_at: z.string().default(""), match_source: z.string().default(""), snippet: z.string().default(""), matched_comment_snippet: z.string().nullable().optional() }).loose()).default([]), total: z.number().default(0) }).loose();
 export type NoteSearchResponse = z.infer<typeof NoteSearchResponseSchema>;
@@ -2669,6 +2674,18 @@ export class ApiClient {
     return this.fetch("/api/channels", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  // CEREBRO-PATCH(channel-group-kind): FIR-2159 — convert a group (no fixed name)
+  // into a named channel. Server publishes channel:updated on success.
+  async convertGroupToChannel(channelId: string, name: string): Promise<ConvertGroupToChannelResponse> {
+    const raw = await this.fetch<unknown>(`/api/channels/${channelId}/convert`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    return parseWithFallback(raw, ConvertGroupToChannelResponseSchema, EMPTY_CONVERT_GROUP_TO_CHANNEL, {
+      endpoint: "POST /api/channels/:id/convert",
     });
   }
 

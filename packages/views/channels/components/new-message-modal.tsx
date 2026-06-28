@@ -213,20 +213,24 @@ export function NewMessageModal({
 
   const derivedName = selected.map((s) => s.name).join(", ");
   const effectiveName = nameOverride ?? derivedName;
-  const canSubmitGroup =
-    !submitting && selected.length > 0 && effectiveName.trim().length > 0;
+  // CEREBRO-PATCH(channel-group-kind): FIR-2159 — multi-select with no typed
+  // name creates a `group` (no fixed name, sits with DMs); typing a name still
+  // creates a named `channel`. The derived participant string is only a UI hint.
+  const hasTypedName = !!nameOverride?.trim();
+  const canSubmitGroup = !submitting && selected.length > 0;
 
   const handleCreateGroup = async () => {
     if (!canSubmitGroup) return;
     setSubmitting(true);
     try {
+      // CEREBRO-PATCH(channel-group-kind): FIR-2159 — no typed name → group.
       const channel = await createChannel.mutateAsync({
-        kind: "channel",
-        name: effectiveName.trim(),
+        kind: hasTypedName ? "channel" : "group",
+        name: hasTypedName ? effectiveName.trim() : "",
         member_ids: selected.filter((s) => s.type === "member").map((s) => s.id),
         agent_ids: selected.filter((s) => s.type === "agent").map((s) => s.id),
         // CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — persist creator-chosen settings.
-        ...(permissionsEnabled
+        ...(permissionsEnabled && hasTypedName
           ? {
               rename_policy: renameAdminsOnly ? "admins" : "everyone",
               add_members_policy: manageAdminsOnly ? "admins" : "everyone",
@@ -440,7 +444,10 @@ export function NewMessageModal({
                 {submitting
                   ? "Creating…"
                   : selected.length > 0
-                    ? `Create channel (${selected.length})`
+                    ? // CEREBRO-PATCH(channel-group-kind): FIR-2159 — label reflects group vs named channel.
+                      hasTypedName
+                      ? `Create channel (${selected.length})`
+                      : `Create group (${selected.length})`
                     : "Pick people to add"}
               </Button>
             </div>

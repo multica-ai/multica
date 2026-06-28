@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useToggleChannelParticipant } from "@multica/core/channels";
+import { useToggleChannelParticipant, useConvertGroupToChannel } from "@multica/core/channels"; // CEREBRO-PATCH(channel-group-kind): FIR-2159
 import type { Channel, ChannelMember } from "@multica/core/types";
 import {
   Sheet,
@@ -18,6 +18,7 @@ import {
   SheetDescription,
 } from "@multica/ui/components/ui/sheet";
 import { Input } from "@multica/ui/components/ui/input";
+import { Button } from "@multica/ui/components/ui/button"; // CEREBRO-PATCH(channel-group-kind): FIR-2159
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,11 +55,35 @@ export function ParticipantsPanel({
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
   const isDm = channel.kind === "dm";
+  // CEREBRO-PATCH(channel-group-kind): FIR-2159 — groups have no fixed name; the
+  // user can promote one to a named channel from here.
+  const isGroup = channel.kind === "group";
 
   const toggle = useToggleChannelParticipant();
+  const convertGroup = useConvertGroupToChannel(); // CEREBRO-PATCH(channel-group-kind): FIR-2159
 
   const [filter, setFilter] = useState("");
   const [pendingRemove, setPendingRemove] = useState<ChannelMember | null>(null);
+  const [convertName, setConvertName] = useState(""); // CEREBRO-PATCH(channel-group-kind): FIR-2159
+
+  // CEREBRO-PATCH(channel-group-kind): FIR-2159 — promote this group to a named channel.
+  const handleConvert = () => {
+    const name = convertName.trim();
+    if (!name) return;
+    convertGroup.mutate(
+      { channelId: channel.id, name },
+      {
+        onSuccess: () => {
+          setConvertName("");
+          onOpenChange(false);
+        },
+        onError: (err) =>
+          toast.error(
+            err instanceof Error ? err.message : "Failed to convert to channel",
+          ),
+      },
+    );
+  };
 
   const isParticipant = (type: ChannelMember["user_type"], id: string) =>
     channel.participants.some((p) => p.user_type === type && p.user_id === id);
@@ -225,6 +250,39 @@ export function ParticipantsPanel({
                     ))}
                   </PickerSection>
                 )}
+              </section>
+            )}
+
+            {/* CEREBRO-PATCH(channel-group-kind): FIR-2159 — promote a group to a
+                named channel. On success the server's channel:updated event
+                refreshes the list. */}
+            {isGroup && (
+              <section className="border-t px-4 py-3">
+                <h3 className="pb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Convert to channel
+                </h3>
+                <p className="pb-2 text-xs text-muted-foreground">
+                  Give this group a permanent name to turn it into a channel.
+                </p>
+                <Input
+                  placeholder="Channel name…"
+                  value={convertName}
+                  onChange={(e) => setConvertName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleConvert();
+                    }
+                  }}
+                />
+                <Button
+                  size="sm"
+                  className="mt-2 w-full"
+                  disabled={!convertName.trim() || convertGroup.isPending}
+                  onClick={handleConvert}
+                >
+                  Convert to channel
+                </Button>
               </section>
             )}
           </div>

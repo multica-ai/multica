@@ -15,7 +15,7 @@ export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent" | "squad";
 
-export type IssueKind = "issue" | "channel" | "dm";
+export type IssueKind = "issue" | "channel" | "dm" | "group"; // CEREBRO-PATCH(channel-group-kind): FIR-2159
 
 export interface IssueReaction {
   id: string;

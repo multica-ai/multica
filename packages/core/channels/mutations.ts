@@ -302,3 +302,19 @@ export function useCreateChannel() {
     },
   });
 }
+
+// CEREBRO-PATCH(channel-group-kind): FIR-2159 — convert a group to a named
+// channel. The server publishes channel:updated, but invalidate the list on
+// settle so the row moves from DMs to Channels immediately.
+export function useConvertGroupToChannel() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ channelId, name }: { channelId: string; name: string }) =>
+      api.convertGroupToChannel(channelId, name),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
+    },
+  });
+}

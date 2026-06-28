@@ -75,6 +75,10 @@ export function ChannelSettingsSheet({
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
   const isChannel = channel.kind === "channel";
+  // CEREBRO-PATCH(channel-group-kind): FIR-2159 — groups are multi-party, so
+  // they get Leave/Delete affordances too; channel-only things (rename, name
+  // display) stay on the strict `isChannel` check.
+  const isChannelOrGroup = channel.kind === "channel" || channel.kind === "group";
   const permissionsEnabled = useFeatureFlag("cerebro_channel_permissions");
   // CEREBRO-PATCH(channel-leave-delete-actions): TECH-3758 — Leave/Delete
   // actions + confirm gate for the destructive "delete for everyone" action.
@@ -184,8 +188,9 @@ export function ChannelSettingsSheet({
               </Button>
               {/* TECH-3758 — leave removes the caller from the channel (gone
                   from the chat roster), distinct from inbox archive. Channels
-                  only: a DM has no "leave". */}
-              {isChannel && (
+                  and groups only: a DM has no "leave". */}
+              {/* CEREBRO-PATCH(channel-group-kind): FIR-2159 — groups allow Leave. */}
+              {isChannelOrGroup && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -201,7 +206,8 @@ export function ChannelSettingsSheet({
               )}
               {/* TECH-3758 — delete removes the channel for everyone; offered
                   only to the creator / workspace admins & owners. */}
-              {isChannel && canManage && (
+              {/* CEREBRO-PATCH(channel-group-kind): FIR-2159 — groups allow Delete. */}
+              {isChannelOrGroup && canManage && (
                 <Button
                   variant="outline"
                   size="sm"

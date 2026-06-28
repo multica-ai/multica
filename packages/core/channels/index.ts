@@ -10,6 +10,7 @@ export {
 } from "./queries";
 export {
   useCreateChannel,
+  useConvertGroupToChannel, // CEREBRO-PATCH(channel-group-kind): FIR-2159
   useMarkChannelRead,
   useUpdateChannel,
   useToggleChannelParticipant,

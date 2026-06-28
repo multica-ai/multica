@@ -180,7 +180,7 @@ func (h *Handler) MarkThreadRead(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
-	if issue.Kind != ChannelKindChannel && issue.Kind != ChannelKindDM {
+	if issue.Kind != ChannelKindChannel && issue.Kind != ChannelKindDM && issue.Kind != ChannelKindGroup { // FIR-2159: groups are messaging issues
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}

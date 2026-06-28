@@ -43,7 +43,9 @@ export function buildChannelThreadEntries(
       time: inboxItemSortTime(representative),
       item: representative,
       channelId: representative.issue_id,
-      channelKind: channel.kind === "dm" ? "dm" : "channel",
+      // FIR-2159 — preserve group as its own kind so it routes with DMs.
+      channelKind:
+        channel.kind === "dm" ? "dm" : channel.kind === "group" ? "group" : "channel",
       threadRootId: rootId,
     });
   }

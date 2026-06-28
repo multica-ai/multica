@@ -11,6 +11,61 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const convertGroupToChannel = `-- name: ConvertGroupToChannel :one
+UPDATE issue
+SET kind = 'channel',
+    title = $2,
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'group'
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, start_date, metadata, stage, is_private, classification
+`
+
+type ConvertGroupToChannelParams struct {
+	ID    pgtype.UUID `json:"id"`
+	Title string      `json:"title"`
+}
+
+// FIR-2159. The deliberate "Convert to channel" step: flips a group-kind issue
+// to channel kind and sets the user-chosen name. Idempotent — a second call (or
+// a call on an issue that is not a group) returns no row. The name is always
+// written because converting is the moment the conversation earns a fixed name.
+func (q *Queries) ConvertGroupToChannel(ctx context.Context, arg ConvertGroupToChannelParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, convertGroupToChannel, arg.ID, arg.Title)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.Kind,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.IsPrivate,
+		&i.Classification,
+	)
+	return i, err
+}
+
 const countUnreadInboxForChannel = `-- name: CountUnreadInboxForChannel :one
 SELECT count(*) FROM inbox_item
 WHERE recipient_type = 'member'
@@ -161,7 +216,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.created_at, i.updated_at, i.number
 FROM issue i
 WHERE i.workspace_id = $1
-  AND i.kind IN ('channel', 'dm')
+  AND i.kind IN ('channel', 'dm', 'group') -- CEREBRO-PATCH(channel-group-kind): FIR-2159
 ORDER BY i.updated_at DESC
 `
 
@@ -281,7 +336,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 FROM issue i
 JOIN issue_subscriber s ON s.issue_id = i.id
 WHERE i.workspace_id = $1
-  AND i.kind IN ('channel', 'dm')
+  AND i.kind IN ('channel', 'dm', 'group') -- CEREBRO-PATCH(channel-group-kind): FIR-2159
   AND s.user_type = 'member'
   AND s.user_id = $2
 ORDER BY i.updated_at DESC
@@ -398,9 +453,9 @@ func (q *Queries) ListLatestCommentsForIssues(ctx context.Context, dollar_1 []pg
 	return items, nil
 }
 
-const promoteDMToChannel = `-- name: PromoteDMToChannel :one
+const promoteDMToGroup = `-- name: PromoteDMToGroup :one
 UPDATE issue
-SET kind = 'channel',
+SET kind = 'group',
     title = CASE WHEN title = '' THEN COALESCE($2, '') ELSE title END,
     updated_at = now()
 WHERE id = $1
@@ -408,22 +463,22 @@ WHERE id = $1
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, kind, start_date, metadata, stage, is_private, classification
 `
 
-type PromoteDMToChannelParams struct {
+type PromoteDMToGroupParams struct {
 	ID    pgtype.UUID `json:"id"`
 	Title pgtype.Text `json:"title"`
 }
 
 // CEREBRO-PATCH(sqlc-channel-dm-promote): JEH-1131 — DM auto-promotion
-// on third-party mention. The PromoteDMToChannel and
+// on third-party mention. The PromoteDMToGroup, ConvertGroupToChannel and
 // ListChannelParticipantNames queries below are cerebro-only; upstream
 // never needs to flip kind on an existing channel-table row.
-// JEH-1131. Flips a DM-kind issue to channel kind in one statement. The
-// WHERE clause makes it idempotent: a second call (or a call on an issue
-// that was already a channel) returns no row, which the service treats as
-// a no-op. Title is only filled when it's currently empty so a user-renamed
-// channel (shouldn't happen on a DM today, but cheap to defend) is preserved.
-func (q *Queries) PromoteDMToChannel(ctx context.Context, arg PromoteDMToChannelParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, promoteDMToChannel, arg.ID, arg.Title)
+// FIR-2159. Flips a DM-kind issue to group kind in one statement when a third
+// party joins. The WHERE clause makes it idempotent: a second call (or a call
+// on an issue that is no longer a DM) returns no row, which the service treats
+// as a no-op. Title is only filled when currently empty so a user-set title is
+// preserved. A group keeps its participant-derived title, exactly like a DM.
+func (q *Queries) PromoteDMToGroup(ctx context.Context, arg PromoteDMToGroupParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, promoteDMToGroup, arg.ID, arg.Title)
 	var i Issue
 	err := row.Scan(
 		&i.ID,

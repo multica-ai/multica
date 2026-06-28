@@ -38,6 +38,17 @@ export function useChannelDisplay(channel: Channel): ChannelDisplay {
       };
     }
 
+    // CEREBRO-PATCH(channel-group-kind): FIR-2159 group title is all
+    // participants except self, joined by ", " (no fixed name, like a DM).
+    if (channel.kind === "group") {
+      const names = others.map((p) => getActorName(p.user_type, p.user_id));
+      return {
+        title: names.length > 0 ? names.join(", ") : channel.title || "Group",
+        isChannel: false,
+        otherParticipants: others,
+      };
+    }
+
     // DM: title is the peer's name. If the peer somehow isn't loaded yet,
     // fall back to channel.title (server uses a placeholder).
     const peer = others[0];

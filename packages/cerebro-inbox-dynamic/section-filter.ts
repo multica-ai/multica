@@ -28,7 +28,7 @@ export type DynInboxEntry =
       time: number;
       item: InboxItem;
       channelId: string;
-      channelKind: "channel" | "dm";
+      channelKind: "channel" | "dm" | "group"; // FIR-2159 — groups sit with DMs.
       threadRootId: string;
     };
 
@@ -370,11 +370,13 @@ export function matchesViewFilter(
       );
     case "dms":
       // 1:1 agent chats group with DMs — the user's "DM" view is every 1:1
-      // thread they have.
+      // thread they have. FIR-2159 — groups sit with DMs, never in channels.
       return (
         entry.kind === "chat" ||
-        (entry.kind === "channel" && entry.channel.kind === "dm") ||
-        (entry.kind === "thread" && entry.channelKind === "dm")
+        (entry.kind === "channel" &&
+          (entry.channel.kind === "dm" || entry.channel.kind === "group")) ||
+        (entry.kind === "thread" &&
+          (entry.channelKind === "dm" || entry.channelKind === "group"))
       );
     case "muted":
       return entryIsMuted(entry);
@@ -522,7 +524,8 @@ function bucketize(
   if (mode === "type") {
     if (entry.kind === "chat") return { key: "__chat__", label: "Chats", isFallback: true };
     if (entry.kind === "channel") {
-      return entry.channel.kind === "dm"
+      // FIR-2159 — groups have no fixed name and sit with DMs, not Channels.
+      return entry.channel.kind === "dm" || entry.channel.kind === "group"
         ? { key: "__dm__", label: "Direct messages", isFallback: true }
         : { key: "__channel__", label: "Channels", isFallback: true };
     }

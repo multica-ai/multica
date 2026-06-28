@@ -2,7 +2,7 @@
 // them as a separate concept because the UI differs — title is the channel
 // name, subscribers are participants, comments are messages.
 
-export type ChannelKind = "channel" | "dm";
+export type ChannelKind = "channel" | "dm" | "group"; // CEREBRO-PATCH(channel-group-kind): FIR-2159
 
 export interface ChannelMember {
   user_type: "member" | "agent";

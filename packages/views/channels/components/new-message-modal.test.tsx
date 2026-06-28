@@ -318,7 +318,7 @@ describe("NewMessageModal", () => {
     });
   });
 
-  it("group mode reveals checkboxes and creates a channel for multi-select", async () => {
+  it("group mode reveals checkboxes and creates a group for multi-select with no typed name", async () => {
     const user = userEvent.setup();
     render(<NewMessageModal open onClose={() => {}} />);
 
@@ -333,18 +333,15 @@ describe("NewMessageModal", () => {
     // Inline name input shows the auto-derived value and stays editable.
     expect(screen.getByDisplayValue("Alice, Mads")).toBeInTheDocument();
 
-    await user.click(screen.getByText("Create channel (2)"));
+    // No name typed → creates a group (no fixed name, no channel perm policies).
+    await user.click(screen.getByText("Create group (2)"));
 
     await waitFor(() => {
       expect(mockCreateChannel).toHaveBeenCalledWith({
-        kind: "channel",
-        name: "Alice, Mads",
+        kind: "group",
+        name: "",
         member_ids: ["alice", "mads"],
         agent_ids: [],
-        // CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — recommended defaults sent at creation.
-        rename_policy: "admins",
-        add_members_policy: "everyone",
-        allow_self_leave: true,
       });
     });
   });
@@ -374,7 +371,7 @@ describe("NewMessageModal", () => {
     });
   });
 
-  it("group mode mixes members and agents into a single channel", async () => {
+  it("group mode mixes members and agents into a single group", async () => {
     const user = userEvent.setup();
     render(<NewMessageModal open onClose={() => {}} />);
 
@@ -382,18 +379,14 @@ describe("NewMessageModal", () => {
 
     await user.click(screen.getByText("Alice"));
     await user.click(screen.getByText("Reviewer"));
-    await user.click(screen.getByText("Create channel (2)"));
+    await user.click(screen.getByText("Create group (2)"));
 
     await waitFor(() => {
       expect(mockCreateChannel).toHaveBeenCalledWith({
-        kind: "channel",
-        name: "Alice, Reviewer",
+        kind: "group",
+        name: "",
         member_ids: ["alice"],
         agent_ids: ["a1"],
-        // CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — recommended defaults sent at creation.
-        rename_policy: "admins",
-        add_members_policy: "everyone",
-        allow_self_leave: true,
       });
     });
   });
@@ -439,7 +432,8 @@ describe("NewMessageModal", () => {
     await user.click(addAll);
 
     // Footer shows the count = number of non-self members (Alice, Mads).
-    expect(screen.getByText("Create channel (2)")).toBeInTheDocument();
+    // No name typed → the button offers a group.
+    expect(screen.getByText("Create group (2)")).toBeInTheDocument();
 
     // The button hides once everyone is picked.
     expect(
@@ -458,12 +452,12 @@ describe("NewMessageModal", () => {
 
     await user.click(screen.getByRole("button", { name: /^Switch to channel$/ }));
     await user.click(screen.getByRole("button", { name: /Add all workspace members/i }));
-    await user.click(screen.getByText("Create channel (2)"));
+    await user.click(screen.getByText("Create group (2)"));
 
     await waitFor(() => {
       expect(mockCreateChannel).toHaveBeenCalledWith(
         expect.objectContaining({
-          kind: "channel",
+          kind: "group",
           member_ids: ["alice", "mads"],
           agent_ids: [],
         }),

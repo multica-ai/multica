@@ -201,8 +201,9 @@ func uuidString(u pgtype.UUID) string {
 
 // TestPromoteDMOnMention_AgentMention covers the happy path: a DM with two
 // members receives a comment that mentions a third-party agent. The issue's
-// kind should flip to 'channel', the agent should be subscribed, and the
-// title should be auto-generated.
+// kind should flip to 'group' (FIR-2159 — a DM promotes to a group, not a
+// channel), the agent should be subscribed, and the title should be
+// auto-generated.
 func TestPromoteDMOnMention_AgentMention(t *testing.T) {
 	ctx := context.Background()
 	memberA := createTestUserAndMember(t, "alice-agent")
@@ -222,8 +223,8 @@ func TestPromoteDMOnMention_AgentMention(t *testing.T) {
 	testSvc.PromoteDMOnMention(ctx, dm, comment, nil, uuidString(testWorkspaceID), "member", uuidString(memberA))
 
 	after := loadIssue(t, dm.ID)
-	if after.Kind != "channel" {
-		t.Fatalf("expected kind=channel after agent mention, got %q", after.Kind)
+	if after.Kind != "group" {
+		t.Fatalf("expected kind=group after agent mention, got %q", after.Kind)
 	}
 	if after.Title == "" {
 		t.Fatalf("expected auto-generated title, got empty string")
@@ -402,7 +403,7 @@ func TestPromoteDMOnMention_InheritsFromParent(t *testing.T) {
 	testSvc.PromoteDMOnMention(ctx, dm, reply, &parent, uuidString(testWorkspaceID), "member", uuidString(memberA))
 
 	after := loadIssue(t, dm.ID)
-	if after.Kind != "channel" {
+	if after.Kind != "group" {
 		t.Fatalf("expected promotion via parent inheritance, got kind=%q", after.Kind)
 	}
 }

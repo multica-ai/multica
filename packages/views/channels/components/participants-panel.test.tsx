@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { Agent, Channel, MemberWithUser } from "@multica/core/types";
 
 const mockToggle = vi.hoisted(() => vi.fn());
+const mockConvert = vi.hoisted(() => vi.fn());
 
 const members: MemberWithUser[] = [
   {
@@ -90,6 +91,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 
 vi.mock("@multica/core/channels", () => ({
   useToggleChannelParticipant: () => ({ mutate: mockToggle }),
+  useConvertGroupToChannel: () => ({ mutate: mockConvert, isPending: false }),
 }));
 
 vi.mock("../../issues/components", () => ({
