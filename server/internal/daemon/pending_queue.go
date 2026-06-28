@@ -6,8 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+)
+
+const (
+	maxPendingRecords = 100
+	maxPendingAge     = 7 * 24 * time.Hour
+	maxTmpAge         = 1 * time.Hour
 )
 
 // pendingTaskRecord stores a completed task result that failed to be reported
@@ -37,15 +44,16 @@ func (d *Daemon) notifyPendingQueue() {
 	}
 }
 
-// enqueuePendingResult serializes a completed task result to disk using an
+// enqueuePendingResult serializes a completed or failed task result to disk using an
 // atomic write-then-rename pattern, ensuring a concurrent poller or crashing
 // daemon never observes a half-written JSON record.
 func (d *Daemon) enqueuePendingResult(taskID string, result TaskResult) {
 	dir := d.pendingResultsDir()
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		d.logger.Error("failed to create pending results directory", "error", err, "path", dir)
 		return
 	}
+	_ = os.Chmod(dir, 0700)
 
 	record := pendingTaskRecord{
 		TaskID:    taskID,
@@ -62,7 +70,7 @@ func (d *Daemon) enqueuePendingResult(taskID string, result TaskResult) {
 	targetPath := filepath.Join(dir, fmt.Sprintf("%s.json", taskID))
 	tmpPath := targetPath + ".tmp"
 
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
 		d.logger.Error("failed to write temporary pending task record", "error", err, "path", tmpPath)
 		return
 	}
@@ -74,7 +82,71 @@ func (d *Daemon) enqueuePendingResult(taskID string, result TaskResult) {
 	}
 
 	d.logger.Info("enqueued pending task result to disk", "task_id", taskID, "path", targetPath)
+	d.prunePendingQueue()
 	d.notifyPendingQueue()
+}
+
+type fileInfoWithPath struct {
+	path string
+	info os.FileInfo
+}
+
+// prunePendingQueue enforces retention bounds (max count, max age) and cleans up
+// orphaned temporary write files (.json.tmp). Called on startup and before flush.
+func (d *Daemon) prunePendingQueue() {
+	dir := d.pendingResultsDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	now := time.Now()
+	var jsonFiles []fileInfoWithPath
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		filePath := filepath.Join(dir, name)
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		// Clean up orphaned .tmp files older than maxTmpAge
+		if strings.HasSuffix(name, ".tmp") {
+			if now.Sub(info.ModTime()) > maxTmpAge {
+				os.Remove(filePath)
+			}
+			continue
+		}
+
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
+
+		// Clean up expired JSON records older than maxPendingAge
+		if now.Sub(info.ModTime()) > maxPendingAge {
+			d.logger.Warn("pruning expired pending task record", "path", filePath, "age", now.Sub(info.ModTime()))
+			os.Remove(filePath)
+			continue
+		}
+
+		jsonFiles = append(jsonFiles, fileInfoWithPath{path: filePath, info: info})
+	}
+
+	// Enforce max count by oldest-first eviction
+	if len(jsonFiles) > maxPendingRecords {
+		sort.Slice(jsonFiles, func(i, j int) bool {
+			return jsonFiles[i].info.ModTime().Before(jsonFiles[j].info.ModTime())
+		})
+		evictCount := len(jsonFiles) - maxPendingRecords
+		for i := 0; i < evictCount; i++ {
+			d.logger.Warn("evicting oldest pending task record to enforce max limit", "path", jsonFiles[i].path)
+			os.Remove(jsonFiles[i].path)
+		}
+	}
 }
 
 // pendingQueueRetrierLoop runs a background supervisor that periodically retries
@@ -91,6 +163,7 @@ func (d *Daemon) pendingQueueRetrierLoop(ctx context.Context) {
 		timer.Stop()
 		return
 	case <-timer.C:
+		d.prunePendingQueue()
 		d.flushPendingQueue(ctx)
 	}
 
@@ -99,6 +172,7 @@ func (d *Daemon) pendingQueueRetrierLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			d.prunePendingQueue()
 			d.flushPendingQueue(ctx)
 		case <-d.pendingQueueNotify:
 			d.flushPendingQueue(ctx)
@@ -132,7 +206,7 @@ func (d *Daemon) flushPendingQueue(ctx context.Context) {
 }
 
 // retryPendingRecord reads a single buffered task record from disk and attempts
-// to report it via CompleteTask. If reported successfully (or if rejected due to
+// to report it via CompleteTask or FailTask. If reported successfully (or if rejected due to
 // permanent 4xx client errors), the disk record is permanently deleted.
 func (d *Daemon) retryPendingRecord(ctx context.Context, filePath string) {
 	data, err := os.ReadFile(filePath)
@@ -153,12 +227,9 @@ func (d *Daemon) retryPendingRecord(ctx context.Context, filePath string) {
 
 	switch res.Status {
 	case "completed":
-		reportErr = d.client.CompleteTask(ctx, record.TaskID, res.Comment, res.BranchName, res.SessionID, res.WorkDir)
+		reportErr = d.client.CompleteTaskWithSchedule(ctx, record.TaskID, res.Comment, res.BranchName, res.SessionID, res.WorkDir, nil)
 	default:
-		// Unknown or unhandled status in pending queue; discard
-		d.logger.Warn("discarding pending record with unhandled status", "task_id", record.TaskID, "status", res.Status)
-		os.Remove(filePath)
-		return
+		reportErr = d.client.FailTaskWithSchedule(ctx, record.TaskID, res.Comment, res.SessionID, res.WorkDir, res.FailureReason, nil)
 	}
 
 	if reportErr == nil {

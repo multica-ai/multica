@@ -3100,8 +3100,17 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// which is the canonical replacement for the legacy
 		// "agent_error" coarse bucket.
 		fallbackErrMsg := fmt.Sprintf("complete task failed: %s", err.Error())
-		if failErr := d.client.FailTask(ctx, taskID, fallbackErrMsg, result.SessionID, result.WorkDir, taskfailure.Classify(fallbackErrMsg).String()); failErr != nil {
-			taskLog.Error("fail task fallback also failed", "error", failErr)
+		fallbackReason := taskfailure.Classify(fallbackErrMsg).String()
+		if failErr := d.client.FailTask(ctx, taskID, fallbackErrMsg, result.SessionID, result.WorkDir, fallbackReason); failErr != nil {
+			if isTransientError(failErr) {
+				result.Status = "failed"
+				result.Comment = fallbackErrMsg
+				result.FailureReason = fallbackReason
+				taskLog.Error("fail task fallback failed after retries; saving to pending queue", "error", failErr)
+				d.enqueuePendingResult(taskID, result)
+				return
+			}
+			taskLog.Error("fail task fallback also failed permanently", "error", failErr)
 		}
 	default:
 		failureReason := result.FailureReason
@@ -3122,9 +3131,15 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 				failureReason = taskfailure.Classify(result.Comment).String()
 			}
 		}
+		result.FailureReason = failureReason
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
 		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
-			taskLog.Error("report failed task failed", "error", err)
+			if isTransientError(err) {
+				taskLog.Error("report failed task failed after retries; saving to pending queue", "error", err)
+				d.enqueuePendingResult(taskID, result)
+				return
+			}
+			taskLog.Error("report failed task failed permanently", "error", err)
 		}
 	}
 }
