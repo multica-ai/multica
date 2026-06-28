@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -112,6 +113,18 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 		if header := LaunchHeader(t_); header == "" {
 			t.Errorf("LaunchHeader(%q) returned empty string — add it to launchHeaders", t_)
 		}
+	}
+}
+
+func TestLaunchHeaderAntigravityAvoidsTextOnlyPrintModeLabel(t *testing.T) {
+	t.Parallel()
+
+	header := LaunchHeader("antigravity")
+	if header != "agy -p (non-interactive)" {
+		t.Fatalf("unexpected Antigravity launch header: %q", header)
+	}
+	if strings.Contains(header, "print mode") {
+		t.Fatalf("Antigravity launch header must not imply a text-only mode: %q", header)
 	}
 }
 

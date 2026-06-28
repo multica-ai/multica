@@ -219,6 +219,8 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 			// resume-aware operation.
 			CustomArgs: []string{
 				"-p", "hijacked-prompt",
+				"-i",
+				"--prompt-interactive",
 				"--continue",
 				"-c",
 				"--conversation", "bad-id",
@@ -246,6 +248,9 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 	if strings.Contains(joined, "hijacked-prompt") {
 		t.Errorf("custom -p value leaked through filter: %v", args)
+	}
+	if strings.Contains(joined, "-i") || strings.Contains(joined, "--prompt-interactive") {
+		t.Errorf("interactive-mode flags leaked through filter: %v", args)
 	}
 	if strings.Contains(joined, "bad-id") {
 		t.Errorf("custom --conversation value leaked through filter: %v", args)
@@ -389,8 +394,8 @@ func TestAntigravityBackendPrintTimeoutSurfacesAsTimeout(t *testing.T) {
 		if result.Status != "timeout" {
 			t.Fatalf("expected status=timeout, got %q (error=%q)", result.Status, result.Error)
 		}
-		if !strings.Contains(result.Error, "print mode timed out") {
-			t.Errorf("expected error to explain the print-mode timeout, got %q", result.Error)
+		if !strings.Contains(result.Error, "agy --print-timeout elapsed") {
+			t.Errorf("expected error to explain the agy print timeout, got %q", result.Error)
 		}
 		// Narration streamed before the cut-off must still reach the result so
 		// the user sees how far the turn got.

@@ -159,14 +159,14 @@ ACP 协议 agent（和 Kimi 共享传输层）。会话续接可用，MCP 配置
 
 ### Antigravity（Google）
 
-Google 的 Antigravity CLI（`agy`）。搭配 Google Antigravity 服务，默认走 Gemini 系列模型。会话续接通过 `--conversation <id>` 工作——守护进程从 CLI 的日志文件里抓取 conversation UUID。模型选择保存在 Antigravity CLI 自己的设置里——Multica 里这款工具的「模型」选择项被禁用。Skill 文件写入 `.agents/skills/`（CLI 沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 文档](https://antigravity.google/docs/gcli-migration)）。
+Google 的 Antigravity CLI（`agy`）。搭配 Google Antigravity 服务，默认走 Gemini 系列模型。Multica 使用 `agy -p` 启动它，这是适合 daemon 后台任务的一次性非交互模式；当前 Antigravity CLI 在这个模式下仍可执行工具，而 `agy -i` 需要连接 TTY，不适合 daemon 驱动。会话续接通过 `--conversation <id>` 工作——守护进程从 CLI 的日志文件里抓取 conversation UUID。模型选择保存在 Antigravity CLI 自己的设置里——Multica 里这款工具的「模型」选择项被禁用。Skill 文件写入 `.agents/skills/`（CLI 沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 文档](https://antigravity.google/docs/gcli-migration)）。
 
 | | |
 |---|---|
 | 守护进程扫描 | `agy` |
 | 安装 | 看官方指引 [antigravity.google/docs/cli-overview](https://antigravity.google/docs/cli-overview)。CLI 是预编译的，跑一次 `agy install` 配好 PATH 和 shell 别名即可。 |
 | 认证 | 交互式跑一次 `agy` 走 Google 账号登录流程；或者通过 Antigravity 桌面端登录——CLI 会复用 GUI 写入 keyring 的凭据。 |
-| 备注 | CLI 的 stdout 是纯文本，不是结构化事件流；中间的 "I will run X" 思考过程和最终回复都会作为 text 消息送回 Multica。 |
+| 备注 | CLI 的 stdout 是纯文本，不是结构化事件流；中间的 "I will run X" 过程和最终回复都会作为 text 消息送回 Multica，目前无法展示 Antigravity 的逐工具 telemetry。 |
 
 ## 装完之后
 
