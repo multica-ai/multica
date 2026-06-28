@@ -4,10 +4,13 @@
 
 import { memo, useState, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, MoreHorizontal } from "lucide-react";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import {
+  ListGridCell,
+} from "@multica/ui/components/ui/list-grid";
 import { AppLink } from "../../navigation";
 import type { Issue } from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
@@ -20,7 +23,7 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
-import { IssueActionsContextMenu } from "../actions";
+import { IssueActionsContextMenu, IssueActionsDropdown } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 // CEREBRO-PATCH(list-row-wakeup-dot): FIR-1521 — orange scheduled-wakeup pip stacked next to the running indicator.
@@ -81,108 +84,149 @@ function ListRowContent({
   const showLabels = storeProperties.labels && labels.length > 0;
   const hasChildren = childIssues && childIssues.length > 0;
 
+  // CEREBRO-PATCH(issues-linear-list-mobile): FIR-2123 — row cells participate in the shared list subgrid.
   return (
     <IssueActionsContextMenu issue={issue}>
-      <div>
-      <div
-        ref={containerRef}
-        style={containerStyle}
-        {...containerProps}
-        className={`group/row flex h-9 items-center gap-2 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
-          selected ? "bg-accent/30" : ""
-        } ${indent ? "pr-4" : "px-4"} ${isDragging ? "opacity-30" : ""}`}
-      >
-        {/* CEREBRO-PATCH(list-row-tree-expand): inline sub-issue expander */}
-        {hasChildren && (
-          <button
-            type="button"
-            className="flex shrink-0 items-center justify-center w-4 h-4 text-muted-foreground hover:text-foreground"
-            onClick={() => setExpanded(!expanded)}
-          >
-            <ChevronRight className={`size-3.5 transition-transform ${expanded ? "rotate-90" : ""}`} />
-          </button>
-        )}
+      <div className="contents">
         <div
-          className="relative flex shrink-0 items-center justify-center w-4 h-4"
-          {...checkboxProps}
+          ref={containerRef}
+          style={containerStyle}
+          {...containerProps}
+          className={`group/row col-span-full grid h-10 grid-cols-subgrid items-center text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
+            selected ? "bg-accent/30" : ""
+          } ${isDragging ? "opacity-30" : ""}`}
         >
-          <PriorityIcon
-            priority={issue.priority}
-            className={selected ? "hidden" : "group-hover/row:hidden"}
-          />
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={() => toggle(issue.id)}
-            className={`absolute inset-0 cursor-pointer accent-primary ${
-              selected ? "" : "hidden group-hover/row:block"
-            }`}
-          />
-        </div>
-        <AppLink
-          href={p.issueDetail(issue.id)}
-          className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
-        >
-          <span className="w-16 shrink-0 text-xs text-muted-foreground">
-            {issue.identifier}
-          </span>
-          <span className="inline-flex shrink-0 items-center gap-0.5">
-            <IssueAgentActivityIndicator issueId={issue.id} />
-            {wakeupDotEnabled && <CerebroIssueWakeupPip issueId={issue.id} />}
-          </span>
+          <span aria-hidden="true" />
+          <ListGridCell
+            className="justify-center px-0"
+            {...checkboxProps}
+          >
+            <span className="relative flex h-4 w-4 items-center justify-center">
+              <PriorityIcon
+                priority={issue.priority}
+                className={selected ? "hidden" : "group-hover/row:hidden"}
+              />
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={() => toggle(issue.id)}
+                className={`absolute inset-0 cursor-pointer accent-primary ${
+                  selected ? "" : "hidden group-hover/row:block"
+                }`}
+              />
+            </span>
+          </ListGridCell>
+          <ListGridCell className={`gap-2 ${indent ? "pl-5" : ""}`}>
+            {hasChildren && (
+              <button
+                type="button"
+                className="-ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setExpanded(!expanded);
+                }}
+                onMouseDown={stopDrag}
+                onPointerDown={stopDrag}
+              >
+                <ChevronRight className={`size-3.5 transition-transform ${expanded ? "rotate-90" : ""}`} />
+              </button>
+            )}
+            <span className="w-16 shrink-0 text-xs text-muted-foreground">
+              {issue.identifier}
+            </span>
+            <span className="inline-flex shrink-0 items-center gap-0.5">
+              <IssueAgentActivityIndicator issueId={issue.id} />
+              {wakeupDotEnabled && <CerebroIssueWakeupPip issueId={issue.id} />}
+            </span>
 
-          <span className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className="truncate">{issue.title}</span>
-            {showChildProgress && (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
-                <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
-                <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
-                  {childProgress!.done}/{childProgress!.total}
-                </span>
-              </span>
-            )}
-            {showLabels && (
-              <span className="ml-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
-                {labels.slice(0, 3).map((label) => (
-                  <LabelChip key={label.id} label={label} />
-                ))}
-                {labels.length > 3 && (
-                  <span className="text-[11px] text-muted-foreground">
-                    +{labels.length - 3}
+            <AppLink
+              href={p.issueDetail(issue.id)}
+              className={`flex min-w-0 flex-1 items-center gap-1.5 ${isDragging ? "pointer-events-none" : ""}`}
+            >
+              <span className="truncate">{issue.title}</span>
+              {showChildProgress && (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
+                  <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
+                  <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                    {childProgress!.done}/{childProgress!.total}
                   </span>
-                )}
+                </span>
+              )}
+              {showLabels && (
+                <span className="ml-1.5 hidden @2xl:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
+                  {labels.slice(0, 3).map((label) => (
+                    <LabelChip key={label.id} label={label} />
+                  ))}
+                  {labels.length > 3 && (
+                    <span className="text-[11px] text-muted-foreground">
+                      +{labels.length - 3}
+                    </span>
+                  )}
+                </span>
+              )}
+            </AppLink>
+          </ListGridCell>
+          {showProject ? (
+            <ListGridCell className="hidden @2xl:flex">
+              <span className="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                <ProjectIcon project={project} size="sm" />
+                <span className="truncate">{project!.title}</span>
               </span>
-            )}
-          </span>
-          {showProject && (
-            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
-              <ProjectIcon project={project} size="sm" />
-              <span className="truncate">{project!.title}</span>
-            </span>
+            </ListGridCell>
+          ) : (
+            <ListGridCell className="hidden px-0 @2xl:flex" />
           )}
-          {showStartDate && (
-            <span className="shrink-0 text-xs text-muted-foreground">
+          {showStartDate ? (
+            <ListGridCell className="hidden whitespace-nowrap text-xs text-muted-foreground @2xl:flex">
               {formatDate(issue.start_date!)}
-            </span>
+            </ListGridCell>
+          ) : (
+            <ListGridCell className="hidden px-0 @2xl:flex" />
           )}
-          {showDueDate && (
-            <span className="shrink-0 text-xs text-muted-foreground">
+          {showDueDate ? (
+            <ListGridCell className="hidden whitespace-nowrap text-xs text-muted-foreground @2xl:flex">
               {formatDate(issue.due_date!)}
+            </ListGridCell>
+          ) : (
+            <ListGridCell className="hidden px-0 @2xl:flex" />
+          )}
+          <ListGridCell className="hidden justify-center px-0 @2xl:flex">
+            {showAssignee && (
+              <ActorAvatar
+                actorType={issue.assignee_type!}
+                actorId={issue.assignee_id!}
+                size={20}
+                enableHoverCard
+              />
+            )}
+          </ListGridCell>
+          <ListGridCell className="justify-end px-0">
+            <span
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              className="flex items-center opacity-100 @2xl:opacity-0 @2xl:transition-opacity @2xl:group-hover/row:opacity-100"
+            >
+              <IssueActionsDropdown
+                issue={issue}
+                trigger={
+                  <button
+                    type="button"
+                    aria-label="Issue actions"
+                    className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground data-popup-open:bg-accent data-popup-open:text-accent-foreground"
+                  >
+                    <MoreHorizontal className="size-4" />
+                  </button>
+                }
+              />
             </span>
-          )}
-          {showAssignee && (
-            <ActorAvatar
-              actorType={issue.assignee_type!}
-              actorId={issue.assignee_id!}
-              size={20}
-              enableHoverCard
-            />
-          )}
-        </AppLink>
-      </div>
+          </ListGridCell>
+          <span aria-hidden="true" />
+        </div>
       {/* CEREBRO-PATCH(list-row-tree-expand): inline child issues when expanded */}
       {hasChildren && expanded && (
-        <div className="relative ml-[22px]">
+        <div className="relative col-span-full ml-[22px]">
           {/* Vertical tree line */}
           <div className="absolute left-0 top-0 bottom-[18px] w-px bg-border" />
           {childIssues!.map((child) => (

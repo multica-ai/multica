@@ -17,6 +17,11 @@ import {
   type DragOverEvent,
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import {
+  ListGrid,
+  ListGridBody,
+  LIST_GRID_BOTTOM_CLEARANCE,
+} from "@multica/ui/components/ui/list-grid";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
@@ -45,6 +50,35 @@ const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 // CEREBRO-PATCH(list-view-cerebro): tree-expand sub-issue map.
 const EMPTY_CHILDREN_MAP = new Map<string, Issue[]>();
 const EMPTY_IDS: string[] = [];
+
+// CEREBRO-PATCH(issues-linear-list-mobile): FIR-2123 — port Linear-style list grid to Issues.
+// Compact containers keep only selection,
+// issue identity, and row actions; wider containers add metadata columns.
+const GRID_COLS =
+  "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_1.75rem_0.75rem] " +
+  "@2xl:grid-cols-[0.75rem_1rem_minmax(220px,1fr)_var(--isc-project)_var(--isc-start)_var(--isc-due)_var(--isc-assignee)_1.75rem_0.75rem]";
+
+const COLUMN_WIDTHS = {
+  project: 152,
+  start: 84,
+  due: 84,
+  assignee: 44,
+};
+
+const FIXED_TRACKS_WIDTH = 288 + 8 * 12;
+
+function columnTrackVars(): React.CSSProperties {
+  const minWidth =
+    FIXED_TRACKS_WIDTH +
+    Object.values(COLUMN_WIDTHS).reduce((sum, width) => sum + width, 0);
+  return {
+    "--isc-project": `${COLUMN_WIDTHS.project}px`,
+    "--isc-start": `${COLUMN_WIDTHS.start}px`,
+    "--isc-due": `${COLUMN_WIDTHS.due}px`,
+    "--isc-assignee": `${COLUMN_WIDTHS.assignee}px`,
+    "--isc-minw": `${minWidth}px`,
+  } as React.CSSProperties;
+}
 
 function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
   return visibleStatuses.map((status) => ({
@@ -297,7 +331,7 @@ export function ListView({
   const content = (
     <Accordion.Root
       multiple
-      className="space-y-1"
+      className="col-span-full grid grid-cols-subgrid gap-y-1"
       value={expandedStatuses}
       onValueChange={(value: string[]) => {
         if (isDraggingRef.current) return;
@@ -335,8 +369,13 @@ export function ListView({
 
   if (!dragEnabled) {
     return (
-      <div className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
-        {content}
+      <div className="flex-1 min-h-0 overflow-auto p-2 pt-0 @container">
+        <ListGrid
+          className={`${GRID_COLS} @2xl:min-w-[var(--isc-minw)]`}
+          style={columnTrackVars()}
+        >
+          {content}
+        </ListGrid>
       </div>
     );
   }
@@ -349,8 +388,13 @@ export function ListView({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
-        {content}
+      <div className="flex-1 min-h-0 overflow-auto p-2 pt-0 @container">
+        <ListGrid
+          className={`${GRID_COLS} @2xl:min-w-[var(--isc-minw)]`}
+          style={columnTrackVars()}
+        >
+          {content}
+        </ListGrid>
       </div>
 
       <DragOverlay dropAnimation={null}>
@@ -424,9 +468,13 @@ function StatusAccordionItem({
   const disableSorting = !!sortLabel;
 
   return (
-    <Accordion.Item value={status} ref={dragEnabled ? setDroppableRef : undefined}>
+    <Accordion.Item
+      value={status}
+      ref={dragEnabled ? setDroppableRef : undefined}
+      className="col-span-full grid grid-cols-subgrid"
+    >
       <Accordion.Header
-        className={`group/header sticky top-0 z-10 flex h-10 items-center rounded-lg bg-muted transition-colors hover:bg-accent ${
+        className={`group/header sticky top-0 z-10 col-span-full flex h-10 items-center rounded-lg bg-muted transition-colors hover:bg-accent ${
           isOver && !isExpanded
             ? "ring-2 ring-brand/25 bg-accent/15"
             : ""
@@ -480,32 +528,40 @@ function StatusAccordionItem({
           </Tooltip>
         </div>
       </Accordion.Header>
-      <Accordion.Panel>
+      <Accordion.Panel className="col-span-full grid grid-cols-subgrid">
         {issues.length > 0 ? (
           dragEnabled ? (
             <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-              {issues.map((issue) => (
-                <DraggableListRow
-                  key={issue.id}
-                  issue={issue}
-                  childProgress={childProgressMap.get(issue.id)}
-                  disableSorting={disableSorting}
-                />
-              ))}
+              <ListGridBody
+                style={{ paddingBottom: LIST_GRID_BOTTOM_CLEARANCE }}
+              >
+                {issues.map((issue) => (
+                  <DraggableListRow
+                    key={issue.id}
+                    issue={issue}
+                    childProgress={childProgressMap.get(issue.id)}
+                    disableSorting={disableSorting}
+                  />
+                ))}
+              </ListGridBody>
               {hasMore && (
                 <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
               )}
             </SortableContext>
           ) : (
             <>
-              {issues.map((issue) => (
-                <ListRow
-                  key={issue.id}
-                  issue={issue}
-                  childProgress={childProgressMap.get(issue.id)}
-                  childIssues={childrenMap.get(issue.id)}
-                />
-              ))}
+              <ListGridBody
+                style={{ paddingBottom: LIST_GRID_BOTTOM_CLEARANCE }}
+              >
+                {issues.map((issue) => (
+                  <ListRow
+                    key={issue.id}
+                    issue={issue}
+                    childProgress={childProgressMap.get(issue.id)}
+                    childIssues={childrenMap.get(issue.id)}
+                  />
+                ))}
+              </ListGridBody>
               {hasMore && (
                 <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
               )}
