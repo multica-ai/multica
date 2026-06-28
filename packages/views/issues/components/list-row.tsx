@@ -96,7 +96,7 @@ function ListRowContent({
             selected ? "bg-accent/30" : ""
           } ${isDragging ? "opacity-30" : ""}`}
         >
-          <span aria-hidden="true" />
+          {/* CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — edge placeholder spans removed. */}
           <ListGridCell
             className="justify-center px-0"
             {...checkboxProps}
@@ -222,7 +222,6 @@ function ListRowContent({
               />
             </span>
           </ListGridCell>
-          <span aria-hidden="true" />
         </div>
       {/* CEREBRO-PATCH(list-row-tree-expand): inline child issues when expanded */}
       {hasChildren && expanded && (

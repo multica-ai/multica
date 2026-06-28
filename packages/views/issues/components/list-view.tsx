@@ -54,10 +54,10 @@ const EMPTY_IDS: string[] = [];
 // CEREBRO-PATCH(issues-linear-list-mobile): FIR-2123 — port Linear-style list grid to Issues.
 // Compact containers keep only selection,
 // issue identity, and row actions; wider containers add metadata columns.
-// CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — 0px edge tracks (see agents-page).
+// CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — no edge tracks (see agents-page).
 const GRID_COLS =
-  "grid-cols-[0px_1rem_minmax(120px,1fr)_1.75rem_0px] " +
-  "@2xl:grid-cols-[0px_1rem_minmax(220px,1fr)_var(--isc-project)_var(--isc-start)_var(--isc-due)_var(--isc-assignee)_1.75rem_0px]";
+  "grid-cols-[1rem_minmax(120px,1fr)_1.75rem] " +
+  "@2xl:grid-cols-[1rem_minmax(220px,1fr)_var(--isc-project)_var(--isc-start)_var(--isc-due)_var(--isc-assignee)_1.75rem]";
 
 const COLUMN_WIDTHS = {
   project: 152,
@@ -66,7 +66,7 @@ const COLUMN_WIDTHS = {
   assignee: 44,
 };
 
-const FIXED_TRACKS_WIDTH = 264 + 8 * 12;
+const FIXED_TRACKS_WIDTH = 264 + 6 * 12;
 
 function columnTrackVars(): React.CSSProperties {
   const minWidth =

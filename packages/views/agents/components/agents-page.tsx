@@ -91,9 +91,9 @@ import { useT } from "../../i18n";
 // the TWO-LINE form: avatar left, name + description right, 64px tall —
 // the documented exception to the single-line management-list rule.
 const GRID_COLS =
-  // CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — 0px edge tracks; 0.75rem gutters read as unwanted side padding on mobile.
-  "grid-cols-[0px_1rem_minmax(120px,1fr)_var(--agc-status)_1.75rem_0px] " +
-  "@2xl:grid-cols-[0px_1rem_minmax(200px,1fr)_var(--agc-status)_var(--agc-owner)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem_0px]";
+  // CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — no edge tracks (0px tracks still pick up gap-x-3).
+  "grid-cols-[1rem_minmax(120px,1fr)_var(--agc-status)_1.75rem] " +
+  "@2xl:grid-cols-[1rem_minmax(200px,1fr)_var(--agc-status)_var(--agc-owner)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem]";
 
 // Two-line rows; the virtualizer's fixed-size contract.
 const ROW_HEIGHT = 64;
@@ -112,10 +112,9 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
   created: 104,
 };
 
-// Fixed tracks (checkbox 16, name min 200, kebab 28) plus the 11 gap-x-3 gaps
-// between the wide template's 12 tracks (zero-width edge tracks still carry
-// gaps but no inset).
-const FIXED_TRACKS_WIDTH = 244 + 11 * 12;
+// Fixed tracks (checkbox 16, name min 200, kebab 28) plus gap-x-3 between the
+// wide template's 10 tracks.
+const FIXED_TRACKS_WIDTH = 244 + 9 * 12;
 
 function columnTrackVars(
   isVisible: (key: AgentColumnKey) => boolean,
@@ -572,7 +571,7 @@ function AgentListHeader({
       ) : (
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
       )}
-      <span aria-hidden="true" />
+      <ListGridHeaderCell className="px-0" />
     </ListGridHeader>
   );
 }
@@ -586,7 +585,6 @@ function LoadingSkeleton() {
       )}
     >
       <ListGridHeader>
-        <span aria-hidden="true" />
         <ListGridHeaderCell>
           <Skeleton className="h-3 w-12" />
         </ListGridHeaderCell>
@@ -607,11 +605,10 @@ function LoadingSkeleton() {
         </ListGridHeaderCell>
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-        <span aria-hidden="true" />
+        <ListGridHeaderCell className="px-0" />
       </ListGridHeader>
       {Array.from({ length: 5 }).map((_, i) => (
         <ListGridRow key={i} className="h-16 hover:bg-transparent">
-          <span aria-hidden="true" />
           <ListGridCell className="gap-3">
             <Skeleton className="size-8 rounded-md" />
             <div className="min-w-0 flex-1 space-y-1.5">
@@ -637,7 +634,7 @@ function LoadingSkeleton() {
           </ListGridCell>
           <ListGridCell className="hidden px-0 @2xl:flex" />
           <ListGridCell className="hidden px-0 @2xl:flex" />
-          <span aria-hidden="true" />
+          <ListGridCell className="px-0" />
         </ListGridRow>
       ))}
     </ListGrid>

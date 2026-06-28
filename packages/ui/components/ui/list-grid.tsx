@@ -12,9 +12,10 @@ import { cn } from "../../lib/utils";
 // skeletons.
 //
 // Conventions the container class must follow:
-// - First and last tracks are edge-padding columns (e.g. 1.25rem) so row
-//   hover backgrounds stay full-bleed while content aligns with page chrome.
-//   ListGridHeader/ListGridRow render the matching placeholder cells.
+// CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — no leading/trailing edge-padding
+// columns; a 0px edge track still picks up gap-x-3 on both sides, which reads as
+// unwanted side padding on mobile. Rows are full-bleed; page chrome alignment
+// lives in toolbar/header px-* instead.
 // - Responsiveness is TWO-ZONE and CONTAINER-query driven (wrap the ListGrid
 //   in a `@container` element; `@<bp>:` variants, never viewport `sm:`/`lg:`,
 //   so sidebars and split panes are accounted for):
@@ -59,9 +60,7 @@ function ListGridHeader({
       )}
       {...props}
     >
-      <span aria-hidden="true" />
       {children}
-      <span aria-hidden="true" />
     </div>
   );
 }
@@ -177,13 +176,8 @@ function ListGridRow({ render, className, children, ...props }: ListGridRowProps
     "group/row col-span-full grid h-12 grid-cols-subgrid items-center transition-colors hover:bg-accent/40",
     className,
   );
-  const content = (
-    <>
-      <span aria-hidden="true" />
-      {children}
-      <span aria-hidden="true" />
-    </>
-  );
+  // CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — edge placeholder spans removed.
+  const content = children;
   if (render) {
     return cloneElement(
       render,
