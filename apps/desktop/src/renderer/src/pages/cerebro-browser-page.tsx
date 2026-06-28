@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ArrowLeft, ArrowRight, RotateCw, Globe } from "lucide-react";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 
 interface NavState {
   url: string;
@@ -24,6 +25,7 @@ interface NavState {
 export function CerebroBrowserPage(): React.JSX.Element {
   const enabled = useFeatureFlag("cerebro_browser");
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const windowOverlay = useWindowOverlayStore((s) => s.overlay);
   const [address, setAddress] = useState("");
   // Don't fight the user while they're editing the address bar — only mirror
   // the live URL into the field when the input is not focused.
@@ -51,11 +53,11 @@ export function CerebroBrowserPage(): React.JSX.Element {
     });
   }, [api]);
 
-  // Open the pane on mount, hide it on unmount. Keep the native session alive
-  // across tab switches — we only hide, never destroy.
+  // Keep the native session alive across tab switches — we only hide, never
+  // destroy. Opening is handled separately so window-level overlays can cover
+  // the tab system without the native WebContentsView painting through them.
   useEffect(() => {
     if (!enabled || !api) return;
-    void api.open().then(syncBounds);
     const unsub = api.onNavState((state) => {
       setNav(state);
       if (!addressFocusedRef.current) setAddress(state.url);
@@ -64,7 +66,16 @@ export function CerebroBrowserPage(): React.JSX.Element {
       unsub();
       void api.hide();
     };
-  }, [enabled, api, syncBounds]);
+  }, [enabled, api]);
+
+  useEffect(() => {
+    if (!enabled || !api) return;
+    if (windowOverlay) {
+      void api.hide();
+      return;
+    }
+    void api.open().then(syncBounds);
+  }, [enabled, api, syncBounds, windowOverlay]);
 
   // Keep the pane glued to the host rect as the window/layout resizes.
   useEffect(() => {
