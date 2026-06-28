@@ -148,19 +148,19 @@ const COLUMN_WIDTHS: Record<ProjectColumnKey, number> = {
   created: 104,
 };
 
-// Fixed tracks: edges 12+12, checkbox 16, name min 200, status 116,
-// kebab 28 = 384, plus the 10 gap-x-3 gaps between the wide template's
-// 11 tracks.
-const FIXED_TRACKS_WIDTH = 384 + 10 * 12;
+// Fixed tracks: checkbox 16, name min 200, status 116, kebab 28 = 360, plus
+// the 10 gap-x-3 gaps between the wide template's 11 tracks.
+const FIXED_TRACKS_WIDTH = 360 + 10 * 12;
 
 // Render/track order: checkbox, name, status (core, fixed 116px), priority,
 // progress, lead, issues, created, kebab. MUST be a literal string —
 // Tailwind can't see interpolated `grid-cols-[...]` arbitrary values, so an
 // interpolated width silently drops the whole template and the grid
 // collapses to one column.
+// CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — 0px edge tracks (see agents-page).
 const GRID_COLS =
-  "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_116px_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_116px_var(--pjc-priority)_var(--pjc-progress)_var(--pjc-lead)_var(--pjc-issues)_var(--pjc-created)_1.75rem_0.75rem]";
+  "grid-cols-[0px_1rem_minmax(120px,1fr)_116px_1.75rem_0px] " +
+  "@2xl:grid-cols-[0px_1rem_minmax(200px,1fr)_116px_var(--pjc-priority)_var(--pjc-progress)_var(--pjc-lead)_var(--pjc-issues)_var(--pjc-created)_1.75rem_0px]";
 
 function columnTrackVars(
   isVisible: (key: ProjectColumnKey) => boolean,

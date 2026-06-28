@@ -71,9 +71,10 @@ import { useT } from "../../i18n";
 // toggles / batch selection — a machine hosts 1-5 runtimes, those would all
 // be dead weight, and batch-deleting runtimes (a cascade-confirm heavy
 // operation) is deliberately not offered.
+// CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — 0px edge tracks (see agents-page).
 const GRID_COLS =
-  "grid-cols-[0.75rem_minmax(120px,1fr)_var(--rtc-health)_var(--rtc-kebab)_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_minmax(140px,1fr)_var(--rtc-health)_var(--rtc-owner)_var(--rtc-agents)_var(--rtc-cost)_var(--rtc-cli)_var(--rtc-kebab)_0.75rem]";
+  "grid-cols-[0px_minmax(120px,1fr)_var(--rtc-health)_var(--rtc-kebab)_0px] " +
+  "@2xl:grid-cols-[0px_minmax(140px,1fr)_var(--rtc-health)_var(--rtc-owner)_var(--rtc-agents)_var(--rtc-cost)_var(--rtc-cli)_var(--rtc-kebab)_0px]";
 
 const COLUMN_WIDTHS = {
   // Health folds the workload in as a suffix ("Healthy · 2 running") —
@@ -85,10 +86,9 @@ const COLUMN_WIDTHS = {
   cli: 112,
 } as const;
 
-// Fixed tracks (edges 12+12, name min 140) plus the 8 gap-x-3 gaps
-// between the wide template's 9 tracks (zero-width tracks still carry
-// gaps).
-const FIXED_TRACKS_WIDTH = 164 + 8 * 12;
+// Fixed tracks (name min 140) plus the 8 gap-x-3 gaps between the wide
+// template's 9 tracks.
+const FIXED_TRACKS_WIDTH = 140 + 8 * 12;
 
 // The kebab track is conditional like the owner column: on a healthy
 // local machine EVERY row's only action (delete) is hidden by the
