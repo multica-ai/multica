@@ -14,6 +14,7 @@ function note(p: Partial<Note>): Note {
     pinned: p.pinned ?? false,
     issue_id: p.issue_id ?? null,
     project_id: p.project_id ?? null,
+    comment_count: p.comment_count ?? 0,
     created_at: p.created_at ?? "2026-01-01T00:00:00Z",
     updated_at: p.updated_at ?? "2026-01-01T00:00:00Z",
   };
