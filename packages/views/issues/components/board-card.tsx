@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, memo } from "react";
+import { useCallback, memo, type HTMLAttributes } from "react";
 import { AppLink } from "../../navigation";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
@@ -60,10 +60,12 @@ export const BoardCardContent = memo(function BoardCardContent({
   issue,
   editable = false,
   childProgress,
+  isKeyboardActive = false,
 }: {
   issue: Issue;
   editable?: boolean;
   childProgress?: ChildProgress;
+  isKeyboardActive?: boolean;
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
@@ -179,7 +181,11 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showRightMeta = !!showStartDate || !!showDueDate || !!showChildProgress || showUpdatedHint;
 
   return (
-    <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
+    <div
+      className={`rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent ${
+        isKeyboardActive ? "border-ring bg-accent ring-1 ring-ring/30" : ""
+      }`}
+    >
       {/* Row 1: priority + identifier (left), agent activity + assignee (right) */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -310,7 +316,19 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
   return defaultAnimateLayoutChanges(args);
 };
 
-export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress, disableSorting }: { issue: Issue; childProgress?: ChildProgress; disableSorting?: boolean }) {
+export const DraggableBoardCard = memo(function DraggableBoardCard({
+  issue,
+  childProgress,
+  disableSorting,
+  isKeyboardActive,
+  keyboardProps,
+}: {
+  issue: Issue;
+  childProgress?: ChildProgress;
+  disableSorting?: boolean;
+  isKeyboardActive?: boolean;
+  keyboardProps?: HTMLAttributes<HTMLDivElement>;
+}) {
   const p = useWorkspacePaths();
   const {
     attributes,
@@ -336,6 +354,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
       <div
         ref={setNodeRef}
         style={style}
+        {...keyboardProps}
         {...attributes}
         {...listeners}
         className={`group/card ${isDragging ? "opacity-30" : ""}`}
@@ -344,7 +363,12 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
           href={p.issueDetail(issue.id)}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
         >
-          <BoardCardContent issue={issue} editable childProgress={childProgress} />
+          <BoardCardContent
+            issue={issue}
+            editable
+            childProgress={childProgress}
+            isKeyboardActive={isKeyboardActive}
+          />
         </AppLink>
       </div>
     </IssueActionsContextMenu>

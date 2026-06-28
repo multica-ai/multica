@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, type HTMLAttributes } from "react";
 import { ChevronRight, Plus } from "lucide-react";
 import { Accordion } from "@base-ui/react/accordion";
 import {
@@ -23,10 +23,13 @@ import type { IssueSortParam, MyIssuesFilter } from "@multica/core/issues/querie
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
 import { useDragSettle } from "./use-drag-settle";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { useNavigation } from "../../navigation";
+import { useIssueKeyboardNavigation } from "../hooks";
 import { useT } from "../../i18n";
 import {
   type DragMoveUpdates,
@@ -80,6 +83,8 @@ export function ListView({
   );
   const sortBy = useViewStore((s) => s.sortBy);
   const { t } = useT("issues");
+  const router = useNavigation();
+  const paths = useWorkspacePaths();
 
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
   const sortLabel = sortBy !== "position"
@@ -144,6 +149,20 @@ export function ListView({
   if (!isDraggingRef.current && !isSettlingRef.current) {
     issueMapRef.current = issueMap;
   }
+
+  const keyboardIssueIds = useMemo(
+    () =>
+      expandedStatuses.flatMap((status) => columns[statusGroupId(status)] ?? EMPTY_IDS),
+    [columns, expandedStatuses],
+  );
+  const keyboardNav = useIssueKeyboardNavigation({
+    issueIds: keyboardIssueIds,
+    disabled: isDraggingRef.current,
+    onOpenIssue: useCallback(
+      (issueId: string) => router.push(paths.issueDetail(issueId)),
+      [paths, router],
+    ),
+  });
 
   const collisionDetection = useMemo(
     () => makeKanbanCollision(groupIds),
@@ -321,6 +340,8 @@ export function ListView({
             isExpanded={isExpanded}
             sortLabel={sortLabel}
             sort={sort}
+            activeIssueId={keyboardNav.activeIssueId}
+            getIssueKeyboardProps={keyboardNav.issueKeyboardProps}
           />
         );
       })}
@@ -370,6 +391,8 @@ function StatusAccordionItem({
   isExpanded,
   sortLabel,
   sort,
+  activeIssueId,
+  getIssueKeyboardProps,
 }: {
   status: IssueStatus;
   issueIds: string[];
@@ -381,6 +404,8 @@ function StatusAccordionItem({
   isExpanded: boolean;
   sortLabel: string | null;
   sort?: IssueSortParam;
+  activeIssueId?: string | null;
+  getIssueKeyboardProps?: (issueId: string) => HTMLAttributes<HTMLDivElement>;
 }) {
   const { t } = useT("issues");
   const selectedIds = useIssueSelectionStore((s) => s.selectedIds);
@@ -473,6 +498,8 @@ function StatusAccordionItem({
                   issue={issue}
                   childProgress={childProgressMap.get(issue.id)}
                   disableSorting={disableSorting}
+                  isKeyboardActive={activeIssueId === issue.id}
+                  keyboardProps={getIssueKeyboardProps?.(issue.id)}
                 />
               ))}
               {hasMore && (
@@ -482,7 +509,13 @@ function StatusAccordionItem({
           ) : (
             <>
               {issues.map((issue) => (
-                <ListRow key={issue.id} issue={issue} childProgress={childProgressMap.get(issue.id)} />
+                <ListRow
+                  key={issue.id}
+                  issue={issue}
+                  childProgress={childProgressMap.get(issue.id)}
+                  isKeyboardActive={activeIssueId === issue.id}
+                  keyboardProps={getIssueKeyboardProps?.(issue.id)}
+                />
               ))}
               {hasMore && (
                 <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
