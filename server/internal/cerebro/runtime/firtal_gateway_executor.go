@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/connections"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
@@ -71,6 +72,12 @@ type FirtalGatewayExecutor struct {
 	// workspace_connection. Nil only in tests that don't wire it.
 	connDeny *toolpolicy.Store
 
+	// apiConnStore reads enabled API-type workspace connections so their allowed
+	// endpoints can be exposed as agent tools and dispatched server-side
+	// (FIR-2166 C PR2). Pool-backed; wired by SetAPIConnectionStore. Nil disables
+	// the feature regardless of the workspace flag.
+	apiConnStore *connections.Store
+
 	attachmentStorage storage.Storage
 
 	// routerHandler is the server's own HTTP router, used by the FIR-1449
@@ -86,6 +93,15 @@ type FirtalGatewayExecutor struct {
 func (e *FirtalGatewayExecutor) SetConnectionDenyStore(s *toolpolicy.Store) {
 	if e != nil {
 		e.connDeny = s
+	}
+}
+
+// SetAPIConnectionStore wires the pool-backed connections store used to expose
+// enabled API-type connections as agent tools (FIR-2166 C PR2). The server calls
+// it after construction; nil keeps the feature off regardless of the flag.
+func (e *FirtalGatewayExecutor) SetAPIConnectionStore(s *connections.Store) {
+	if e != nil {
+		e.apiConnStore = s
 	}
 }
 
@@ -917,6 +933,24 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 			// add_comment) that the Registry wraps via its Call method.
 			// For backward compat, create an MCP server and also expose its
 			// tools — the registry dispatch handles the extended tools.
+			anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
+			activeRegistry = taskRegistry
+			useRegistry = true
+		}
+		// FIR-2166 C PR2: expose every enabled API-type connection's allowed
+		// endpoints as server-side-dispatched tools when the workspace flag
+		// cerebro_api_connection_tools is on (default off). Additive — the tools
+		// are appended to whatever the cascade/policy already enabled and
+		// registered in this task's registry so the registry tool loop dispatches
+		// them. Per-actor filtering (hide/deny an endpoint via
+		// ConnectionEndpointEffective) lands in PR3; until then the flag stays off
+		// in production, because while on every agent in the workspace would get
+		// every endpoint of every enabled API connection.
+		if apiTools := e.apiConnectionTools(ctx, workspaceID); len(apiTools) > 0 {
+			for _, t := range apiTools {
+				taskRegistry.Register(t)
+			}
+			enabledTools = append(enabledTools, apiTools...)
 			anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
 			activeRegistry = taskRegistry
 			useRegistry = true

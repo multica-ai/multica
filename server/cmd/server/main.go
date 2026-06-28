@@ -19,6 +19,7 @@ import (
 	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	// CEREBRO-PATCH(main-gws-group-sync): FIR-2596 Google Workspace group sync worker import
+	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
 	cerebroidentitysync "github.com/multica-ai/multica/server/internal/cerebro/identitysync"
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
@@ -439,6 +440,8 @@ func main() {
 		cerebroruntime.MaybeEnableApprovalGate(gatewayExecutor, cerebrodb.New(pool), pool, bus)                                                                        // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-2193 default-off approval enforcement gate, controlled rollout via env.
 		// CEREBRO-PATCH(main-firtal-gateway-connection-deny): TECH-3174 always-on per-tool connection Deny on the gateway path.
 		gatewayExecutor.SetConnectionDenyStore(cerebrotoolpolicy.NewStore(pool))
+		// CEREBRO-PATCH(main-firtal-gateway-api-connection-tools): FIR-2166 C PR2 — expose enabled API-type connections as server-side-dispatched agent tools, behind the default-off cerebro_api_connection_tools workspace flag.
+		gatewayExecutor.SetAPIConnectionStore(cerebroconnections.New(pool))
 		// CEREBRO-PATCH(main-firtal-gateway-inproc-bridge): FIR-1449 default-off in-process bridge to the full CLI tool surface, controlled rollout via env.
 		cerebroruntime.MaybeEnableInProcessBridge(gatewayExecutor, r)
 		go gatewayExecutor.Run(gatewayRuntimeCtx)
