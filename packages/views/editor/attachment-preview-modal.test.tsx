@@ -5,9 +5,26 @@ import type { ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
 
 const openExternalMock = vi.hoisted(() => vi.fn());
+// CEREBRO-PATCH(pdf-modal-inline-render): FIR-2152 — control the inline-PDF flag per test
+const featureFlagMock = vi.hoisted(() => vi.fn(() => true));
 
 vi.mock("../platform", () => ({
   openExternal: openExternalMock,
+}));
+
+// CEREBRO-PATCH(pdf-modal-inline-render): FIR-2152 — stub the cerebro PDF viewer
+// (its credentialed fetch + blob framing is exercised in cerebro-artifacts);
+// here we only assert the modal hands it the workspace-scoped fileUrl.
+vi.mock("@multica/cerebro-artifacts/views/components", () => ({
+  PdfViewer: ({ fileUrl, title }: { fileUrl: string; title: string }) => (
+    <div data-testid="pdf-viewer" data-file-url={fileUrl} data-title={title} />
+  ),
+}));
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: featureFlagMock,
+}));
+vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ id: "ws-1" }),
 }));
 
 // vi.hoisted: factories run before module evaluation, letting us name mocks
@@ -123,6 +140,8 @@ beforeEach(() => {
   // Default to web's same-origin empty base so existing absolute-URL tests
   // remain unaffected by the relative-URL resolution added in normalize().
   getBaseUrlMock.mockReturnValue("");
+  // CEREBRO-PATCH(pdf-modal-inline-render): default the inline-PDF flag on.
+  featureFlagMock.mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -130,12 +149,36 @@ afterEach(() => {
 });
 
 describe("AttachmentPreviewModal — dispatch", () => {
-  it("renders a PDF iframe pointing at the signed download URL", () => {
+  // CEREBRO-PATCH(pdf-modal-inline-render): FIR-2152 — comment PDFs now render the
+  // full multi-page PdfViewer. The single-page iframe remains the flag-off fallback.
+  it("renders the full PdfViewer for a PDF attachment (all pages)", () => {
+    const att = makeAttachment({ filename: "manual.pdf", content_type: "application/pdf" });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+    const viewer = screen.getByTestId("pdf-viewer");
+    // Absolute CloudFront URL is self-authenticating — passed through unchanged.
+    expect(viewer.getAttribute("data-file-url")).toBe(att.download_url);
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+
+  it("scopes a server-relative PDF download URL with workspace_id for the credentialed fetch", () => {
+    const att = makeAttachment({
+      filename: "manual.pdf",
+      content_type: "application/pdf",
+      download_url: "/api/attachments/att-1/download",
+    });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+    expect(screen.getByTestId("pdf-viewer").getAttribute("data-file-url")).toBe(
+      "/api/attachments/att-1/download?workspace_id=ws-1",
+    );
+  });
+
+  it("falls back to the single-page iframe for a PDF when cerebro_pdf_inline_render is off", () => {
+    featureFlagMock.mockReturnValue(false);
     const att = makeAttachment({ filename: "manual.pdf", content_type: "application/pdf" });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
     const iframe = document.querySelector("iframe");
-    expect(iframe).toBeTruthy();
     expect(iframe?.getAttribute("src")).toBe(att.download_url);
+    expect(screen.queryByTestId("pdf-viewer")).toBeNull();
   });
 
   it("renders a <video> for video/* content types", () => {
@@ -235,6 +278,9 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
   });
 
   it("prefixes the configured API base for PDF previews when download_url is server-relative", () => {
+    // CEREBRO-PATCH(pdf-modal-inline-render): base-prefixing applies to the iframe
+    // fallback (flag off); the PdfViewer path resolves the base internally.
+    featureFlagMock.mockReturnValue(false);
     getBaseUrlMock.mockReturnValue("https://api.example.test");
     const att = makeAttachment({
       filename: "manual.pdf",

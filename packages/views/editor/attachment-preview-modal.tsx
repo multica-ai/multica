@@ -58,6 +58,11 @@ import {
   type PreviewKind,
 } from "./utils/preview";
 import { useDownloadAttachment } from "./use-download-attachment";
+// CEREBRO-PATCH(pdf-modal-inline-render): FIR-2152 — comment-PDF preview renders all pages via the shared PdfViewer (was a single-page iframe)
+import { PdfViewer } from "@multica/cerebro-artifacts/views/components";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { attachmentDownloadHref } from "@multica/cerebro-attachments/core/download-url";
+import { useCurrentWorkspace } from "@multica/core/paths";
 
 // ---------------------------------------------------------------------------
 // Preview source — full attachment, or URL-only (media types only)
@@ -294,6 +299,9 @@ function PreviewContent({
   onDownload: () => void;
 }) {
   const { t } = useT("editor");
+  // CEREBRO-PATCH(pdf-modal-inline-render): FIR-2152 — flag gate + workspace-scoped URL for the full PDF viewer
+  const inlinePdf = useFeatureFlag("cerebro_pdf_inline_render");
+  const wsId = useCurrentWorkspace()?.id ?? "";
 
   if (kind === null) {
     return (
@@ -334,6 +342,16 @@ function PreviewContent({
         </div>
       );
     case "pdf":
+      // CEREBRO-PATCH(pdf-modal-inline-render): FIR-2152 — all-pages viewer for comment PDFs; flag off or URL-only source → original single-page iframe
+      if (inlinePdf && source.kind === "full")
+        return (
+          <PdfViewer
+            fileUrl={attachmentDownloadHref(source.attachment.download_url, wsId)}
+            title={state.filename}
+            downloadUrl={state.mediaUrl}
+            className="h-full"
+          />
+        );
       return (
         <iframe
           src={state.mediaUrl}
