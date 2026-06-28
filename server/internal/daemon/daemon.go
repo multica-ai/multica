@@ -175,6 +175,15 @@ type Daemon struct {
 	wsHBMu      sync.RWMutex         // guards wsHBLastAck
 	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 
+	// runningTasksMu guards runningTasks and taskCancelFuncs.
+	runningTasksMu sync.Mutex
+	// runningTasks tracks tasks currently being executed by this daemon.
+	// Used to trigger immediate status checks on WebSocket reconnection.
+	runningTasks map[string]string // task_id -> runtime_id
+	// taskCancelFuncs stores cancel functions for running tasks.
+	// Used to immediately cancel tasks when server-side state changes are detected.
+	taskCancelFuncs map[string]context.CancelFunc // task_id -> cancel func
+
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
 	// handlers converge on a single recovery path when they each detect that a
@@ -258,6 +267,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
+		runningTasks:              make(map[string]string),
+		taskCancelFuncs:           make(map[string]context.CancelFunc),
 		activeEnvRoots:            make(map[string]int),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
@@ -681,13 +692,23 @@ func (d *Daemon) wsHeartbeatFreshness() time.Duration {
 
 // recordWSHeartbeatAck stamps the runtime as having received a fresh WS
 // heartbeat ack from the server. Called by the WS read pump.
+// On reconnection (when the runtime had no prior ack record), triggers an
+// immediate check of all running tasks to detect any server-side state changes
+// that occurred while disconnected.
 func (d *Daemon) recordWSHeartbeatAck(runtimeID string) {
 	if runtimeID == "" {
 		return
 	}
 	d.wsHBMu.Lock()
+	_, existed := d.wsHBLastAck[runtimeID]
 	d.wsHBLastAck[runtimeID] = time.Now()
 	d.wsHBMu.Unlock()
+
+	if !existed {
+		d.logger.Debug("WS heartbeat ack received for previously disconnected runtime, triggering immediate task state check",
+			"runtime_id", runtimeID)
+		go d.checkAllRunningTasks(runtimeID)
+	}
 }
 
 // wsHeartbeatRecentlyAcked reports whether the runtime received a WS
@@ -711,6 +732,55 @@ func (d *Daemon) clearWSHeartbeatAcks() {
 		delete(d.wsHBLastAck, k)
 	}
 	d.wsHBMu.Unlock()
+}
+
+// checkAllRunningTasks checks the server-side status of all tasks currently
+// running on this daemon. Called on WebSocket reconnection to detect any
+// server-side state changes (e.g., task cancelled) that occurred while disconnected.
+func (d *Daemon) checkAllRunningTasks(runtimeID string) {
+	d.runningTasksMu.Lock()
+	tasks := make([]string, 0, len(d.runningTasks))
+	for taskID, rtID := range d.runningTasks {
+		if rtID == runtimeID {
+			tasks = append(tasks, taskID)
+		}
+	}
+	d.runningTasksMu.Unlock()
+
+	if len(tasks) == 0 {
+		return
+	}
+
+	d.logger.Debug("checking server-side status for running tasks after WS reconnection",
+		"runtime_id", runtimeID, "task_count", len(tasks))
+
+	ctx, cancel := context.WithTimeout(d.rootCtx, 10*time.Second)
+	defer cancel()
+
+	for _, taskID := range tasks {
+		status, err := d.client.GetTaskStatus(ctx, taskID)
+		if shouldInterruptAgent(status, err) {
+			d.logger.Info("detected server-side task state change after WS reconnection, interrupting task",
+				"task_id", shortID(taskID), "status", status, "error", err)
+			d.cancelRunningTask(taskID)
+		}
+	}
+}
+
+// cancelRunningTask cancels a running task by its ID. This is called when
+// server-side state changes are detected after WebSocket reconnection.
+func (d *Daemon) cancelRunningTask(taskID string) {
+	d.runningTasksMu.Lock()
+	cancelFunc, ok := d.taskCancelFuncs[taskID]
+	d.runningTasksMu.Unlock()
+	if !ok || cancelFunc == nil {
+		return
+	}
+
+	taskLog := d.logger.With("task", shortID(taskID))
+	taskLog.Info("cancelling task due to server-side state change after WS reconnection")
+
+	cancelFunc()
 }
 
 // Run starts the daemon: resolves auth, registers runtimes, then polls for tasks.
@@ -2769,6 +2839,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.mu.Unlock()
 	provider := rt.Provider
 
+	d.runningTasksMu.Lock()
+	d.runningTasks[task.ID] = task.RuntimeID
+	d.runningTasksMu.Unlock()
+
 	// Task-scoped logger with short ID for readable concurrent logs.
 	taskLog := d.logger.With("task", shortID(task.ID))
 	agentName := "agent"
@@ -2838,6 +2912,16 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// deleted (404).
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
+
+	d.runningTasksMu.Lock()
+	d.taskCancelFuncs[task.ID] = runCancel
+	d.runningTasksMu.Unlock()
+	defer func() {
+		d.runningTasksMu.Lock()
+		delete(d.runningTasks, task.ID)
+		delete(d.taskCancelFuncs, task.ID)
+		d.runningTasksMu.Unlock()
+	}()
 
 	// Poll interval is d.cancelPollInterval (5s in production, reduced in tests
 	// via direct field override). Guard against zero so a misconfigured daemon
