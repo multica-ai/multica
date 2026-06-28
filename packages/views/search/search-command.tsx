@@ -380,7 +380,17 @@ export function SearchCommand() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (abortRef.current) abortRef.current.abort();
 
-    if (!q.trim()) {
+    const trimmed = q.trim();
+    if (!trimmed) {
+      setResults({ issues: [], projects: [] });
+      setIsLoading(false);
+      return;
+    }
+
+    // Don't search on fewer than 3 characters — the result set is too
+    // broad and PostgreSQL can't use the GIN indexes effectively for
+    // single-character LIKE patterns.
+    if (trimmed.length < 3) {
       setResults({ issues: [], projects: [] });
       setIsLoading(false);
       return;
@@ -393,13 +403,13 @@ export function SearchCommand() {
       try {
         const [issueRes, projectRes] = await Promise.all([
           api.searchIssues({
-            q: q.trim(),
+            q: trimmed,
             limit: 20,
             include_closed: true,
             signal: controller.signal,
           }),
           api.searchProjects({
-            q: q.trim(),
+            q: trimmed,
             limit: 10,
             include_closed: true,
             signal: controller.signal,

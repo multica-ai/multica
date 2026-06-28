@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -26,6 +29,42 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// --- Search cache ---
+
+type searchCacheEntry struct {
+	result     []searchResult
+	total      int64
+	expiresAt  time.Time
+}
+
+var searchCache sync.Map
+
+func searchCacheKey(workspaceID, q string, includeClosed bool) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:%v", workspaceID, q, includeClosed)))
+	return hex.EncodeToString(h[:16])
+}
+
+func getSearchCache(key string) ([]searchResult, int64, bool) {
+	v, ok := searchCache.Load(key)
+	if !ok {
+		return nil, 0, false
+	}
+	entry := v.(*searchCacheEntry)
+	if time.Now().After(entry.expiresAt) {
+		searchCache.Delete(key)
+		return nil, 0, false
+	}
+	return entry.result, entry.total, true
+}
+
+func setSearchCache(key string, result []searchResult, total int64, ttl time.Duration) {
+	searchCache.Store(key, &searchCacheEntry{
+		result:    result,
+		total:     total,
+		expiresAt: time.Now().Add(ttl),
+	})
+}
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
@@ -373,7 +412,6 @@ func parseQueryNumber(q string) (int, bool) {
 // searchResult holds a raw row from the dynamic search query.
 type searchResult struct {
 	issue                 db.Issue
-	totalCount            int64
 	matchSource           string
 	matchedCommentContent string
 }
@@ -382,7 +420,7 @@ type searchResult struct {
 // It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
 // Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 // LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool) (string, string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
@@ -571,11 +609,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	limitParam := nextArg(nil)  // placeholder
 	offsetParam := nextArg(nil) // placeholder
 
-	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+	// Main SELECT — no longer uses COUNT(*) OVER(); total is fetched via a
+	// separate capped count query so PostgreSQL can stop counting at 1001
+	// instead of scanning every matching row.
+	selectQuery := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
-		COUNT(*) OVER() AS total_count,
 		%s AS match_source,
 		%s AS matched_comment_content
 	FROM issue i
@@ -592,7 +632,14 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		offsetParam,
 	)
 
-	return query, args
+	// Capped count query: stops counting at 1001 so PostgreSQL can use a
+	// fast-start plan without evaluating every matching row.
+	countQuery := fmt.Sprintf(
+		"SELECT COUNT(*) FROM (SELECT 1 FROM issue i WHERE i.workspace_id = %s AND %s LIMIT 1001) _c",
+		wsParam, whereClause,
+	)
+
+	return selectQuery, countQuery, args
 }
 
 func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
@@ -630,13 +677,29 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	terms := splitSearchTerms(q)
 	queryNum, hasNum := parseQueryNumber(q)
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed)
+	// Check in-memory cache (30s TTL) before hitting the database.
+	cacheKey := searchCacheKey(workspaceID, q, includeClosed)
+	if cachedResults, cachedTotal, ok := getSearchCache(cacheKey); ok {
+		resp := h.buildSearchResponse(ctx, cachedResults, wsUUID, q, terms)
+		w.Header().Set("X-Total-Count", strconv.FormatInt(cachedTotal, 10))
+		writeJSON(w, http.StatusOK, map[string]any{
+			"issues": resp,
+			"total":  cachedTotal,
+		})
+		return
+	}
+
+	selectQuery, countQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset
 
-	rows, err := h.DB.Query(ctx, sqlQuery, args...)
+	// Count args are select args minus the last two (limit/offset).
+	countArgs := make([]any, len(args)-2)
+	copy(countArgs, args[:len(args)-2])
+
+	rows, err := h.DB.Query(ctx, selectQuery, args...)
 	if err != nil {
 		slog.Warn("search issues failed", "error", err, "workspace_id", workspaceID, "query", q)
 		writeError(w, http.StatusInternalServerError, "failed to search issues")
@@ -668,7 +731,6 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 			&sr.issue.UpdatedAt,
 			&sr.issue.Number,
 			&sr.issue.ProjectID,
-			&sr.totalCount,
 			&sr.matchSource,
 			&sr.matchedCommentContent,
 		); err != nil {
@@ -684,11 +746,29 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capped count: runs in parallel with the main query if the connection
+	// pool allows it, or separately. Stops at 1001 rows instead of scanning
+	// every match, trading exactness above 1000 for lower latency.
 	var total int64
 	if len(results) > 0 {
-		total = results[0].totalCount
+		_ = h.DB.QueryRow(ctx, countQuery, countArgs...).Scan(&total)
 	}
 
+	// Cache results for 30 seconds.
+	setSearchCache(cacheKey, results, total, 30*time.Second)
+
+	resp := h.buildSearchResponse(ctx, results, wsUUID, q, terms)
+
+	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"issues": resp,
+		"total":  total,
+	})
+}
+
+// buildSearchResponse converts raw search results into the JSON response shape,
+// populating snippets from matched comment and description content.
+func (h *Handler) buildSearchResponse(ctx context.Context, results []searchResult, wsUUID pgtype.UUID, q string, terms []string) []SearchIssueResponse {
 	prefix := h.getIssuePrefix(ctx, wsUUID)
 	resp := make([]SearchIssueResponse, len(results))
 	for i, sr := range results {
@@ -696,16 +776,13 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 			IssueResponse: issueToResponse(sr.issue, prefix),
 			MatchSource:   sr.matchSource,
 		}
-		// Always populate comment snippet when a matching comment exists
 		if sr.matchedCommentContent != "" {
 			snippet := extractSnippet(sr.matchedCommentContent, q)
 			sir.MatchedCommentSnippet = &snippet
-			// Keep backward compat: also set MatchedSnippet for comment-source matches
 			if sr.matchSource == "comment" {
 				sir.MatchedSnippet = &snippet
 			}
 		}
-		// Populate description snippet when description matches
 		if sr.matchSource == "description" || descriptionContains(sr.issue.Description, q, terms) {
 			if sr.issue.Description.Valid && sr.issue.Description.String != "" {
 				snippet := extractSnippet(sr.issue.Description.String, q)
@@ -714,12 +791,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		resp[i] = sir
 	}
-
-	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
-	writeJSON(w, http.StatusOK, map[string]any{
-		"issues": resp,
-		"total":  total,
-	})
+	return resp
 }
 
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
