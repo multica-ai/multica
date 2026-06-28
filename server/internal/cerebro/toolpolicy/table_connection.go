@@ -341,6 +341,58 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 	return result, connName, nil
 }
 
+// ConnectionEndpointEffective resolves the effective Allow/Ask/Deny verdict for a
+// single API-connection endpoint call (`<METHOD> <path>`, e.g. "GET /secrets")
+// through the full Workspace › Runtime › Agent › Group › User › System chain —
+// i.e. the same per-actor-level control MCP connections already get, extended to
+// REST connections (FIR-2166 "C": connect any API and control it at every actor
+// level). Today API endpoint rows are authored and shown but never enforced at
+// runtime ("config-only"); this resolver is the engine half the API-call gate
+// uses, so the gateway gate and the admin screen can never drift.
+//
+// The verdict folds two rows for the named connection, MOST RESTRICTIVE wins
+// (Deny > Ask > Allow): the connection-wide cap (`connection:<name>`, empty
+// resource_pattern) and the per-endpoint row (source connection-endpoint,
+// resource_pattern "<METHOD> <path>"). A per-endpoint row can only ever tighten
+// the connection-wide row. No matching row resolves to SettingAllow (ungated):
+// connection permissions only ever tighten from an allow baseline. Returns the
+// resolved setting and the connection name when the verdict tightens past the
+// allow baseline (so callers can surface "which integration" in an approval).
+func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, connName, method, path string) (Setting, string, error) {
+	if connName == "" || method == "" || path == "" {
+		return SettingAllow, "", nil
+	}
+	rows, err := s.Table(ctx, TableQuery{
+		WorkspaceID: workspaceID,
+		RuntimeID:   runtimeID,
+		AgentID:     agentID,
+		UserID:      userID,
+	})
+	if err != nil {
+		return SettingAllow, "", err
+	}
+	wantKey := connectionToolKeyPrefix + connName
+	wantPattern := method + " " + path
+	result := SettingAllow
+	for _, r := range rows {
+		if r.ToolKey != wantKey {
+			continue
+		}
+		// The connection-wide cap (empty pattern) and the matching per-endpoint
+		// row both gate this call; everything else for the connection is ignored.
+		isWide := r.Source == "connection" && r.ResourcePattern == ""
+		isEndpoint := r.Source == connectionEndpointSource && r.ResourcePattern == wantPattern
+		if !isWide && !isEndpoint {
+			continue
+		}
+		result = MoreRestrictive(result, r.Effective.Setting)
+	}
+	if result == SettingAllow {
+		return SettingAllow, "", nil
+	}
+	return result, connName, nil
+}
+
 // DeniedConnectionTools resolves, for the given chain context, every MCP
 // connection tool whose effective verdict is Deny, and returns them as Claude
 // Code --disallowedTools tokens ("mcp__<connection>__<tool>"). The daemon passes
