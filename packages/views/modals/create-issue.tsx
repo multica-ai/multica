@@ -200,6 +200,21 @@ export function ManualCreatePanel({
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
 
+  const closingRef = useRef(false);
+  useEffect(() => {
+    closingRef.current = false;
+    return () => {
+      closingRef.current = true;
+      clearDraft();
+    };
+  }, [clearDraft]);
+
+  const closeAndClearDraft = () => {
+    closingRef.current = true;
+    clearDraft();
+    onClose();
+  };
+
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
   const descEditorRef = useRef<ContentEditorRef>(null);
@@ -279,6 +294,7 @@ export function ManualCreatePanel({
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
+    if (closingRef.current) return result;
     if (result) {
       const currentAttachments =
         useIssueDraftStore.getState().draft.attachments ?? [];
@@ -558,7 +574,7 @@ export function ManualCreatePanel({
                     render={
                       <button
                         type="button"
-                        onClick={onClose}
+                        onClick={closeAndClearDraft}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
                         <XIcon className="size-4" />
@@ -870,8 +886,13 @@ export function CreateIssueModal(props: {
   data?: Record<string, unknown> | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const clearDraft = useIssueDraftStore((s) => s.clearDraft);
+  const closeAndClearDraft = () => {
+    clearDraft();
+    props.onClose();
+  };
   return (
-    <DialogRoot open onOpenChange={(v) => { if (!v) props.onClose(); }}>
+    <DialogRoot open onOpenChange={(v) => { if (!v) closeAndClearDraft(); }}>
       <DialogContent
         finalFocus={false}
         showCloseButton={false}
@@ -879,6 +900,7 @@ export function CreateIssueModal(props: {
       >
         <ManualCreatePanel
           {...props}
+          onClose={closeAndClearDraft}
           isExpanded={isExpanded}
           setIsExpanded={setIsExpanded}
         />

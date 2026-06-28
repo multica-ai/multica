@@ -1140,7 +1140,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 
 	loopStart := time.Now()
 	triedAgents := map[string]struct{}{}
-	var claimed *db.
+	var claimed *db.AgentTaskQueue
 	// 3. 遍历刚才捞出来的候选任务列表
 	for _, candidate := range tasks {
 		agentKey := util.UUIDToString(candidate.AgentID)
