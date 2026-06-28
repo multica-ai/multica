@@ -221,7 +221,10 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// tool name and only matches MCP per-tool rows, so it returns Allow for an API
 	// endpoint tool — this is where an API endpoint's Deny/Ask is applied.
 	// Most-restrictive wins, so the two verdicts compose safely.
-	if epSetting, epConn := e.apiEndpointSetting(ctx, agentID, workspaceID, reg, toolName, meta); epSetting != toolpolicy.SettingAllow {
+	// failClosed=true: this is the authoritative call-time guard in front of the
+	// secrets box, so an unresolved endpoint verdict denies the call rather than
+	// allowing it (FIR-2166 C review fix).
+	if epSetting, epConn := e.apiEndpointSetting(ctx, agentID, workspaceID, reg, toolName, true, meta); epSetting != toolpolicy.SettingAllow {
 		if connName == "" {
 			connName = epConn
 		}

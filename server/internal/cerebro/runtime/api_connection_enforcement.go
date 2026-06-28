@@ -35,15 +35,26 @@ import (
 // registry; the tool is looked up there and type-asserted to *APIConnectionTool
 // to recover its connection/method/path without re-parsing the synthetic name.
 //
-// Fail-open to Allow on a lookup/resolve error (logged at warn), exactly like
-// connectionToolSetting: an always-on per-call check must not take the gateway
-// fleet offline on a transient DB blip. A genuine Deny/Ask holds in every
-// non-error case, which is the requirement.
+// failClosed selects the verdict for an API-connection tool whose policy could
+// not be resolved (agent lookup or ConnectionEndpointEffective error, logged at
+// warn):
+//   - false at LIST time: return Allow, keeping the tool listed. The always-on
+//     call-time guard re-resolves and is the authoritative check, so a transient
+//     list-time error cannot leak access past the gate.
+//   - true at CALL time: return Deny, failing CLOSED. This gate fronts the
+//     secrets box (FIR-2166), so an unresolved verdict must never grant a call.
+//     The blast radius is only API-connection tools (behind the default-off
+//     cerebro_api_connection_tools flag) — a DB blip cannot affect normal/MCP
+//     tools, so this does not take the gateway fleet offline.
+//
+// The "not an API-connection tool" cases above always return Allow regardless of
+// failClosed, so a normal tool is never denied by a secrets-box error path.
 func (e *FirtalGatewayExecutor) apiEndpointSetting(
 	ctx context.Context,
 	agentID, workspaceID pgtype.UUID,
 	reg *Registry,
 	toolName string,
+	failClosed bool,
 	meta GatewayRequestMeta,
 ) (toolpolicy.Setting, string) {
 	if e == nil || e.connDeny == nil || reg == nil || !agentID.Valid || toolName == "" {
@@ -57,19 +68,25 @@ func (e *FirtalGatewayExecutor) apiEndpointSetting(
 	if !ok {
 		return toolpolicy.SettingAllow, ""
 	}
+	// Past this point the tool is a confirmed API-connection tool, so failing
+	// closed here only ever denies a secrets-box endpoint, never a normal tool.
+	onErr := toolpolicy.SettingAllow
+	if failClosed {
+		onErr = toolpolicy.SettingDeny
+	}
 	agent, err := e.queries.GetAgent(ctx, agentID)
 	if err != nil {
-		e.logger.Warn("api endpoint policy: agent lookup failed — allowing",
-			"agent_id", meta.AgentID, "tool", toolName, "error", err)
-		return toolpolicy.SettingAllow, ""
+		e.logger.Warn("api endpoint policy: agent lookup failed",
+			"agent_id", meta.AgentID, "tool", toolName, "fail_closed", failClosed, "error", err)
+		return onErr, ""
 	}
 	eff, connName, err := e.connDeny.ConnectionEndpointEffective(
 		ctx, workspaceID, agent.RuntimeID, agentID, agent.OwnerID,
 		api.ConnectionName(), api.Method(), api.Path())
 	if err != nil {
-		e.logger.Warn("api endpoint policy: resolve failed — allowing",
-			"agent_id", meta.AgentID, "tool", toolName, "error", err)
-		return toolpolicy.SettingAllow, ""
+		e.logger.Warn("api endpoint policy: resolve failed",
+			"agent_id", meta.AgentID, "tool", toolName, "fail_closed", failClosed, "error", err)
+		return onErr, connName
 	}
 	return eff, connName
 }
@@ -97,7 +114,7 @@ func (e *FirtalGatewayExecutor) filterDeniedAPIEndpoints(
 			out = append(out, t)
 			continue
 		}
-		setting, _ := e.apiEndpointSetting(ctx, agentID, workspaceID, reg, api.Name(), meta)
+		setting, _ := e.apiEndpointSetting(ctx, agentID, workspaceID, reg, api.Name(), false, meta)
 		if setting == toolpolicy.SettingDeny {
 			e.logger.Info("api endpoint hidden from tool list by Deny (FIR-2166 C PR3)",
 				"agent_id", meta.AgentID, "tool", api.Name(), "connection", api.ConnectionName())
