@@ -17,7 +17,7 @@ import type {
   AgentRuntime,
   CreateAgentRequest,
 } from "@multica/core/types";
-import { DragStrip } from "@multica/views/platform";
+import { DragStrip } from "@multica/views/platform/drag-strip";
 import { StepHeader } from "../components/step-header";
 import { useT } from "../../i18n";
 

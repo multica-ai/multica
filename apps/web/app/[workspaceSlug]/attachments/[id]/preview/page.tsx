@@ -2,7 +2,7 @@
 
 import { use } from "react";
 import { useSearchParams } from "next/navigation";
-import { AttachmentPreviewPage } from "@multica/views/attachments";
+import { AttachmentPreviewPage } from "@multica/views/attachments/attachment-preview-page";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 
 // Lives at /:slug/attachments/:id/preview — OUTSIDE the (dashboard) group on

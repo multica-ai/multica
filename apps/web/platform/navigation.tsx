@@ -2,10 +2,8 @@
 
 import { Suspense } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import {
-  NavigationProvider,
-  type NavigationAdapter,
-} from "@multica/views/navigation";
+import { NavigationProvider } from "@multica/views/navigation/context";
+import type { NavigationAdapter } from "@multica/views/navigation/types";
 
 function NavigationProviderInner({
   children,

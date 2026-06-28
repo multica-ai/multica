@@ -6,7 +6,7 @@ import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { captureDownloadIntent } from "@multica/core/analytics";
 import { cn } from "@multica/ui/lib/utils";
-import { DragStrip } from "@multica/views/platform";
+import { DragStrip } from "@multica/views/platform/drag-strip";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import type { IssueStatus } from "@multica/core/types";
 import { StatusIcon } from "../../issues/components/status-icon";

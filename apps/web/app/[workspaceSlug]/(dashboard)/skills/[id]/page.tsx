@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { SkillDetailPage } from "@multica/views/skills";
+import { SkillDetailPage } from "@multica/views/skills/components/skill-detail-page";
 
 export default function SkillDetailRoute({
   params,

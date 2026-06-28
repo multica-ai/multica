@@ -10,7 +10,8 @@ import {
   useHasOnboarded,
 } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
-import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboarding";
+import { OnboardingFlow } from "@multica/views/onboarding/onboarding-flow";
+import { CliInstallInstructions } from "@multica/views/onboarding/steps/cli-install-instructions";
 
 /**
  * Web shell for the onboarding flow. The route is the platform chrome on

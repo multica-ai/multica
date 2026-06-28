@@ -9,10 +9,8 @@ import {
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
-import {
-  Attachment as AttachmentRenderer,
-  AttachmentDownloadProvider,
-} from "../editor";
+import { Attachment as AttachmentRenderer } from "../editor/attachment";
+import { AttachmentDownloadProvider } from "../editor/attachment-download-context";
 
 export type { RenderMode };
 

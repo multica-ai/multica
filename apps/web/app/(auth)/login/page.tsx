@@ -25,7 +25,7 @@ import { Loader2 } from "lucide-react";
 import { captureDownloadIntent } from "@multica/core/analytics";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
-import { LoginPage, validateCliCallback } from "@multica/views/auth";
+import { LoginPage, validateCliCallback } from "@multica/views/auth/login-page";
 import { useT } from "@multica/views/i18n";
 
 /**

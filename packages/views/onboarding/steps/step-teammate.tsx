@@ -14,7 +14,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
-import { DragStrip } from "@multica/views/platform";
+import { DragStrip } from "@multica/views/platform/drag-strip";
 import { StepHeader } from "../components/step-header";
 import { RuntimeAsidePanel } from "../components/runtime-aside-panel";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";

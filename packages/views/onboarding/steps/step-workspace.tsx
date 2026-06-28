@@ -24,7 +24,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
 import type { Workspace } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
-import { DragStrip } from "@multica/views/platform";
+import { DragStrip } from "@multica/views/platform/drag-strip";
 import { StepHeader } from "../components/step-header";
 import { RadioMark } from "../components/option-card";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";

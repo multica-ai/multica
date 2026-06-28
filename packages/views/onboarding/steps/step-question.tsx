@@ -5,7 +5,7 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import type { OnboardingStep } from "@multica/core/onboarding";
-import { DragStrip } from "@multica/views/platform";
+import { DragStrip } from "@multica/views/platform/drag-strip";
 import { StepHeader } from "../components/step-header";
 import {
   IconOptionCard,

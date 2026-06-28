@@ -9,7 +9,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { runtimeKeys } from "@multica/core/runtimes/queries";
 import type { AgentRuntime } from "@multica/core/types";
-import { DragStrip } from "@multica/views/platform";
+import { DragStrip } from "@multica/views/platform/drag-strip";
 import { StepHeader } from "../components/step-header";
 import { RuntimeAsidePanel } from "../components/runtime-aside-panel";
 import { useRuntimePicker } from "../components/use-runtime-picker";

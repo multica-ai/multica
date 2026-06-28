@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "sh -c 'next dev --port \"${FRONTEND_PORT:-3000}\"'",
+    "prebuild": "pnpm --filter @multica/core --filter @multica/ui --filter @multica/views build",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
