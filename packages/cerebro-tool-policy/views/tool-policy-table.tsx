@@ -80,6 +80,7 @@ import {
   TabsTrigger,
 } from "@multica/ui/components/ui/tabs";
 import { cn } from "@multica/ui/lib/utils";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   classFacets,
   classifySideEffect,
@@ -131,7 +132,12 @@ export type ToolPolicyView =
   | "system";
 
 /** Restricts the rows shown to a specific category of tools. */
-export type ToolPolicyTabFilter = "repos" | "connections" | "runtime" | "multica";
+export type ToolPolicyTabFilter =
+  | "repos"
+  | "connections"
+  | "runtime"
+  | "multica"
+  | "credentials";
 
 export interface ToolPolicyTableProps {
   wsId: string;
@@ -151,6 +157,7 @@ export interface ToolPolicyTableProps {
    * When set, restricts which rows are visible:
    *   "repos"       — only per-repo rows (read/checkout/push per repository)
    *   "connections" — only workspace connection tools (source === "connection")
+   *   "credentials" — only per-credential rows (source === "credential")
    *   "runtime"     — only runtime/daemon capability tools
    *   "multica"     — everything else (issues, agents, comments, etc.)
    * When omitted, all rows are shown (original behaviour).
@@ -277,14 +284,23 @@ export function ToolPolicyTable({
   // pattern too, but — like connection sub-rows — they are surfaced through their
   // own "Data sources" sheet, not as repo groups, so exclude them from repos.
   const isRegistrySubRow = (r: ToolPolicyRow) => r.source === "registry-data-source";
+  // Credential rows (FIR-1479) carry a resource pattern too ("cerebro-credential:<id>",
+  // one row per credential capability), but they are their own "Credentials" tab — not
+  // repos — so exclude them from the repo set the same way connection/registry sub-rows
+  // are excluded.
+  const isCredentialRow = (r: ToolPolicyRow) => r.source === "credential";
   const allRepoRows = useMemo(
     () =>
       rows.filter(
         (r) =>
-          r.resource_pattern && !isConnectionSubRow(r) && !isRegistrySubRow(r),
+          r.resource_pattern &&
+          !isConnectionSubRow(r) &&
+          !isRegistrySubRow(r) &&
+          !isCredentialRow(r),
       ),
     [rows],
   );
+  const allCredentialRows = useMemo(() => rows.filter(isCredentialRow), [rows]);
   // Registry data-source sub-rows grouped by their tool key ("firtal_registry"),
   // so the capability row can hand its data sources to the per-source sheet.
   const registryDataSourcesByKey = useMemo(() => {
@@ -325,14 +341,22 @@ export function ToolPolicyTable({
     if (tabFilter === "repos") return [];
     if (!tabFilter) return allCapRows;
     if (tabFilter === "connections") return allCapRows.filter((r) => r.source === "connection");
+    // Credential rows carry a resource pattern (so they live in `rows`, not
+    // `allCapRows`), one row per box per capability, grouped visually by the box
+    // name (its Category). They render in the flat table under their own tab.
+    if (tabFilter === "credentials") return allCredentialRows;
     if (tabFilter === "runtime")
       return allCapRows.filter((r) => isRuntimeReported(r) || r.category === "Runtimes");
     // "multica" = everything that isn't a connection, a runtime-reported tool, or
-    // a runtime-admin action (those three have their own tabs above)
+    // a runtime-admin action (those have their own tabs above). Credential rows are
+    // already excluded here because they carry a resource pattern (not in allCapRows).
     return allCapRows.filter(
-      (r) => r.source !== "connection" && !isRuntimeReported(r) && r.category !== "Runtimes",
+      (r) =>
+        r.source !== "connection" &&
+        !isRuntimeReported(r) &&
+        r.category !== "Runtimes",
     );
-  }, [tabFilter, allCapRows]);
+  }, [tabFilter, allCapRows, allCredentialRows]);
 
   const repoRows = useMemo(() => {
     if (!tabFilter || tabFilter === "repos") return allRepoRows;
@@ -424,9 +448,11 @@ export function ToolPolicyTable({
         <p className="text-sm text-muted-foreground">Loading tools…</p>
       ) : repoGroups.length === 0 && filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {allCapRows.length === 0 && allRepoRows.length === 0
-            ? "No tools reported yet."
-            : "No tools match these filters."}
+          {tabFilter === "credentials" && capRows.length === 0
+            ? "No credentials available yet. Connect an Agent Vault to this workspace to grant credential access here."
+            : allCapRows.length === 0 && allRepoRows.length === 0
+              ? "No tools reported yet."
+              : "No tools match these filters."}
         </p>
       ) : (
         <>
@@ -457,7 +483,12 @@ export function ToolPolicyTable({
               </TableHeader>
               <TableBody>
                 {filtered.map((row) => (
-                  <TableRow key={row.tool_key} data-testid={`tool-row-${row.tool_key}`}>
+                  <TableRow
+                    key={`${row.tool_key}:${row.resource_pattern ?? ""}`}
+                    data-testid={`tool-row-${row.tool_key}${
+                      row.resource_pattern ? `:${row.resource_pattern}` : ""
+                    }`}
+                  >
                     <TableCell>
                       <div className="flex flex-col">
                         <span className="font-medium">{row.title || row.tool_key}</span>
@@ -483,7 +514,7 @@ export function ToolPolicyTable({
                           row={row}
                           editLayer={editLayer}
                           disabled={busy}
-                          onChange={(s) => applySetting(row.tool_key, s)}
+                          onChange={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
                         />
                         <ConditionControl
                           row={row}
@@ -532,8 +563,10 @@ export function ToolPolicyTable({
           <div className="flex flex-col gap-2 md:hidden">
             {filtered.map((row) => (
               <div
-                key={row.tool_key}
-                data-testid={`tool-card-${row.tool_key}`}
+                key={`${row.tool_key}:${row.resource_pattern ?? ""}`}
+                data-testid={`tool-card-${row.tool_key}${
+                  row.resource_pattern ? `:${row.resource_pattern}` : ""
+                }`}
                 className="rounded-lg border p-3"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -574,7 +607,7 @@ export function ToolPolicyTable({
                       row={row}
                       editLayer={editLayer}
                       disabled={busy}
-                      onChange={(s) => applySetting(row.tool_key, s)}
+                      onChange={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
                     />
                   </div>
                 </div>
@@ -606,13 +639,19 @@ export function ToolPolicyTable({
 }
 
 export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
+  // Credentials are a permission type only once the workspace turns the feature on
+  // (FIR-1479). Gate the tab on the same flag the backend gates the rows with, so
+  // the tab is a consistent permission surface the moment an admin enables it.
+  const showCredentials = useFeatureFlag("cerebro_credentials_per_actor");
   return (
     // TECH-3156 Mangel 3: force the tab row horizontal. The shared Tabs primitive
     // renders its list vertically by default, so — like cost-optimization-tabs —
-    // we override the list to !flex-row and each trigger to !w-auto so the four
-    // tabs sit on one horizontal row instead of stacked.
+    // we override the list to !flex-row and each trigger to !w-auto so the tabs sit
+    // on one horizontal row instead of stacked. On narrow screens the row scrolls
+    // horizontally (flex-nowrap + overflow-x-auto) instead of wrapping and breaking
+    // over the content below it.
     <Tabs defaultValue="multica" orientation="horizontal">
-      <TabsList className="!h-auto w-full !flex-row flex-wrap justify-start gap-1">
+      <TabsList className="no-scrollbar !h-auto w-full max-w-full !flex-row flex-nowrap justify-start gap-1 overflow-x-auto">
         <TabsTrigger className="!w-auto !flex-none !justify-center" value="multica">
           Multica
         </TabsTrigger>
@@ -625,6 +664,11 @@ export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
         <TabsTrigger className="!w-auto !flex-none !justify-center" value="connections">
           Connections
         </TabsTrigger>
+        {showCredentials && (
+          <TabsTrigger className="!w-auto !flex-none !justify-center" value="credentials">
+            Credentials
+          </TabsTrigger>
+        )}
       </TabsList>
       <TabsContent value="multica" className="mt-4">
         <ToolPolicyTable {...props} tabFilter="multica" />
@@ -638,6 +682,11 @@ export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
       <TabsContent value="connections" className="mt-4">
         <ToolPolicyTable {...props} tabFilter="connections" />
       </TabsContent>
+      {showCredentials && (
+        <TabsContent value="credentials" className="mt-4">
+          <ToolPolicyTable {...props} tabFilter="credentials" />
+        </TabsContent>
+      )}
     </Tabs>
   );
 }

@@ -6,6 +6,12 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
 const mockListAutopilots = vi.hoisted(() => vi.fn());
+const mockUseFeatureFlag = vi.hoisted(() => vi.fn((_key: string) => false));
+
+vi.mock("@multica/cerebro-feature-flags", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/cerebro-feature-flags")>();
+  return { ...actual, useFeatureFlag: (key: string) => mockUseFeatureFlag(key) };
+});
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -105,7 +111,7 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
   };
 });
 
-import { ToolPolicyTable } from "./tool-policy-table";
+import { ToolPolicyTable, ToolPolicyTabs } from "./tool-policy-table";
 
 const TABLE = {
   tools: [
@@ -158,6 +164,9 @@ beforeEach(() => {
   // picker); the mock stays defined so the api shape is complete.
   mockListAutopilots.mockReset();
   mockListAutopilots.mockResolvedValue({ autopilots: [] });
+  // Credentials feature is OFF by default; the credential-specific tests opt in.
+  mockUseFeatureFlag.mockReset();
+  mockUseFeatureFlag.mockReturnValue(false);
 });
 
 // The desktop table and the mobile cards both render in jsdom (CSS hides one),
@@ -965,5 +974,116 @@ describe("ToolPolicyTable runtime/multica tab split (FIR-1708 D(a))", () => {
     expect(table.getByText("Add comment")).toBeInTheDocument();
     expect(table.queryByText("Bash")).not.toBeInTheDocument();
     expect(table.queryByText("Manage runtime")).not.toBeInTheDocument();
+  });
+});
+
+// FIR-1479: credentials are a permission type, rendered as per-box rows under
+// their own "Credentials" tab. Each row carries a resource_pattern
+// ("cerebro-credential:<id>"), so a decision MUST be written scoped to that box —
+// the prior inline rendering dropped the scope and the toggle silently no-op'd.
+describe("ToolPolicyTable — Credentials tab (FIR-1479)", () => {
+  const credRow = (
+    box: string,
+    name: string,
+    setting: "allow" | "ask" | "deny" = "deny",
+  ) => ({
+    tool_key: "credential.reveal",
+    resource_pattern: `cerebro-credential:${box}`,
+    title: "Use secret",
+    category: name,
+    source: "credential",
+    layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
+    effective: { setting, decided_by: "", capped_by: "", reason: "" },
+  });
+
+  const BUILTIN_ROW = {
+    tool_key: "list_issues",
+    resource_pattern: "",
+    title: "List issues",
+    category: "Built-in tools",
+    source: "builtin",
+    layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
+    effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+  };
+
+  const CRED_TABLE = {
+    tools: [BUILTIN_ROW, credRow("box-1", "bigquery"), credRow("box-2", "cloudflare")],
+  };
+
+  function renderCredentials() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable
+          wsId="ws-1"
+          view="agent"
+          subjectId="agent-1"
+          runtimeId="rt-1"
+          userId="user-1"
+          tabFilter="credentials"
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("shows one row per credential box (by box name) and excludes non-credential tools", async () => {
+    mockCerebroRequest.mockResolvedValue(CRED_TABLE);
+    renderCredentials();
+    const table = await tableBody();
+    expect(table.getByText("bigquery")).toBeInTheDocument();
+    expect(table.getByText("cloudflare")).toBeInTheDocument();
+    // A builtin tool is not a credential → never appears on the credentials tab.
+    expect(table.queryByText("List issues")).not.toBeInTheDocument();
+  });
+
+  it("writes a credential decision scoped to its box's resource_pattern (toggle fix)", async () => {
+    const user = userEvent.setup();
+    mockCerebroRequest.mockResolvedValue(CRED_TABLE);
+    renderCredentials();
+    const row = await screen.findByTestId(
+      "tool-row-credential.reveal:cerebro-credential:box-1",
+    );
+    await user.click(within(row).getByLabelText(/^Decision:/));
+    await user.click(within(row).getByRole("menuitem", { name: "Allow" }));
+
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(put).toBeTruthy();
+      expect(JSON.parse((put![1] as RequestInit).body as string)).toMatchObject({
+        tool_key: "credential.reveal",
+        setting: "allow",
+        resource_pattern: "cerebro-credential:box-1",
+      });
+    });
+  });
+
+  it("shows a credentials-specific hint when no vault boxes exist", async () => {
+    mockCerebroRequest.mockResolvedValue({ tools: [BUILTIN_ROW] });
+    renderCredentials();
+    expect(await screen.findByText(/No credentials available yet/)).toBeInTheDocument();
+  });
+});
+
+describe("ToolPolicyTabs — Credentials tab gated on the feature flag", () => {
+  function renderTabs() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTabs wsId="ws-1" view="agent" subjectId="agent-1" runtimeId="rt-1" userId="user-1" />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("renders the Credentials tab when cerebro_credentials_per_actor is on", async () => {
+    mockUseFeatureFlag.mockReturnValue(true);
+    renderTabs();
+    expect(await screen.findByRole("tab", { name: "Credentials" })).toBeInTheDocument();
+  });
+
+  it("hides the Credentials tab when the flag is off", async () => {
+    mockUseFeatureFlag.mockReturnValue(false);
+    renderTabs();
+    expect(await screen.findByRole("tab", { name: "Multica" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Credentials" })).not.toBeInTheDocument();
   });
 });
