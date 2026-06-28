@@ -5,6 +5,7 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
@@ -18,13 +19,16 @@ import {
   projectGanttIssuesOptions,
   childIssueProgressOptions,
   type AssigneeGroupedIssuesFilter,
+  type IssueSortParam,
   type MyIssuesFilter,
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useRecentContextStore } from "@multica/core/chat";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
@@ -32,8 +36,9 @@ import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
+import { filterRunningAssigneeGroups } from "./project-issue-filters";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { AppLink, useNavigation } from "../../navigation";
+import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
@@ -41,6 +46,7 @@ import { IssuesHeader } from "../../issues/components/issues-header";
 import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
 import { GanttView } from "../../issues/components/gantt-view";
+import { SwimLaneView } from "../../issues/components/swimlane-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -65,7 +71,13 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
-import { PageHeader } from "../../layout/page-header";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
+import {
+  AnimatedRightSidebar,
+  getAnimatedRightSidebarInitialOpen,
+  rightSidebarPanelMotionProps,
+  useAnimatedRightSidebarState,
+} from "../../layout/animated-right-sidebar";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -115,6 +127,7 @@ function ProjectIssuesContent({
   assigneeGroupFilter,
   scope,
   filter,
+  sort,
   ganttIssues,
 }: {
   projectId: string;
@@ -124,6 +137,7 @@ function ProjectIssuesContent({
   assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
   scope: string;
   filter: MyIssuesFilter;
+  sort?: IssueSortParam;
   ganttIssues: Issue[];
 }) {
   const { t } = useT("projects");
@@ -135,18 +149,57 @@ function ProjectIssuesContent({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const runningIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const task of snapshot) {
+      if (task.status === "running" && task.issue_id) ids.add(task.issue_id);
+    }
+    return ids;
+  }, [snapshot]);
 
   const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
   );
+
+  // Status-unfiltered companion for Swimlane.
+  const swimlaneIssues = useMemo(
+    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
+  );
+
+  const activeFilters = useMemo(() => ({
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    projectFilters: [],
+    includeNoProject: false,
+    labelFilters,
+    agentRunningFilter,
+  }), [
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    labelFilters,
+    agentRunningFilter,
+  ]);
 
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
   const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters],
+    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
+    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
+  );
+
+  const filteredAssigneeGroups = useMemo(
+    () => filterRunningAssigneeGroups(assigneeGroups, agentRunningFilter, runningIssueIds),
+    [assigneeGroups, agentRunningFilter, runningIssueIds],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
@@ -164,7 +217,7 @@ function ProjectIssuesContent({
 
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
-    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position">) => {
+    (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position" | "parent_issue_id">, onSettled?: () => void) => {
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         {
@@ -174,18 +227,19 @@ function ProjectIssuesContent({
                 ? err.message
                 : t(($) => $.detail.toast_move_issue_failed),
             ),
+          onSettled: () => onSettled?.(),
         },
       );
     },
     [updateIssueMutation, t],
   );
 
-  // Gantt has its own data source (scheduled-only) and its own empty axis —
-  // we never short-circuit it here, otherwise an unscheduled-but-non-empty
-  // project would surface a misleading "no issues" CTA. For Board/List the
-  // bucketed cache really is the ground truth, so an empty result means an
-  // empty project.
-  if (viewMode !== "gantt" && projectIssues.length === 0) {
+  // Gantt and Swimlane have their own data sources and empty states —
+  // we never short-circuit them here, otherwise an unscheduled/unparented
+  // but non-empty project would surface a misleading "no issues" CTA.
+  // For Board/List the bucketed cache really is the ground truth,
+  // so an empty result means an empty project.
+  if (viewMode !== "gantt" && viewMode !== "swimlane" && projectIssues.length === 0) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
         <ListTodo className="h-10 w-10 text-muted-foreground/40" />
@@ -210,8 +264,8 @@ function ProjectIssuesContent({
     <div className="flex flex-col flex-1 min-h-0">
       {viewMode === "board" && (
         <BoardView
-          issues={assigneeGroups ? projectIssues : issues}
-          assigneeGroups={assigneeGroups}
+          issues={filteredAssigneeGroups ? filteredAssigneeGroups.flatMap((group) => group.issues) : issues}
+          assigneeGroups={filteredAssigneeGroups}
           assigneeGroupQueryKey={assigneeGroupQueryKey}
           assigneeGroupFilter={assigneeGroupFilter}
           visibleStatuses={visibleStatuses}
@@ -220,6 +274,7 @@ function ProjectIssuesContent({
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
+          sort={sort}
           projectId={projectId}
         />
       )}
@@ -230,10 +285,27 @@ function ProjectIssuesContent({
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
+          sort={sort}
           projectId={projectId}
+          onMoveIssue={handleMoveIssue}
         />
       )}
       {viewMode === "gantt" && <GanttView issues={filteredGanttIssues} />}
+      {viewMode === "swimlane" && (
+        <SwimLaneView
+          issues={issues}
+          unfilteredIssues={swimlaneIssues}
+          activeFilters={activeFilters}
+          visibleStatuses={visibleStatuses}
+          hiddenStatuses={hiddenStatuses}
+          onMoveIssue={handleMoveIssue}
+          childProgressMap={childProgressMap}
+          myIssuesScope={scope}
+          myIssuesFilter={filter}
+          sort={sort}
+          projectId={projectId}
+        />
+      )}
     </div>
   );
 }
@@ -250,6 +322,8 @@ function ProjectIssuesSurface({
   const wsId = useWorkspaceId();
   const viewMode = useViewStore((s) => s.viewMode);
   const grouping = useViewStore((s) => s.grouping);
+  const sortBy = useViewStore((s) => s.sortBy);
+  const sortDirection = useViewStore((s) => s.sortDirection);
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
@@ -258,6 +332,15 @@ function ProjectIssuesSurface({
   const labelFilters = useViewStore((s) => s.labelFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const usesGantt = viewMode === "gantt";
+
+  const sort = useMemo(
+    () => ({
+      sort_by: sortBy,
+      sort_direction: sortBy !== "position" ? sortDirection : undefined,
+    } as const),
+    [sortBy, sortDirection],
+  );
+
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
       ...filter,
@@ -274,6 +357,8 @@ function ProjectIssuesSurface({
     wsId,
     scope,
     assigneeGroupFilter,
+    undefined,
+    sort,
   );
   // Each view owns exactly one data source. Board/List ride the bucketed
   // `myIssueListOptions` cache; the assignee-grouped board uses the grouped
@@ -281,7 +366,7 @@ function ProjectIssuesSurface({
   // the current view so switching to Gantt doesn't re-trigger the full
   // per-status fetch in the background.
   const statusIssuesQuery = useQuery({
-    ...myIssueListOptions(wsId, scope, filter),
+    ...myIssueListOptions(wsId, scope, filter, undefined, sort),
     enabled: !usesAssigneeBoard && !usesGantt,
   });
   const assigneeGroupsQuery = useQuery({
@@ -317,9 +402,10 @@ function ProjectIssuesSurface({
         assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
         scope={scope}
         filter={filter}
+        sort={sort}
         ganttIssues={ganttIssues}
       />
-      <BatchActionToolbar />
+      <BatchActionToolbar issues={projectIssues} />
     </>
   );
 }
@@ -336,9 +422,20 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
-  const workspace = useCurrentWorkspace();
-  const workspaceName = workspace?.name;
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
+  useEffect(() => {
+    if (project) {
+      recordRecentContext(wsId, {
+        type: "project",
+        id: project.id,
+        label: project.title,
+        subtitle: project.description ?? undefined,
+        icon: project.icon,
+        projectStatus: project.status,
+      });
+    }
+  }, [project?.id, project?.title, project?.description, project?.icon, project?.status, recordRecentContext, wsId]);
   const projectScope = `project:${projectId}`;
   const projectFilter = useMemo<MyIssuesFilter>(
     () => ({ project_id: projectId }),
@@ -354,6 +451,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     enabled: !!userId,
   });
   const isPinned = pinnedItems.some((p) => p.item_type === "project" && p.item_id === projectId);
+  const isWorkspaceAdmin = useMemo(() => {
+    if (!userId) return false;
+    const me = members.find((m) => m.user_id === userId);
+    return me?.role === "owner" || me?.role === "admin";
+  }, [members, userId]);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
   const descEditorRef = useRef<ContentEditorRef>(null);
@@ -369,11 +471,21 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     id: "multica_project_detail_layout",
   });
   const sidebarRef = usePanelRef();
+  const desktopSidebarInitialOpen = getAnimatedRightSidebarInitialOpen(
+    true,
+    defaultLayout,
+  );
   // Desktop and mobile sidebar state must be separate. A single state defaulting
   // to `true` made the mobile <Sheet> mount in the open position on first render
   // (after `useIsMobile()` flipped from false→true), briefly covering the page
   // with its modal backdrop and locking scroll — leaving the page unresponsive.
-  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
+  const {
+    open: desktopSidebarOpen,
+    visualOpen: desktopSidebarVisualOpen,
+    motionEnabled: desktopSidebarMotionEnabled,
+    beginToggle: beginDesktopSidebarToggle,
+    handleResize: handleDesktopSidebarResize,
+  } = useAnimatedRightSidebarState(desktopSidebarInitialOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
 
@@ -382,6 +494,22 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       setMobileSidebarOpen(false);
     }
   }, [isMobile]);
+
+  const handleToggleSidebar = useCallback(() => {
+    if (isMobile) {
+      setMobileSidebarOpen((open) => !open);
+      return;
+    }
+
+    const panel = sidebarRef.current;
+    if (!panel) return;
+    const nextOpen = panel.isCollapsed();
+    beginDesktopSidebarToggle(nextOpen);
+    window.requestAnimationFrame(() => {
+      if (nextOpen) panel.expand();
+      else panel.collapse();
+    });
+  }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
 
   // Lead popover
   const [leadOpen, setLeadOpen] = useState(false);
@@ -466,6 +594,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       {/* Properties */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
@@ -598,6 +727,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         return (
           <div>
             <button
+              type="button"
               className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${progressOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
               onClick={() => setProgressOpen(!progressOpen)}
             >
@@ -622,6 +752,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       {/* Description */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${descriptionOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setDescriptionOpen(!descriptionOpen)}
         >
@@ -637,6 +768,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             onUpdate={(md) => handleUpdateField({ description: md || null })}
             debounceMs={1500}
           />
+          <p className="mt-1 px-2 text-xs text-muted-foreground">
+            {t(($) => $.detail.description_hint)}
+          </p>
         </div>}
       </div>
 
@@ -650,15 +784,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         <div className="flex h-full flex-col">
-          <PageHeader className="gap-2 bg-background text-sm">
-            <div className="flex flex-1 items-center gap-1.5 min-w-0">
-              <AppLink href={wsPaths.projects()} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
-                {workspaceName ?? t(($) => $.detail.breadcrumb_fallback)}
-              </AppLink>
-              <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              <span className="truncate">{project.title}</span>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
+          <BreadcrumbHeader
+            segments={[{ href: wsPaths.projects(), label: t(($) => $.detail.breadcrumb_fallback) }]}
+            leaf={<span className="truncate font-medium text-foreground">{project.title}</span>}
+            actions={
+              <>
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -684,20 +814,25 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 />
                 <DropdownMenuContent align="end" className="w-auto">
                   <DropdownMenuItem onClick={() => {
-                    navigator.clipboard.writeText(window.location.href);
-                    toast.success(t(($) => $.detail.toast_link_copied));
+                    void copyText(window.location.href).then((ok) => {
+                      if (ok) toast.success(t(($) => $.detail.toast_link_copied));
+                    });
                   }}>
                     <Link2 className="h-3.5 w-3.5" />
                     {t(($) => $.detail.copy_link)}
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => setDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    {t(($) => $.detail.delete_action)}
-                  </DropdownMenuItem>
+                  {isWorkspaceAdmin && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => setDeleteDialogOpen(true)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {t(($) => $.detail.delete_action)}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
               <Tooltip>
@@ -707,16 +842,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                       variant={sidebarOpen ? "secondary" : "ghost"}
                       size="icon-sm"
                       className={sidebarOpen ? "" : "text-muted-foreground"}
-                      onClick={() => {
-                        if (isMobile) {
-                          setMobileSidebarOpen((open) => !open);
-                        } else {
-                          const panel = sidebarRef.current;
-                          if (!panel) return;
-                          if (panel.isCollapsed()) panel.expand();
-                          else panel.collapse();
-                        }
-                      }}
+                      onClick={handleToggleSidebar}
                     >
                       <PanelRight />
                     </Button>
@@ -724,8 +850,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 />
                 <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
               </Tooltip>
-            </div>
-          </PageHeader>
+              </>
+            }
+          />
 
           <ViewStoreProvider store={projectViewStore}>
               <ProjectIssuesSurface
@@ -740,19 +867,19 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         {!isMobile && (
         <ResizablePanel
           id="sidebar"
+          {...rightSidebarPanelMotionProps}
+          data-right-sidebar-motion={desktopSidebarMotionEnabled ? "enabled" : undefined}
           defaultSize={desktopSidebarOpen ? 320 : 0}
           minSize={260}
           maxSize={420}
           collapsible
           groupResizeBehavior="preserve-pixel-size"
           panelRef={sidebarRef}
-          onResize={(size) => setDesktopSidebarOpen(size.inPixels > 0)}
+          onResize={handleDesktopSidebarResize}
         >
-          <div className="overflow-y-auto border-l h-full">
-            <div className="p-4">
-              {sidebarContent}
-            </div>
-          </div>
+          <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled}>
+            {sidebarContent}
+          </AnimatedRightSidebar>
         </ResizablePanel>
         )}
         {isMobile && (
@@ -765,22 +892,24 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </ResizablePanelGroup>
 
       {/* Delete confirmation */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.delete_dialog.title)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(($) => $.delete_dialog.description)}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.delete_dialog.cancel)}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-white hover:bg-destructive/90">
-              {t(($) => $.delete_dialog.confirm)}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {isWorkspaceAdmin && (
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t(($) => $.delete_dialog.title)}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t(($) => $.delete_dialog.description)}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t(($) => $.delete_dialog.cancel)}</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDelete} className="bg-destructive text-white hover:bg-destructive/90">
+                {t(($) => $.delete_dialog.confirm)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </>
   );
 }

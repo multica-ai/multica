@@ -1,7 +1,7 @@
 /**
  * Agent Runs sheet — presented as a formSheet by the parent Stack. Two
  * sections: Active (queued/dispatched/running, created_at desc) and Past
- * (failed → cancelled → completed, completed_at desc within each). Empty
+ * (completed_at desc, status rank as tiebreaker). Empty
  * sections hide entirely.
  *
  * Both entry points (the in-card AgentActivityRow and the Stack-header
@@ -30,6 +30,7 @@ const PAST_STATUS_ORDER: Record<AgentTask["status"], number> = {
   completed: 2,
   queued: 99,
   dispatched: 99,
+  waiting_local_directory: 99,
   running: 99,
 };
 
@@ -57,9 +58,9 @@ export default function IssueRunsRoute() {
         t.status === "cancelled",
     );
     return filtered.sort((a, b) => {
-      const ord = PAST_STATUS_ORDER[a.status] - PAST_STATUS_ORDER[b.status];
-      if (ord !== 0) return ord;
-      return (b.completed_at ?? "").localeCompare(a.completed_at ?? "");
+      const timeDiff = (b.completed_at ?? "").localeCompare(a.completed_at ?? "");
+      if (timeDiff !== 0) return timeDiff;
+      return PAST_STATUS_ORDER[a.status] - PAST_STATUS_ORDER[b.status];
     });
   }, [allTasks]);
 

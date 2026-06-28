@@ -1,3 +1,5 @@
+import type { AgentTask } from "./agent";
+
 export interface ChatSession {
   id: string;
   workspace_id: string;
@@ -55,6 +57,18 @@ export interface ChatMessage {
   elapsed_ms?: number | null;
 }
 
+export interface ChatMessagesCursor {
+  created_at: string;
+  id: string;
+}
+
+export interface ChatMessagesPage {
+  messages: ChatMessage[];
+  limit: number;
+  has_more: boolean;
+  next_cursor?: ChatMessagesCursor | null;
+}
+
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
@@ -65,6 +79,29 @@ export interface SendChatMessageResponse {
    * timer "snaps backwards" later when WS events update the cache.
    */
   created_at: string;
+  /**
+   * Attachment ids the server actually bound to this message. The client
+   * diffs these against the ids it requested to warn when an attachment
+   * silently failed to bind — no extra fetch needed. Optional for forward
+   * compat with servers that predate the field.
+   */
+  attachment_ids?: string[];
+}
+
+export interface CancelledChatMessage {
+  chat_session_id: string;
+  message_id: string;
+  content: string;
+  restore_to_input: boolean;
+  /**
+   * Attachments detached from the deleted message so a restored draft can
+   * re-bind them on re-send. Absent on servers that predate the field.
+   */
+  attachments?: import("./attachment").Attachment[];
+}
+
+export interface CancelTaskResponse extends AgentTask {
+  cancelled_chat_message?: CancelledChatMessage;
 }
 
 /**

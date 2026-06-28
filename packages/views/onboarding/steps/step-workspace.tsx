@@ -24,7 +24,10 @@ import { cn } from "@multica/ui/lib/utils";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
 import type { Workspace } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
+import { useConfigStore } from "@multica/core/config";
+import { workspaceUrlHost } from "@multica/core/workspace/workspace-url";
 import { DragStrip } from "@multica/views/platform";
+import { useLogout } from "../../auth";
 import { StepHeader } from "../components/step-header";
 import { RadioMark } from "../components/option-card";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
@@ -49,7 +52,9 @@ import { isReservedSlug } from "@multica/core/paths";
  * shared form's own button would fight the footer CTA.
  *
  * The create-fields block doubles as a pedagogical preview: the URL is
- * rendered as a `multica.ai/[slug]` pill, and a live `Issues will look
+ * rendered as a `<host>/[slug]` pill (host derived from the deployment's
+ * app URL so self-hosted instances show their own domain), and a live
+ * `Issues will look
  * like ACME-123` line shows the user what their issue IDs will read
  * like before they've created anything.
  *
@@ -78,13 +83,26 @@ export function StepWorkspace({
   const { t } = useT("onboarding");
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
+  const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+  const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
+  // Single source of truth for "can the user reach the create path on this
+  // instance?" — drives the resume-mode picker, the eyebrow/headline/lede
+  // copy, the side panel, and the footer CTA so the disabled state can't
+  // leak a clickable create affordance even if /api/config arrives late
+  // (#3433 review feedback).
+  const workspaceCreationAllowed = !workspaceCreationDisabled;
+  const logout = useLogout();
 
   const reusing = existing ?? null;
   // Resume path only: user picks which card. `null` = neither yet, so
   // the footer CTA stays disabled. Clicking either card toggles — a
   // second click on the same card deselects it. No-existing path
-  // ignores this state entirely.
-  const [mode, setMode] = useState<"existing" | "create" | null>(null);
+  // ignores this state entirely. When workspace creation is disabled
+  // and a workspace already exists, default to "existing" so the user
+  // can press the CTA immediately — the only valid action.
+  const [mode, setMode] = useState<"existing" | "create" | null>(() =>
+    !workspaceCreationAllowed && existing ? "existing" : null,
+  );
   const pickExisting = () =>
     setMode((m) => (m === "existing" ? null : "existing"));
   const pickCreate = () =>
@@ -152,9 +170,13 @@ export function StepWorkspace({
   // Compute the footer CTA from whichever path the user is on. `null`
   // is only reachable in the resume path; `existing` is only valid
   // when we actually have a `reusing` workspace; everything else
-  // (including the no-existing path) funnels through `create`.
+  // (including the no-existing path) funnels through `create` — except
+  // when this instance has DISABLE_WORKSPACE_CREATION=true, in which
+  // case the create path is unreachable and a no-reusing user falls
+  // through to the disabled notice (rendered separately below).
   const isCreating = createWorkspace.isPending;
-  const creatingActive = !reusing || mode === "create";
+  const creatingActive =
+    workspaceCreationAllowed && (!reusing || mode === "create");
   const existingActive = Boolean(reusing) && mode === "existing";
 
   let hint: string;
@@ -224,7 +246,7 @@ export function StepWorkspace({
         </Label>
         <div className="flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground">
           <span className="select-none pl-3 font-mono text-sm text-muted-foreground">
-            {"multica.ai/"}
+            {`${urlHost}/`}
           </span>
           <Input
             id="ws-slug"
@@ -288,18 +310,30 @@ export function StepWorkspace({
           <div className="mx-auto w-full max-w-[620px] px-6 py-10 sm:px-10 md:px-14 lg:px-0 lg:py-14">
             <div className="mb-2 text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
               {reusing
-                ? t(($) => $.step_workspace.eyebrow_resume)
-                : t(($) => $.step_workspace.eyebrow_first)}
+                ? workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.eyebrow_resume)
+                  : t(($) => $.step_workspace.creation_disabled_eyebrow_resume)
+                : workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.eyebrow_first)
+                  : t(($) => $.step_workspace.creation_disabled_eyebrow)}
             </div>
             <h1 className="text-balance font-serif text-[36px] font-medium leading-[1.1] tracking-tight text-foreground">
               {reusing
-                ? t(($) => $.step_workspace.headline_resume, { name: reusing.name })
-                : t(($) => $.step_workspace.headline_first)}
+                ? workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.headline_resume, { name: reusing.name })
+                  : t(($) => $.step_workspace.creation_disabled_headline_resume, { name: reusing.name })
+                : workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.headline_first)
+                  : t(($) => $.step_workspace.creation_disabled_headline)}
             </h1>
             <p className="mt-4 text-[15.5px] leading-[1.55] text-foreground/80">
               {reusing
-                ? t(($) => $.step_workspace.lede_resume)
-                : t(($) => $.step_workspace.lede_first)}
+                ? workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.lede_resume)
+                  : t(($) => $.step_workspace.creation_disabled_lede_resume)
+                : workspaceCreationAllowed
+                  ? t(($) => $.step_workspace.lede_first)
+                  : t(($) => $.step_workspace.creation_disabled_lede)}
             </p>
 
             <div className="mt-10">
@@ -310,30 +344,40 @@ export function StepWorkspace({
                     selected={mode === "existing"}
                     onSelect={pickExisting}
                   />
-                  <CreateNewWorkspaceCard
-                    selected={mode === "create"}
-                    onSelect={pickCreate}
-                  >
-                    {createFields}
-                  </CreateNewWorkspaceCard>
+                  {/* Hide the create-new card entirely when the self-host
+                      gate (DISABLE_WORKSPACE_CREATION) is on (#3433) — the
+                      backend would 403 the POST and the user would be stuck
+                      with a useless form. */}
+                  {!workspaceCreationDisabled && (
+                    <CreateNewWorkspaceCard
+                      selected={mode === "create"}
+                      onSelect={pickCreate}
+                    >
+                      {createFields}
+                    </CreateNewWorkspaceCard>
+                  )}
                 </div>
+              ) : workspaceCreationDisabled ? (
+                <CreationDisabledNotice onLogout={logout} />
               ) : (
                 createFields
               )}
             </div>
 
-            <div className="mt-8 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
-              <span
-                aria-live="polite"
-                className="mr-auto text-xs text-muted-foreground"
-              >
-                {hint}
-              </span>
-              <Button size="lg" disabled={continueDisabled} onClick={onContinue}>
-                {continueLabel}
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
+            {!(workspaceCreationDisabled && !reusing) && (
+              <div className="mt-8 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+                <span
+                  aria-live="polite"
+                  className="mr-auto text-xs text-muted-foreground"
+                >
+                  {hint}
+                </span>
+                <Button size="lg" disabled={continueDisabled} onClick={onContinue}>
+                  {continueLabel}
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </div>
         </main>
       </div>
@@ -358,6 +402,24 @@ export function StepWorkspace({
   );
 }
 
+/**
+ * Onboarding-step notice rendered when the operator has set
+ * DISABLE_WORKSPACE_CREATION=true (#3433) AND the user has no existing
+ * workspace yet. The headline / lede above this block already carry the
+ * messaging; this component only provides the logout escape so a user who
+ * landed here without an invitation is not trapped.
+ */
+function CreationDisabledNotice({ onLogout }: { onLogout: () => void }) {
+  const { t } = useT("onboarding");
+  return (
+    <div className="flex flex-col gap-3">
+      <Button variant="outline" size="lg" onClick={onLogout}>
+        {t(($) => $.step_workspace.creation_disabled_logout)}
+      </Button>
+    </div>
+  );
+}
+
 function ExistingWorkspaceCard({
   workspace,
   selected,
@@ -367,6 +429,7 @@ function ExistingWorkspaceCard({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
   return (
     <button
       type="button"
@@ -380,13 +443,13 @@ function ExistingWorkspaceCard({
           : "hover:border-foreground/20 hover:bg-accent/30",
       )}
     >
-      <WorkspaceAvatar name={workspace.name} size="lg" />
+      <WorkspaceAvatar name={workspace.name} avatarUrl={workspace.avatar_url} size="lg" />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="truncate text-[14.5px] font-medium text-foreground">
           {workspace.name}
         </div>
         <div className="truncate font-mono text-xs text-muted-foreground">
-          {`multica.ai/${workspace.slug}`}
+          {`${urlHost}/${workspace.slug}`}
         </div>
       </div>
       <RadioMark selected={selected} />
@@ -513,6 +576,7 @@ function WorkspacePreviewCard({
   slug: string;
 }) {
   const { t } = useT("onboarding");
+  const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
   return (
     <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
       <div className="flex items-center gap-3 border-b px-4 py-3.5">
@@ -522,7 +586,7 @@ function WorkspacePreviewCard({
             {name}
           </div>
           <div className="truncate font-mono text-[11.5px] text-muted-foreground">
-            {`multica.ai/${slug}`}
+            {`${urlHost}/${slug}`}
           </div>
         </div>
         <Lock

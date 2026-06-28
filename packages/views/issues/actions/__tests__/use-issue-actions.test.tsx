@@ -74,6 +74,7 @@ vi.mock("sonner", () => ({
 }));
 
 // Import AFTER mocks are registered.
+import { toast } from "sonner";
 import { useIssueActions } from "../use-issue-actions";
 
 const mockIssue: Issue = {
@@ -109,6 +110,8 @@ beforeEach(() => {
   mockUpdateMutate.mockReset();
   mockCreatePinMutate.mockReset();
   mockDeletePinMutate.mockReset();
+  vi.mocked(toast.success).mockReset();
+  vi.mocked(toast.error).mockReset();
   pinListRef.value = [];
   localStorage.clear();
   Object.defineProperty(navigator, "clipboard", {
@@ -131,9 +134,8 @@ describe("useIssueActions", () => {
     );
   });
 
-  it("assigning an agent to a backlog issue opens the backlog-hint modal", () => {
-    const backlogIssue = { ...mockIssue, status: "backlog" } as Issue;
-    const { result } = renderHook(() => useIssueActions(backlogIssue), { wrapper });
+  it("assigning an agent routes through the run-confirm modal instead of mutating directly", () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
 
     act(() => {
       result.current.updateField({
@@ -142,13 +144,16 @@ describe("useIssueActions", () => {
       });
     });
 
-    expect(mockOpenModal).toHaveBeenCalledWith("issue-backlog-agent-hint", {
-      issueId: "issue-1",
+    expect(mockOpenModal).toHaveBeenCalledWith("issue-run-confirm", {
+      issueIds: ["issue-1"],
+      mode: "assign",
+      assigneeType: "agent",
+      assigneeId: "agent-1",
     });
+    expect(mockUpdateMutate).not.toHaveBeenCalled();
   });
 
-  it("does not re-open backlog-hint when the user has dismissed it", () => {
-    localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
+  it("assigning an agent to a backlog issue applies directly — backlog never starts a run", () => {
     const backlogIssue = { ...mockIssue, status: "backlog" } as Issue;
     const { result } = renderHook(() => useIssueActions(backlogIssue), { wrapper });
 
@@ -159,6 +164,27 @@ describe("useIssueActions", () => {
       });
     });
 
+    expect(mockUpdateMutate).toHaveBeenCalledWith(
+      { id: "issue-1", assignee_type: "agent", assignee_id: "agent-1" },
+      expect.any(Object),
+    );
+    expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
+  it("assigning a member applies directly without the run-confirm modal", () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    act(() => {
+      result.current.updateField({
+        assignee_type: "member",
+        assignee_id: "user-1",
+      });
+    });
+
+    expect(mockUpdateMutate).toHaveBeenCalledWith(
+      { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
+      expect.any(Object),
+    );
     expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
@@ -207,6 +233,63 @@ describe("useIssueActions", () => {
       identifier: "TES-1",
       onDeletedNavigateTo: "/test/issues",
     });
+  });
+
+  it("removeParent clears parent_issue_id and stage in one write, never via the run-confirm modal", () => {
+    const childIssue = {
+      ...mockIssue,
+      parent_issue_id: "parent-1",
+      stage: 2,
+    } as Issue;
+    const { result } = renderHook(() => useIssueActions(childIssue), { wrapper });
+
+    act(() => {
+      result.current.removeParent();
+    });
+
+    expect(mockUpdateMutate).toHaveBeenCalledWith(
+      { id: "issue-1", parent_issue_id: null, stage: null },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    // Detaching never routes through the run-confirm modal.
+    expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
+  it("removeParent toasts success only from onSuccess — not eagerly, and not on failure", () => {
+    const childIssue = {
+      ...mockIssue,
+      parent_issue_id: "parent-1",
+    } as Issue;
+    const { result } = renderHook(() => useIssueActions(childIssue), { wrapper });
+
+    act(() => {
+      result.current.removeParent();
+    });
+
+    // mutate() is fire-and-forget here (mocked), so nothing is confirmed yet.
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(mockUpdateMutate).toHaveBeenCalledTimes(1);
+
+    const opts = mockUpdateMutate.mock.calls[0]![1] as {
+      onSuccess: () => void;
+      onError: (err: unknown) => void;
+    };
+
+    // A failed write surfaces the error, never a false "removed" confirmation.
+    act(() => {
+      opts.onError(new Error("forbidden"));
+    });
+    expect(toast.error).toHaveBeenCalledWith("forbidden");
+    expect(toast.success).not.toHaveBeenCalled();
+
+    // Only the server-confirmed success toasts.
+    act(() => {
+      opts.onSuccess();
+    });
+    expect(toast.success).toHaveBeenCalledTimes(1);
   });
 
   it("togglePin calls createPin when not pinned and deletePin when pinned", async () => {

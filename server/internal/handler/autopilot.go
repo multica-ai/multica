@@ -11,7 +11,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -42,6 +45,25 @@ type AutopilotResponse struct {
 	LastRunAt          *string `json:"last_run_at"`
 	CreatedAt          string  `json:"created_at"`
 	UpdatedAt          string  `json:"updated_at"`
+
+	// List-endpoint-only derived fields (absent on the detail/create/update
+	// responses and on older servers — clients must treat them as optional).
+	// Enabled triggers only; last_run_status is the most recent run's status.
+	TriggerKinds  []string `json:"trigger_kinds,omitempty"`
+	NextRunAt     *string  `json:"next_run_at,omitempty"`
+	LastRunStatus *string  `json:"last_run_status,omitempty"`
+
+	// Always non-nil (empty slice when no subscribers configured) so
+	// frontend optional-chain rules can treat the field as authoritative.
+	Subscribers []AutopilotSubscriberEntry `json:"subscribers"`
+}
+
+// user_type is restricted to "member" at the DB layer; the field is kept on
+// the wire so a future expansion to agents/squads is additive, not breaking.
+type AutopilotSubscriberEntry struct {
+	UserType  string `json:"user_type"`
+	UserID    string `json:"user_id"`
+	CreatedAt string `json:"created_at"`
 }
 
 type AutopilotTriggerResponse struct {
@@ -78,6 +100,11 @@ type AutopilotTriggerResponse struct {
 	LastFiredAt       *string `json:"last_fired_at"`
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
+	// EventFilters is the declared event scope. Only present for webhook
+	// triggers; omitted when the trigger accepts all events. Serializes as
+	// a JSON array of {event, actions?} objects — never as a base64 string
+	// (which is what []byte would produce through encoding/json).
+	EventFilters []WebhookEventFilter `json:"event_filters,omitempty"`
 }
 
 type AutopilotRunResponse struct {
@@ -98,13 +125,21 @@ type AutopilotRunResponse struct {
 
 // ── Converters ──────────────────────────────────────────────────────────────
 
-func autopilotToResponse(a db.Autopilot) AutopilotResponse {
+func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) AutopilotResponse {
 	assigneeType := a.AssigneeType
 	if assigneeType == "" {
 		// Older rows pre-MUL-2429 may surface as "" against an out-of-date
 		// schema view; default to "agent" so the API contract stays
 		// non-null.
 		assigneeType = "agent"
+	}
+	subResp := make([]AutopilotSubscriberEntry, len(subscribers))
+	for i, s := range subscribers {
+		subResp[i] = AutopilotSubscriberEntry{
+			UserType:  s.UserType,
+			UserID:    uuidToString(s.UserID),
+			CreatedAt: timestampToString(s.CreatedAt),
+		}
 	}
 	return AutopilotResponse{
 		ID:                 uuidToString(a.ID),
@@ -122,6 +157,7 @@ func autopilotToResponse(a db.Autopilot) AutopilotResponse {
 		LastRunAt:          timestampToPtr(a.LastRunAt),
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
+		Subscribers:        subResp,
 	}
 }
 
@@ -156,6 +192,16 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 			resp.HasSigningSecret = true
 			hint := signingSecretHint(t.SigningSecret.String)
 			resp.SigningSecretHint = &hint
+		}
+		if len(t.EventFilters) > 0 {
+			var filters []WebhookEventFilter
+			if err := json.Unmarshal(t.EventFilters, &filters); err == nil {
+				resp.EventFilters = filters
+			}
+			// On unmarshal error we deliberately drop the field instead of
+			// surfacing raw bytes or 500ing — strict write-time validation
+			// is supposed to make this branch unreachable, and the matcher
+			// fails closed if a corrupt row ever slips through.
 		}
 	}
 	return resp
@@ -224,10 +270,11 @@ type CreateAutopilotRequest struct {
 	ProjectID   *string `json:"project_id"`
 	// AssigneeType is optional and defaults to "agent" — preserves backward
 	// compatibility with desktop clients shipped before MUL-2429.
-	AssigneeType       *string `json:"assignee_type"`
-	AssigneeID         string  `json:"assignee_id"`
-	ExecutionMode      string  `json:"execution_mode"`
-	IssueTitleTemplate *string `json:"issue_title_template"`
+	AssigneeType       *string           `json:"assignee_type"`
+	AssigneeID         string            `json:"assignee_id"`
+	ExecutionMode      string            `json:"execution_mode"`
+	IssueTitleTemplate *string           `json:"issue_title_template"`
+	Subscribers        []SubscriberInput `json:"subscribers"`
 }
 
 type UpdateAutopilotRequest struct {
@@ -239,6 +286,13 @@ type UpdateAutopilotRequest struct {
 	Status             *string `json:"status"`
 	ExecutionMode      *string `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
+	// Wholesale replacement when present; omit to leave subscribers untouched.
+	Subscribers []SubscriberInput `json:"subscribers"`
+}
+
+type SubscriberInput struct {
+	UserType string `json:"user_type"`
+	UserID   string `json:"user_id"`
 }
 
 type CreateAutopilotTriggerRequest struct {
@@ -249,6 +303,9 @@ type CreateAutopilotTriggerRequest struct {
 	// Provider is currently only meaningful for kind=webhook. Allowed
 	// values: "generic" (default) or "github". Unset → "generic".
 	Provider *string `json:"provider"`
+	// EventFilters is an optional list of {event, actions?} scopes. Only
+	// meaningful for webhook triggers. nil/empty means "accept all events".
+	EventFilters []WebhookEventFilter `json:"event_filters,omitempty"`
 }
 
 // SetSigningSecretRequest is the body shape for PUT
@@ -269,6 +326,20 @@ type UpdateAutopilotTriggerRequest struct {
 	CronExpression *string `json:"cron_expression"`
 	Timezone       *string `json:"timezone"`
 	Label          *string `json:"label"`
+	// EventFilters is the desired event-filter set with tri-state PATCH
+	// semantics:
+	//
+	//   - omitted / explicit null (nil pointer) → leave the existing value
+	//     untouched.
+	//   - explicit [] (non-nil, length 0)       → clear filters (the trigger
+	//     reverts to "accept all events").
+	//   - explicit [...]                        → replace with the supplied
+	//     list.
+	//
+	// This is why the pointer matters: with a plain []WebhookEventFilter
+	// there is no way to tell "field absent from the PATCH body" from "field
+	// present but empty", and the user can never clear filters once set.
+	EventFilters *[]WebhookEventFilter `json:"event_filters,omitempty"`
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
@@ -291,8 +362,19 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := make([]AutopilotResponse, len(autopilots))
-	for i, a := range autopilots {
-		resp[i] = autopilotToResponse(a)
+	for i, row := range autopilots {
+		// Omit subscribers to avoid an N+1; GET /api/autopilots/{id} is
+		// the source of truth for the populated template.
+		r := autopilotToResponse(row.Autopilot, nil)
+		r.TriggerKinds = row.TriggerKinds
+		if row.NextRunAt.Valid {
+			r.NextRunAt = timestampToPtr(row.NextRunAt)
+		}
+		if row.LastRunStatus != "" {
+			s := row.LastRunStatus
+			r.LastRunStatus = &s
+		}
+		resp[i] = r
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"autopilots": resp, "total": len(resp)})
 }
@@ -306,7 +388,12 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := autopilotToResponse(autopilot)
+	subs, err := h.Queries.ListAutopilotSubscribers(r.Context(), autopilot.ID)
+	if err != nil {
+		// Don't 500 the detail fetch over template metadata.
+		subs = nil
+	}
+	resp := autopilotToResponse(autopilot, subs)
 
 	// Include triggers.
 	triggers, err := h.Queries.ListAutopilotTriggers(r.Context(), autopilot.ID)
@@ -405,7 +492,21 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	autopilot, err := h.Queries.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
+	// Validate before insert so a bad payload doesn't half-create the row.
+	subscriberUUIDs, ok := h.validateAutopilotSubscribers(w, r, req.Subscribers, workspaceID)
+	if !ok {
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	autopilot, err := qtx.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
 		WorkspaceID:        wsUUID,
 		Title:              req.Title,
 		AssigneeType:       assigneeType,
@@ -423,9 +524,75 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := autopilotToResponse(autopilot)
+	for _, uid := range subscriberUUIDs {
+		if err := qtx.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
+			AutopilotID: autopilot.ID,
+			UserType:    "member",
+			UserID:      uid,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to add autopilot subscriber")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
+		return
+	}
+	subs, err := h.Queries.ListAutopilotSubscribers(r.Context(), autopilot.ID)
+	if err != nil {
+		subs = nil
+	}
+
+	resp := autopilotToResponse(autopilot, subs)
 	h.publish(protocol.EventAutopilotCreated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AutopilotCreated(
+		userID,
+		workspaceID,
+		uuidToString(autopilot.ID),
+		"manual",
+		"manual",
+	))
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// Writes an HTTP error and returns ok=false on the first invalid entry.
+// Returns (nil, true) when raw is empty — caller distinguishes "leave alone"
+// from "replace with empty" via the raw-fields map, not this return.
+func (h *Handler) validateAutopilotSubscribers(
+	w http.ResponseWriter,
+	r *http.Request,
+	raw []SubscriberInput,
+	workspaceID string,
+) ([]pgtype.UUID, bool) {
+	if len(raw) == 0 {
+		return nil, true
+	}
+	out := make([]pgtype.UUID, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
+	for i, entry := range raw {
+		if entry.UserType != "member" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("subscribers[%d].user_type must be 'member'", i))
+			return nil, false
+		}
+		if entry.UserID == "" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("subscribers[%d].user_id is required", i))
+			return nil, false
+		}
+		uid, ok := parseUUIDOrBadRequest(w, entry.UserID, fmt.Sprintf("subscribers[%d].user_id", i))
+		if !ok {
+			return nil, false
+		}
+		if seen[entry.UserID] {
+			continue
+		}
+		seen[entry.UserID] = true
+		if !h.isWorkspaceEntity(r.Context(), entry.UserType, entry.UserID, workspaceID) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("subscribers[%d] is not a member of this workspace", i))
+			return nil, false
+		}
+		out = append(out, uid)
+	}
+	return out, true
 }
 
 func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
@@ -536,13 +703,62 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	autopilot, err := h.Queries.UpdateAutopilot(r.Context(), params)
+	// Subscribers are validated up-front (before any write) so a bad payload
+	// doesn't leave the autopilot row updated but the template stale.
+	var (
+		subscriberUUIDs    []pgtype.UUID
+		replaceSubscribers bool
+	)
+	if _, sent := rawFields["subscribers"]; sent {
+		replaceSubscribers = true
+		validated, vok := h.validateAutopilotSubscribers(w, r, req.Subscribers, workspaceID)
+		if !vok {
+			return
+		}
+		subscriberUUIDs = validated
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	autopilot, err := qtx.UpdateAutopilot(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
 		return
 	}
 
-	resp := autopilotToResponse(autopilot)
+	if replaceSubscribers {
+		if err := qtx.DeleteAutopilotSubscribersForAutopilot(r.Context(), autopilot.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update subscribers")
+			return
+		}
+		for _, uid := range subscriberUUIDs {
+			if err := qtx.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
+				AutopilotID: autopilot.ID,
+				UserType:    "member",
+				UserID:      uid,
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to add autopilot subscriber")
+				return
+			}
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+		return
+	}
+
+	subs, err := h.Queries.ListAutopilotSubscribers(r.Context(), autopilot.ID)
+	if err != nil {
+		subs = nil
+	}
+	resp := autopilotToResponse(autopilot, subs)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -596,7 +812,27 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.DeleteAutopilot(r.Context(), idUUID); err != nil {
+	// autopilot_subscriber carries no DB-level foreign key/cascade (repo rule:
+	// referential cleanup lives in the application layer), so delete the
+	// subscriber template alongside the autopilot in one transaction. Without
+	// this, deleting an autopilot would orphan its subscriber rows.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if err := qtx.DeleteAutopilotSubscribersForAutopilot(r.Context(), idUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	if err := qtx.DeleteAutopilot(r.Context(), idUUID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete autopilot")
 		return
 	}
@@ -643,6 +879,16 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		// next_run_at to compute, so a timezone is meaningless. Reject loudly
 		// instead of silently dropping the field.
 		writeError(w, http.StatusBadRequest, "timezone is not valid for webhook triggers")
+		return
+	}
+	if req.Kind != "webhook" && len(req.EventFilters) > 0 {
+		// event_filters narrows webhook ingress — it has no meaning for a
+		// schedule trigger and would otherwise be silently dropped.
+		writeError(w, http.StatusBadRequest, "event_filters is only valid for webhook triggers")
+		return
+	}
+	if err := validateWebhookEventFilters(req.EventFilters); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Provider only applies to webhook triggers and the value space is
@@ -698,7 +944,12 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		// entry (vanishingly unlikely with 256 bits but the retry keeps
 		// the failure mode obvious if RNG is degraded), we re-generate
 		// and re-INSERT — never UPDATE.
-		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap.ID, ptrToText(req.Label), provider)
+		eventFiltersBytes, err := encodeWebhookEventFilters(req.EventFilters)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encode event_filters")
+			return
+		}
+		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap.ID, ptrToText(req.Label), provider, eventFiltersBytes)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create trigger")
 			return
@@ -750,6 +1001,7 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 	autopilotID pgtype.UUID,
 	label pgtype.Text,
 	provider string,
+	eventFilters []byte,
 ) (db.AutopilotTrigger, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		token, err := generateWebhookToken()
@@ -763,6 +1015,7 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 			Label:        label,
 			WebhookToken: pgtype.Text{String: token, Valid: true},
 			Provider:     pgtype.Text{String: provider, Valid: provider != ""},
+			EventFilters: eventFilters,
 		})
 		if err == nil {
 			return trigger, nil
@@ -841,6 +1094,13 @@ func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusUnprocessableEntity, "squad leader is archived; pick a different squad or rotate the leader before assigning autopilot")
 			return false
 		}
+		// Private-leader gate: the member configuring the autopilot must have
+		// access to the private leader, same as validateAssigneePair.
+		actorType, actorID := h.resolveActor(r, requestUserID(r), util.UUIDToString(workspaceID))
+		if !h.canAccessPrivateAgent(r.Context(), leader, actorType, actorID, util.UUIDToString(workspaceID)) {
+			writeError(w, http.StatusForbidden, "cannot assign autopilot to squad with private leader")
+			return false
+		}
 		return true
 	default:
 		writeError(w, http.StatusBadRequest, "assignee_type must be agent or squad")
@@ -914,6 +1174,28 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Label != nil {
 		params.Label = pgtype.Text{String: *req.Label, Valid: true}
+	}
+	// Tri-state PATCH for event_filters. A nil pointer (field omitted or
+	// JSON null) leaves the existing row untouched — params.EventFilters
+	// stays unset and the COALESCE in the UPDATE preserves the previous
+	// value. A non-nil pointer is authoritative: an empty slice clears
+	// filters (encoded as the JSONB literal `[]` so COALESCE replaces
+	// rather than preserves), a populated slice replaces.
+	if req.EventFilters != nil {
+		if prev.Kind != "webhook" {
+			writeError(w, http.StatusBadRequest, "event_filters is only valid for webhook triggers")
+			return
+		}
+		if err := validateWebhookEventFilters(*req.EventFilters); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		encoded, err := encodeWebhookEventFiltersAlways(*req.EventFilters)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encode event_filters")
+			return
+		}
+		params.EventFilters = encoded
 	}
 
 	// Recompute next_run_at if cron or timezone changed.

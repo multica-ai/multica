@@ -91,6 +91,103 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("searchIssues", () => {
+    it("falls back to an empty result when the response is malformed", async () => {
+      stubFetchJson({ issues: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchIssues({ q: "bug" });
+      expect(res).toEqual({ issues: [], total: 0 });
+    });
+  });
+
+  describe("searchProjects", () => {
+    it("falls back to an empty result when the response is malformed", async () => {
+      stubFetchJson({ projects: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchProjects({ q: "roadmap" });
+      expect(res).toEqual({ projects: [], total: 0 });
+    });
+  });
+
+  describe("listAutopilots", () => {
+    const baseAutopilot = {
+      id: "ap-1",
+      workspace_id: "ws-1",
+      title: "Daily triage",
+      description: null,
+      assignee_id: "agent-1",
+      status: "active",
+      execution_mode: "run_only",
+      issue_title_template: null,
+      created_by_type: "member",
+      created_by_id: "user-1",
+      last_run_at: null,
+      created_at: "2026-06-01T00:00:00Z",
+      updated_at: "2026-06-01T00:00:00Z",
+    };
+
+    it("falls back to an empty list when the response is malformed", async () => {
+      stubFetchJson({ autopilots: "not-an-array", total: 1 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res).toEqual({ autopilots: [], total: 0 });
+    });
+
+    it("accepts an old-server row without assignee_type or derived fields", async () => {
+      // Pre-MUL-2429 servers omit assignee_type; servers older than the
+      // list-derived-fields change omit trigger_kinds/next_run_at/
+      // last_run_status. Both must parse, not fall back.
+      stubFetchJson({ autopilots: [baseAutopilot], total: 1 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res.autopilots).toHaveLength(1);
+      expect(res.autopilots[0]?.assignee_type).toBe("agent");
+      expect(res.autopilots[0]?.trigger_kinds).toBeUndefined();
+      expect(res.autopilots[0]?.last_run_status).toBeUndefined();
+    });
+
+    it("passes derived fields through and tolerates enum drift", async () => {
+      stubFetchJson({
+        autopilots: [
+          {
+            ...baseAutopilot,
+            assignee_type: "squad",
+            trigger_kinds: ["schedule", "some_future_kind"],
+            next_run_at: "2026-06-13T09:00:00Z",
+            last_run_status: "some_future_status",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res.autopilots[0]?.trigger_kinds).toEqual([
+        "schedule",
+        "some_future_kind",
+      ]);
+      expect(res.autopilots[0]?.next_run_at).toBe("2026-06-13T09:00:00Z");
+      expect(res.autopilots[0]?.last_run_status).toBe("some_future_status");
+    });
+  });
+
+  describe("getConfig", () => {
+    it("drops malformed daemon setup URLs instead of throwing", async () => {
+      stubFetchJson({
+        cdn_domain: "cdn.example.com",
+        allow_signup: true,
+        daemon_server_url: { wrong: "shape" },
+        daemon_app_url: 123,
+        workspace_creation_disabled: false,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const config = await client.getConfig();
+      expect(config.cdn_domain).toBe("cdn.example.com");
+      expect(config.allow_signup).toBe(true);
+      expect(config.daemon_server_url).toBeUndefined();
+      expect(config.daemon_app_url).toBeUndefined();
+    });
+  });
+
   describe("listGroupedIssues", () => {
     it("falls back to empty groups when the response is malformed", async () => {
       stubFetchJson({ groups: "not-an-array" });
@@ -106,6 +203,15 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const comments = await client.listComments("issue-1");
       expect(comments).toEqual([]);
+    });
+  });
+
+  describe("previewCommentTriggers", () => {
+    it("returns an empty agent list when the response is malformed", async () => {
+      stubFetchJson({ agents: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const preview = await client.previewCommentTriggers("issue-1", "hello");
+      expect(preview).toEqual({ agents: [] });
     });
   });
 

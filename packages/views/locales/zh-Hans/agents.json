@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "我的",
-    "all": "全部"
+    "all": "全部",
+    "archived": "已归档"
   },
   "sort": {
     "label_recent": "最近活跃",
@@ -25,7 +26,8 @@
     "all": "全部",
     "online": "在线",
     "unstable": "不稳定",
-    "offline": "离线"
+    "offline": "离线",
+    "archived": "已归档"
   },
   "workload": {
     "working": "处理中",
@@ -46,7 +48,17 @@
     "no_archived": "还没有已归档智能体。",
     "search_active": "没有智能体匹配\"{{query}}\"。",
     "search_active_filtered": "在该筛选下没有智能体匹配\"{{query}}\"。",
-    "no_filter_match": "该筛选下没有匹配的智能体。"
+    "no_filter_match": "该筛选下没有匹配的智能体。",
+    "search_runtime_filtered": "\"{{machine}}\"上没有匹配\"{{query}}\"的智能体。",
+    "runtime_filtered": "\"{{machine}}\"上还没有智能体。"
+  },
+  "runtime_filter": {
+    "all": "全部运行时",
+    "section_local": "本机",
+    "section_remote": "远程",
+    "section_cloud": "云端",
+    "agent_count_other": "{{count}} 个智能体",
+    "empty": "还没有机器"
   },
   "columns": {
     "agent": "智能体",
@@ -54,7 +66,11 @@
     "workload": "工作负载",
     "runtime": "运行时",
     "activity_7d": "活动（7 天）",
-    "runs": "运行次数"
+    "runs": "运行次数",
+    "last_active": "最近活跃",
+    "model": "模型",
+    "created": "创建时间",
+    "owner": "Owner"
   },
   "row": {
     "you": "你",
@@ -62,7 +78,9 @@
     "no_description": "暂无描述",
     "fallback_runtime_cloud": "云端",
     "fallback_runtime_local": "本地",
-    "actions_aria": "行操作"
+    "actions_aria": "行操作",
+    "task_count_one": "{{count}} 个任务",
+    "task_count_other": "{{count}} 个任务"
   },
   "activity_tooltip": {
     "created_today": "今天创建",
@@ -123,7 +141,8 @@
   "inspector": {
     "section_properties": "属性",
     "section_details": "详情",
-    "section_skills": "skill",
+    "section_skills": "Skills",
+    "section_integrations": "外部集成",
     "prop_runtime": "运行时",
     "prop_model": "模型",
     "prop_thinking": "思考",
@@ -186,11 +205,14 @@
   },
   "tabs": {
     "activity": "动态",
-    "tasks": "task",
+    "tasks": "Tasks",
     "instructions": "指令",
-    "skills": "skill",
+    "skills": "Skills",
     "environment": "环境变量",
     "custom_args": "自定义参数",
+    "mcp_config": "MCP",
+    "integrations": "集成",
+    "runtime_config": "路由",
     "discard_dialog_title": "放弃未保存的修改？",
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",
@@ -229,7 +251,7 @@
       "editor_placeholder": "写下这个智能体该做什么、关注什么、要避开什么…"
     },
     "skills_section": {
-      "label": "Skill",
+      "label": "Skills",
       "placeholder": "从工作区添加 skill",
       "selected_other": "已选 {{count}} 个 —— 点击修改",
       "collapse": "收起",
@@ -258,7 +280,7 @@
       "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR —— 每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式"
     },
     "env": {
-      "intro_readonly": "在智能体进程启动时注入。值已隐藏 —— 只有智能体所有者或工作区管理员可以查看和编辑。",
+      "intro_readonly": "在智能体进程启动时注入。只有工作区所有者 / 管理员可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",
       "empty_readonly": "尚未配置环境变量。",
       "intro_prefix": "在智能体进程启动时注入（例如 ",
       "intro_separator": "、",
@@ -270,7 +292,14 @@
       "remove_aria": "移除变量",
       "duplicate_keys_toast": "环境变量 key 重复",
       "saved_toast": "已保存环境变量",
-      "save_failed_toast": "保存环境变量失败"
+      "save_failed_toast": "保存环境变量失败",
+      "not_revealed_title_other": "已配置 {{count}} 个变量",
+      "not_revealed_empty": "尚未配置环境变量。",
+      "not_revealed_hint": "在解锁前所有值保持隐藏。每次解锁与编辑都会写入工作区审计日志。",
+      "reveal_action": "解锁并编辑",
+      "revealing": "正在解锁…",
+      "reveal_failed_toast": "加载环境变量值失败",
+      "empty_editable": "尚未配置环境变量。新增一条即可在智能体启动时注入。"
     },
     "custom_args": {
       "intro": "在智能体命令启动时追加的额外 CLI 参数。多 token 的参数可以共用一行 —— 在传给 CLI 前会按空白拆分。",
@@ -281,10 +310,41 @@
       "saved_toast": "已保存自定义参数",
       "save_failed_toast": "保存自定义参数失败"
     },
+    "mcp_config": {
+      "intro": "转发给运行时 CLI 的 MCP 服务器配置（Claude 通过 --mcp-config，Codex 通过 $CODEX_HOME/config.toml，Hermes/Kimi/Kiro 通过 ACP mcpServers，OpenCode 通过 OPENCODE_CONFIG_CONTENT，OpenClaw 通过每个任务的配置 wrapper）。原样保存，可能包含密钥 —— 只有智能体所有者和工作区管理员可以读取。留空则回退到 CLI 自身的默认设置。OpenClaw 的 HTTP/SSE 条目需要使用 OpenClaw 自己的字段名（例如 \"transport\": \"streamable-http\"），而不是 Claude 的 \"type\"。",
+      "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
+      "editor_aria": "MCP 配置 JSON 编辑器",
+      "clear_action": "清空",
+      "invalid_json": "JSON 无效：{{error}}",
+      "invalid_not_object": "MCP 配置必须是 JSON 对象（例如 {\"mcpServers\": …}）。",
+      "saved_toast": "已保存 MCP 配置",
+      "save_failed_toast": "保存 MCP 配置失败",
+      "redacted_title": "已配置 —— 当前账号无权查看",
+      "redacted_hint": "只有智能体所有者或工作区管理员可以读取该配置。"
+    },
+    "runtime_config": {
+      "intro": "选择 OpenClaw 运行时执行该智能体每一回合的方式。Local 模式让智能体直接在 daemon 进程内运行；Gateway 模式则把每一回合转发到一个 OpenClaw Gateway —— 适合 daemon 宿主只是轻量协调机、希望真正算力落在更强的远端机器上的场景。",
+      "mode_label": "路由模式",
+      "mode_local": "Local",
+      "mode_gateway": "Gateway",
+      "mode_local_hint": "默认。daemon 调用 `openclaw agent --local …`，智能体循环跑在本机。",
+      "mode_gateway_hint": "daemon 连接 OpenClaw Gateway。端点字段留空则继承 daemon 宿主 `~/.openclaw/openclaw.json` 里的配置。",
+      "gateway_legend": "Gateway 端点",
+      "host_label": "Host",
+      "host_placeholder": "gw.internal",
+      "port_label": "端口",
+      "port_invalid": "端口必须是正整数。",
+      "token_label": "鉴权 Token",
+      "token_placeholder": "Gateway 颁发的 bearer token",
+      "token_masked_placeholder": "已保存 —— 输入新值可轮换，留空则保留原 token",
+      "tls_label": "启用 TLS",
+      "tls_hint": "用 https:// 代替 http:// 连接",
+      "saved_toast": "路由配置已保存",
+      "save_failed_toast": "保存路由配置失败"
+    },
     "skills": {
       "intro": "分配给该智能体的工作区 skill。本地运行时 skill 会自动可用。",
       "add_action": "添加 skill",
-      "import_hint": "导入会在工作区创建一份副本，团队可以编辑和复用。",
       "empty_title": "尚未分配 skill",
       "empty_hint": "添加工作区 skill，把团队知识共享给这个智能体。",
       "remove_failed_toast": "移除 skill 失败",
@@ -299,6 +359,10 @@
       "add_dialog_confirm_other": "添加 {{count}} 个 skill",
       "add_dialog_cancel": "取消",
       "add_failed_toast": "添加 skill 失败"
+    },
+    "integrations": {
+      "intro": "把这个智能体连接到外部聊天平台，让大家在自己熟悉的工具里直接与它协作。",
+      "members_note": "只有工作区的所有者和管理员才能为智能体绑定飞书 Bot。你可以在「设置 → 集成」中查看已连接的 Bot。"
     },
     "activity": {
       "section_now": "当前",
@@ -318,7 +382,7 @@
       "success_pct": "{{percent}}% 成功",
       "avg_duration": "平均 {{value}}",
       "failed_count": "{{count}} 次失败",
-      "source_issue": "issue",
+      "source_issue": "Issue",
       "source_chat": "聊天",
       "source_autopilot": "自动化",
       "source_untracked": "未追踪",
@@ -326,7 +390,7 @@
       "source_creating_issue": "正在创建 issue",
       "source_chat_session": "聊天会话",
       "source_autopilot_run": "自动化运行",
-      "issue_short_fallback": "issue {{prefix}}...",
+      "issue_short_fallback": "Issue {{prefix}}...",
       "triggered_by": "触发来源",
       "open_issue_aria": "打开 issue",
       "open_issue_tooltip": "打开 issue",
@@ -360,7 +424,7 @@
     "unavailable": "智能体不可用",
     "detail_link": "详情 →",
     "runtime_label": "运行时",
-    "skills_label": "skill",
+    "skills_label": "Skills",
     "owner_label": "所有者",
     "unknown_runtime": "未知运行时"
   },
@@ -396,5 +460,32 @@
     "runtime_offline": "守护进程离线",
     "runtime_recovery": "守护进程已重启",
     "manual": "用户取消"
+  },
+  "last_active": {
+    "today": "今天",
+    "days_ago_one": "{{count}} 天前",
+    "days_ago_other": "{{count}} 天前",
+    "none": "30 天内无活动"
+  },
+  "toolbar": {
+    "result_count_title": "当前结果 / 范围内全部",
+    "filter_label": "筛选",
+    "filter_active_count_one": "{{count}} 项筛选",
+    "filter_active_count_other": "{{count}} 项筛选",
+    "clear_filters": "清除筛选",
+    "section_availability": "可用性",
+    "section_runtime": "运行时",
+    "display": "显示",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "列",
+    "section_owner": "Owner",
+    "section_model": "模型"
+  },
+  "actions": {
+    "selected_one": "已选 {{count}} 项",
+    "selected_other": "已选 {{count}} 项",
+    "clear_selection": "清除选择"
   }
 }

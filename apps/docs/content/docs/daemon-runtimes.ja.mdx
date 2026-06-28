@@ -1,0 +1,134 @@
+---
+title: デーモンとランタイム
+description: エージェントは Multica のサーバーでは実行されません — あなた自身のマシンで実行されます。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+Multica では、[エージェント](/agents)は私たちのサーバーでは実行され**ません** — ローカルにインストールされた [AI コーディングツール](/providers)を呼び出す**デーモン**という小さなプログラムが駆動し、あなた自身のマシンで実行されます。Multica サーバーは調整役に徹します。[イシュー](/issues)を保存し、[タスク](/tasks)をキューに入れ、適切な**ランタイム**へ分配します（ランタイム = デーモン × AI コーディングツール 1 つ）。
+
+この構造が Multica と Linear / Jira の最大の違いです。**あなたの API キー、ツールチェーン、コードディレクトリはすべてあなたのマシンに残り**、Multica サーバーはそのどれも見ることはありません。つまり「自分のエージェントが動かない」はほとんど常にローカルの問題です。デーモンが実行されていない、AI ツールがインストールされていない、キーが期限切れになっている、といったことです。まずローカルを確認してください。案内は[トラブルシューティング](/troubleshooting)を参照してください。
+
+## デーモンを起動する
+
+デーモンは Multica CLI の一部です。[Multica CLI](/cli) をインストールしたら、あなた自身のマシンで実行してください。
+
+```bash
+multica daemon start
+```
+
+起動時にデーモンは 4 つのことを行います。
+
+1. ログイン時に保存された認証情報を読み込みます
+2. `PATH` にインストールされた AI コーディングツールを検出します（内蔵 12 種: [Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Gemini](/providers#gemini)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)）
+3. 検出した各ツールに対するランタイムとともに、自身をサーバーに登録します
+4. **3 秒ごと**に取得すべきタスクがないかポーリングし、**15 秒ごとにハートビートを送信**し続けます
+
+よく使うコマンド:
+
+| コマンド | 用途 |
+|---|---|
+| `multica daemon start` | 起動（デフォルトはバックグラウンド。フォアグラウンドで実行するには `--foreground` を追加） |
+| `multica daemon stop` | 停止 |
+| `multica daemon restart` | 再起動 |
+| `multica daemon status` | ステータス表示 |
+| `multica daemon logs` | ログ表示（追従するには `-f` を追加） |
+
+完全な CLI リファレンスは [CLI コマンド](/cli)を確認してください。
+
+**デスクトップアプリにはデーモンが同梱されています。** [デスクトップアプリ](/desktop-app)を使う場合、`multica daemon start` を手動で実行する必要はありません。起動時にデーモンを自動的に立ち上げます。あなたのワークフローにどの方式が合うかは、[デスクトップアプリ](/desktop-app)ページを参照してください。
+
+## 1 つのマシンに複数のランタイムができる理由
+
+ランタイムはサーバーでもコンテナでもありません。「**デーモン × AI コーディングツール 1 つ**」の組み合わせです。たとえば、Claude Code と Codex の両方がインストールされた MacBook でデーモンを起動し、あなたが 2 つのワークスペースのメンバーだとします。すると Multica は 4 つのランタイムを登録します。
+
+<Mermaid chart={`
+graph TD
+    D["あなたのデーモン<br/>MacBook"]
+    D --> R1["ランタイム<br/>ワークスペース A × Claude Code"]
+    D --> R2["ランタイム<br/>ワークスペース A × Codex"]
+    D --> R3["ランタイム<br/>ワークスペース B × Claude Code"]
+    D --> R4["ランタイム<br/>ワークスペース B × Codex"]
+`} />
+
+要点:
+
+- **1 つのデーモンは複数のランタイムにマッピングされ得ます** — インストールされたツールと、あなたが所属するワークスペースの組み合わせごとに 1 つできます
+- **同じデーモン、ワークスペース、ツールは、ちょうど 1 つのランタイムを作ります** — デーモンを再起動しても重複レコードは生まれません
+- Multica UI の**ランタイム**ページがこれらの行を一覧表示します
+
+## カスタムランタイムプロファイル
+
+組み込み provider 検出は一般的なツールを対象にしていますが、Multica が対応するプロトコルファミリーで動作し、ワークスペース固有の起動コマンドが必要な AI CLI には **custom runtime profile** を定義できます。Runtimes UI か CLI で管理します。
+
+```bash
+multica runtime profile list
+multica runtime profile create --display-name "Composer" --protocol-family codex --command-name agent
+multica runtime profile update <profile-id> --command-name agent
+multica runtime profile delete <profile-id>
+```
+
+入力するコマンドは shell 文字列ではなく argv 形式です。Multica は実行ファイル名と固定引数を保存し、デーモンは `exec.Command(command_name, fixed_args...)` で直接起動します。通常の引数、引用符、バックスラッシュエスケープは使えますが、パイプ、リダイレクト、`&&`、`;`、バッククォート、`$VAR` / `$(...)` 展開は使えません。shell の動作が必要な場合は wrapper script を使ってください。
+現在、コマンドと引数の解析は Runtimes UI が担当します。CLI の profile コマンドは profile 行とローカルのパス上書きを管理します。
+
+デスクトップアプリから起動したデーモンが、ターミナルでは動くコマンドを見つけられない場合は、そのマシンで絶対パスを固定できます。
+
+```bash
+multica runtime profile set-path <profile-id> --path /abs/path/to/agent
+multica runtime profile unset-path <profile-id>
+```
+
+profile のコマンドや引数の変更は、デーモンが再登録された後に新しく取得するタスクへ適用されます。実行中のタスクは開始時の引数を使い続けます。混在デプロイでは、先に server をアップグレードしてから daemon を順次更新することを推奨します。`fixed_args` の入力は server 側の Runtimes UI が担い、`failed_profiles` 登録レポートも server が表示します。古いコンポーネントは未知のフィールドを明示的に失敗させず無視することがあるため、server を先に更新すると rollout を観測しやすくなります。
+
+<Callout type="info">
+**クラウドランタイムが近日提供されます。** 現在は順番待ちリストの段階です。提供が始まれば、ローカルのデーモンを実行せずに Multica Cloud 上で直接エージェントタスクを実行できるようになります。[ダウンロードページ](https://multica.ai/download)でメールアドレスを登録すると通知を受け取れます。
+</Callout>
+
+## ランタイムがオフラインと表示される時点
+
+Multica はハートビートでランタイムがオンラインかどうかを判断します。3 つの重要な数値があります。
+
+| イベント | しきい値 |
+|---|---|
+| デーモンのハートビート頻度 | **15 秒**ごと |
+| 欠落として表示 | **45 秒**間ハートビートなし（3 回欠落） |
+| 自動削除 | 関連するエージェントがない状態で **7 日**以上欠落 |
+
+欠落は永続的ではありません。デーモンが再びハートビートを送った瞬間にオンラインに戻り、ランタイムレコードも保持されます。デーモンを再起動してもランタイムは失われません。
+
+<Callout type="warning">
+**欠落したランタイムで実行中だったタスクは失敗として表示されます**（失敗理由 `runtime_offline`）。リトライ可能なソース（イシュー、チャット）については、Multica が自動的に再度キューに入れます。オートパイロットがトリガーしたタスクは自動的にはリトライされません。[タスク → どの失敗が自動リトライされるか](/tasks#which-failures-retry-automatically-which-dont)を参照してください。
+</Callout>
+
+## いくつのタスクを並列に実行できるか
+
+Multica は 2 つの層で同時実行数の制限を適用します。
+
+- **デーモン層**: デフォルトで**同時タスク 20 個**（環境変数 `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` で調整可能）
+- **エージェント層**: デフォルトで**エージェントあたり同時タスク 6 個**（エージェントごとに設定）
+
+2 つのうち厳しい方が適用されます。デーモンがすでにタスク 20 個を実行中なら、あるエージェントに余裕が残っていても新しいタスクは待機します。
+
+タスクが `dispatched` に進めず `queued` で止まっている場合、通常はこの 2 つの制限のいずれかが飽和しています。
+
+## デーモンのクラッシュ後、進行中だったタスクはどうなるか
+
+デーモンがクラッシュしたり強制終了されたりすると、デーモンが取得していたタスクは `dispatched` または `running` 状態に残ります。次回の起動時、デーモンはサーバーに「これらのタスクはもう私のものではないので、失敗として表示してください」と伝えます。サーバーはそれを理由 `runtime_recovery` とともに `failed` に切り替えます。リトライ可能なソースについては、タスクが自動的に再度キューに入ります。
+
+この手順がネットワークの問題で失敗しても、バックアップとして**30 秒ごと**にサーバー側のスキャンが回ります。45 秒以上ハートビートのないランタイムは欠落として表示され、その上のタスクも一緒に回収されます。
+
+## 動かないエージェントのトラブルシューティング
+
+「自分のエージェントが動かない」という問題に遭遇したら、まずこの 3 ステップのチェックリストを進めてください。
+
+1. `multica daemon status` を実行し、デーモンが実行中でオンラインかを確認します
+2. `multica daemon logs -f` を実行し、エラーがないかを確認します
+3. Multica UI の**ランタイム**ページを開き、ランタイムが「オンライン」と表示されているかを確認します
+
+より多くのシナリオは[トラブルシューティング](/troubleshooting)を参照してください。
+
+## 次へ
+
+- [タスク](/tasks) — デーモンがタスクを取得した後の全ライフサイクル
+- [プロバイダー対照表](/providers) — 12 種の AI コーディングツールの機能の違い

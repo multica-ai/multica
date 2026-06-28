@@ -7,6 +7,7 @@ import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWelcomeStore } from "@multica/core/onboarding";
 import { paths, useCurrentWorkspace } from "@multica/core/paths";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, CreateIssueRequest, Issue } from "@multica/core/types";
@@ -50,7 +51,7 @@ import {
  *     1. Full-screen loading veil ("Preparing your Helper…")
  *     2. Find-or-create a "Multica Helper" agent on the picked runtime
  *        — `listAgents` first to dedupe against re-entries, then
- *        `createAgent` with the EN/ZH instructions from
+ *        `createAgent` with the localized instructions from
  *        `onboarding/templates/helper-instructions.ts`.
  *     3. Blocking Dialog (no close button, no Escape, no outside-click).
  *        Renders the agent's name + description and 3 starter cards.
@@ -279,8 +280,8 @@ function RuntimeWelcome({
   // browser fallback and the user's saved `me.language` preference (via
   // user-locale-sync). Reading me.language directly would miss anonymous
   // new users whose preference field is still null but whose browser is
-  // in Chinese — the agent instructions and seeded issue body should
-  // follow what they're already reading.
+  // already using another supported locale — the agent instructions and
+  // seeded issue body should follow what they're already reading.
   const { t, i18n } = useT("onboarding");
   const navigation = useNavigation();
   const qc = useQueryClient();
@@ -330,7 +331,7 @@ function RuntimeWelcome({
       useCaseLabel: t(
         ($) => $.welcome_after_onboarding.user_context_use_case_label,
       ),
-      listSeparator: lang === "zh" ? "、" : ", ",
+      listSeparator: lang === "zh" || lang === "ja" ? "、" : ", ",
       role: {
         engineer: t(($) => $.questions.role.engineer),
         product: t(($) => $.questions.role.product),
@@ -560,7 +561,7 @@ function RuntimeWelcome({
       >
         <div className="flex flex-col items-center gap-3 pt-4 animate-onboarding-enter">
           <img
-            src={agent.avatar_url || HELPER_AVATAR_URL}
+            src={resolvePublicFileUrl(agent.avatar_url) ?? HELPER_AVATAR_URL}
             alt=""
             aria-hidden
             className="h-14 w-14 rounded-xl ring-1 ring-foreground/10"
@@ -675,7 +676,7 @@ interface SkipWelcomeProps {
  * Skip-path welcome. v3 product decision (see /Users/qingnaiyuan/.claude/plans):
  *
  *   1. Full-screen loading veil while we provision EVERYTHING in a fixed
- *      sequence — create-agent-guide issue → install-runtime issue →
+ *      sequence — install-runtime issue → create-agent-guide issue →
  *      follow-up comment on the install-runtime issue linking to the
  *      create-agent-guide identifier.
  *   2. Only after the whole chain succeeds do we mount the celebration
@@ -696,7 +697,8 @@ interface SkipWelcomeProps {
 function SkipWelcome({ workspaceId, onDismiss }: SkipWelcomeProps) {
   // i18n.language is the LIVE runtime locale (browser fallback + saved
   // me.language). Reading me.language directly would miss new users
-  // whose preference field is still null but who are browsing in Chinese.
+  // whose preference field is still null but who are browsing in another
+  // supported locale.
   const { t, i18n } = useT("onboarding");
   const navigation = useNavigation();
   const qc = useQueryClient();

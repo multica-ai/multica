@@ -174,18 +174,16 @@ func isPiToolNameByte(b byte) bool {
 }
 
 func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
-	execPath := b.cfg.ExecutablePath
-	if execPath == "" {
-		execPath = "pi"
+	execName := b.cfg.ExecutablePath
+	if execName == "" {
+		execName = "pi"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("pi executable not found at %q: %w", execPath, err)
+	lookedUp, err := exec.LookPath(execName)
+	if err != nil {
+		return nil, fmt.Errorf("pi executable not found at %q: %w", execName, err)
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
 
 	// Pi's --session flag expects a file path where events are appended.
 	// The path doubles as our opaque session identifier: we return it as
@@ -202,13 +200,14 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		return nil, fmt.Errorf("pi session file: %w", err)
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildPiArgs(prompt, sessionPath, opts, b.cfg.Logger)
+	argv0, cmdArgs := choosePiInvocation(execName, lookedUp, args, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
+	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -220,12 +219,26 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancel()
 		return nil, fmt.Errorf("pi stdout pipe: %w", err)
 	}
+	// Attach an explicit stdin pipe so we can close it ourselves. Pi reads
+	// its prompt from argv (positional, see buildPiArgs) and never expects
+	// interactive input, but when the parent leaves cmd.Stdin nil and the
+	// daemon is run under systemd, Pi has been observed to block in its
+	// event loop awaiting stdin events instead of progressing to "done"
+	// (#2188). Closing the pipe immediately after Start delivers an
+	// explicit EOF on a FIFO, which unblocks Pi's readable side.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("pi stdin pipe: %w", err)
+	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[pi:stderr] ")
 
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
 		cancel()
 		return nil, fmt.Errorf("start pi: %w", err)
 	}
+	_ = stdin.Close()
 
 	b.cfg.Logger.Info("pi started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 

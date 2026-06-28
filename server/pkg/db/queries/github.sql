@@ -37,6 +37,26 @@ DELETE FROM github_installation WHERE id = $1 AND workspace_id = $2;
 DELETE FROM github_installation WHERE installation_id = $1
 RETURNING id, workspace_id;
 
+-- name: UpsertPendingGitHubInstallation :one
+INSERT INTO github_pending_installation (
+    installation_id, account_login, account_type, account_avatar_url
+) VALUES (
+    $1, $2, $3, sqlc.narg('account_avatar_url')
+)
+ON CONFLICT (installation_id) DO UPDATE SET
+    account_login = EXCLUDED.account_login,
+    account_type = EXCLUDED.account_type,
+    account_avatar_url = EXCLUDED.account_avatar_url,
+    updated_at = now()
+RETURNING *;
+
+-- name: DeletePendingGitHubInstallation :exec
+DELETE FROM github_pending_installation WHERE installation_id = $1;
+
+-- name: GetPendingGitHubInstallation :one
+SELECT * FROM github_pending_installation WHERE installation_id = $1
+;
+
 -- =====================
 -- GitHub Pull Request
 -- =====================
@@ -151,20 +171,21 @@ ORDER BY pr.pr_created_at DESC;
 SELECT issue_id FROM issue_pull_request
 WHERE pull_request_id = $1;
 
--- name: GetSiblingPullRequestStateCountsForIssue :one
--- Returns, for the PRs linked to an issue excluding one PR by id (the PR
--- currently being processed by the webhook handler), how many are still in
--- flight (open or draft) and how many have already merged. The webhook
--- handler combines these with the current event's state to decide whether
--- to auto-advance the issue: the issue moves to done only when there is no
--- in-flight sibling AND at least one linked PR (current or sibling) merged.
+-- name: GetIssuePullRequestCloseAggregate :one
+-- Aggregates the issue's linked PRs into the two counts that gate
+-- auto-advance: how many are still in flight (`open` or `draft`) and how
+-- many merged PRs declared explicit closing intent on the link row. The
+-- webhook auto-advances the issue when open_count = 0 AND
+-- merged_with_close_intent_count > 0. Both the PR state and the link row
+-- (with close_intent) are persisted before this query runs, so the result
+-- is event-agnostic — a link-only sibling closing after a closing-keyword
+-- PR has already merged still resolves the issue.
 SELECT
     COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
-    COALESCE(SUM(CASE WHEN pr.state = 'merged' THEN 1 ELSE 0 END), 0)::bigint AS merged_count
+    COALESCE(SUM(CASE WHEN pr.state = 'merged' AND ipr.close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-WHERE ipr.issue_id = $1
-  AND pr.id <> $2;
+WHERE ipr.issue_id = $1;
 
 -- =====================
 -- GitHub PR check suite
@@ -191,16 +212,66 @@ ON CONFLICT (pr_id, suite_id) DO UPDATE SET
 WHERE EXCLUDED.updated_at >= github_pull_request_check_suite.updated_at;
 
 -- =====================
+-- GitHub pending check_suite (out-of-order arrival stash)
+-- =====================
+
+-- name: UpsertPendingCheckSuite :exec
+-- Stashes a check_suite event whose PR row is not yet mirrored. Replayed
+-- (and deleted) by DrainPendingCheckSuitesForPR once the matching
+-- `pull_request` webhook lands. ON CONFLICT keeps the newest payload
+-- for the same (workspace, repo, pr_number, suite_id) — repeated
+-- deliveries while the PR is still missing are idempotent. The
+-- suite_updated_at guard mirrors UpsertPullRequestCheckSuite so an older
+-- event arriving after a newer one cannot overwrite the newer payload.
+INSERT INTO github_pending_check_suite (
+    workspace_id, installation_id, repo_owner, repo_name, pr_number,
+    suite_id, head_sha, app_id, conclusion, status, suite_updated_at
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, sqlc.narg('conclusion'), $9, $10
+)
+ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number, suite_id) DO UPDATE SET
+    installation_id  = EXCLUDED.installation_id,
+    head_sha         = EXCLUDED.head_sha,
+    app_id           = EXCLUDED.app_id,
+    conclusion       = EXCLUDED.conclusion,
+    status           = EXCLUDED.status,
+    suite_updated_at = EXCLUDED.suite_updated_at,
+    received_at      = now()
+WHERE EXCLUDED.suite_updated_at >= github_pending_check_suite.suite_updated_at;
+
+-- name: DrainPendingCheckSuitesForPR :many
+-- Atomically reads + deletes all pending suites for the given PR address.
+-- Caller replays each row through UpsertPullRequestCheckSuite. RETURNING
+-- gives us the payloads we need without a separate SELECT, so two parallel
+-- handlers racing on the same PR can't double-apply the same row.
+DELETE FROM github_pending_check_suite
+WHERE workspace_id = $1
+  AND repo_owner   = $2
+  AND repo_name    = $3
+  AND pr_number    = $4
+RETURNING suite_id, head_sha, app_id, conclusion, status, suite_updated_at;
+
+-- =====================
 -- Issue ↔ Pull Request link
 -- =====================
 
 -- name: LinkIssueToPullRequest :exec
+-- close_intent reflects the PR's explicit close declaration at the moment
+-- the webhook is allowed to update that intent. Open/edit/merge webhooks use
+-- the current title/body parse result so authors can remove a closing keyword
+-- before merge. Post-terminal edits can opt into preserving the stored value,
+-- keeping the merge-time decision stable.
 INSERT INTO issue_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id
+    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
 ) VALUES (
-    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id')
+    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id'), $3
 )
-ON CONFLICT (issue_id, pull_request_id) DO NOTHING;
+ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
+    close_intent = CASE
+        WHEN sqlc.arg('preserve_close_intent') THEN issue_pull_request.close_intent
+        ELSE EXCLUDED.close_intent
+    END;
 
 -- name: UnlinkIssueFromPullRequest :exec
 DELETE FROM issue_pull_request

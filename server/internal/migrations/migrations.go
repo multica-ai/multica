@@ -69,16 +69,24 @@ func Files(direction string) ([]string, error) {
 	return files, nil
 }
 
-// LatestVersion returns the latest "up" migration version found on disk.
-func LatestVersion() (string, error) {
+// AllVersions returns every "up" migration version found on disk, in apply
+// order. The readiness check verifies that all of them are recorded in
+// schema_migrations — checking only the lexically-last version would miss an
+// out-of-order migration (one numbered below an already-applied later one),
+// letting a server report ready while running against a schema that lacks it.
+func AllVersions() ([]string, error) {
 	files, err := Files("up")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if len(files) == 0 {
-		return "", fmt.Errorf("no up migrations found")
+		return nil, fmt.Errorf("no up migrations found")
 	}
-	return ExtractVersion(files[len(files)-1]), nil
+	versions := make([]string, len(files))
+	for i, f := range files {
+		versions[i] = ExtractVersion(f)
+	}
+	return versions, nil
 }
 
 // ExtractVersion strips the .up.sql / .down.sql suffix from a migration file.

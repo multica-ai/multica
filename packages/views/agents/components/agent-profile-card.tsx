@@ -9,6 +9,7 @@ import {
   type RuntimeHealth,
 } from "@multica/core/runtimes";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
@@ -76,7 +77,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         <ActorAvatarBase
           name={agent.name}
           initials={initials}
-          avatarUrl={agent.avatar_url}
+          avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
           isAgent
           size={40}
           className="rounded-md"

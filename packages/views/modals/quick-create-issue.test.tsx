@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
@@ -11,6 +11,7 @@ const mockClearPrompt = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
+const mockUploadWithToast = vi.hoisted(() => vi.fn());
 
 const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
@@ -116,7 +117,7 @@ vi.mock("@multica/core/runtimes", () => ({
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: vi.fn(), uploading: false }),
+  useFileUpload: () => ({ uploadWithToast: mockUploadWithToast, uploading: false }),
 }));
 
 vi.mock("../issues/components/pickers/assignee-picker", () => ({
@@ -141,7 +142,7 @@ vi.mock("../common/pill-button", () => ({
 }));
 
 vi.mock("../editor", () => {
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, placeholder }: any, ref: any) => {
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, placeholder }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
 
@@ -153,23 +154,36 @@ vi.mock("../editor", () => {
       },
       uploadFile: vi.fn(),
       focus: vi.fn(),
+      // Real ContentEditor checks ProseMirror node attrs for any `uploading:
+      // true` marker. The mock returns false because none of these tests drive
+      // a real in-flight upload through the editor — the multi-upload race is
+      // covered as a unit test against useFileUpload directly (MUL-3339).
+      hasActiveUploads: () => false,
     }));
 
     return (
-      <textarea
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => {
-          valueRef.current = e.target.value;
-          setValue(e.target.value);
-          onUpdate?.(e.target.value);
-        }}
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-            onSubmit?.();
-          }
-        }}
-      />
+      <>
+        <textarea
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            valueRef.current = e.target.value;
+            setValue(e.target.value);
+            onUpdate?.(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              onSubmit?.();
+            }
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => onUploadFile?.(new File(["image"], "shot.png", { type: "image/png" }))}
+        >
+          Mock editor upload
+        </button>
+      </>
     );
   });
   ContentEditor.displayName = "ContentEditor";
@@ -287,6 +301,23 @@ describe("AgentCreatePanel", () => {
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
     mockQuickCreateIssue.mockResolvedValue(undefined);
+    mockUploadWithToast.mockResolvedValue({
+      id: "019ec09d-6222-722b-bdfa-427b105d80be",
+      workspace_id: "ws-test",
+      issue_id: null,
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "member",
+      uploader_id: "user-1",
+      filename: "shot.png",
+      url: "/uploads/shot.png",
+      download_url: "/api/attachments/019ec09d-6222-722b-bdfa-427b105d80be/download",
+      markdown_url: "/api/attachments/019ec09d-6222-722b-bdfa-427b105d80be/download",
+      content_type: "image/png",
+      size_bytes: 5,
+      created_at: "2026-06-12T00:00:00Z",
+    });
     mockSetKeepOpen.mockImplementation((value: boolean) => {
       mockQuickCreateStore.keepOpen = value;
     });
@@ -333,6 +364,38 @@ describe("AgentCreatePanel", () => {
     expect(mockClearPrompt).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("passes referenced upload attachment ids to quick-create", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
+
+    await user.click(screen.getByRole("button", { name: "Mock editor upload" }));
+    await waitFor(() => expect(mockUploadWithToast).toHaveBeenCalled());
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    await user.clear(editor);
+    fireEvent.change(editor, {
+      target: {
+        value: "Create issue with ![image](/api/attachments/019ec09d-6222-722b-bdfa-427b105d80be/download)",
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith({
+        agent_id: "agent-1",
+        prompt: "Create issue with ![image](/api/attachments/019ec09d-6222-722b-bdfa-427b105d80be/download)",
+        project_id: undefined,
+        parent_issue_id: undefined,
+        attachment_ids: ["019ec09d-6222-722b-bdfa-427b105d80be"],
+      });
+    });
   });
 
   // Picking a squad routes the submission through `squad_id` (not
@@ -412,5 +475,55 @@ describe("AgentCreatePanel", () => {
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
     expect(mockSetLastProjectId).not.toHaveBeenCalled();
+  });
+
+  // When the modal was opened from "Add sub issue" on an existing issue,
+  // the manual panel transfers parent_issue_id through the `data` payload
+  // on switch-to-agent. The agent panel must forward that UUID to the
+  // quick-create API silently — without surfacing a parent picker — so the
+  // new issue is filed as a sub-issue. Dropping parent_issue_id here was
+  // the original bug; this locks the wiring in.
+  it("forwards parent_issue_id from the carry payload to the quick-create API", async () => {
+    const user = userEvent.setup();
+
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: {
+        parent_issue_id: "parent-uuid-1",
+        parent_issue_identifier: "MUL-2534",
+      },
+    });
+
+    // Sub-issue context chip is visible so the user knows the new issue
+    // will be filed as a sub-issue.
+    expect(screen.getByTestId("agent-sub-issue-chip")).toBeInTheDocument();
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    await user.clear(editor);
+    await user.type(editor, "Investigate the regression");
+
+    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith({
+        agent_id: "agent-1",
+        prompt: "Investigate the regression",
+        project_id: undefined,
+        parent_issue_id: "parent-uuid-1",
+      });
+    });
+  });
+
+  // The sub-issue chip is purely opt-in context — it only appears when the
+  // modal was opened from an "Add sub issue" entry. A plain quick-create
+  // (no parent in data) must NOT render the chip; otherwise users would see
+  // a stray badge on every quick-create.
+  it("does not render the sub-issue chip when no parent is seeded", () => {
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.queryByTestId("agent-sub-issue-chip")).toBeNull();
   });
 });

@@ -1,0 +1,401 @@
+{
+  "page": {
+    "title": "オートパイロット",
+    "new_autopilot": "新規オートパイロット",
+    "start_blank": "ゼロから始める",
+    "table": {
+      "name": "名前",
+      "agent": "エージェント",
+      "created_by": "作成者",
+      "mode": "モード",
+      "status": "ステータス",
+      "last_run": "最終実行",
+      "assignee": "担当",
+      "trigger": "トリガー",
+      "next_run": "次回実行",
+      "created": "作成日時"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "まだオートパイロットがありません",
+      "hint": "AI エージェントの繰り返しタスクをスケジュールしましょう。テンプレートを選ぶか、ゼロから始められます。"
+    },
+    "scope_all": "すべて",
+    "no_matches": "該当する自動化はありません",
+    "retry": "再試行"
+  },
+  "status": {
+    "active": "アクティブ",
+    "paused": "一時停止中",
+    "archived": "アーカイブ済み"
+  },
+  "execution_mode": {
+    "create_issue": "イシューを作成",
+    "run_only": "実行のみ"
+  },
+  "relative_date": {
+    "today": "今日",
+    "one_day_ago": "1 日前",
+    "days_ago": "{{count}} 日前",
+    "months_ago": "{{count}} か月前"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "日次ニュースダイジェスト",
+      "summary": "今日のニュースを検索し、チーム向けに要約します"
+    },
+    "pr_review": {
+      "title": "PR レビューのリマインダー",
+      "summary": "レビューが必要な滞留中の Pull request を表示します"
+    },
+    "bug_triage": {
+      "title": "バグのトリアージ",
+      "summary": "新しいバグレポートを評価し、優先順位を付けます"
+    },
+    "weekly_progress": {
+      "title": "週次進捗レポート",
+      "summary": "チームの進捗を週次でまとめます"
+    },
+    "dependency_audit": {
+      "title": "依存関係の監査",
+      "summary": "セキュリティ脆弱性と古いパッケージをスキャンします"
+    },
+    "documentation_check": {
+      "title": "ドキュメントの点検",
+      "summary": "最近の変更にドキュメントの不足がないか確認します"
+    }
+  },
+  "detail": {
+    "not_found": "オートパイロットが見つかりません",
+    "pause_aria": "オートパイロットを一時停止",
+    "activate_aria": "オートパイロットを有効化",
+    "edit": "編集",
+    "run_now": "今すぐ実行",
+    "running": "実行中...",
+    "toast_triggered": "オートパイロットを実行しました",
+    "toast_trigger_failed": "オートパイロットを実行できませんでした",
+    "section_properties": "プロパティ",
+    "section_triggers": "トリガー",
+    "section_run_history": "実行履歴",
+    "section_danger": "危険な操作",
+    "field_agent": "エージェント",
+    "field_created_by": "作成者",
+    "field_output_mode": "出力モード",
+    "field_project": "プロジェクト",
+    "no_project": "プロジェクトなし",
+    "project_unavailable": "プロジェクトを利用できません",
+    "field_prompt": "プロンプト",
+    "field_subscribers": "購読者",
+    "field_subscribers_none": "なし",
+    "add_trigger": "トリガーを追加",
+    "no_triggers": "設定されたトリガーがありません。自動で実行するスケジュールを追加してください。",
+    "no_runs": "まだ実行履歴がありません。手動で実行するには「今すぐ実行」をクリックしてください。",
+    "delete_button": "オートパイロットを削除",
+    "toast_deleted": "オートパイロットを削除しました",
+    "toast_delete_failed": "オートパイロットを削除できませんでした",
+    "delete_dialog": {
+      "title": "オートパイロットを削除",
+      "description": "「{{title}}」を、そのトリガーと実行履歴ごと完全に削除します。この操作は元に戻せません。",
+      "cancel": "キャンセル",
+      "confirm": "削除",
+      "deleting": "削除中..."
+    }
+  },
+  "run_status": {
+    "issue_created": "イシュー作成済み",
+    "running": "実行中",
+    "completed": "完了",
+    "failed": "失敗",
+    "skipped": "スキップ済み"
+  },
+  "run_source": {
+    "schedule": "スケジュール",
+    "manual": "手動",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "run": {
+    "issue_linked": "イシューをリンク済み",
+    "view_log": "実行ログを表示",
+    "skipped_group": {
+      "label": "スキップ済み",
+      "summary": "スキップされた実行 {{count}} 件"
+    }
+  },
+  "webhook_payload": {
+    "label": "Webhook イベント:",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "コピー",
+    "copied": "Webhook payload をコピーしました",
+    "copied_short": "コピーしました",
+    "copy_failed": "コピーできませんでした",
+    "truncated_marker": "[切り詰め — 全体の payload を取得するにはコピーをクリック]"
+  },
+  "trigger_kind": {
+    "schedule": "スケジュール",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "trigger_row": {
+    "disabled_badge": "無効",
+    "deprecated_badge": "非推奨",
+    "next_label": "次回: {{date}}",
+    "webhook_url_label": "Webhook URL",
+    "copy_url": "URL をコピー",
+    "url_copied": "Webhook URL をコピーしました",
+    "url_copy_failed": "URL をコピーできませんでした",
+    "rotate_url": "URL を再生成",
+    "rotate_confirm_title": "Webhook URL を再生成",
+    "rotate_confirm_description": "現在の URL は直ちに動作を停止します。この URL を呼び出している外部システムは新しい URL に更新する必要があります。続けますか?",
+    "rotate_confirm_cancel": "キャンセル",
+    "rotate_confirm_action": "URL を再生成",
+    "rotate_in_progress": "再生成中...",
+    "toast_rotated": "Webhook URL を再生成しました",
+    "toast_rotate_failed": "URL を再生成できませんでした",
+    "toast_deleted": "トリガーを削除しました",
+    "toast_delete_failed": "トリガーを削除できませんでした",
+    "delete_dialog": {
+      "title": "トリガーを削除",
+      "description": "このトリガーは削除され、オートパイロットはこのスケジュールでは実行されなくなります。この操作は元に戻せません。",
+      "cancel": "キャンセル",
+      "confirm": "削除",
+      "deleting": "削除中..."
+    }
+  },
+  "deliveries": {
+    "section_title": "Webhook の配信",
+    "empty": "まだ Webhook の配信がありません。Webhook URL に POST を送ると、ここに表示されます。",
+    "row": {
+      "attempts": "{{count}} 回の試行",
+      "replay_badge": "再実行"
+    },
+    "status": {
+      "queued": "キュー待ち",
+      "dispatched": "ディスパッチ済み",
+      "rejected": "拒否",
+      "ignored": "無視",
+      "failed": "失敗"
+    },
+    "signature": {
+      "not_required": "署名なし",
+      "valid": "署名は有効",
+      "invalid": "署名が無効",
+      "missing": "署名がありません"
+    },
+    "detail": {
+      "title": "配信",
+      "received_at": "受信",
+      "last_attempt_at": "最終試行",
+      "attempt_count": "試行回数",
+      "response_status": "レスポンス",
+      "dedupe_key": "重複排除キー",
+      "dedupe_source": "重複排除ソース",
+      "content_type": "Content-Type",
+      "replayed_from": "再実行元",
+      "error_label": "エラー",
+      "raw_body": "生の本文",
+      "selected_headers": "ヘッダー",
+      "response_body": "レスポンス本文"
+    },
+    "replay": {
+      "action": "再実行",
+      "in_progress": "再実行中...",
+      "toast_success": "配信を再実行しました",
+      "toast_failed": "再実行に失敗しました",
+      "disabled_invalid_signature": "署名が無効だったため再実行できません",
+      "disabled_rejected": "拒否された配信は再実行できません",
+      "disabled_queued": "まだキュー待ちです。処理が落ち着いてから再実行してください"
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "トリガーを追加",
+    "type_label": "種類",
+    "type_schedule": "スケジュール",
+    "type_webhook": "Webhook",
+    "label_field": "ラベル(任意)",
+    "label_placeholder": "例: 平日の朝",
+    "webhook_help": "保存すると Multica が Webhook URL を生成します。その URL に任意の JSON を POST すると、このオートパイロットが実行されます。",
+    "submit": "トリガーを追加",
+    "submitting": "追加中...",
+    "toast_added_schedule": "スケジュールトリガーを追加しました",
+    "toast_added_webhook": "Webhook トリガーを追加しました",
+    "toast_add_failed": "トリガーを追加できませんでした"
+  },
+  "dialog": {
+    "sr_create": "新規オートパイロット",
+    "sr_edit": "オートパイロットを編集",
+    "header_create": "新規オートパイロット",
+    "header_edit": "オートパイロットを編集",
+    "subtitle": "繰り返し実行される AI タスク",
+    "expand": "展開",
+    "collapse": "折りたたむ",
+    "close": "閉じる",
+    "title_placeholder": "オートパイロット名",
+    "runbook_label": "ランブック",
+    "runbook_hint": "実行のたびにエージェントが読みます",
+    "description_placeholder": "# 目標\nエージェントは何を達成すべきですか?\n\n# コンテキスト\n誰のための作業ですか? 制約はありますか?\n\n# 手順\n1. …\n2. …",
+    "auto_run_hint": "保存すると、一時停止するまで自動で実行されます。",
+    "cancel": "キャンセル",
+    "create": "オートパイロットを作成",
+    "save": "保存",
+    "creating": "作成中...",
+    "saving": "保存中...",
+    "toast_created": "オートパイロットを作成しました",
+    "toast_create_partial": "オートパイロットは作成しましたが、スケジュールを保存できませんでした",
+    "toast_create_partial_with_reason": "オートパイロットは作成しましたが、スケジュールを保存できませんでした: {{reason}}",
+    "toast_create_failed": "オートパイロットを作成できませんでした",
+    "toast_updated": "オートパイロットを更新しました",
+    "toast_update_partial": "オートパイロットは更新しましたが、スケジュールを保存できませんでした",
+    "toast_update_partial_with_reason": "オートパイロットは更新しましたが、スケジュールを保存できませんでした: {{reason}}",
+    "toast_update_failed": "オートパイロットを更新できませんでした",
+    "section_agent": "エージェント",
+    "section_assignee": "担当者",
+    "select_agent": "エージェントを選択",
+    "select_assignee": "エージェントまたはスクワッドを選択",
+    "section_project": "プロジェクト",
+    "no_project": "プロジェクトなし",
+    "section_subscribers": "購読者",
+    "subscribers_hint": "このオートパイロットが作成するすべてのイシューを自動で購読します",
+    "subscribers_empty": "購読者はいません。チームメイトを追加すると、毎回通知されます",
+    "subscribers_add": "購読者を追加",
+    "subscribers_search_placeholder": "名前でメンバーを検索…",
+    "subscribers_no_results": "一致するメンバーはいません",
+    "subscribers_remove_tooltip": "削除",
+    "section_output_mode": "出力モード",
+    "section_schedule": "スケジュール",
+    "section_trigger_kind": "トリガー",
+    "trigger_kind_schedule": "スケジュール",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "このオートパイロットを作成すると、Multica が Webhook URL を生成します。その URL に任意の JSON を POST すると実行されます。",
+    "webhook_help_edit": "このオートパイロットは Webhook で実行されます。URL の管理(コピー / 再生成)はオートパイロットの詳細ページで行ってください。",
+    "webhook_created_title": "Webhook オートパイロットの準備が完了しました",
+    "webhook_created_description": "下の URL に任意の JSON を POST すると、オートパイロットが実行されます。今コピーしておいてください — オートパイロットの詳細ページでも確認・再生成できます。",
+    "webhook_created_warning": "この URL はパスワードのように扱ってください。URL を持っている人は誰でもオートパイロットを実行できます。",
+    "webhook_created_done": "完了",
+    "event_filter_label": "イベントフィルター",
+    "event_filter_docs_link_label": "イベントフィルターの仕組みを学ぶ",
+    "event_filter_event_placeholder": "例: workflow_run",
+    "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_hint": "これらのイベントに一致する Webhook のみを処理します。空にするとすべて許可します。",
+    "schedule_disabled_reason": "このオートパイロットには複数のスケジュールがあります。詳細ページで編集してください。",
+    "next_run_label": "次回実行:",
+    "output_modes": {
+      "create_issue": {
+        "label": "イシューを作成",
+        "description": "実行のたびに追跡可能なイシューを作成します"
+      },
+      "run_only": {
+        "label": "実行のみ",
+        "description": "イシューを作成せず、静かに実行します"
+      }
+    },
+    "frequency_long": {
+      "hourly": "毎時",
+      "daily": "毎日",
+      "weekdays": "平日ごと",
+      "weekly": "毎週",
+      "custom": "カスタム cron"
+    },
+    "days": {
+      "sunday": "日曜日",
+      "monday": "月曜日",
+      "tuesday": "火曜日",
+      "wednesday": "水曜日",
+      "thursday": "木曜日",
+      "friday": "金曜日",
+      "saturday": "土曜日"
+    }
+  },
+  "trigger_config": {
+    "frequencies": {
+      "hourly": "毎時",
+      "daily": "毎日",
+      "weekdays": "平日",
+      "weekly": "曜日",
+      "custom": "カスタム"
+    },
+    "days_short": {
+      "sun": "日",
+      "mon": "月",
+      "tue": "火",
+      "wed": "水",
+      "thu": "木",
+      "fri": "金",
+      "sat": "土"
+    },
+    "cron_label": "Cron 式",
+    "cron_hint": "標準の 5 フィールド cron(分 時 日 月 曜日)",
+    "minute_label": "分",
+    "time_label": "時刻",
+    "timezone_label": "タイムゾーン",
+    "days_label": "曜日",
+    "summary": {
+      "hourly": "毎時 · :{{min}}",
+      "daily": "毎日 {{time}}",
+      "weekdays": "平日 {{time}}",
+      "weekly": "{{days}} {{time}}",
+      "custom": "カスタム cron",
+      "no_days": "—"
+    },
+    "describe": {
+      "hourly": "毎時 :{{min}} に実行",
+      "daily": "毎日 {{time}} {{offset}} に実行",
+      "weekdays": "平日 {{time}} {{offset}} に実行",
+      "weekly": "毎週 {{days}} {{time}} {{offset}} に実行",
+      "custom": "カスタムスケジュール: {{cron}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}} 日 {{hours}} 時間",
+      "hours_minutes": "{{hours}} 時間 {{minutes}} 分",
+      "minutes": "{{minutes}} 分",
+      "less_than_minute": "1 分未満"
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "エージェントまたはスクワッドを絞り込み...",
+    "select_agent": "エージェントを選択",
+    "select_assignee": "エージェントまたはスクワッドを選択",
+    "agents_group": "エージェント",
+    "squads_group": "スクワッド"
+  },
+  "timezone_picker": {
+    "search_placeholder": "タイムゾーンを検索..."
+  },
+  "toolbar": {
+    "result_count_title": "該当する自動化 / すべての自動化",
+    "filter_label": "フィルター",
+    "filter_active_count_one": "{{count}} 件のフィルター",
+    "filter_active_count_other": "{{count}} 件のフィルター",
+    "clear_filters": "フィルターをクリア",
+    "section_assignee": "担当",
+    "section_mode": "モード",
+    "section_trigger": "トリガー",
+    "section_creator": "作成者",
+    "display": "表示",
+    "sort_by": "並び替え",
+    "direction_asc": "昇順",
+    "direction_desc": "降順",
+    "section_columns": "列"
+  },
+  "actions": {
+    "row_menu": "自動化の操作",
+    "pause": "一時停止",
+    "resume": "再開",
+    "delete": "削除",
+    "selected_one": "{{count}} 件選択中",
+    "selected_other": "{{count}} 件選択中",
+    "clear_selection": "選択を解除",
+    "delete_dialog": {
+      "title": "自動化を削除しますか？",
+      "description_one": "「{{name}}」とその実行履歴を完全に削除します。",
+      "description_other": "{{count}} 件の自動化とその実行履歴を完全に削除します。",
+      "warning": "この操作は取り消せません。",
+      "cancel": "キャンセル",
+      "confirm": "完全に削除",
+      "deleting": "削除中…"
+    }
+  }
+}

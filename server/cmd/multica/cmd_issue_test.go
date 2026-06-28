@@ -242,6 +242,7 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("allow-duplicate", false, "")
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().StringSlice("attachment-id", nil, "")
 	return cmd
 }
 
@@ -283,6 +284,54 @@ func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
 	}
 }
 
+func TestRunIssueCreateSendsExistingAttachmentIDs(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         "issue-1",
+			"identifier": "MUL-1",
+			"title":      "With attachments",
+			"status":     "todo",
+			"priority":   "none",
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_QUICK_CREATE_ATTACHMENT_IDS", `["att-env","att-shared"]`)
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "With attachments")
+	_ = cmd.Flags().Set("attachment-id", "att-flag")
+	_ = cmd.Flags().Set("attachment-id", "att-shared")
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	got, ok := body["attachment_ids"].([]any)
+	if !ok {
+		t.Fatalf("attachment_ids = %#v, want JSON array", body["attachment_ids"])
+	}
+	want := []string{"att-flag", "att-shared", "att-env"}
+	if len(got) != len(want) {
+		t.Fatalf("attachment_ids length = %d, want %d (%#v)", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("attachment_ids[%d] = %#v, want %q (all=%#v)", i, got[i], w, got)
+		}
+	}
+}
+
 func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	want := "Active duplicate issue exists: YUA-36 SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs (status: in_progress). Set allow_duplicate=true or use --allow-duplicate to create another."
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -315,6 +364,159 @@ func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	}
 	if got := err.Error(); got != want {
 		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+func newIssuePullRequestsTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "pull-requests"}
+	cmd.Flags().String("output", "table", "")
+	return cmd
+}
+
+func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/issues/MUL-2818":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-2818",
+				"title":      "CLI PR lookup",
+			})
+		case "/api/issues/issue-uuid/pull-requests":
+			json.NewEncoder(w).Encode(map[string]any{
+				"pull_requests": []map[string]any{
+					{
+						"url":    "https://github.com/multica-ai/multica/pull/42",
+						"number": float64(42),
+						"state":  "open",
+						"title":  "MUL-2818 add issue PR CLI",
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssuePullRequestsTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssuePullRequests(cmd, []string{"MUL-2818"})
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssuePullRequests: %v", err)
+	}
+
+	if want := []string{"/api/issues/MUL-2818", "/api/issues/issue-uuid/pull-requests"}; fmt.Sprint(gotPaths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, string(out))
+	}
+	prs, _ := payload["pull_requests"].([]any)
+	if len(prs) != 1 {
+		t.Fatalf("pull_requests length = %d, want 1", len(prs))
+	}
+	pr, _ := prs[0].(map[string]any)
+	if pr["url"] != "https://github.com/multica-ai/multica/pull/42" || pr["number"] != float64(42) || pr["state"] != "open" || pr["title"] != "MUL-2818 add issue PR CLI" {
+		t.Fatalf("unexpected PR payload: %#v", pr)
+	}
+}
+
+func newIssueUsageTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "usage"}
+	cmd.Flags().String("output", "table", "")
+	return cmd
+}
+
+func TestRunIssueUsageReturnsTokenSummaryAsJSON(t *testing.T) {
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/issues/MUL-2818":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-2818",
+				"title":      "CLI usage lookup",
+			})
+		case "/api/issues/issue-uuid/usage":
+			json.NewEncoder(w).Encode(map[string]any{
+				"total_input_tokens":       float64(3800),
+				"total_output_tokens":      float64(11700),
+				"total_cache_read_tokens":  float64(537800),
+				"total_cache_write_tokens": float64(42400),
+				"task_count":               float64(1),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueUsageTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssueUsage(cmd, []string{"MUL-2818"})
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssueUsage: %v", err)
+	}
+
+	if want := []string{"/api/issues/MUL-2818", "/api/issues/issue-uuid/usage"}; fmt.Sprint(gotPaths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, string(out))
+	}
+	if payload["total_input_tokens"] != float64(3800) || payload["total_output_tokens"] != float64(11700) ||
+		payload["total_cache_read_tokens"] != float64(537800) || payload["total_cache_write_tokens"] != float64(42400) ||
+		payload["task_count"] != float64(1) {
+		t.Fatalf("unexpected usage payload: %#v", payload)
+	}
+}
+
+func TestRunIssuePullRequestsTableIncludesCoreFields(t *testing.T) {
+	prs := []map[string]any{{
+		"url":    "https://github.com/multica-ai/multica/pull/42",
+		"number": float64(42),
+		"state":  "open",
+		"title":  "MUL-2818 add issue PR CLI",
+	}}
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	printIssuePullRequestsTable(prs)
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	text := string(out)
+	for _, want := range []string{"NUMBER", "STATE", "TITLE", "URL", "42", "open", "MUL-2818 add issue PR CLI", "https://github.com/multica-ai/multica/pull/42"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("table output missing %q:\n%s", want, text)
+		}
 	}
 }
 
@@ -1552,6 +1754,9 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "list"}
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().String("since", "", "")
+	cmd.Flags().Bool("roots-only", false, "")
+	cmd.Flags().Bool("summary", false, "")
+	cmd.Flags().Bool("full", false, "")
 	cmd.Flags().String("thread", "", "")
 	cmd.Flags().Int("recent", 0, "")
 	cmd.Flags().Int("tail", 0, "")
@@ -1560,8 +1765,85 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newIssueCommentResolutionTestCmd(use string) *cobra.Command {
+	cmd := &cobra.Command{Use: use}
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueCommentResolution(t *testing.T) {
+	commentID := "comment-123"
+	tests := []struct {
+		name       string
+		run        func(*cobra.Command, []string) error
+		cmdUse     string
+		wantMethod string
+	}{
+		{
+			name:       "resolve posts to resolve endpoint",
+			run:        runIssueCommentResolve,
+			cmdUse:     "resolve",
+			wantMethod: http.MethodPost,
+		},
+		{
+			name:       "unresolve deletes resolve endpoint",
+			run:        runIssueCommentUnresolve,
+			cmdUse:     "unresolve",
+			wantMethod: http.MethodDelete,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMethod = r.Method
+				gotPath = r.URL.Path
+				if gotMethod != tt.wantMethod {
+					t.Errorf("method = %s, want %s", gotMethod, tt.wantMethod)
+				}
+				if gotPath != "/api/comments/"+commentID+"/resolve" {
+					t.Errorf("path = %q, want /api/comments/%s/resolve", gotPath, commentID)
+				}
+				if ws := r.Header.Get("X-Workspace-ID"); ws != "ws-1" {
+					t.Errorf("X-Workspace-ID = %q, want ws-1", ws)
+				}
+				json.NewEncoder(w).Encode(map[string]any{
+					"id":          commentID,
+					"content":     "done",
+					"resolved_at": "2026-06-22T08:00:00Z",
+				})
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueCommentResolutionTestCmd(tt.cmdUse)
+			out, err := captureStdout(t, func() error {
+				return tt.run(cmd, []string{commentID})
+			})
+			if err != nil {
+				t.Fatalf("run command: %v", err)
+			}
+			if gotMethod == "" || gotPath == "" {
+				t.Fatal("server did not receive request")
+			}
+
+			var got map[string]any
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("decode stdout JSON: %v\nstdout: %s", err, out)
+			}
+			if got["id"] != commentID {
+				t.Fatalf("stdout id = %v, want %s", got["id"], commentID)
+			}
+		})
+	}
+}
+
 // TestRunIssueCommentListFlagGuards locks the CLI-side flag combination
-// matrix. Two behaviours matter here:
+// matrix. Three behaviours matter here:
 //
 //   - --recent 0 / --recent -3 must error rather than silently fall back to
 //     the default list path. Previously `recent > 0` collapsed "not passed"
@@ -1571,8 +1853,10 @@ func newIssueCommentListTestCmd() *cobra.Command {
 //   - --before / --before-id without --recent must error. Before this fix
 //     the cursor would be sent to the server but ignored because RecentN=0,
 //     so callers asking for "comments before X" got the full timeline.
+//   - --roots-only is mutually exclusive with the thread/recent/pagination
+//     modes; it may only combine with --since.
 //
-// All four cases must fail before any HTTP round-trip — verified by an
+// These cases must fail before any HTTP round-trip — verified by an
 // httptest server that fatals if /api/issues/<key>/comments is hit.
 func TestRunIssueCommentListFlagGuards(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1662,6 +1946,39 @@ func TestRunIssueCommentListFlagGuards(t *testing.T) {
 			},
 			wantMsg: "require --recent",
 		},
+		{
+			name: "roots-only + thread rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("roots-only", "true")
+				_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+			},
+			wantMsg: "--roots-only and --thread are mutually exclusive",
+		},
+		{
+			name: "roots-only + recent rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("roots-only", "true")
+				_ = c.Flags().Set("recent", "3")
+			},
+			wantMsg: "--roots-only and --recent are mutually exclusive",
+		},
+		{
+			name: "roots-only + tail rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("roots-only", "true")
+				_ = c.Flags().Set("tail", "3")
+			},
+			wantMsg: "--roots-only and --tail are mutually exclusive",
+		},
+		{
+			name: "roots-only + before rejected",
+			setup: func(c *cobra.Command) {
+				_ = c.Flags().Set("roots-only", "true")
+				_ = c.Flags().Set("before", "2026-01-01T00:00:00Z")
+				_ = c.Flags().Set("before-id", "00000000-0000-0000-0000-000000000001")
+			},
+			wantMsg: "--roots-only does not support --before / --before-id",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1673,6 +1990,175 @@ func TestRunIssueCommentListFlagGuards(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantMsg) {
 				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantMsg)
+			}
+		})
+	}
+}
+
+// TestRunIssueCommentList_RootsOnlyPassesThroughWithSince pins the CLI side
+// of #3164: the flag must be forwarded as the server's roots_only query param,
+// and it must still allow the existing --since incremental polling filter.
+func TestRunIssueCommentList_RootsOnlyPassesThroughWithSince(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			gotQuery = r.URL.Query()
+			w.Write([]byte("[]"))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("roots-only", "true"); err != nil {
+		t.Fatalf("set roots-only: %v", err)
+	}
+	if err := cmd.Flags().Set("since", "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatalf("set since: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	if got := gotQuery.Get("roots_only"); got != "true" {
+		t.Errorf("roots_only query = %q, want true", got)
+	}
+	if got := gotQuery.Get("since"); got != "2026-01-01T00:00:00Z" {
+		t.Errorf("since query = %q, want timestamp", got)
+	}
+}
+
+// TestRunIssueCommentList_SummaryPassesThrough pins the CLI side of the summary
+// projection: --summary must forward summary=true, and it must compose with
+// --roots-only (the orientation read it pairs with most often) rather than
+// being rejected as an incompatible combination.
+func TestRunIssueCommentList_SummaryPassesThrough(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			gotQuery = r.URL.Query()
+			w.Write([]byte("[]"))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("summary", "true"); err != nil {
+		t.Fatalf("set summary: %v", err)
+	}
+	if err := cmd.Flags().Set("roots-only", "true"); err != nil {
+		t.Fatalf("set roots-only: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	if got := gotQuery.Get("summary"); got != "true" {
+		t.Errorf("summary query = %q, want true", got)
+	}
+	if got := gotQuery.Get("roots_only"); got != "true" {
+		t.Errorf("roots_only query = %q, want true", got)
+	}
+}
+
+// TestRunIssueCommentList_FoldDefaultAndFullEscape pins the CLI's resolve-aware
+// fold default and its --full escape hatch (MUL-3555):
+//
+//   - the complete-thread reads (default list, --recent, untailed --thread) send
+//     fold=true by default, so an agent skips settled discussion automatically;
+//   - --full suppresses fold so a caller can pull the whole discussion back;
+//   - the partial-thread reads (--since, --thread + --tail) and --roots-only
+//     never send fold — folding them would be unsafe, and the server rejects it,
+//     so the CLI must not add the param there in the first place.
+func TestRunIssueCommentList_FoldDefaultAndFullEscape(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			gotQuery = r.URL.Query()
+			w.Write([]byte("[]"))
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cases := []struct {
+		name     string
+		setup    func(c *cobra.Command)
+		wantFold bool
+	}{
+		{name: "default list folds", setup: func(c *cobra.Command) {}, wantFold: true},
+		{name: "recent folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("recent", "10")
+		}, wantFold: true},
+		{name: "untailed thread folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+		}, wantFold: true},
+		{name: "full opts out", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("full", "true")
+		}, wantFold: false},
+		{name: "since never folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("since", "2026-01-01T00:00:00Z")
+		}, wantFold: false},
+		{name: "thread+tail never folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("thread", "00000000-0000-0000-0000-000000000001")
+			_ = c.Flags().Set("tail", "5")
+		}, wantFold: false},
+		{name: "roots-only never folds", setup: func(c *cobra.Command) {
+			_ = c.Flags().Set("roots-only", "true")
+		}, wantFold: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotQuery = nil
+			cmd := newIssueCommentListTestCmd()
+			tc.setup(cmd)
+			if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+				t.Fatalf("runIssueCommentList: %v", err)
+			}
+			gotFold := gotQuery.Get("fold") == "true"
+			if gotFold != tc.wantFold {
+				t.Errorf("fold query = %q, want fold=%v", gotQuery.Get("fold"), tc.wantFold)
 			}
 		})
 	}
@@ -1780,6 +2266,44 @@ func TestRunIssueCommentList_RecentStillLabelsCursorAsThread(t *testing.T) {
 	}
 }
 
+// TestRunIssueCommentList_DoesNotPrintShowingPreamble locks in the removal of
+// the "Showing N comments." stderr preamble. The line was the only
+// `list --output json` subcommand that emitted a human-readable count, which
+// polluted stdout/stderr-merged consumers (agent harnesses, CI `2>&1`).
+// Tracks GitHub issue #3303.
+func TestRunIssueCommentList_DoesNotPrintShowingPreamble(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+			return
+		}
+		w.Write([]byte(`[{"id":"c1"},{"id":"c2"}]`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	stderr := captureStderr(t)
+	defer stderr.restore()
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("output", "json"); err != nil {
+		t.Fatalf("set output: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	if got := stderr.read(); strings.Contains(got, "Showing") {
+		t.Errorf("stderr must not contain a 'Showing ...' preamble, got: %q", got)
+	}
+}
+
 func TestValidIssueStatuses(t *testing.T) {
 	expected := map[string]bool{
 		"backlog":     true,
@@ -1797,5 +2321,102 @@ func TestValidIssueStatuses(t *testing.T) {
 	}
 	if len(validIssueStatuses) != len(expected) {
 		t.Errorf("validIssueStatuses has %d entries, expected %d", len(validIssueStatuses), len(expected))
+	}
+}
+
+func TestValidateIssueStatus(t *testing.T) {
+	for _, s := range validIssueStatuses {
+		if err := validateIssueStatus(s); err != nil {
+			t.Errorf("status %q should be valid, got: %v", s, err)
+		}
+	}
+	err := validateIssueStatus("active")
+	if err == nil {
+		t.Fatal("status \"active\" should be rejected")
+	}
+	if !strings.Contains(err.Error(), "backlog") {
+		t.Errorf("error should list valid statuses, got: %v", err)
+	}
+}
+
+func TestValidateIssuePriority(t *testing.T) {
+	expected := map[string]bool{
+		"urgent": true,
+		"high":   true,
+		"medium": true,
+		"low":    true,
+		"none":   true,
+	}
+	for _, p := range validIssuePriorities {
+		if !expected[p] {
+			t.Errorf("unexpected priority in validIssuePriorities: %q", p)
+		}
+		if err := validateIssuePriority(p); err != nil {
+			t.Errorf("priority %q should be valid, got: %v", p, err)
+		}
+	}
+	if len(validIssuePriorities) != len(expected) {
+		t.Errorf("validIssuePriorities has %d entries, expected %d", len(validIssuePriorities), len(expected))
+	}
+	err := validateIssuePriority("P1")
+	if err == nil {
+		t.Fatal("priority \"P1\" should be rejected")
+	}
+	if !strings.Contains(err.Error(), "urgent") {
+		t.Errorf("error should list valid priorities, got: %v", err)
+	}
+}
+
+func TestRunIssueCreateRejectsInvalidStatusBeforeRequest(t *testing.T) {
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Invalid status")
+	_ = cmd.Flags().Set("status", "active")
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueCreate should reject invalid status")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueCreateRejectsInvalidPriorityBeforeRequest(t *testing.T) {
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Invalid priority")
+	_ = cmd.Flags().Set("priority", "P1")
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueCreate should reject invalid priority")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueUpdateRejectsInvalidStatusBeforeRequest(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	_ = cmd.Flags().Set("status", "active")
+	err := runIssueUpdate(cmd, []string{"MUL-1"})
+	if err == nil {
+		t.Fatal("runIssueUpdate should reject invalid status")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueUpdateRejectsInvalidPriorityBeforeRequest(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	_ = cmd.Flags().Set("priority", "P1")
+	err := runIssueUpdate(cmd, []string{"MUL-1"})
+	if err == nil {
+		t.Fatal("runIssueUpdate should reject invalid priority")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
 	}
 }

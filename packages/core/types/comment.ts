@@ -29,4 +29,22 @@ export interface Comment {
   resolved_at: string | null;
   resolved_by_type: CommentAuthorType | null;
   resolved_by_id: string | null;
+  source_task_id?: string | null;
+}
+
+export type CommentTriggerSource =
+  | "issue_assignee"
+  | "mention_agent"
+  | "mention_squad_leader";
+
+export interface CommentTriggerPreviewAgent {
+  id: string;
+  name: string;
+  avatar_url?: string;
+  source: CommentTriggerSource | string;
+  reason: string;
+}
+
+export interface CommentTriggerPreview {
+  agents: CommentTriggerPreviewAgent[];
 }

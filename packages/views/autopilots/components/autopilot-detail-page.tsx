@@ -23,12 +23,13 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useNavigation, AppLink } from "../../navigation";
-import { PageHeader } from "../../layout/page-header";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -51,7 +52,12 @@ import {
   toCronExpression,
 } from "./trigger-config";
 import type { TriggerConfig } from "./trigger-config";
-import type { AutopilotExecutionMode, AutopilotRun, AutopilotTrigger } from "@multica/core/types";
+import type {
+  AutopilotExecutionMode,
+  AutopilotRun,
+  AutopilotSubscriber,
+  AutopilotTrigger,
+} from "@multica/core/types";
 import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
@@ -291,12 +297,11 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
 
   const handleCopy = async () => {
     if (!webhookUrl) return;
-    try {
-      await navigator.clipboard.writeText(webhookUrl);
+    if (await copyText(webhookUrl)) {
       setCopied(true);
       toast.success(t(($) => $.trigger_row.url_copied));
       setTimeout(() => setCopied(false), 1500);
-    } catch {
+    } else {
       toast.error(t(($) => $.trigger_row.url_copy_failed));
     }
   };
@@ -573,6 +578,40 @@ function AddTriggerDialog({
   );
 }
 
+// Read-only chip row; edits flow through AutopilotDialog → SubscriberMultiSelect
+// so the detail page never holds in-flight selection state.
+function SubscriberChips({
+  subscribers,
+}: {
+  subscribers: AutopilotSubscriber[] | undefined;
+}) {
+  const { t } = useT("autopilots");
+  const { getActorName } = useActorName();
+  const members = (subscribers ?? []).filter((s) => s.user_type === "member");
+  if (members.length === 0) {
+    return (
+      <div className="mt-1 text-sm text-muted-foreground">
+        {t(($) => $.detail.field_subscribers_none)}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-1 flex flex-wrap gap-1.5">
+      {members.map((s) => (
+        <span
+          key={`${s.user_type}:${s.user_id}`}
+          className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-xs"
+        >
+          <ActorAvatar actorType="member" actorId={s.user_id} size={14} />
+          <span className="max-w-[14rem] truncate">
+            {getActorName("member", s.user_id)}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
@@ -677,48 +716,61 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <AppLink href={wsPaths.autopilots()} className="text-muted-foreground hover:text-foreground transition-colors">
-            <Zap className="h-4 w-4" />
-          </AppLink>
-          <span className="text-muted-foreground">/</span>
-          <h1 className="text-sm font-medium truncate">{autopilot.title}</h1>
-          <div className="ml-1 flex items-center gap-1.5">
-            <Switch
+      <BreadcrumbHeader
+        segments={[{ href: wsPaths.autopilots(), label: t(($) => $.page.title) }]}
+        leaf={
+          <>
+            <h1 className="min-w-0 truncate text-sm font-medium text-foreground">{autopilot.title}</h1>
+            <div className="ml-1 flex items-center gap-1.5 shrink-0">
+              <Switch
+                size="sm"
+                checked={autopilot.status === "active"}
+                onCheckedChange={handleToggleStatus}
+                disabled={autopilot.status === "archived"}
+                aria-label={
+                  autopilot.status === "active"
+                    ? t(($) => $.detail.pause_aria)
+                    : t(($) => $.detail.activate_aria)
+                }
+              />
+              <span className={cn(
+                "text-xs font-medium hidden sm:inline",
+                autopilot.status === "active" ? "text-emerald-500" :
+                autopilot.status === "paused" ? "text-amber-500" :
+                "text-muted-foreground",
+              )}>
+                {t(($) => $.status[autopilot.status])}
+              </span>
+            </div>
+          </>
+        }
+        actions={
+          <>
+            <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.edit)}>
+              <Pencil className="h-3.5 w-3.5 sm:mr-1" />
+              <span className="hidden sm:inline">{t(($) => $.detail.edit)}</span>
+            </Button>
+            <Button
               size="sm"
-              checked={autopilot.status === "active"}
-              onCheckedChange={handleToggleStatus}
-              disabled={autopilot.status === "archived"}
-              aria-label={
-                autopilot.status === "active"
-                  ? t(($) => $.detail.pause_aria)
-                  : t(($) => $.detail.activate_aria)
-              }
-            />
-            <span className={cn(
-              "text-xs font-medium",
-              autopilot.status === "active" ? "text-emerald-500" :
-              autopilot.status === "paused" ? "text-amber-500" :
-              "text-muted-foreground",
-            )}>
-              {t(($) => $.status[autopilot.status])}
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)}>
-            <Pencil className="h-3.5 w-3.5 mr-1" />
-            {t(($) => $.detail.edit)}
-          </Button>
-          <Button size="sm" onClick={handleRunNow} disabled={autopilot.status !== "active" || triggerAutopilot.isPending}>
-            <Play className="h-3.5 w-3.5 mr-1" />
-            {triggerAutopilot.isPending
-              ? t(($) => $.detail.running)
-              : t(($) => $.detail.run_now)}
-          </Button>
-        </div>
-      </PageHeader>
+              onClick={handleRunNow}
+              disabled={autopilot.status !== "active" || triggerAutopilot.isPending}
+              className="px-2 sm:px-2.5"
+              aria-label={triggerAutopilot.isPending ? t(($) => $.detail.running) : t(($) => $.detail.run_now)}
+            >
+              {triggerAutopilot.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
+              ) : (
+                <Play className="h-3.5 w-3.5 sm:mr-1" />
+              )}
+              <span className="hidden sm:inline">
+                {triggerAutopilot.isPending
+                  ? t(($) => $.detail.running)
+                  : t(($) => $.detail.run_now)}
+              </span>
+            </Button>
+          </>
+        }
+      />
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto p-6 space-y-8">
@@ -740,6 +792,24 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                   />
                   <span className="cursor-pointer">
                     {getActorName(autopilot.assignee_type, autopilot.assignee_id)}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_created_by)}</label>
+                <div className="mt-1 flex items-center gap-2">
+                  {/* Creator may be a member or an agent: the HTTP create path stamps
+                      member today, but backend logic also writes created_by_type=agent.
+                      ActorAvatar/getActorName resolve both, so never assume member. */}
+                  <ActorAvatar
+                    actorType={autopilot.created_by_type}
+                    actorId={autopilot.created_by_id}
+                    size={20}
+                    enableHoverCard
+                    showStatusDot={autopilot.created_by_type === "agent"}
+                  />
+                  <span className="cursor-pointer">
+                    {getActorName(autopilot.created_by_type, autopilot.created_by_id)}
                   </span>
                 </div>
               </div>
@@ -769,6 +839,16 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                       <span className="text-muted-foreground">{t(($) => $.detail.project_unavailable)}</span>
                     )}
                   </div>
+                </div>
+              )}
+              {autopilot.execution_mode === "create_issue" && (
+                <div className="col-span-2">
+                  <label className="text-xs text-muted-foreground">
+                    {t(($) => $.detail.field_subscribers)}
+                  </label>
+                  <SubscriberChips
+                    subscribers={autopilot.subscribers}
+                  />
                 </div>
               )}
               {autopilot.description && (
@@ -869,6 +949,10 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             assignee_type: autopilot.assignee_type,
             assignee_id: autopilot.assignee_id,
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,
+            subscriber_user_ids:
+              autopilot.subscribers
+                ?.filter((s) => s.user_type === "member")
+                .map((s) => s.user_id) ?? [],
           }}
           triggers={triggers}
         />

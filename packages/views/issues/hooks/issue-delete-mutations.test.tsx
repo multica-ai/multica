@@ -40,6 +40,7 @@ const workspace: Workspace = {
   settings: {},
   repos: [],
   issue_prefix: "TST",
+  avatar_url: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -60,6 +61,7 @@ const baseIssue: Issue = {
   parent_issue_id: PARENT_ISSUE_ID,
   project_id: null,
   position: 0,
+  stage: null,
   start_date: null,
   due_date: null,
   metadata: {},
@@ -97,6 +99,7 @@ const attachment: Attachment = {
   filename: "evidence.png",
   url: "s3://bucket/evidence.png",
   download_url: "https://example.test/evidence.png",
+  markdown_url: "https://example.test/api/attachments/attachment-1/download",
   content_type: "image/png",
   size_bytes: 1,
   created_at: "2026-01-01T00:00:00Z",

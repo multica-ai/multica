@@ -16,13 +16,17 @@
     "ios:device:prod": "dotenv -e .env.production -- cross-env APP_ENV=production expo run:ios --device",
     "ios:device:prod:release": "dotenv -e .env.production -- cross-env APP_ENV=production expo run:ios --device --configuration Release",
     "lint": "expo lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@expo/vector-icons": "^14.1.0",
+    "@multica/core": "workspace:*",
     "@react-native-community/datetimepicker": "8.6.0",
     "@react-native-community/netinfo": "11.5.2",
     "@react-native-segmented-control/segmented-control": "2.5.7",
     "@react-navigation/elements": "^2.9.17",
+    "@react-navigation/native": "^7.1.6",
     "@rn-primitives/avatar": "^1.4.0",
     "@rn-primitives/collapsible": "^1.4.0",
     "@rn-primitives/dropdown-menu": "^1.4.0",
@@ -83,6 +87,7 @@
     "cross-env": "^7.0.3",
     "dotenv-cli": "^7.4.4",
     "eslint-config-expo": "~55.0.0",
-    "typescript": "~5.9.0"
+    "typescript": "~5.9.0",
+    "vitest": "catalog:"
   }
 }

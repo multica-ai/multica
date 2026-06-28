@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { configStore } from "@multica/core/config";
 import enCommon from "../locales/en/common.json";
 import enWorkspace from "../locales/en/workspace.json";
 import { CreateWorkspaceForm } from "./create-workspace-form";
@@ -35,7 +36,22 @@ function renderForm(onSuccess = vi.fn()) {
 }
 
 describe("CreateWorkspaceForm", () => {
-  beforeEach(() => mockMutate.mockReset());
+  beforeEach(() => {
+    mockMutate.mockReset();
+    configStore.setState({ daemonAppUrl: "" });
+  });
+
+  it("shows the brand host as the URL prefix when no app URL is configured", () => {
+    renderForm();
+    expect(screen.getByText("multica.ai/")).toBeInTheDocument();
+  });
+
+  it("shows the deployment host as the URL prefix for self-hosted instances", () => {
+    configStore.setState({ daemonAppUrl: "https://multica.example.com" });
+    renderForm();
+    expect(screen.getByText("multica.example.com/")).toBeInTheDocument();
+    expect(screen.queryByText("multica.ai/")).not.toBeInTheDocument();
+  });
 
   it("auto-generates slug from name until user edits slug", () => {
     renderForm();

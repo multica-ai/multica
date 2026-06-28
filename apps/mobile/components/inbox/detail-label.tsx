@@ -17,6 +17,7 @@ import type {
   IssueStatus,
   IssuePriority,
 } from "@multica/core/types";
+import { formatDateOnly } from "@multica/core/issues/date";
 import { Text } from "@/components/ui/text";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { PriorityIcon } from "@/components/ui/priority-icon";
@@ -46,6 +47,7 @@ const PRIORITY_LABEL: Record<IssuePriority, string> = {
 // Mirrors useTypeLabels in packages/views/inbox/components/inbox-detail-label.tsx
 const TYPE_LABEL: Record<InboxItemType, string> = {
   issue_assigned: "Assigned",
+  issue_subscribed: "Subscribed",
   unassigned: "Unassigned",
   assignee_changed: "Reassigned",
   status_changed: "Status changed",
@@ -64,12 +66,9 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   quick_create_failed: "Quick-create failed",
 };
 
+// due_date is a calendar day — format timezone-safely (no offset day shift).
 function shortDate(dateStr: string): string {
-  if (!dateStr) return "";
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateOnly(dateStr, { month: "short", day: "numeric" }, "en-US");
 }
 
 function singleLine(value: string | null | undefined): string {

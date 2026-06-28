@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -193,6 +194,20 @@ func (s *CloudFrontSigner) SignedURL(rawURL string, expiry time.Time) string {
 		separator = "&"
 	}
 	return fmt.Sprintf("%s%sPolicy=%s&Signature=%s&Key-Pair-Id=%s", rawURL, separator, encodedPolicy, encodedSig, s.keyPairID)
+}
+
+func (s *CloudFrontSigner) SignedURLWithContentDisposition(rawURL string, contentDisposition string, expiry time.Time) string {
+	if contentDisposition == "" {
+		return s.SignedURL(rawURL, expiry)
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return s.SignedURL(rawURL, expiry)
+	}
+	q := u.Query()
+	q.Set("response-content-disposition", contentDisposition)
+	u.RawQuery = q.Encode()
+	return s.SignedURL(u.String(), expiry)
 }
 
 // cfBase64Encode applies CloudFront's URL-safe base64 encoding.

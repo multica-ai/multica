@@ -23,6 +23,8 @@ export type WSEventType =
   | "agent:restored"
   | "task:queued"
   | "task:dispatch"
+  | "task:running"
+  | "task:waiting_local_directory"
   | "task:progress"
   | "task:completed"
   | "task:failed"
@@ -92,6 +94,18 @@ export interface IssueCreatedPayload {
 
 export interface IssueUpdatedPayload {
   issue: Issue;
+  // The server stamps issue:updated with which fields actually changed
+  // (server/internal/handler/issue.go publish). assignee_changed lets the
+  // realtime layer keep filtered myList caches in place on a non-membership
+  // change instead of refetching; status_changed lets it reconcile board column
+  // counts when a status change lands on an off-screen (unloaded) issue;
+  // project_changed lets it drop a moved issue from the old project's filtered
+  // list (the client-side cache diff is unreliable after an optimistic local
+  // move — MUL-3669 / #4548). Other change flags are present on the wire too and
+  // can be surfaced here when needed.
+  assignee_changed?: boolean;
+  status_changed?: boolean;
+  project_changed?: boolean;
 }
 
 export interface IssueDeletedPayload {
@@ -221,6 +235,7 @@ export interface TaskMessagePayload {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  created_at?: string;
 }
 
 export interface TaskQueuedPayload {
@@ -237,6 +252,28 @@ export interface TaskDispatchPayload {
   issue_id: string;
   runtime_id: string;
   chat_session_id?: string;
+}
+
+export interface TaskRunningPayload {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  chat_session_id?: string;
+  status: string;
+}
+
+// task:waiting_local_directory fires when the daemon dequeues a task but
+// can't immediately acquire the on-disk path lock — another task on this
+// daemon is already executing in the same local_directory. The optional
+// `wait_reason` mirrors the server-side hint (path / holder task id), but
+// is not yet surfaced end-to-end; the UI today only reads the status.
+export interface TaskWaitingLocalDirectoryPayload {
+  task_id: string;
+  agent_id: string;
+  issue_id: string;
+  chat_session_id?: string;
+  status: string;
+  wait_reason?: string;
 }
 
 export interface TaskCompletedPayload {
@@ -385,6 +422,8 @@ export interface WSEventPayloadMap {
   "agent:restored": AgentRestoredPayload;
   "task:queued": TaskQueuedPayload;
   "task:dispatch": TaskDispatchPayload;
+  "task:running": TaskRunningPayload;
+  "task:waiting_local_directory": TaskWaitingLocalDirectoryPayload;
   "task:completed": TaskCompletedPayload;
   "task:failed": TaskFailedPayload;
   "task:message": TaskMessagePayload;

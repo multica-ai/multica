@@ -1,0 +1,246 @@
+---
+title: 환경 변수
+description: 자체 호스팅 Multica 서버를 실행하기 위한 환경 변수 전체 목록입니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+자체 호스팅 Multica [서버](/self-host-quickstart)는 시작 시 환경 변수에서 설정을 읽습니다 — 데이터베이스, 로그인, 이메일, 스토리지, 가입 허용 목록이 모두 여기에 있습니다. 이 페이지는 모든 변수를 용도별로 그룹화합니다: 각 섹션은 **설정하지 않으면 어떻게 되는지**, 그리고 **프로덕션에서 반드시 설정해야 하는 변수가 무엇인지**를 명확히 설명합니다. auth 관련 변수를 실제로 어떻게 설정하는지는 [로그인 및 가입 설정](/auth-setup)을 참고하세요.
+
+## 핵심 서버 변수
+
+배포 전에 반드시 고려해야 하는 핵심 변수입니다 — 일부는 서버를 시작할 수 있게 해주는 기본값을 가지고 있지만, 프로덕션에서는 필수 항목을 명시적으로 설정해야 합니다.
+
+| 변수 | 기본값 | 프로덕션 필수? |
+|---|---|---|
+| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **예** |
+| `PORT` | `8080` | 아니오 (포트를 변경하는 경우 제외) |
+| `JWT_SECRET` | `multica-dev-secret-change-in-production` | **예** (기본값은 안전하지 않음) |
+| `APP_ENV` | 비어 있음 | **예** (`production`이어야 함) |
+| `FRONTEND_ORIGIN` | 비어 있음 | **예** (자체 호스팅은 자체 도메인을 설정해야 함) |
+| `MULTICA_DEV_VERIFICATION_CODE` | 비어 있음 | 아니오 (프로덕션에서는 반드시 비워 두어야 함) |
+
+<Callout type="warning">
+**프로덕션에서는 `MULTICA_DEV_VERIFICATION_CODE`를 비워 두세요.** 고정된 로컬 테스트 코드는 기본적으로 비활성화되어 있지만, `MULTICA_DEV_VERIFICATION_CODE=888888`로 활성화하면 `APP_ENV`가 production이 아닌 동안에는 코드를 요청할 수 있는 누구나 그 고정 값으로 로그인할 수 있습니다. 이 단축 코드는 `APP_ENV=production`일 때 무시됩니다.
+</Callout>
+
+### 데이터베이스 커넥션 풀
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `DATABASE_MAX_CONNS` | `25` | pgxpool 최대 연결 수. 데몬은 자주(3초마다) 폴링하며 연결을 사용하므로, 규모가 큰 배포에서는 더 높은 값이 필요할 수 있습니다 |
+| `DATABASE_MIN_CONNS` | `5` | 최소 유휴 연결 수 |
+
+**설정하지 않으면** 위 값이 사용됩니다 — 이전에 프로덕션에서 풀 고갈을 일으켰던 pgx 내장 기본값 4/NumCPU가 **아닙니다**.
+
+## 이메일 설정
+
+Multica는 두 가지 전송 백엔드를 지원합니다 — 클라우드 배포용 [Resend](https://resend.com/), 또는 내부 / 온프레미스 네트워크용 SMTP relay. 둘 다 설정된 경우 `SMTP_HOST`가 `RESEND_API_KEY`보다 우선합니다.
+
+### Resend
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `RESEND_API_KEY` | 비어 있음 | Resend API key |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 발신 주소 (Resend 계정에서 검증된 도메인이어야 하며, SMTP를 사용할 때도 `From:` 헤더로 재사용됨) |
+
+### SMTP relay
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `SMTP_HOST` | 비어 있음 | SMTP relay 호스트명. 이를 설정하면 SMTP 모드가 활성화되고 Resend를 덮어씁니다 |
+| `SMTP_PORT` | `25` | SMTP 포트. STARTTLS 제출에는 `587`을, SMTPS(암묵적 TLS, 자동 활성화)에는 `465`를 사용하세요 |
+| `SMTP_USERNAME` | 비어 있음 | SMTP 사용자명. 인증 없는 relay의 경우 비워 두세요 |
+| `SMTP_PASSWORD` | 비어 있음 | SMTP 비밀번호 |
+| `SMTP_TLS` | `starttls` | TLS 모드. `implicit`(별칭 `smtps`, `ssl`)은 연결 시 즉시 TLS 핸드셰이크를 수행합니다(SMTPS). `465` 포트에서는 자동으로 활성화됩니다. 미설정 / `starttls`는 연결 후 STARTTLS로 업그레이드합니다 |
+| `SMTP_TLS_INSECURE` | `false` | TLS 인증서 검증을 건너뛰려면 `true`로 설정 (사설 CA / 자체 서명 인증서만 해당) |
+| `SMTP_EHLO_NAME` | 머신 호스트명 | relay에 알리는 EHLO/HELO 이름. 엄격한 relay(예: Google Workspace `smtp-relay.gmail.com`)가 공개 IP에서 보내는 기본 greeting을 거부하는 경우 실제 FQDN을 설정하세요 — 그렇지 않으면 relay가 연결을 끊고, 이는 이후 명령에서 불투명한 `EOF`로 나타납니다 |
+
+서버가 STARTTLS를 알리면 자동으로 업그레이드됩니다. dial 타임아웃은 10초이고 전체 SMTP 세션에는 30초 데드라인이 있어, 블랙홀이 된 relay가 auth 핸들러를 멈추게 할 수 없습니다.
+
+**둘 다 설정하지 않았을 때의 동작**: 서버는 오류를 내지 않지만, 전송되어야 했던 모든 이메일(인증 코드, 초대 링크)은 **서버의 stdout에만 기록됩니다**. 로컬 개발에는 편리합니다 — 서버 로그에서 코드를 복사해 사용하세요; **프로덕션에서는 이를 설정하는 것을 잊으면 조용한 블랙홀이 되어**, 사용자는 이메일을 전혀 받지 못하고 아무런 오류도 드러나지 않습니다.
+
+## Google OAuth 설정
+
+선택 사항입니다. 이메일 + 인증 코드만 사용하려면 설정하지 않은 채로 두고, 로그인 페이지에 "Sign in with Google"을 추가하려면 설정하세요.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `GOOGLE_CLIENT_ID` | 비어 있음 | Google Cloud OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | 비어 있음 | Google Cloud OAuth secret |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | OAuth 콜백 URL (자체 호스팅: 자신의 프론트엔드 도메인으로 교체) |
+
+**런타임에 적용됨**: 프론트엔드는 런타임에 `/api/config`를 통해 이 설정을 읽으므로, **변경해도 프론트엔드 리빌드나 재배포가 필요 없습니다** — 서버를 재시작하면 적용됩니다.
+
+전체 설정(Google Cloud Console 단계 포함)은 [로그인 및 가입 설정](/auth-setup#google-oauth-configuration)에 있습니다.
+
+## 파일 스토리지 설정
+
+Multica는 사용자가 업로드한 첨부 파일(댓글의 이미지와 파일)을 저장합니다. **S3가 권장됩니다**; S3가 설정되어 있지 않으면 로컬 디스크로 폴백합니다.
+
+### S3 / S3 호환 스토리지
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `S3_BUCKET` | 비어 있음 | **버킷 이름만** (예: `my-bucket`). `.s3.<region>.amazonaws.com` 접미사를 포함하지 **마세요** — 서버가 `S3_BUCKET` + `S3_REGION`으로 공개 호스트를 구성합니다. 이를 설정하면 S3 스토리지가 활성화됩니다 |
+| `S3_REGION` | `us-west-2` | AWS 리전. 버킷의 실제 리전과 일치해야 합니다 — SDK 서명과 공개 URL 구성 모두에 사용됩니다 |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | 비어 있음 | 정적 자격 증명. 둘 다 설정하지 않으면 AWS SDK 기본 자격 증명 체인(IAM role / 환경 자격 증명)이 사용됩니다 |
+| `AWS_ENDPOINT_URL` | 비어 있음 | 사용자 정의 S3 호환 엔드포인트 (예: [MinIO](https://min.io/)). 이를 설정하면 path-style URL로 전환됩니다 |
+| `ATTACHMENT_DOWNLOAD_MODE` | `auto` | 첨부 파일 다운로드 방식: `auto`, `cloudfront`, `presign`, `proxy`. `auto`에서는 CloudFront가 완전히 설정되어 있으면 우선 사용하고, 내부/프라이빗 endpoint host는 server proxy를, 공개 S3 호환 endpoint는 지원되는 경우 presigned GET을 사용합니다 |
+| `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | CloudFront signed URL 및 S3 presigned download URL의 유효 기간. Go duration 형식을 받습니다 |
+
+**`S3_BUCKET`을 설정하지 않으면**: 서버는 시작 시 `"S3_BUCKET not set, cloud upload disabled"`를 로깅하고, 모든 업로드는 로컬 디스크로 폴백합니다.
+
+**저장된 객체 URL**은 다음 우선순위 순서로 구성됩니다:
+
+1. `CLOUDFRONT_DOMAIN`이 설정된 경우 `https://<CLOUDFRONT_DOMAIN>/<key>`.
+2. `AWS_ENDPOINT_URL`이 설정된 경우 `<AWS_ENDPOINT_URL>/<S3_BUCKET>/<key>` (path-style).
+3. `https://<S3_BUCKET>.s3.<S3_REGION>.amazonaws.com/<key>` (virtual-hosted-style). `S3_BUCKET`에 점이 포함된 경우, AWS가 발급한 와일드카드 TLS 인증서가 점이 포함된 버킷 호스트를 검증하지 못하므로 서버는 `https://s3.<S3_REGION>.amazonaws.com/<S3_BUCKET>/<key>` (path-style)로 폴백합니다.
+
+API `download_url` 값은 CloudFront 서명이 설정되지 않은 경우 `GET /api/attachments/{id}/download`를 사용합니다. 이 endpoint는 안전한 경우 CloudFront/S3 presigned URL로 리디렉션하고, `http://rustfs:9000` 같은 프라이빗/내부 endpoint에서는 server가 스트리밍합니다. Docker/VPC 내부 객체 저장소에서는 `ATTACHMENT_DOWNLOAD_MODE=proxy`를 명시할 수 있습니다.
+
+### 로컬 디스크 (S3가 설정되지 않은 경우)
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `LOCAL_UPLOAD_DIR` | `./data/uploads` | 로컬 스토리지 디렉터리 |
+| `LOCAL_UPLOAD_BASE_URL` | 비어 있음 (상대 경로 반환) | 공개 base URL — 설정하지 않으면 프론트엔드가 첨부 파일의 전체 URL을 확인할 수 없습니다 |
+
+### CloudFront (선택)
+
+S3 앞에 CloudFront를 두는 경우 세 가지 변수가 적용됩니다: `CLOUDFRONT_DOMAIN`, `CLOUDFRONT_KEY_PAIR_ID`, `CLOUDFRONT_PRIVATE_KEY` (또는 Secrets Manager에서 읽으려면 `CLOUDFRONT_PRIVATE_KEY_SECRET`). CloudFront를 사용하지 않으면 건너뛰세요 — S3 설정과 충돌하지 않습니다.
+
+### Cookie 도메인
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `COOKIE_DOMAIN` | 비어 있음 | 세션 cookie의 범위 |
+
+- **비어 있음**: cookie는 방문한 정확한 호스트에서만 유효합니다 (단일 호스트 배포에 적합)
+- **`.example.com`으로 설정**: cookie가 하위 도메인 간에 공유됩니다 (그래서 `app.example.com`과 `api.example.com`이 로그인 세션을 공유함)
+- 경고: IP 주소일 수 없습니다 (브라우저가 무시함)
+
+## 누가 가입할 수 있는지 제한하기
+
+세 개의 허용 목록 계층이 우선순위에 따라 결합됩니다. **어느 한 계층이라도 비어 있지 않은 값으로 설정되면, 일치하지 않는 이메일은 거부됩니다** — `ALLOW_SIGNUP=true`조차 이를 무시할 수 없습니다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `ALLOWED_EMAILS` | 비어 있음 | 명시적 이메일 허용 목록 (쉼표로 구분). 비어 있지 않으면 목록에 있는 이메일만 가입할 수 있습니다 |
+| `ALLOWED_EMAIL_DOMAINS` | 비어 있음 | 도메인 허용 목록 (쉼표로 구분). 비어 있지 않으면 목록에 있는 도메인만 가입할 수 있습니다 |
+| `ALLOW_SIGNUP` | `true` | 가입 마스터 스위치. 가입을 완전히 비활성화하려면 `false`로 설정 |
+
+**직관에 반하는 부분**: `ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true`는 "company.io 또는 모두를 허용"한다는 뜻이 **아니라** **company.io만 허용**한다는 뜻입니다. 허용 목록 계층은 AND 시맨틱입니다 — 전체 결정 트리는 [로그인 및 가입 설정 → 가입 허용 목록](/auth-setup#restricting-who-can-sign-up)에 있습니다.
+
+**초대 흐름 자체는 가입 허용 목록을 확인하지 않습니다** — 하지만 초대받은 사람은 초대를 수락하기 전에 여전히 **로그인**할 수 있어야 합니다. 이미 Multica 계정이 있다면(예: 다른 워크스페이스에서) 허용 목록의 영향을 받지 않고 바로 수락할 수 있습니다; **한 번도 가입한 적이 없다면**, 로그인의 첫 단계(인증 코드 요청)는 여전히 허용 목록 확인을 거치며, `ALLOW_SIGNUP=false`나 `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`에 의해 거부된 이메일은 **가입을 완료할 수 없고, 따라서 초대를 수락할 수 없습니다**.
+
+## 워크스페이스 생성 잠그기
+
+`ALLOW_SIGNUP=false`는 새 계정을 차단하지만, 이미 로그인한 사용자가 `POST /api/workspaces`를 통해 또 다른 워크스페이스를 생성하는 것은 **차단하지 않습니다**. 모든 이슈, 저장소, 에이전트가 플랫폼 관리자에게 보여야 하는 자체 호스팅 인스턴스에서는, 그 틈을 막기 위해 `DISABLE_WORKSPACE_CREATION=true`로 설정하세요.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `DISABLE_WORKSPACE_CREATION` | `false` | `true`이면 `POST /api/workspaces`에 대한 모든 호출이 `403 workspace creation is disabled for this instance`를 반환합니다. 웹 UI는 `/api/config`를 통해 모든 "워크스페이스 생성" 요소를 숨깁니다. 역할/owner 예외는 없습니다 — 이 게이트는 인스턴스 단위로 전역 적용됩니다 |
+
+권장 부트스트랩 순서:
+
+1. `DISABLE_WORKSPACE_CREATION`을 설정하지 않은 채로(기본값) 인스턴스를 시작합니다.
+2. 관리자로 로그인하여 공유 워크스페이스를 생성합니다.
+3. `DISABLE_WORKSPACE_CREATION=true`로 설정하고 백엔드를 재시작합니다. 이 시점부터 사용자는 초대를 통해서만 참여할 수 있습니다.
+
+초대받은 사용자가 첫 인증 코드로 가입을 완료할 수 있도록 `ALLOW_SIGNUP=true`를 유지하고 싶다면, `DISABLE_WORKSPACE_CREATION=true`를 `ALLOWED_EMAIL_DOMAINS` / `ALLOWED_EMAILS`와 결합하여 어떤 주소가 가입할 수 있는지 범위를 지정하세요. `ALLOW_SIGNUP=false`로 설정하면 대기 중인 초대 대상자가 계정을 만드는 것조차 추가로 차단됩니다 — 모든 멤버가 이미 Multica 계정을 가지고 있는 인스턴스에서만 유용합니다.
+
+## 속도 제한 (선택적 Redis)
+
+공개 auth 엔드포인트 — `/auth/send-code`, `/auth/verify-code`, `/auth/google` — 앞에는 IP별 고정 윈도우 속도 제한이 있습니다. 리미터는 Redis로 뒷받침됩니다. `REDIS_URL`을 설정하지 않으면 미들웨어는 **no-op**(fail-open)이 되고, 백엔드는 시작 시 `rate limiting disabled: REDIS_URL not configured`를 로깅합니다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `REDIS_URL` | 비어 있음 | Redis 연결 URL (예: `redis://localhost:6379/0`). 설정하지 않으면 auth 엔드포인트의 속도 제한이 비활성화됩니다. 동일한 Redis는 실시간 허브 fan-out, PAT 캐시, 데몬 토큰 캐시에서도 사용됩니다 — 설정하지 않으면 모두 인메모리 / 직접 DB 모드로 폴백합니다 |
+| `RATE_LIMIT_AUTH` | `5` | `/auth/send-code` 및 `/auth/google`에 대한 IP당 분당 최대 요청 수 |
+| `RATE_LIMIT_AUTH_VERIFY` | `20` | `/auth/verify-code`에 대한 IP당 분당 최대 요청 수 |
+| `RATE_LIMIT_TRUSTED_PROXIES` | 비어 있음 | 리미터가 그 `X-Forwarded-For` 헤더를 신뢰하도록 허용하는, 쉼표로 구분된 CIDR. 비어 있음(기본값)은 **XFF를 절대 신뢰하지 않음**을 의미합니다 — 리미터는 직접 연결의 `RemoteAddr`만 사용합니다 |
+
+요청이 제한을 초과하면 서버는 `429 Too Many Requests`, `Retry-After: 60`, 그리고 본문 `{"error":"too many requests"}`로 응답합니다.
+
+<Callout type="warning">
+**리버스 프록시 뒤에서는 `RATE_LIMIT_TRUSTED_PROXIES`를 반드시 설정해야 합니다.** 그렇지 않으면 백엔드 관점에서 모든 실제 사용자가 프록시의 IP를 공유하게 되어, 배포 전체가 하나의 버킷에 들어가고, `/auth/send-code`가 사이트 전체에 대해 분당 5회가 됩니다. 일반적인 값: 같은 호스트의 Caddy / Nginx에는 `127.0.0.1/32,::1/128`; Cloudflare / ALB / CloudFront에는 해당 CDN의 공개된 IP 범위. `RemoteAddr`이 이 CIDR 중 하나에 속하는 IP만 `X-Forwarded-For`를 사용해 클라이언트를 식별할 수 있습니다.
+</Callout>
+
+이 별도의 `RATE_LIMIT_TRUSTED_PROXIES`는 오토파일럿 webhook 리미터(`/api/webhooks/autopilots/{token}`)를 제어하는 `MULTICA_TRUSTED_PROXIES`와는 **다릅니다**. 각 리미터는 자체 목록을 파싱하므로, 프록시 뒤에 있는 배포는 둘 다 설정해야 합니다.
+
+## 데몬 튜닝 파라미터
+
+데몬은 사용자의 로컬 기기에서 실행되며, 그 설정도 로컬 환경 변수에서 읽습니다. 일반적으로 사용되는 것들:
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | 서버 주소 (자체 호스팅: 자신의 도메인으로 교체) |
+| `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 하트비트 간격 |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 작업 폴링 간격 |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 최대 동시 작업 수 |
+| `MULTICA_<PROVIDER>_PATH` | CLI 이름과 일치 | 각 AI 코딩 도구 실행 파일의 경로 (예: `MULTICA_CLAUDE_PATH`) |
+| `MULTICA_<PROVIDER>_MODEL` | 비어 있음 | 각 AI 코딩 도구의 기본 모델 |
+| `MULTICA_<PROVIDER>_ARGS` | 비어 있음 | 백엔드별 데몬 전역 기본 CLI 인자. 각 작업에 대해 각 에이전트 자체의 `custom_args`보다 먼저 적용됩니다. `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`를 지원 |
+
+각 파라미터가 데몬 동작에 어떻게 영향을 미치는지에 대한 전체 설명은 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
+
+### 기본 에이전트 인자 (`MULTICA_<PROVIDER>_ARGS`)
+
+백엔드에 대해 **플릿 전역 기본값** 계층의 CLI 플래그를 설정합니다. 각 에이전트의 `custom_args`를 일일이 수정하지 않고도 데몬의 모든 에이전트에 기본 비용·리소스 기준선(예: `--max-turns`)을 적용할 수 있는 편리한 방법입니다. 이는 넘을 수 없는 상한이 아니라 기본 계층입니다. 각 에이전트 자체의 `custom_args`가 뒤에 추가되어 이를 덮어쓸 수 있습니다(아래 **우선순위** 참고).
+
+- **우선순위:** 기본 인자가 먼저 적용되고, 그다음 각 에이전트 자체의 `custom_args`가 추가됩니다. 값을 받는 플래그의 경우 다운스트림 CLI 자체의 인자 파서가 최종 적용 값을 결정합니다(대부분의 도구는 마지막 항목이 우선). 따라서 개별 에이전트는 데몬 기본값을 높일 수 있지만, 에이전트가 덮어쓰지 않은 부분에는 기본값이 계속 적용됩니다.
+- **파싱:** 값은 POSIX 셸 단어 규칙으로 분할되므로 따옴표를 사용할 수 있습니다 — `MULTICA_CLAUDE_ARGS='--append-system-prompt "multi word"'`는 두 개의 토큰으로 파싱됩니다.
+- **안전성:** 기본 인자 계층과 에이전트별 `custom_args` 계층 모두 동일한 blocked-flags 필터를 통과합니다. 따라서 프로토콜에 중요한 플래그(Claude의 `-p`, `--output-format`, `--input-format`, `--permission-mode`, `--mcp-config` 및 Codex의 `--listen` 등)는 어느 계층을 통해서도 주입할 수 없습니다.
+- **미설정/빈 값**은 동작에 변화가 없음을 의미합니다.
+
+## 프론트엔드 액세스 제어
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `FRONTEND_ORIGIN` | 비어 있음 | 프론트엔드 주소. 초대 이메일 링크, CORS 허용 목록, cookie 도메인이 모두 이 값에서 파생됩니다. 설정하지 않으면 초대 이메일 링크는 호스팅 도메인 `https://app.multica.ai`로 폴백합니다 — 자체 호스팅은 이를 명시적으로 설정해야 합니다 |
+| `CORS_ALLOWED_ORIGINS` | 비어 있음 | 추가로 허용할 CORS origin (쉼표로 구분) |
+| `ALLOWED_ORIGINS` | 비어 있음 | WebSocket 전용 origin 허용 목록 (쉼표로 구분); 설정하지 않으면 폴백 순서는 `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174`입니다 |
+
+<Callout type="warning">
+**`FRONTEND_ORIGIN`을 설정하지 않으면 두 가지 조용한 실패가 발생합니다**: (1) 초대 이메일 링크가 `https://app.multica.ai`(호스팅 도메인)를 가리켜, 클릭해도 사용자가 자체 호스팅 인스턴스로 돌아오지 않습니다; (2) WebSocket Origin 검사가 `localhost:3000 / 5173 / 5174`로 폴백하여, 프로덕션 배포의 모든 WebSocket 연결이 거부되고 프론트엔드가 "실시간 업데이트를 받지 못하는" 것처럼 보입니다.
+</Callout>
+
+## GitHub 연동
+
+[GitHub PR ↔ 이슈 연동](/github-integration)에는 두 개의 필수 변수가 필요합니다. 설정에서 Connect GitHub를 활성화하고 들어오는 webhook을 수락하려면 둘 다 설정하세요. 추가로 두 개의 선택 변수를 설정하면 설치 시점에 연결된 계정 이름을 즉시 가져올 수 있습니다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `GITHUB_APP_SLUG` | 비어 있음 | GitHub App의 slug (`https://github.com/apps/<slug>`의 끝부분). 설정 → GitHub 설치 버튼 URL을 구성합니다 |
+| `GITHUB_WEBHOOK_SECRET` | 비어 있음 | GitHub App에 설정한 Webhook secret. 모든 `pull_request` / `installation` delivery의 HMAC-SHA256 검증에 사용되며, setup 콜백 state token의 HMAC 키로도 사용됩니다 |
+| `GITHUB_APP_ID` | 비어 있음 | 선택. App 설정 페이지에 표시되는 숫자 App ID. `GITHUB_APP_PRIVATE_KEY`와 함께 설정하면 setup 콜백이 설치 시점에 GitHub에서 연결된 계정 이름을 가져올 수 있습니다 |
+| `GITHUB_APP_PRIVATE_KEY` | 비어 있음 | 선택. App RSA 비공개 키의 전체 PEM 블록 (`-----BEGIN/END-----` 줄 포함, 줄바꿈 유지). GitHub의 App 인증 REST 호출에 필요한 단명 JWT를 발급하는 데 사용됩니다 |
+
+**필수 변수 중 하나라도 설정하지 않았을 때의 동작:**
+
+- 설정 → GitHub의 `Connect GitHub`가 **비활성화**되고 admin에게 "not configured" 힌트를 표시합니다.
+- `/api/webhooks/github` 엔드포인트는 **`503 github webhooks not configured`**를 반환합니다 — Multica는 모든 서명을 유효한 것으로 취급하기보다, secret 없이는 이벤트 처리를 거부합니다.
+
+**선택 `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY`가 설정되지 않았을 때의 동작:**
+
+- 설치 직후 연결 카드에 잠시 `Connected to unknown`이 표시됩니다. GitHub의 `installation.created` 웹훅이 도착하면(보통 몇 초 이내) Multica가 행을 실제 조직/사용자 이름으로 갱신하고 실시간 브로드캐스트를 보내, 열려 있는 Settings → GitHub 탭이 수동 새로고침 없이 업데이트됩니다.
+
+**참고:** `GITHUB_WEBHOOK_SECRET`은 설치 흐름 state token의 서명 키로 재사용되므로, 운영자는 secret 하나만 관리하면 됩니다. 이것은 GitHub App의 *Client* secret이 **아닙니다** — Client secret은 OAuth 관련이며 이 연동에서는 사용되지 않습니다. 전체 안내는 [GitHub 연동 → 자체 호스팅 설정](/github-integration#self-host-setup)을 참고하세요.
+
+## 사용량 분석
+
+기본적으로 서버는 Multica의 공식 PostHog 인스턴스로 보고합니다. 옵트아웃하려면 `ANALYTICS_DISABLED=true`로 설정하세요.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `ANALYTICS_DISABLED` | `false` | 백엔드 분석을 완전히 비활성화하려면 `true`로 설정 |
+| `POSTHOG_API_KEY` | 내장 기본 키 | 자신의 PostHog 인스턴스를 가리킬 때 설정 |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog를 자체 호스팅하는 경우 자신의 호스트로 변경 |
+
+## 다음
+
+- [로그인 및 가입 설정](/auth-setup) — 위의 auth 관련 변수를 실제로 어떻게 설정하는지, 그리고 함정이 어디에 있는지
+- [GitHub 연동](/github-integration) — `GITHUB_APP_SLUG` / `GITHUB_WEBHOOK_SECRET`을 뒷받침하는 GitHub App을 어떻게 설정하는지
+- [문제 해결](/troubleshooting) — 흔한 설정 오류의 증상과 해결책
+- [데몬과 런타임](/daemon-runtimes) — `MULTICA_DAEMON_*` 파라미터가 실제로 하는 일

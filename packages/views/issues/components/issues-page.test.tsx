@@ -115,6 +115,7 @@ const mockListSquads = vi.hoisted(() =>
 );
 vi.mock("@multica/core/api", () => ({
   api: {
+    getBaseUrl: () => "http://127.0.0.1:8080",
     listIssues: (...args: any[]) => mockListIssues(...args),
     listGroupedIssues: (...args: any[]) => mockListGroupedIssues(...args),
     updateIssue: vi.fn(),
@@ -337,6 +338,7 @@ const issueDefaults = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  stage: null,
   metadata: {},
 };
 
@@ -531,7 +533,10 @@ describe("IssuesPage (shared)", () => {
 
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("Test User");
+    // "Test User" renders both as the assignee group header and on the
+    // assignee chip of each card grouped under that header, so a unique
+    // match is not guaranteed.
+    await screen.findAllByText("Test User");
     expect(screen.getAllByText("Agent One").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Squad One").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("No assignee")).toBeInTheDocument();
@@ -555,7 +560,7 @@ describe("IssuesPage (shared)", () => {
     expect(mockListIssues).not.toHaveBeenCalled();
   });
 
-  it("shows workspace breadcrumb with 'Issues' label", async () => {
+  it("shows the 'Issues' section header without a workspace prefix", async () => {
     mockListIssues.mockImplementation((params: any) =>
       Promise.resolve({
         issues: mockIssues.filter((i) => i.status === params?.status),
@@ -566,7 +571,9 @@ describe("IssuesPage (shared)", () => {
     renderWithQuery(<IssuesPage />);
 
     await screen.findByText("Issues");
-    expect(screen.getByText("Test WS")).toBeInTheDocument();
+    // The list header is now `icon + title`, matching the other list pages.
+    // The workspace/org name is no longer rendered as a breadcrumb prefix.
+    expect(screen.queryByText("Test WS")).not.toBeInTheDocument();
   });
 
   it("shows empty state when there are no issues", async () => {
@@ -581,7 +588,7 @@ describe("IssuesPage (shared)", () => {
   it("shows scope tab buttons", async () => {
     renderWithQuery(<IssuesPage />);
 
-    await screen.findByText("All");
+    expect(await screen.findAllByText("All")).not.toHaveLength(0);
     expect(screen.getByText("Members")).toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
   });

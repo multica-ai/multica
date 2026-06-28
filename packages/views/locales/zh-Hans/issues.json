@@ -1,6 +1,6 @@
 {
   "page": {
-    "breadcrumb_title": "issue",
+    "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "工作区",
     "empty_title": "还没有 issue",
     "empty_hint": "创建一个 issue 开始使用。",
@@ -21,6 +21,10 @@
     "medium": "中",
     "low": "低",
     "none": "无优先级"
+  },
+  "stage": {
+    "none": "无阶段",
+    "value": "阶段 {{n}}"
   },
   "scope": {
     "all_label": "全部",
@@ -43,11 +47,22 @@
     "section_creator": "创建者",
     "section_project": "项目",
     "section_label": "标签",
+    "section_date": "日期",
+    "date_field": "字段",
+    "date_field_created": "创建时间",
+    "date_field_updated": "更新时间",
+    "date_today": "今天",
+    "date_last_3_days": "最近 3 天",
+    "date_last_7_days": "最近 7 天",
+    "date_custom_range": "自定义日期或范围",
+    "date_apply": "应用",
+    "date_clear": "清除日期筛选",
     "members_group": "成员",
     "agents_group": "智能体",
     "squads_group": "小队",
     "issue_count_other": "{{count}} 个 issue",
-    "reset": "重置全部筛选"
+    "reset": "重置全部筛选",
+    "active_count_other": "{{count}} 个筛选"
   },
   "display": {
     "tooltip": "显示设置",
@@ -58,6 +73,8 @@
     "descending_title": "降序",
     "group_status": "状态",
     "group_assignee": "负责人",
+    "group_parent": "父级 issue",
+    "group_project": "项目",
     "sort_manual": "手动",
     "sort_priority": "优先级",
     "sort_start_date": "开始日期",
@@ -77,10 +94,12 @@
     "tooltip_board": "看板视图",
     "tooltip_list": "列表视图",
     "tooltip_gantt": "甘特图",
+    "tooltip_swimlane": "泳道视图",
     "section": "视图",
     "board": "看板",
     "list": "列表",
-    "gantt": "甘特图"
+    "gantt": "甘特图",
+    "swimlane": "泳道"
   },
   "gantt": {
     "header_issue": "Issue",
@@ -119,13 +138,22 @@
     "empty_status": "无 issue",
     "add_issue_tooltip": "新建 issue"
   },
+  "swimlane": {
+    "no_parent": "无父级",
+    "other_parents": "其他父级",
+    "no_project": "无项目",
+    "no_assignee": "未指派",
+    "open_parent": "打开父级 issue",
+    "toggle_collapse": "切换泳道"
+  },
   "board": {
     "hidden_columns_label": "隐藏的列",
     "hide_column": "隐藏列",
     "show_column": "显示列",
     "add_issue_tooltip": "新建 issue",
     "empty_column": "无 issue",
-    "empty_grouping": "没有匹配的 issue"
+    "empty_grouping": "没有匹配的 issue",
+    "ordered_by": "按{{field}}排序"
   },
   "detail": {
     "not_found": "这个 issue 不存在或已在该工作区被删除。",
@@ -170,6 +198,7 @@
     "pull_request_card_show_less": "收起",
     "prop_status": "状态",
     "prop_priority": "优先级",
+    "prop_stage": "阶段",
     "prop_assignee": "负责人",
     "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
@@ -235,7 +264,9 @@
     "squad_leader_failed_reason": "评估失败：{{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} 条动态",
-    "activity_count_other": "{{count}} 条动态"
+    "activity_count_other": "{{count}} 条动态",
+    "show_more_activities_one": "展开更早 {{count}} 条动态",
+    "show_more_activities_other": "展开更早 {{count}} 条动态"
   },
   "comment": {
     "delete_title": "删除评论",
@@ -256,25 +287,44 @@
     "reply_count_other": "{{count}} 条回复",
     "leave_comment_placeholder": "留下评论...",
     "send_tooltip": "发送",
-    "expand_tooltip": "展开",
-    "collapse_tooltip": "收起",
+    "trigger_source_issue_assignee": "assignee",
+    "trigger_source_mention_agent": "@mention",
+    "trigger_source_mention_squad_leader": "squad",
+    "trigger_source_unknown": "将触发",
+    "trigger_skipped_label": "已跳过",
+    "trigger_wont_trigger": "本次不会开始",
+    "trigger_none_will_trigger": "都不会开始",
+    "trigger_reason_mention_squad_leader": "被 @ Squad 的 leader。",
+    "trigger_reason_unknown": "将由这条评论开始。",
+    "trigger_will_start": "发送后开始工作",
+    "trigger_will_start_count_other": "发送后 {{count}} 个智能体开始工作",
+    "trigger_starts_now": "立即开始。",
+    "trigger_starts_when_online": "当前离线，上线后开始。",
+    "trigger_click_to_skip": "点击本次跳过。",
+    "trigger_click_to_manage": "点击选择本次运行的对象。",
+    "trigger_click_to_restore": "本次不会开始，点击恢复。",
+    "trigger_preview_title": "发送后将开始",
+    "trigger_chip_aria": "{{name}} 触发状态：{{state}}",
     "resolve": {
-      "resolve_action": "标记为已解决",
+      "resolve_thread_action": "解决该讨论",
+      "unresolve_thread_action": "重新打开讨论",
+      "resolve_with_comment_action": "以此评论解决讨论",
       "unresolve_action": "重新打开",
+      "resolution_badge": "结论",
       "collapse": "收起",
       "bar_other": "来自 {{authors}} 的 {{count}} 条已解决评论",
+      "fold_other": "来自 {{authors}} 的 {{count}} 条评论",
       "bar_authors_more_other": "{{names}} 等 {{count}} 人",
       "resolve_failed": "标记已解决失败",
       "unresolve_failed": "重新打开失败"
     }
   },
   "reply": {
-    "placeholder": "回复...",
-    "expand_tooltip": "展开",
-    "collapse_tooltip": "收起"
+    "placeholder": "回复..."
   },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体正在工作",
+    "hover_header_queued_other": "{{count}} 个智能体排队中",
     "status_running": "正在工作",
     "status_queued": "排队中",
     "chip_label": "工作中",
@@ -282,8 +332,9 @@
     "filter_active_label": "正在查看工作中的智能体"
   },
   "agent_live": {
-    "is_working": "{{name}} 正在处理",
+    "is_working": "{{name}} 在工作",
     "is_queued": "{{name}} 排队中",
+    "is_waiting_local_directory": "{{name}} 正在等待本地目录",
     "queued_elapsed_prefix": "已排队 {{elapsed}}",
     "fallback_name": "智能体",
     "tool_count_other": "{{count}} 次工具调用",
@@ -310,8 +361,10 @@
     "trigger_autopilot": "自动化运行",
     "trigger_comment": "评论触发",
     "trigger_initial": "首次运行",
+    "trigger_handoff_prefix": "交接：",
     "status_queued": "排队中",
     "status_dispatched": "启动中",
+    "status_waiting_local_directory": "等待本地目录释放",
     "status_running": "处理中",
     "status_completed": "已完成",
     "status_failed": "失败",
@@ -365,6 +418,8 @@
     "more": "更多",
     "create_sub_issue": "创建子 issue",
     "set_parent_issue": "设置父 issue...",
+    "remove_parent_issue": "移除父 issue",
+    "remove_parent_issue_success": "已移除父 issue",
     "add_sub_issue": "添加子 issue...",
     "delete_issue": "删除 issue"
   },
@@ -424,9 +479,6 @@
     "row_backlog_label": "Backlog",
     "row_backlog_hint": "智能体保持暂停",
     "row_todo_label": "Todo",
-    "row_todo_hint": "启动智能体",
-    "dont_show_again": "不再提示",
-    "keep_in_backlog": "保持在 Backlog",
-    "move_to_todo": "移到 Todo"
+    "row_todo_hint": "启动智能体"
   }
 }

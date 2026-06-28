@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
-import { pickLocale } from "@multica/core/i18n";
+import { pickLocale, type SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
 import { useWelcomeStore } from "@multica/core/onboarding";
 import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/queries";
@@ -19,13 +19,58 @@ import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
+import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
 
+// BCP-47 region tags for the <html lang> attribute, mirroring
+// apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
+// we sync it to the resolved locale at boot so screen readers announce the
+// right language AND the Japanese-scoped CJK font override in globals.css
+// (`html[lang|="ja"]`) can take effect.
+const HTML_LANG: Record<SupportedLocale, string> = {
+  en: "en",
+  "zh-Hans": "zh-CN",
+  ko: "ko-KR",
+  ja: "ja-JP",
+};
+
+
+/**
+ * Cmd/Ctrl+W: close the active tab. When the last real tab is closed
+ * (or no tabs/workspace exist — e.g. login page), close the window.
+ *
+ * Mounted at the App root so every renderer state — including login,
+ * loading, onboarding, and runtime-config errors — has a working Cmd+W
+ * handler. Without this, states outside the tab shell would swallow the
+ * shortcut and do nothing.
+ */
+function useCmdWCloseTab() {
+  useEffect(() => {
+    return window.desktopAPI.onCloseActiveTab(() => {
+      const store = useTabStore.getState();
+      const { activeWorkspaceSlug, byWorkspace } = store;
+      if (!activeWorkspaceSlug) {
+        // No workspace — nothing to close, dismiss the window.
+        window.desktopAPI.closeWindow();
+        return;
+      }
+      const group = byWorkspace[activeWorkspaceSlug];
+      if (!group || group.tabs.length <= 1) {
+        // Last tab (or no tabs) — close the window.
+        window.desktopAPI.closeWindow();
+        return;
+      }
+      // Multiple tabs — close the active one.
+      store.closeActiveTab();
+    });
+  }, []);
+}
 
 function AppContent() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const qc = useQueryClient();
+
   // Deep-link login runs loginWithToken → syncToken → listWorkspaces →
   // setQueryData sequentially. loginWithToken sets user+isLoading=false
   // as soon as getMe resolves, which would cause DesktopShell to mount
@@ -179,6 +224,7 @@ function AppContent() {
     return undefined;
   }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded, qc]);
 
+
   // Validate persisted tab state against the current user's workspace list,
   // and pick an active workspace if none is set. Runs in useLayoutEffect
   // (synchronously after render, before paint) rather than the render
@@ -285,6 +331,28 @@ export default function App() {
   const { version, os } = window.desktopAPI.appInfo;
   const systemLocale = window.desktopAPI.systemLocale;
   const runtimeConfigResult = window.desktopAPI.runtimeConfig;
+  useCmdWCloseTab();
+
+  // Flush a freeze/crash breadcrumb the main process parked from a previous
+  // session. A true hang or process death can't report itself when it happens
+  // (the renderer is blocked or gone), so the main process persists it and we
+  // emit it here on the next boot. The in-thread, recoverable freeze tier is
+  // handled separately by the shared watchdog in CoreProvider.
+  useEffect(() => {
+    const last = window.desktopAPI.getLastFreeze();
+    if (!last) return;
+    const crashed = last.kind === "render-process-gone";
+    captureEvent(crashed ? "client_crash" : "client_unresponsive", {
+      // Spread context FIRST so our explicit fields below always win — a
+      // future context key (e.g. its own `source`) must not silently override.
+      ...last.context,
+      source: crashed ? "render-process-gone" : "main-unresponsive",
+      recovered: false,
+      breadcrumb_ts: last.ts,
+      crashed_version: last.version,
+    });
+  }, []);
+
   // Stable identity reference so downstream effects (WS reconnect) don't
   // tear down on every parent render.
   const identity = useMemo(
@@ -302,6 +370,15 @@ export default function App() {
     () => ({ [locale]: RESOURCES[locale] }),
     [locale],
   );
+
+  // Keep <html lang> in sync with the resolved locale (index.html hardcodes
+  // "en"). Drives the lang-scoped Japanese CJK font override and a11y.
+  // useLayoutEffect (not useEffect) so lang is committed before the first
+  // paint — otherwise Japanese users would see one frame of Kanji rendered
+  // with the Chinese-first fallback stack before the override kicks in.
+  useLayoutEffect(() => {
+    document.documentElement.lang = HTML_LANG[locale];
+  }, [locale]);
 
   // React to OS-level language changes detected by main on focus regain.
   // Only act when the user is following the system signal (no explicit

@@ -18,16 +18,24 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflagdispatch"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
 
 var defaultOrigins = []string{
@@ -57,6 +65,17 @@ func allowedOrigins() []string {
 		return defaultOrigins
 	}
 	return origins
+}
+
+// appURLFromEnv resolves the user-facing web app URL. It prefers
+// MULTICA_APP_URL and falls back to FRONTEND_ORIGIN, matching how the backend
+// resolves the app URL elsewhere (handler.daemonSetupURLsFromEnv) and the CLI
+// login flow (cmd/multica tryResolveAppURL). Empty when neither is set.
+func appURLFromEnv() string {
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_APP_URL")), "/"); v != "" {
+		return v
+	}
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")), "/")
 }
 
 // parseTrustedProxies parses a comma-separated list of CIDR prefixes from the
@@ -94,13 +113,16 @@ func parseTrustedProxies(raw string) []netip.Prefix {
 // keeps the default in-memory stores which are fine for single-node dev and
 // tests.
 func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client) chi.Router {
-	return NewRouterWithOptions(pool, hub, bus, analyticsClient, rdb, RouterOptions{})
+	r, _ := NewRouterWithOptions(pool, hub, bus, analyticsClient, rdb, RouterOptions{})
+	return r
 }
 
 type RouterOptions struct {
-	HTTPMetrics  *obsmetrics.HTTPMetrics
-	DaemonHub    *daemonws.Hub
-	DaemonWakeup service.TaskWakeupNotifier
+	HTTPMetrics     *obsmetrics.HTTPMetrics
+	BusinessMetrics *obsmetrics.BusinessMetrics
+	DaemonHub       *daemonws.Hub
+	DaemonWakeup    service.TaskWakeupNotifier
+	FeatureFlags    *featureflag.Service
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
@@ -108,7 +130,14 @@ type RouterOptions struct {
 	HeartbeatScheduler handler.HeartbeatScheduler
 }
 
-func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
+// NewRouterWithOptions builds the fully-configured Chi router and
+// returns the *handler.Handler it was constructed from. Callers that
+// need to drive background lifecycle on services attached to the
+// handler (e.g. starting the Lark inbound Hub under a long-running
+// context, calling Wait on shutdown) use the returned handler;
+// callers that only need the HTTP handler (tests, the simple
+// NewRouter shim) discard the second value.
+func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) (chi.Router, *handler.Handler) {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
 	daemonHub := opts.DaemonHub
@@ -129,19 +158,41 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
+	origins := allowedOrigins()
 
 	signupConfig := handler.Config{
 		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
 		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
 		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
 		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
 		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
 		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
+		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
+		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		AttachmentFrameAncestors: origins,
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	h.Metrics = opts.BusinessMetrics
+	if opts.FeatureFlags != nil {
+		h.DaemonFeatureFlags = featureflagdispatch.NewEvaluator(opts.FeatureFlags)
+	}
+	h.TaskService.Metrics = opts.BusinessMetrics
+	h.IssueService.Metrics = opts.BusinessMetrics
+	if opts.BusinessMetrics != nil {
+		// Wire the BusinessMetrics receiver into the cloud runtime client
+		// so every outbound Fleet/Gateway request feeds the
+		// multica_cloudruntime_request_* histograms.
+		if client, ok := h.CloudRuntime.(*cloudruntime.Client); ok {
+			client.SetRecorder(opts.BusinessMetrics)
+		}
+	}
 	if opts.DaemonWakeup != nil {
 		h.TaskService.Wakeup = opts.DaemonWakeup
+		if notifier, ok := opts.DaemonWakeup.(handler.RuntimeProfileRefreshNotifier); ok {
+			h.DaemonProfileRefresh = notifier
+		}
 	}
 	if rdb != nil {
 		h.UpdateStore = handler.NewRedisUpdateStore(rdb)
@@ -152,6 +203,238 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.WebhookRateLimiter = handler.NewRedisWebhookRateLimiter(rdb, handler.DefaultWebhookRateLimit())
 		h.WebhookIPRateLimiter = handler.NewRedisWebhookIPRateLimiter(rdb, handler.DefaultWebhookIPRateLimit())
 	}
+
+	// Channel engine (MUL-3620): the platform-agnostic inbound runtime.
+	// Built UNCONDITIONALLY — it drives any channel.Channel, not just
+	// Feishu, so it must not depend on the Lark master key (a future
+	// Slack-only deployment has no Lark key). Platform adapters register a
+	// Factory + ResolverSet into it below; the Supervisor enumerates active
+	// installations across ALL channel types and routes each to its
+	// registered platform's Factory. With no platform registered the store
+	// still lists any active installation rows, but Registry.Build returns
+	// ErrUnknownType for them, so the supervisor logs and backs off without
+	// opening a connection (the normal state is simply that no rows exist
+	// for an unregistered platform). The Router is the single shared inbound
+	// handler injected into every Channel.
+	channelRegistry := channel.NewRegistry()
+	channelRouter := engine.NewRouter(h.IssueService, h.TaskService, queries, engine.RouterConfig{Logger: slog.Default()})
+	// Debounce the per-session run trigger so a burst of messages collapses
+	// into one agent run instead of one per message (MUL-2968).
+	channelRouter.EnableRunBatching(engine.DefaultChatRunBatchWindow)
+	h.ChannelRouter = channelRouter
+	h.ChannelSupervisor = engine.NewSupervisor(
+		lark.NewChannelInstallationStore(queries),
+		channelRegistry,
+		channelRouter.Handle,
+		engine.Config{},
+	)
+
+	// Lark integration. Only wired when MULTICA_LARK_SECRET_KEY is set:
+	// the InstallationService refuses to fall back to plaintext storage
+	// for app_secret, and the BindingTokenService cannot mint usable
+	// tokens without it either. When the key is absent the Lark
+	// handlers return 503 with a clear message; the rest of the server
+	// continues to start so self-host deployments that have not opted
+	// in to Lark are unaffected. Feishu registers its Factory + ResolverSet
+	// into the channel engine above.
+	if larkKey, err := secretbox.LoadKey("MULTICA_LARK_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(larkKey)
+		if err != nil {
+			slog.Error("lark: secretbox.New failed; lark integration disabled", "error", err)
+		} else {
+			installSvc, err := lark.NewInstallationService(queries, box)
+			if err != nil {
+				slog.Error("lark: InstallationService init failed; lark integration disabled", "error", err)
+			} else {
+				h.LarkInstallations = installSvc
+				h.LarkBindingTokens = lark.NewBindingTokenService(queries, pool)
+				slog.Info("lark integration enabled")
+
+				// APIClient: wire the real Lark Open Platform HTTP client
+				// (IM v1 send/patch + binding-prompt + bot info). Setting
+				// MULTICA_LARK_SECRET_KEY is the operator's opt-in for
+				// the integration as a whole; we don't expose a separate
+				// "HTTP enabled" knob because the inbound dispatcher
+				// without outbound replies is not a useful production
+				// state, and CI / integration tests that want to avoid
+				// real Lark traffic can point MULTICA_LARK_HTTP_BASE_URL
+				// at a mock server.
+				//
+				// MULTICA_LARK_HTTP_BASE_URL is an OPTIONAL deployment-wide
+				// override. Normal operation leaves it empty: each call then
+				// resolves its open-platform host from the installation's
+				// region (open.feishu.cn vs open.larksuite.com), so one
+				// deployment serves both clouds. Set it only to force every
+				// installation onto one host — a proxy, a mock for tests, or
+				// a single-cloud staging setup.
+				larkClient := lark.NewHTTPAPIClient(lark.HTTPClientConfig{
+					BaseURL: strings.TrimSpace(os.Getenv("MULTICA_LARK_HTTP_BASE_URL")),
+					Logger:  slog.Default(),
+				})
+				h.LarkAPIClient = larkClient
+
+				// Channel-backed store: routes the lark package's DB seams
+				// onto the channel_* tables (MUL-3515). Interface-wired
+				// consumers (patcher, typing indicator, dispatcher, hub,
+				// backfills) take it directly; the constructor-based services
+				// wrap *db.Queries internally, so they keep taking queries.
+				cs := lark.NewChannelStore(queries)
+				patcher := lark.NewPatcher(cs, installSvc, larkClient, lark.PatcherConfig{})
+				patcher.Register(bus)
+
+				// Typing indicator: shows a "processing" reaction on the user's
+				// message while the agent is working, then removes it before the
+				// reply is sent. Best-effort; failures are logged only.
+				typingIndicator := lark.NewTypingIndicatorManager(larkClient, installSvc, cs, slog.Default())
+				patcher.SetTypingIndicatorManager(typingIndicator)
+
+				// Inbound pipeline seams: lark_inbound_audit logger and the
+				// shared channel-agnostic chat-session service. They back the
+				// Feishu ResolverSet that the engine.Router runs through,
+				// sharing the same IssueService + TaskService that back HTTP, so
+				// /issue-created issues share counter, dup guard, project
+				// boundary, broadcast, analytics and agent-enqueue with the rest
+				// of the product. Feishu is just another consumer of the shared
+				// engine.ChatSession (channel_type-keyed); the Lark session
+				// titles preserve the pre-cutover wording.
+				auditLogger := lark.NewAuditLogger(queries)
+				feishuSession := engine.NewChatSession(queries, pool, channel.TypeFeishu, engine.SessionTitles{
+					Group:    "Lark group chat",
+					Direct:   "Lark direct message",
+					Fallback: "Lark chat",
+				})
+
+				// OutcomeReplier wires the outbound side: NeedsBinding /
+				// AgentOffline / AgentArchived / issue-created translate to a
+				// Lark-side reply card. Requires the real APIClient and the
+				// binding token service; otherwise it falls back to the noop
+				// replier (outcomes logged, not delivered). We only register
+				// it on the ResolverSet when it can actually deliver, so a
+				// pre-outbound deployment pays no reply-goroutine cost.
+				replier := lark.NewLarkOutcomeReplier(lark.OutcomeReplierConfig{
+					APIClient:   larkClient,
+					BindingSvc:  h.LarkBindingTokens,
+					Credentials: installSvc,
+					Queries:     queries,
+					AppURL:      appURLFromEnv(),
+					Logger:      slog.Default(),
+				})
+				var resolverReplier lark.OutcomeReplier
+				if larkClient.IsConfigured() {
+					resolverReplier = replier
+				}
+
+				// Feishu adapter (MUL-3620): the WSLongConnConnector talks
+				// Lark's long-conn protocol over gorilla/websocket and wraps
+				// every read with a ctx-cancel watchdog so lease loss /
+				// shutdown breaks the blocking ReadMessage in bounded time —
+				// the invariant §4.4 leans on. If the endpoint fetcher fails
+				// to initialize (bad MULTICA_LARK_CALLBACK_BASE_URL or
+				// similar), buildLarkConnector logs and falls back to the
+				// NoopConnector so the lease / supervisor lifecycle still runs
+				// against real DB rows — inbound messages are silently dropped
+				// until the config is fixed, with the boot log labelling the
+				// mode "noop".
+				//
+				// Registering the Factory (connect/send) + ResolverSet
+				// (inbound pipeline seams) is all it takes to add the platform
+				// to the engine — no engine edit.
+				connector, connectorLabel := buildLarkConnector(installSvc, larkClient)
+				lark.RegisterFeishu(channelRegistry, lark.FeishuChannelDeps{
+					Connector:   connector,
+					APIClient:   larkClient,
+					Credentials: installSvc,
+					Logger:      slog.Default(),
+				})
+				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
+					cs, feishuSession, auditLogger, resolverReplier, typingIndicator,
+				))
+				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
+
+				// One-shot union_id backfill for installations created
+				// before migration 112 added bot_union_id. Runs off the
+				// hot startup path so a slow Lark round-trip cannot block
+				// HTTP listener boot. New installs already write
+				// bot_union_id during the device-flow finalize, so this
+				// is bridge code — it will simply find no rows to update
+				// on a fresh deployment and exit. MUL-2671.
+				go lark.BackfillBotUnionIDs(context.Background(), cs, larkClient, installSvc, slog.Default())
+
+				// Upgrade repair for deployments that ran the whole
+				// integration against Lark international via the deployment-
+				// wide base-URL override before per-installation region
+				// existed: migration 116 backfilled their rows to 'feishu',
+				// so relabel them to 'lark' (their true cloud) before the
+				// operator clears the override. No-op on mainland / fresh
+				// deployments. Off the hot startup path like the union_id
+				// backfill. MUL-3083.
+				go lark.BackfillRegionFromLegacyOverride(context.Background(), cs,
+					strings.TrimSpace(os.Getenv("MULTICA_LARK_HTTP_BASE_URL")),
+					strings.TrimSpace(os.Getenv("MULTICA_LARK_CALLBACK_BASE_URL")),
+					slog.Default())
+
+				// Device-flow registration service: end-to-end install
+				// pipeline that talks to accounts.feishu.cn (RFC 8628)
+				// for the QR-scan handshake and then commits the
+				// resulting Bot credentials + the installer's
+				// lark_user_binding in one DB transaction. The optional
+				// MULTICA_LARK_REGISTRATION_DOMAIN / _LARK_DOMAIN env
+				// vars override the protocol hosts for staging / dev.
+				regCfg := lark.RegistrationConfig{
+					Domain:     strings.TrimSpace(os.Getenv("MULTICA_LARK_REGISTRATION_DOMAIN")),
+					LarkDomain: strings.TrimSpace(os.Getenv("MULTICA_LARK_REGISTRATION_LARK_DOMAIN")),
+				}
+				regClient := lark.NewRegistrationClient(regCfg)
+				regSvc, rerr := lark.NewRegistrationService(
+					lark.RegistrationServiceConfig{Logger: slog.Default()},
+					regClient,
+					larkClient,
+					queries,
+					pool,
+					installSvc,
+					h.LarkBindingTokens,
+				)
+				if rerr != nil {
+					slog.Error("lark: RegistrationService init failed; install disabled", "error", rerr)
+				} else {
+					// Publish lark_installation:created at row-commit time so the
+					// connection badge refreshes on every workspace client, not just
+					// the tab that polls the install status to success.
+					regSvc.SetEventBus(bus)
+					h.LarkRegistration = regSvc
+					slog.Info("lark device-flow install enabled")
+				}
+			}
+		}
+	} else {
+		slog.Info("lark integration disabled (MULTICA_LARK_SECRET_KEY not set)")
+	}
+
+	// Slack integration (MUL-3516). Gated by MULTICA_SLACK_SECRET_KEY — the key
+	// that decrypts the bot/app tokens stored on the channel_installation row.
+	// When unset the whole block is skipped, so existing deployments are
+	// unaffected; an operator opts in by setting the key and creating a
+	// channel_type='slack' installation (config: app_id=team_id, bot_user_id,
+	// bot_token_encrypted, app_token_encrypted). Registering the Factory
+	// (Socket Mode connect/send) + ResolverSet (inbound pipeline) + the outbound
+	// subscriber (agent reply -> Slack) is all it takes — no engine or core edit,
+	// and Feishu is untouched. The Slack ResolverSet/Outbound share the same
+	// engine.ChatSession, channel_* tables, IssueService and TaskService as
+	// Feishu, so /issue, dedup, and run-triggering behave identically.
+	if slackKey, err := secretbox.LoadKey("MULTICA_SLACK_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(slackKey)
+		if err != nil {
+			slog.Error("slack: secretbox.New failed; slack integration disabled", "error", err)
+		} else {
+			slack.RegisterSlack(channelRegistry, slack.SlackChannelDeps{Decrypt: box.Open, Logger: slog.Default()})
+			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool))
+			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)
+			slog.Info("slack integration enabled")
+		}
+	} else {
+		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -165,6 +448,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.PATCache = patCache
 	h.DaemonTokenCache = daemonTokenCache
 	h.MembershipCache = auth.NewMembershipCache(rdb)
+
+	// Cloud PAT verifier: validates mcn_ tokens against Multica Cloud
+	// Fleet. Returns nil when no Fleet URL is configured — the Auth /
+	// DaemonAuth middlewares treat nil as "mcn_ not supported" and
+	// reject with 401, instead of falling through to mul_/JWT paths.
+	// Reuses MULTICA_CLOUD_FLEET_URL (the same URL the cloud-runtime
+	// proxy uses) so a deployment doesn't need a second config knob.
+	cloudPATVerifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{
+		FleetBaseURL: signupConfig.CloudRuntimeFleetURL,
+		Redis:        rdb,
+	})
 
 	// Empty-claim cache: lets the daemon poll path skip a Postgres
 	// scan when a recent check confirmed the runtime had no queued
@@ -188,15 +482,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.ContentSecurityPolicy)
-	origins := allowedOrigins()
 
 	// Share allowed origins with WebSocket origin checker.
 	realtime.SetAllowedOrigins(origins)
 
+	// Share the same trusted-proxy CIDRs (MULTICA_TRUSTED_PROXIES) so the
+	// WebSocket origin check honors X-Forwarded-Host only from trusted proxies,
+	// using one config source instead of a parallel one.
+	realtime.SetTrustedProxies(signupConfig.TrustedProxies)
+
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Workspace-ID", "X-Workspace-Slug", "X-Request-ID", "X-Agent-ID", "X-Task-ID", "X-CSRF-Token", "X-Client-Platform", "X-Client-Version", "X-Client-OS", "X-User-PAT"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Workspace-ID", "X-Workspace-Slug", "X-Request-ID", "X-Agent-ID", "X-Task-ID", "X-CSRF-Token", "X-Client-Platform", "X-Client-Version", "X-Client-OS"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -264,18 +562,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)
+	// Stripe webhook (no Multica auth — Stripe signs the raw body
+	// with a shared secret, the multica-cloud upstream verifies. We
+	// only forward the bytes + the Stripe-Signature header; see
+	// HandleCloudBillingStripeWebhook for the rationale).
+	r.Post("/api/webhooks/stripe", h.HandleCloudBillingStripeWebhook)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
-		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache))
+		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
 
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
 		r.Post("/heartbeat", h.DaemonHeartbeat)
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
+		r.Get("/workspaces/{workspaceId}/runtime-profiles", h.DaemonListRuntimeProfiles)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
+		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/prepare-lease", h.ExtendTaskPrepareLease)
+		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/skill-bundles/resolve", h.ResolveTaskSkillBundles)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/update/{updateId}/result", h.ReportUpdateResult)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
@@ -284,6 +590,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		r.Get("/tasks/{taskId}/status", h.GetTaskStatus)
 		r.Post("/tasks/{taskId}/start", h.StartTask)
+		r.Post("/tasks/{taskId}/wait-local-directory", h.MarkTaskWaitingLocalDirectory)
 		r.Post("/tasks/{taskId}/progress", h.ReportTaskProgress)
 		r.Post("/tasks/{taskId}/complete", h.CompleteTask)
 		r.Post("/tasks/{taskId}/fail", h.FailTask)
@@ -302,7 +609,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Protected API routes
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(queries, patCache))
+		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// --- User-scoped routes (no workspace context required) ---
@@ -323,6 +630,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 
+		// Attachment download — user-scoped (auth-only), NOT
+		// workspace-scoped. The handler self-resolves the workspace
+		// from the attachment row and enforces membership inside, so
+		// this route is callable as a native browser <img>/<video>
+		// src that cannot attach X-Workspace-Slug / X-Workspace-ID
+		// headers. Persisting `/api/attachments/<id>/download` into
+		// comment markdown depends on this — see MUL-3130. The
+		// metadata / delete endpoints below stay workspace-scoped
+		// because they are JSON-API consumers that always have
+		// workspace context.
+		r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
+
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
@@ -339,6 +658,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the handler strips the management handle and adds a
 					// can_manage hint so the UI can gate connect/disconnect.
 					r.Get("/github/installations", h.ListGitHubInstallations)
+					// Custom runtime profiles — listing/reading is member-visible
+					// (the Runtime page renders for everyone; create/edit/delete
+					// are admin-gated below).
+					r.Get("/runtime-profiles", h.ListRuntimeProfiles)
+					r.Get("/runtime-profiles/{profileId}", h.GetRuntimeProfile)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -351,6 +675,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					// Custom runtime profile mutations (admin-only).
+					r.Post("/runtime-profiles", h.CreateRuntimeProfile)
+					r.Patch("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
+					r.Put("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
+					r.Delete("/runtime-profiles/{profileId}", h.DeleteRuntimeProfile)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
@@ -363,8 +692,38 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
 				})
+
+				// Lark integration. Listing is member-visible (same
+				// rationale as GitHub: the Integrations tab must
+				// render for non-admins so they see "wired up by whom").
+				// Install / revoke require admin to prevent a non-admin
+				// from binding a Bot to a workspace agent or yanking
+				// an installation out from under one.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/lark/installations", h.ListLarkInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
+					// Device-flow scan-to-install. Begin opens a new
+					// registration session against Lark and returns
+					// the QR-code URL; the frontend dialog then polls
+					// /install/{sessionId}/status until success or
+					// terminal failure.
+					r.Post("/lark/install/begin", h.BeginLarkInstall)
+					r.Get("/lark/install/{sessionId}/status", h.GetLarkInstallStatus)
+				})
 			})
 		})
+
+		// Lark binding-token redemption. NOT workspace-scoped because
+		// the redeemer hits this BEFORE they have any workspace
+		// context — the redemption itself is what mints their
+		// lark_user_binding row. Identity comes from the session;
+		// the token only proves "this open_id requested binding," and
+		// is combined with the logged-in user to create the mapping.
+		r.Post("/api/lark/binding/redeem", h.RedeemLarkBindingToken)
 
 		// User-scoped invitation routes (no workspace context required)
 		r.Get("/api/invitations", h.ListMyInvitations)
@@ -375,7 +734,45 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Route("/api/tokens", func(r chi.Router) {
 			r.Get("/", h.ListPersonalAccessTokens)
 			r.Post("/", h.CreatePersonalAccessToken)
+			r.Post("/current/renew", h.RenewCurrentPersonalAccessToken)
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
+		})
+
+		// Cloud Billing proxy. Same upstream service / port as
+		// cloud-runtime — multica-cloud's Fleet and Billing share
+		// :8080 and the same chi router. All routes here forward
+		// to /api/v1/billing/* with X-User-ID stamped from the
+		// authenticated context.
+		//
+		// User-scoped (account-level), NOT workspace-scoped — sits
+		// outside the RequireWorkspaceMember group so a user can
+		// inspect their balance, top up, and open the Billing Portal
+		// without an active workspace selected. The upstream owner
+		// model is single-user; X-Workspace-ID would be ignored even
+		// if we sent it. The Stripe webhook is the public outlier
+		// and lives outside the entire Auth group (see above).
+		//
+		// IMPORTANT — task-token actors are blocked here. The Auth
+		// middleware happily turns an mat_ task token into a normal
+		// X-User-ID stamp (so agents can comment, claim issues, etc.
+		// as their owner), but billing is account-level and a running
+		// agent reading its owner's balance / opening a checkout
+		// session is the kind of lateral-movement we're explicitly
+		// trying to prevent. handler.RequireHumanActor checks the
+		// authoritative server-set X-Actor-Source header and 403s
+		// any task-token request. See actor_guards.go for the full
+		// rationale.
+		r.Route("/api/cloud-billing", func(r chi.Router) {
+			r.Use(handler.RequireHumanActor)
+
+			r.Get("/balance", h.GetCloudBillingBalance)
+			r.Get("/transactions", h.ListCloudBillingTransactions)
+			r.Get("/batches", h.ListCloudBillingBatches)
+			r.Get("/topups", h.ListCloudBillingTopups)
+			r.Get("/price-tiers", h.ListCloudBillingPriceTiers)
+			r.Post("/checkout-sessions", h.CreateCloudBillingCheckoutSession)
+			r.Get("/checkout-sessions/{sessionId}", h.GetCloudBillingCheckoutSession)
+			r.Post("/portal-sessions", h.CreateCloudBillingPortalSession)
 		})
 
 		// --- Workspace-scoped routes (all require workspace membership) ---
@@ -389,16 +786,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/search", h.SearchIssues)
 				r.Get("/child-progress", h.ChildIssueProgress)
+				r.Get("/children", h.ListChildrenByParents)
 				r.Get("/grouped", h.ListGroupedIssues)
 				r.Get("/", h.ListIssues)
 				r.Post("/", h.CreateIssue)
 				r.Post("/quick-create", h.QuickCreateIssue)
+				r.Post("/preview-trigger", h.PreviewIssueTrigger)
 				r.Post("/batch-update", h.BatchUpdateIssues)
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
 					r.Delete("/", h.DeleteIssue)
+					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
@@ -449,6 +849,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteProject)
 					r.Get("/resources", h.ListProjectResources)
 					r.Post("/resources", h.CreateProjectResource)
+					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
 				})
 			})
@@ -506,6 +907,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Attachments
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
+			// /api/attachments/{id}/download is registered in the
+			// outer Auth-only group above so it can be loaded as a
+			// native <img>/<video> src without workspace headers
+			// (MUL-3130). The handler self-resolves the workspace
+			// from the attachment row.
 			r.Get("/api/attachments/{id}/content", h.GetAttachmentContent)
 			r.Delete("/api/attachments/{id}", h.DeleteAttachment)
 
@@ -537,6 +943,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tasks", h.ListAgentTasks)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
+					r.Post("/skills/add", h.AddAgentSkills)
+					// Dedicated env-management endpoint. Owner/admin only;
+					// agent actors are denied. Every reveal / write is
+					// audited to activity_log. See MUL-2600 and
+					// internal/handler/agent_env.go.
+					r.Get("/env", h.GetAgentEnv)
+					r.Put("/env", h.UpdateAgentEnv)
 				})
 			})
 
@@ -552,6 +965,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/skills", func(r chi.Router) {
 				r.Get("/", h.ListSkills)
 				r.Post("/", h.CreateSkill)
+				r.Get("/search", h.SearchSkills)
 				r.Post("/import", h.ImportSkill)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetSkill)
@@ -591,6 +1005,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/local-skills/import", h.InitiateImportLocalSkill)
 					r.Get("/local-skills/import/{requestId}", h.GetLocalSkillImportRequest)
 					r.Delete("/", h.DeleteAgentRuntime)
+					// Cascade variant of DELETE: archive every active agent
+					// bound to this runtime, cancel their tasks, then delete
+					// the runtime — all in one transaction. Used by the
+					// DeleteRuntimeDialog when the strict DELETE refused with
+					// `runtime_has_active_agents` and the user confirmed the
+					// cascade plan.
+					r.Post("/archive-agents-and-delete", h.ArchiveAgentsAndDeleteRuntime)
 				})
 			})
 
@@ -634,6 +1055,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
 					r.Get("/messages", h.ListChatMessages)
+					r.Get("/messages/page", h.ListChatMessagesPage)
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Post("/read", h.MarkChatSessionRead)
 				})
@@ -644,6 +1066,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				r.Get("/unread-count", h.CountUnreadInbox)
+				// Cross-workspace unread summary: account-level, keyed on the
+				// user. Backs the workspace-switcher dot for OTHER workspaces.
+				r.Get("/unread-summary", h.UnreadInboxSummary)
 				r.Post("/mark-all-read", h.MarkAllInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
@@ -660,7 +1085,77 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		})
 	})
 
-	return r
+	return r, h
+}
+
+// buildLarkConnector wires the real WS long-conn connector that talks
+// to /callback/ws/endpoint directly with app_id/app_secret. The
+// connector wraps every read with a ctx-cancel watchdog so lease loss /
+// shutdown breaks the blocking ReadMessage in bounded time — the
+// invariant §4.4 leans on. A single connector instance serves every
+// installation; its Run is parameterized by the installation, so the
+// feishuChannel hands it the per-installation row.
+//
+// If the endpoint fetcher fails to initialize (typically a malformed
+// MULTICA_LARK_CALLBACK_BASE_URL), we log and fall back to the
+// NoopConnector so the lease / supervisor lifecycle still exercises
+// against real DB rows. Inbound messages are silently dropped until
+// the config is fixed; the boot log labels the mode "noop" so the
+// degraded state is visible.
+//
+// Returns the connector plus a short label for the boot log:
+// "ws-long-conn" in the healthy case, "noop" in the fallback case.
+func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.APIClient) (lark.EventConnector, string) {
+	endpointFetcher, err := lark.NewHTTPConnectionTokenFetcher(lark.HTTPConnectionTokenConfig{
+		BaseURL: strings.TrimSpace(os.Getenv("MULTICA_LARK_CALLBACK_BASE_URL")),
+		Logger:  slog.Default(),
+	})
+	if err != nil {
+		slog.Error("lark ws: endpoint fetcher init failed; falling back to noop", "error", err)
+		return lark.NewNoopConnector(slog.Default()), "noop"
+	}
+	decoder := lark.NewLarkJSONFrameDecoder()
+	dialer := lark.NewGorillaDialer()
+	if proxyURL := strings.TrimSpace(os.Getenv("MULTICA_LARK_WS_PROXY_URL")); proxyURL != "" {
+		dialer.ProxyURL = proxyURL
+	}
+	credsProvider := lark.CredentialsProviderFunc(func(ctx context.Context, inst lark.Installation) (lark.InstallationCredentials, error) {
+		secret, err := installSvc.DecryptAppSecret(inst)
+		if err != nil {
+			return lark.InstallationCredentials{}, err
+		}
+		creds := lark.InstallationCredentials{
+			AppID:     inst.AppID,
+			AppSecret: secret,
+			Region:    lark.RegionOrDefault(inst.Region),
+		}
+		if inst.TenantKey.Valid {
+			creds.TenantKey = inst.TenantKey.String
+		}
+		return creds, nil
+	})
+	// Inbound enricher: expands quoted replies / forwarded bundles AND
+	// prefetches a window of surrounding group history (MUL-3084) into the
+	// agent's body via the IM API before dispatch. It shares the
+	// connector's resolved credentials and runs under the connector's
+	// EnrichTimeout so it cannot overrun the Lark long-conn ACK budget.
+	enricher := lark.NewInboundEnricher(apiClient, lark.InboundEnricherConfig{
+		RecentContextSize: lark.DefaultRecentContextSize,
+		Logger:            slog.Default(),
+	})
+	conn, err := lark.NewWSLongConnConnector(lark.WSConnectorConfig{
+		Dialer:              dialer,
+		EndpointFetcher:     endpointFetcher,
+		FrameDecoder:        decoder,
+		Enricher:            enricher,
+		CredentialsProvider: credsProvider,
+		Logger:              slog.Default(),
+	})
+	if err != nil {
+		slog.Error("lark ws: connector init failed; falling back to noop", "error", err)
+		return lark.NewNoopConnector(slog.Default()), "noop"
+	}
+	return conn, "ws-long-conn"
 }
 
 // membershipChecker implements realtime.MembershipChecker using database queries.

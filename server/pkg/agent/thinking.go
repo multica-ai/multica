@@ -11,13 +11,15 @@ import (
 )
 
 // thinking.go discovers per-model reasoning/effort catalogs for the
-// claude and codex backends so the daemon can advertise them to the
+// claude, codex, and opencode backends so the daemon can advertise them to the
 // UI without hard-coding (and getting wrong) what's installed locally.
 //
 // MUL-2339: we deliberately do not flatten Claude's `low|medium|high|
 // xhigh|max` and Codex's `none|minimal|low|medium|high|xhigh` onto a
-// shared enum — what users pick must round-trip exactly through each
-// CLI's own value vocabulary.
+// shared enum. OpenCode exposes provider-specific model variants through
+// `opencode run --variant`, and those names can be extended by local
+// opencode.json config. What users pick must round-trip exactly through
+// each CLI's own value vocabulary.
 
 // ── Cache ────────────────────────────────────────────────────────────
 //
@@ -102,6 +104,7 @@ var claudeEffortLabel = map[string]string{
 var claudeModelEffortAllow = map[string]map[string]bool{
 	// Opus is the only model that publicly supports xhigh; the help
 	// list still includes it for Sonnet / Haiku so we filter here.
+	"claude-opus-4-8":           {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
 	"claude-opus-4-7":           {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
 	"claude-opus-4-6":           {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
 	"claude-sonnet-4-6":         {"low": true, "medium": true, "high": true, "max": true},
@@ -355,6 +358,141 @@ func parseCodexDebugModels(raw []byte) map[string]*ModelThinking {
 	return out
 }
 
+// ── CodeBuddy ────────────────────────────────────────────────────────
+//
+// CodeBuddy uses the same `--effort <level>` flag as Claude but with a
+// different level set (no `max`). Discovery parses `--help` identically
+// to the claude approach. All models get the same effort levels since
+// CodeBuddy doesn't document per-model restrictions.
+
+var codebuddyEffortRe = regexp.MustCompile(`--effort\s*(?:<[^>]+>)?\s*[^(]*\(([^)]+)\)`)
+
+var codebuddyEffortLabel = map[string]string{
+	"low":    "Low",
+	"medium": "Medium",
+	"high":   "High",
+	"xhigh":  "Extra high",
+}
+
+var codebuddyStaticEffortFallback = []string{"low", "medium", "high", "xhigh"}
+
+// codebuddyHelpCache caches the raw --help output so both model discovery
+// (models.go) and effort discovery avoid redundant slow CLI invocations.
+// CodeBuddy's --help takes ~30s; calling it twice on cold start wastes ~30s.
+var (
+	codebuddyHelpMu    sync.Mutex
+	codebuddyHelpStore = map[string]codebuddyHelpEntry{}
+)
+
+const codebuddyHelpTTL = 60 * time.Second
+
+type codebuddyHelpEntry struct {
+	output    string
+	expiresAt time.Time
+}
+
+// codebuddyHelpOutput runs `codebuddy --help` (cached for codebuddyHelpTTL).
+// Both discoverCodebuddyModels and codebuddyEffortSuperset call this so a
+// single cold invocation feeds both.
+func codebuddyHelpOutput(ctx context.Context, executablePath string) string {
+	if executablePath == "" {
+		executablePath = "codebuddy"
+	}
+	key := executablePath
+	codebuddyHelpMu.Lock()
+	if entry, ok := codebuddyHelpStore[key]; ok && time.Now().Before(entry.expiresAt) {
+		codebuddyHelpMu.Unlock()
+		return entry.output
+	}
+	codebuddyHelpMu.Unlock()
+
+	runCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "--help")
+	hideAgentWindow(cmd)
+	out, _ := cmd.CombinedOutput()
+	result := string(out)
+
+	if result != "" {
+		codebuddyHelpMu.Lock()
+		codebuddyHelpStore[key] = codebuddyHelpEntry{output: result, expiresAt: time.Now().Add(codebuddyHelpTTL)}
+		codebuddyHelpMu.Unlock()
+	}
+	return result
+}
+
+func annotateCodebuddyThinking(ctx context.Context, models []Model, executablePath string) {
+	if executablePath == "" {
+		executablePath = "codebuddy"
+	}
+	version, _ := DetectVersion(ctx, executablePath)
+	key := thinkingCacheKey{provider: "codebuddy", executablePath: executablePath, cliVersion: version}
+	if cached, ok := thinkingCacheGet(key); ok {
+		for i := range models {
+			if t, ok := cached[models[i].ID]; ok && t != nil {
+				models[i].Thinking = t
+			}
+		}
+		return
+	}
+
+	levels := codebuddyEffortSuperset(ctx, executablePath)
+	thinkingLevels := make([]ThinkingLevel, 0, len(levels))
+	for _, value := range levels {
+		label, ok := codebuddyEffortLabel[value]
+		if !ok {
+			label = strings.Title(value) //nolint:staticcheck
+		}
+		thinkingLevels = append(thinkingLevels, ThinkingLevel{Value: value, Label: label})
+	}
+
+	result := map[string]*ModelThinking{}
+	if len(thinkingLevels) > 0 {
+		thinking := &ModelThinking{
+			SupportedLevels: thinkingLevels,
+			DefaultLevel:    "medium",
+		}
+		for _, m := range models {
+			result[m.ID] = thinking
+		}
+	}
+	thinkingCachePut(key, result)
+
+	for i := range models {
+		if t, ok := result[models[i].ID]; ok && t != nil {
+			models[i].Thinking = t
+		}
+	}
+}
+
+func codebuddyEffortSuperset(ctx context.Context, executablePath string) []string {
+	helpOut := codebuddyHelpOutput(ctx, executablePath)
+	if helpOut == "" {
+		return append([]string(nil), codebuddyStaticEffortFallback...)
+	}
+	parsed := parseCodebuddyEffortHelp(helpOut)
+	if len(parsed) == 0 {
+		return append([]string(nil), codebuddyStaticEffortFallback...)
+	}
+	return parsed
+}
+
+func parseCodebuddyEffortHelp(helpText string) []string {
+	match := codebuddyEffortRe.FindStringSubmatch(helpText)
+	if len(match) < 2 {
+		return nil
+	}
+	var out []string
+	for _, raw := range strings.Split(match[1], ",") {
+		token := strings.TrimSpace(raw)
+		if token == "" {
+			continue
+		}
+		out = append(out, token)
+	}
+	return out
+}
+
 // ── Shared validation ────────────────────────────────────────────────
 
 // ValidateThinkingLevel reports whether `value` is in the supported
@@ -395,6 +533,9 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 			}
 		}
 		if target == "" {
+			if providerType == "opencode" {
+				return anyModelSupportsThinkingValue(models, value), nil
+			}
 			return false, nil
 		}
 	}
@@ -415,15 +556,33 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 	return false, nil
 }
 
-// providerThinkingEnums is the server-side accept-list for each runtime's
-// reasoning-effort vocabulary. The server doesn't have local CLI binaries,
-// so it cannot do per-model discovery the way the daemon can; what it CAN
-// do is reject values that are not in any version of the provider's enum
-// at all. Per-model gaps (e.g. user sets `xhigh` while the chosen model
-// only supports up to `high`) surface as a daemon-side task failure with
-// a clear error, not a server-side 400 — that split is intentional so the
-// API behaviour stays consistent (always-400 on literal-invalid, never
-// auto-clear on combination-invalid). See MUL-2339 review notes.
+func anyModelSupportsThinkingValue(models []Model, value string) bool {
+	for _, m := range models {
+		if m.Thinking == nil {
+			continue
+		}
+		for _, lvl := range m.Thinking.SupportedLevels {
+			if lvl.Value == value {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// providerThinkingEnums is the server-side accept-list for runtimes with a
+// fixed reasoning-effort vocabulary. OpenCode is deliberately absent because
+// its `--variant` values come from the local model catalog and custom
+// opencode.json entries can define additional variant names.
+//
+// The server doesn't have local CLI binaries, so it cannot do per-model
+// discovery the way the daemon can; what it CAN do is reject values that are
+// not in any version of the provider's enum at all. Per-model gaps (e.g. user
+// sets `xhigh` while the chosen model only supports up to `high`) are handled
+// by the daemon's pre-execution guard, which logs and skips injection rather
+// than mutating persisted agent state. That split keeps API behaviour
+// consistent: always 400 on literal-invalid, never auto-clear on
+// combination-invalid. See MUL-2339 review notes.
 //
 // Keep these lists permissive: they're a "is this a known token in this
 // runtime's universe" check, not an "is this the right level for this
@@ -445,12 +604,19 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"high":    true,
 		"xhigh":   true,
 	},
+	"codebuddy": {
+		"low":    true,
+		"medium": true,
+		"high":   true,
+		"xhigh":  true,
+	},
 }
 
 // IsKnownThinkingValue reports whether `value` is a recognised effort
 // token for the given provider. Empty string is always accepted (means
 // "use runtime default"). Unknown providers (no thinking concept) accept
-// only empty.
+// only empty; OpenCode accepts well-formed variant names because its local
+// catalog can be extended by opencode.json.
 //
 // This is the cheap synchronous gate the server uses on CreateAgent /
 // UpdateAgent. Unlike ValidateThinkingLevel it does NOT consult the live
@@ -459,9 +625,31 @@ func IsKnownThinkingValue(providerType, value string) bool {
 	if value == "" {
 		return true
 	}
+	if providerType == "opencode" {
+		return isValidOpenCodeVariantName(value)
+	}
 	enum, ok := providerThinkingEnums[providerType]
 	if !ok {
 		return false
 	}
 	return enum[value]
+}
+
+func isValidOpenCodeVariantName(value string) bool {
+	if len(value) > 64 {
+		return false
+	}
+	for i, r := range value {
+		valid := r >= 'a' && r <= 'z' ||
+			r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' ||
+			r == '-' || r == '_' || r == '.'
+		if !valid {
+			return false
+		}
+		if i == 0 && (r == '-' || r == '_' || r == '.') {
+			return false
+		}
+	}
+	return true
 }

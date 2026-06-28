@@ -41,3 +41,15 @@ func TestIsInlineContentType(t *testing.T) {
 		}
 	}
 }
+
+func TestContentDisposition(t *testing.T) {
+	if got := ContentDisposition("image/png", `nice"file;.png`); got != `inline; filename="nice_file_.png"` {
+		t.Fatalf("ContentDisposition image = %q", got)
+	}
+	if got := ContentDisposition("text/plain", "notes.txt"); got != `attachment; filename="notes.txt"` {
+		t.Fatalf("ContentDisposition text = %q", got)
+	}
+	if got := ContentDisposition("image/svg+xml", "logo.svg"); got != `attachment; filename="logo.svg"` {
+		t.Fatalf("ContentDisposition svg = %q", got)
+	}
+}

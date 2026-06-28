@@ -129,6 +129,18 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(5 + 25, 5);
   });
 
+  it("prices Claude Fable 5 at the Mythos-class tier", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-fable-5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(10 + 50 + 1 + 12.5, 5);
+  });
+
   it("prices the provider-prefixed Anthropic form (anthropic/claude-sonnet-4.6)", () => {
     // openclaw / opencode emit `<provider>/<model>`. Same SKU as the
     // bare form, must hit the same rate.
@@ -164,6 +176,24 @@ describe("estimateCost", () => {
       output_tokens: 1_000_000,
     });
     expect(cost).toBeCloseTo(5 + 25, 5);
+  });
+
+  it("prices the 1M-context Anthropic tag form (claude-opus-4-7[1m]) at the standard Opus tier", () => {
+    // Claude Code reports the 1M-context beta as `claude-opus-4-7[1m]`.
+    // Anthropic prices it at the standard Opus rate for prompts ≤200K
+    // input tokens (with a 2× surcharge above that, which we can't see
+    // from aggregated daily totals). Strip the bracketed context tag so
+    // the tokens still land in the cost total at standard pricing —
+    // mild under-estimate, but the alternative was excluding them
+    // entirely (the bug this fixes).
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-opus-4-7[1m]",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(5 + 25, 5);
+    expect(isModelPriced("claude-opus-4-7[1m]")).toBe(true);
   });
 
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
@@ -232,10 +262,164 @@ describe("estimateCost", () => {
       }),
     ).toBe(0);
   });
+
+  it("prices Cursor Composer rows at the published rates without cache-write spend", () => {
+    // Cursor's ids are unprefixed generic names, so they're provider-qualified
+    // (`cursor/auto`) and only resolve when the row carries provider "cursor".
+    const costWithAllTokenTypes = (model: string) =>
+      estimateCost({
+        ...zeroUsage,
+        provider: "cursor",
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      });
+
+    expect(costWithAllTokenTypes("auto")).toBeCloseTo(1.25 + 6 + 0.25, 5);
+    expect(costWithAllTokenTypes("composer-2.5-fast")).toBeCloseTo(
+      3 + 15 + 0.5,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-2.5")).toBeCloseTo(0.5 + 2.5 + 0.2, 5);
+    expect(costWithAllTokenTypes("composer-2-fast")).toBeCloseTo(
+      1.5 + 7.5 + 0.35,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-2")).toBeCloseTo(0.5 + 2.5 + 0.2, 5);
+    expect(costWithAllTokenTypes("composer-1.5")).toBeCloseTo(
+      3.5 + 17.5 + 0.35,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-1")).toBeCloseTo(
+      1.25 + 10 + 0.125,
+      5,
+    );
+    // The legacy `cursor` fallback equals the provider name, so it stays
+    // unqualified and resolves regardless of the row's provider.
+    expect(costWithAllTokenTypes("cursor")).toBeCloseTo(3 + 15 + 0.5, 5);
+  });
+
+  it("scopes the generic `auto` id by provider so collisions don't borrow a price", () => {
+    const auto = (provider?: string) =>
+      estimateCost({ ...zeroUsage, provider, model: "auto", input_tokens: 1_000_000 });
+
+    // Cursor's `auto` is priced via the `cursor/auto` row.
+    expect(auto("cursor")).toBeCloseTo(1.25, 5);
+    // A different provider reporting `auto` has no row
+    // yet — it must NOT inherit Cursor's price; it stays unmapped ($0).
+    expect(auto("acme")).toBe(0);
+    // No provider at all → also unmapped, never silently Cursor's price.
+    expect(auto(undefined)).toBe(0);
+  });
+
+  it("reports provider-qualified keys for unmapped generic model ids", () => {
+    const unmapped = collectUnmappedModels([
+      { ...zeroUsage, provider: "acme", model: "auto" },
+      { ...zeroUsage, provider: "cursor", model: "auto" },
+    ]);
+    // Same bare id, two providers → two distinct, priceable-by-key entries.
+    // `cursor/auto` is priced, so only the genuinely-unmapped one surfaces.
+    expect(unmapped).toEqual(["acme/auto"]);
+  });
+
+  // The Chinese-model rates below are spot-checked against the literal
+  // numbers on the three official price sheets cited in MODEL_PRICING's
+  // header comment. Pinning them in tests is what catches a future edit
+  // that copies a price from a near-named neighbour by accident — the
+  // mistake the previous attempt (PR #3170, closed) made.
+  it("prices deepseek-v4-flash at the official $0.14/$0.28 with ~50× cache-hit discount", () => {
+    // 1M input × $0.14 + 1M output × $0.28 + 1M cache read × $0.0028 = $0.4228.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "deepseek-v4-flash",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(0.14 + 0.28 + 0.0028, 5);
+  });
+
+  it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
+    // The DeepSeek docs explicitly route both legacy names to v4-flash —
+    // they must hit the same numbers, not the older $0.27/$1.10 tier.
+    const flash = estimateCost({
+      ...zeroUsage,
+      model: "deepseek-v4-flash",
+      input_tokens: 1_000_000,
+    });
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "deepseek-chat",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(flash, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "deepseek-reasoner",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(flash, 5);
+  });
+
+  it("prices kimi-k2.6 at the official $0.95 / $4.00 tier (not the K2 tier)", () => {
+    // Moonshot's K2.6 page is the only authoritative source today; K2.6 is
+    // explicitly NOT priced like K2. 1M input × $0.95 + 1M output × $4.00 = $4.95.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-k2.6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(4.95, 5);
+  });
+
+  it("prices glm-5.1 at the official $1.4 / $4.4 tier", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "glm-5.1",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(1.4 + 4.4, 5);
+  });
+
+  it("prices glm-4.5-flash at the official Free tier ($0)", () => {
+    // z.ai currently ships Free tiers for the *-flash family; $0 is the
+    // literal price on the page, not a placeholder. Anything non-zero
+    // here would mean we mis-copied a paid SKU's number into the row.
+    expect(isModelPriced("glm-4.5-flash")).toBe(true);
+    expect(isModelPriced("glm-4.7-flash")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "glm-4.5-flash",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBe(0);
+  });
+
+  it("recognises the provider-prefixed forms emitted by OpenRouter-style runtimes", () => {
+    // opencode + OpenRouter route IDs through as `<provider>/<model>`.
+    // canonicalCandidates strips the prefix; without this the rows above
+    // would only fire on bare IDs and the dashboard would still show
+    // $0.00 for the runtime that actually triggered this work.
+    expect(isModelPriced("deepseek/deepseek-v4-flash")).toBe(true);
+    expect(isModelPriced("moonshotai/kimi-k2.6")).toBe(true);
+    expect(isModelPriced("zhipuai/glm-5.1")).toBe(true);
+    expect(isModelPriced("zhipuai/glm-4.5-air")).toBe(true);
+  });
 });
 
 describe("isModelPriced", () => {
   it("recognises both Claude and Codex/GPT families", () => {
+    expect(isModelPriced("claude-fable-5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4-6")).toBe(true);
     expect(isModelPriced("gpt-5-codex")).toBe(true);
     expect(isModelPriced("gpt-5-mini")).toBe(true);
@@ -259,6 +443,7 @@ describe("isModelPriced", () => {
   it("recognises provider-prefixed Anthropic IDs (openclaw / opencode form)", () => {
     // openclaw / opencode emit `<provider>/<model>` in `meta.agentMeta.model`.
     // The provider prefix is routing metadata, not part of the SKU.
+    expect(isModelPriced("anthropic/claude-fable-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-opus-4.7")).toBe(true);
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
   });
@@ -337,6 +522,23 @@ describe("user-supplied custom pricing", () => {
     ).toBeCloseTo(2, 5);
   });
 
+  it("resolves a provider-qualified override only for the matching provider", () => {
+    // The dialog stores the override under the provider-qualified key that
+    // `collectUnmappedModels` surfaced, so it must price a provider-scoped
+    // `auto` row without leaking onto another provider's `auto`.
+    useCustomPricingStore.getState().setCustomPricing("acme/auto", {
+      input: 2,
+      output: 8,
+      cacheRead: 0.2,
+      cacheWrite: 2,
+    });
+    expect(
+      estimateCost({ ...zeroUsage, provider: "acme", model: "auto", input_tokens: 1_000_000 }),
+    ).toBeCloseTo(2, 5);
+    // A row with no provider must not pick up the provider-scoped override.
+    expect(isModelPriced("auto")).toBe(false);
+  });
+
   it("removeCustomPricing clears the override", () => {
     const store = useCustomPricingStore.getState();
     store.setCustomPricing("gpt-5.5-mini", {
@@ -375,12 +577,31 @@ describe("user-supplied custom pricing", () => {
     ];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const byModel = aggregateCostByModel(rows as any);
+    // Priced vendor-prefixed id stays bare; the unmapped generic id is
+    // provider-qualified so it matches the unmapped notice / pricing dialog.
     const sonnet = byModel.find((r) => r.key === "claude-sonnet-4-6");
-    const fictional = byModel.find((r) => r.key === "fictional-model-x");
+    const fictional = byModel.find((r) => r.key === "fictional/fictional-model-x");
     expect(sonnet?.cost).toBeCloseTo(3, 5);
     expect(fictional?.cost).toBe(0);
+    // The unmapped key is provider-qualified so a user can price this exact
+    // (provider, model) pair without affecting another provider's same id.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(collectUnmappedModels(rows as any)).toEqual(["fictional-model-x"]);
+    expect(collectUnmappedModels(rows as any)).toEqual(["fictional/fictional-model-x"]);
+  });
+
+  it("keeps the same generic model id from two providers as distinct by-model rows", () => {
+    // Two providers reporting the bare id `auto` must not collapse into one
+    // mislabelled `auto` row — each is provider-qualified so the priced
+    // (cursor) and unpriced (other) sides stay separable.
+    const rows = [
+      { ...zeroUsage, model: "auto", provider: "cursor", input_tokens: 1_000_000, date: "2026-01-01" },
+      { ...zeroUsage, model: "auto", provider: "acme", input_tokens: 1_000_000, date: "2026-01-01" },
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const byModel = aggregateCostByModel(rows as any);
+    expect(byModel.map((r) => r.key).toSorted()).toEqual(["acme/auto", "cursor/auto"]);
+    expect(byModel.find((r) => r.key === "cursor/auto")?.cost).toBeCloseTo(1.25, 5);
+    expect(byModel.find((r) => r.key === "acme/auto")?.cost).toBe(0);
   });
 
   it("aggregateCostByModel reflects a newly-saved custom price on re-call with the same input", () => {

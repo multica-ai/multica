@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -161,6 +162,192 @@ func TestKiroBackendSetModelFailureFailsTask(t *testing.T) {
 	}
 }
 
+func fakeKiroACPGoalCompleteCloseErrorScript(goalStatus string) string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_goal_done"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_goal_done","update":{"type":"ToolCall","toolCallId":"tc-goal","name":"goal_complete","status":"pending","parameters":{}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_goal_done","update":{"type":"ToolCallUpdate","toolCallId":"tc-goal","status":"` + goalStatus + `","name":"goal_complete","output":"ok"}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"Kiro failed to generate a response"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func TestKiroBackendTreatsGoalCompleteCloseErrorAsCompleted(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPGoalCompleteCloseErrorScript("completed")))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed after goal_complete close error, got %q (error=%q)", result.Status, result.Error)
+		}
+		if result.Error != "" {
+			t.Fatalf("expected close-handshake error to be suppressed, got %q", result.Error)
+		}
+		if result.SessionID != "ses_goal_done" {
+			t.Fatalf("session id = %q, want ses_goal_done", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestKiroBackendDoesNotCompleteAfterFailedGoalComplete(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPGoalCompleteCloseErrorScript("failed")))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed after failed goal_complete, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "Kiro failed to generate a response") {
+			t.Fatalf("expected original prompt error to be preserved, got %q", result.Error)
+		}
+		if result.SessionID != "ses_goal_done" {
+			t.Fatalf("session id = %q, want ses_goal_done", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// fakeKiroACPStaleLoadSetModelScript impersonates kiro when a resumed
+// session is gone and the caller picked a model: session/load returns
+// an empty result (so the requested id is kept), then
+// session/set_model rejects the unknown session with kiro's observed
+// wording — -32603 with "No session found with id ..." in data.
+func fakeKiroACPStaleLoadSetModelScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/load"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"No session found with id ses_stale"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKiroBackendClearsSessionIDWhenSetModelSessionNotFound pins the
+// set_model sibling of the resumed-session fix: with a model override,
+// session/set_model runs before session/prompt, so a dead resumed
+// session surfaces there. The Result must carry an empty SessionID so
+// the daemon's fresh-session retry (gated on SessionID == "") fires.
+func TestKiroBackendClearsSessionIDWhenSetModelSessionNotFound(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPStaleLoadSetModelScript()))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_stale",
+		Model:           "auto",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, `could not switch to model "auto"`) {
+			t.Errorf("expected error to name the requested model, got %q", result.Error)
+		}
+		if result.SessionID != "" {
+			t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 func TestKiroBackendInvokesACPWithTrustAllTools(t *testing.T) {
 	t.Parallel()
 
@@ -313,5 +500,52 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	}
 	if !strings.Contains(requests, `"prompt":[`) {
 		t.Fatalf("session/prompt must send standard ACP prompt field for Kiro 2.1.1 compatibility, got:\n%s", requests)
+	}
+}
+
+// TestKiroLoadIncludesMcpServersFromConfig pins that the agent's managed
+// MCP set actually reaches the wire on session/load — the resume path is
+// otherwise indistinguishable from the no-config case, which is how the
+// missing-on-resume bug got past the first round of review.
+func TestKiroLoadIncludesMcpServersFromConfig(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_load", `{}`)))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_load",
+		McpConfig:       json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx"}}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/load")
+	params := frame["params"].(map[string]any)
+	servers, ok := params["mcpServers"].([]any)
+	if !ok {
+		t.Fatalf("session/load.mcpServers: got %T, want []any", params["mcpServers"])
+	}
+	if len(servers) != 1 || servers[0].(map[string]any)["name"] != "fetch" {
+		t.Fatalf("session/load.mcpServers: got %v, want one entry named fetch", servers)
 	}
 }

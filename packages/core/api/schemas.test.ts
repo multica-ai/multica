@@ -1,15 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
+  AppConfigSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   DuplicateIssueErrorBodySchema,
+  EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_USER,
+  InboxUnreadSummarySchema,
+  IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  SquadListSchema,
+  SquadSchema,
+  TimelineEntriesSchema,
   UserSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
@@ -30,6 +37,7 @@ const baseIssue = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  stage: null,
   start_date: null,
   due_date: null,
   metadata: {},
@@ -69,6 +77,112 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
       total: 1,
     };
     expect(ListIssuesResponseSchema.safeParse(payload).success).toBe(false);
+  });
+
+  it("accepts a numeric stage", () => {
+    const payload = { issues: [{ ...baseIssue, stage: 2 }], total: 1 };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.stage).toBe(2);
+  });
+
+  it("defaults stage to null when the server omits it (older backend)", () => {
+    const { stage: _omit, ...issueWithoutStage } = baseIssue;
+    const payload = { issues: [issueWithoutStage], total: 1 };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.stage).toBeNull();
+  });
+});
+
+// POST /api/issues/preview-trigger feeds this schema through parseWithFallback
+// in client.previewIssueTrigger with fallback { triggers: [], total_count: 0 }
+// (MUL-3375). The four entry points read it to decide "will this start a run",
+// so malformed / missing / null drift must degrade to "nothing will start"
+// rather than throw into the picker/modal.
+const PREVIEW_FALLBACK = { triggers: [], total_count: 0 };
+const PREVIEW_ENDPOINT = { endpoint: "POST /api/issues/preview-trigger" };
+
+describe("IssueTriggerPreviewSchema", () => {
+  it("parses a well-formed response", () => {
+    const parsed = IssueTriggerPreviewSchema.parse({
+      triggers: [
+        { issue_id: "i1", agent_id: "a1", source: "assign", handoff_supported: true },
+        { issue_id: "i2", agent_id: "a2", source: "status", handoff_supported: false },
+      ],
+      total_count: 2,
+    });
+    expect(parsed.total_count).toBe(2);
+    expect(parsed.triggers).toHaveLength(2);
+    expect(parsed.triggers[0]).toMatchObject({ issue_id: "i1", agent_id: "a1", source: "assign", handoff_supported: true });
+  });
+
+  it("defaults missing top-level fields (empty / older backend)", () => {
+    const parsed = IssueTriggerPreviewSchema.parse({});
+    expect(parsed.triggers).toEqual([]);
+    expect(parsed.total_count).toBe(0);
+  });
+
+  it("defaults missing optional item fields, keeping required issue_id", () => {
+    const parsed = IssueTriggerPreviewSchema.parse({ triggers: [{ issue_id: "i1" }], total_count: 1 });
+    expect(parsed.triggers[0]).toEqual({
+      issue_id: "i1",
+      agent_id: "",
+      source: "",
+      handoff_supported: false,
+    });
+  });
+
+  it("parseWithFallback returns the fallback for a malformed shape (triggers not an array)", () => {
+    const parsed = parseWithFallback(
+      { triggers: "nope", total_count: 1 },
+      IssueTriggerPreviewSchema,
+      PREVIEW_FALLBACK,
+      PREVIEW_ENDPOINT,
+    );
+    expect(parsed).toEqual(PREVIEW_FALLBACK);
+  });
+
+  it("parseWithFallback returns the fallback when an item drops the required issue_id", () => {
+    const parsed = parseWithFallback(
+      { triggers: [{ agent_id: "a1", source: "assign" }], total_count: 1 },
+      IssueTriggerPreviewSchema,
+      PREVIEW_FALLBACK,
+      PREVIEW_ENDPOINT,
+    );
+    expect(parsed).toEqual(PREVIEW_FALLBACK);
+  });
+
+  it("parseWithFallback returns the fallback for a wrong-typed total_count", () => {
+    const parsed = parseWithFallback(
+      { triggers: [], total_count: "5" },
+      IssueTriggerPreviewSchema,
+      PREVIEW_FALLBACK,
+      PREVIEW_ENDPOINT,
+    );
+    expect(parsed).toEqual(PREVIEW_FALLBACK);
+  });
+
+  it("parseWithFallback returns the fallback for null / non-object bodies", () => {
+    expect(parseWithFallback(null, IssueTriggerPreviewSchema, PREVIEW_FALLBACK, PREVIEW_ENDPOINT)).toEqual(PREVIEW_FALLBACK);
+    expect(parseWithFallback("oops", IssueTriggerPreviewSchema, PREVIEW_FALLBACK, PREVIEW_ENDPOINT)).toEqual(PREVIEW_FALLBACK);
+  });
+});
+
+describe("TimelineEntriesSchema", () => {
+  it("preserves source_task_id for agent failure comments", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        created_at: "2026-01-01T00:00:00Z",
+        content: "API Error: 500 Internal server error",
+        comment_type: "system",
+        source_task_id: "task-1",
+      },
+    ]);
+
+    expect(parsed[0]?.source_task_id).toBe("task-1");
   });
 });
 
@@ -164,6 +278,51 @@ describe("UserSchema timezone drift", () => {
   });
 });
 
+describe("SquadListSchema member preview drift", () => {
+  const baseSquad = {
+    id: "squad-1",
+    workspace_id: "ws-1",
+    name: "Frontend Squad",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    leader_id: "agent-1",
+    creator_id: "user-1",
+    created_at: "2026-05-01T00:00:00Z",
+    updated_at: "2026-05-01T00:00:00Z",
+    archived_at: null,
+    archived_by: null,
+  };
+
+  it("defaults preview fields when an older backend omits them", () => {
+    const parsed = SquadListSchema.parse([baseSquad]);
+    expect(parsed[0]?.member_count).toBe(0);
+    expect(parsed[0]?.member_preview).toEqual([]);
+  });
+
+  it("defaults preview fields on a single squad response", () => {
+    const parsed = SquadSchema.parse(baseSquad);
+    expect(parsed.member_count).toBe(0);
+    expect(parsed.member_preview).toEqual([]);
+  });
+
+  it("preserves lightweight member preview rows", () => {
+    const parsed = SquadListSchema.parse([
+      {
+        ...baseSquad,
+        member_count: 2,
+        member_preview: [
+          { member_type: "agent", member_id: "agent-1", role: "leader" },
+          { member_type: "member", member_id: "user-2", role: "member" },
+        ],
+      },
+    ]);
+    expect(parsed[0]?.member_count).toBe(2);
+    expect(parsed[0]?.member_preview).toHaveLength(2);
+    expect(parsed[0]?.member_preview?.[0]?.role).toBe("leader");
+  });
+});
+
 // The workspace dashboard and runtime-detail pages were re-pointed at the
 // unified `task_usage_hourly` rollup. Every numeric field drives chart /
 // KPI math, and string keys (date / agent_id / model) bucket the series.
@@ -211,6 +370,20 @@ describe("dashboard + runtime usage schema drift", () => {
     expect(RuntimeUsageByHourListSchema.parse([{ hour: 9 }])[0]?.model).toBe("");
   });
 
+  it("defaults a missing provider to \"\" so an older server's rows still price by bare model", () => {
+    // provider was added for cross-provider model disambiguation; a server
+    // predating it omits the field. The schema must fill "" (→ bare-model
+    // pricing lookup) rather than drop the row.
+    expect(
+      DashboardUsageDailyListSchema.parse([{ date: "2026-05-19", model: "claude-opus-4-7" }])[0]
+        ?.provider,
+    ).toBe("");
+    expect(
+      DashboardUsageByAgentListSchema.parse([{ model: "claude-opus-4-7" }])[0]?.provider,
+    ).toBe("");
+    expect(RuntimeUsageByAgentListSchema.parse([{ model: "x" }])[0]?.provider).toBe("");
+  });
+
   it("rejects a non-array body so parseWithFallback can return its fallback", () => {
     expect(DashboardUsageDailyListSchema.safeParse(null).success).toBe(false);
     expect(RuntimeUsageListSchema.safeParse({ rows: [] }).success).toBe(false);
@@ -221,5 +394,66 @@ describe("dashboard + runtime usage schema drift", () => {
       { date: "2026-05-19", region: "us-east" },
     ]);
     expect((parsed[0] as Record<string, unknown>).region).toBe("us-east");
+  });
+});
+
+describe("AppConfigSchema cdn_signed drift", () => {
+  it("defaults cdn_signed to false when the server omits it (pre-MUL-3254 servers)", () => {
+    const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });
+    expect(parsed.cdn_signed).toBe(false);
+  });
+
+  it("coerces a malformed cdn_signed to false instead of failing the whole config", () => {
+    const parsed = AppConfigSchema.parse({
+      cdn_domain: "cdn.example.com",
+      cdn_signed: "yes",
+    });
+    expect(parsed.cdn_signed).toBe(false);
+    expect(parsed.cdn_domain).toBe("cdn.example.com");
+  });
+
+  it("keeps cdn_signed=true from a signing-enabled server", () => {
+    const parsed = AppConfigSchema.parse({ cdn_signed: true });
+    expect(parsed.cdn_signed).toBe(true);
+  });
+});
+
+describe("InboxUnreadSummarySchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/inbox/unread-summary" };
+
+  it("parses a well-formed summary and tolerates extra fields", () => {
+    const parsed = parseWithFallback(
+      [
+        { workspace_id: "ws-1", count: 2 },
+        { workspace_id: "ws-2", count: 0, future_field: "ignored" },
+      ],
+      InboxUnreadSummarySchema,
+      EMPTY_INBOX_UNREAD_SUMMARY,
+      ENDPOINT,
+    );
+    expect(parsed).toEqual([
+      { workspace_id: "ws-1", count: 2 },
+      { workspace_id: "ws-2", count: 0, future_field: "ignored" },
+    ]);
+  });
+
+  it("returns the empty fallback (dot hidden) for a non-array body", () => {
+    expect(
+      parseWithFallback({ rows: [] }, InboxUnreadSummarySchema, EMPTY_INBOX_UNREAD_SUMMARY, ENDPOINT),
+    ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+    expect(
+      parseWithFallback(null, InboxUnreadSummarySchema, EMPTY_INBOX_UNREAD_SUMMARY, ENDPOINT),
+    ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+  });
+
+  it("returns the empty fallback when an entry has a wrong-typed count", () => {
+    expect(
+      parseWithFallback(
+        [{ workspace_id: "ws-1", count: "lots" }],
+        InboxUnreadSummarySchema,
+        EMPTY_INBOX_UNREAD_SUMMARY,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
   });
 });

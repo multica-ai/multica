@@ -1,0 +1,28 @@
+{
+  "save": "저장",
+  "cancel": "취소",
+  "delete": "삭제",
+  "confirm": "확인",
+  "loading": "로딩 중...",
+  "time": {
+    "just_now": "방금 전",
+    "minutes_ago": "{{count}}분 전",
+    "hours_ago": "{{count}}시간 전",
+    "days_ago": "{{count}}일 전"
+  },
+  "lark_bind": {
+    "page_title": "Lark 계정 연결",
+    "redeeming": "바인딩 토큰을 사용하는 중…",
+    "needs_auth_description": "바인딩을 완료하려면 Multica에 로그인하세요. 링크의 토큰이 Lark 계정을 현재 로그인된 Multica 사용자에 연결하므로, 먼저 로그인해야 합니다.",
+    "sign_in": "로그인",
+    "done_title": "연결 완료.",
+    "done_description": "이제 Lark에서 봇에게 보낸 메시지가 곧바로 에이전트로 전달됩니다. 이 탭은 닫아도 됩니다.",
+    "error_title": "바인딩을 완료하지 못했어요",
+    "error_admin_hint": "계속 실패한다면, 워크스페이스 관리자에게 Lark에서 바인딩 링크를 다시 보내달라고 요청하세요.",
+    "error_missing_token": "링크에 바인딩 토큰이 없습니다. Lark에서 봇에게 새 링크를 다시 받아주세요.",
+    "error_expired": "이 바인딩 링크는 유효하지 않거나 만료되었습니다(유효 시간 15분). 봇에게 새 링크를 다시 받아주세요.",
+    "error_already_bound": "이 Lark 계정은 이미 다른 Multica 사용자에 연결되어 있습니다. 계정 이전은 먼저 명시적으로 연결을 해제해야 합니다.",
+    "error_not_member": "현재 로그인한 Multica 계정이 이 워크스페이스의 멤버가 아닙니다.",
+    "error_unknown": "문제가 발생했어요. 다시 시도해 보고, 계속되면 워크스페이스 관리자에게 문의하세요."
+  }
+}
