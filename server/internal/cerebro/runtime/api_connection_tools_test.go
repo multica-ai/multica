@@ -225,3 +225,42 @@ func TestAPIConnectionToolCallNon2xx(t *testing.T) {
 		t.Fatalf("expected 401 error, got %v", err)
 	}
 }
+
+// redactCredentials must strip every non-empty secret half from a response body
+// so an endpoint that echoes its own auth cannot leak the credential to the
+// agent. Short/empty config values are left untouched. (FIR-2166 C review fix.)
+func TestRedactCredentials(t *testing.T) {
+	auth := connections.AuthConfig{
+		BearerToken:    "super-secret-bearer-token-1234",
+		APIKey:         "ak_live_abcdef123456",
+		CFAccessID:     "cf-access-client-id-value",
+		CFAccessSecret: "cf-access-client-secret-value",
+	}
+	body := `{"echoed_bearer":"super-secret-bearer-token-1234",` +
+		`"echoed_key":"ak_live_abcdef123456",` +
+		`"cf_id":"cf-access-client-id-value",` +
+		`"cf_secret":"cf-access-client-secret-value",` +
+		`"data":"ok"}`
+
+	got := redactCredentials(body, auth)
+	for _, leak := range []string{auth.BearerToken, auth.APIKey, auth.CFAccessID, auth.CFAccessSecret} {
+		if strings.Contains(got, leak) {
+			t.Fatalf("credential leaked through redaction: %q still present in %q", leak, got)
+		}
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("expected [REDACTED] placeholder, got %q", got)
+	}
+	if !strings.Contains(got, `"data":"ok"`) {
+		t.Fatalf("non-secret payload must survive redaction, got %q", got)
+	}
+}
+
+// A short or empty secret config must not turn the whole body into placeholders.
+func TestRedactCredentialsSkipsShortAndEmpty(t *testing.T) {
+	auth := connections.AuthConfig{BearerToken: "ab", APIKey: ""}
+	body := `{"data":"abc"}`
+	if got := redactCredentials(body, auth); got != body {
+		t.Fatalf("short/empty secrets must leave body unchanged, got %q", got)
+	}
+}

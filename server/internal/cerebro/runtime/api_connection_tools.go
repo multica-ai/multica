@@ -336,7 +336,12 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 	if err != nil {
 		return "", fmt.Errorf("api connection %q: read response: %w", t.connName, err)
 	}
-	text := strings.TrimSpace(string(body))
+	// Strip the connection's own secrets from the body before it reaches the
+	// agent. Server-side dispatch keeps the credential out of the request the
+	// agent constructs, but a misbehaving endpoint can echo its auth back in the
+	// response; without this an echoed token would leak straight to the model.
+	// Applied before BOTH the error and success returns below. (FIR-2166 C review.)
+	text := redactCredentials(strings.TrimSpace(string(body)), t.auth)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("api connection %q: %s %s returned HTTP %d: %s", t.connName, t.method, filledPath, resp.StatusCode, text)
 	}
@@ -418,4 +423,23 @@ func applyConnectionAuth(req *http.Request, auth connections.AuthConfig) {
 		req.Header.Set("CF-Access-Client-Id", auth.CFAccessID)
 		req.Header.Set("CF-Access-Client-Secret", auth.CFAccessSecret)
 	}
+}
+
+// redactCredentials replaces any occurrence of the connection's own secret
+// values in an endpoint response with a fixed placeholder, so an endpoint that
+// echoes its auth back cannot leak the credential to the agent. Every non-empty
+// secret half from the auth config is covered (bearer token, API key, Cloudflare
+// Access id + secret). Values shorter than 4 chars are skipped to avoid
+// over-redacting trivial/empty config; real credentials are far longer.
+func redactCredentials(text string, auth connections.AuthConfig) string {
+	if text == "" {
+		return text
+	}
+	for _, secret := range []string{auth.BearerToken, auth.APIKey, auth.CFAccessSecret, auth.CFAccessID} {
+		if len(secret) < 4 {
+			continue
+		}
+		text = strings.ReplaceAll(text, secret, "[REDACTED]")
+	}
+	return text
 }
