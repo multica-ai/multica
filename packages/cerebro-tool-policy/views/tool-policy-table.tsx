@@ -2135,6 +2135,36 @@ function CredentialGroup({
   const [open, setOpen] = useState(false);
   const verdict = credentialGroupVerdict(group, editLayer);
   const Chevron = open ? ChevronDown : ChevronRight;
+
+  // A box with a single action (Agent Vault boxes expose only "Use secret") IS
+  // one permission row — render it flat with one decision, no pointless fold-out.
+  if (group.rows.length === 1) {
+    const row = group.rows[0]!;
+    return (
+      <div
+        className="flex items-center justify-between gap-3 rounded-lg border p-3"
+        data-testid={`credential-group-${group.resource}`}
+      >
+        <span className="truncate text-sm font-medium">{group.label}</span>
+        <div className="flex items-center gap-2">
+          <OriginTag row={row} editLayer={editLayer} />
+          <DecisionControl
+            row={row}
+            editLayer={editLayer}
+            disabled={busy}
+            onChange={(s) => onSetCapability(group.resource, row.tool_key, s)}
+          />
+          <ConditionControl
+            row={row}
+            editLayer={editLayer}
+            disabled={busy}
+            onChange={(c) => onSetCondition(row, c)}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg border" data-testid={`credential-group-${group.resource}`}>
       <div className="flex items-center justify-between gap-3 p-3">

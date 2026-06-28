@@ -102,9 +102,10 @@ func TestTable_CredentialRowsFromAgentVault(t *testing.T) {
 	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: capCredentialReveal, Layer: LayerWorkspace, SubjectID: tpTestWorkspaceID, ResourcePattern: cf, Setting: SettingAsk}); err != nil {
 		t.Fatalf("set workspace ask cloudflare: %v", err)
 	}
-	// credential.rotate on deployment: user Deny → effective Deny capped by user.
-	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: capCredentialRotate, Layer: LayerUser, SubjectID: user, ResourcePattern: deploy, Setting: SettingDeny}); err != nil {
-		t.Fatalf("set user deny rotate deployment: %v", err)
+	// credential.reveal on deployment: user Deny → effective Deny capped by user.
+	// (Vault boxes expose only "Use secret"/reveal, so reveal is the cell to author.)
+	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: capCredentialReveal, Layer: LayerUser, SubjectID: user, ResourcePattern: deploy, Setting: SettingDeny}); err != nil {
+		t.Fatalf("set user deny reveal deployment: %v", err)
 	}
 
 	rows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, AgentID: agent, UserID: user, IncludeCredentials: true})
@@ -112,8 +113,8 @@ func TestTable_CredentialRowsFromAgentVault(t *testing.T) {
 		t.Fatalf("table: %v", err)
 	}
 
-	// 3 boxes × len(credentialCapabilities) credential rows, every one carrying a
-	// agentvault-vault:<name> resource (no cerebro-credential:<uuid> here).
+	// 3 boxes × len(vaultCredentialCapabilities) credential rows: Agent Vault boxes
+	// expose ONLY "Use secret" (credential.reveal), each carrying agentvault-vault:<name>.
 	credRows := 0
 	for _, r := range rows {
 		if r.Source == credentialSource {
@@ -121,10 +122,13 @@ func TestTable_CredentialRowsFromAgentVault(t *testing.T) {
 			if _, ok := agentvault.VaultFromResourcePattern(r.ResourcePattern); !ok {
 				t.Fatalf("credential row has non-vault resource %q, want agentvault-vault:<name>", r.ResourcePattern)
 			}
+			if r.ToolKey != capCredentialReveal {
+				t.Fatalf("vault credential row tool = %q, want only %q (vault boxes expose only Use secret)", r.ToolKey, capCredentialReveal)
+			}
 		}
 	}
-	if want := 3 * len(credentialCapabilities); credRows != want {
-		t.Fatalf("got %d credential rows, want %d (3 boxes × %d caps)", credRows, want, len(credentialCapabilities))
+	if want := 3 * len(vaultCredentialCapabilities); credRows != want {
+		t.Fatalf("got %d credential rows, want %d (3 boxes × %d cap)", credRows, want, len(vaultCredentialCapabilities))
 	}
 
 	// The capability-wide row still lists — credential rows must not replace it.
@@ -152,12 +156,12 @@ func TestTable_CredentialRowsFromAgentVault(t *testing.T) {
 		t.Fatalf("reveal cloudflare effective = %q, want ask", revealCF.Effective.Setting)
 	}
 
-	rotateDeploy, ok := findCredentialRow(rows, capCredentialRotate, deploy)
+	revealDeploy, ok := findCredentialRow(rows, capCredentialReveal, deploy)
 	if !ok {
-		t.Fatalf("credential.rotate row for deployment missing")
+		t.Fatalf("credential.reveal row for deployment missing")
 	}
-	if rotateDeploy.Effective.Setting != SettingDeny || rotateDeploy.Effective.CappedBy != LayerUser {
-		t.Fatalf("rotate deployment effective = %q capped %q, want deny/user", rotateDeploy.Effective.Setting, rotateDeploy.Effective.CappedBy)
+	if revealDeploy.Effective.Setting != SettingDeny || revealDeploy.Effective.CappedBy != LayerUser {
+		t.Fatalf("reveal deployment effective = %q capped %q, want deny/user", revealDeploy.Effective.Setting, revealDeploy.Effective.CappedBy)
 	}
 
 	// A setting on one box must not leak onto another: cloudflare reveal is Ask,

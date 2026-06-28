@@ -85,6 +85,27 @@ var credentialCapabilities = []credentialCapability{
 	{capCredentialAttach, "Attach to resource"},
 }
 
+// vaultCredentialCapabilities is the capability set shown for an Agent Vault box
+// (resource agentvault-vault:<name>). Only "Use secret" (credential.reveal)
+// applies: the broker injects the box's secret read-only, and reveal is the ONLY
+// verb the grant resolver projects to vault access (cerebro_agentvault_mirror.go,
+// credentialBrokerAction). Rotate/revoke/attach/read-redacted belong to cerebro's
+// own stored-secret model (cerebro-credential:<uuid>) and cannot act on a secret
+// that lives in Agent Vault — showing them only confuses the admin.
+var vaultCredentialCapabilities = []credentialCapability{
+	{capCredentialReveal, "Use secret"},
+}
+
+// capabilitiesFor returns the capability rows to emit for a credential box: the
+// single reveal verb for live Agent Vault boxes, the full set for cerebro-stored
+// credentials.
+func capabilitiesFor(resource string) []credentialCapability {
+	if strings.HasPrefix(resource, agentvault.VaultResourcePrefix) {
+		return vaultCredentialCapabilities
+	}
+	return credentialCapabilities
+}
+
 // credentialBox is one Agent Vault box (a row in cerebro_credential) the admin can
 // author policy on: its id builds the ResourcePattern, its name labels the group.
 type credentialBox struct {
@@ -151,7 +172,7 @@ func (s *Store) appendCredentialRows(ctx context.Context, in TableQuery, groupID
 	}
 
 	for _, g := range groups {
-		for _, c := range credentialCapabilities {
+		for _, c := range capabilitiesFor(g.resource) {
 			row := TableRow{
 				ToolKey:         c.key,
 				ResourcePattern: g.resource,

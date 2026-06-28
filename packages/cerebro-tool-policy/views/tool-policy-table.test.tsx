@@ -982,19 +982,40 @@ describe("ToolPolicyTable runtime/multica tab split (FIR-1708 D(a))", () => {
 // ("cerebro-credential:<id>"), so a decision MUST be written scoped to that box —
 // the prior inline rendering dropped the scope and the toggle silently no-op'd.
 describe("ToolPolicyTable — Credentials tab (FIR-1479)", () => {
-  const credRow = (
-    box: string,
+  // A single-action box (Agent Vault boxes expose only "Use secret") renders as a
+  // plain permission row — resource agentvault-vault:<name>, one reveal capability.
+  const vaultRow = (
     name: string,
     setting: "allow" | "ask" | "deny" = "deny",
   ) => ({
     tool_key: "credential.reveal",
-    resource_pattern: `cerebro-credential:${box}`,
+    resource_pattern: `agentvault-vault:${name}`,
     title: "Use secret",
     category: name,
     source: "credential",
     layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
     effective: { setting, decided_by: "", capped_by: "", reason: "" },
   });
+
+  // A multi-action box (a cerebro-stored credential) renders as a foldable group:
+  // all five capability rows under cerebro-credential:<id>.
+  const CRED_CAPS = [
+    ["credential.reveal", "Use secret"],
+    ["credential.read_redacted", "Read redacted"],
+    ["credential.rotate", "Rotate"],
+    ["credential.revoke", "Revoke"],
+    ["credential.attach", "Attach to resource"],
+  ] as const;
+  const credBox = (id: string, name: string) =>
+    CRED_CAPS.map(([tool_key, title]) => ({
+      tool_key,
+      resource_pattern: `cerebro-credential:${id}`,
+      title,
+      category: name,
+      source: "credential",
+      layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
+      effective: { setting: "deny", decided_by: "", capped_by: "", reason: "" },
+    }));
 
   const BUILTIN_ROW = {
     tool_key: "list_issues",
@@ -1006,8 +1027,11 @@ describe("ToolPolicyTable — Credentials tab (FIR-1479)", () => {
     effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
   };
 
-  const CRED_TABLE = {
-    tools: [BUILTIN_ROW, credRow("box-1", "bigquery"), credRow("box-2", "cloudflare")],
+  const VAULT_TABLE = {
+    tools: [BUILTIN_ROW, vaultRow("bigquery"), vaultRow("cloudflare")],
+  };
+  const FOLDABLE_TABLE = {
+    tools: [BUILTIN_ROW, ...credBox("box-1", "stored-key")],
   };
 
   function renderCredentials() {
@@ -1026,25 +1050,24 @@ describe("ToolPolicyTable — Credentials tab (FIR-1479)", () => {
     );
   }
 
-  it("shows one collapsible group per credential box (by box name) and excludes non-credential tools", async () => {
-    mockCerebroRequest.mockResolvedValue(CRED_TABLE);
+  it("shows one row per Agent Vault box (by box name) and excludes non-credential tools", async () => {
+    mockCerebroRequest.mockResolvedValue(VAULT_TABLE);
     renderCredentials();
-    // Each box is ONE foldable group row labelled by the box name (the Class is
-    // "credentials" — the section — not the box name on every row).
-    expect(await screen.findByTestId("credential-group-cerebro-credential:box-1")).toBeInTheDocument();
+    expect(await screen.findByTestId("credential-group-agentvault-vault:bigquery")).toBeInTheDocument();
     expect(screen.getByText("bigquery")).toBeInTheDocument();
     expect(screen.getByText("cloudflare")).toBeInTheDocument();
     // A builtin tool is not a credential → never appears on the credentials tab.
     expect(screen.queryByText("List issues")).not.toBeInTheDocument();
   });
 
-  it("cascades a box decision scoped to its resource_pattern via the group header (toggle fix)", async () => {
+  it("sets a single-action vault box decision scoped to its resource_pattern (plain row)", async () => {
     const user = userEvent.setup();
-    mockCerebroRequest.mockResolvedValue(CRED_TABLE);
+    mockCerebroRequest.mockResolvedValue(VAULT_TABLE);
     renderCredentials();
-    const group = await screen.findByTestId("credential-group-cerebro-credential:box-1");
-    await user.click(within(group).getByLabelText(/^Credential decision:/));
-    await user.click(within(group).getByRole("menuitem", { name: /^Allow/ }));
+    // A vault box (only "Use secret") is a plain row — no fold, one decision.
+    const box = await screen.findByTestId("credential-group-agentvault-vault:bigquery");
+    await user.click(within(box).getByLabelText(/^Decision:/));
+    await user.click(within(box).getByRole("menuitem", { name: "Allow" }));
 
     await waitFor(() => {
       const put = findPutCalls().at(-1);
@@ -1052,21 +1075,20 @@ describe("ToolPolicyTable — Credentials tab (FIR-1479)", () => {
       expect(JSON.parse((put![1] as RequestInit).body as string)).toMatchObject({
         tool_key: "credential.reveal",
         setting: "allow",
-        resource_pattern: "cerebro-credential:box-1",
+        resource_pattern: "agentvault-vault:bigquery",
       });
     });
   });
 
-  it("expands a box to author one action individually, scoped to the box", async () => {
+  it("renders a multi-action credential as a foldable group; expand to author one action", async () => {
     const user = userEvent.setup();
-    mockCerebroRequest.mockResolvedValue(CRED_TABLE);
+    mockCerebroRequest.mockResolvedValue(FOLDABLE_TABLE);
     renderCredentials();
     const group = await screen.findByTestId("credential-group-cerebro-credential:box-1");
-    // Fold the box open via its chevron/label button (named by the box), then set
-    // the reveal action.
-    await user.click(within(group).getByRole("button", { name: "bigquery" }));
+    // Foldable (5 actions): open via the box-named button, then set one capability.
+    await user.click(within(group).getByRole("button", { name: "stored-key" }));
     const cap = await within(group).findByTestId(
-      "credential-cap-credential.reveal-cerebro-credential:box-1",
+      "credential-cap-credential.rotate-cerebro-credential:box-1",
     );
     await user.click(within(cap).getByLabelText(/^Decision:/));
     await user.click(within(cap).getByRole("menuitem", { name: "Allow" }));
@@ -1075,14 +1097,31 @@ describe("ToolPolicyTable — Credentials tab (FIR-1479)", () => {
       const put = findPutCalls().at(-1);
       expect(put).toBeTruthy();
       expect(JSON.parse((put![1] as RequestInit).body as string)).toMatchObject({
-        tool_key: "credential.reveal",
+        tool_key: "credential.rotate",
         setting: "allow",
         resource_pattern: "cerebro-credential:box-1",
       });
     });
   });
 
-  it("shows a credentials-specific hint when no vault boxes exist", async () => {
+  it("cascades a multi-action box via the group header, scoped to the box", async () => {
+    const user = userEvent.setup();
+    mockCerebroRequest.mockResolvedValue(FOLDABLE_TABLE);
+    renderCredentials();
+    const group = await screen.findByTestId("credential-group-cerebro-credential:box-1");
+    await user.click(within(group).getByLabelText(/^Credential decision:/));
+    await user.click(within(group).getByRole("menuitem", { name: /^Allow/ }));
+
+    await waitFor(() => {
+      const cascaded = findPutCalls().some((c) => {
+        const body = JSON.parse((c[1] as RequestInit).body as string);
+        return body.resource_pattern === "cerebro-credential:box-1" && body.setting === "allow";
+      });
+      expect(cascaded).toBe(true);
+    });
+  });
+
+  it("shows a credentials-specific hint when no boxes exist", async () => {
     mockCerebroRequest.mockResolvedValue({ tools: [BUILTIN_ROW] });
     renderCredentials();
     expect(await screen.findByText(/No credentials available yet/)).toBeInTheDocument();
