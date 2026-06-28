@@ -535,6 +535,10 @@ export function useRealtimeSync(
         // Squad members-status reads the same task lifecycle to flip
         // working ↔ idle for each agent member.
         invalidateSquadMemberStatusQueries(qc, wsId);
+        // CEREBRO-PATCH(inbox-run-marker-task): JEH-1425 — the inbox active-run marker reads inboxKeys.activeIssueTasks; refresh it on every task lifecycle event so a started agent shows "running" and the row re-categorises live.
+        qc.invalidateQueries({ queryKey: inboxKeys.activeIssueTasks(wsId) });
+        // CEREBRO-PATCH(inbox-wakeup-task): FIR-1677 — a finishing agent usually schedules its next wakeup the same turn; refresh the inbox wakeup list so the row moves to Running instead of Waiting.
+        qc.invalidateQueries({ queryKey: ["cerebro-inbox-wakeups", wsId] });
         // Comment trigger previews answer "who would a send wake right
         // now" — the pending-task dedup guard makes that answer
         // queue-dependent, so any task lifecycle change must refresh an
