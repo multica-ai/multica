@@ -990,6 +990,26 @@ export function NoteEditor({
           </Badge>
         )}
 
+        {/* Comments button: surfaces directly in the action bar so the count
+            badge is always visible when comments exist and the panel is closed.
+            FIR-2145: Jesper: "a small marking" when comments are present. */}
+        {commentsEnabled && (
+          <Button
+            size="sm"
+            variant={showComments ? "secondary" : "ghost"}
+            onClick={() => (showComments ? closeComments() : setShowComments(true))}
+            aria-label={showComments ? "Close comments" : "Comments"}
+            className="relative shrink-0"
+          >
+            <MessageSquare className="size-4" />
+            {!showComments && comments.length > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground">
+                {comments.length}
+              </span>
+            )}
+          </Button>
+        )}
+
         {/* Everything else lives behind one shared "⋯" menu — the same
             component the Documents view uses (FIR-1647, request 5 + 6). */}
         <EditorActionsMenu
@@ -1011,13 +1031,6 @@ export function NoteEditor({
               icon: Pin,
               onSelect: () =>
                 setPin.mutate({ id: note.id, pinned: !note.pinned }),
-            },
-            commentsEnabled && {
-              key: "comments",
-              label: "Comments",
-              icon: MessageSquare,
-              onSelect: () =>
-                showComments ? closeComments() : setShowComments(true),
             },
             versionsEnabled && {
               key: "history",
