@@ -8,13 +8,14 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Archive, LogOut, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
+import { Archive, ArrowUpRight, LogOut, Pencil, Pin, PinOff, Trash2 } from "lucide-react"; // CEREBRO-PATCH(channel-group-kind): FIR-2159 — convert icon.
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   channelPermissionsOptions,
   useUpdateChannelPermissions,
+  useConvertGroupToChannel, // CEREBRO-PATCH(channel-group-kind): FIR-2159 — promote a group to a named channel.
 } from "@multica/core/channels";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { useArchiveChannel } from "@multica/cerebro-channels";
@@ -39,6 +40,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input"; // CEREBRO-PATCH(channel-group-kind): FIR-2159 — name field for convert.
 import { ListenersList } from "./channel-listeners-panel";
 
 interface ChannelSettingsSheetProps {
@@ -79,10 +81,31 @@ export function ChannelSettingsSheet({
   // they get Leave/Delete affordances too; channel-only things (rename, name
   // display) stay on the strict `isChannel` check.
   const isChannelOrGroup = channel.kind === "channel" || channel.kind === "group";
+  // CEREBRO-PATCH(channel-group-kind): FIR-2159 — a group can be promoted to a
+  // named channel from the gear (the discoverable settings home).
+  const isGroup = channel.kind === "group";
   const permissionsEnabled = useFeatureFlag("cerebro_channel_permissions");
   // CEREBRO-PATCH(channel-leave-delete-actions): TECH-3758 — Leave/Delete
   // actions + confirm gate for the destructive "delete for everyone" action.
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // CEREBRO-PATCH(channel-group-kind): FIR-2159 — convert-to-channel name draft.
+  const [convertName, setConvertName] = useState("");
+  const convertGroup = useConvertGroupToChannel();
+  const handleConvert = () => {
+    const name = convertName.trim();
+    if (!name) return;
+    convertGroup.mutate(
+      { channelId: channel.id, name },
+      {
+        onSuccess: () => {
+          setConvertName("");
+          onOpenChange(false);
+        },
+        onError: (err) =>
+          toast.error(err instanceof Error ? err.message : "Failed to convert to channel"),
+      },
+    );
+  };
 
   // --- Pin to sidebar -----------------------------------------------------
   const { data: pinnedItems = [] } = useQuery({
@@ -159,6 +182,38 @@ export function ChannelSettingsSheet({
                 agents={agentParticipants}
                 defaultMode={isChannel ? "mention_only" : "always"}
               />
+            </section>
+          )}
+
+          {/* CEREBRO-PATCH(channel-group-kind): FIR-2159 — promote a group to a
+              named channel. On success the server's channel:updated event moves
+              the row from Groups to Channels. */}
+          {isGroup && (
+            <section className="border-b px-4 py-3">
+              <SectionLabel>Convert to channel</SectionLabel>
+              <p className="pb-2 text-xs text-muted-foreground">
+                Give this group a permanent name to turn it into a channel.
+              </p>
+              <Input
+                placeholder="Channel name…"
+                value={convertName}
+                onChange={(e) => setConvertName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleConvert();
+                  }
+                }}
+              />
+              <Button
+                size="sm"
+                className="mt-2 w-full gap-2"
+                disabled={!convertName.trim() || convertGroup.isPending}
+                onClick={handleConvert}
+              >
+                <ArrowUpRight className="size-3.5" />
+                Convert to channel
+              </Button>
             </section>
           )}
 

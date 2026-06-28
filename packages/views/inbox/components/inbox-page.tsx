@@ -1110,6 +1110,9 @@ export function InboxPage() {
           return { key: "__chat__", label: "Chats", isFallback: true };
         }
         if (entry.kind === "channel") {
+          // CEREBRO-PATCH(channel-group-kind): FIR-2159 — groups get their own bucket.
+          if (entry.channel.kind === "group")
+            return { key: "__group__", label: "Groups", isFallback: true };
           return entry.channel.kind === "dm"
             ? { key: "__dm__", label: "Direct messages", isFallback: true }
             : { key: "__channel__", label: "Channels", isFallback: true };

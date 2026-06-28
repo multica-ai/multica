@@ -602,6 +602,27 @@ describe("section-filter — classic parity (TECH-3541 #2)", () => {
     expect(groups.map((g) => g.label)).toEqual(["Alpha", "No project"]);
   });
 
+  // FIR-2159 — groups are their own section in the chat block, separate from
+  // both named channels and 1:1 DMs.
+  it("groups by type into separate Channels / Groups / Direct messages buckets", () => {
+    const entries = [
+      channelEntry(1, { kind: "channel" } as Partial<Channel>),
+      channelEntry(2, { kind: "group" } as Partial<Channel>),
+      channelEntry(3, { kind: "dm" } as Partial<Channel>),
+    ];
+    const groups = groupSectionEntries(
+      entries,
+      { id: "s", kind: "all", groupBy: "type" },
+      ctx,
+      noLabels,
+    );
+    expect(groups.map((g) => g.label).sort()).toEqual([
+      "Channels",
+      "Direct messages",
+      "Groups",
+    ]);
+  });
+
   it("default preset starts with Secretary, then 'All messages' grouped by action", () => {
     const preset = operatorPreset();
     expect(preset.tabs).toHaveLength(1);

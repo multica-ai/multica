@@ -59,6 +59,8 @@ vi.mock("@multica/core/channels", () => ({
   useMarkChannelRead: () => ({ mutate: mockMarkChannelRead }),
   useUpdateChannel: () => ({ mutate: mockUpdateChannel }),
   useToggleChannelParticipant: () => ({ mutate: mockToggleParticipant }),
+  // CEREBRO-PATCH(channel-group-kind): FIR-2159 — settings sheet's convert hook.
+  useConvertGroupToChannel: () => ({ mutate: vi.fn(), isPending: false }),
   useSetChannelAgentListenMode: () => ({
     mutate: mockSetListenMode,
     isPending: false,

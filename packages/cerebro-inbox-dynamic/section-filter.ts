@@ -524,10 +524,13 @@ function bucketize(
   if (mode === "type") {
     if (entry.kind === "chat") return { key: "__chat__", label: "Chats", isFallback: true };
     if (entry.kind === "channel") {
-      // FIR-2159 — groups have no fixed name and sit with DMs, not Channels.
-      return entry.channel.kind === "dm" || entry.channel.kind === "group"
-        ? { key: "__dm__", label: "Direct messages", isFallback: true }
-        : { key: "__channel__", label: "Channels", isFallback: true };
+      // FIR-2159 — three buckets: named channels, groups (multi-party, no fixed
+      // name) and 1:1 DMs. Groups get their own section in the chat block.
+      if (entry.channel.kind === "channel")
+        return { key: "__channel__", label: "Channels", isFallback: true };
+      if (entry.channel.kind === "group")
+        return { key: "__group__", label: "Groups", isFallback: true };
+      return { key: "__dm__", label: "Direct messages", isFallback: true };
     }
     const t = entry.item.type;
     return { key: t, label: gctx.typeLabels?.[t] ?? t, isFallback: false };
