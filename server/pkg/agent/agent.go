@@ -217,7 +217,7 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"antigravity": "agy -p (print mode)",
+	"antigravity": "agy -p (non-interactive)",
 	"claude":      "claude (stream-json)",
 	"codebuddy":   "codebuddy (stream-json)",
 	"codex":       "codex app-server",
