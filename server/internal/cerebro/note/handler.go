@@ -236,8 +236,10 @@ type NoteResponse struct {
 	// loaded; nil on lightweight list rows that never render the meta header.
 	IssueID   *string `json:"issue_id"`
 	ProjectID *string `json:"project_id"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
+	// FIR-2145: populated on list reads; 0 on single-note detail reads.
+	CommentCount int64  `json:"comment_count"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // --- handlers ---
@@ -368,6 +370,20 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 
 	// Tagging a person in the note body notifies them (and shares the note).
 	h.notifyNoteMentions(r.Context(), wsUUID, artifact.ID, ownerUUID, artifact.Title, "", artifact.Body, noteRow.Visibility)
+
+	// FIR-2145: when the note is scoped to an issue, auto-create a reference so
+	// the note's References panel shows the issue link immediately, without the
+	// user or agent needing a separate API call.
+	if issueID.Valid {
+		_, _ = h.Cerebro.UpsertNoteReference(r.Context(), cerebrodb.UpsertNoteReferenceParams{
+			NoteID:        artifact.ID,
+			Object:        "issue",
+			RefID:         uuidStr(issueID),
+			Metadata:      []byte("{}"),
+			CreatedByType: "member",
+			CreatedByID:   ownerUUID,
+		})
+	}
 
 	writeJSON(w, http.StatusCreated, NoteResponse{
 		ID:          uuidStr(artifact.ID),
@@ -813,46 +829,49 @@ func pageParams(r *http.Request) (limit, offset int32) {
 
 func listRowToResponse(n cerebrodb.ListNotesForUserRow) NoteResponse {
 	return NoteResponse{
-		ID:          uuidStr(n.ID),
-		WorkspaceID: uuidStr(n.WorkspaceID),
-		FolderID:    uuidPtr(n.FolderID),
-		Title:       n.Title,
-		Body:        n.Body,
-		OwnerID:     uuidStr(n.OwnerID),
-		Visibility:  n.Visibility,
-		Pinned:      n.Pinned,
-		CreatedAt:   tsStr(n.CreatedAt),
-		UpdatedAt:   tsStr(n.UpdatedAt),
+		ID:           uuidStr(n.ID),
+		WorkspaceID:  uuidStr(n.WorkspaceID),
+		FolderID:     uuidPtr(n.FolderID),
+		Title:        n.Title,
+		Body:         n.Body,
+		OwnerID:      uuidStr(n.OwnerID),
+		Visibility:   n.Visibility,
+		Pinned:       n.Pinned,
+		CommentCount: n.CommentCount,
+		CreatedAt:    tsStr(n.CreatedAt),
+		UpdatedAt:    tsStr(n.UpdatedAt),
 	}
 }
 
 func searchRowToResponse(n cerebrodb.SearchNotesForUserRow) NoteResponse {
 	return NoteResponse{
-		ID:          uuidStr(n.ID),
-		WorkspaceID: uuidStr(n.WorkspaceID),
-		FolderID:    uuidPtr(n.FolderID),
-		Title:       n.Title,
-		Body:        n.Body,
-		OwnerID:     uuidStr(n.OwnerID),
-		Visibility:  n.Visibility,
-		Pinned:      n.Pinned,
-		CreatedAt:   tsStr(n.CreatedAt),
-		UpdatedAt:   tsStr(n.UpdatedAt),
+		ID:           uuidStr(n.ID),
+		WorkspaceID:  uuidStr(n.WorkspaceID),
+		FolderID:     uuidPtr(n.FolderID),
+		Title:        n.Title,
+		Body:         n.Body,
+		OwnerID:      uuidStr(n.OwnerID),
+		Visibility:   n.Visibility,
+		Pinned:       n.Pinned,
+		CommentCount: n.CommentCount,
+		CreatedAt:    tsStr(n.CreatedAt),
+		UpdatedAt:    tsStr(n.UpdatedAt),
 	}
 }
 
 func recentRowToResponse(n cerebrodb.ListRecentNotesForUserRow) NoteResponse {
 	return NoteResponse{
-		ID:          uuidStr(n.ID),
-		WorkspaceID: uuidStr(n.WorkspaceID),
-		FolderID:    uuidPtr(n.FolderID),
-		Title:       n.Title,
-		Body:        n.Body,
-		OwnerID:     uuidStr(n.OwnerID),
-		Visibility:  n.Visibility,
-		Pinned:      n.Pinned,
-		CreatedAt:   tsStr(n.CreatedAt),
-		UpdatedAt:   tsStr(n.UpdatedAt),
+		ID:           uuidStr(n.ID),
+		WorkspaceID:  uuidStr(n.WorkspaceID),
+		FolderID:     uuidPtr(n.FolderID),
+		Title:        n.Title,
+		Body:         n.Body,
+		OwnerID:      uuidStr(n.OwnerID),
+		Visibility:   n.Visibility,
+		Pinned:       n.Pinned,
+		CommentCount: n.CommentCount,
+		CreatedAt:    tsStr(n.CreatedAt),
+		UpdatedAt:    tsStr(n.UpdatedAt),
 	}
 }
 

@@ -97,6 +97,7 @@ import { NoteLockBanner } from "./note-lock-banner";
 import { NoteCommentsPanel } from "./note-comments-panel";
 import { NoteVersionsDialog } from "./note-versions-dialog";
 import { useCommentAnchors } from "./use-comment-anchors";
+import { useFindHighlight } from "./use-find-highlight";
 import {
   DRAFT_ANCHOR_ID,
   type CommentAnchor,
@@ -720,6 +721,14 @@ function NoteListSection({
                 </span>
               </>
             )}
+            {/* FIR-2145: comment count indicator — only shown when > 0. */}
+            {n.comment_count > 0 && (
+              <>
+                <span className="opacity-50">·</span>
+                <MessageSquare className="size-3" />
+                <span>{n.comment_count}</span>
+              </>
+            )}
           </div>
         </button>
       ))}
@@ -770,11 +779,20 @@ export function NoteEditor({
   // counts react while typing, without waiting for the save round-trip.
   const [liveBody, setLiveBody] = React.useState(note.body);
   const contentScrollRef = React.useRef<HTMLDivElement>(null);
+  // FIR-2145: closing the comments panel reflows the flex layout (the 320px
+  // sidebar disappears), which causes browsers to reset scrollTop on the content
+  // div. Save it right before the state flip and restore it in useLayoutEffect,
+  // which fires after the DOM mutation but before the browser paints.
+  const savedScrollRef = React.useRef<number>(0);
   // Inline find & replace, shared with the Documents surface (FIR-1647). The bar
   // operates on the markdown body; replacements remount the editor (replaceToken)
   // so the new text appears and autosaves, mirroring the Documents view.
   const [findOpen, setFindOpen] = React.useState(false);
   const [replaceToken, setReplaceToken] = React.useState(0);
+  // FIR-2145: lifted state drives the find-highlight decoration plugin so the
+  // editor paints matches while the user types in the FindReplaceBar.
+  const [findQuery, setFindQuery] = React.useState("");
+  const [findActiveIndex, setFindActiveIndex] = React.useState(-1);
 
   const myId = useAuthStore((s: { user: { id: string } | null }) => s.user?.id);
   const isOwner = note.owner_id === myId;
@@ -808,6 +826,8 @@ export function NoteEditor({
 
   const activeAnchor = draftQuote ? DRAFT_ANCHOR_ID : activeAnchorId;
   useCommentAnchors(editor, commentAnchors, activeAnchor);
+  // FIR-2145: paint find matches in the editor as the user types.
+  useFindHighlight(editor, findOpen ? findQuery : "", findOpen ? findActiveIndex : -1);
 
   function startCommentOnSelection(text: string) {
     if (!text) return;
@@ -817,10 +837,21 @@ export function NoteEditor({
   }
 
   function closeComments() {
+    if (contentScrollRef.current) {
+      savedScrollRef.current = contentScrollRef.current.scrollTop;
+    }
     setShowComments(false);
     setDraftQuote(null);
     setActiveAnchorId(null);
   }
+
+  // FIR-2145: restore the scroll position saved in closeComments() after the
+  // layout reflow caused by the sidebar disappearing.
+  React.useLayoutEffect(() => {
+    if (!showComments && savedScrollRef.current > 0 && contentScrollRef.current) {
+      contentScrollRef.current.scrollTop = savedScrollRef.current;
+    }
+  }, [showComments]);
 
   // The body is the shared rich editor (same as issue comments/descriptions):
   // typing "@" opens the identical mention picker, and inline mentions are
@@ -1073,7 +1104,15 @@ export function NoteEditor({
                   body={liveBody}
                   onReplaceAll={applyReplacedBody}
                   onReplaceFirst={applyReplacedBody}
-                  onClose={() => setFindOpen(false)}
+                  onClose={() => {
+                    setFindOpen(false);
+                    setFindQuery("");
+                    setFindActiveIndex(-1);
+                  }}
+                  onFindStateChange={(q, idx) => {
+                    setFindQuery(q);
+                    setFindActiveIndex(idx);
+                  }}
                 />
               )}
               <ContentEditor

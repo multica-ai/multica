@@ -30,6 +30,8 @@ export const NoteSchema = z.object({
   // document list. Defaulted to null for older server builds that omit them.
   issue_id: z.string().nullable().default(null),
   project_id: z.string().nullable().default(null),
+  // FIR-2145: populated on list reads; 0 on single-note detail reads.
+  comment_count: z.number().default(0),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 });

@@ -97,9 +97,11 @@ SELECT EXISTS (
 -- name: ListNotesForUser :many
 -- The fast Notes list: every note the user may see in a workspace, pinned
 -- first (most-recently pinned first), then most-recently-updated.
+-- FIR-2145: comment_count lets the list UI show a comment-indicator badge.
 SELECT a.id, a.workspace_id, a.folder_id, a.title, a.body,
        a.created_at, a.updated_at,
-       n.owner_id, n.visibility, n.pinned, n.pinned_at
+       n.owner_id, n.visibility, n.pinned, n.pinned_at,
+       (SELECT COUNT(*) FROM cerebro_note_comment c WHERE c.note_id = a.id)::bigint AS comment_count
 FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1
@@ -119,9 +121,11 @@ LIMIT $3 OFFSET $4;
 -- name: SearchNotesForUser :many
 -- Same access rule as ListNotesForUser, filtered by a free-text query over
 -- title + body. Private notes only ever match for their owner.
+-- FIR-2145: comment_count included for consistency with ListNotesForUser.
 SELECT a.id, a.workspace_id, a.folder_id, a.title, a.body,
        a.created_at, a.updated_at,
-       n.owner_id, n.visibility, n.pinned, n.pinned_at
+       n.owner_id, n.visibility, n.pinned, n.pinned_at,
+       (SELECT COUNT(*) FROM cerebro_note_comment c WHERE c.note_id = a.id)::bigint AS comment_count
 FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1
@@ -145,9 +149,11 @@ LIMIT $3 OFFSET $4;
 -- name: ListRecentNotesForUser :many
 -- Compact feed for the Notes box in the dynamic inbox: pinned first, then
 -- newest, capped small by the caller via LIMIT.
+-- FIR-2145: comment_count included for consistency with ListNotesForUser.
 SELECT a.id, a.workspace_id, a.folder_id, a.title, a.body,
        a.created_at, a.updated_at,
-       n.owner_id, n.visibility, n.pinned, n.pinned_at
+       n.owner_id, n.visibility, n.pinned, n.pinned_at,
+       (SELECT COUNT(*) FROM cerebro_note_comment c WHERE c.note_id = a.id)::bigint AS comment_count
 FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1

@@ -169,7 +169,8 @@ func (q *Queries) ListNoteShares(ctx context.Context, artifactID pgtype.UUID) ([
 const listNotesForUser = `-- name: ListNotesForUser :many
 SELECT a.id, a.workspace_id, a.folder_id, a.title, a.body,
        a.created_at, a.updated_at,
-       n.owner_id, n.visibility, n.pinned, n.pinned_at
+       n.owner_id, n.visibility, n.pinned, n.pinned_at,
+       (SELECT COUNT(*) FROM cerebro_note_comment c WHERE c.note_id = a.id)::bigint AS comment_count
 FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1
@@ -195,17 +196,18 @@ type ListNotesForUserParams struct {
 }
 
 type ListNotesForUserRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	FolderID    pgtype.UUID        `json:"folder_id"`
-	Title       string             `json:"title"`
-	Body        string             `json:"body"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	OwnerID     pgtype.UUID        `json:"owner_id"`
-	Visibility  string             `json:"visibility"`
-	Pinned      bool               `json:"pinned"`
-	PinnedAt    pgtype.Timestamptz `json:"pinned_at"`
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	FolderID     pgtype.UUID        `json:"folder_id"`
+	Title        string             `json:"title"`
+	Body         string             `json:"body"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	OwnerID      pgtype.UUID        `json:"owner_id"`
+	Visibility   string             `json:"visibility"`
+	Pinned       bool               `json:"pinned"`
+	PinnedAt     pgtype.Timestamptz `json:"pinned_at"`
+	CommentCount int64              `json:"comment_count"`
 }
 
 // The fast Notes list: every note the user may see in a workspace, pinned
@@ -236,6 +238,7 @@ func (q *Queries) ListNotesForUser(ctx context.Context, arg ListNotesForUserPara
 			&i.Visibility,
 			&i.Pinned,
 			&i.PinnedAt,
+			&i.CommentCount,
 		); err != nil {
 			return nil, err
 		}
@@ -335,7 +338,8 @@ func (q *Queries) ListNotesReferencingObject(ctx context.Context, arg ListNotesR
 const listRecentNotesForUser = `-- name: ListRecentNotesForUser :many
 SELECT a.id, a.workspace_id, a.folder_id, a.title, a.body,
        a.created_at, a.updated_at,
-       n.owner_id, n.visibility, n.pinned, n.pinned_at
+       n.owner_id, n.visibility, n.pinned, n.pinned_at,
+       (SELECT COUNT(*) FROM cerebro_note_comment c WHERE c.note_id = a.id)::bigint AS comment_count
 FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1
@@ -360,17 +364,18 @@ type ListRecentNotesForUserParams struct {
 }
 
 type ListRecentNotesForUserRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	FolderID    pgtype.UUID        `json:"folder_id"`
-	Title       string             `json:"title"`
-	Body        string             `json:"body"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	OwnerID     pgtype.UUID        `json:"owner_id"`
-	Visibility  string             `json:"visibility"`
-	Pinned      bool               `json:"pinned"`
-	PinnedAt    pgtype.Timestamptz `json:"pinned_at"`
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	FolderID     pgtype.UUID        `json:"folder_id"`
+	Title        string             `json:"title"`
+	Body         string             `json:"body"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	OwnerID      pgtype.UUID        `json:"owner_id"`
+	Visibility   string             `json:"visibility"`
+	Pinned       bool               `json:"pinned"`
+	PinnedAt     pgtype.Timestamptz `json:"pinned_at"`
+	CommentCount int64              `json:"comment_count"`
 }
 
 // Compact feed for the Notes box in the dynamic inbox: pinned first, then
@@ -396,6 +401,7 @@ func (q *Queries) ListRecentNotesForUser(ctx context.Context, arg ListRecentNote
 			&i.Visibility,
 			&i.Pinned,
 			&i.PinnedAt,
+			&i.CommentCount,
 		); err != nil {
 			return nil, err
 		}
@@ -434,7 +440,8 @@ func (q *Queries) ReplaceNoteShares(ctx context.Context, artifactID pgtype.UUID)
 const searchNotesForUser = `-- name: SearchNotesForUser :many
 SELECT a.id, a.workspace_id, a.folder_id, a.title, a.body,
        a.created_at, a.updated_at,
-       n.owner_id, n.visibility, n.pinned, n.pinned_at
+       n.owner_id, n.visibility, n.pinned, n.pinned_at,
+       (SELECT COUNT(*) FROM cerebro_note_comment c WHERE c.note_id = a.id)::bigint AS comment_count
 FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1
@@ -465,17 +472,18 @@ type SearchNotesForUserParams struct {
 }
 
 type SearchNotesForUserRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	FolderID    pgtype.UUID        `json:"folder_id"`
-	Title       string             `json:"title"`
-	Body        string             `json:"body"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	OwnerID     pgtype.UUID        `json:"owner_id"`
-	Visibility  string             `json:"visibility"`
-	Pinned      bool               `json:"pinned"`
-	PinnedAt    pgtype.Timestamptz `json:"pinned_at"`
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	FolderID     pgtype.UUID        `json:"folder_id"`
+	Title        string             `json:"title"`
+	Body         string             `json:"body"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	OwnerID      pgtype.UUID        `json:"owner_id"`
+	Visibility   string             `json:"visibility"`
+	Pinned       bool               `json:"pinned"`
+	PinnedAt     pgtype.Timestamptz `json:"pinned_at"`
+	CommentCount int64              `json:"comment_count"`
 }
 
 // Same access rule as ListNotesForUser, filtered by a free-text query over
@@ -507,6 +515,7 @@ func (q *Queries) SearchNotesForUser(ctx context.Context, arg SearchNotesForUser
 			&i.Visibility,
 			&i.Pinned,
 			&i.PinnedAt,
+			&i.CommentCount,
 		); err != nil {
 			return nil, err
 		}
