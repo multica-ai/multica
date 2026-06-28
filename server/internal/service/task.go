@@ -1833,15 +1833,23 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							"error", checkErr,
 						)
 					} else if !hasActive {
-						if _, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 							ID:          t.IssueID,
 							Status:      "todo",
 							WorkspaceID: issue.WorkspaceID,
-						}); updateErr != nil {
+						})
+						if updateErr != nil {
 							slog.Warn("handle failed tasks: reset stuck issue failed",
 								"issue_id", issueKey,
 								"error", updateErr,
 							)
+						} else {
+							// This direct reset bypasses the HTTP UpdateIssue
+							// handler that normally emits issue:updated, so emit
+							// it here too. Without it the board / status-filter
+							// caches keep showing the issue as in_progress until
+							// the next write touches it (#4648 / MUL-3782).
+							s.broadcastIssueUpdated(updatedIssue, issue.Status)
 						}
 					}
 				}
@@ -2261,14 +2269,23 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 	})
 }
 
-func (s *TaskService) broadcastIssueUpdated(issue db.Issue) {
+// broadcastIssueUpdated publishes the issue:updated event the frontend's
+// realtime reconcile (onIssueUpdated) relies on to move an issue between status
+// columns / status filters and reconcile their bucket counts. prevStatus is the
+// issue's status before the write so the client can gate that reconcile on
+// status_changed, exactly like the HTTP UpdateIssue handler does.
+func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 	prefix := s.getIssuePrefix(issue.WorkspaceID)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
 		ActorType:   "system",
 		ActorID:     "",
-		Payload:     map[string]any{"issue": issueToMap(issue, prefix)},
+		Payload: map[string]any{
+			"issue":          issueToMap(issue, prefix),
+			"status_changed": prevStatus != issue.Status,
+			"prev_status":    prevStatus,
+		},
 	})
 }
 
