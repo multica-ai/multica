@@ -92,7 +92,8 @@ import { useT } from "../../i18n";
 // the documented exception to the single-line management-list rule.
 const GRID_COLS =
   "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_var(--agc-status)_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--agc-status)_var(--agc-owner)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem_0.75rem]";
+  // CEREBRO-PATCH(agents-list-grid-overflow): keep default visible columns inside a 1280px dashboard pane.
+  "@2xl:grid-cols-[0.75rem_1rem_minmax(160px,1fr)_var(--agc-status)_var(--agc-owner)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem_0.75rem]";
 
 // Two-line rows; the virtualizer's fixed-size contract.
 const ROW_HEIGHT = 64;
@@ -111,10 +112,10 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
   created: 104,
 };
 
-// Fixed tracks (edges 12+12, checkbox 16, name min 200, kebab 28) plus the
+// Fixed tracks (edges 12+12, checkbox 16, name min 160, kebab 28) plus the
 // 11 gap-x-3 gaps between the wide template's 12 tracks (zero-width tracks
 // still carry gaps).
-const FIXED_TRACKS_WIDTH = 268 + 11 * 12;
+const FIXED_TRACKS_WIDTH = 228 + 11 * 12;
 
 function columnTrackVars(
   isVisible: (key: AgentColumnKey) => boolean,
