@@ -2273,7 +2273,16 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // realtime reconcile (onIssueUpdated) relies on to move an issue between status
 // columns / status filters and reconcile their bucket counts. prevStatus is the
 // issue's status before the write so the client can gate that reconcile on
-// status_changed, exactly like the HTTP UpdateIssue handler does.
+// status_changed.
+//
+// The `issue` payload is a map (issueToMap), which the workspace WS fanout
+// (listeners.go SubscribeAll) marshals and broadcasts as-is — that is what
+// drives the UI reconcile. Note this does NOT cover the full HTTP UpdateIssue
+// side effects: the activity-log and inbox listeners type-assert `issue` to a
+// handler.IssueResponse and skip a map, so a background status reset does not
+// emit status-change activity / notifications. That is intentional for the
+// realtime-staleness fix (#4648 / MUL-3782); folding those side effects in
+// would mean unifying the payload type and is left as a follow-up.
 func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 	prefix := s.getIssuePrefix(issue.WorkspaceID)
 	s.Bus.Publish(events.Event{
