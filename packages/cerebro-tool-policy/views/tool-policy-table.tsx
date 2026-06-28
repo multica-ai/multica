@@ -30,6 +30,7 @@ import {
   Folder,
   FolderGit2,
   Globe,
+  KeyRound,
   Loader2,
   Lock,
   Plus,
@@ -185,6 +186,19 @@ const VIEW_EDIT_LAYER: Record<ToolPolicyView, ToolLayer> = {
 // The order the three repo capabilities render inside a group, regardless of the
 // order the server emitted them.
 const REPO_CAP_ORDER = ["repo.read", "repo.checkout", "repo.push"];
+
+// Credential rows (FIR-1739) also carry a non-empty resource_pattern (the Agent
+// Vault box, `agentvault-vault:<name>`, or `cerebro-credential:<uuid>`) and render
+// as collapsible groups — one group per credential box — exactly like repos, so a
+// box is ONE permission row you fold open to set each action. The order the box's
+// capability rows render inside a group, regardless of server emission order.
+const CREDENTIAL_CAP_ORDER = [
+  "credential.reveal",
+  "credential.read_redacted",
+  "credential.rotate",
+  "credential.revoke",
+  "credential.attach",
+];
 
 const SETTING_CHOICES: ToolSetting[] = ["allow", "ask", "deny", "inherit"];
 const SETTING_LABEL: Record<ToolSetting, string> = {
@@ -342,9 +356,10 @@ export function ToolPolicyTable({
     if (!tabFilter) return allCapRows;
     if (tabFilter === "connections") return allCapRows.filter((r) => r.source === "connection");
     // Credential rows carry a resource pattern (so they live in `rows`, not
-    // `allCapRows`), one row per box per capability, grouped visually by the box
-    // name (its Category). They render in the flat table under their own tab.
-    if (tabFilter === "credentials") return allCredentialRows;
+    // `allCapRows`), one row per box per capability. Like repos they render as
+    // collapsible per-box groups (credentialGroups below), NOT as flat catalog
+    // rows — so the flat table excludes them entirely on the credentials tab.
+    if (tabFilter === "credentials") return [];
     if (tabFilter === "runtime")
       return allCapRows.filter((r) => isRuntimeReported(r) || r.category === "Runtimes");
     // "multica" = everything that isn't a connection, a runtime-reported tool, or
@@ -371,6 +386,14 @@ export function ToolPolicyTable({
   // Repo groups are keyed by URL and narrowed only by the free-text search — the
   // class/side-effect/decision facets describe capabilities, not repos.
   const repoGroups = useMemo(() => groupRepoRows(repoRows, search), [repoRows, search]);
+  // Credential groups: one collapsible group per Agent Vault box, shown only on
+  // the credentials tab. Like repo groups they are keyed by resource_pattern and
+  // narrowed only by the free-text search (on the box name).
+  const credentialGroups = useMemo(
+    () =>
+      tabFilter === "credentials" ? groupCredentialRows(allCredentialRows, search) : [],
+    [tabFilter, allCredentialRows, search],
+  );
 
   const busy = setPolicy.isPending || clearPolicy.isPending;
 
@@ -411,6 +434,14 @@ export function ToolPolicyTable({
     }
   }
 
+  // Cascade one choice onto every capability of a credential box (the group
+  // header control): "set bigquery to Allow and every action under it follows."
+  function applyCredentialGroup(group: CredentialGroupData, setting: ToolSetting) {
+    for (const row of group.rows) {
+      applySetting(row.tool_key, setting, group.resource);
+    }
+  }
+
   function bulkSet(setting: Exclude<ToolSetting, "inherit">) {
     for (const row of filtered) {
       // TECH-3287 hul 6: "Allow all" can't loosen a row a higher layer blocks —
@@ -446,9 +477,9 @@ export function ToolPolicyTable({
 
       {query.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading tools…</p>
-      ) : repoGroups.length === 0 && filtered.length === 0 ? (
+      ) : repoGroups.length === 0 && credentialGroups.length === 0 && filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {tabFilter === "credentials" && capRows.length === 0
+          {tabFilter === "credentials" && credentialGroups.length === 0
             ? "No credentials available yet. Connect an Agent Vault to this workspace to grant credential access here."
             : allCapRows.length === 0 && allRepoRows.length === 0
               ? "No tools reported yet."
@@ -463,6 +494,17 @@ export function ToolPolicyTable({
               busy={busy}
               onSetCapability={(url, toolKey, s) => applySetting(toolKey, s, url)}
               onSetGroup={applyRepoGroup}
+              onSetCondition={applyCondition}
+            />
+          )}
+
+          {credentialGroups.length > 0 && (
+            <CredentialSection
+              groups={credentialGroups}
+              editLayer={editLayer}
+              busy={busy}
+              onSetCapability={(resource, toolKey, s) => applySetting(toolKey, s, resource)}
+              onSetGroup={applyCredentialGroup}
               onSetCondition={applyCondition}
             />
           )}
@@ -1968,6 +2010,224 @@ function RepoGroupControl({
             {SETTING_LABEL[choice]}
             <span className="ml-auto text-xs text-muted-foreground">
               {choice === "inherit" ? "clears all" : "all three"}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// CredentialGroupData is one Agent Vault box's collapsible group: its resource
+// pattern (`agentvault-vault:<name>` or `cerebro-credential:<uuid>`), the display
+// label (the box name), and its capability rows in CREDENTIAL_CAP_ORDER.
+interface CredentialGroupData {
+  resource: string;
+  label: string;
+  rows: ToolPolicyRow[];
+}
+
+// groupCredentialRows buckets the per-credential rows by resource pattern, labels
+// each group with the box name (the rows' Category), orders each group's rows by
+// CREDENTIAL_CAP_ORDER, and narrows by the free-text search on the box name.
+// Groups are sorted by label so the list is stable.
+export function groupCredentialRows(
+  rows: ToolPolicyRow[],
+  search: string,
+): CredentialGroupData[] {
+  const q = search.trim().toLowerCase();
+  const byResource = new Map<string, ToolPolicyRow[]>();
+  for (const r of rows) {
+    const list = byResource.get(r.resource_pattern);
+    if (list) list.push(r);
+    else byResource.set(r.resource_pattern, [r]);
+  }
+  const rank = (key: string) => {
+    const i = CREDENTIAL_CAP_ORDER.indexOf(key);
+    return i === -1 ? CREDENTIAL_CAP_ORDER.length : i;
+  };
+  const labelFor = (resource: string, rs: ToolPolicyRow[]) =>
+    rs[0]?.category?.trim() || resource.replace(/^[^:]*:/, "") || resource;
+  return [...byResource.entries()]
+    .map(([resource, rs]) => ({
+      resource,
+      label: labelFor(resource, rs),
+      rows: [...rs].sort((a, b) => rank(a.tool_key) - rank(b.tool_key)),
+    }))
+    .filter((g) => !q || g.label.toLowerCase().includes(q))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// credentialGroupVerdict folds a box's rows into one header value: the shared
+// Effective when all agree, else "mixed". `overridden` is true when any
+// capability carries an explicit setting at the page's own layer.
+function credentialGroupVerdict(
+  group: CredentialGroupData,
+  editLayer: ToolLayer,
+): { setting: ToolEffectiveSetting | "mixed"; overridden: boolean } {
+  const settings = new Set(group.rows.map((r) => r.effective.setting));
+  const overridden = group.rows.some((r) => !!r.layers[editLayer]);
+  const only = settings.size === 1 ? [...settings][0] : undefined;
+  return { setting: only ?? "mixed", overridden };
+}
+
+function CredentialSection({
+  groups,
+  editLayer,
+  busy,
+  onSetCapability,
+  onSetGroup,
+  onSetCondition,
+}: {
+  groups: CredentialGroupData[];
+  editLayer: ToolLayer;
+  busy: boolean;
+  onSetCapability: (resource: string, toolKey: string, setting: ToolSetting) => void;
+  onSetGroup: (group: CredentialGroupData, setting: ToolSetting) => void;
+  /** Write/clear the When condition on one credential capability row. */
+  onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2" data-testid="credential-policy-section">
+      <div className="flex items-center gap-2">
+        <KeyRound className="size-4 text-muted-foreground" />
+        <h3 className="text-base font-semibold">Credentials</h3>
+        <span className="font-mono text-xs text-muted-foreground">
+          {groups.length === 1 ? "1 credential" : `${groups.length} credentials`}
+        </span>
+      </div>
+      <p className="max-w-xl text-sm text-muted-foreground">
+        Set a whole credential, or expand it to decide each action separately.
+        Setting the credential cascades to every action.
+      </p>
+      <div className="flex flex-col gap-2">
+        {groups.map((group) => (
+          <CredentialGroup
+            key={group.resource}
+            group={group}
+            editLayer={editLayer}
+            busy={busy}
+            onSetCapability={onSetCapability}
+            onSetGroup={onSetGroup}
+            onSetCondition={onSetCondition}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CredentialGroup({
+  group,
+  editLayer,
+  busy,
+  onSetCapability,
+  onSetGroup,
+  onSetCondition,
+}: {
+  group: CredentialGroupData;
+  editLayer: ToolLayer;
+  busy: boolean;
+  onSetCapability: (resource: string, toolKey: string, setting: ToolSetting) => void;
+  onSetGroup: (group: CredentialGroupData, setting: ToolSetting) => void;
+  onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const verdict = credentialGroupVerdict(group, editLayer);
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <div className="rounded-lg border" data-testid={`credential-group-${group.resource}`}>
+      <div className="flex items-center justify-between gap-3 p-3">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex min-w-0 items-center gap-2 text-left"
+        >
+          <Chevron className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate text-sm font-medium">{group.label}</span>
+        </button>
+        <CredentialGroupControl
+          verdict={verdict}
+          disabled={busy}
+          onChange={(s) => onSetGroup(group, s)}
+        />
+      </div>
+      {open && (
+        <div className="border-t">
+          {group.rows.map((row) => (
+            <div
+              key={`${row.tool_key}:${row.resource_pattern}`}
+              data-testid={`credential-cap-${row.tool_key}-${row.resource_pattern}`}
+              className="flex items-center justify-between gap-3 py-2 pl-9 pr-3"
+            >
+              <div className="flex min-w-0 flex-col">
+                <span className="text-sm">{row.title || row.tool_key}</span>
+                <span className="font-mono text-xs text-muted-foreground">{row.tool_key}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <OriginTag row={row} editLayer={editLayer} />
+                <DecisionControl
+                  row={row}
+                  editLayer={editLayer}
+                  disabled={busy}
+                  onChange={(s) => onSetCapability(group.resource, row.tool_key, s)}
+                />
+                <ConditionControl
+                  row={row}
+                  editLayer={editLayer}
+                  disabled={busy}
+                  onChange={(c) => onSetCondition(row, c)}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// CredentialGroupControl is the header pill that cascades one choice to every
+// capability of a credential box. It shows the shared verdict, or a neutral
+// "Mixed" when the box's capabilities disagree.
+function CredentialGroupControl({
+  verdict,
+  disabled,
+  onChange,
+}: {
+  verdict: { setting: ToolEffectiveSetting | "mixed"; overridden: boolean };
+  disabled?: boolean;
+  onChange: (setting: ToolSetting) => void;
+}) {
+  const concrete = verdict.setting === "mixed" ? undefined : verdict.setting;
+  const Icon = concrete ? VERDICT_ICON[concrete] : KeyRound;
+  const label = concrete ? SETTING_LABEL[concrete] : "Mixed";
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        disabled={disabled}
+        aria-label={`Credential decision: ${label}`}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50",
+          concrete ? VERDICT_PILL[concrete] : "border-border bg-muted text-muted-foreground",
+          verdict.overridden && "ring-1 ring-primary/40",
+        )}
+      >
+        <Icon className="size-3.5" />
+        {label}
+        <ChevronDown className="size-3 opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-40">
+        {SETTING_CHOICES.map((choice) => (
+          <DropdownMenuItem
+            key={choice}
+            onClick={() => onChange(choice)}
+            className={cn("text-sm", choice === "inherit" && "text-muted-foreground")}
+          >
+            {SETTING_LABEL[choice]}
+            <span className="ml-auto text-xs text-muted-foreground">
+              {choice === "inherit" ? "clears all" : "all actions"}
             </span>
           </DropdownMenuItem>
         ))}

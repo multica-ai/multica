@@ -1026,25 +1026,50 @@ describe("ToolPolicyTable — Credentials tab (FIR-1479)", () => {
     );
   }
 
-  it("shows one row per credential box (by box name) and excludes non-credential tools", async () => {
+  it("shows one collapsible group per credential box (by box name) and excludes non-credential tools", async () => {
     mockCerebroRequest.mockResolvedValue(CRED_TABLE);
     renderCredentials();
-    const table = await tableBody();
-    expect(table.getByText("bigquery")).toBeInTheDocument();
-    expect(table.getByText("cloudflare")).toBeInTheDocument();
+    // Each box is ONE foldable group row labelled by the box name (the Class is
+    // "credentials" — the section — not the box name on every row).
+    expect(await screen.findByTestId("credential-group-cerebro-credential:box-1")).toBeInTheDocument();
+    expect(screen.getByText("bigquery")).toBeInTheDocument();
+    expect(screen.getByText("cloudflare")).toBeInTheDocument();
     // A builtin tool is not a credential → never appears on the credentials tab.
-    expect(table.queryByText("List issues")).not.toBeInTheDocument();
+    expect(screen.queryByText("List issues")).not.toBeInTheDocument();
   });
 
-  it("writes a credential decision scoped to its box's resource_pattern (toggle fix)", async () => {
+  it("cascades a box decision scoped to its resource_pattern via the group header (toggle fix)", async () => {
     const user = userEvent.setup();
     mockCerebroRequest.mockResolvedValue(CRED_TABLE);
     renderCredentials();
-    const row = await screen.findByTestId(
-      "tool-row-credential.reveal:cerebro-credential:box-1",
+    const group = await screen.findByTestId("credential-group-cerebro-credential:box-1");
+    await user.click(within(group).getByLabelText(/^Credential decision:/));
+    await user.click(within(group).getByRole("menuitem", { name: /^Allow/ }));
+
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(put).toBeTruthy();
+      expect(JSON.parse((put![1] as RequestInit).body as string)).toMatchObject({
+        tool_key: "credential.reveal",
+        setting: "allow",
+        resource_pattern: "cerebro-credential:box-1",
+      });
+    });
+  });
+
+  it("expands a box to author one action individually, scoped to the box", async () => {
+    const user = userEvent.setup();
+    mockCerebroRequest.mockResolvedValue(CRED_TABLE);
+    renderCredentials();
+    const group = await screen.findByTestId("credential-group-cerebro-credential:box-1");
+    // Fold the box open via its chevron/label button (named by the box), then set
+    // the reveal action.
+    await user.click(within(group).getByRole("button", { name: "bigquery" }));
+    const cap = await within(group).findByTestId(
+      "credential-cap-credential.reveal-cerebro-credential:box-1",
     );
-    await user.click(within(row).getByLabelText(/^Decision:/));
-    await user.click(within(row).getByRole("menuitem", { name: "Allow" }));
+    await user.click(within(cap).getByLabelText(/^Decision:/));
+    await user.click(within(cap).getByRole("menuitem", { name: "Allow" }));
 
     await waitFor(() => {
       const put = findPutCalls().at(-1);
