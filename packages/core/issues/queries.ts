@@ -139,10 +139,10 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
   return out;
 }
 
-async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
+async function fetchFirstPages(wsId: string, filter: MyIssuesFilter = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
   const responses = await Promise.all(
     PAGINATED_STATUSES.map((status) =>
-      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
+      api.listIssues({ workspace_id: wsId, status, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
     ),
   );
   const byStatus: ListIssuesCache["byStatus"] = {};
@@ -172,11 +172,11 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortPara
  * total — pagination on the "All" scope is out of scope; the first
  * 50-per-status × 3 widening (deduped) is what the page renders.
  */
-async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
+async function fetchAllMyFirstPages(wsId: string, userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
   const [byAssignee, byCreator, byInvolves] = await Promise.all([
-    fetchFirstPages({ assignee_id: userId }, sort),
-    fetchFirstPages({ creator_id: userId }, sort),
-    fetchFirstPages({ involves_user_id: userId }, sort),
+    fetchFirstPages(wsId, { assignee_id: userId }, sort),
+    fetchFirstPages(wsId, { creator_id: userId }, sort),
+    fetchFirstPages(wsId, { involves_user_id: userId }, sort),
   ]);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
@@ -204,6 +204,7 @@ async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Prom
  * pass through unchanged.
  */
 async function fetchAllMyAssigneeGroups(
+  wsId: string,
   userId: string,
   filter: AssigneeGroupedIssuesFilter,
   sort?: IssueSortParam,
@@ -216,6 +217,7 @@ async function fetchAllMyAssigneeGroups(
   const responses = await Promise.all(
     variants.map((f) =>
       api.listGroupedIssues({
+        workspace_id: wsId,
         group_by: "assignee",
         limit: ISSUE_PAGE_SIZE,
         offset: 0,
@@ -263,7 +265,7 @@ async function fetchAllMyAssigneeGroups(
 export function issueListOptions(wsId: string, sort?: IssueSortParam) {
   return queryOptions({
     queryKey: issueKeys.listSorted(wsId, sort),
-    queryFn: () => fetchFirstPages({}, sort),
+    queryFn: () => fetchFirstPages(wsId, {}, sort),
     select: flattenIssueBuckets,
     placeholderData: keepPreviousData,
   });
@@ -278,6 +280,7 @@ export function issueAssigneeGroupsOptions(
     queryKey: issueKeys.assigneeGroups(wsId, { ...filter, ...sort }),
     queryFn: () =>
       api.listGroupedIssues({
+        workspace_id: wsId,
         group_by: "assignee",
         limit: ISSUE_PAGE_SIZE,
         offset: 0,
@@ -307,8 +310,8 @@ export function myIssueListOptions(
     queryKey: issueKeys.myListSorted(wsId, scope, filter, sort),
     queryFn: () =>
       scope === "all" && userId
-        ? fetchAllMyFirstPages(userId, sort)
-        : fetchFirstPages(filter, sort),
+        ? fetchAllMyFirstPages(wsId, userId, sort)
+        : fetchFirstPages(wsId, filter, sort),
     select: flattenIssueBuckets,
     placeholderData: keepPreviousData,
   });
@@ -329,11 +332,12 @@ export const PROJECT_GANTT_PAGE_LIMIT = 500;
  */
 export const PROJECT_GANTT_MAX_ISSUES = 10_000;
 
-async function fetchProjectGanttIssues(projectId: string) {
+async function fetchProjectGanttIssues(wsId: string, projectId: string) {
   const issues = [];
   let offset = 0;
   while (offset < PROJECT_GANTT_MAX_ISSUES) {
     const res = await api.listIssues({
+      workspace_id: wsId,
       project_id: projectId,
       scheduled: true,
       limit: PROJECT_GANTT_PAGE_LIMIT,
@@ -363,7 +367,7 @@ async function fetchProjectGanttIssues(projectId: string) {
 export function projectGanttIssuesOptions(wsId: string, projectId: string) {
   return queryOptions({
     queryKey: issueKeys.projectGantt(wsId, projectId),
-    queryFn: () => fetchProjectGanttIssues(projectId),
+    queryFn: () => fetchProjectGanttIssues(wsId, projectId),
   });
 }
 
@@ -380,8 +384,9 @@ export function myIssueAssigneeGroupsOptions(
     queryKey: issueKeys.myAssigneeGroups(wsId, scope, { ...filter, ...sort }),
     queryFn: () =>
       scope === "all" && userId
-        ? fetchAllMyAssigneeGroups(userId, filter, sort)
+        ? fetchAllMyAssigneeGroups(wsId, userId, filter, sort)
         : api.listGroupedIssues({
+            workspace_id: wsId,
             group_by: "assignee",
             limit: ISSUE_PAGE_SIZE,
             offset: 0,

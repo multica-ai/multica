@@ -81,6 +81,7 @@ describe("projectGanttIssuesOptions", () => {
 
     expect(listIssues).toHaveBeenCalledTimes(1);
     expect(listIssues).toHaveBeenCalledWith({
+      workspace_id: WS_ID,
       project_id: PROJECT_ID,
       scheduled: true,
       limit: PROJECT_GANTT_PAGE_LIMIT,

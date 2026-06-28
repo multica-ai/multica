@@ -219,6 +219,26 @@ describe("onIssueMetadataChanged", () => {
   });
 });
 
+describe("onIssueCreated", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("inserts a created issue into the cached board column by position", () => {
+    const laterIssue: Issue = { ...baseIssue, id: "later", position: 0 };
+    const newTopIssue: Issue = { ...baseIssue, id: "new-top", position: -10 };
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), makeListCache(laterIssue));
+
+    onIssueCreated(qc, WS_ID, newTopIssue);
+
+    const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
+    expect(list?.byStatus.todo?.issues.map((i) => i.id)).toEqual(["new-top", "later"]);
+    expect(list?.byStatus.todo?.total).toBe(2);
+  });
+});
+
 describe("project progress invalidation", () => {
   let qc: QueryClient;
 
