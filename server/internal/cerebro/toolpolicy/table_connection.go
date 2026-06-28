@@ -124,14 +124,30 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 	// blocks the tools, not just the (display-only) wide row (TECH-3180). The
 	// connection-wide rows were already resolved into `out` by Table(); reuse each
 	// one's Effective setting as the BASE for its per-tool resolution so a per-tool
-	// choice can only tighten the connection-wide one, never loosen it. Absent (no
-	// capability row) falls back to the query's workspace Base.
+	// choice can only tighten the connection-wide one, never loosen it.
 	connWideBase := connectionWideBases(out)
+
+	// Fallback when no capability-wide row is in `out`. Table() only emits a
+	// source='connection' wide row when a cerebro_capability row exists for the
+	// connection (MCP connections register one; an API connection authored only in
+	// workspace_connection has none). Without that row the connection-wide
+	// Deny/Ask authored on `connection:<name>` (resource_pattern '') would never
+	// reach the per-endpoint rows, so a workspace/agent-level "deny this whole
+	// connection" would silently fail to cap its endpoints (FIR-2166). Resolve the
+	// authored wide settings straight from cerebro_tool_policy and use them as the
+	// base wherever the capability-derived base is absent.
+	authoredWideBase, err := s.connectionWideAuthoredBases(ctx, in, groupIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	for _, conn := range conns {
 		toolKey := connectionToolKeyPrefix + conn.name
 		source := sourceForKind(conn.kind)
 		base := in.Base
+		if w, ok := authoredWideBase[toolKey]; ok && rank(w) >= 0 {
+			base = w
+		}
 		if w, ok := connWideBase[toolKey]; ok && rank(w) >= 0 {
 			base = w
 		}
@@ -178,6 +194,77 @@ func connectionWideBases(out []TableRow) map[string]Setting {
 		}
 	}
 	return bases
+}
+
+// connectionWideAuthoredBases resolves, per connection policy key, the effective
+// connection-wide setting from the authored rows in cerebro_tool_policy
+// (tool_key 'connection:%', resource_pattern '') folded through the same
+// Workspace › Runtime › Agent › Group › User chain as every other layer. It is
+// the fallback for connectionWideBases: it does NOT depend on a cerebro_capability
+// row existing, so a connection authored only in workspace_connection (no
+// capability row — the common case for API connections) still propagates its
+// connection-wide cap to its per-endpoint rows. The subject predicates mirror
+// loadConnectionPolicySettings so an absent subject never matches and that layer
+// stays Inherit. Keys with no authored wide row are simply absent (callers keep
+// the query Base).
+func (s *Store) connectionWideAuthoredBases(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID) (map[string]Setting, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT p.tool_key, p.layer, p.setting
+		FROM cerebro_tool_policy p
+		WHERE p.workspace_id = $1
+		  AND p.resource_pattern = ''
+		  AND p.tool_key LIKE 'connection:%'
+		  AND (
+		    (p.layer = 'workspace' AND p.subject_id = $1) OR
+		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
+		    (p.layer = 'agent'     AND p.subject_id = $3) OR
+		    (p.layer = 'user'      AND p.subject_id = $4) OR
+		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[]))
+		  )
+	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs)
+	if err != nil {
+		if isUndefinedTable(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("toolpolicy: load connection-wide settings: %w", err)
+	}
+	defer rows.Close()
+
+	type wideAcc struct {
+		layers map[Layer]Setting
+		groups []Setting
+	}
+	byKey := map[string]*wideAcc{}
+	for rows.Next() {
+		var toolKey, layer, setting string
+		if err := rows.Scan(&toolKey, &layer, &setting); err != nil {
+			return nil, fmt.Errorf("toolpolicy: scan connection-wide setting: %w", err)
+		}
+		a, ok := byKey[toolKey]
+		if !ok {
+			a = &wideAcc{layers: map[Layer]Setting{}}
+			byKey[toolKey] = a
+		}
+		l := Layer(layer)
+		set := Setting(setting)
+		if l == LayerGroup {
+			a.groups = append(a.groups, set)
+		} else {
+			a.layers[l] = set
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("toolpolicy: iterate connection-wide settings: %w", err)
+	}
+
+	out := map[string]Setting{}
+	for key, a := range byKey {
+		if len(a.groups) > 0 {
+			a.layers[LayerGroup] = CombineGroups(a.groups...)
+		}
+		out[key] = Resolve(Input{Settings: a.layers, Base: in.Base}).Setting
+	}
+	return out, nil
 }
 
 // discoverConnectionTools returns each enabled connection in the workspace with
@@ -337,6 +424,58 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 			connName = strings.TrimPrefix(r.ToolKey, connectionToolKeyPrefix)
 		}
 		result = tightened
+	}
+	return result, connName, nil
+}
+
+// ConnectionEndpointEffective resolves the effective Allow/Ask/Deny verdict for a
+// single API-connection endpoint call (`<METHOD> <path>`, e.g. "GET /secrets")
+// through the full Workspace › Runtime › Agent › Group › User › System chain —
+// i.e. the same per-actor-level control MCP connections already get, extended to
+// REST connections (FIR-2166 "C": connect any API and control it at every actor
+// level). Today API endpoint rows are authored and shown but never enforced at
+// runtime ("config-only"); this resolver is the engine half the API-call gate
+// uses, so the gateway gate and the admin screen can never drift.
+//
+// The verdict folds two rows for the named connection, MOST RESTRICTIVE wins
+// (Deny > Ask > Allow): the connection-wide cap (`connection:<name>`, empty
+// resource_pattern) and the per-endpoint row (source connection-endpoint,
+// resource_pattern "<METHOD> <path>"). A per-endpoint row can only ever tighten
+// the connection-wide row. No matching row resolves to SettingAllow (ungated):
+// connection permissions only ever tighten from an allow baseline. Returns the
+// resolved setting and the connection name when the verdict tightens past the
+// allow baseline (so callers can surface "which integration" in an approval).
+func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, connName, method, path string) (Setting, string, error) {
+	if connName == "" || method == "" || path == "" {
+		return SettingAllow, "", nil
+	}
+	rows, err := s.Table(ctx, TableQuery{
+		WorkspaceID: workspaceID,
+		RuntimeID:   runtimeID,
+		AgentID:     agentID,
+		UserID:      userID,
+	})
+	if err != nil {
+		return SettingAllow, "", err
+	}
+	wantKey := connectionToolKeyPrefix + connName
+	wantPattern := method + " " + path
+	result := SettingAllow
+	for _, r := range rows {
+		if r.ToolKey != wantKey {
+			continue
+		}
+		// The connection-wide cap (empty pattern) and the matching per-endpoint
+		// row both gate this call; everything else for the connection is ignored.
+		isWide := r.Source == "connection" && r.ResourcePattern == ""
+		isEndpoint := r.Source == connectionEndpointSource && r.ResourcePattern == wantPattern
+		if !isWide && !isEndpoint {
+			continue
+		}
+		result = MoreRestrictive(result, r.Effective.Setting)
+	}
+	if result == SettingAllow {
+		return SettingAllow, "", nil
 	}
 	return result, connName, nil
 }
