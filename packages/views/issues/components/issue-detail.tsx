@@ -14,6 +14,8 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  Maximize2,
+  Minimize2,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -831,6 +833,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return cached?.description != null ? cached : undefined;
     },
   });
+
+  // Fullscreen mode for workflow issues — default to fullscreen so the
+  // execution panorama fills the available space. Toggle to detail mode
+  // reveals description, sub-issues, and activity.
+  const hasWorkflow = issue?.assignee_type === "workflow" && !!issue?.assignee_id;
+  const [isFullscreen, setIsFullscreen] = useState(hasWorkflow);
+  useEffect(() => {
+    setIsFullscreen(hasWorkflow);
+  }, [hasWorkflow]);
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
@@ -1811,6 +1822,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 </Button>
               }
             />
+            {hasWorkflow && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      onClick={() => setIsFullscreen((v) => !v)}
+                    >
+                      {isFullscreen ? <Minimize2 /> : <Maximize2 />}
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">
+                  {isFullscreen ? t(($) => $.detail.detail_mode) : t(($) => $.detail.fullscreen_mode)}
+                </TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -1834,6 +1864,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           className="relative flex-1 overflow-y-auto"
         >
           {/* TitleEditor, parent link, originNodeRun, Description, ReactionBar */}
+          {!isFullscreen && (
           <div className="w-full max-w-5xl px-8 pt-8">
             <TitleEditor
               key={`title-${id}`}
@@ -1923,10 +1954,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               {descDragOver && <FileDropOverlay />}
             </div>
           </div>
+          )}
           {/* Full-width Workflow Panorama (replaces old WorkflowDagViewer position) */}
           {issue.assignee_type === "workflow" && issue.assignee_id && (
-            <div className="border-y bg-muted/20 py-6">
-              <div className="px-8">
+            <div className={
+              isFullscreen
+                ? "flex-1 min-h-0 flex flex-col"
+                : "border-y bg-muted/20 py-6"
+            }>
+              <div className={isFullscreen ? "flex-1 min-h-0 px-8 py-6" : "px-8"}>
                 <ExecutionPanoramaPage
                   workflowId={effectiveWorkflowId ?? ""}
                   runId={effectiveWorkflowRunId ?? null}
@@ -1935,6 +1971,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               </div>
             </div>
           )}
+          {!isFullscreen && (
           <div className="w-full max-w-5xl px-8 pb-8">
               {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (
@@ -2157,6 +2194,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
             </div>
         </div>
+          )}
         </div>
         </div>
     );
@@ -2170,6 +2208,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {sidebarContent}
           </SheetContent>
         </Sheet>
+      </div>
+    );
+  }
+
+  // Fullscreen mode: no sidebar, header + panorama fill the viewport
+  if (isFullscreen) {
+    return (
+      <div className="flex flex-1 min-h-0">
+        {detailContent}
       </div>
     );
   }
