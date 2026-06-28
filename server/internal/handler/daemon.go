@@ -2279,6 +2279,7 @@ type TaskUsagePayload struct {
 	OutputTokens           int64  `json:"output_tokens"`
 	CacheReadTokens        int64  `json:"cache_read_tokens"`
 	CacheWriteTokens       int64  `json:"cache_write_tokens"`
+	CostCents              int64  `json:"cost_cents"` // CEREBRO-PATCH(handler-daemon-firtal-gateway-usage-cost): accept exact spend from managed gateway runtimes.
 	ContextInputTokens     int64  `json:"context_input_tokens,omitempty"`
 	ContextCacheReadTokens int64  `json:"context_cache_read_tokens,omitempty"`
 }
@@ -2328,12 +2329,14 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
+			CostCents:        u.CostCents, // CEREBRO-PATCH(task-usage-gateway-cost): persist gateway-reported spend.
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
 		}
 		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
 		h.recordUsageBudgetAndAccount(r.Context(), task, u)
+		h.recordCerebroTaskContextFootprint(r.Context(), taskID, u) // CEREBRO-PATCH(handler-daemon-context-footprint): FIR-1856 persist last-turn footprint for the window indicator.
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -2740,18 +2743,46 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := h.Queries.GetIssueUsageSummary(r.Context(), issue.ID)
+	selfRows, err := h.Queries.GetIssueUsageByModel(r.Context(), issue.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get issue usage")
 		return
 	}
+	subtreeRows, err := h.Queries.GetIssueSubtreeUsageByModel(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get issue subtree usage")
+		return
+	}
+
+	var (
+		selfInput, selfOutput, selfCacheRead, selfCacheWrite int64
+		selfTaskCount                                        int32
+		selfCostCents                                        int64
+	)
+	for _, row := range selfRows {
+		selfInput += row.TotalInputTokens
+		selfOutput += row.TotalOutputTokens
+		selfCacheRead += row.TotalCacheReadTokens
+		selfCacheWrite += row.TotalCacheWriteTokens
+		selfTaskCount += row.TaskCount
+		// CEREBRO-PATCH(task-usage-gateway-cost): prefer the exact spend the
+		// gateway reported (stored per model) over the pricing-table estimate.
+		selfCostCents += preferGatewayCost(row.TotalCostCents, row.Model, row.TotalInputTokens, row.TotalOutputTokens, row.TotalCacheReadTokens, row.TotalCacheWriteTokens)
+	}
+
+	var subtreeCostCents int64
+	for _, row := range subtreeRows {
+		subtreeCostCents += preferGatewayCost(row.TotalCostCents, row.Model, row.TotalInputTokens, row.TotalOutputTokens, row.TotalCacheReadTokens, row.TotalCacheWriteTokens)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total_input_tokens":       row.TotalInputTokens,
-		"total_output_tokens":      row.TotalOutputTokens,
-		"total_cache_read_tokens":  row.TotalCacheReadTokens,
-		"total_cache_write_tokens": row.TotalCacheWriteTokens,
-		"task_count":               row.TaskCount,
+		"total_input_tokens":       selfInput,
+		"total_output_tokens":      selfOutput,
+		"total_cache_read_tokens":  selfCacheRead,
+		"total_cache_write_tokens": selfCacheWrite,
+		"task_count":               selfTaskCount,
+		"cost_cents":               selfCostCents,
+		"subtree_cost_cents":       subtreeCostCents,
 	})
 }
 
