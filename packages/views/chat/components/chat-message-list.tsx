@@ -253,7 +253,7 @@ function AssistantMessage({
       {timeline.length > 0 ? (
         <TimelineView items={timeline} attachments={message.attachments} />
       ) : (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none break-words overflow-x-hidden">
           <Markdown attachments={message.attachments}>{message.content}</Markdown>
         </div>
       )}
@@ -445,7 +445,7 @@ function TimelineView({
   return (
     <>
       {preface.length > 0 && (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none break-words overflow-x-hidden">
           <Markdown attachments={attachments}>
             {preface.map((t) => t.content ?? "").join("")}
           </Markdown>
@@ -459,7 +459,7 @@ function TimelineView({
         />
       )}
       {final.length > 0 && (
-        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+        <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none break-words overflow-x-hidden">
           <Markdown attachments={attachments}>
             {final.map((t) => t.content ?? "").join("")}
           </Markdown>
@@ -520,7 +520,7 @@ function MiddleTextRow({
   attachments?: import("@multica/core/types").Attachment[];
 }) {
   return (
-    <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+    <div className="py-0.5 text-xs text-muted-foreground prose prose-sm dark:prose-invert max-w-none break-words overflow-x-hidden [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
       <Markdown attachments={attachments}>{item.content ?? ""}</Markdown>
     </div>
   );
