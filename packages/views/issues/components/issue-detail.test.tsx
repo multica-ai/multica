@@ -314,12 +314,30 @@ vi.mock("@multica/core/issues/stores", () => ({
 // other components doesn't throw; deep-link tests assert the highlight ring
 // instead, which is mechanism-independent and observable without layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
+const mockVirtuosoProps = vi.hoisted(() => ({
+  calls: [] as Array<{
+    dataLength: number;
+    initialTopMostItemIndex: unknown;
+  }>,
+}));
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
-    { data, itemContent }: { data: unknown[]; itemContent: (i: number, item: unknown) => unknown },
+    {
+      data,
+      itemContent,
+      initialTopMostItemIndex,
+    }: {
+      data: unknown[];
+      itemContent: (i: number, item: unknown) => unknown;
+      initialTopMostItemIndex?: unknown;
+    },
     ref: any,
   ) {
+    mockVirtuosoProps.calls.push({
+      dataLength: data.length,
+      initialTopMostItemIndex,
+    });
     useImperativeHandle(ref, () => ({
       // Real Virtuoso ref methods are not exercised by tests in this file
       // since the deep-link cold-path drives the container's scrollTop on the
@@ -517,6 +535,7 @@ describe("IssueDetail (shared)", () => {
     // Reset project mock — individual tests override per case. Default fixture
     // has project_id: null so getProject is not invoked.
     mockApiObj.getProject.mockReset();
+    mockVirtuosoProps.calls = [];
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -1210,6 +1229,31 @@ describe("IssueDetail (shared)", () => {
         expect(
           document.getElementById("comment-reply-1")?.className,
         ).toContain("bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]");
+      });
+    });
+
+    it("keeps long highlighted timelines virtualized instead of mounting every comment", async () => {
+      const longTimeline: TimelineEntry[] = Array.from({ length: 120 }, (_, i) => ({
+        type: "comment",
+        id: `comment-${i}`,
+        actor_type: i % 2 === 0 ? "member" : "agent",
+        actor_id: i % 2 === 0 ? "user-1" : "agent-1",
+        content: `Long timeline comment ${i}`,
+        parent_id: null,
+        created_at: `2026-01-18T00:${String(i % 60).padStart(2, "0")}:00Z`,
+        updated_at: `2026-01-18T00:${String(i % 60).padStart(2, "0")}:00Z`,
+        comment_type: "comment",
+      }));
+      mockApiObj.listTimeline.mockResolvedValue(longTimeline);
+
+      renderIssueDetailWithHighlight("comment-99");
+
+      await waitFor(() => {
+        expect(screen.getByTestId("virtuoso-mock")).toBeInTheDocument();
+      });
+      expect(mockVirtuosoProps.calls.at(-1)).toEqual({
+        dataLength: 120,
+        initialTopMostItemIndex: { index: 99, align: "center" },
       });
     });
   });
