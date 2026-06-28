@@ -1,11 +1,15 @@
 package handler
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func (h *Handler) DaemonWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +57,37 @@ func (h *Handler) DaemonWebSocket(w http.ResponseWriter, r *http.Request) {
 		RuntimeIDs:    runtimeIDs,
 		ClientVersion: r.Header.Get("X-Client-Version"),
 	})
+
+	// Scenario-C fix: after WS registration, query for tasks that were
+	// cancelled while the daemon was disconnected and proactively push
+	// daemon:task_cancelled frames. The daemon can then abort those tasks
+	// immediately instead of waiting for watchTaskCancellation (up to 5 s).
+	go h.pushCancelledTasksOnReconnect(r.Context(), runtimeIDs)
+}
+
+// pushCancelledTasksOnReconnect queries for tasks cancelled during the
+// disconnection window and pushes daemon:task_cancelled frames so the
+// daemon can abort them without waiting for the next poll cycle.
+func (h *Handler) pushCancelledTasksOnReconnect(ctx context.Context, runtimeIDs []string) {
+	uuids := make([]pgtype.UUID, 0, len(runtimeIDs))
+	for _, id := range runtimeIDs {
+		uuids = append(uuids, parseUUID(id))
+	}
+
+	cancelled, err := h.Queries.ListCancelledTasksForRuntimes(ctx, db.ListCancelledTasksForRuntimesParams{
+		RuntimeIds: uuids,
+	})
+	if err != nil {
+		slog.Debug("push-cancelled-on-reconnect: query failed", "error", err)
+		return
+	}
+
+	for _, task := range cancelled {
+		h.DaemonHub.NotifyTaskCancelled(
+			uuidToString(task.RuntimeID),
+			uuidToString(task.ID),
+		)
+	}
 }
 
 func parseRuntimeIDs(r *http.Request) []string {

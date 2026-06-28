@@ -27,6 +27,17 @@ type TaskAvailablePayload struct {
 	TaskID    string `json:"task_id,omitempty"`
 }
 
+// TaskCancelledPayload is sent from server to daemon when the server detects
+// that a task was cancelled while the daemon's WebSocket connection was
+// interrupted. This allows the daemon to abort the task immediately instead
+// of waiting for the next watchTaskCancellation poll cycle (up to 5 s).
+// The payload is intentionally lean — just the task and runtime IDs — because
+// the daemon already fetches full task state from the server on receipt.
+type TaskCancelledPayload struct {
+	TaskID    string `json:"task_id"`
+	RuntimeID string `json:"runtime_id"`
+}
+
 // RuntimeProfilesChangedPayload is sent from server to daemon as a wakeup hint
 // when a workspace custom runtime profile is created, edited, disabled, or
 // deleted. The daemon still fetches profiles and registers runtimes through the

@@ -117,6 +117,7 @@ const (
 	EventDaemonHeartbeatAck           = "daemon:heartbeat_ack"
 	EventDaemonRegister               = "daemon:register"
 	EventDaemonTaskAvailable          = "daemon:task_available"
+	EventDaemonTaskCancelled          = "daemon:task_cancelled"
 	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
 
 	// GitHub integration events

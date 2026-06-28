@@ -250,6 +250,21 @@ func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
 	h.notifyTaskAvailable(runtimeID, taskID, "")
 }
 
+// NotifyTaskCancelled pushes a daemon:task_cancelled frame to every daemon
+// watching runtimeID so the daemon can abort the task immediately instead of
+// waiting for the next watchTaskCancellation poll (up to 5 s). This is the
+// server-side half of the Scenario-C fix: WS reconnect → proactive cancel push.
+func (h *Hub) NotifyTaskCancelled(runtimeID, taskID string) {
+	if h == nil || runtimeID == "" || taskID == "" {
+		return
+	}
+	data, err := taskCancelledFrame(runtimeID, taskID)
+	if err != nil {
+		return
+	}
+	h.notifyFrame(runtimeID, data, "")
+}
+
 // NotifyRuntimeProfilesChanged asks connected daemons in workspaceID to pull
 // runtime profiles now instead of waiting for their periodic sync loop.
 func (h *Hub) NotifyRuntimeProfilesChanged(workspaceID, profileID string) {
@@ -387,6 +402,16 @@ func taskAvailableFrame(runtimeID, taskID string) ([]byte, error) {
 	return json.Marshal(protocol.Message{
 		Type: protocol.EventDaemonTaskAvailable,
 		Payload: mustMarshalRaw(protocol.TaskAvailablePayload{
+			RuntimeID: runtimeID,
+			TaskID:    taskID,
+		}),
+	})
+}
+
+func taskCancelledFrame(runtimeID, taskID string) ([]byte, error) {
+	return json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonTaskCancelled,
+		Payload: mustMarshalRaw(protocol.TaskCancelledPayload{
 			RuntimeID: runtimeID,
 			TaskID:    taskID,
 		}),
