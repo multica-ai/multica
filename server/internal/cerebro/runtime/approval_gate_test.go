@@ -115,7 +115,7 @@ func TestDecodeToolArgs(t *testing.T) {
 
 func TestGuardToolCall_NilGate_AllowsWithoutLookup(t *testing.T) {
 	e := &FirtalGatewayExecutor{logger: slog.Default()} // gate == nil
-	allowed, reason := e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), "web_fetch", nil, GatewayRequestMeta{})
+	allowed, reason := e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), "web_fetch", nil, nil, GatewayRequestMeta{})
 	if !allowed || reason != "" {
 		t.Fatalf("nil gate must allow; got allowed=%v reason=%q", allowed, reason)
 	}
@@ -128,7 +128,7 @@ func TestGuardToolCall_AgentOutsideAllowlist_Allows(t *testing.T) {
 	other := gateTestUUID(7)
 	e := newGatedExecutor(res, ap, other) // gate scoped to a different agent
 
-	allowed, _ := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "web_fetch", nil, GatewayRequestMeta{})
+	allowed, _ := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "web_fetch", nil, nil, GatewayRequestMeta{})
 	if !allowed {
 		t.Fatal("agent outside the allowlist must run ungated")
 	}
@@ -143,7 +143,7 @@ func TestGuardToolCall_UngatedTool_Allows(t *testing.T) {
 	agent := gateTestUUID(1)
 	e := newGatedExecutor(res, ap, agent)
 
-	allowed, _ := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "get_issue", nil, GatewayRequestMeta{})
+	allowed, _ := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "get_issue", nil, nil, GatewayRequestMeta{})
 	if !allowed {
 		t.Fatal("ungated tool must be allowed")
 	}
@@ -158,7 +158,7 @@ func TestGuardToolCall_Allowed(t *testing.T) {
 	agent := gateTestUUID(1)
 	e := newGatedExecutor(res, ap, agent)
 
-	allowed, reason := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "web_fetch", nil, GatewayRequestMeta{})
+	allowed, reason := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "web_fetch", nil, nil, GatewayRequestMeta{})
 	if !allowed || reason != "" {
 		t.Fatalf("allow decision must pass; got allowed=%v reason=%q", allowed, reason)
 	}
@@ -173,7 +173,7 @@ func TestGuardToolCall_Denied_Blocks(t *testing.T) {
 	agent := gateTestUUID(1)
 	e := newGatedExecutor(res, ap, agent)
 
-	allowed, reason := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "credential_list", nil, GatewayRequestMeta{})
+	allowed, reason := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "credential_list", nil, nil, GatewayRequestMeta{})
 	if allowed {
 		t.Fatal("deny decision must block the tool")
 	}
@@ -191,7 +191,7 @@ func TestGuardToolCall_NeedsApproval_ApprovedContinues(t *testing.T) {
 	agent := gateTestUUID(1)
 	e := newGatedExecutor(res, ap, agent)
 
-	allowed, _ := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "web_fetch", nil, GatewayRequestMeta{})
+	allowed, _ := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "web_fetch", nil, nil, GatewayRequestMeta{})
 	if !allowed {
 		t.Fatal("approved ask must let the tool continue")
 	}
@@ -206,7 +206,7 @@ func TestGuardToolCall_NeedsApproval_RejectedBlocks(t *testing.T) {
 	agent := gateTestUUID(1)
 	e := newGatedExecutor(res, ap, agent)
 
-	allowed, reason := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "web_fetch", nil, GatewayRequestMeta{})
+	allowed, reason := e.guardToolCall(context.Background(), agent, gateTestUUID(9), "web_fetch", nil, nil, GatewayRequestMeta{})
 	if allowed {
 		t.Fatal("rejected ask must block the tool")
 	}

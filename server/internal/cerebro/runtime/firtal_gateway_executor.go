@@ -947,10 +947,15 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		// in production, because while on every agent in the workspace would get
 		// every endpoint of every enabled API connection.
 		if apiTools := e.apiConnectionTools(ctx, workspaceID); len(apiTools) > 0 {
+			// Register every endpoint tool so the call-time guard can resolve it by
+			// name (defence in depth), then LIST only the ones this agent is not
+			// Denied — PR3's list-time filter. Ask/Allow endpoints stay listed; Ask
+			// pauses at call time like any other Ask.
 			for _, t := range apiTools {
 				taskRegistry.Register(t)
 			}
-			enabledTools = append(enabledTools, apiTools...)
+			listed := e.filterDeniedAPIEndpoints(ctx, agentID, workspaceID, taskRegistry, apiTools, meta)
+			enabledTools = append(enabledTools, listed...)
 			anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
 			activeRegistry = taskRegistry
 			useRegistry = true
@@ -1183,7 +1188,9 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 			ToolCalls: completion.ToolCalls,
 		})
 		for _, call := range completion.ToolCalls {
-			if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, decodeToolArgs(call.Function.Arguments), meta); !allowed {
+			// MCP-server path: API-connection tools are never registered here, so
+			// there is no per-task registry to consult (nil).
+			if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, decodeToolArgs(call.Function.Arguments), nil, meta); !allowed {
 				e.logger.Info("firtal gateway tool call blocked by approval gate",
 					"task_id", meta.TaskID,
 					"agent_id", meta.AgentID,
@@ -1328,7 +1335,7 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 				}
 			}
 			if !isError {
-				if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, args, meta); !allowed {
+				if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, args, registry, meta); !allowed {
 					resultText = fmt.Sprintf("blocked by approval gate: %s", reason)
 					isError = true
 				}
@@ -1504,7 +1511,7 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 				resultText string
 				isError    bool
 			)
-			if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, decodeToolArgs(call.Function.Arguments), meta); !allowed {
+			if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, decodeToolArgs(call.Function.Arguments), registry, meta); !allowed {
 				resultText = fmt.Sprintf("blocked by approval gate: %s", reason)
 				isError = true
 			} else if useRegistry && registry != nil {

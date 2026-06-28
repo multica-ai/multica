@@ -63,6 +63,16 @@ func (r *Registry) hasTool(name string) bool {
 	return ok
 }
 
+// Get returns the registered tool for name, if any. Used by the call-time guard
+// to recover a tool's concrete type (e.g. *APIConnectionTool) so it can resolve
+// the per-actor endpoint verdict without re-parsing the synthetic tool name.
+func (r *Registry) Get(name string) (Tool, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	t, ok := r.tools[name]
+	return t, ok
+}
+
 // GetEnabledToolsForAgent queries agent_tool_grant for the given agent and
 // returns the subset of registered tools that are both enabled in the DB and
 // present in the in-memory registry. On DB error it falls back to an empty

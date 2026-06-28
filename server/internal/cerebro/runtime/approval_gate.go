@@ -201,6 +201,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	agentID, workspaceID pgtype.UUID,
 	toolName string,
 	args map[string]any,
+	reg *Registry,
 	meta GatewayRequestMeta,
 ) (bool, string) {
 	if e == nil {
@@ -214,6 +215,18 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// approval-gate rollout. Ask needs the approval inbox, so it is routed below
 	// alongside the rest of the Ask machinery (a no-op when the gate is off).
 	connSetting, connName := e.connectionToolSetting(ctx, agentID, workspaceID, toolName, meta)
+	// FIR-2166 C PR3: fold in the API-connection ENDPOINT verdict for API-type
+	// connection tools (api_connection_tools.go), resolved through the same chain
+	// via ConnectionEndpointEffective. connectionToolSetting above keys on the bare
+	// tool name and only matches MCP per-tool rows, so it returns Allow for an API
+	// endpoint tool — this is where an API endpoint's Deny/Ask is applied.
+	// Most-restrictive wins, so the two verdicts compose safely.
+	if epSetting, epConn := e.apiEndpointSetting(ctx, agentID, workspaceID, reg, toolName, meta); epSetting != toolpolicy.SettingAllow {
+		if connName == "" {
+			connName = epConn
+		}
+		connSetting = toolpolicy.MoreRestrictive(connSetting, epSetting)
+	}
 	if connSetting == toolpolicy.SettingDeny {
 		e.logger.Info("connection tool blocked by per-tool Deny (TECH-3174)",
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool", toolName)
