@@ -496,11 +496,12 @@ RETURNING *;
 -- Dispatched tasks with an active prepare lease are excluded because the
 -- daemon is still proving liveness while resolving/cache/preparing startup
 -- inputs before StartTask.
--- waiting_local_directory rows are intentionally excluded: the daemon owns
--- the wait (with its own ctx-driven timeout) and a legitimate queue ahead
--- of this task can exceed the dispatch / running timeouts without being
--- "stuck". If the daemon dies, RecoverOrphanedTasksForRuntime reclaims
--- those rows at restart.
+-- waiting_local_directory rows have their own coarse timeout as a backstop
+-- for the case where the daemon is alive (runtime stays online) but its
+-- lock-acquisition goroutine is hung. The daemon's own ctx-driven timeout
+-- handles the common case; this catches the tail. If the daemon dies,
+-- RecoverOrphanedTasksForRuntime or FailTasksForOfflineRuntimes reclaims
+-- those rows at restart / runtime-offline sweep.
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'task timed out',
     failure_reason = 'timeout',
@@ -511,6 +512,7 @@ WHERE (
     AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
   )
    OR (status = 'running' AND started_at < now() - make_interval(secs => @running_timeout_secs::double precision))
+   OR (status = 'waiting_local_directory' AND dispatched_at < now() - make_interval(secs => @waiting_local_directory_timeout_secs::double precision))
 RETURNING *;
 
 -- name: ExpireStaleQueuedTasks :many

@@ -43,6 +43,15 @@ const (
 	// watchdog), so this only needs to sit generously above any realistic single
 	// run rather than track a per-run wall-clock cap (MUL-3064).
 	runningTimeoutSeconds = 9000.0
+	// waitingLocalDirectoryTimeoutSeconds fails tasks stuck in
+	// 'waiting_local_directory' beyond this threshold. This is a coarse
+	// server-side backstop for the case where a daemon is alive (runtime stays
+	// online) but its lock-acquisition goroutine is hung — e.g. filesystem
+	// unavailability, deadlock, or a daemon bug that leaks a local-directory
+	// lock. The daemon's own ctx-driven timeout handles the common case;
+	// this catches the tail. 30 minutes is generously above any realistic
+	// lock-wait duration, only triggering when something is genuinely stuck.
+	waitingLocalDirectoryTimeoutSeconds = 1800.0
 	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
 	// arm of the MUL-1899 backlog fix: even with the dispatch-time
@@ -246,7 +255,8 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: dispatchTimeoutSeconds,
-		RunningTimeoutSecs:  runningTimeoutSeconds,
+		RunningTimeoutSecs:                runningTimeoutSeconds,
+		WaitingLocalDirectoryTimeoutSecs:  waitingLocalDirectoryTimeoutSeconds,
 	})
 	if err != nil {
 		slog.Warn("task sweeper: failed to clean up stale tasks", "error", err)
