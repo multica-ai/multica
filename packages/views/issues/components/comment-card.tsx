@@ -620,6 +620,7 @@ function CommentRow({
                 else edit.clearDraft(edit.draftKey);
               }}
               onSubmit={edit.saveEdit}
+              submitOnEnter
               onUploadFile={edit.handleUpload}
               debounceMs={100}
               currentIssueId={issueId}
@@ -910,6 +911,7 @@ function CommentCardImpl({
                       else edit.clearDraft(edit.draftKey);
                     }}
                     onSubmit={edit.saveEdit}
+                    submitOnEnter
                     onUploadFile={edit.handleUpload}
                     debounceMs={100}
                     currentIssueId={issueId}

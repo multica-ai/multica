@@ -190,6 +190,7 @@ function ReplyInput({
               }
             }}
             onSubmit={handleSubmit}
+            submitOnEnter
             onUploadFile={handleUpload}
             debounceMs={100}
             currentIssueId={issueId}

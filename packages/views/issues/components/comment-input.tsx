@@ -9,7 +9,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
-import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
+import { enterKey } from "@multica/core/platform";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
@@ -163,6 +163,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
             else clearDraft(draftKey);
           }}
           onSubmit={handleSubmit}
+          submitOnEnter
           onUploadFile={handleUpload}
           debounceMs={100}
           currentIssueId={issueId}
@@ -188,7 +189,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           onClick={handleSubmit}
           disabled={isEmpty}
           loading={submitting}
-          tooltip={`${t(($) => $.comment.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
+          tooltip={`${t(($) => $.comment.send_tooltip)} · ${enterKey}`}
         />
       </div>
       {isDragOver && <FileDropOverlay />}
