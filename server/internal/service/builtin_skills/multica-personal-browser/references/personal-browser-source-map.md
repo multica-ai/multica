@@ -9,7 +9,9 @@ at the bottom before relying on an exact line.
 | Behavior | File:line |
 |---|---|
 | Parent command `cerebro-browser` | `server/cmd/multica/cerebro_browser.go` (`cerebroBrowserCmd`) |
-| Subcommands `snapshot` / `click` / `fill` / `navigate` / `sessions` / `logout` / `clear-cookies` | `server/cmd/multica/cerebro_browser.go` (`init`) |
+| Subcommands `open` / `snapshot` / `click` / `fill` / `navigate` / `sessions` / `logout` / `clear-cookies` | `server/cmd/multica/cerebro_browser.go` (`init`) |
+| `open` launches the desktop app if needed, waits for the sidecar, then requests the Browser tab | `server/cmd/multica/cerebro_browser.go` (`runCerebroBrowserOpen`, `launchDesktopApp`, `sidecarReady`) |
+| Desktop app identity for launch (`appId` / `productName`) | `server/cmd/multica/cerebro_browser.go` (`desktopAppBundleID`, `desktopAppName`) ↔ `apps/desktop/electron-builder.yml` |
 | `--session` persistent flag | `server/cmd/multica/cerebro_browser.go` (`PersistentFlags().String("session", …)`) |
 | Registered on the root command | `server/cmd/multica/main.go` (`rootCmd.AddCommand(cerebroBrowserCmd)`, marked `CEREBRO-PATCH(cerebro-browser-cli)`) |
 | Refuses without the grant env `MULTICA_PERSONAL_BROWSER` | `server/cmd/multica/cerebro_browser.go` (`callCerebroBrowser`) |
@@ -47,6 +49,10 @@ all) and the authoritative PER-ACTION gate (may this agent drive this host now).
 |---|---|
 | Loopback control server (127.0.0.1, bearer token, audit) | `apps/desktop/src/main/cerebro-browser-control-server.ts` |
 | Writes the 0600 sidecar `cerebro-browser-control.json` | `apps/desktop/src/main/cerebro-browser-control-server.ts` (`ensureCerebroBrowserControlServer`) |
+| `/agent/open-tab` route (background-loads url, then asks the renderer to show the tab) | `apps/desktop/src/main/cerebro-browser-control-server.ts` (`buildRoutes`) |
+| Control server started at app startup (flag-on), not only on manual tab open | `apps/desktop/src/main/cerebro-browser-pane.ts` (`cerebro-browser:ensure-control-server`) ← `apps/desktop/src/renderer/src/cerebro/use-cerebro-browser-bridge.ts` |
+| Pane focuses the window + asks renderer to open the Browser tab | `apps/desktop/src/main/cerebro-browser-pane.ts` (`requestOpenTab`) |
+| Renderer opens the Browser route when the agent asks | `apps/desktop/src/renderer/src/cerebro/use-cerebro-browser-bridge.ts` (`onOpenTab`) |
 | Audit log `~/.multica/logs/cerebro-browser-audit.log` (never logs typed values) | `apps/desktop/src/main/cerebro-browser-control-server.ts` (`audit`, `/agent/fill` handler) |
 | Pane drives the same logged-in view over CDP | `apps/desktop/src/main/cerebro-browser-pane.ts` (`agentSnapshot` / `agentClick` / `agentFill` / `agentNavigate`) |
 | Per-session isolated partition `persist:cerebro-browser[-<id>]` | `apps/desktop/src/main/cerebro-browser-pane.ts` (`partitionFor`) |

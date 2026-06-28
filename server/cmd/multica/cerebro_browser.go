@@ -27,10 +27,21 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
+)
+
+// Desktop app identity, discovered from apps/desktop/electron-builder.yml
+// (appId + productName). Used by `open` to launch the app when it is not
+// already running. Kept in sync with that file by hand — a CLI build cannot
+// read the desktop build config at runtime.
+const (
+	desktopAppBundleID = "ai.multica.desktop"
+	desktopAppName     = "Multica"
 )
 
 // personalBrowserGrantEnvCLI mirrors handler.personalBrowserGrantEnv — the grant
@@ -84,7 +95,7 @@ func callCerebroBrowser(cmd *cobra.Command, action string, payload map[string]an
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf(
-				"the personal browser is not running — open the Browser tab in the Multica desktop app first",
+				"the personal browser is not running — run `multica cerebro-browser open` to start it",
 			)
 		}
 		return fmt.Errorf("reading personal-browser sidecar: %w", err)
@@ -152,6 +163,109 @@ func payloadWithSession(cmd *cobra.Command, base map[string]any) map[string]any 
 	return base
 }
 
+// sidecarReady reports whether the desktop control server's sidecar file
+// exists and is complete (port + token present). os.IsNotExist and parse
+// errors both count as "not ready" — the app simply has not brought the
+// transport up yet.
+func sidecarReady() bool {
+	path, err := cerebroBrowserSidecarPath()
+	if err != nil {
+		return false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var side cerebroBrowserSidecar
+	if err := json.Unmarshal(raw, &side); err != nil {
+		return false
+	}
+	return side.Port != 0 && side.Token != ""
+}
+
+// launchDesktopApp starts the Multica desktop app detached (best-effort). It
+// does not block on the child process. Returns an error only when the platform
+// has no known way to launch the app.
+func launchDesktopApp() error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		// Prefer launch-by-bundle-id (robust to where the .app lives); fall back
+		// to launch-by-name. `open` returns immediately, so the app is detached.
+		if _, err := exec.LookPath("open"); err != nil {
+			return fmt.Errorf("cannot launch the Multica desktop app: `open` not found")
+		}
+		if err := exec.Command("open", "-b", desktopAppBundleID).Start(); err == nil {
+			return nil
+		}
+		cmd = exec.Command("open", "-a", desktopAppName)
+	case "windows":
+		// Best-effort: ask the shell to start the app by its product name.
+		cmd = exec.Command("cmd", "/c", "start", "", desktopAppName)
+	case "linux":
+		// Best-effort: run a binary named after the product from PATH.
+		bin := "multica-desktop"
+		if _, err := exec.LookPath(bin); err != nil {
+			return fmt.Errorf(
+				"cannot launch the Multica desktop app automatically on linux — start it manually, then retry",
+			)
+		}
+		cmd = exec.Command(bin)
+	default:
+		return fmt.Errorf(
+			"cannot launch the Multica desktop app automatically on %s — start it manually, then retry",
+			runtime.GOOS,
+		)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("launching the Multica desktop app: %w", err)
+	}
+	return nil
+}
+
+// runCerebroBrowserOpen launches the desktop app if needed and asks it to open
+// & focus the Browser tab for the human (optionally pre-navigated to url).
+func runCerebroBrowserOpen(cmd *cobra.Command, url string) error {
+	// Same hard gate as every other action: an ungranted agent must not even
+	// launch the app.
+	if os.Getenv(personalBrowserGrantEnvCLI) == "" {
+		return fmt.Errorf(
+			"personal browser is not enabled for this workspace — ask an admin to turn on the Browser feature, then allow the 'tools:personal-browser' capability for you in Settings → Permissions",
+		)
+	}
+
+	payload := map[string]any{}
+	if url != "" {
+		payload["url"] = url
+	}
+
+	// Already running → just open the tab.
+	if sidecarReady() {
+		return callCerebroBrowser(cmd, "open-tab", payload)
+	}
+
+	// Not running → launch and wait for the control server to come up.
+	if err := launchDesktopApp(); err != nil {
+		return err
+	}
+
+	const (
+		pollInterval = 500 * time.Millisecond
+		pollTimeout  = 25 * time.Second
+	)
+	deadline := time.Now().Add(pollTimeout)
+	for !sidecarReady() {
+		if time.Now().After(deadline) {
+			return fmt.Errorf(
+				"the Multica desktop app was started but the personal browser did not come up — sign in to the app and make sure the Browser feature is enabled, then retry",
+			)
+		}
+		time.Sleep(pollInterval)
+	}
+
+	return callCerebroBrowser(cmd, "open-tab", payload)
+}
+
 var cerebroBrowserCmd = &cobra.Command{
 	Use:   "cerebro-browser",
 	Short: "Drive the in-app personal browser (the Multica-owned browser you are logged into)",
@@ -163,6 +277,23 @@ var cerebroBrowserCmd = &cobra.Command{
 
 func init() {
 	cerebroBrowserCmd.PersistentFlags().String("session", "", "Browser session id (omit for the default session)")
+
+	openCmd := &cobra.Command{
+		Use:   "open [url]",
+		Short: "Launch the desktop app if needed and open & focus the Browser tab for the human",
+		Long: "Bring up the in-app personal browser for the human to watch / log in / take over. " +
+			"Launches the Multica desktop app if it is not already running, then opens and " +
+			"focuses the Browser tab. Pass an optional URL to point the default session there " +
+			"first. Run this before snapshot/click/fill.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			url := ""
+			if len(args) == 1 {
+				url = args[0]
+			}
+			return runCerebroBrowserOpen(cmd, url)
+		},
+	}
 
 	snapshotCmd := &cobra.Command{
 		Use:   "snapshot",
@@ -227,5 +358,5 @@ func init() {
 		},
 	}
 
-	cerebroBrowserCmd.AddCommand(snapshotCmd, clickCmd, fillCmd, navigateCmd, sessionsCmd, logoutCmd, clearCookiesCmd)
+	cerebroBrowserCmd.AddCommand(openCmd, snapshotCmd, clickCmd, fillCmd, navigateCmd, sessionsCmd, logoutCmd, clearCookiesCmd)
 }

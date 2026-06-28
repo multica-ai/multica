@@ -264,6 +264,11 @@ interface CerebroBrowserNavState {
 }
 
 const cerebroBrowserAPI = {
+  /** Ensure the loopback agent-control server (and its sidecar) is up. Called
+   *  once at app startup when the `cerebro_browser` flag is on, so an agent can
+   *  open the Browser tab before the human has ever opened it manually. */
+  ensureControlServer: (): Promise<void> =>
+    ipcRenderer.invoke("cerebro-browser:ensure-control-server"),
   /** Show the pane (creates it on first call) and load its landing page. */
   open: (): Promise<void> => ipcRenderer.invoke("cerebro-browser:open"),
   /** Hide the pane when leaving the Browser tab; session stays alive. */
@@ -291,6 +296,16 @@ const cerebroBrowserAPI = {
     ipcRenderer.on("cerebro-browser:nav-state", handler);
     return () => {
       ipcRenderer.removeListener("cerebro-browser:nav-state", handler);
+    };
+  },
+  /** Subscribe to a main-process request to open & focus the Browser tab
+   *  (fired when an agent calls `multica cerebro-browser open`). Returns an
+   *  unsubscribe function. */
+  onOpenTab: (handler: () => void) => {
+    const listener = () => handler();
+    ipcRenderer.on("cerebro-browser:open-tab", listener);
+    return () => {
+      ipcRenderer.removeListener("cerebro-browser:open-tab", listener);
     };
   },
 };

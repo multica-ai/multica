@@ -205,6 +205,19 @@ function buildRoutes(): Record<string, Route> {
         return { ok: true };
       },
     },
+    "/agent/open-tab": {
+      action: "open-tab",
+      // Authorize against the TARGET host when a url is given (it is loaded into
+      // the default session before we show the tab); empty host = management.
+      hostFor: (b) => strField(b, "url") ?? "",
+      run: async (b) => {
+        const url = strField(b, "url");
+        if (url) await requirePane().agentNavigate(url); // background-load default session
+        requirePane().requestOpenTab();
+        await audit("open-tab", { url: url ?? "" });
+        return { ok: true };
+      },
+    },
     "/agent/sessions": {
       action: "sessions",
       hostFor: () => "",

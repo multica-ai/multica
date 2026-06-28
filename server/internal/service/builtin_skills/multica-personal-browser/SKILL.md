@@ -1,6 +1,6 @@
 ---
 name: multica-personal-browser
-description: Use when a task needs a real browser that is ALREADY LOGGED IN as the user — opening a site behind the user's saved login, reading or acting inside an authenticated account (dashboards, webmail, admin panels, a SaaS the user is signed into) that a fresh throwaway browser could not reach. This drives the in-app PERSONAL BROWSER (the Multica-owned browser pane in the desktop app), NOT the user's system Chrome/Safari. Do NOT use it for anonymous fetches or public pages — use the `agent-browser` skill or WebFetch for those. Requires the `tools:personal-browser` capability and the desktop Browser tab to be open.
+description: Use when a task needs a real browser that is ALREADY LOGGED IN as the user — opening a site behind the user's saved login, reading or acting inside an authenticated account (dashboards, webmail, admin panels, a SaaS the user is signed into) that a fresh throwaway browser could not reach. This drives the in-app PERSONAL BROWSER (the Multica-owned browser pane in the desktop app), NOT the user's system Chrome/Safari. Do NOT use it for anonymous fetches or public pages — use the `agent-browser` skill or WebFetch for those. Requires the `tools:personal-browser` capability. You start it yourself with `multica cerebro-browser open` (launches the desktop app if it is closed and opens the Browser tab) — you no longer need the user to open it.
 user-invocable: false
 allowed-tools: Bash(multica cerebro-browser *)
 ---
@@ -41,8 +41,11 @@ Because the check is per action against the **current site**, a refusal is norma
 and expected on a disallowed domain — do not try to work around it; tell the user
 which domain was blocked and that it needs granting.
 
-- The user must have the **Browser tab open** in the Multica desktop app (it is
-  what starts the browser). If it is closed, the CLI says so — ask them to open it.
+- The browser must be **running**, and you start it yourself: `multica cerebro-browser
+  open` launches the Multica desktop app if it is closed and opens the Browser tab for
+  the user to watch — you do **not** ask the user to open anything. Every other action
+  also fails with a clear "not running" message if the browser is down; run `open` and
+  retry.
 - **Every action is audited** twice — locally on the machine and centrally on the
   Multica server (which agent, which host, allowed or not; never the typed value).
   Treat the user's logged-in accounts with care: never log out, change settings,
@@ -50,7 +53,16 @@ which domain was blocked and that it needs granting.
 
 ## How to drive it
 
-Always work in two steps: **snapshot to see, then act by ref.** You act on
+**Step 0 — start the browser (do this first).** `open` launches the desktop app
+if it is closed and opens & focuses the Browser tab, so the user can watch, log
+in, or take over. Optionally pass a URL to land the page there.
+
+```bash
+multica cerebro-browser open                                  # launch + open the tab
+multica cerebro-browser open https://app.example.com/login    # …and land on a URL
+```
+
+Then work in two steps: **snapshot to see, then act by ref.** You act on
 elements by a stable `@ref` (e.g. `@e12`) from the snapshot — never by guessing
 CSS selectors or pixel coordinates.
 
@@ -107,13 +119,15 @@ system browser and never another session.
 - **Never** assume a ref from an old snapshot is still valid — re-snapshot after
   every change.
 - **Never** type secrets you were not given. If a site needs a login the user
-  has not saved, stop and ask the user to log in via the Browser tab; do not
-  attempt to enter credentials yourself.
+  has not saved, run `multica cerebro-browser open <url>` to bring the browser up
+  on that page and ask the user to log in there; do not attempt to enter
+  credentials yourself.
 - **Never** take a destructive or outward-facing action (send, pay, delete, post,
   change account settings, log out) unless the task explicitly requests it —
   this is the user's real, logged-in account.
-- If a command reports "not granted" or "not running", relay that to the user
-  plainly; it is not something you can fix by retrying.
+- If a command reports **"not granted"**, relay that to the user plainly — it is
+  not something you can fix by retrying. If it reports **"not running"**, run
+  `multica cerebro-browser open` first, then retry the command.
 
 Every command and contract above is traced to source in
 `references/personal-browser-source-map.md`.

@@ -357,6 +357,16 @@ class CerebroBrowserPane {
     const url = normalizeUrl(rawUrl);
     if (url) await sess.view.webContents.loadURL(url);
   }
+
+  /** Ask the renderer to open & focus the Browser tab so a human can watch/log in. */
+  requestOpenTab(): void {
+    const win = this.getWindow();
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send("cerebro-browser:open-tab");
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
 }
 
 /**
@@ -395,6 +405,14 @@ export function setupCerebroBrowserPane(
 ): CerebroBrowserPane {
   const pane = new CerebroBrowserPane(getWindow);
   paneSingleton = pane;
+
+  // Bring up the capability-gated agent transport at app startup (flag-on),
+  // before the human ever opens the Browser tab — otherwise the sidecar the
+  // CLI reads would only exist after a manual tab open, and an agent could not
+  // open the tab for the human in the first place.
+  ipcMain.handle("cerebro-browser:ensure-control-server", () =>
+    ensureCerebroBrowserControlServer(),
+  );
 
   ipcMain.handle("cerebro-browser:open", (_e, sessionId?: string) =>
     pane.open(sessionId),

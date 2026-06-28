@@ -147,6 +147,7 @@ interface CerebroBrowserNavState {
 }
 
 interface CerebroBrowserAPI {
+  ensureControlServer: () => Promise<void>;
   open: () => Promise<void>;
   hide: () => Promise<void>;
   setBounds: (bounds: {
@@ -162,6 +163,7 @@ interface CerebroBrowserAPI {
   onNavState: (
     callback: (state: CerebroBrowserNavState) => void,
   ) => () => void;
+  onOpenTab: (handler: () => void) => () => void;
 }
 
 interface UpdaterAPI {

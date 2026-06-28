@@ -2397,6 +2397,10 @@
       "gate": "via:POST /api/cerebro/personal-browser/authorize"
     },
     {
+      "id": "cerebro-browser open",
+      "gate": "via:POST /api/cerebro/personal-browser/authorize"
+    },
+    {
       "id": "cerebro-browser sessions",
       "gate": "via:POST /api/cerebro/personal-browser/authorize"
     },

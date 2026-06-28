@@ -17,6 +17,7 @@ import { useNavigation } from "@multica/views/navigation";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
 import { DesktopNavigationProvider } from "@/platform/navigation";
+import { useCerebroBrowserBridge } from "@/cerebro/use-cerebro-browser-bridge";
 import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
 import { WindowOverlay } from "./window-overlay";
@@ -138,6 +139,11 @@ function useInternalLinkHandler() {
 function DesktopInboxBridge() {
   const workspace = useCurrentWorkspace();
   useDesktopUnreadBadge(workspace?.id ?? null);
+  // Cerebro personal-browser bridge (FIR-2037): ensure the agent-control server
+  // is up at startup (flag-on) and open the Browser tab when an agent asks.
+  // Mounted here because this component already sits inside both the navigation
+  // and workspace-slug providers the bridge needs.
+  useCerebroBrowserBridge();
   const { push } = useNavigation();
   // The adapter identity changes with the active tab's location; the ref
   // keeps the main-process subscription stable across navigations.
