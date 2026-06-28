@@ -597,8 +597,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent access-table CRUD handler.
 	cerebroAgentVaultHandler := cerebroagentvault.NewHandler(pool)
-	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from).
-	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool))
+	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from). FIR-1739: wire the Agent Vault vault lister so the Credentials tab also lists Agent Vault boxes (agentvault-vault:<name>) as grantable rows; nil-safe when admin creds absent.
+	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool).WithVaultLister(cerebroagentvault.NewVaultLister()))
 	// CEREBRO-PATCH(cerebro-tool-policy-registry-fold-in): FIR-1609 Phase 5 — inject
 	// the firtal_registry data-source lister + per-agent grant so the table appends
 	// one per-data-source row under firtal_registry. Keeps toolpolicy.Table pure.

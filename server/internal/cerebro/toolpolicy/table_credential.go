@@ -26,10 +26,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -89,6 +92,15 @@ type credentialBox struct {
 	name string
 }
 
+// credentialResourceGroup is one grantable credential box as rendered in the
+// table: its ResourcePattern (the exact grant target the policy gate matches on)
+// and the Category the UI clusters the box's capability rows under (the box name).
+// Two sources feed it — see discoverCredentialResources.
+type credentialResourceGroup struct {
+	resource string
+	category string
+}
+
 // credentialPolicyKey identifies one (tool, credential) cell so stored settings can
 // be bucketed back onto the synthetic rows. Mirrors repoPolicyKey.
 type credentialPolicyKey struct {
@@ -106,22 +118,30 @@ type credentialPolicyLayers struct {
 	conditions map[Layer]*Condition
 }
 
-// appendCredentialRows discovers the workspace's credentials (Agent Vault boxes)
-// and appends, for each box, one row per credential capability carrying that
+// appendCredentialRows discovers the workspace's grantable credential boxes and
+// appends, for each box, one row per credential capability carrying that
 // (tool, credential) cell's explicit per-layer settings and resolved Effective
 // verdict. groupIDs is the already-resolved group set for the query's context,
 // reused so the Group layer resolves against the same groups as the other rows.
+//
+// Boxes come from two sources (discoverCredentialResources): credentials
+// registered in cerebro_credential (cerebro-credential:<uuid>) and Agent Vault
+// boxes (agentvault-vault:<name>). Most workspaces — including firtal — have an
+// empty cerebro_credential table but real Agent Vault boxes, so without the
+// second source the tab shows zero rows even though boxes exist (FIR-1739 last
+// mile). The per-layer settings query loads rows for either resource shape, so a
+// grant authored on either pattern surfaces here unchanged.
 //
 // Credential rows are emitted on every view, including a runtime-scoped one:
 // credential capabilities are not runtime-reported, so the runtime filter in
 // table.go would otherwise hide them — but credential access is authored at all
 // actor layers (runtime included), exactly the reasoning appendRepoRows uses.
 func (s *Store) appendCredentialRows(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID, out []TableRow) ([]TableRow, error) {
-	boxes, err := s.discoverCredentials(ctx, in.WorkspaceID)
+	groups, err := s.discoverCredentialResources(ctx, in.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
-	if len(boxes) == 0 {
+	if len(groups) == 0 {
 		return out, nil
 	}
 
@@ -130,19 +150,18 @@ func (s *Store) appendCredentialRows(ctx context.Context, in TableQuery, groupID
 		return nil, err
 	}
 
-	for _, box := range boxes {
-		resource := credentialResourcePrefix + util.UUIDToString(box.id)
+	for _, g := range groups {
 		for _, c := range credentialCapabilities {
 			row := TableRow{
 				ToolKey:         c.key,
-				ResourcePattern: resource,
+				ResourcePattern: g.resource,
 				Title:           c.title,
-				Category:        box.name,
+				Category:        g.category,
 				Source:          credentialSource,
 				Layers:          map[Layer]Setting{},
 				Conditions:      map[Layer]*Condition{},
 			}
-			if cell, ok := settings[credentialPolicyKey{c.key, resource}]; ok {
+			if cell, ok := settings[credentialPolicyKey{c.key, g.resource}]; ok {
 				for l, set := range cell.layers {
 					row.Layers[l] = set
 				}
@@ -160,8 +179,78 @@ func (s *Store) appendCredentialRows(ctx context.Context, in TableQuery, groupID
 	return out, nil
 }
 
-// discoverCredentials returns the workspace's credentials (Agent Vault boxes) as
-// (id, name) pairs, sorted by name so the admin table renders a stable order.
+// discoverCredentialResources returns every grantable credential box in the
+// workspace as (resource, category) groups, from two sources:
+//
+//  1. Credentials registered in cerebro_credential — resource
+//     cerebro-credential:<uuid>, the id-scoped pattern the canonical convention
+//     pins. These carry a MULTICA_CREDENTIALS_KEY-encrypted secret.
+//  2. Agent Vault boxes, when a vault lister is wired — resource
+//     agentvault-vault:<name>, the vault-level pattern (FIR-1739 v1) the mirror
+//     (agentvault/mirror.go) and grant resolver already honor. Needs no
+//     cerebro_credential row because the secret already lives in Agent Vault.
+//
+// A box registered in cerebro_credential AND present in Agent Vault is the SAME
+// box (one box = one credential, keyed on name — migration 9096), so a vault
+// whose name already appeared from source 1 is skipped: the id-scoped row wins
+// and the box is never listed twice. Sorted by category for a stable table order.
+func (s *Store) discoverCredentialResources(ctx context.Context, workspaceID pgtype.UUID) ([]credentialResourceGroup, error) {
+	boxes, err := s.discoverCredentials(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	groups := make([]credentialResourceGroup, 0, len(boxes))
+	seen := make(map[string]bool, len(boxes))
+	for _, box := range boxes {
+		groups = append(groups, credentialResourceGroup{
+			resource: credentialResourcePrefix + util.UUIDToString(box.id),
+			category: box.name,
+		})
+		seen[box.name] = true
+	}
+	for _, name := range s.agentVaultBoxNames(ctx) {
+		if seen[name] {
+			continue
+		}
+		groups = append(groups, credentialResourceGroup{
+			resource: agentvault.VaultResourcePrefix + name,
+			category: name,
+		})
+		seen[name] = true
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].category < groups[j].category })
+	return groups, nil
+}
+
+// agentVaultBoxNames lists the Agent Vault box names for the credentials table,
+// or nil when no vault lister is wired (Agent Vault admin creds absent) — the
+// same degradation as the vaults endpoint. A live ListVaults error is logged and
+// downgraded to nil so an Agent Vault outage hides the vault-sourced rows but
+// never fails the whole permissions table.
+func (s *Store) agentVaultBoxNames(ctx context.Context) []string {
+	if s.vaults == nil {
+		return nil
+	}
+	vaults, err := s.vaults.ListVaults(ctx)
+	if err != nil {
+		slog.Error("toolpolicy: list agent vault boxes for credentials table failed", "error", err)
+		return nil
+	}
+	names := make([]string, 0, len(vaults))
+	for _, v := range vaults {
+		name := strings.TrimSpace(v.Name)
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+// discoverCredentials returns the workspace's registered credentials (rows in
+// cerebro_credential) as (id, name) pairs, sorted by name. The wider grantable
+// set (registered credentials plus Agent Vault boxes) is assembled by
+// discoverCredentialResources.
 func (s *Store) discoverCredentials(ctx context.Context, workspaceID pgtype.UUID) ([]credentialBox, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name FROM cerebro_credential

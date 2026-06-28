@@ -26,17 +26,33 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// vaultLister lists the Agent Vault boxes a member can author a grant against.
+// VaultLister lists the Agent Vault boxes a member can author a grant against.
 // Implemented by *Client; left nil when Agent Vault is not configured (no admin
 // creds) so the vaults endpoint degrades to an empty list instead of erroring.
-type vaultLister interface {
+// Exported so the credentials tool-policy table can source the same box list and
+// surface each box as a grantable agentvault-vault:<name> row (FIR-1739).
+type VaultLister interface {
 	ListVaults(ctx context.Context) ([]Vault, error)
+}
+
+// NewVaultLister builds a vault lister from ambient Agent Vault admin config, or
+// returns a true nil interface when admin creds are absent (LoadConfig ok=false).
+// Callers nil-check the result and degrade to an empty vault list — the same
+// degradation contract the Vaults endpoint uses. This is the shared seam the
+// router wires into the credentials tool-policy table so the table lists the same
+// boxes the vaults endpoint does, without each call site re-deriving the config.
+func NewVaultLister() VaultLister {
+	cfg, ok := LoadConfig()
+	if !ok {
+		return nil
+	}
+	return NewClient(cfg)
 }
 
 // Handler exposes the access store over HTTP.
 type Handler struct {
 	store  *Store
-	vaults vaultLister
+	vaults VaultLister
 }
 
 // NewHandler constructs a Handler over a Store built from the given pool. When

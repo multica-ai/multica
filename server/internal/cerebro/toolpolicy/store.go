@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 )
 
@@ -25,11 +26,28 @@ import (
 type Store struct {
 	pool *pgxpool.Pool
 	q    *cerebrodb.Queries
+	// vaults, when set, lets the credentials table surface Agent Vault boxes as
+	// grantable agentvault-vault:<name> rows (FIR-1739). Optional and nil-safe:
+	// the claim-time gate, approvals, and registry call sites leave it unset.
+	vaults agentvault.VaultLister
 }
 
 // NewStore constructs a Store backed by the given pool.
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, q: cerebrodb.New(pool)}
+}
+
+// WithVaultLister wires an Agent Vault vault lister so the credentials tab also
+// surfaces Agent Vault boxes as grantable rows (agentvault-vault:<name>), the
+// boxes that live only in Agent Vault and never get a cerebro_credential registry
+// row. It is optional and nil-safe: only the credentials table handler wires it;
+// the ~8 other NewStore call sites (claim-time gate, approvals, registry fold-in)
+// leave it unset and are unaffected. A nil lister degrades to "no Agent Vault
+// rows", the same contract the vaults endpoint uses when admin creds are absent.
+// Returns the receiver for fluent construction at the call site.
+func (s *Store) WithVaultLister(v agentvault.VaultLister) *Store {
+	s.vaults = v
+	return s
 }
 
 // NewStoreFromQueries constructs a Store for the resolution path only — Resolve,
