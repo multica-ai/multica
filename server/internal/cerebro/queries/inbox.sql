@@ -182,6 +182,19 @@ INSERT INTO inbox_item (
 ) VALUES ($1, 'member', $2, 'manually_added', 'info', $3, $4, 'member', $2, 'inbox')
 RETURNING *;
 
+-- name: CreateFiredReminderInboxItem :one
+-- FIR-2154: a unified reminder fired but has no conversation to re-surface — a
+-- free "remind me at X" (anchor 'none'), a project reminder, or one whose source
+-- was deleted. Drop a standalone, unread, action-required reminder row straight
+-- into the inbox so it still notifies at its planned time. No muted_until: it is
+-- due now, so it shows immediately. issue_id may be NULL (free/project reminder).
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title,
+    actor_type, actor_id, route
+) VALUES ($1, 'member', $2, 'reminder', 'action_required', $3, $4, 'system', NULL, 'inbox')
+RETURNING *;
+
 -- name: BumpRuntimePauseInboxCard :one
 -- FIR-2611: a later auto-pause for the same runtime on the same day. Refresh
 -- the card in place — bump the failed-run counter, update severity/title/body

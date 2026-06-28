@@ -134,6 +134,58 @@ func (q *Queries) ClearInboxMuteByIssue(ctx context.Context, arg ClearInboxMuteB
 	return result.RowsAffected(), nil
 }
 
+const createFiredReminderInboxItem = `-- name: CreateFiredReminderInboxItem :one
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title,
+    actor_type, actor_id, route
+) VALUES ($1, 'member', $2, 'reminder', 'action_required', $3, $4, 'system', NULL, 'inbox')
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
+`
+
+type CreateFiredReminderInboxItemParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	Title       string      `json:"title"`
+}
+
+// FIR-2154: a unified reminder fired but has no conversation to re-surface — a
+// free "remind me at X" (anchor 'none'), a project reminder, or one whose source
+// was deleted. Drop a standalone, unread, action-required reminder row straight
+// into the inbox so it still notifies at its planned time. No muted_until: it is
+// due now, so it shows immediately. issue_id may be NULL (free/project reminder).
+func (q *Queries) CreateFiredReminderInboxItem(ctx context.Context, arg CreateFiredReminderInboxItemParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, createFiredReminderInboxItem,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.IssueID,
+		arg.Title,
+	)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+		&i.Route,
+		&i.MutedUntil,
+		&i.ArchivedAt,
+	)
+	return i, err
+}
+
 const createManualInboxItem = `-- name: CreateManualInboxItem :one
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,

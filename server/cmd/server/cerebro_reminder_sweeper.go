@@ -96,8 +96,12 @@ func surfaceFiredReminder(ctx context.Context, cerebro *cerebrodb.Queries, bus *
 		return
 	}
 	if !rem.ConversationID.Valid {
-		// Source conversation was deleted; the reminder still shows in the
-		// overview as fired, but there is nothing to re-surface.
+		// No conversation to re-surface: a free "remind me at X" (anchor
+		// 'none'), a project reminder, or one whose source was deleted. These
+		// must still notify at their planned time, so drop a standalone reminder
+		// row straight into the inbox (FIR-2154) instead of silently swallowing
+		// it — the bug where free reminders never fired into the inbox.
+		surfaceFiredAnchorlessReminder(ctx, cerebro, bus, rem)
 		return
 	}
 
@@ -170,6 +174,45 @@ func surfaceFiredReminder(ctx context.Context, cerebro *cerebrodb.Queries, bus *
 			Payload: map[string]any{
 				"recipient_id": util.UUIDToString(rem.RecipientID),
 				"issue_id":     util.UUIDToString(rem.ConversationID),
+				"type":         "reminder",
+			},
+		})
+	}
+}
+
+// surfaceFiredAnchorlessReminder handles a fired reminder that has no
+// conversation to bring back: a free "remind me at X", a project reminder, or
+// one whose source was deleted. It creates a fresh, unread reminder row in the
+// inbox carrying the reminder text so the reminder still lands at its planned
+// time (FIR-2154). issue_id is NULL for a free/project reminder.
+func surfaceFiredAnchorlessReminder(ctx context.Context, cerebro *cerebrodb.Queries, bus *events.Bus, rem cerebrodb.ClaimDueRemindersRow) {
+	title := rem.Text
+	if title == "" {
+		title = "Reminder"
+	}
+	created, err := cerebro.CreateFiredReminderInboxItem(ctx, cerebrodb.CreateFiredReminderInboxItemParams{
+		WorkspaceID: rem.WorkspaceID,
+		RecipientID: rem.RecipientID,
+		IssueID:     rem.ConversationID, // invalid → NULL for free/project reminders
+		Title:       title,
+	})
+	if err != nil {
+		slog.Warn("cerebro reminder sweeper: failed to create standalone reminder inbox row", "error", err)
+		return
+	}
+	if err := cerebro.SetReminderFiredInboxItem(ctx, cerebrodb.SetReminderFiredInboxItemParams{
+		ID:               rem.ID,
+		FiredInboxItemID: created.ID,
+	}); err != nil {
+		slog.Warn("cerebro reminder sweeper: failed to record fired inbox item", "error", err)
+	}
+	if bus != nil {
+		bus.Publish(events.Event{
+			Type:        protocol.EventInboxNew,
+			WorkspaceID: util.UUIDToString(rem.WorkspaceID),
+			ActorType:   "system",
+			Payload: map[string]any{
+				"recipient_id": util.UUIDToString(rem.RecipientID),
 				"type":         "reminder",
 			},
 		})
