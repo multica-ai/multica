@@ -85,14 +85,15 @@ import { useT } from "../../i18n";
 // Same conventions as the skills/autopilots lists (see list-grid.tsx):
 // deterministic var-width tracks, two-zone responsiveness (≥@2xl WYSIWYG
 // with min-width + horizontal-scroll escape valve; <@2xl static core set of
-// name + status, toggles don't apply).
+// name + kebab only — status lives on the avatar dot; toggles don't apply).
 //
 // Agents are identity-type entities (few, avatar + persona), so rows are
 // the TWO-LINE form: avatar left, name + description right, 64px tall —
 // the documented exception to the single-line management-list rule.
 const GRID_COLS =
   // CEREBRO-PATCH(list-grid-edge-padding): FIR-2172 — no edge tracks (0px tracks still pick up gap-x-3).
-  "grid-cols-[1rem_minmax(120px,1fr)_var(--agc-status)_1.75rem] " +
+  // Mobile matches Issues list: checkbox + name + kebab — a 144px status track left almost no room for names.
+  "grid-cols-[1rem_minmax(120px,1fr)_1.75rem] " +
   "@2xl:grid-cols-[1rem_minmax(200px,1fr)_var(--agc-status)_var(--agc-owner)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem]";
 
 // Two-line rows; the virtualizer's fixed-size contract.
@@ -373,7 +374,7 @@ function StatusCell({ row }: { row: AgentListRow }) {
   const { agent, presence } = row;
   if (agent.archived_at) {
     return (
-      <ListGridCell>
+      <ListGridCell className="hidden @2xl:flex">
         <span className="text-xs text-muted-foreground/60">
           {t(($) => $.row.archived)}
         </span>
@@ -382,7 +383,7 @@ function StatusCell({ row }: { row: AgentListRow }) {
   }
   if (!presence) {
     return (
-      <ListGridCell>
+      <ListGridCell className="hidden @2xl:flex">
         <span className="text-xs text-muted-foreground/40">—</span>
       </ListGridCell>
     );
@@ -390,7 +391,7 @@ function StatusCell({ row }: { row: AgentListRow }) {
   const visual = availabilityConfig[presence.availability];
   const active = presence.runningCount + presence.queuedCount;
   return (
-    <ListGridCell className="gap-1.5">
+    <ListGridCell className="hidden gap-1.5 @2xl:flex">
       <span className={`size-1.5 shrink-0 rounded-full ${visual.dotClass}`} />
       <span className={`truncate text-xs ${visual.textClass}`}>
         {t(($) => $.availability[presence.availability])}
@@ -512,9 +513,11 @@ function AgentListHeader({
         {t(($) => $.columns.agent)}
       </ListGridHeaderCell>
       {isColVisible("status") ? (
-        <ListGridHeaderCell>{t(($) => $.columns.status)}</ListGridHeaderCell>
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          {t(($) => $.columns.status)}
+        </ListGridHeaderCell>
       ) : (
-        <ListGridHeaderCell className="px-0" />
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
       )}
       {isColVisible("owner") ? (
         <ListGridHeaderCell className="hidden @2xl:flex">
@@ -616,7 +619,7 @@ function LoadingSkeleton() {
               <Skeleton className="h-3 w-48 max-w-full" />
             </div>
           </ListGridCell>
-          <ListGridCell>
+          <ListGridCell className="hidden @2xl:flex">
             <Skeleton className="h-3 w-16" />
           </ListGridCell>
           <ListGridCell className="hidden gap-1.5 @2xl:flex">
@@ -1137,7 +1140,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       {isColVisible("status") ? (
                         <StatusCell row={row} />
                       ) : (
-                        <ListGridCell className="px-0" />
+                        <ListGridCell className="hidden px-0 @2xl:flex" />
                       )}
                       {isColVisible("owner") ? (
                         <OwnerCell row={row} />
