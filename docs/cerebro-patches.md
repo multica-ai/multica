@@ -817,6 +817,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `daemon-handler-chat-history-cap` | server/internal/handler/daemon.go | 7 | JEH-757 — claim path uses ListRecentChatMessages(limit=30) and reverses to chronological order |
 | `sqlc-inbox` | server/pkg/db/queries/inbox.sql | 30 | Cerebro sqlc query additions |
 | `sqlc-inbox-remind-sort` | server/pkg/db/queries/inbox.sql | 2 | FIR-2016 — resurfaced reminders sort by muted_until so they re-enter the feed at the planned time |
+| `inbox-reminder-wins-dedupe` | packages/core/inbox/queries.ts | 2 | FIR-2278 — per-issue inbox dedup picks a fired reminder as the group's row instead of a newer notification, so a reminder anchored to an issue stays visible even when that issue gets newer activity |
 | `inbox-archived-at-sort` | server/pkg/db/queries/inbox.sql (ORDER BY)<br>server/internal/handler/inbox.go (ArchivedAt response field + archived-branch mapping) | 3 | FIR-1686 — expose inbox_item.archived_at (added by migration 9092 + DB trigger) on the archived feed and order it most-recently-archived first, so the cerebro Archived block can default-sort by archive time. |
 | `sqlc-inbox-folder` | server/pkg/db/queries/inbox_folder.sql | 175 | Cerebro sqlc query additions |
 | `sqlc-issue` | server/pkg/db/queries/issue.sql | 40 | Cerebro sqlc query additions |

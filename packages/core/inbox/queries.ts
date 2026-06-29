@@ -92,7 +92,9 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
       (a, b) =>
         inboxItemSortTime(b) - inboxItemSortTime(a),
     );
-    if (group[0]) merged.push(group[0]);
+    // CEREBRO-PATCH(inbox-reminder-wins-dedupe): keep a fired reminder visible when a newer notification shares its issue — pick it as the group's row instead of the newer one (FIR-2278). Future-muted reminders are excluded, so they still don't hide an active row.
+    const chosen = group.find((i) => i.type === "reminder" && (!i.muted_until || new Date(i.muted_until).getTime() <= Date.now())) ?? group[0];
+    if (chosen) merged.push(chosen);
   }
   return merged.sort(
     (a, b) =>

@@ -75,4 +75,26 @@ describe("deduplicateInboxItems", () => {
       deduplicateInboxItems([futureReminder, activeComment]).map((i) => i.id),
     ).toEqual(["comment"]);
   });
+
+  it("keeps a fired reminder visible when a newer notification shares its issue (FIR-2278)", () => {
+    const firedReminder = item({
+      id: "reminder",
+      issue_id: "issue-1",
+      muted_until: null, // fired: due now, not muted into the future
+      created_at: "2000-01-01T08:00:00Z",
+    });
+    const newerComment = item({
+      id: "comment",
+      type: "new_comment",
+      issue_id: "issue-1",
+      muted_until: null,
+      created_at: "2000-01-01T10:00:00Z", // newer than the reminder
+    });
+
+    // Without the fix the newer comment wins the per-issue dedup and hides the
+    // reminder; the reminder must remain the visible row for the issue.
+    expect(
+      deduplicateInboxItems([newerComment, firedReminder]).map((i) => i.id),
+    ).toEqual(["reminder"]);
+  });
 });
