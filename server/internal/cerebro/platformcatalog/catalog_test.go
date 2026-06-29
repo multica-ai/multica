@@ -41,6 +41,12 @@ func TestCatalogInvariants(t *testing.T) {
 		if strings.TrimSpace(c.Description) == "" {
 			t.Errorf("capability %q has blank description", c.Key)
 		}
+		// FIR-2175 phase 3: every capability ships a Chinese description too, so the
+		// permission table is self-explanatory in both app languages and the en/zh
+		// pair can never silently drift apart.
+		if strings.TrimSpace(c.DescriptionZh) == "" {
+			t.Errorf("capability %q has blank Chinese description (DescriptionZh)", c.Key)
+		}
 		if !knownCategory[c.Category] {
 			t.Errorf("capability %q has unknown category %q", c.Key, c.Category)
 		}

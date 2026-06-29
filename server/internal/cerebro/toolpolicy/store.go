@@ -147,6 +147,41 @@ func (s *Store) Resolve(ctx context.Context, in Query) (Effective, error) {
 	return Resolve(input), nil
 }
 
+// FlagMemberOverride is the workspace feature-flag key that switches the GENERAL
+// tool-policy gate from the pure tighten-only Resolve to ResolveMemberOverride
+// (FIR-2175). Default OFF: an unset flag keeps the tighten-only chain, so the
+// gate is behaviour-identical until an admin opts the workspace in. The handlers
+// read it next to their policyCELEvaluator flag read and pass the result into
+// ResolveGeneral.
+const FlagMemberOverride = "cerebro_member_override"
+
+// ResolveGeneral folds the chain for the GENERAL tool-policy gate — the visible
+// per-tool Allow / Ask / Deny permissions an operator authors in the policy
+// table. When memberOverride is true (the workspace cerebro_member_override flag
+// is on) it resolves through ResolveMemberOverride, the two-stage model where a
+// member's own setting overrides an inherited group/workspace default by
+// specificity and can therefore LOOSEN a group Deny. When false it is identical
+// to Resolve (pure most-restrictive-wins), so the flag's default is a no-op.
+//
+// SECURITY — read before adding a caller. Only the general tool-policy gate may
+// pass memberOverride=true. The deny-by-default FLOORS — credentials, the OS
+// sandbox, repo checkout, and the repo-approval cap — MUST keep calling Resolve
+// directly and MUST NEVER reach this method, because ResolveMemberOverride can
+// loosen and a floor that can be loosened is not a floor: a member could grant
+// themselves access to a secret their group denied. Resolve stays the single
+// load-bearing resolver for every floor; this method is for the visible gate
+// only. See ResolveMemberOverride for the model and chain.go for the contrast.
+func (s *Store) ResolveGeneral(ctx context.Context, in Query, memberOverride bool) (Effective, error) {
+	input, err := s.loadInput(ctx, in)
+	if err != nil {
+		return Effective{}, err
+	}
+	if memberOverride {
+		return ResolveMemberOverride(input), nil
+	}
+	return Resolve(input), nil
+}
+
 // ResolveOptIn loads the explicit settings for the query's (workspace, user,
 // groups, tool) context and decides an OFF-by-default capability gate: false
 // unless an explicit Allow has been granted at the user or group layer. Unlike

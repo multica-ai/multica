@@ -222,6 +222,89 @@ func Resolve(in Input) Effective {
 	}
 }
 
+// ResolveMemberOverride folds the chain using the member-override model
+// (FIR-2175): a two-stage resolution that matches how an operator intuitively
+// reasons about access.
+//
+//	Stage A — the MEMBER decides by specificity. Among the human-facing layers
+//	  Workspace › Group › User, the MOST SPECIFIC explicit setting wins
+//	  (User over Group over Workspace). Unlike Resolve, this stage may LOOSEN as
+//	  well as tighten: a User (member) Allow overrides a Group Deny. A member's
+//	  own setting is authoritative for the member; group/workspace are the
+//	  inherited defaults it can override.
+//	Stage B — the AGENT inherits the member verdict as a CEILING, then Runtime,
+//	  Agent (and System) may only TIGHTEN it. An agent can never do more than its
+//	  member; a Deny on runtime/agent wins even when member/workspace say Allow.
+//
+// CONTRAST WITH Resolve: Resolve is pure most-restrictive-wins (tighten-only at
+// every layer) and is the load-bearing invariant for the deny-by-default gates —
+// credentials, the OS sandbox, repo checkout, the approval cap. Because this
+// function can LOOSEN (member overrides group), it MUST NOT be used to gate any
+// deny-by-default floor. It is for the general tool-policy chain only, behind the
+// member-override feature flag. Keep credentials/sandbox/etc. on Resolve.
+func ResolveMemberOverride(in Input) Effective {
+	base := in.Base
+	if rank(base) < 0 {
+		base = SettingAllow
+	}
+
+	// Stage A — member effective by specificity: the most specific explicit
+	// layer wins (User > Group > Workspace). Iterating broad→specific and
+	// overwriting on each explicit layer leaves the most specific one in force.
+	memberEff := base
+	var memberDecidedBy Layer
+	for _, layer := range []Layer{LayerWorkspace, LayerGroup, LayerUser} {
+		if v := in.Settings[layer]; rank(v) >= 0 {
+			memberEff = v
+			memberDecidedBy = layer
+		}
+	}
+
+	// Stage B — the agent inherits the member ceiling; runtime/agent/system may
+	// only tighten it. A layer trying to loosen is ignored.
+	resolved := memberEff
+	decidedBy := memberDecidedBy
+	var cappedBy Layer
+	memberRank := rank(memberEff)
+	for _, layer := range []Layer{LayerRuntime, LayerAgent, LayerSystem} {
+		v := in.Settings[layer]
+		if rank(v) < 0 {
+			continue // Inherit / absent — no opinion.
+		}
+		switch {
+		case rank(v) > rank(resolved):
+			resolved = v
+			decidedBy = layer
+			if rank(v) > memberRank {
+				cappedBy = layer // tightened the agent below what the member allowed.
+			}
+		case rank(v) == rank(resolved):
+			decidedBy = layer
+		default:
+			// Loosening is not permitted on the agent side; member is the ceiling.
+		}
+	}
+
+	// A System actor (autopilot, no human) cannot answer an approval prompt, so
+	// an Ask it would resolve to becomes Deny — fail-safe (FIR-1609), identical
+	// to Resolve.
+	if in.IsSystem && resolved == SettingAsk {
+		return Effective{
+			Setting:   SettingDeny,
+			DecidedBy: LayerSystem,
+			CappedBy:  LayerSystem,
+			Reason:    "Denied — system actor has no human to answer an Ask",
+		}
+	}
+
+	return Effective{
+		Setting:   resolved,
+		DecidedBy: decidedBy,
+		CappedBy:  cappedBy,
+		Reason:    reasonFor(resolved, decidedBy, cappedBy),
+	}
+}
+
 // ResolveOptIn decides an OFF-by-default capability gate from the explicit
 // per-layer settings. It exists because Resolve (the tighten-only chain) cannot
 // express opt-in: Resolve only ever TIGHTENS below its Base and refuses to

@@ -137,6 +137,8 @@ type toolPolicyRow struct {
 	ResourcePattern   string          `json:"resource_pattern"`
 	Title             string          `json:"title"`
 	Category          string          `json:"category"`
+	Description       string          `json:"description"`
+	DescriptionZh     string          `json:"description_zh"`
 	Source            string          `json:"source"`
 	ManagedExternally bool            `json:"managed_externally"`
 	Layers            layerSettings   `json:"layers"`
@@ -474,6 +476,8 @@ func toRowResponse(row TableRow) toolPolicyRow {
 		ResourcePattern:    row.ResourcePattern,
 		Title:              row.Title,
 		Category:           row.Category,
+		Description:        row.Description,
+		DescriptionZh:      row.DescriptionZh,
 		Source:             row.Source,
 		ManagedExternally:  row.ManagedExternally,
 		EnforcedConditions: enforcedStrs,

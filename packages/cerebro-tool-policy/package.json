@@ -19,6 +19,7 @@
     "@multica/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",
+    "react-i18next": "catalog:",
     "sonner": "^2.0.7",
     "zod": "catalog:"
   },

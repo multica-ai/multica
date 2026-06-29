@@ -382,7 +382,13 @@ func (e *FirtalGatewayExecutor) guardToolCallViaPolicy(
 		reqCtx.Host = toolpolicy.HostOf(u)
 	}
 
-	eff, err := e.toolPolicy.Resolve(ctx, toolpolicy.Query{
+	// This is the GENERAL tool-policy gate, so it resolves through ResolveGeneral:
+	// when the default-OFF cerebro_member_override flag is on for the workspace it
+	// uses the member-override model (a member may loosen an inherited group/
+	// workspace default), otherwise it is identical to the tighten-only Resolve.
+	// The deny-by-default floors (credentials, sandbox, repo checkout, repo-
+	// approval cap) resolve through Resolve elsewhere and never reach this path.
+	eff, err := e.toolPolicy.ResolveGeneral(ctx, toolpolicy.Query{
 		WorkspaceID:    workspaceID,
 		ToolKey:        toolName,
 		RuntimeID:      runtimeID,
@@ -397,7 +403,7 @@ func (e *FirtalGatewayExecutor) guardToolCallViaPolicy(
 		// closed by effect (ConditionedSetting). No row carries an Expr today, so
 		// the flag's default keeps behaviour identical until it is turned on.
 		Eval: e.policyCELEvaluator(ctx, workspaceID),
-	})
+	}, e.memberOverrideEnabled(ctx, workspaceID))
 	if err != nil {
 		e.logger.Warn("tool-policy gate: resolve failed — failing closed",
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName, "error", err)
@@ -487,6 +493,28 @@ func (e *FirtalGatewayExecutor) workspaceApprovalGateEnabled(ctx context.Context
 		return true // no override or DB error → default ON
 	}
 	return enabled
+}
+
+// memberOverrideEnabled reports whether the default-OFF cerebro_member_override
+// flag is on for the workspace — the switch that makes the GENERAL tool-policy
+// gate resolve through the member-override model (a member may loosen a group
+// default) instead of the pure tighten-only chain. A DB lookup miss or error
+// resolves to OFF (the flag's default), like policyCELEvaluator and unlike the
+// always-on gates: a path that can LOOSEN access must never switch itself on by
+// accident. The deny-by-default floors never call this — they stay on Resolve.
+func (e *FirtalGatewayExecutor) memberOverrideEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
+	if e == nil || e.cerebro == nil {
+		return false
+	}
+	enabled, err := e.cerebro.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+		WorkspaceID: workspaceID,
+		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
+		FlagKey:     toolpolicy.FlagMemberOverride,
+	})
+	if err != nil || !enabled {
+		return false // no override or DB error → default OFF → pure tighten-only
+	}
+	return true
 }
 
 // policyCELEvaluator returns the shared CEL evaluator when the default-OFF

@@ -23,6 +23,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/webfetchpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -49,6 +50,13 @@ type TableRow struct {
 	// so the UI never shows a raw key or id.
 	Title    string
 	Category string
+	// Description and DescriptionZh are the one-line plain-language explanation of
+	// what the permission does, in English and Chinese (FIR-2175 phase 3), so the
+	// table is self-explanatory to a non-technical operator. Sourced from the
+	// platform capability register (platformcatalog); empty for a capability that
+	// carries no catalogued description (e.g. a reported runtime tool or repo row).
+	Description   string
+	DescriptionZh string
 	// Source records how the capability was discovered (e.g. "scan", "report").
 	Source string
 	// ManagedExternally is true for platform capabilities whose enforcement point
@@ -363,6 +371,18 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		out, err = s.appendPlatformRows(ctx, in, groupIDs, out)
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	// Enrich every row with its plain-language explanation from the capability
+	// register (FIR-2175 phase 3), so the table is self-explanatory. ByKey is the
+	// single source of truth for both English and Chinese; a row whose tool_key
+	// has no catalogue entry (a reported runtime tool, a repo row) simply keeps an
+	// empty description and the UI shows no tooltip — never a raw key.
+	for i := range out {
+		if cap, ok := platformcatalog.ByKey(out[i].ToolKey); ok {
+			out[i].Description = cap.Description
+			out[i].DescriptionZh = cap.DescriptionZh
 		}
 	}
 	return out, nil

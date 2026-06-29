@@ -295,6 +295,14 @@ export type CerebroFlagKey =
   // reveal. Default OFF — flip on only after the grant→tool-policy migration is
   // verified 1:1.
   | "cerebro_credential_chain_grant"
+  // FIR-2175: member-override resolution for the GENERAL tool-policy gate. When
+  // on, a member's own Allow/Ask/Deny overrides an inherited group/workspace
+  // default by specificity (the model can LOOSEN, not only tighten); runtime +
+  // agent may then only tighten the member verdict. OFF by default — the gate
+  // stays pure tighten-only (Resolve). It is scoped to the visible tool-policy
+  // permissions ONLY: the deny-by-default floors (credentials, OS sandbox, repo
+  // checkout, the repo-approval cap) never consult it and stay strict.
+  | "cerebro_member_override"
   // TECH-3196: Agent Vault — per-agent secret brokering via the internal path.
   | "cerebro_agent_vault"
   // TECH-3491: per-device draft persistence for the comment / channel / DM
@@ -640,6 +648,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // admin flips this on, after the grant→tool-policy migration is verified 1:1.
   // No deploy-time behaviour change; can never open a default-allow hole on reveal.
   cerebro_credential_chain_grant: false,
+  // FIR-2175: OFF by default — the general tool-policy gate stays pure
+  // tighten-only (Resolve) until an admin opts a workspace into member-override.
+  // Flipping it on can only affect the visible tool-policy permissions; the
+  // deny-by-default floors are never wired to it, so it can never widen
+  // credential, sandbox, repo-checkout, or approval-cap access.
+  cerebro_member_override: false,
   // TECH-3196: OFF by default — Agent Vault per-agent secret brokering ships
   // dormant until an admin opts in and the access table is configured.
   cerebro_agent_vault: false,
@@ -1539,6 +1553,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Let an explicit Allow rule in the unified per-tool policy GRANT access to a credential, instead of only ever tightening it. This makes the one policy chain the place to grant secret access, so the old separate grant store can eventually be retired. Off by default and fail-safe: with no explicit rule a credential stays deny-by-default exactly as today, so turning it off can never widen who can reveal a secret. Only flip on once existing grants have been migrated onto the chain 1:1. FIR-1609 Phase 7.",
+  },
+  {
+    key: "cerebro_member_override",
+    label: "Member overrides group on the tool-policy gate",
+    group: "permissions",
+    description:
+      "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: a member's own setting wins over an inherited group or workspace default by specificity (most specific wins, so a member Allow can OPEN what their group denied), and the runtime + agent layers may then only tighten that member verdict. Off by default — the gate stays pure most-restrictive-wins. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so turning it on can never widen access to a secret, the sandbox, or a repo. FIR-2175.",
   },
 ];
 

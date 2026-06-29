@@ -37,6 +37,24 @@ name if a line moved.
 
 Keep these apart. This doc answers question 2 honestly.
 
+> **FIR-2175 (flag `cerebro_member_override`, default OFF):** when this general
+> gate IS deciding a call (question 1), a workspace can opt into the
+> *member-override* model — a member's own Allow/Ask/Deny overrides an inherited
+> group/workspace default by specificity, so a member Allow can OPEN what their
+> group denied (it can loosen, not only tighten). It is wired ONLY into the two
+> general gates (`guardToolCallViaPolicy`, the local-CLI gate) via
+> `Store.ResolveGeneral`; OFF keeps them identical to the tighten-only `Resolve`.
+> The deny-by-default floors below — **credentials (row 1), agent-browser sandbox
+> (row 8), repo checkout (row 10)** and the approval cap — never consult this flag
+> and stay strictly tighten-only, so it can never widen access to a secret, the
+> sandbox, or a repo.
+>
+> **FIR-2175 phase 3 (display only, no flag):** the permission table now also
+> renders a one-line plain-language explanation per capability (English +
+> Chinese), sourced from the `platformcatalog` register and exposed as
+> `description` / `description_zh` on each tool-policy row. This is display
+> metadata — it does not change any gate, the resolution chain, or the flag above.
+
 ---
 
 ## What is enforced LIVE today (no flag required)

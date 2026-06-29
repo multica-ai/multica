@@ -124,6 +124,16 @@ export interface ToolPolicyRow {
   resource_pattern: string;
   title: string;
   category: string;
+  /**
+   * Plain-language explanation of what this permission does (FIR-2175 phase 3),
+   * in English and Chinese, sourced from the platform capability register. Empty
+   * for a capability with no catalogued description; the UI then shows no tooltip.
+   * Optional so an older backend that omits the fields (and a fixture that does
+   * not need them) still satisfies the type — the API-compat rule "treat every
+   * field as possibly missing". The zod schema below defaults them to "".
+   */
+  description?: string;
+  description_zh?: string;
   source: string;
   /**
    * FIR-2594: true for a platform action whose enforcement point is not the
@@ -216,6 +226,22 @@ export function isLockedFromElsewhere(
   return !!eff.decided_by && eff.decided_by !== editLayer && eff.setting !== "allow";
 }
 
+/**
+ * Pick the plain-language permission explanation to show for the active UI
+ * language (FIR-2175 phase 3). Returns the Chinese text for any `zh*` locale
+ * (e.g. "zh-Hans", "zh-Hans-CN") when it is present, otherwise the English
+ * description. Empty when neither is set, so the caller renders no help tooltip.
+ * Pure (language in, string out) so it is unit-tested without a DOM.
+ */
+export function permissionDescription(
+  row: Pick<ToolPolicyRow, "description" | "description_zh">,
+  language: string | undefined | null,
+): string {
+  const isZh = (language ?? "").toLowerCase().startsWith("zh");
+  if (isZh && row.description_zh) return row.description_zh;
+  return row.description ?? "";
+}
+
 // --- schemas (fail closed) --------------------------------------------------
 
 const TOOL_SETTINGS = ["inherit", "allow", "ask", "deny"] as const;
@@ -267,6 +293,11 @@ const toolPolicyRowSchema = z.object({
   resource_pattern: z.string().default(""),
   title: z.string().default(""),
   category: z.string().default(""),
+  // FIR-2175 phase 3: plain-language explanation of the permission, English +
+  // Chinese. Defaulted to "" so an older backend that omits them renders with no
+  // help tooltip (graceful) rather than throwing.
+  description: z.string().default(""),
+  description_zh: z.string().default(""),
   source: z.string().default(""),
   // FIR-2594: true for platform actions whose enforcement point is not the
   // tool-policy gate (membership ACL, daemon token, …). Defaults false so older

@@ -93,6 +93,11 @@ type Capability struct {
 	Category string
 	// Description is a one-line plain explanation of what the action does.
 	Description string
+	// DescriptionZh is the Chinese (zh) translation of Description, surfaced in the
+	// permission table next to the English help so the screen is self-explanatory in
+	// both app languages (FIR-2175 phase 3). Empty falls back to the English
+	// Description in the UI, so a not-yet-translated row degrades gracefully.
+	DescriptionZh string
 	// ManagedExternally is true when the tool-policy gate is NOT this action's
 	// enforcement point (see package doc). Shown for visibility; phase 2 skips it.
 	ManagedExternally bool
@@ -112,10 +117,11 @@ type Capability struct {
 var catalog = []Capability{
 	// --- Issues ---------------------------------------------------------------
 	{
-		Key:         "create_issue",
-		Title:       "Create issue",
-		Category:    CategoryIssues,
-		Description: "Create a new issue or sub-issue (a sub-issue is a create with a parent).",
+		Key:           "create_issue",
+		Title:         "Create issue",
+		Category:      CategoryIssues,
+		Description:   "Create a new issue or sub-issue (a sub-issue is a create with a parent).",
+		DescriptionZh: "创建新的工单或子工单（子工单即带父级的创建）。",
 		Ops: []string{
 			"POST /api/issues/",
 			"POST /api/issues/quick-create",
@@ -124,10 +130,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "update_issue",
-		Title:       "Edit issue",
-		Category:    CategoryIssues,
-		Description: "Edit an issue: fields, status/close, labels, metadata, dependencies, references. Status change and close are part of this action.",
+		Key:           "update_issue",
+		Title:         "Edit issue",
+		Category:      CategoryIssues,
+		Description:   "Edit an issue: fields, status/close, labels, metadata, dependencies, references. Status change and close are part of this action.",
+		DescriptionZh: "编辑工单：字段、状态/关闭、标签、元数据、依赖与引用。状态变更和关闭属于此操作。",
 		Ops: []string{
 			"PUT /api/issues/{id}",
 			"POST /api/issues/batch-update",
@@ -150,20 +157,22 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "delete_issue",
-		Title:       "Delete issue",
-		Category:    CategoryIssues,
-		Description: "Delete one issue or a batch of issues.",
+		Key:           "delete_issue",
+		Title:         "Delete issue",
+		Category:      CategoryIssues,
+		Description:   "Delete one issue or a batch of issues.",
+		DescriptionZh: "删除单个或批量工单。",
 		Ops: []string{
 			"DELETE /api/issues/{id}/",
 			"POST /api/issues/batch-delete",
 		},
 	},
 	{
-		Key:         "rerun_issue",
-		Title:       "Re-run / cancel issue agent",
-		Category:    CategoryIssues,
-		Description: "Re-trigger the assigned agent on an issue, or cancel a running task.",
+		Key:           "rerun_issue",
+		Title:         "Re-run / cancel issue agent",
+		Category:      CategoryIssues,
+		Description:   "Re-trigger the assigned agent on an issue, or cancel a running task.",
+		DescriptionZh: "重新触发工单上分配的 agent，或取消正在运行的任务。",
 		Ops: []string{
 			"POST /api/issues/{id}/rerun",
 			"POST /api/issues/{id}/tasks/{taskId}/cancel",
@@ -171,10 +180,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "subscribe_issue",
-		Title:       "Subscribe / react to issue",
-		Category:    CategoryIssues,
-		Description: "Subscribe or unsubscribe yourself, or add/remove a reaction on an issue.",
+		Key:           "subscribe_issue",
+		Title:         "Subscribe / react to issue",
+		Category:      CategoryIssues,
+		Description:   "Subscribe or unsubscribe yourself, or add/remove a reaction on an issue.",
+		DescriptionZh: "订阅或取消订阅工单，或添加/移除表情回应。",
 		Ops: []string{
 			"POST /api/issues/{id}/subscribe",
 			"POST /api/issues/{id}/unsubscribe",
@@ -183,10 +193,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_labels",
-		Title:       "Define / edit labels",
-		Category:    CategoryIssues,
-		Description: "Create, rename, or delete a workspace label (distinct from attaching a label to an issue).",
+		Key:           "manage_labels",
+		Title:         "Define / edit labels",
+		Category:      CategoryIssues,
+		Description:   "Create, rename, or delete a workspace label (distinct from attaching a label to an issue).",
+		DescriptionZh: "创建、重命名或删除工作区标签（区别于给工单附加标签）。",
 		Ops: []string{
 			"POST /api/labels/",
 			"PUT /api/labels/{id}/",
@@ -194,10 +205,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_issue_recurrence",
-		Title:       "Manage issue recurrence",
-		Category:    CategoryIssues,
-		Description: "Configure or remove an issue's recurrence (repeat schedule), or manually run a recurrence to spawn the next issue.",
+		Key:           "manage_issue_recurrence",
+		Title:         "Manage issue recurrence",
+		Category:      CategoryIssues,
+		Description:   "Configure or remove an issue's recurrence (repeat schedule), or manually run a recurrence to spawn the next issue.",
+		DescriptionZh: "配置或移除工单的周期（重复计划），或手动运行一次以生成下一个工单。",
 		Ops: []string{
 			"PUT /api/cerebro/issues/{issueID}/recurrence/",
 			"DELETE /api/cerebro/issues/{issueID}/recurrence/",
@@ -207,19 +219,21 @@ var catalog = []Capability{
 
 	// --- Comments -------------------------------------------------------------
 	{
-		Key:         "add_comment",
-		Title:       "Add comment",
-		Category:    CategoryComments,
-		Description: "Post a comment (or threaded reply) on an issue.",
+		Key:           "add_comment",
+		Title:         "Add comment",
+		Category:      CategoryComments,
+		Description:   "Post a comment (or threaded reply) on an issue.",
+		DescriptionZh: "在工单上发表评论（或在串中回复）。",
 		Ops: []string{
 			"POST /api/issues/{id}/comments",
 		},
 	},
 	{
-		Key:         "update_comment",
-		Title:       "Edit / delete comment",
-		Category:    CategoryComments,
-		Description: "Edit, delete, resolve, react to, or move an existing comment.",
+		Key:           "update_comment",
+		Title:         "Edit / delete comment",
+		Category:      CategoryComments,
+		Description:   "Edit, delete, resolve, react to, or move an existing comment.",
+		DescriptionZh: "编辑、删除、解决、回应或移动已有评论。",
 		Ops: []string{
 			"PUT /api/comments/{commentId}/",
 			"DELETE /api/comments/{commentId}/",
@@ -232,10 +246,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_sessions",
-		Title:       "Manage sessions",
-		Category:    CategoryComments,
-		Description: "Edit a session, or start a fresh session (with or without handoff) in an issue's comment thread.",
+		Key:           "manage_sessions",
+		Title:         "Manage sessions",
+		Category:      CategoryComments,
+		Description:   "Edit a session, or start a fresh session (with or without handoff) in an issue's comment thread.",
+		DescriptionZh: "在工单的评论串中编辑会话，或开启新会话（可选交接）。",
 		Ops: []string{
 			"PATCH /api/cerebro/issues/{issueId}/sessions/{sessionId}",
 			"POST /api/cerebro/issues/{issueId}/sessions/start-fresh",
@@ -244,10 +259,11 @@ var catalog = []Capability{
 
 	// --- Autopilots -----------------------------------------------------------
 	{
-		Key:         "create_autopilot",
-		Title:       "Create / edit autopilot",
-		Category:    CategoryAutopilots,
-		Description: "Create, edit, or delete an autopilot and its triggers.",
+		Key:           "create_autopilot",
+		Title:         "Create / edit autopilot",
+		Category:      CategoryAutopilots,
+		Description:   "Create, edit, or delete an autopilot and its triggers.",
+		DescriptionZh: "创建、编辑或删除 autopilot 及其触发器。",
 		Ops: []string{
 			"POST /api/autopilots/",
 			"PATCH /api/autopilots/{id}/",
@@ -260,20 +276,22 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "trigger_autopilot",
-		Title:       "Trigger autopilot",
-		Category:    CategoryAutopilots,
-		Description: "Fire an autopilot manually, or replay a past delivery.",
+		Key:           "trigger_autopilot",
+		Title:         "Trigger autopilot",
+		Category:      CategoryAutopilots,
+		Description:   "Fire an autopilot manually, or replay a past delivery.",
+		DescriptionZh: "手动触发 autopilot，或重放一次过往投递。",
 		Ops: []string{
 			"POST /api/autopilots/{id}/trigger",
 			"POST /api/autopilots/{id}/deliveries/{deliveryId}/replay",
 		},
 	},
 	{
-		Key:         "autopilot_scope",
-		Title:       "Autopilot scope (who may see/edit/trigger)",
-		Category:    CategoryAutopilots,
-		Description: "The hardcoded owner/group scope rule deciding who may see, edit, or trigger an autopilot. Today a code check, not on the controllable engine.",
+		Key:           "autopilot_scope",
+		Title:         "Autopilot scope (who may see/edit/trigger)",
+		Category:      CategoryAutopilots,
+		Description:   "The hardcoded owner/group scope rule deciding who may see, edit, or trigger an autopilot. Today a code check, not on the controllable engine.",
+		DescriptionZh: "决定谁可查看、编辑或触发 autopilot 的硬编码所有者/群组范围规则。目前为代码检查，尚未纳入可控引擎。",
 		Evidence: []string{
 			"server/internal/cerebro/access/autopilot_scope.go:48",  // ValidateScope
 			"server/internal/cerebro/access/autopilot_scope.go:150", // CanEdit
@@ -285,6 +303,7 @@ var catalog = []Capability{
 		Title:             "Autopilot inbound webhook",
 		Category:          CategoryAutopilots,
 		Description:       "An external caller firing an autopilot via its webhook URL. Governed by the per-trigger webhook secret, not the tool-policy gate.",
+		DescriptionZh:     "外部调用方通过 webhook URL 触发 autopilot。由每个触发器的 webhook 密钥管控，而非工具策略门。",
 		ManagedExternally: true,
 		Ops: []string{
 			"POST /api/webhooks/autopilots/{token}",
@@ -293,10 +312,11 @@ var catalog = []Capability{
 
 	// --- Artifacts ------------------------------------------------------------
 	{
-		Key:         "manage_artifacts",
-		Title:       "Create / edit / delete artifacts",
-		Category:    CategoryArtifacts,
-		Description: "Create, upload, edit, move, re-scope, change folder access of, or delete artifacts, artifact folders, and attachments.",
+		Key:           "manage_artifacts",
+		Title:         "Create / edit / delete artifacts",
+		Category:      CategoryArtifacts,
+		Description:   "Create, upload, edit, move, re-scope, change folder access of, or delete artifacts, artifact folders, and attachments.",
+		DescriptionZh: "创建、上传、编辑、移动、重设范围、更改文件夹访问权限或删除工件、工件文件夹和附件。",
 		Ops: []string{
 			"POST /api/artifacts/",
 			"PUT /api/artifacts/{id}",
@@ -313,10 +333,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_notes",
-		Title:       "Create / edit / delete notes",
-		Category:    CategoryArtifacts,
-		Description: "Create, edit, delete, pin, change the visibility of, manage references on, comment/suggest on, version, or lock notes (built on the Document feature).",
+		Key:           "manage_notes",
+		Title:         "Create / edit / delete notes",
+		Category:      CategoryArtifacts,
+		Description:   "Create, edit, delete, pin, change the visibility of, manage references on, comment/suggest on, version, or lock notes (built on the Document feature).",
+		DescriptionZh: "创建、编辑、删除、置顶、更改可见性、管理引用、评论/建议、版本管理或锁定笔记（基于 Document 功能）。",
 		Ops: []string{
 			"POST /api/notes/",
 			"PUT /api/notes/{id}",
@@ -339,10 +360,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_note_types",
-		Title:       "Create / edit / delete note types",
-		Category:    CategoryArtifacts,
-		Description: "Create, edit, delete, or run note types — reusable note templates with recurrence (e.g. business reviews).",
+		Key:           "manage_note_types",
+		Title:         "Create / edit / delete note types",
+		Category:      CategoryArtifacts,
+		Description:   "Create, edit, delete, or run note types — reusable note templates with recurrence (e.g. business reviews).",
+		DescriptionZh: "创建、编辑、删除或运行笔记类型——可复用且可周期的笔记模板（如业务评审）。",
 		Ops: []string{
 			"POST /api/cerebro/note-types/",
 			"PUT /api/cerebro/note-types/{id}",
@@ -351,10 +373,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_entity_folders",
-		Title:       "Create / edit / delete skill & autopilot folders",
-		Category:    CategoryWorkspace,
-		Description: "Create, rename, delete, and file skills or autopilots into folders (with sub-folders) on the Skills and Autopilots pages (FIR-1412).",
+		Key:           "manage_entity_folders",
+		Title:         "Create / edit / delete skill & autopilot folders",
+		Category:      CategoryWorkspace,
+		Description:   "Create, rename, delete, and file skills or autopilots into folders (with sub-folders) on the Skills and Autopilots pages (FIR-1412).",
+		DescriptionZh: "在 Skills 和 Autopilots 页面创建、重命名、删除文件夹（含子文件夹），并将 skill 或 autopilot 归入其中（FIR-1412）。",
 		Ops: []string{
 			"POST /api/cerebro/entity-folders/",
 			"PUT /api/cerebro/entity-folders/{id}",
@@ -365,20 +388,22 @@ var catalog = []Capability{
 
 	// --- Agents (styring af agenter) -----------------------------------------
 	{
-		Key:         "create_agent",
-		Title:       "Create agent",
-		Category:    CategoryAgents,
-		Description: "Create a new agent, from scratch or from a template.",
+		Key:           "create_agent",
+		Title:         "Create agent",
+		Category:      CategoryAgents,
+		Description:   "Create a new agent, from scratch or from a template.",
+		DescriptionZh: "从零或基于模板创建新 agent。",
 		Ops: []string{
 			"POST /api/agents/",
 			"POST /api/agents/from-template",
 		},
 	},
 	{
-		Key:         "update_agent",
-		Title:       "Edit agent",
-		Category:    CategoryAgents,
-		Description: "Edit an agent's config, skills, tools, env, archive/restore it, cancel its tasks, or govern its context (propose/review change-requests, roll back, transfer ownership).",
+		Key:           "update_agent",
+		Title:         "Edit agent",
+		Category:      CategoryAgents,
+		Description:   "Edit an agent's config, skills, tools, env, archive/restore it, cancel its tasks, or govern its context (propose/review change-requests, roll back, transfer ownership).",
+		DescriptionZh: "编辑 agent 的配置、skills、tools、环境变量，归档/恢复，取消其任务，或管理其上下文（提交/审阅变更请求、回滚、转让所有权）。",
 		Ops: []string{
 			"PUT /api/agents/{id}/",
 			"POST /api/agents/{id}/archive",
@@ -402,40 +427,44 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "trigger_other_agent",
-		Title:       "Trigger someone else's agent",
-		Category:    CategoryAgents,
-		Description: "Whether you may start an agent you do not own (via an @mention or run-request). FIR-2409: now settable on the controllable engine at workspace / group / member / agent level. With no rule set, the hardcoded default applies (owners/admins master key, members blocked); an explicit Deny removes the master key, an explicit Allow grants a blocked member.",
+		Key:           "trigger_other_agent",
+		Title:         "Trigger someone else's agent",
+		Category:      CategoryAgents,
+		Description:   "Whether you may start an agent you do not own (via an @mention or run-request). FIR-2409: now settable on the controllable engine at workspace / group / member / agent level. With no rule set, the hardcoded default applies (owners/admins master key, members blocked); an explicit Deny removes the master key, an explicit Allow grants a blocked member.",
+		DescriptionZh: "是否可启动不属于你的 agent（通过 @提及 或运行请求）。FIR-2409：现可在工作区/群组/成员/agent 层级于可控引擎上设置。未设规则时套用硬编码默认（所有者/管理员持万能钥匙，成员被阻止）；显式 Deny 移除万能钥匙，显式 Allow 放行被阻止的成员。",
 		Evidence: []string{
 			"server/internal/cerebro/grouppermissions/permissions.go:336", // CanUseAgent (baseline)
 			"server/internal/cerebro/mentiongate/gate.go:31",              // CanTriggerMention (now resolves trigger_other_agent via toolpolicy)
 		},
 	},
 	{
-		Key:         "schedule_agent_wakeup",
-		Title:       "Schedule agent wakeup",
-		Category:    CategoryAgents,
-		Description: "Create or cancel a scheduled wakeup that starts an agent on an issue later or when a watched event happens.",
+		Key:           "schedule_agent_wakeup",
+		Title:         "Schedule agent wakeup",
+		Category:      CategoryAgents,
+		Description:   "Create or cancel a scheduled wakeup that starts an agent on an issue later or when a watched event happens.",
+		DescriptionZh: "创建或取消计划唤醒，在稍后或监视事件发生时于工单上启动 agent。",
 		Ops: []string{
 			"POST /api/cerebro/wakeups/",
 			"POST /api/cerebro/wakeups/{id}/cancel",
 		},
 	},
 	{
-		Key:         "manage_agent_passes",
-		Title:       "Manage agent passes",
-		Category:    CategoryAgents,
-		Description: "Issue or revoke an agent pass (a scoped, time-boxed permission for an agent to act on an issue).",
+		Key:           "manage_agent_passes",
+		Title:         "Manage agent passes",
+		Category:      CategoryAgents,
+		Description:   "Issue or revoke an agent pass (a scoped, time-boxed permission for an agent to act on an issue).",
+		DescriptionZh: "签发或撤销 agent 通行证（一种限定范围、有时限、允许 agent 在工单上行动的权限）。",
 		Ops: []string{
 			"POST /api/cerebro/agent-passes/",
 			"DELETE /api/cerebro/agent-passes/{passId}",
 		},
 	},
 	{
-		Key:         "manage_work_sessions",
-		Title:       "Drive agent work session",
-		Category:    CategoryAgents,
-		Description: "Start, fork, message, resume, rename, or complete an interactive agent work session.",
+		Key:           "manage_work_sessions",
+		Title:         "Drive agent work session",
+		Category:      CategoryAgents,
+		Description:   "Start, fork, message, resume, rename, or complete an interactive agent work session.",
+		DescriptionZh: "启动、分叉、发消息、恢复、重命名或完成交互式 agent 工作会话。",
 		Ops: []string{
 			"POST /api/work-sessions/",
 			"POST /api/work-sessions/{id}/fork",
@@ -448,10 +477,11 @@ var catalog = []Capability{
 
 	// --- Runtimes (styring af runtimes) --------------------------------------
 	{
-		Key:         "manage_runtime",
-		Title:       "Manage runtime",
-		Category:    CategoryRuntimes,
-		Description: "Edit, pause, update, delete a runtime (machine), change its sandbox/tool config, or push local skills and models to it.",
+		Key:           "manage_runtime",
+		Title:         "Manage runtime",
+		Category:      CategoryRuntimes,
+		Description:   "Edit, pause, update, delete a runtime (machine), change its sandbox/tool config, or push local skills and models to it.",
+		DescriptionZh: "编辑、暂停、更新、删除 runtime（机器），更改其沙箱/工具配置，或向其推送本地 skills 和模型。",
 		Ops: []string{
 			"PATCH /api/runtimes/{runtimeId}/",
 			"DELETE /api/runtimes/{runtimeId}/",
@@ -471,10 +501,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_runtime_tool_access",
-		Title:       "Grant runtime tool access",
-		Category:    CategoryRuntimes,
-		Description: "Grant or revoke a specific runtime tool for a group or user (per-tool allowlist on a machine, or through an agent's assigned runtime).",
+		Key:           "manage_runtime_tool_access",
+		Title:         "Grant runtime tool access",
+		Category:      CategoryRuntimes,
+		Description:   "Grant or revoke a specific runtime tool for a group or user (per-tool allowlist on a machine, or through an agent's assigned runtime).",
+		DescriptionZh: "为群组或用户授予或撤销特定 runtime 工具（机器上的按工具白名单，或通过 agent 所分配的 runtime）。",
 		Ops: []string{
 			"POST /api/agents/{id}/tool-grants",
 			"DELETE /api/agents/{id}/tool-grants",
@@ -485,10 +516,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_runtime_accounts",
-		Title:       "Manage runtime accounts",
-		Category:    CategoryRuntimes,
-		Description: "Add, remove, or change controls on the model/provider accounts a runtime uses.",
+		Key:           "manage_runtime_accounts",
+		Title:         "Manage runtime accounts",
+		Category:      CategoryRuntimes,
+		Description:   "Add, remove, or change controls on the model/provider accounts a runtime uses.",
+		DescriptionZh: "添加、移除或更改 runtime 所用的模型/供应商账户的管控。",
 		Ops: []string{
 			"POST /api/workspaces/{id}/accounts",
 			"DELETE /api/workspaces/{id}/accounts/{id}",
@@ -496,10 +528,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_cloud_runtime",
-		Title:       "Manage cloud runtime nodes",
-		Category:    CategoryRuntimes,
-		Description: "Provision, start, stop, reboot, delete, or exec on cloud runtime nodes.",
+		Key:           "manage_cloud_runtime",
+		Title:         "Manage cloud runtime nodes",
+		Category:      CategoryRuntimes,
+		Description:   "Provision, start, stop, reboot, delete, or exec on cloud runtime nodes.",
+		DescriptionZh: "配置、启动、停止、重启、删除云 runtime 节点，或在其上执行命令。",
 		Ops: []string{
 			"POST /api/cloud-runtime/nodes",
 			"DELETE /api/cloud-runtime/nodes",
@@ -511,20 +544,22 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "create_runtime",
-		Title:       "Create runtime",
-		Category:    CategoryRuntimes,
-		Description: "Register a new runtime (machine). A named group capability an admin can grant or deny today; no HTTP route — runtimes are created via the daemon — so it is settable only as a non-route capability. The runtime twin of create_agent.",
+		Key:           "create_runtime",
+		Title:         "Create runtime",
+		Category:      CategoryRuntimes,
+		Description:   "Register a new runtime (machine). A named group capability an admin can grant or deny today; no HTTP route — runtimes are created via the daemon — so it is settable only as a non-route capability. The runtime twin of create_agent.",
+		DescriptionZh: "注册新 runtime（机器）。管理员目前可授予或拒绝的命名群组能力；无 HTTP 路由——runtime 通过守护进程创建——故仅可作为非路由能力设置。create_agent 的 runtime 对应物。",
 		Evidence: []string{
 			"server/internal/handler/group_permissions_cerebro.go:150",    // cerebroRequireCapability("create_runtime")
 			"server/internal/cerebro/grouppermissions/permissions.go:295", // CanCreateRuntime
 		},
 	},
 	{
-		Key:         "create_local_runtime",
-		Title:       "Create local runtime",
-		Category:    CategoryRuntimes,
-		Description: "Register a new LOCAL (daemon-based) runtime that runs on the user's own machine. Settable Allow/Ask/Deny on every layer; enforced live at the runtime setup-token mint through the unified tool-policy chain (workspace > group > user). The local twin of manage_cloud_runtime (FIR-2672).",
+		Key:           "create_local_runtime",
+		Title:         "Create local runtime",
+		Category:      CategoryRuntimes,
+		Description:   "Register a new LOCAL (daemon-based) runtime that runs on the user's own machine. Settable Allow/Ask/Deny on every layer; enforced live at the runtime setup-token mint through the unified tool-policy chain (workspace > group > user). The local twin of manage_cloud_runtime (FIR-2672).",
+		DescriptionZh: "注册运行在用户本机上的新本地（基于守护进程）runtime。各层级均可设置 Allow/Ask/Deny；在 runtime 设置令牌签发时经统一工具策略链实时强制（工作区 > 群组 > 用户）。manage_cloud_runtime 的本地对应物（FIR-2672）。",
 		Ops: []string{
 			"POST /api/runtime-setup/tokens",
 			"POST /api/workspaces/{id}/runtime-setup-token",
@@ -535,10 +570,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "use_other_runtime",
-		Title:       "Use someone else's runtime",
-		Category:    CategoryRuntimes,
-		Description: "Whether you may point an agent at a runtime you do not own. Today a hardcoded group allowlist, NOT on the controllable engine — the runtime twin of trigger_other_agent.",
+		Key:           "use_other_runtime",
+		Title:         "Use someone else's runtime",
+		Category:      CategoryRuntimes,
+		Description:   "Whether you may point an agent at a runtime you do not own. Today a hardcoded group allowlist, NOT on the controllable engine — the runtime twin of trigger_other_agent.",
+		DescriptionZh: "是否可将 agent 指向不属于你的 runtime。目前为硬编码群组白名单，尚未纳入可控引擎——trigger_other_agent 的 runtime 对应物。",
 		Evidence: []string{
 			"server/internal/cerebro/grouppermissions/permissions.go:322", // CanUseRuntime
 			"server/internal/handler/group_permissions_cerebro.go:187",    // cerebroRequireRuntimeAccess call site
@@ -549,6 +585,7 @@ var catalog = []Capability{
 		Title:             "Daemon runtime callbacks",
 		Category:          CategoryRuntimes,
 		Description:       "The local daemon reporting heartbeats, claiming tasks, and posting results. Governed by the daemon token, not the tool-policy gate.",
+		DescriptionZh:     "本地守护进程上报心跳、领取任务并提交结果。由守护进程令牌管控，而非工具策略门。",
 		ManagedExternally: true,
 		Ops: []string{
 			"POST /api/daemon/register",
@@ -561,10 +598,11 @@ var catalog = []Capability{
 
 	// --- Groups ---------------------------------------------------------------
 	{
-		Key:         "manage_group",
-		Title:       "Create / edit group",
-		Category:    CategoryGroups,
-		Description: "Create, edit, or delete a group, and grant or revoke a group's capabilities.",
+		Key:           "manage_group",
+		Title:         "Create / edit group",
+		Category:      CategoryGroups,
+		Description:   "Create, edit, or delete a group, and grant or revoke a group's capabilities.",
+		DescriptionZh: "创建、编辑或删除群组，并授予或撤销群组能力。",
 		Ops: []string{
 			"POST /api/workspaces/{id}/groups",
 			"PATCH /api/groups/{id}",
@@ -574,10 +612,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_group_members",
-		Title:       "Manage group members",
-		Category:    CategoryGroups,
-		Description: "Add or remove users, agents, and runtimes from a group.",
+		Key:           "manage_group_members",
+		Title:         "Manage group members",
+		Category:      CategoryGroups,
+		Description:   "Add or remove users, agents, and runtimes from a group.",
+		DescriptionZh: "在群组中添加或移除用户、agent 和 runtime。",
 		Ops: []string{
 			"POST /api/groups/{id}/members",
 			"DELETE /api/groups/{id}/members/{userId}",
@@ -590,20 +629,22 @@ var catalog = []Capability{
 
 	// --- Permissions (styring af roller/policy) -------------------------------
 	{
-		Key:         "manage_collections",
-		Title:       "Manage Collections folder access",
-		Category:    CategoryPermissions,
-		Description: "Set or remove who may see a Collections folder (and everything inside it) — the per-folder access grants behind Settings → Collections, across Documents, Notes, Autopilots, and Skills (FIR-1590).",
+		Key:           "manage_collections",
+		Title:         "Manage Collections folder access",
+		Category:      CategoryPermissions,
+		Description:   "Set or remove who may see a Collections folder (and everything inside it) — the per-folder access grants behind Settings → Collections, across Documents, Notes, Autopilots, and Skills (FIR-1590).",
+		DescriptionZh: "设置或移除谁可查看 Collections 文件夹（及其内全部内容）——Settings → Collections 背后的按文件夹访问授权，涵盖 Documents、Notes、Autopilots 和 Skills（FIR-1590）。",
 		Ops: []string{
 			"PUT /api/cerebro/folder-grants/",
 			"DELETE /api/cerebro/folder-grants/",
 		},
 	},
 	{
-		Key:         "manage_roles",
-		Title:       "Manage roles",
-		Category:    CategoryPermissions,
-		Description: "Create, edit, or delete roles, and assign or unassign a role to a member, agent, or group.",
+		Key:           "manage_roles",
+		Title:         "Manage roles",
+		Category:      CategoryPermissions,
+		Description:   "Create, edit, or delete roles, and assign or unassign a role to a member, agent, or group.",
+		DescriptionZh: "创建、编辑或删除角色，并为成员、agent 或群组分配或取消角色。",
 		Ops: []string{
 			"POST /api/workspaces/{id}/roles",
 			"PATCH /api/roles/{id}",
@@ -613,30 +654,33 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_tool_policy",
-		Title:       "Manage tool policy",
-		Category:    CategoryPermissions,
-		Description: "Set or clear an Allow/Ask/Deny choice in the permission table itself.",
+		Key:           "manage_tool_policy",
+		Title:         "Manage tool policy",
+		Category:      CategoryPermissions,
+		Description:   "Set or clear an Allow/Ask/Deny choice in the permission table itself.",
+		DescriptionZh: "在权限表中设置或清除 Allow/Ask/Deny 选择。",
 		Ops: []string{
 			"PUT /api/workspaces/{id}/tool-policy",
 			"DELETE /api/workspaces/{id}/tool-policy",
 		},
 	},
 	{
-		Key:         "manage_agent_vault_access",
-		Title:       "Manage Agent Vault access",
-		Category:    CategoryPermissions,
-		Description: "Grant or revoke a private agent's access to an Agent Vault secret box (TECH-3196).",
+		Key:           "manage_agent_vault_access",
+		Title:         "Manage Agent Vault access",
+		Category:      CategoryPermissions,
+		Description:   "Grant or revoke a private agent's access to an Agent Vault secret box (TECH-3196).",
+		DescriptionZh: "授予或撤销私有 agent 对某个 Agent Vault 密钥箱的访问（TECH-3196）。",
 		Ops: []string{
 			"PUT /api/workspaces/{id}/agentvault/access",
 			"DELETE /api/workspaces/{id}/agentvault/access",
 		},
 	},
 	{
-		Key:         "decide_approval",
-		Title:       "Decide approval request",
-		Category:    CategoryPermissions,
-		Description: "Raise, approve, reject, or delegate an approval request in the inbox.",
+		Key:           "decide_approval",
+		Title:         "Decide approval request",
+		Category:      CategoryPermissions,
+		Description:   "Raise, approve, reject, or delegate an approval request in the inbox.",
+		DescriptionZh: "在收件箱中发起、批准、拒绝或委派审批请求。",
 		Ops: []string{
 			"POST /api/workspaces/{id}/approvals/intake",
 			"POST /api/workspaces/{id}/approvals/{approvalId}/approve",
@@ -647,10 +691,11 @@ var catalog = []Capability{
 
 	// --- Projects -------------------------------------------------------------
 	{
-		Key:         "manage_project",
-		Title:       "Create / edit project",
-		Category:    CategoryProjects,
-		Description: "Create, edit, or delete a project and its resources.",
+		Key:           "manage_project",
+		Title:         "Create / edit project",
+		Category:      CategoryProjects,
+		Description:   "Create, edit, or delete a project and its resources.",
+		DescriptionZh: "创建、编辑或删除项目及其资源。",
 		Ops: []string{
 			"POST /api/projects/",
 			"PUT /api/projects/{id}/",
@@ -668,6 +713,7 @@ var catalog = []Capability{
 		Title:             "Manage project access",
 		Category:          CategoryProjects,
 		Description:       "Add/remove project members and group access. Governed by the project's own access list, not the tool-policy gate.",
+		DescriptionZh:     "添加/移除项目成员和群组访问。由项目自身的访问列表管控，而非工具策略门。",
 		ManagedExternally: true,
 		Ops: []string{
 			"PATCH /api/projects/{id}/access",
@@ -680,10 +726,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_status_models",
-		Title:       "Manage status models",
-		Category:    CategoryProjects,
-		Description: "Create, edit, or delete the custom status model for the workspace or a project.",
+		Key:           "manage_status_models",
+		Title:         "Manage status models",
+		Category:      CategoryProjects,
+		Description:   "Create, edit, or delete the custom status model for the workspace or a project.",
+		DescriptionZh: "为工作区或项目创建、编辑或删除自定义状态模型。",
 		Ops: []string{
 			"POST /api/cerebro/status-models/",
 			"PUT /api/cerebro/status-models/{id}",
@@ -695,10 +742,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_project_sprints",
-		Title:       "Manage project sprints",
-		Category:    CategoryProjects,
-		Description: "Create, edit, delete, and assign project sprints and recurring sprint tasks.",
+		Key:           "manage_project_sprints",
+		Title:         "Manage project sprints",
+		Category:      CategoryProjects,
+		Description:   "Create, edit, delete, and assign project sprints and recurring sprint tasks.",
+		DescriptionZh: "创建、编辑、删除并分配项目冲刺与周期性冲刺任务。",
 		Ops: []string{
 			"PUT /api/cerebro/projects/{projectID}/sprint-settings/",
 			"DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
@@ -715,10 +763,11 @@ var catalog = []Capability{
 
 	// --- Workspace (medlemmer, settings, integrationer) ----------------------
 	{
-		Key:         "manage_workspace_members",
-		Title:       "Manage workspace members",
-		Category:    CategoryWorkspace,
-		Description: "Invite or remove members, change a member's role/budget, set a member's secret folders, or revoke an invitation.",
+		Key:           "manage_workspace_members",
+		Title:         "Manage workspace members",
+		Category:      CategoryWorkspace,
+		Description:   "Invite or remove members, change a member's role/budget, set a member's secret folders, or revoke an invitation.",
+		DescriptionZh: "邀请或移除成员，更改成员角色/预算，设置成员的密钥文件夹，或撤销邀请。",
 		Ops: []string{
 			"POST /api/workspaces/{id}/members",
 			"PATCH /api/workspaces/{id}/members/{memberId}/",
@@ -729,10 +778,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_workspace_settings",
-		Title:       "Edit workspace settings",
-		Category:    CategoryWorkspace,
-		Description: "Change workspace settings: name/config, feature flags, cost optimization, auth settings, and pausing all tasks.",
+		Key:           "manage_workspace_settings",
+		Title:         "Edit workspace settings",
+		Category:      CategoryWorkspace,
+		Description:   "Change workspace settings: name/config, feature flags, cost optimization, auth settings, and pausing all tasks.",
+		DescriptionZh: "更改工作区设置：名称/配置、功能开关、成本优化、认证设置，以及暂停所有任务。",
 		Ops: []string{
 			"PATCH /api/workspaces/{id}/",
 			"PUT /api/workspaces/{id}/",
@@ -753,19 +803,21 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "delete_workspace",
-		Title:       "Delete workspace",
-		Category:    CategoryWorkspace,
-		Description: "Permanently delete the entire workspace. Owner-only and irreversible.",
+		Key:           "delete_workspace",
+		Title:         "Delete workspace",
+		Category:      CategoryWorkspace,
+		Description:   "Permanently delete the entire workspace. Owner-only and irreversible.",
+		DescriptionZh: "永久删除整个工作区。仅所有者可执行且不可逆。",
 		Ops: []string{
 			"DELETE /api/workspaces/{id}/",
 		},
 	},
 	{
-		Key:         "manage_integrations",
-		Title:       "Manage integrations",
-		Category:    CategoryWorkspace,
-		Description: "Connect or disconnect external integrations (e.g. a GitHub App installation).",
+		Key:           "manage_integrations",
+		Title:         "Manage integrations",
+		Category:      CategoryWorkspace,
+		Description:   "Connect or disconnect external integrations (e.g. a GitHub App installation).",
+		DescriptionZh: "连接或断开外部集成（如 GitHub App 安装）。",
 		Ops: []string{
 			"DELETE /api/workspaces/{id}/github/installations/{installationId}",
 			"DELETE /api/workspaces/{id}/lark/installations/{installationId}",
@@ -775,10 +827,11 @@ var catalog = []Capability{
 
 	// --- Skills ---------------------------------------------------------------
 	{
-		Key:         "manage_skills",
-		Title:       "Create / edit / delete skills",
-		Category:    CategorySkills,
-		Description: "Create, import, edit, fork, delete skills and their files, review change-requests, transfer skill ownership, and record behavioral observations.",
+		Key:           "manage_skills",
+		Title:         "Create / edit / delete skills",
+		Category:      CategorySkills,
+		Description:   "Create, import, edit, fork, delete skills and their files, review change-requests, transfer skill ownership, and record behavioral observations.",
+		DescriptionZh: "创建、导入、编辑、分叉、删除 skills 及其文件，审阅变更请求，转让 skill 所有权，并记录行为观察。",
 		Ops: []string{
 			"POST /api/skills/",
 			"POST /api/skills/import",
@@ -797,10 +850,11 @@ var catalog = []Capability{
 
 	// --- Squads ---------------------------------------------------------------
 	{
-		Key:         "manage_squad",
-		Title:       "Create / edit squad",
-		Category:    CategorySquads,
-		Description: "Create, edit, or delete a squad, manage its members, and change a member's role.",
+		Key:           "manage_squad",
+		Title:         "Create / edit squad",
+		Category:      CategorySquads,
+		Description:   "Create, edit, or delete a squad, manage its members, and change a member's role.",
+		DescriptionZh: "创建、编辑或删除小队，管理其成员并更改成员角色。",
 		Ops: []string{
 			"POST /api/squads/",
 			"PUT /api/squads/{id}/",
@@ -813,10 +867,11 @@ var catalog = []Capability{
 
 	// --- Connections (CEREBRO-PATCH cerebro-connections-catalog: TECH-3108) ---
 	{
-		Key:         "manage_connections",
-		Title:       "Manage workspace connections",
-		Category:    CategoryConnections,
-		Description: "Create, edit, or delete workspace API/MCP connections (external URLs and internal Sliplane paths).",
+		Key:           "manage_connections",
+		Title:         "Manage workspace connections",
+		Category:      CategoryConnections,
+		Description:   "Create, edit, or delete workspace API/MCP connections (external URLs and internal Sliplane paths).",
+		DescriptionZh: "创建、编辑或删除工作区 API/MCP 连接（外部 URL 和内部 Sliplane 路径）。",
 		Ops: []string{
 			"POST /api/workspaces/{id}/mcp",
 			"POST /api/workspaces/{id}/connections",
@@ -827,10 +882,11 @@ var catalog = []Capability{
 
 	// --- Credentials ----------------------------------------------------------
 	{
-		Key:         "manage_credentials",
-		Title:       "Manage credentials / secrets",
-		Category:    CategoryCredentials,
-		Description: "Create, edit, delete, reveal, or rotate workspace credentials and their bindings. Highly sensitive.",
+		Key:           "manage_credentials",
+		Title:         "Manage credentials / secrets",
+		Category:      CategoryCredentials,
+		Description:   "Create, edit, delete, reveal, or rotate workspace credentials and their bindings. Highly sensitive.",
+		DescriptionZh: "创建、编辑、删除、显示或轮换工作区凭据及其绑定。高度敏感。",
 		Ops: []string{
 			"POST /api/workspaces/{id}/credentials",
 			"PATCH /api/workspaces/{id}/credentials/{credId}",
@@ -842,10 +898,11 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_credential_access",
-		Title:       "Grant credential access",
-		Category:    CategoryCredentials,
-		Description: "Grant, deny, or clear an actor's (agent / group / user) access to a specific credential at a given layer (FIR-1479). The credential twin of \"Grant runtime tool access\". Highly sensitive.",
+		Key:           "manage_credential_access",
+		Title:         "Grant credential access",
+		Category:      CategoryCredentials,
+		Description:   "Grant, deny, or clear an actor's (agent / group / user) access to a specific credential at a given layer (FIR-1479). The credential twin of \"Grant runtime tool access\". Highly sensitive.",
+		DescriptionZh: "在指定层级授予、拒绝或清除某主体（agent/群组/用户）对特定凭据的访问（FIR-1479）。即「Grant runtime tool access」的凭据对应物。高度敏感。",
 		Evidence: []string{
 			"server/internal/handler/group_permissions_cerebro.go:308", // cerebroRequireCredentialGrantPolicy
 			"server/internal/handler/group_permissions_cerebro.go:393", // RequireToolPolicyWritePolicy (credential.* branch)
@@ -854,10 +911,11 @@ var catalog = []Capability{
 
 	// --- Workflows ------------------------------------------------------------
 	{
-		Key:         "manage_workflows",
-		Title:       "Manage workflows",
-		Category:    CategoryWorkflows,
-		Description: "Create, edit, delete, toggle a workflow, or regenerate its tokens and signing secrets.",
+		Key:           "manage_workflows",
+		Title:         "Manage workflows",
+		Category:      CategoryWorkflows,
+		Description:   "Create, edit, delete, toggle a workflow, or regenerate its tokens and signing secrets.",
+		DescriptionZh: "创建、编辑、删除、启停工作流，或重新生成其令牌和签名密钥。",
 		Ops: []string{
 			"POST /api/cerebro/workflows/",
 			"PUT /api/cerebro/workflows/{id}",
@@ -872,10 +930,11 @@ var catalog = []Capability{
 
 	// --- Channels -------------------------------------------------------------
 	{
-		Key:         "manage_channels",
-		Title:       "Manage channels",
-		Category:    CategoryChannels,
-		Description: "Create, delete or archive a channel, set its per-channel permissions, and set an agent's listen mode in it.",
+		Key:           "manage_channels",
+		Title:         "Manage channels",
+		Category:      CategoryChannels,
+		Description:   "Create, delete or archive a channel, set its per-channel permissions, and set an agent's listen mode in it.",
+		DescriptionZh: "创建、删除或归档频道，设置其按频道权限，并设置 agent 在其中的监听模式。",
 		Ops: []string{
 			"POST /api/channels/",
 			"POST /api/channels/{id}/archive",
@@ -890,6 +949,7 @@ var catalog = []Capability{
 		Title:             "Gateway inbound channel message",
 		Category:          CategoryChannels,
 		Description:       "The Firtal Gateway delivering a webhook into a channel on behalf of a chosen principal (FIR-1766). Governed by the gateway service token plus the acting principal's channel membership, not the tool-policy gate.",
+		DescriptionZh:     "Firtal Gateway 代表选定主体将 webhook 投递到频道（FIR-1766）。由网关服务令牌加上执行主体的频道成员资格管控，而非工具策略门。",
 		ManagedExternally: true,
 		Ops: []string{
 			"POST /api/webhooks/gateway/channel-message",
@@ -905,6 +965,7 @@ var catalog = []Capability{
 		Title:             "Read issues",
 		Category:          CategoryReadAccess,
 		Description:       "View issues, comments, and their history. Governed by workspace membership, not the tool-policy gate.",
+		DescriptionZh:     "查看工单、评论及其历史。由工作区成员资格管控，而非工具策略门。",
 		ManagedExternally: true,
 		Evidence:          []string{"server/internal/middleware/workspace.go (RequireWorkspaceMember)"},
 	},
@@ -913,6 +974,7 @@ var catalog = []Capability{
 		Title:             "Read projects",
 		Category:          CategoryReadAccess,
 		Description:       "View projects and their contents. Governed by the project access list (and a group-membership path), not the tool-policy gate.",
+		DescriptionZh:     "查看项目及其内容。由项目访问列表（及群组成员路径）管控，而非工具策略门。",
 		ManagedExternally: true,
 		Evidence: []string{
 			"server/internal/handler/project_access.go (canAccessProject)",

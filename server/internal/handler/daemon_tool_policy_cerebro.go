@@ -171,8 +171,16 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// No row carries an Expr today, so this is behaviour-preserving until enabled.
 	// Resolved once and reused across the capability-wide and per-resource calls.
 	celEval := h.daemonPolicyCELEvaluator(r.Context(), wsUUID)
+	// This is the local-runtime twin of the gateway's GENERAL tool-policy gate, so
+	// it resolves through ResolveGeneral behind the default-OFF cerebro_member_override
+	// flag: on → the member-override model (a member may loosen an inherited group/
+	// workspace default), off → identical to the tighten-only Resolve. Resolved once
+	// and reused across the capability-wide and per-resource calls so both see the
+	// same model. The deny-by-default agent-browser sandbox gate below keeps calling
+	// Resolve directly and never consults this flag.
+	memberOverride := h.daemonMemberOverrideEnabled(r.Context(), wsUUID)
 	resolveAt := func(pattern string) (toolpolicy.Effective, error) {
-		return store.Resolve(r.Context(), toolpolicy.Query{
+		return store.ResolveGeneral(r.Context(), toolpolicy.Query{
 			WorkspaceID:     wsUUID,
 			ToolKey:         toolKey,
 			ResourcePattern: pattern,
@@ -182,7 +190,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 			Eval:            celEval,
 			UserID:          ownerID,
 			Base:            toolpolicy.SettingAllow,
-		})
+		}, memberOverride)
 	}
 	eff, err := resolveAt("")
 	if err != nil {
@@ -381,6 +389,29 @@ func (h *Handler) localToolPolicyMode(ctx context.Context, wsID pgtype.UUID) loc
 		}
 	}
 	return localtoolpolicy.ModeFromFlags(enabled, enforce)
+}
+
+// daemonMemberOverrideEnabled reports whether the default-OFF cerebro_member_override
+// flag is on for the workspace — the switch that makes the local-runtime GENERAL
+// tool-policy gate resolve through the member-override model (a member may loosen
+// an inherited group default) instead of the pure tighten-only chain. It mirrors
+// the gateway twin (runtime.memberOverrideEnabled) so a local CLI and a gateway
+// tool call see the same model. A lookup miss or DB error resolves to OFF (the
+// flag's default): a path that can LOOSEN access must never switch on by accident.
+// Only the general gate calls this; the agent-browser sandbox gate stays on Resolve.
+func (h *Handler) daemonMemberOverrideEnabled(ctx context.Context, wsID pgtype.UUID) bool {
+	if h.CerebroQueries == nil {
+		return false
+	}
+	enabled, err := h.CerebroQueries.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+		WorkspaceID: wsID,
+		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
+		FlagKey:     toolpolicy.FlagMemberOverride,
+	})
+	if err != nil || !enabled {
+		return false // no override or DB error → default OFF → pure tighten-only
+	}
+	return true
 }
 
 // daemonPolicyCELEvaluator returns the shared CEL evaluator when the default-OFF

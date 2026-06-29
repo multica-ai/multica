@@ -34,6 +34,17 @@ The unified tool-policy chain is the model we want **everything** to converge on
 - **Resolver:** `toolpolicy.Resolve` (pure fold, `chain.go:153`) / `Store.Resolve`
   (DB, `store.go:95`). Folds base→ceiling, most-restrictive-wins; `Inherit`/absent =
   pass-through; **Base default = Allow** (`chain.go:155-157`).
+- **Member-override resolver (FIR-2175, flag `cerebro_member_override`, default OFF):**
+  `toolpolicy.ResolveMemberOverride` (pure, `chain.go:245`) is a two-stage variant — Stage A
+  resolves the human layers `Workspace › Group › User` by **specificity** (most specific wins,
+  so a member's own Allow can OPEN what their group denied — it can LOOSEN, not only tighten),
+  Stage B lets `Runtime`/`Agent`/`System` only tighten that member ceiling. The **general gate
+  only** dispatches to it through `Store.ResolveGeneral(ctx, q, memberOverride)` (`store.go`),
+  where `memberOverride` is the workspace flag read by the gate handler
+  (`runtime.memberOverrideEnabled` / `handler.daemonMemberOverrideEnabled`, both fail-to-OFF).
+  Flag OFF ⇒ `ResolveGeneral` is byte-for-byte `Resolve`. **SECURITY:** because it can loosen,
+  it MUST NOT govern any deny-by-default floor — credentials, the OS sandbox, repo checkout,
+  the repo-approval cap all keep calling `Resolve` directly and never reach `ResolveGeneral`.
 - **Backing table:** `cerebro_tool_policy` — `(workspace_id, tool_key, layer, subject_id,
   resource_pattern, setting)` (migrations `9042` + `9052` workspace layer + `9054`
   resource_pattern). `setting ∈ inherit|allow|ask|deny`.
@@ -59,8 +70,14 @@ The unified tool-policy chain is the model we want **everything** to converge on
 | `manage_connections` | `group_permissions_cerebro.go:237` (+ router middleware) | live |
 | connection per-tool Deny/Ask | `table_connection.go:305` `ConnectionToolEffective` | live |
 | mention `trigger_other_agent` (layered over a code baseline) | `mentiongate/gate.go:92` | live |
-| general gateway tool calls (`guardToolCallViaPolicy`) | `approval_gate.go:314` | **off by default** (env `CEREBRO_APPROVAL_GATE_ENABLED` + `MODE=toolpolicy`) |
-| local-CLI tool calls (Claude/Codex/Cursor/Gemini) | `daemon_tool_policy_cerebro.go:68` | **off by default** (flags `cerebro_local_tool_policy`(+`_enforce`)) |
+| general gateway tool calls (`guardToolCallViaPolicy`, via `ResolveGeneral`) | `approval_gate.go:314` | **off by default** (env `CEREBRO_APPROVAL_GATE_ENABLED` + `MODE=toolpolicy`) |
+| local-CLI tool calls (Claude/Codex/Cursor/Gemini, via `ResolveGeneral`) | `daemon_tool_policy_cerebro.go:68` | **off by default** (flags `cerebro_local_tool_policy`(+`_enforce`)) |
+
+Both **general** gates resolve through `Store.ResolveGeneral`, so when `cerebro_member_override`
+(FIR-2175, default OFF) is on for the workspace they apply the member-override model; OFF keeps
+them identical to `Resolve`. The **floor** gates in this table — agent-browser unix-socket
+(Base=Deny), repo checkout, connection per-tool — keep calling `Resolve` directly and are NOT
+affected by that flag.
 
 Everything below in section 4 is **not** on this list — it is a separate model.
 

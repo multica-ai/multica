@@ -15,11 +15,37 @@ vi.mock("@multica/core/api", async () => {
 import {
   clearToolPolicy,
   fetchToolPolicyTable,
+  permissionDescription,
   setToolPolicy,
 } from "./tool-policy";
 
 beforeEach(() => {
   mockCerebroRequest.mockReset();
+});
+
+describe("permissionDescription", () => {
+  const row = { description: "Create a new issue.", description_zh: "创建一个新工单。" };
+
+  it("returns Chinese for any zh* locale when present", () => {
+    expect(permissionDescription(row, "zh")).toBe("创建一个新工单。");
+    expect(permissionDescription(row, "zh-Hans")).toBe("创建一个新工单。");
+    expect(permissionDescription(row, "zh-Hans-CN")).toBe("创建一个新工单。");
+  });
+
+  it("returns English for non-zh locales", () => {
+    expect(permissionDescription(row, "en")).toBe("Create a new issue.");
+    expect(permissionDescription(row, "en-US")).toBe("Create a new issue.");
+    expect(permissionDescription(row, undefined)).toBe("Create a new issue.");
+  });
+
+  it("falls back to English when the Chinese translation is missing", () => {
+    expect(permissionDescription({ description: "X", description_zh: "" }, "zh")).toBe("X");
+  });
+
+  it("returns empty string when neither description is set", () => {
+    expect(permissionDescription({ description: "", description_zh: "" }, "zh")).toBe("");
+    expect(permissionDescription({ description: "", description_zh: "" }, "en")).toBe("");
+  });
 });
 
 describe("fetchToolPolicyTable", () => {

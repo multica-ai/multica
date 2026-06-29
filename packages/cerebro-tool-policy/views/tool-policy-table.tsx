@@ -23,6 +23,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
   ChevronRight,
@@ -30,6 +31,7 @@ import {
   Folder,
   FolderGit2,
   Globe,
+  Info,
   KeyRound,
   Loader2,
   Lock,
@@ -87,6 +89,7 @@ import {
   classifySideEffect,
   conditionFacets,
   isLockedFromElsewhere,
+  permissionDescription,
   SIDE_EFFECT_LABEL,
   SIDE_EFFECTS,
   toolPolicyTableOptions,
@@ -533,7 +536,10 @@ export function ToolPolicyTable({
                   >
                     <TableCell>
                       <div className="flex flex-col">
-                        <span className="font-medium">{row.title || row.tool_key}</span>
+                        <span className="flex items-center gap-1 font-medium">
+                          {row.title || row.tool_key}
+                          <PermissionHelp row={row} />
+                        </span>
                         <span className="font-mono text-xs text-muted-foreground">
                           {row.tool_key}
                         </span>
@@ -613,8 +619,9 @@ export function ToolPolicyTable({
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">
+                    <div className="flex items-center gap-1 truncate text-sm font-medium">
                       {row.title || row.tool_key}
+                      <PermissionHelp row={row} />
                     </div>
                     <div className="truncate font-mono text-xs text-muted-foreground">
                       {row.tool_key}
@@ -982,6 +989,27 @@ function ManagedExternallyTag() {
     >
       Managed externally
     </Badge>
+  );
+}
+
+// PermissionHelp shows a small info icon next to a permission, carrying the
+// plain-language explanation of what the permission does as a native tooltip
+// (FIR-2175 phase 3) — so the table is self-explanatory to a non-technical
+// operator. The text follows the active UI language (Chinese for a zh* locale
+// when a translation exists, English otherwise). Renders nothing when the
+// capability has no catalogued description, so an un-described row is unchanged.
+function PermissionHelp({ row }: { row: ToolPolicyRow }) {
+  const { i18n } = useTranslation();
+  const text = permissionDescription(row, i18n.language);
+  if (!text) return null;
+  return (
+    <span
+      title={text}
+      aria-label={text}
+      className="inline-flex shrink-0 cursor-help text-muted-foreground"
+    >
+      <Info className="size-3.5" aria-hidden />
+    </span>
   );
 }
 
