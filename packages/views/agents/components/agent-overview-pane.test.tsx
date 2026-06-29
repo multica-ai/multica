@@ -45,6 +45,9 @@ vi.mock("../../common/actor-issues-panel", () => ({
 const larkListingRef = vi.hoisted(() => ({
   current: { installations: [] as unknown[], configured: false },
 }));
+const slackListingRef = vi.hoisted(() => ({
+  current: { installations: [] as unknown[], configured: false },
+}));
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -52,6 +55,12 @@ vi.mock("@multica/core/lark", () => ({
   larkInstallationsOptions: () => ({
     queryKey: ["lark", "installations"],
     queryFn: () => Promise.resolve(larkListingRef.current),
+  }),
+}));
+vi.mock("@multica/core/slack", () => ({
+  slackInstallationsOptions: () => ({
+    queryKey: ["slack", "installations"],
+    queryFn: () => Promise.resolve(slackListingRef.current),
   }),
 }));
 
@@ -119,6 +128,7 @@ function renderPane(runtimes: AgentRuntime[]) {
 
 beforeEach(() => {
   larkListingRef.current = { installations: [], configured: false };
+  slackListingRef.current = { installations: [], configured: false };
 });
 
 describe("AgentOverviewPane MCP tab visibility", () => {
@@ -163,9 +173,19 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
     ).toBeInTheDocument();
   });
 
-  it("hides the Integrations tab when Lark is not configured", () => {
-    // Default ref is configured:false; the tab must not appear on
-    // deployments without the integration, which are the common case.
+  it("shows the Integrations tab when only Slack is configured (Lark off)", async () => {
+    // Regression: the tab gate must consider Slack too, not just Lark —
+    // a Slack-only deployment was hiding the tab (and its bind entry).
+    slackListingRef.current = { installations: [], configured: true };
+    renderPane([makeRuntime("claude")]);
+    expect(
+      await screen.findByRole("button", { name: /^Integrations$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the Integrations tab when neither Lark nor Slack is configured", () => {
+    // Default refs are configured:false; the tab must not appear on
+    // deployments without either integration, the common case.
     renderPane([makeRuntime("claude")]);
     expect(
       screen.queryByRole("button", { name: /^Integrations$/i }),

@@ -25,11 +25,12 @@ import (
 const originSlackChat = "slack_chat"
 
 // NewSlackResolverSet assembles the Slack ResolverSet over the generated
-// queries + a tx starter (for the shared session service). Replier/Typing are
-// left nil for now: the outbound binding-prompt / notice path is a later step
-// (the inbound pipeline — route, identity, dedup, session, /issue, run trigger
-// — is fully functional without them).
-func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter) engine.ResolverSet {
+// queries + a tx starter (for the shared session service). The replier delivers
+// the outbound binding-prompt / status / issue-created notices; pass a nil
+// engine.OutboundReplier to disable them (the inbound pipeline — route,
+// identity, dedup, session, /issue, run trigger — is fully functional without
+// it). Typing is left nil. (MUL-3666 wired the replier; stage 3 had it nil.)
+func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier) engine.ResolverSet {
 	return engine.ResolverSet{
 		Installation: &installationResolver{q: q},
 		Identity:     &identityResolver{q: q},
@@ -40,6 +41,7 @@ func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter) engine.ResolverSet 
 			Fallback: "Slack chat",
 		})},
 		Audit:      &auditor{q: q},
+		Replier:    replier,
 		OriginType: originSlackChat,
 	}
 }
@@ -105,6 +107,21 @@ func nullText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
 }
 
+// installationServesTeam reports whether an installation (its stored config) may
+// serve events from eventTeamID. Inbound routing keys on api_app_id, which
+// identifies the Slack APP, not the Slack workspace: a BYO app distributed /
+// installed into another Slack workspace emits events carrying the SAME app id.
+// So we additionally require the event's team to match the team the installed
+// bot belongs to. An installation with no recorded team (legacy) is permissive.
+func installationServesTeam(installConfigJSON json.RawMessage, eventTeamID string) bool {
+	// Read team_id directly (NOT via DecodePublicConfig, which falls back to
+	// app_id when team_id is absent — a hosted-era convenience that would defeat
+	// this check for BYO where app_id != team_id).
+	var cfg installConfig
+	_ = json.Unmarshal(installConfigJSON, &cfg)
+	return cfg.TeamID == "" || cfg.TeamID == eventTeamID
+}
+
 // ---- installation routing ----
 
 type installationResolver struct{ q *db.Queries }
@@ -116,13 +133,20 @@ func (r *installationResolver) ResolveInstallation(ctx context.Context, msg chan
 	}
 	inst, err := r.q.GetChannelInstallationByAppID(ctx, db.GetChannelInstallationByAppIDParams{
 		ChannelType: string(TypeSlack),
-		AppID:       raw.TeamID, // Slack team_id is stored in the routing-key slot
+		// Route by the event's api_app_id: each BYO installation stores its real
+		// Slack app id in the routing-key slot (config->>'app_id'), and the
+		// per-installation Socket Mode connection only ever delivers events for
+		// its own app, so api_app_id uniquely identifies the installation.
+		AppID: raw.APIAppID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return engine.ResolvedInstallation{}, engine.ErrInstallationNotFound
 		}
 		return engine.ResolvedInstallation{}, err
+	}
+	if !installationServesTeam(inst.Config, raw.TeamID) {
+		return engine.ResolvedInstallation{}, engine.ErrInstallationNotFound
 	}
 	return engine.ResolvedInstallation{
 		ID:              inst.ID,

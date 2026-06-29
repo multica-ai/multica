@@ -370,7 +370,7 @@
     },
     "integrations": {
       "intro": "Connect this agent to external chat platforms so people can work with it where they already are.",
-      "members_note": "Only workspace owners and admins can bind a Lark Bot to an agent. You can view connected bots in Settings → Integrations."
+      "members_note": "Only workspace owners and admins can connect an agent to an external chat platform. You can view connected bots in Settings → Integrations."
     },
     "activity": {
       "section_now": "Now",

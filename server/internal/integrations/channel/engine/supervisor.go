@@ -345,6 +345,16 @@ func (s *Supervisor) sweep(ctx context.Context) {
 	}
 	active := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
+		// Skip channel types with no registered per-installation Factory. Such
+		// rows are driven outside the Supervisor (e.g. Slack's app-level Socket
+		// Mode connector owns ONE deployment connection for all its
+		// installations, so each Slack row carries only outbound creds + routing,
+		// not its own connection). Without this guard the supervise loop would
+		// acquire the lease, hit ErrUnknownType from Registry.Build, release, and
+		// back off forever — churning the lease and the log on every such row.
+		if _, ok := s.registry.Lookup(row.ChannelType); !ok {
+			continue
+		}
 		id := uuidString(row.ID)
 		active[id] = struct{}{}
 		s.maybeRestartOnRotation(id, row)

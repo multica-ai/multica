@@ -85,6 +85,8 @@
     "./github/queries": "./github/queries.ts",
     "./lark": "./lark/index.ts",
     "./lark/queries": "./lark/queries.ts",
+    "./slack": "./slack/index.ts",
+    "./slack/queries": "./slack/queries.ts",
     "./feedback": "./feedback/index.ts",
     "./feedback/mutations": "./feedback/mutations.ts",
     "./realtime": "./realtime/index.ts",
