@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -268,6 +269,38 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
 	return d
+}
+
+// safeGo starts a new goroutine that runs fn with panic recovery. If fn
+// (or anything it calls) panics, the panic is captured at Error level with
+// a stack trace and the goroutine exits cleanly — instead of crashing the
+// entire daemon process and stalling every workspace's runtime polling,
+// heartbeat, and task lifecycle.
+//
+// safeGo deliberately does NOT add WaitGroup semantics: callers that need
+// to track fn's lifetime must continue to do so explicitly. The existing
+// defer-on-inner-closure pattern (e.g. `defer pollerWG.Done()` placed as
+// the first statement inside fn) continues to fire correctly, because
+// deferred calls run in LIFO order before the recover itself unwinds.
+//
+// In Go 1.22+ per-iteration loop variables, capturing loop variables from
+// the enclosing scope is safe — wrapping `go d.fn(loopVar, ...)` as
+// `d.safeGo("fn", func() { d.fn(loopVar, ...) })` preserves the original
+// argument-evaluation semantics for the range-loop pattern used in this
+// file.
+func (d *Daemon) safeGo(name string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				d.logger.Error("goroutine panicked; recovered to keep daemon alive",
+					"name", name,
+					"panic", r,
+					"stack", string(debug.Stack()),
+				)
+			}
+		}()
+		fn()
+	}()
 }
 
 // setAgentVersion records the detected CLI version for an agent provider so
@@ -764,8 +797,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// "starting" until d.ready is set after preflight, so a slow or *failing*
 	// preflight is never misreported as a started daemon. resolveAuth has
 	// already run, so a missing token still fails fast before we begin serving.
-	go d.serveHealth(ctx, healthLn, time.Now())
-
+	d.safeGo("serveHealth", func() { d.serveHealth(ctx, healthLn, time.Now()) })
 	// Renew the PAT before the first API call, then do the initial
 	// workspace sync. Both steps live in preflightAuth so the ordering
 	// invariant (renew first) is enforced at one site instead of
@@ -779,14 +811,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 	defer d.deregisterRuntimes()
 
 	// Start workspace sync loop to discover newly created workspaces.
-	go d.workspaceSyncLoop(ctx)
+	d.safeGo("workspaceSyncLoop", func() { d.workspaceSyncLoop(ctx) })
 
 	taskWakeups := make(chan taskWakeup, 256)
-	go d.taskWakeupLoop(ctx, taskWakeups)
-	go d.heartbeatLoop(ctx)
-	go d.gcLoop(ctx)
-	go d.autoUpdateLoop(ctx)
-	go d.tokenRenewalLoop(ctx)
+	d.safeGo("taskWakeupLoop", func() { d.taskWakeupLoop(ctx, taskWakeups) })
+	d.safeGo("heartbeatLoop", func() { d.heartbeatLoop(ctx) })
+	d.safeGo("gcLoop", func() { d.gcLoop(ctx) })
+	d.safeGo("autoUpdateLoop", func() { d.autoUpdateLoop(ctx) })
+	d.safeGo("tokenRenewalLoop", func() { d.tokenRenewalLoop(ctx) })
 
 	// Preflight succeeded and the background loops are up: the daemon has
 	// registered its runtimes and can now claim and run tasks. Flip /health
@@ -1302,10 +1334,10 @@ func (d *Daemon) registerTaskRepos(workspaceID, taskID string, repos []RepoData)
 		// yet, so the agent's first checkout will surface a sync failure
 		// without silently treating it as a config bug.
 		d.bgSyncs.Add(1)
-		go func() {
+		d.safeGo("bgRepoSync", func() {
 			defer d.bgSyncs.Done()
 			d.syncWorkspaceRepos(workspaceID, toSync)
-		}()
+		})
 	}
 }
 
@@ -1794,7 +1826,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		d.mu.Unlock()
 
 		if d.repoCache != nil && len(resp.Repos) > 0 {
-			go d.syncWorkspaceRepos(id, resp.Repos)
+			d.safeGo("syncWorkspaceRepos", func() { d.syncWorkspaceRepos(id, resp.Repos) })
 		}
 
 		// Tell the server about any tasks the previous daemon process was
@@ -1872,7 +1904,7 @@ func (d *Daemon) heartbeatLoop(ctx context.Context) {
 			}
 			rctx, rcancel := context.WithCancel(ctx)
 			cancels[rid] = rcancel
-			go d.runRuntimeHeartbeat(rctx, rid)
+			d.safeGo("runRuntimeHeartbeat", func() { d.runRuntimeHeartbeat(rctx, rid) })
 		}
 	}
 
@@ -1940,7 +1972,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 				// concurrent callers and runs the recovery HTTP call under
 				// the daemon root context so notifyRuntimeSetChanged
 				// tearing down this heartbeat goroutine cannot abort it.
-				go d.handleRuntimeGone(rid)
+				d.safeGo("handleRuntimeGone", func() { d.handleRuntimeGone(rid) })
 				return
 			}
 			d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)
@@ -1948,11 +1980,11 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 		return
 	}
 	if resp != nil && resp.RuntimeGone {
-		// The WS path returns a successful ack with RuntimeGone=true for the
-		// same scenario; treat it the same way here in case HTTP starts
-		// surfacing this signal too.
-		go d.handleRuntimeGone(rid)
-		return
+	// The WS path returns a successful ack with RuntimeGone=true for the
+	// same scenario; treat it the same way here in case HTTP starts
+	// surfacing this signal too.
+	d.safeGo("handleRuntimeGone", func() { d.handleRuntimeGone(rid) })
+	return
 	}
 	d.handleHeartbeatActions(ctx, rid, resp)
 }
@@ -1976,28 +2008,28 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 		)
 	}
 	if resp.PendingUpdate != nil {
-		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
+		d.safeGo("handleUpdate", func() { d.handleUpdate(ctx, runtimeID, resp.PendingUpdate) })
 	}
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
+			d.safeGo("handleModelList", func() { d.handleModelList(ctx, *rt, resp.PendingModelList.ID) })
 		}
 	}
 	if resp.PendingLocalSkills != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID)
+			d.safeGo("handleLocalSkillList", func() { d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID) })
 		}
 	}
 	// Prefer the batch field (new backend); fall back to singular (old backend).
 	if len(resp.PendingLocalSkillImports) > 0 {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			for _, imp := range resp.PendingLocalSkillImports {
-				go d.handleLocalSkillImport(ctx, *rt, imp)
+				d.safeGo("handleLocalSkillImport", func() { d.handleLocalSkillImport(ctx, *rt, imp) })
 			}
 		}
 	} else if resp.PendingLocalSkillImport != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
+			d.safeGo("handleLocalSkillImport", func() { d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport) })
 		}
 	}
 }
@@ -2467,10 +2499,10 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			wakeup := make(chan struct{}, 1)
 			pollers[rid] = &pollerHandle{cancel: pcancel, wakeup: wakeup}
 			pollerWG.Add(1)
-			go func(rid string, pctx context.Context, wakeup <-chan struct{}) {
+			d.safeGo("runtimePoller", func() {
 				defer pollerWG.Done()
 				d.runRuntimePoller(pctx, ctx, rid, sem, wakeup, &taskWG)
-			}(rid, pctx, wakeup)
+			})
 		}
 	}
 
@@ -2490,7 +2522,7 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			pollerWG.Wait()
 
 			waitDone := make(chan struct{})
-			go func() { taskWG.Wait(); close(waitDone) }()
+			d.safeGo("taskWGDrain", func() { taskWG.Wait(); close(waitDone) })
 			select {
 			case <-waitDone:
 			case <-time.After(30 * time.Second):
@@ -2610,7 +2642,7 @@ func (d *Daemon) runRuntimePoller(
 					// the poller; the runtime-set watcher will tear this
 					// goroutine down via pollerCtx once the workspace is
 					// re-registered with a new runtime ID.
-					go d.handleRuntimeGone(rid)
+					d.safeGo("handleRuntimeGone", func() { d.handleRuntimeGone(rid) })
 					return
 				}
 				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
@@ -2637,13 +2669,20 @@ func (d *Daemon) runRuntimePoller(
 		d.logger.Info("task received", "task", shortID(task.ID), "target", taskTarget)
 		taskWG.Add(1)
 		d.activeTasks.Add(1)
-		go func(t Task, slot int) {
+		// Snapshot task and slot at goroutine launch time, mirroring the
+		// previous IIFE's value-capture semantics (`go func(t Task, slot int)
+		// {...}(*task, slot)`). The outer loop reassigns both before the next
+		// iteration, so referencing them directly from the closure would
+		// race with the next task.
+		taskVal := *task
+		slotVal := slot
+		d.safeGo("taskHandler", func() {
 			defer taskWG.Done()
 			defer d.exitClaim()
 			defer d.activeTasks.Add(-1)
-			defer func() { sem <- slot }()
-			d.handleTask(parentCtx, t, slot)
-		}(*task, slot)
+			defer func() { sem <- slotVal }()
+			d.handleTask(parentCtx, taskVal, slotVal)
+		})
 		// Loop immediately: more tasks may already be queued for this runtime.
 	}
 }
@@ -2738,7 +2777,7 @@ func shouldInterruptAgent(status string, err error) bool {
 // so callers should pass the runCtx that was set up around the agent run.
 func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollInterval time.Duration, taskLog *slog.Logger) <-chan struct{} {
 	cancelled := make(chan struct{})
-	go func() {
+	d.safeGo("watchTaskCancellation", func() {
 		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
 		for {
@@ -2759,7 +2798,7 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 				return
 			}
 		}
-	}()
+	})
 	return cancelled
 }
 
@@ -2847,13 +2886,13 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		pollInterval = 5 * time.Second
 	}
 	cancelledByPoll := d.watchTaskCancellation(runCtx, task.ID, pollInterval, taskLog)
-	go func() {
+	d.safeGo("runCancelRelay", func() {
 		select {
 		case <-cancelledByPoll:
 			runCancel()
 		case <-runCtx.Done():
 		}
-	}()
+	})
 
 	result, err := d.runner.run(runCtx, task, provider, slot, taskLog)
 
@@ -3014,13 +3053,13 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		// shouldn't run anymore" signals we need to react to during the wait.
 		watcherOnce.Do(func() {
 			cancelledByPoll = d.watchTaskCancellation(waitCtx, task.ID, pollInterval, taskLog)
-			go func() {
+			d.safeGo("waitCancelRelay", func() {
 				select {
 				case <-cancelledByPoll:
 					waitCancel()
 				case <-waitCtx.Done():
 				}
-			}()
+			})
 		})
 	}
 	release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
@@ -4090,10 +4129,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	idleWatchdogThreshold.Store(int64(d.cfg.AgentIdleWatchdog))
 	idleWindow := d.cfg.AgentIdleWatchdog
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
+		d.safeGo("runIdleWatchdog", func() {
+			d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
+		})
 	}
 
-	go func() {
+	d.safeGo("agentSessionPump", func() {
 		var seq atomic.Int32
 		var mu sync.Mutex
 		var pendingText strings.Builder
@@ -4140,7 +4181,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		defer ticker.Stop()
 
 		done := make(chan struct{})
-		go func() {
+		d.safeGo("agentMessageFlusher", func() {
 			for {
 				select {
 				case <-ticker.C:
@@ -4149,7 +4190,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					return
 				}
 			}
-		}()
+		})
 
 		var sessionPinned atomic.Bool
 		for {
@@ -4173,13 +4214,13 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					if msg.SessionID != "" && !sessionPinned.Swap(true) {
 						sid := msg.SessionID
 						wd := opts.Cwd
-						go func() {
+						d.safeGo("pinTaskSession", func() {
 							pinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 							defer cancel()
 							if err := d.client.PinTaskSession(pinCtx, taskID, sid, wd); err != nil {
 								taskLog.Debug("pin session failed", "error", err)
 							}
-						}()
+						})
 					}
 				case agent.MessageToolUse:
 					n := toolCount.Add(1)
@@ -4261,11 +4302,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			case <-drainCtx.Done():
 				goto drainDone
 			}
-		}
-	drainDone:
-		close(done)
-		flush()
-	}()
+	}
+drainDone:
+	close(done)
+	flush()
+	})
 
 	select {
 	case result := <-session.Result:
