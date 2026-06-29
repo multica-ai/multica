@@ -395,6 +395,16 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := autopilotToResponse(autopilot, subs)
 
+	// Webhook tokens are trigger-granting secrets: anyone who can read the
+	// token can fire the autopilot from outside the permission system. Only
+	// callers who can write the autopilot (its creator or a workspace admin)
+	// get the live token/URL; every other member sees the trigger metadata
+	// with the secret fields stripped (MUL-3807).
+	canSeeSecrets := false
+	if member, err := h.getWorkspaceMember(r.Context(), requestUserID(r), workspaceID); err == nil {
+		canSeeSecrets = canWriteAutopilot(autopilot, member)
+	}
+
 	// Include triggers.
 	triggers, err := h.Queries.ListAutopilotTriggers(r.Context(), autopilot.ID)
 	if err != nil {
@@ -402,7 +412,13 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	triggerResp := make([]AutopilotTriggerResponse, len(triggers))
 	for i, t := range triggers {
-		triggerResp[i] = h.triggerToResponse(t)
+		tr := h.triggerToResponse(t)
+		if !canSeeSecrets {
+			tr.WebhookToken = nil
+			tr.WebhookPath = nil
+			tr.WebhookURL = nil
+		}
+		triggerResp[i] = tr
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -430,6 +446,36 @@ func (h *Handler) loadAutopilotInWorkspace(w http.ResponseWriter, r *http.Reques
 		return db.Autopilot{}, false
 	}
 	return autopilot, true
+}
+
+// canWriteAutopilot reports whether the given member may perform write or
+// execute operations on the autopilot — editing it, deleting it, triggering
+// runs, replaying deliveries, and managing its triggers and webhook secrets.
+// Write access is held by the autopilot's creator and by workspace
+// owners/admins; every other member has read-only access. The same predicate
+// also gates whether webhook secrets are exposed on the read path, since
+// seeing a webhook token is equivalent to being able to trigger (MUL-3807).
+func canWriteAutopilot(ap db.Autopilot, member db.Member) bool {
+	if roleAllowed(member.Role, "owner", "admin") {
+		return true
+	}
+	return ap.CreatedByType == "member" && uuidToString(ap.CreatedByID) == uuidToString(member.UserID)
+}
+
+// requireAutopilotWrite enforces canWriteAutopilot for a mutating/executing
+// request. On failure it writes the response (404 when the caller is not a
+// member of the workspace, 403 otherwise) and returns false; the caller must
+// return early. On success it returns true.
+func (h *Handler) requireAutopilotWrite(w http.ResponseWriter, r *http.Request, ap db.Autopilot, workspaceID string) bool {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if !canWriteAutopilot(ap, member) {
+		writeError(w, http.StatusForbidden, "only the autopilot creator or a workspace admin can manage this autopilot")
+		return false
+	}
+	return true
 }
 
 func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
@@ -601,6 +647,9 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	prev, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
 	if !ok {
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, prev, workspaceID) {
 		return
 	}
 
@@ -799,11 +848,15 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
+	ap, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
 		ID:          idUUID,
 		WorkspaceID: wsUUID,
-	}); err != nil {
+	})
+	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
 
@@ -849,6 +902,9 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 
 	ap, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
 
@@ -1117,6 +1173,9 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
+		return
+	}
 
 	triggerUUID, ok := parseUUIDOrBadRequest(w, triggerID, "trigger id")
 	if !ok {
@@ -1252,11 +1311,15 @@ func (h *Handler) DeleteAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if _, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
+	ap, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
 		ID:          autopilotUUID,
 		WorkspaceID: wsUUID,
-	}); err != nil {
+	})
+	if err != nil {
 		writeError(w, http.StatusNotFound, "autopilot not found")
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
 
@@ -1294,6 +1357,9 @@ func (h *Handler) RotateAutopilotTriggerWebhookToken(w http.ResponseWriter, r *h
 
 	ap, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
 
@@ -1360,6 +1426,9 @@ func (h *Handler) SetAutopilotTriggerSigningSecret(w http.ResponseWriter, r *htt
 
 	ap, ok := h.loadAutopilotInWorkspace(w, r, autopilotID, workspaceID)
 	if !ok {
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
 		return
 	}
 	triggerUUID, ok := parseUUIDOrBadRequest(w, triggerID, "trigger id")
@@ -1503,6 +1572,9 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	autopilot, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
 	if !ok {
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, autopilot, workspaceID) {
 		return
 	}
 	if autopilot.Status != "active" {
