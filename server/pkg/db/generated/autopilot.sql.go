@@ -176,7 +176,7 @@ const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
 VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id
 `
 
 type CreateAutopilotTaskParams struct {
@@ -229,6 +229,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.InitiatorUserID,
 		&i.HandoffNote,
 		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
 	)
 	return i, err
 }
@@ -836,7 +837,8 @@ type ListSchedulableAutopilotTriggersRow struct {
 // last_fired_at is read so the planner hook can anchor cold-start
 // enumeration on the most recent successful fire (set by either the
 // legacy goroutine before the new scheduler took over, or the new
-// scheduler's own TouchAutopilotTriggerFiredAt call). Without it,
+// scheduler's own post-dispatch advance — AdvanceTriggerNextRun, falling
+// back to TouchAutopilotTriggerFiredAt on a cron parse error). Without it,
 // a trigger that was created days ago and fired by the legacy code
 // looks like a brand-new trigger to the new scheduler on first tick
 // and the half-open `(created_at, now]` enumeration replays the most

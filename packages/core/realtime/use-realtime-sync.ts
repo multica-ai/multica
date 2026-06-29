@@ -23,6 +23,7 @@ import {
 } from "../agents/queries";
 import { githubKeys } from "../github/queries";
 import { larkKeys } from "../lark/queries";
+import { slackKeys } from "../slack/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -30,7 +31,7 @@ import {
   onIssueLabelsChanged,
   onIssueMetadataChanged,
 } from "../issues/ws-updaters";
-import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
+import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
 import {
   notificationPreferenceOptions,
@@ -230,6 +231,9 @@ export async function handleInboxNew(
 ): Promise<void> {
   const sourceWsId = item.workspace_id;
   if (sourceWsId) onInboxNew(qc, sourceWsId, item);
+  // A new item in ANY workspace can light the workspace-switcher dot, so
+  // refresh the cross-workspace summary regardless of the active workspace.
+  onInboxSummaryInvalidate(qc);
   // Fire a native OS notification only when the app isn't focused. When
   // the user is already looking at Multica, the inbox sidebar's unread
   // styling is enough — no need to interrupt with a banner. `desktopAPI`
@@ -320,6 +324,9 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
   }
+  // Cross-workspace, so outside the wsId guard: a reconnect may have missed
+  // inbox events from any workspace, so re-pull the switcher-dot summary.
+  onInboxSummaryInvalidate(qc);
   // Per-issue caches are keyed without wsId, so the issueKeys.all(wsId)
   // prefix above does not reach them. They rely entirely on WS events for
   // freshness (staleTime: Infinity), so events missed while disconnected
@@ -333,6 +340,14 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
   qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
   qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+  // Per-chat-session caches are also keyed without wsId, so the
+  // chatKeys.all(wsId) prefix above only reaches session lists / aggregates.
+  // Message streams rely on WS invalidation with staleTime: Infinity; recover
+  // sessions that missed chat/task events while the socket was disconnected.
+  qc.invalidateQueries({ queryKey: chatKeys.messagesAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.messagesPageAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.pendingTaskAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.taskMessagesAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
@@ -394,6 +409,12 @@ export function useRealtimeSync(
       inbox: () => {
         const wsId = getCurrentWsId();
         if (wsId) onInboxInvalidate(qc, wsId);
+        // inbox:read / inbox:archived / batch events arrive here. They can
+        // originate from a workspace other than the active one (personal
+        // events fan out to all the user's connections), so always refresh
+        // the cross-workspace summary — its dot must clear when another
+        // workspace's items are read/archived.
+        onInboxSummaryInvalidate(qc);
       },
       agent: () => {
         const wsId = getCurrentWsId();
@@ -471,6 +492,10 @@ export function useRealtimeSync(
       lark_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
+      },
+      slack_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: slackKeys.installations(wsId) });
       },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all
@@ -588,6 +613,8 @@ export function useRealtimeSync(
       if (wsId) {
         onIssueUpdated(qc, wsId, issue, {
           assigneeChanged: payload.assignee_changed,
+          statusChanged: payload.status_changed,
+          projectChanged: payload.project_changed,
         });
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);

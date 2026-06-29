@@ -11,28 +11,99 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  frontend:
+  # Decides whether the (heavy, ~6min) frontend job has anything to do.
+  # The frontend job validates the web/desktop apps, the shared packages,
+  # the install graph, and the selfhost / reserved-slugs scripts it runs;
+  # a pure backend-only or docs-only PR touches none of those and gains
+  # nothing from a full web build. This job emits a single `frontend`
+  # output consumed by the frontend job below.
+  changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      frontend: ${{ steps.decide.outputs.frontend }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # apps/docs is excluded from the frontend turbo run, so a
+          # docs-only change does not need this job. apps/mobile has its
+          # own mobile-verify workflow. Everything else the frontend job
+          # touches is listed here; bias toward over-matching since a
+          # missed path silently skips validation.
+          filters: |
+            frontend:
+              - 'apps/web/**'
+              - 'apps/desktop/**'
+              - 'packages/**'
+              - 'package.json'
+              - '.npmrc'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'turbo.json'
+              - '.github/workflows/ci.yml'
+              - 'scripts/generate-reserved-slugs.mjs'
+              - 'server/internal/handler/reserved_slugs.json'
+              - 'scripts/selfhost-config.test.sh'
+              - 'scripts/check.sh'
+              - 'scripts/dev.sh'
+              - 'scripts/local-env.sh'
+              - '.env.example'
+              - 'docker-compose.selfhost.yml'
+
+      - name: Decide
+        id: decide
+        # Always run the frontend job on push to main (full validation);
+        # on pull_request, run only when frontend-relevant paths changed.
+        # The frontend job itself always runs and reports success — its
+        # steps are gated on this output rather than the job being skipped
+        # — so the required "frontend" status check is satisfied with a
+        # genuine green instead of being left pending on filtered PRs.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FRONTEND_CHANGED: ${{ steps.filter.outputs.frontend }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$FRONTEND_CHANGED" = "true" ]; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  frontend:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/checkout@v6
+
       - name: Setup pnpm
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
 
       - name: Install dependencies
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: pnpm install
 
       - name: Test self-host env derivation
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/selfhost-config.test.sh
 
       - name: Verify reserved-slugs.ts is up to date
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         # Re-runs the generator and fails on any drift from the
         # checked-in TypeScript output. The Go side embeds the JSON
         # source directly, so a passing diff here proves both sides
@@ -42,8 +113,9 @@ jobs:
           git diff --exit-code -- packages/core/paths/reserved-slugs.ts
 
       - name: Build, type check, lint, and test
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
         # Mobile lives in a parallel mobile-verify workflow (path-filtered
-        # to apps/mobile/** + packages/core/types/**) so it doesn't add
+        # to apps/mobile/** + packages/core/**) so it doesn't add
         # ~50s of expo-lint + tsc to every web/desktop PR. Keep this
         # filter in sync with the root package.json scripts, which also
         # exclude @multica/mobile.

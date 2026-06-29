@@ -40,14 +40,16 @@ func larkMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
 	return lm, nil
 }
 
-// NewFeishuResolverSet assembles the Feishu ResolverSet from the store, chat
-// service, audit logger, and (optional) outbound replier + typing indicator.
-func NewFeishuResolverSet(store *ChannelStore, chat ChatSessionService, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager) engine.ResolverSet {
+// NewFeishuResolverSet assembles the Feishu ResolverSet from the store, the
+// shared session service, audit logger, and (optional) outbound replier +
+// typing indicator. Feishu is just another consumer of the channel-agnostic
+// engine.ChatSession — there is no Feishu-specific session implementation.
+func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &feishuInstallationResolver{store: store},
 		Identity:     &feishuIdentityResolver{store: store},
 		Dedup:        &feishuDeduper{store: store},
-		Session:      &feishuSessionBinder{chat: chat},
+		Session:      &feishuSessionBinder{session: session},
 		Audit:        &feishuAuditor{audit: audit},
 		OriginType:   originFeishuChat,
 	}
@@ -149,48 +151,47 @@ func (r *feishuDeduper) Release(ctx context.Context, installationID pgtype.UUID,
 
 // ---- session bind / append ----
 
-type feishuSessionBinder struct{ chat ChatSessionService }
+// chatSession is the slice of engine.ChatSession the Feishu binder drives.
+// Declared as an interface so the (platform-specific) param mapping can be
+// unit-tested with a fake; *engine.ChatSession is the production value.
+type chatSession interface {
+	EnsureSession(ctx context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error)
+	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
+}
+
+type feishuSessionBinder struct{ session chatSession }
 
 func (r *feishuSessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessionParams) (pgtype.UUID, error) {
-	return r.chat.EnsureChatSession(ctx, EnsureChatSessionParams{
+	return r.session.EnsureSession(ctx, engine.EnsureSessionInput{
 		WorkspaceID:    p.Installation.WorkspaceID,
-		InstallationID: p.Installation.ID,
 		AgentID:        p.Installation.AgentID,
-		ChatID:         ChatID(p.Message.Source.ChatID),
-		ChatType:       ChatType(p.Message.Source.ChatType),
+		InstallationID: p.Installation.ID,
 		Sender:         p.Sender,
+		// Feishu's chat id is the session-isolation key (one session per chat),
+		// and channel_chat_id IS the real outbound chat, so no BindingConfig.
+		BindingKey: p.Message.Source.ChatID,
+		ChatType:   p.Message.Source.ChatType,
 	})
 }
 
 func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
+	// CommandText is the user's OWN typed text: the Feishu enricher inlines
+	// quoted/forwarded context into Body, so /issue parsing must use the
+	// un-enriched command body stashed in Raw, not Body.
 	lm, err := larkMsgFromRaw(p.Message)
 	if err != nil {
 		return engine.AppendResult{}, err
 	}
-	res, err := r.chat.AppendUserMessage(ctx, AppendUserMessageParams{
-		ChatSessionID:  p.SessionID,
+	return r.session.AppendUserMessage(ctx, engine.AppendInput{
+		SessionID:      p.SessionID,
 		Sender:         p.Sender,
-		Body:           p.Message.Text,
-		CommandBody:    lm.CommandBody,
 		InstallationID: p.InstallationID,
-		LarkMessageID:  p.Message.MessageID,
-		LarkThreadID:   p.Message.Source.ThreadID,
+		Body:           p.Message.Text,
+		CommandText:    lm.CommandBody,
+		MessageID:      p.Message.MessageID,
+		ThreadID:       p.Message.Source.ThreadID,
 		ClaimToken:     p.ClaimToken,
 	})
-	if err != nil {
-		if errors.Is(err, ErrClaimLost) {
-			return engine.AppendResult{}, engine.ErrClaimLost
-		}
-		return engine.AppendResult{}, err
-	}
-	out := engine.AppendResult{DedupMarked: res.DedupMarked}
-	if res.IssueCommand != nil {
-		out.IssueCommand = &engine.IssueCommand{
-			Title:       res.IssueCommand.Title,
-			Description: res.IssueCommand.Description,
-		}
-	}
-	return out, nil
 }
 
 // ---- audit ----

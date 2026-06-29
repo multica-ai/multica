@@ -46,8 +46,6 @@ import { deriveThreadResolution } from "./thread-utils";
 
 const highlightedCommentBackgroundClass =
   "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
-const highlightedCommentFadeClass =
-  "after:from-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
 
 function StickyHeaderShell({
   className,
@@ -67,9 +65,8 @@ function StickyHeaderShell({
   return (
     <div
       className={cn(
-        "sticky top-0 z-10 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-1 after:bg-gradient-to-b after:to-transparent",
+        "sticky top-0 z-10 transition-colors duration-700 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-1 after:bg-[inherit] after:[mask-image:linear-gradient(to_bottom,#000,transparent)] after:[-webkit-mask-image:linear-gradient(to_bottom,#000,transparent)]",
         highlighted ? highlightedCommentBackgroundClass : "bg-card",
-        highlighted ? highlightedCommentFadeClass : "after:from-card",
       )}
     >
       <div className={className}>
@@ -314,8 +311,10 @@ function useEditAttachmentState(
   const { t } = useT("issues");
   const { uploadWithToast } = useFileUpload(api);
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const editorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
+  const savingRef = useRef(false);
   const [content, setContent] = useState(entry.content ?? "");
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
@@ -398,7 +397,7 @@ function useEditAttachmentState(
   };
 
   const saveEdit = async () => {
-    if (cancelledRef.current) return;
+    if (cancelledRef.current || savingRef.current) return;
     const trimmed = editorRef.current
       ?.getMarkdown()
       ?.replace(/(\n\s*)+$/, "")
@@ -417,6 +416,8 @@ function useEditAttachmentState(
     const suppressAgentIds = triggerPreview.agents
       .filter((agent) => suppressedAgentIds.has(agent.id))
       .map((agent) => agent.id);
+    savingRef.current = true;
+    setSaving(true);
     try {
       await onEdit(
         entry.id,
@@ -431,11 +432,15 @@ function useEditAttachmentState(
           ? err.message
           : t(($) => $.comment.update_failed),
       );
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
   return {
     editing,
+    saving,
     editorRef,
     editorAttachments,
     handleUpload,
@@ -645,8 +650,11 @@ function CommentRow({
                 multiple
                 onSelect={(file) => edit.editorRef.current?.uploadFile(file)}
               />
-              <Button size="sm" variant="ghost" onClick={edit.cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
-              <Button size="sm" variant="outline" onClick={edit.saveEdit}>{t(($) => $.comment.save_action)}</Button>
+              <Button size="sm" variant="ghost" onClick={edit.cancelEdit} disabled={edit.saving}>{t(($) => $.comment.cancel_edit)}</Button>
+              <Button size="sm" variant="outline" onClick={edit.saveEdit} disabled={edit.saving}>
+                {edit.saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {t(($) => $.comment.save_action)}
+              </Button>
             </div>
           </div>
           {edit.isDragOver && <FileDropOverlay />}
@@ -932,8 +940,11 @@ function CommentCardImpl({
                     />
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={edit.cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
-                    <Button size="sm" variant="outline" onClick={edit.saveEdit}>{t(($) => $.comment.save_action)}</Button>
+                    <Button size="sm" variant="ghost" onClick={edit.cancelEdit} disabled={edit.saving}>{t(($) => $.comment.cancel_edit)}</Button>
+                    <Button size="sm" variant="outline" onClick={edit.saveEdit} disabled={edit.saving}>
+                      {edit.saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      {t(($) => $.comment.save_action)}
+                    </Button>
                   </div>
                 </div>
                 {edit.isDragOver && <FileDropOverlay />}

@@ -14,12 +14,14 @@ import (
 )
 
 // antigravityBackend implements Backend by spawning Google's Antigravity CLI
-// (`agy -p <prompt>`) in non-interactive print mode. Unlike Claude / Codex /
-// Cursor / Gemini, the Antigravity CLI does not expose a structured event
-// stream — stdout is plain assistant text (intermediate "I will run X" lines
-// and the final reply, all interleaved). The backend therefore streams stdout
-// line-by-line as `MessageText` events and accumulates the same text as the
-// final `Result.Output`.
+// with a one-shot prompt (`agy -p <prompt>`). Despite the upstream flag name,
+// current agy print mode is still capable of running Antigravity tools; it is
+// the daemon-compatible mode because `agy -i` requires an attached TTY. Unlike
+// Claude / Codex / Cursor / Gemini, the Antigravity CLI does not expose a
+// structured event stream — stdout is plain assistant text (intermediate "I
+// will run X" lines and the final reply, all interleaved). The backend
+// therefore streams stdout line-by-line as `MessageText` events and accumulates
+// the same text as the final `Result.Output`.
 //
 // Session resumption uses `--conversation <id>`. The conversation id is not
 // emitted on stdout; we capture it by routing `--log-file` to a temp file and
@@ -154,7 +156,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			// success the user can't distinguish from a finished task (MUL-3570).
 			finalStatus = "timeout"
 			finalError = fmt.Sprintf(
-				"agy print mode timed out after %s waiting for the agent response; a long-running command likely outlived --print-timeout",
+				"agy --print-timeout elapsed after %s waiting for the agent response; a long-running command likely outlived the print timeout",
 				antigravityPrintTimeout(timeout),
 			)
 		} else if providerErr := antigravityProviderError(logPath); finalStatus == "completed" && providerErr != "" {
@@ -270,7 +272,7 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 	"-p":                             blockedWithValue,
 	"--print":                        blockedWithValue,
 	"--prompt":                       blockedWithValue,
-	"-i":                             blockedStandalone, // interactive mode would block the daemon
+	"-i":                             blockedStandalone, // interactive mode requires a TTY and cannot run under the daemon
 	"--prompt-interactive":           blockedStandalone,
 	"-c":                             blockedStandalone, // resume via --conversation, not --continue
 	"--continue":                     blockedStandalone,
@@ -281,7 +283,8 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 	"--log-file":                     blockedWithValue,  // daemon needs it for session capture
 }
 
-// buildAntigravityArgs assembles the argv for a one-shot agy invocation.
+// buildAntigravityArgs assembles the argv for a daemon-compatible one-shot agy
+// invocation.
 //
 //	agy -p <prompt> --dangerously-skip-permissions [--model <display name>]
 //	    --print-timeout <duration> --log-file <tmp>

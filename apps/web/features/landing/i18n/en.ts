@@ -294,6 +294,78 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.32",
+        date: "2026-06-29",
+        title: "Detach sub-Issues, sturdier daemon reconnects, and friendlier attachment previews",
+        changes: [],
+        features: [
+          "Issues now have a Remove parent action, so you can detach a sub-Issue without first having to pick a different parent.",
+        ],
+        improvements: [
+          "The local daemon reconnects to Multica through a more resilient WebSocket flow with bounded backoff, so brief network drops recover smoothly instead of stalling.",
+          "The daemon now bounds each runtime probe with its own timeout, so a single wedged CLI can no longer block every other runtime from coming online.",
+        ],
+        fixes: [
+          "Scheduled autopilots advance their next-run time the moment a run is dispatched, so a slow runner can no longer cause back-to-back duplicate dispatches.",
+          "Attachment previews open correctly whether the URL redirects inside a frame, comes back from the same origin, or was uploaded locally — and local upload URLs are now preferred when available.",
+          "When the failed-task handler unsticks an Issue, the Issue view refreshes immediately instead of waiting for a manual reload.",
+          "Sticky Issue comment headers share the same background fade as the highlight, so settling on a comment no longer looks out of sync.",
+          "Chat conversations refresh their message cache when reconnecting, so you no longer see stale messages right after coming back online.",
+        ],
+      },
+      {
+        version: "0.3.31",
+        date: "2026-06-26",
+        title: "Cross-workspace unread dot, Composio toolkit foundation, and a friendlier editor",
+        changes: [],
+        features: [
+          "The workspace switcher shows a dot when another workspace has unread inbox items.",
+          "New Composio toolkit foundation that prepares the upcoming third-party integrations.",
+          "You can run desktop dev on multiple checkouts side by side without them clashing.",
+          "The Chinese docs homepage now opens with a short intro video.",
+        ],
+        improvements: [
+          "Contributor docs note that the desktop dev command isolates per checkout.",
+        ],
+        fixes: [
+          "Tab now reliably indents selected list items in the Issue editor and keeps focus in place.",
+          "Squad leaders boot with the full squad briefing when you @-mention them in a comment, and replies that inherit the parent mention no longer trigger them again.",
+          "Code-block selections in Issues stay put while the page re-renders.",
+          "Assigning an Issue directly to an agent opens the handoff note instantly instead of waiting on a check.",
+          "The workspace switcher's unread dot now matches what you actually see in your inbox.",
+          "The edit-comment save button shows a loading state until the change is saved.",
+          "Search results load reliably again.",
+          "Self-hosting fails fast with a clear hint when Docker Compose v2 is missing.",
+        ],
+      },
+      {
+        version: "0.3.30",
+        date: "2026-06-25",
+        title: "Slack Channel Integration, a Smoother Editor, and Many Reliability Fixes",
+        changes: [],
+        features: [
+          "Slack conversations now run on the new unified collaboration channel, putting Slack on the same reliable footing as Feishu and Lark",
+          "The Issue composer now accepts the highlighted @mention or suggestion when you press Tab, so picking the right teammate or Issue is a single keypress",
+          "Task list items can be toggled from a one-click button in the editor's floating menu",
+        ],
+        improvements: [
+          "Frontend continuous integration now skips automatically when a pull request does not touch frontend code, freeing up build time for the changes that actually need it",
+          "Command line subcommands have broader automated test coverage so everyday workflows stay stable across releases",
+          "Provider-specific default agent arguments now have explicit documentation, and a one-time Lark cutover flag was retired now that the unified channel adapter is fully in production",
+        ],
+        fixes: [
+          "OpenClaw is more forgiving about config file mismatches and supports the newer 2026.6.x agents schema, keeping existing OpenClaw runtimes connected",
+          "Moving an Issue between projects now removes it from the old project list right away, and board column counts stay accurate when an Issue's status changes off-screen",
+          "Attachment previews open correctly even when files are served from a different origin",
+          "Command line agents wait for the daemon to be ready before falling back to a personal access token, and the self-host setup flow now respects existing configuration and surfaces server URL changes",
+          "Lark messages now link to the configured app URL instead of falling back to a generic web address",
+          "Codex runs clean up correctly even when their output overflows, Kiro runs preserve their goal completion state through close errors, and agent shutdown now terminates the entire opencode process group before closing",
+          "Quick-create reliably keeps every uploaded file attached when several uploads happen at the same time",
+          "Redis webhook rate limiting no longer throttles unrelated webhooks together, and daemon skill bundles load reliably even for large skill libraries",
+          "Issue label names now reject control characters so labels stay readable everywhere",
+        ],
+      },
+      {
         version: "0.3.29",
         date: "2026-06-24",
         title: "Feishu Channel Upgrade, Feature Rollout Controls, and More Reliable Autopilots",

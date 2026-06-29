@@ -154,6 +154,11 @@ vi.mock("../editor", () => {
       },
       uploadFile: vi.fn(),
       focus: vi.fn(),
+      // Real ContentEditor checks ProseMirror node attrs for any `uploading:
+      // true` marker. The mock returns false because none of these tests drive
+      // a real in-flight upload through the editor — the multi-upload race is
+      // covered as a unit test against useFileUpload directly (MUL-3339).
+      hasActiveUploads: () => false,
     }));
 
     return (

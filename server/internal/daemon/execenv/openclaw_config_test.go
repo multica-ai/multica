@@ -201,6 +201,281 @@ func TestPrepareOpenclawConfigFailsClosedOnCLIError(t *testing.T) {
 	}
 }
 
+// TestPrepareOpenclawConfigFallsBackWhenConfigFileUnsupported covers
+// OpenClaw 2026.2.x builds that rejected `openclaw config file` with
+// "too many arguments for 'config'". That command-shape mismatch should
+// not make every task fail during execenv prep; the daemon can derive the
+// active path from OpenClaw's documented and legacy config candidates and
+// then continue using `config get ... --json` for resolved config data.
+func TestPrepareOpenclawConfigFallsBackWhenConfigFileUnsupported(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	userConfigDir := t.TempDir()
+	userConfigPath := filepath.Join(userConfigDir, "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+	t.Setenv("OPENCLAW_CONFIG_PATH", userConfigPath)
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {err: errors.New("openclaw config file: exit status 1 (stderr: error: too many arguments for 'config'. Expected 0 arguments but got 1.)")},
+		"config get agents.list --json": {stdout: `[
+			{ "id": "coder", "model": "openai/gpt-5" }
+		]`},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+
+	got := mustReadJSON(t, result.ConfigPath)
+	include, ok := got["$include"].([]any)
+	if !ok || len(include) != 1 || include[0] != userConfigPath {
+		t.Errorf("$include = %v, want fallback OPENCLAW_CONFIG_PATH %q", got["$include"], userConfigPath)
+	}
+	if result.IncludeRoot != userConfigDir {
+		t.Errorf("IncludeRoot = %q, want %q", result.IncludeRoot, userConfigDir)
+	}
+	agents := got["agents"].(map[string]any)
+	list := agents["list"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["workspace"] != workDir {
+		t.Errorf("agents.list workspace rewrite after fallback = %v, want workDir %q", list, workDir)
+	}
+	if len(stub.calls) != 2 {
+		t.Fatalf("openclaw calls = %d, want 2: %+v", len(stub.calls), stub.calls)
+	}
+	if strings.Join(stub.calls[1].args, " ") != "config get agents.list --json" {
+		t.Errorf("second openclaw call = %q, want config get agents.list --json", strings.Join(stub.calls[1].args, " "))
+	}
+}
+
+func TestOpenclawActiveConfigPathFallbackSources(t *testing.T) {
+	cases := map[string]struct {
+		setup func(t *testing.T) string
+	}{
+		"config_path": {
+			setup: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "custom-openclaw.json")
+				t.Setenv("OPENCLAW_CONFIG_PATH", path)
+				return path
+			},
+		},
+		"legacy_config_path": {
+			setup: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "custom-clawdbot.json")
+				t.Setenv("CLAWDBOT_CONFIG_PATH", path)
+				return path
+			},
+		},
+		"state_dir": {
+			setup: func(t *testing.T) string {
+				stateDir := t.TempDir()
+				path := filepath.Join(stateDir, "openclaw.json")
+				t.Setenv("OPENCLAW_STATE_DIR", stateDir)
+				return path
+			},
+		},
+		"legacy_state_dir": {
+			setup: func(t *testing.T) string {
+				stateDir := t.TempDir()
+				path := filepath.Join(stateDir, "clawdbot.json")
+				t.Setenv("CLAWDBOT_STATE_DIR", stateDir)
+				return path
+			},
+		},
+		"openclaw_home": {
+			setup: func(t *testing.T) string {
+				home := t.TempDir()
+				path := filepath.Join(home, ".openclaw", "openclaw.json")
+				t.Setenv("OPENCLAW_HOME", home)
+				return path
+			},
+		},
+		"default_home": {
+			setup: func(t *testing.T) string {
+				home := t.TempDir()
+				path := filepath.Join(home, ".openclaw", "openclaw.json")
+				t.Setenv("HOME", home)
+				return path
+			},
+		},
+		"legacy_default_clawdbot": {
+			setup: func(t *testing.T) string {
+				home := t.TempDir()
+				path := filepath.Join(home, ".clawdbot", "clawdbot.json")
+				t.Setenv("HOME", home)
+				return path
+			},
+		},
+		"legacy_default_moltbot": {
+			setup: func(t *testing.T) string {
+				home := t.TempDir()
+				path := filepath.Join(home, ".moltbot", "moltbot.json")
+				t.Setenv("HOME", home)
+				return path
+			},
+		},
+		"legacy_default_moldbot": {
+			setup: func(t *testing.T) string {
+				home := t.TempDir()
+				path := filepath.Join(home, ".moldbot", "moldbot.json")
+				t.Setenv("HOME", home)
+				return path
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			clearOpenclawPathEnv(t)
+			want := tc.setup(t)
+			if err := os.MkdirAll(filepath.Dir(want), 0o755); err != nil {
+				t.Fatalf("mkdir config dir: %v", err)
+			}
+			if err := os.WriteFile(want, []byte(`{}`), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			stub := installOpenclawStub(t, map[string]openclawResponse{
+				"config file": {err: openclawConfigFileUnsupportedErr()},
+			})
+
+			got, exists, err := openclawActiveConfigPath(stub.bin, openclawCLITimeout)
+			if err != nil {
+				t.Fatalf("openclawActiveConfigPath: %v", err)
+			}
+			if !exists {
+				t.Fatal("exists = false, want true")
+			}
+			if got != want {
+				t.Errorf("path = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestOpenclawActiveConfigPathFallbackFreshInstallUsesCanonicalPath(t *testing.T) {
+	clearOpenclawPathEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {err: openclawConfigFileUnsupportedErr()},
+	})
+
+	got, exists, err := openclawActiveConfigPath(stub.bin, openclawCLITimeout)
+	if err != nil {
+		t.Fatalf("openclawActiveConfigPath: %v", err)
+	}
+	want := filepath.Join(home, ".openclaw", "openclaw.json")
+	if got != want {
+		t.Errorf("path = %q, want canonical fresh-install path %q", got, want)
+	}
+	if exists {
+		t.Fatal("exists = true, want false for fresh install")
+	}
+}
+
+func TestOpenclawActiveConfigPathFallbackOpenclawConfigPathHardOverride(t *testing.T) {
+	clearOpenclawPathEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	explicitPath := filepath.Join(t.TempDir(), "missing-openclaw.json")
+	t.Setenv("OPENCLAW_CONFIG_PATH", explicitPath)
+	legacyPath := filepath.Join(home, ".clawdbot", "clawdbot.json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatalf("mkdir legacy config dir: %v", err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {err: openclawConfigFileUnsupportedErr()},
+	})
+
+	got, exists, err := openclawActiveConfigPath(stub.bin, openclawCLITimeout)
+	if err != nil {
+		t.Fatalf("openclawActiveConfigPath: %v", err)
+	}
+	if got != explicitPath {
+		t.Errorf("path = %q, want OPENCLAW_CONFIG_PATH hard override %q", got, explicitPath)
+	}
+	if exists {
+		t.Fatal("exists = true, want false when explicit OPENCLAW_CONFIG_PATH is missing")
+	}
+}
+
+func TestOpenclawActiveConfigPathFallbackErrorIncludesOriginalCLIError(t *testing.T) {
+	clearOpenclawPathEnv(t)
+	badPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.MkdirAll(badPath, 0o755); err != nil {
+		t.Fatalf("mkdir bad config path: %v", err)
+	}
+	t.Setenv("OPENCLAW_CONFIG_PATH", badPath)
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {err: openclawConfigFileUnsupportedErr()},
+	})
+
+	_, _, err := openclawActiveConfigPath(stub.bin, openclawCLITimeout)
+	if err == nil {
+		t.Fatal("openclawActiveConfigPath succeeded with directory config path; expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "too many arguments for 'config'") {
+		t.Errorf("error %q lost original unsupported CLI stderr", msg)
+	}
+	if !strings.Contains(msg, "is a directory") {
+		t.Errorf("error %q lost fallback failure detail", msg)
+	}
+}
+
+func TestIsOpenclawConfigFileUnsupportedMatchesKnownShapes(t *testing.T) {
+	cases := map[string]struct {
+		err  error
+		want bool
+	}{
+		"reported_too_many_arguments": {
+			err:  errors.New("openclaw config file: exit status 1 (stderr: error: too many arguments for 'config')"),
+			want: true,
+		},
+		"reported_expected_zero_args": {
+			err:  errors.New("Expected 0 arguments but got 1."),
+			want: true,
+		},
+		"unknown_config_file": {
+			err:  errors.New("unknown subcommand `file` for `openclaw config`"),
+			want: true,
+		},
+		"real_config_validation_error": {
+			err:  errors.New("openclaw config validation failed: missing gateway.auth.token"),
+			want: false,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := isOpenclawConfigFileUnsupported(tc.err); got != tc.want {
+				t.Errorf("isOpenclawConfigFileUnsupported(%q) = %t, want %t", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func clearOpenclawPathEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("OPENCLAW_CONFIG_PATH", "")
+	t.Setenv("OPENCLAW_STATE_DIR", "")
+	t.Setenv("OPENCLAW_HOME", "")
+	t.Setenv("CLAWDBOT_CONFIG_PATH", "")
+	t.Setenv("CLAWDBOT_STATE_DIR", "")
+}
+
+func openclawConfigFileUnsupportedErr() error {
+	return errors.New("openclaw config file: exit status 1 (stderr: error: too many arguments for 'config'. Expected 0 arguments but got 1.)")
+}
+
 // TestPrepareOpenclawConfigFailsClosedOnMalformedAgentsList — the second
 // fail-closed surface. When `openclaw config get agents.list --json`
 // returns junk we can't parse, we fail rather than guess.

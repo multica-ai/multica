@@ -209,6 +209,63 @@ describe("createMentionSuggestion", () => {
     ).toBe(true);
   });
 
+  // MUL-3685: plain Tab accepts the highlighted row exactly like Enter.
+  it("accepts the highlighted row on plain Tab, like Enter", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue" },
+      { id: "i-2", label: "MUL-2", type: "issue" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={command} />
+      </I18nWrapper>,
+    );
+
+    const handled = ref.current?.onKeyDown({
+      event: new KeyboardEvent("keydown", { key: "Tab" }),
+    });
+
+    expect(handled).toBe(true);
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-1");
+  });
+
+  // Shift+Tab and any modifier+Tab stay focus navigation — they must NOT
+  // accept, so the picker never traps reverse Tab traversal or OS switching.
+  it("does not accept on Shift+Tab or modifier+Tab", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [{ id: "i-1", label: "MUL-1", type: "issue" }];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={command} />
+      </I18nWrapper>,
+    );
+
+    const press = (init: KeyboardEventInit) =>
+      ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", init) });
+
+    expect(press({ key: "Tab", shiftKey: true })).toBe(false);
+    expect(press({ key: "Tab", metaKey: true })).toBe(false);
+    expect(press({ key: "Tab", ctrlKey: true })).toBe(false);
+    expect(press({ key: "Tab", altKey: true })).toBe(false);
+    expect(command).not.toHaveBeenCalled();
+  });
+
+  it("captures Tab while the popup has no selectable items, like Enter", () => {
+    const ref = createRef<MentionListRef>();
+
+    render(<I18nWrapper><MentionList ref={ref} items={[]} query="协作" command={vi.fn()} /></I18nWrapper>);
+
+    expect(
+      ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Tab" }) }),
+    ).toBe(true);
+  });
+
   // MUL-3607: groupItems() re-buckets the list (current → recent → search →
   // users → issues), so an item that sits LATER in the data array can render
   // NEAR THE TOP. Selection must follow the rendered order — otherwise the
