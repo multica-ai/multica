@@ -182,6 +182,16 @@ func traecliUsageFromTrajectory(traj *traecliTrajectory) TokenUsage {
 	return u
 }
 
+// traecliConfigMissing reports whether the captured stderr indicates the
+// classic "no trae_config.yaml present" startup failure. trae-cli v0.1.0's
+// `run` resolves a config file before doing anything and exits 1 with this
+// message when neither trae_config.yaml/.json nor --config-file/TRAE_CONFIG_FILE
+// resolves — which is the default state of Multica's isolated task workdir, so
+// we turn the raw message into an actionable hint.
+func traecliConfigMissing(stderrTail string) bool {
+	return strings.Contains(stderrTail, "Config file not found")
+}
+
 func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -297,13 +307,24 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
 		case waitErr != nil:
-			// `trae-cli run` calls sys.exit(1) on any execution error.
+			// A non-zero exit is a startup/config failure (e.g. missing
+			// trae_config.yaml) — `trae-cli run` exits 1 BEFORE writing a
+			// trajectory in that case. (A failed *agent* run, by contrast,
+			// exits 0 and records success=false in the trajectory; that path
+			// is handled in the next case.)
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("trae-cli exited with error: %v", waitErr)
+			if traecliConfigMissing(stderrBuf.Tail()) {
+				finalError += "; Trae requires a config file — set the agent env var TRAE_CONFIG_FILE to an absolute path to your trae_config.yaml (with the provider + API key), or pass --config-file via custom_args"
+			}
 		case haveTraj && !traj.Success:
-			// Exited 0 but the agent itself reports the task did not complete
-			// successfully (e.g. it hit max-steps). Surface as failed so the
-			// daemon doesn't record a silent non-completion as success.
+			// `trae-cli run` exits 0 even when the agent itself did not
+			// complete the task successfully (bad API key, max-steps reached,
+			// upstream LLM error). The only reliable failure signal in that
+			// case is trajectory.success=false — verified against trae-cli
+			// v0.1.0, which exited 0 with success=false on an invalid key.
+			// Promote to failed so the daemon doesn't record a silent
+			// non-completion as success.
 			finalStatus = "failed"
 			finalError = "trae-cli reported the task did not complete successfully (trajectory success=false)"
 		}

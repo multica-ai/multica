@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -121,7 +122,7 @@ func TestTraecliBlockedArgsFiltering(t *testing.T) {
 	tempDir := t.TempDir()
 	argsFile := filepath.Join(tempDir, "argv.txt")
 	fakePath := filepath.Join(tempDir, "trae-cli")
-	writeTestExecutable(t, fakePath, []byte(fakeTraecliRunScript(argsFile, true)))
+	writeTestExecutable(t, fakePath, []byte(fakeTraecliRunScript(fakeTraecliOpts{argsFile: argsFile, success: true, exitCode: 0, writeTraj: true})))
 
 	backend, err := New("traecli", Config{
 		ExecutablePath: fakePath,
@@ -184,7 +185,7 @@ func TestTraecliSuccessfulExecution(t *testing.T) {
 
 	tempDir := t.TempDir()
 	fakePath := filepath.Join(tempDir, "trae-cli")
-	writeTestExecutable(t, fakePath, []byte(fakeTraecliRunScript("", true)))
+	writeTestExecutable(t, fakePath, []byte(fakeTraecliRunScript(fakeTraecliOpts{success: true, exitCode: 0, writeTraj: true})))
 
 	backend, err := New("traecli", Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {
@@ -236,23 +237,22 @@ func TestTraecliSuccessfulExecution(t *testing.T) {
 	}
 }
 
-func TestTraecliFailureExitCode(t *testing.T) {
+func TestTraecliAgentFailureExitsZeroSuccessFalse(t *testing.T) {
 	t.Parallel()
-
+	// The important real-world failure path: trae-cli run exits 0 even when
+	// the agent did not complete the task (bad API key, max-steps). The only
+	// reliable signal is trajectory.success=false. Verified against trae-cli
+	// v0.1.0, which exited 0 with success=false on an invalid key.
 	tempDir := t.TempDir()
 	fakePath := filepath.Join(tempDir, "trae-cli")
-	// success=false in the script => exit 1, mirroring `trae-cli run`'s
-	// sys.exit(1) on execution error.
-	writeTestExecutable(t, fakePath, []byte(fakeTraecliRunScript("", false)))
+	writeTestExecutable(t, fakePath, []byte(fakeTraecliRunScript(fakeTraecliOpts{success: false, exitCode: 0, writeTraj: true})))
 
 	backend, err := New("traecli", Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {
 		t.Fatalf("new traecli backend: %v", err)
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
 	session, err := backend.Execute(ctx, "hello", ExecOptions{Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -261,17 +261,80 @@ func TestTraecliFailureExitCode(t *testing.T) {
 		for range session.Messages {
 		}
 	}()
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("exit 0 + success=false must map to failed, got %q", result.Status)
+	}
+	if !strings.Contains(result.Error, "success=false") {
+		t.Errorf("expected error to mention success=false, got %q", result.Error)
+	}
+}
 
-	select {
-	case result := <-session.Result:
-		if result.Status != "failed" {
-			t.Fatalf("expected failed, got status=%q", result.Status)
+func TestTraecliStartupFailureExitsNonZeroNoTrajectory(t *testing.T) {
+	t.Parallel()
+	// Startup/config failure: exit 1 with NO trajectory written (verified:
+	// real trae-cli exits 1 before writing a trajectory when no config file
+	// resolves).
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "trae-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeTraecliRunScript(fakeTraecliOpts{success: false, exitCode: 1, writeTraj: false})))
+
+	backend, err := New("traecli", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new traecli backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "hello", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
 		}
-		if result.Error == "" {
-			t.Error("expected a non-empty error message on failure")
+	}()
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected failed on non-zero exit, got %q", result.Status)
+	}
+	if result.Error == "" {
+		t.Error("expected a non-empty error message on failure")
+	}
+}
+
+func TestTraecliConfigMissingAddsActionableHint(t *testing.T) {
+	t.Parallel()
+	// When the startup failure is the "Config file not found" case, the
+	// backend should append an actionable TRAE_CONFIG_FILE hint.
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "trae-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeTraecliRunScript(fakeTraecliOpts{
+		success:    false,
+		exitCode:   1,
+		writeTraj:  false,
+		stderrLine: "Error: Config file not found. Please specify a valid config file",
+	})))
+
+	backend, err := New("traecli", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new traecli backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "hello", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("timeout waiting for result")
+	}()
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected failed, got %q", result.Status)
+	}
+	if !strings.Contains(result.Error, "TRAE_CONFIG_FILE") {
+		t.Errorf("expected an actionable TRAE_CONFIG_FILE hint, got %q", result.Error)
 	}
 }
 
@@ -311,13 +374,26 @@ func TestTraecliReadTrajectory(t *testing.T) {
 	}
 }
 
+// fakeTraecliOpts parameterizes the fake `trae-cli` so tests can reproduce the
+// real binary's distinct outcomes (verified against trae-cli v0.1.0):
+//   - success run:        exit 0, trajectory success=true
+//   - agent failure:      exit 0, trajectory success=false (bad key / max-steps)
+//   - startup failure:    exit 1, NO trajectory (e.g. missing trae_config.yaml)
+type fakeTraecliOpts struct {
+	argsFile   string
+	success    bool   // value written to trajectory.success
+	exitCode   int    // process exit code
+	writeTraj  bool   // whether a trajectory file is written
+	stderrLine string // optional line emitted to stderr
+}
+
 // fakeTraecliRunScript impersonates `trae-cli run` for unit tests. It logs
-// received argv to TRAECLI_ARGS_FILE (when set), writes a trajectory JSON to
-// the path following --trajectory-file, prints assistant text to stdout, and
-// exits 0 on success or 1 on failure (matching the real CLI's sys.exit(1)).
-func fakeTraecliRunScript(argsFile string, success bool) string {
+// received argv to TRAECLI_ARGS_FILE (when set), optionally writes a trajectory
+// JSON to the path following --trajectory-file, prints assistant text to
+// stdout, optionally emits a stderr line, and exits with the configured code.
+func fakeTraecliRunScript(o fakeTraecliOpts) string {
 	argsLog := ""
-	if argsFile != "" {
+	if o.argsFile != "" {
 		argsLog = `
 if [ -n "$TRAECLI_ARGS_FILE" ]; then
   for arg in "$@"; do
@@ -325,26 +401,17 @@ if [ -n "$TRAECLI_ARGS_FILE" ]; then
   done
 fi`
 	}
-	successJSON := "true"
-	exitCode := "0"
-	if !success {
-		successJSON = "false"
-		exitCode = "1"
+	successJSON := "false"
+	if o.success {
+		successJSON = "true"
 	}
-	return `#!/bin/sh` + argsLog + `
-# Find the value following --trajectory-file.
-traj=""
-prev=""
-for arg in "$@"; do
-  if [ "$prev" = "--trajectory-file" ]; then
-    traj="$arg"
-  fi
-  prev="$arg"
-done
-
-echo "Hello from Trae CLI"
-echo "ran a tool"
-
+	stderrEmit := ""
+	if o.stderrLine != "" {
+		stderrEmit = "\necho " + shQuote(o.stderrLine) + " 1>&2"
+	}
+	trajBlock := ""
+	if o.writeTraj {
+		trajBlock = `
 if [ -n "$traj" ]; then
   cat > "$traj" <<'JSON'
 {
@@ -359,8 +426,27 @@ if [ -n "$traj" ]; then
   ]
 }
 JSON
-fi
+fi`
+	}
+	return `#!/bin/sh` + argsLog + `
+# Find the value following --trajectory-file.
+traj=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--trajectory-file" ]; then
+    traj="$arg"
+  fi
+  prev="$arg"
+done
 
-exit ` + exitCode + `
+echo "Hello from Trae CLI"
+echo "ran a tool"` + stderrEmit + trajBlock + `
+
+exit ` + fmt.Sprintf("%d", o.exitCode) + `
 `
+}
+
+// shQuote single-quotes a string for safe embedding in the generated /bin/sh.
+func shQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

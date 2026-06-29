@@ -226,6 +226,7 @@ Agent-specific overrides:
 | `MULTICA_QODER_MODEL` | Override the Qoder model used |
 | `MULTICA_TRAECLI_PATH` | Custom path to the `trae-cli` binary |
 | `MULTICA_TRAECLI_MODEL` | Override the Trae model used (`provider/model` form, e.g. `doubao/doubao-seed-1.6`) |
+| `TRAE_CONFIG_FILE` | Absolute path to your `trae_config.yaml` (with provider + API key). **Required** for Trae CLI — set it as an agent env var; `trae-cli run` exits with an error if no config file resolves. |
 
 The daemon launches Qoder as `qodercli --yolo --acp`, matching Qoder’s ACP “bypass permissions” mode so tool runs do not block on interactive approval in headless runs.
 
