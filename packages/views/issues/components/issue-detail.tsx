@@ -63,7 +63,9 @@ import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
 import { MergeRequestList } from "./merge-request-list";
+import { GitLabIssueBadge } from "./gitlab-issue-badge";
 import { useGitHubSettings } from "@multica/core/github";
+import { useGitLabSettings } from "@multica/core/gitlab";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -749,6 +751,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const githubSettings = useGitHubSettings();
+  const gitlabSettings = useGitLabSettings();
 
   // Per-issue, per-session set of optional properties currently visible in
   // the sidebar Properties section. Seeded on issue switch with whichever
@@ -1614,10 +1617,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
         </div>
       )}
-      {/* GitLab MRs are shown independently of the GitHub PR sidebar toggle.
-          MergeRequestList returns null when there are no linked MRs, so no
-          extra gate is needed. */}
-      <MergeRequestList issueId={id} />
+      {gitlabSettings.mrSidebar && <MergeRequestList issueId={id} />}
+      {gitlabSettings.issueSync && <GitLabIssueBadge issueId={id} />}
 
       {/* Details */}
       <div>

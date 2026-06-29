@@ -650,7 +650,7 @@ func (h *Handler) GitLabLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "gitlab integration not configured")
 		return
 	}
-	state, err := signGitLabState("login")
+	state, err := signGitLabState("login", "")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to sign state")
 		return
@@ -690,7 +690,7 @@ func (h *Handler) GitLabCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, failURL, http.StatusFound)
 		return
 	}
-	if _, ok := verifyGitLabState(state); !ok {
+	if _, _, ok := verifyGitLabState(state); !ok {
 		http.Redirect(w, r, failURL, http.StatusFound)
 		return
 	}

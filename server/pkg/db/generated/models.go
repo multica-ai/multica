@@ -304,6 +304,7 @@ type Comment struct {
 	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
 	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
+	GitlabNoteID   pgtype.Int8        `json:"gitlab_note_id"`
 }
 
 type CommentReaction struct {
@@ -441,10 +442,24 @@ type GitlabConnection struct {
 	NamespaceType  string             `json:"namespace_type"`
 	AvatarUrl      pgtype.Text        `json:"avatar_url"`
 	AccessToken    string             `json:"access_token"`
+	RefreshToken   pgtype.Text        `json:"refresh_token"`
 	TokenExpiresAt pgtype.Timestamptz `json:"token_expires_at"`
 	ConnectedByID  pgtype.UUID        `json:"connected_by_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type GitlabIssue struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ConnectionID       pgtype.UUID        `json:"connection_id"`
+	ProjectPath        string             `json:"project_path"`
+	GlIssueIid         int32              `json:"gl_issue_iid"`
+	GlProjectID        int64              `json:"gl_project_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	GlAssigneeUsername pgtype.Text        `json:"gl_assignee_username"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type GitlabMergeRequest struct {

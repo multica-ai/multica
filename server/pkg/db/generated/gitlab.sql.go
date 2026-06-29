@@ -14,19 +14,20 @@ import (
 const createGitLabConnection = `-- name: CreateGitLabConnection :one
 INSERT INTO gitlab_connection (
     workspace_id, namespace, namespace_type, avatar_url, access_token,
-    token_expires_at, connected_by_id
+    refresh_token, token_expires_at, connected_by_id
 ) VALUES (
     $1, $2, $3, $5, $4,
-    $6, $7
+    $6, $7, $8
 )
 ON CONFLICT (workspace_id, namespace) DO UPDATE SET
     namespace_type   = EXCLUDED.namespace_type,
     avatar_url       = EXCLUDED.avatar_url,
     access_token     = EXCLUDED.access_token,
+    refresh_token    = EXCLUDED.refresh_token,
     token_expires_at = EXCLUDED.token_expires_at,
     connected_by_id  = EXCLUDED.connected_by_id,
     updated_at       = now()
-RETURNING id, workspace_id, namespace, namespace_type, avatar_url, access_token, token_expires_at, connected_by_id, created_at, updated_at
+RETURNING id, workspace_id, namespace, namespace_type, avatar_url, access_token, refresh_token, token_expires_at, connected_by_id, created_at, updated_at
 `
 
 type CreateGitLabConnectionParams struct {
@@ -35,6 +36,7 @@ type CreateGitLabConnectionParams struct {
 	NamespaceType  string             `json:"namespace_type"`
 	AccessToken    string             `json:"access_token"`
 	AvatarUrl      pgtype.Text        `json:"avatar_url"`
+	RefreshToken   pgtype.Text        `json:"refresh_token"`
 	TokenExpiresAt pgtype.Timestamptz `json:"token_expires_at"`
 	ConnectedByID  pgtype.UUID        `json:"connected_by_id"`
 }
@@ -46,6 +48,7 @@ func (q *Queries) CreateGitLabConnection(ctx context.Context, arg CreateGitLabCo
 		arg.NamespaceType,
 		arg.AccessToken,
 		arg.AvatarUrl,
+		arg.RefreshToken,
 		arg.TokenExpiresAt,
 		arg.ConnectedByID,
 	)
@@ -57,12 +60,39 @@ func (q *Queries) CreateGitLabConnection(ctx context.Context, arg CreateGitLabCo
 		&i.NamespaceType,
 		&i.AvatarUrl,
 		&i.AccessToken,
+		&i.RefreshToken,
 		&i.TokenExpiresAt,
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const updateGitLabConnectionTokens = `-- name: UpdateGitLabConnectionTokens :exec
+UPDATE gitlab_connection SET
+    access_token     = $2,
+    refresh_token    = $3,
+    token_expires_at = $4,
+    updated_at       = now()
+WHERE id = $1
+`
+
+type UpdateGitLabConnectionTokensParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	AccessToken    string             `json:"access_token"`
+	RefreshToken   pgtype.Text        `json:"refresh_token"`
+	TokenExpiresAt pgtype.Timestamptz `json:"token_expires_at"`
+}
+
+func (q *Queries) UpdateGitLabConnectionTokens(ctx context.Context, arg UpdateGitLabConnectionTokensParams) error {
+	_, err := q.db.Exec(ctx, updateGitLabConnectionTokens,
+		arg.ID,
+		arg.AccessToken,
+		arg.RefreshToken,
+		arg.TokenExpiresAt,
+	)
+	return err
 }
 
 const deleteGitLabConnection = `-- name: DeleteGitLabConnection :exec
@@ -176,6 +206,57 @@ func (q *Queries) GetGitLabConnectionByNamespaceGlobal(ctx context.Context, name
 	return i, err
 }
 
+const getGitLabIssueByIssueID = `-- name: GetGitLabIssueByIssueID :one
+SELECT id, workspace_id, connection_id, project_path, gl_issue_iid, gl_project_id, issue_id, gl_assignee_username, created_at, updated_at FROM gitlab_issue WHERE issue_id = $1
+`
+
+func (q *Queries) GetGitLabIssueByIssueID(ctx context.Context, issueID pgtype.UUID) (GitlabIssue, error) {
+	row := q.db.QueryRow(ctx, getGitLabIssueByIssueID, issueID)
+	var i GitlabIssue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ConnectionID,
+		&i.ProjectPath,
+		&i.GlIssueIid,
+		&i.GlProjectID,
+		&i.IssueID,
+		&i.GlAssigneeUsername,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getGitLabIssueByProjectAndIID = `-- name: GetGitLabIssueByProjectAndIID :one
+SELECT id, workspace_id, connection_id, project_path, gl_issue_iid, gl_project_id, issue_id, gl_assignee_username, created_at, updated_at FROM gitlab_issue
+WHERE workspace_id = $1 AND project_path = $2 AND gl_issue_iid = $3
+`
+
+type GetGitLabIssueByProjectAndIIDParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectPath string      `json:"project_path"`
+	GlIssueIid  int32       `json:"gl_issue_iid"`
+}
+
+func (q *Queries) GetGitLabIssueByProjectAndIID(ctx context.Context, arg GetGitLabIssueByProjectAndIIDParams) (GitlabIssue, error) {
+	row := q.db.QueryRow(ctx, getGitLabIssueByProjectAndIID, arg.WorkspaceID, arg.ProjectPath, arg.GlIssueIid)
+	var i GitlabIssue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ConnectionID,
+		&i.ProjectPath,
+		&i.GlIssueIid,
+		&i.GlProjectID,
+		&i.IssueID,
+		&i.GlAssigneeUsername,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getGitLabMergeRequest = `-- name: GetGitLabMergeRequest :one
 SELECT id, workspace_id, connection_id, project_path, mr_iid, title, state, html_url, source_branch, author_username, author_avatar_url, merged_at, closed_at, mr_created_at, mr_updated_at, created_at, updated_at FROM gitlab_merge_request
 WHERE workspace_id = $1 AND project_path = $2 AND mr_iid = $3
@@ -230,6 +311,53 @@ func (q *Queries) GetIssueMergeRequestCloseAggregate(ctx context.Context, issueI
 	row := q.db.QueryRow(ctx, getIssueMergeRequestCloseAggregate, issueID)
 	var i GetIssueMergeRequestCloseAggregateRow
 	err := row.Scan(&i.OpenCount, &i.MergedWithCloseIntentCount)
+	return i, err
+}
+
+const insertGitLabIssue = `-- name: InsertGitLabIssue :one
+INSERT INTO gitlab_issue (
+    workspace_id, connection_id, project_path, gl_issue_iid,
+    gl_project_id, issue_id, gl_assignee_username
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (workspace_id, project_path, gl_issue_iid) DO NOTHING
+RETURNING id, workspace_id, connection_id, project_path, gl_issue_iid, gl_project_id, issue_id, gl_assignee_username, created_at, updated_at
+`
+
+type InsertGitLabIssueParams struct {
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	ConnectionID       pgtype.UUID `json:"connection_id"`
+	ProjectPath        string      `json:"project_path"`
+	GlIssueIid         int32       `json:"gl_issue_iid"`
+	GlProjectID        int64       `json:"gl_project_id"`
+	IssueID            pgtype.UUID `json:"issue_id"`
+	GlAssigneeUsername pgtype.Text `json:"gl_assignee_username"`
+}
+
+func (q *Queries) InsertGitLabIssue(ctx context.Context, arg InsertGitLabIssueParams) (GitlabIssue, error) {
+	row := q.db.QueryRow(ctx, insertGitLabIssue,
+		arg.WorkspaceID,
+		arg.ConnectionID,
+		arg.ProjectPath,
+		arg.GlIssueIid,
+		arg.GlProjectID,
+		arg.IssueID,
+		arg.GlAssigneeUsername,
+	)
+	var i GitlabIssue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ConnectionID,
+		&i.ProjectPath,
+		&i.GlIssueIid,
+		&i.GlProjectID,
+		&i.IssueID,
+		&i.GlAssigneeUsername,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
 	return i, err
 }
 
@@ -356,6 +484,21 @@ func (q *Queries) ListMergeRequestsByIssue(ctx context.Context, issueID pgtype.U
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateGitLabIssueAssignee = `-- name: UpdateGitLabIssueAssignee :exec
+UPDATE gitlab_issue SET gl_assignee_username = $2, updated_at = now()
+WHERE id = $1
+`
+
+type UpdateGitLabIssueAssigneeParams struct {
+	ID                 pgtype.UUID `json:"id"`
+	GlAssigneeUsername pgtype.Text `json:"gl_assignee_username"`
+}
+
+func (q *Queries) UpdateGitLabIssueAssignee(ctx context.Context, arg UpdateGitLabIssueAssigneeParams) error {
+	_, err := q.db.Exec(ctx, updateGitLabIssueAssignee, arg.ID, arg.GlAssigneeUsername)
+	return err
 }
 
 const upsertGitLabMergeRequest = `-- name: UpsertGitLabMergeRequest :one

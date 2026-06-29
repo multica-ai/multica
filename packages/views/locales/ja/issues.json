@@ -486,5 +486,9 @@
       "closed": "クローズ済み",
       "locked": "ロック済み"
     }
+  },
+  "gitlab_issue": {
+    "title": "GitLab Issue",
+    "assignee_label": "GitLab"
   }
 }

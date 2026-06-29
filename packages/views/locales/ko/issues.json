@@ -504,5 +504,9 @@
       "closed": "닫힘",
       "locked": "잠김"
     }
+  },
+  "gitlab_issue": {
+    "title": "GitLab Issue",
+    "assignee_label": "GitLab"
   }
 }

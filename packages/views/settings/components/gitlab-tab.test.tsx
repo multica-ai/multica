@@ -9,7 +9,8 @@ vi.mock("@multica/core/gitlab", () => ({
     queryFn: async () => ({ connections: [], configured: false, can_manage: false }),
     enabled: true,
   }),
-  useDeleteGitLabConnection: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteGitLabConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  deriveGitLabSettings: () => ({ enabled: true, mrSidebar: true, issueSync: true }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws1" }));
@@ -19,8 +20,12 @@ vi.mock("@multica/core/auth", () => ({
 }));
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"], queryFn: async () => [] }),
+  workspaceKeys: { list: () => ["workspaces"] },
 }));
-
+vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ id: "ws1", name: "Test", settings: {} }),
+}));
+vi.mock("@multica/core/api", () => ({ api: { updateWorkspace: vi.fn() } }));
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));

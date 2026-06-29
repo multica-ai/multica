@@ -110,6 +110,10 @@ UPDATE issue SET
 WHERE id = $1 AND workspace_id = $3
 RETURNING *;
 
+-- name: UpdateIssueDescription :exec
+UPDATE issue SET description = $2, updated_at = now()
+WHERE id = $1;
+
 -- name: CreateIssueWithOrigin :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,

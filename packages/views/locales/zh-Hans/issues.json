@@ -491,5 +491,9 @@
       "closed": "已关闭",
       "locked": "已锁定"
     }
+  },
+  "gitlab_issue": {
+    "title": "GitLab Issue",
+    "assignee_label": "GitLab"
   }
 }

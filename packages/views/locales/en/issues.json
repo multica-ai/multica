@@ -498,6 +498,10 @@
       "locked": "Locked"
     }
   },
+  "gitlab_issue": {
+    "title": "GitLab Issue",
+    "assignee_label": "GitLab"
+  },
   "backlog_hint": {
     "title": "Agent is paused in Backlog",
     "description": "This issue is parked, so the assigned agent will wait. Move it to Todo when you want the agent to start.",

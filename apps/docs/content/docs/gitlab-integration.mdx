@@ -1,0 +1,180 @@
+---
+title: GitLab integration
+description: Connect a GitLab group once, then MRs and issues referencing Multica identifiers auto-attach to issues — with two-way comment sync and automatic status transitions.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Connect a GitLab group once in **Settings → GitLab**. After that:
+
+- Any merge request whose title or body contains an issue identifier (e.g. `MUL-123`) is **auto-linked** to that issue and appears under **Merge requests** in the issue sidebar. Merging the MR moves the issue to **Done** if the reference used a closing keyword.
+- Any GitLab issue labeled **agent** is **automatically created** in Multica. Description, assignee, open/close state, and comments stay in sync.
+
+## What the integration does
+
+| Surface | Behavior |
+|---|---|
+| **Settings → GitLab** | Workspace admins enter the GitLab group path and click **Connect GitLab** to start the OAuth flow. After connecting, the card shows the linked namespace. |
+| **Issue sidebar → Merge requests** | Every MR auto-linked to this issue, with title, project, state (`Open` / `Merged` / `Closed`), and author. Click a row to open the MR in GitLab. |
+| **Issue sidebar → GitLab issue** | For issues synced from GitLab, a `group/repo#42` badge links back to the original GitLab issue and shows the GitLab assignee. |
+| **MR webhook** | On every `Merge Request Hook`, Multica upserts the MR, scans title and body for issue identifiers, and rebuilds link rows. Idempotent. |
+| **Issue webhook** | On `Issue Hook` with the **agent** label: creates or deletes the Multica issue. Syncs description, assignee, and status on every update. |
+| **Comment sync** | New GitLab comments appear in Multica. New Multica comments are posted back to GitLab. Historical comments at the time of labeling are **not** imported. |
+| **Auto-status on MR merge** | When an MR transitions to `merged` and its reference used a closing keyword (`Closes MUL-1`, `Fixes MUL-1`, `Resolves MUL-1`), Multica moves the linked issue to **Done**. |
+| **Auto-status on issue close/reopen** | Closing a synced GitLab issue marks the Multica issue **Done**. Reopening marks it **In Progress**. Removing the **agent** label deletes the Multica issue. |
+
+## Merge request identifier matching
+
+The webhook extracts identifiers from two fields: **MR title** and **MR body**.
+
+- Case-insensitive — `mul-123`, `MUL-123`, `Mul-123` all match.
+- Workspace-scoped — only the workspace's own issue prefix is matched.
+- Deduplicated — listing `MUL-1, MUL-1` links the issue once.
+- Multiple issues — `Closes MUL-1, MUL-2` links the MR to both and advances both to Done on merge.
+
+**Closing keywords** (for auto-Done on merge):  
+`Closes`, `Close`, `Closed`, `Fixes`, `Fix`, `Fixed`, `Resolves`, `Resolve`, `Resolved` — case-insensitive, optionally followed by a colon. The keyword must appear **immediately** before the identifier. `Fix login MUL-1` does **not** close `MUL-1`; `Fix MUL-1` does.
+
+## Issue sync
+
+Issues are synced one-way: GitLab → Multica. Adding the **agent** label to a GitLab issue creates a Multica issue. No Multica issue is ever pushed back to GitLab.
+
+| GitLab event | Multica action |
+|---|---|
+| **agent** label added | Create Multica issue with title and description |
+| **agent** label removed | Delete the Multica issue |
+| Issue closed | Mark Multica issue **Done** |
+| Issue reopened | Mark Multica issue **In Progress** |
+| Description updated | Update Multica issue description |
+| Assignee changed | Update displayed GitLab assignee on the Multica issue |
+
+<Callout type="info">
+Historical comments that exist at the moment the **agent** label is applied are **not** imported. Only comments posted after the Multica issue was created are synced.
+</Callout>
+
+## Comment sync
+
+Comments are synced two-way:
+
+- **GitLab → Multica:** GitLab `Note Hook` events create comments on the linked Multica issue, attributed as `username (GitLab):`.
+- **Multica → GitLab:** Comments posted in Multica are pushed to the GitLab issue via the API.
+
+Echo loop prevention: each synced comment stores the GitLab note ID. If a note arrives that already exists in Multica (because Multica posted it), it is silently skipped.
+
+## Self-host setup
+
+If you're running Multica on Multica Cloud, the integration is already configured — skip this section.
+
+For self-host, you create one GitLab OAuth application, point it at your server, and set five environment variables.
+
+### 1. Create a GitLab OAuth application
+
+Go to one of:
+
+- Personal account → `https://<gitlab-host>/-/user_settings/applications`
+- Group → `https://<gitlab-host>/groups/<group>/-/settings/applications`
+- Instance-wide (admin) → `https://<gitlab-host>/admin/applications`
+
+Fill in:
+
+| Field | Value |
+|---|---|
+| **Name** | Anything recognizable, e.g. `Multica`. |
+| **Redirect URI** | Two lines — one per URI: `https://<your-multica-host>/auth/gitlab/callback` and `https://<your-multica-host>/api/gitlab/setup` |
+| **Confidential** | Checked. |
+| **Scopes** | `api`, `read_user` |
+
+After **Save application**, note the **Application ID** and **Secret** — you'll need both in step 2.
+
+<Callout type="warning">
+Both redirect URIs must be registered exactly. GitLab rejects any redirect that doesn't match, and the error surfaces as a silent redirect back to the login page without an error message. If login or connect silently fails, a mismatched redirect URI is the most likely cause.
+</Callout>
+
+### 2. Set environment variables
+
+On the API server:
+
+```dotenv
+GITLAB_URL=https://gitlab.example.com        # your GitLab host, no trailing slash
+GITLAB_APP_ID=<Application ID from step 1>
+GITLAB_APP_SECRET=<Secret from step 1>
+GITLAB_WEBHOOK_SECRET=<generate: openssl rand -hex 32>
+GITLAB_SECRET_KEY=<generate: openssl rand -hex 32>
+```
+
+All five are required. If any is missing:
+
+- **Connect GitLab** in Settings is disabled and shows a "not configured" hint.
+- The `/api/webhooks/gitlab` endpoint returns `503 gitlab integration not configured`.
+
+`GITLAB_WEBHOOK_SECRET` signs webhook payloads sent from GitLab (the same value goes into the webhook form in step 4). `GITLAB_SECRET_KEY` encrypts the stored OAuth access token at rest — changing it after tokens are stored invalidates all existing connections.
+
+Restart the API after setting the env vars.
+
+### 3. Run migrations
+
+```bash
+make migrate-up
+```
+
+Migrations `128` and `129` create the GitLab tables: `gitlab_connection`, `gitlab_merge_request`, `gitlab_issue`, and the `gitlab_note_id` column on `comment`.
+
+### 4. Connect from the UI
+
+1. Open **Settings → GitLab** as an owner or admin.
+2. Enter your GitLab **group path** (e.g. `my-group` for `gitlab.example.com/my-group`). This must match the namespace of the projects you want to receive webhooks from.
+3. Click **Connect GitLab**. GitLab opens in a new tab.
+4. Authorize the application.
+5. GitLab redirects back to Multica. The Settings tab now shows **Connected as my-group**.
+
+### 5. Register the webhook in GitLab
+
+In GitLab, go to the group or project where your issues and MRs live:  
+**Settings → Webhooks → Add new webhook**
+
+| Field | Value |
+|---|---|
+| **URL** | `https://<your-multica-host>/api/webhooks/gitlab` |
+| **Secret token** | The value you set as `GITLAB_WEBHOOK_SECRET` |
+| **Trigger** | Check: **Merge request events**, **Issues events**, **Comments** |
+| **SSL verification** | Enabled (disable only if using a self-signed cert) |
+
+Click **Add webhook**. Use **Test → Merge request events** to verify the endpoint responds `200` or `204`.
+
+### 6. Verify
+
+Fire a test webhook from **Settings → Webhooks → [your webhook] → Test**. The endpoint should respond `204`. Then:
+
+- Open a GitLab MR with `MUL-1` in the title or body — the Merge requests block should appear on that issue within seconds.
+- Add the **agent** label to a GitLab issue — a new Multica issue should appear with the same title and description.
+
+If nothing happens, check the API server logs for `gitlab:` prefixed lines:
+
+```
+gitlab: no connection for namespace "my-group"   → group path mismatch
+gitlab: failed to upsert MR                      → DB error
+```
+
+## Disconnecting
+
+Click **Disconnect** on the **Settings → GitLab** tab. This removes the connection row and stops all webhook processing for that namespace. Existing MR cards and synced issues remain in the database — historical data is preserved. Delete the webhook in GitLab separately to stop GitLab from sending events.
+
+## Permissions and visibility
+
+- **Connect / disconnect** require workspace owner or admin. Members see the connection state but no controls.
+- **Merge requests** sidebar and **GitLab issue** badge are visible to anyone who can read the issue.
+- The OAuth application requests `api` scope (needed to post comments back to GitLab) and `read_user` (for login). No write access to code or repository settings is requested.
+
+## Limitations
+
+- **One group per workspace** — each workspace connection covers one GitLab group path. Projects in subgroups or other namespaces need a separate connection.
+- **No manual MR linking** — the only way to link an MR is via an identifier in its title or body.
+- **No CI / pipeline status** — only MR state is mirrored. Build status and review comments are not surfaced.
+- **No bidirectional issue creation** — GitLab issues with the **agent** label create Multica issues; Multica issues do not create GitLab issues.
+- **Comment attribution** — GitLab comments appear in Multica attributed as `username (GitLab):` plain text, not linked to a Multica user account.
+
+## Next
+
+- [Issues](/issues) — the issue identifiers (`MUL-123`) referenced from MRs
+- [Workspaces](/workspaces) — where the workspace-specific issue prefix is set
+- [Environment variables](/environment-variables) — full env reference

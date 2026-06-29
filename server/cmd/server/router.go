@@ -852,6 +852,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/metadata/{key}", h.DeleteIssueMetadataKey)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
 					r.Get("/merge-requests", h.ListMergeRequestsForIssue)
+					r.Get("/gitlab-issue", h.GetGitLabIssueForIssue)
 				})
 			})
 

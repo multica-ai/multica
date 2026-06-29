@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -683,10 +684,12 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		}
 		conn, err := h.Queries.GetFirstGitLabConnectionByWorkspace(r.Context(), wsUUID)
 		if err == nil {
-			plain, err := h.GitLabBox.Open([]byte(conn.AccessToken))
+			sealedBytes, err := base64.StdEncoding.DecodeString(conn.AccessToken)
 			if err == nil {
-				tok := string(plain)
-				resp.GitLabAccessToken = &tok
+				if plain, err := h.GitLabBox.Open(sealedBytes); err == nil {
+					tok := string(plain)
+					resp.GitLabAccessToken = &tok
+				}
 			}
 		}
 	}

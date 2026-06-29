@@ -1267,6 +1267,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, suppressAgentIDs)
 
+	// Post comment to GitLab if the issue is synced — fire and forget.
+	go h.postCommentToGitLab(context.Background(), comment, issue)
+
 	writeJSON(w, http.StatusCreated, resp)
 }
 

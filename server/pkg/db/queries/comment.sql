@@ -436,3 +436,9 @@ UPDATE comment SET
     updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
 WHERE id = $1
 RETURNING *;
+
+-- name: GetCommentByGitLabNoteID :one
+SELECT * FROM comment WHERE gitlab_note_id = $1;
+
+-- name: SetCommentGitLabNoteID :exec
+UPDATE comment SET gitlab_note_id = $2 WHERE id = $1;

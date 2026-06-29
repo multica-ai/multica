@@ -31,3 +31,10 @@ export interface ListGitLabConnectionsResponse {
   configured: boolean;
   can_manage?: boolean;
 }
+
+export interface GitLabIssue {
+  gl_issue_iid: number;
+  project_path: string;
+  url: string;
+  gl_assignee_username: string | null;
+}

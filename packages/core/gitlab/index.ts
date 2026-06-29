@@ -1,2 +1,4 @@
-export { gitlabKeys, gitlabConnectionsOptions, issueMergeRequestsOptions } from "./queries";
-export { useDeleteGitLabConnection } from "./settings";
+export { gitlabKeys, gitlabConnectionsOptions, issueMergeRequestsOptions, issueGitLabIssueOptions } from "./queries";
+export { useDeleteGitLabConnection, deriveGitLabSettings } from "./settings";
+export type { GitLabSettings } from "./settings";
+export { useGitLabSettings } from "./use-gitlab-settings";
