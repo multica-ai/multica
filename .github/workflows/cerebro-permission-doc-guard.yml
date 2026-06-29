@@ -39,7 +39,13 @@ jobs:
           CHANGED=$(git diff --name-only "origin/$BASE_REF"...HEAD)
 
           # Paths that enforce what an agent may or may not do at runtime.
-          PERM_REGEX='^(server/internal/cerebro/(credentials|toolpolicy|grouppermissions|mentiongate|sandboxprofile|access|permissions|grants|permgate)/|server/internal/cerebro/runtime/(tools_registry|approval_gate|firtal_gateway_tools_extended|firtal_gateway_config)\.go|server/internal/daemon/sandbox\.go)'
+          # server/internal/handler/daemon.go is included because the claim-time
+          # task handler (ClaimTaskByRuntime) is where per-run tool grants are
+          # resolved and stamped into the sandbox policy the daemon receives
+          # (e.g. the agent-browser unix-socket bind, FIR-1428). FIR-1609 deleted
+          # that stamping with no doc/guard catching it; watching this file closes
+          # that blind spot.
+          PERM_REGEX='^(server/internal/cerebro/(credentials|toolpolicy|grouppermissions|mentiongate|sandboxprofile|access|permissions|grants|permgate)/|server/internal/cerebro/runtime/(tools_registry|approval_gate|firtal_gateway_tools_extended|firtal_gateway_config)\.go|server/internal/daemon/sandbox\.go|server/internal/handler/daemon\.go)'
           DOC='docs/agents/permission-system.md'
 
           PERM_CHANGED=$(echo "$CHANGED" | grep -E "$PERM_REGEX" || true)
