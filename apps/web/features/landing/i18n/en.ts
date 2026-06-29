@@ -294,6 +294,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.32",
+        date: "2026-06-29",
+        title: "Bring-your-own Slack app, sturdier daemon reconnects, and friendlier attachment previews",
+        changes: [],
+        features: [
+          "You can now connect Multica to Slack using your own Slack app, with each installation running on its own Socket Mode connection — and the Connect dialog links straight to a new step-by-step setup guide.",
+          "The self-host setup flow can send an anonymous, opt-in beacon noting where you came from, so we can better support the channels through which new self-hosted teams discover Multica.",
+          "Issues now have a Remove parent action, so you can detach a sub-Issue without first having to pick a different parent.",
+        ],
+        improvements: [
+          "The local daemon reconnects to Multica through a more resilient WebSocket flow with bounded backoff, so brief network drops recover smoothly instead of stalling.",
+          "The daemon now bounds each runtime probe with its own timeout, so a single wedged CLI can no longer block every other runtime from coming online.",
+        ],
+        fixes: [
+          "Scheduled autopilots advance their next-run time the moment a run is dispatched, so a slow runner can no longer cause back-to-back duplicate dispatches.",
+          "Attachment previews open correctly whether the URL redirects inside a frame, comes back from the same origin, or was uploaded locally — and local upload URLs are now preferred when available.",
+          "The usage leaderboard hides agents that have been deleted, so dashboards no longer surface ghost entries.",
+          "When the failed-task handler unsticks an Issue, the Issue view refreshes immediately instead of waiting for a manual reload.",
+          "Antigravity daemon-mode guidance now states more clearly what each option does.",
+          "Sticky Issue comment headers share the same background fade as the highlight, so settling on a comment no longer looks out of sync.",
+          "Chat conversations refresh their message cache when reconnecting, so you no longer see stale messages right after coming back online.",
+        ],
+      },
+      {
         version: "0.3.31",
         date: "2026-06-26",
         title: "Cross-workspace unread dot, Composio toolkit foundation, and a friendlier editor",
