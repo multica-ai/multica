@@ -148,7 +148,8 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 	// Use very short timeouts to trigger the sweep on our test task
 	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 300.0,
-		RunningTimeoutSecs:  1.0, // 1 second — our task is 3 hours old
+		RunningTimeoutSecs:               1.0, // 1 second — our task is 3 hours old
+			WaitingLocalDirectoryTimeoutSecs: 1800.0,
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks query failed: %v", err)
@@ -230,6 +231,7 @@ func TestSweepStaleTasksReconcileAgentStatus(t *testing.T) {
 	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0,
+		WaitingLocalDirectoryTimeoutSecs: 1800.0,
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks failed: %v", err)
@@ -291,6 +293,7 @@ func TestSweepDispatchedStaleTask(t *testing.T) {
 	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 1.0,
 		RunningTimeoutSecs:  9000.0,
+		WaitingLocalDirectoryTimeoutSecs: 1800.0,
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks failed: %v", err)
@@ -403,6 +406,7 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0,
+		WaitingLocalDirectoryTimeoutSecs: 1800.0,
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks failed: %v", err)
@@ -487,6 +491,7 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0,
+		WaitingLocalDirectoryTimeoutSecs: 1800.0,
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks failed: %v", err)

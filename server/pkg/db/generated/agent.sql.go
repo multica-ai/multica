@@ -1294,12 +1294,14 @@ WHERE (
     AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
   )
    OR (status = 'running' AND started_at < now() - make_interval(secs => $2::double precision))
+   OR (status = 'waiting_local_directory' AND dispatched_at < now() - make_interval(secs => $3::double precision))
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id
 `
 
 type FailStaleTasksParams struct {
-	DispatchTimeoutSecs float64 `json:"dispatch_timeout_secs"`
-	RunningTimeoutSecs  float64 `json:"running_timeout_secs"`
+	DispatchTimeoutSecs              float64 `json:"dispatch_timeout_secs"`
+	RunningTimeoutSecs               float64 `json:"running_timeout_secs"`
+	WaitingLocalDirectoryTimeoutSecs float64 `json:"waiting_local_directory_timeout_secs"`
 }
 
 // Fails tasks stuck in dispatched/running beyond the given thresholds.
@@ -1308,13 +1310,14 @@ type FailStaleTasksParams struct {
 // Dispatched tasks with an active prepare lease are excluded because the
 // daemon is still proving liveness while resolving/cache/preparing startup
 // inputs before StartTask.
-// waiting_local_directory rows are intentionally excluded: the daemon owns
-// the wait (with its own ctx-driven timeout) and a legitimate queue ahead
-// of this task can exceed the dispatch / running timeouts without being
-// "stuck". If the daemon dies, RecoverOrphanedTasksForRuntime reclaims
-// those rows at restart.
+// waiting_local_directory rows have their own coarse timeout as a backstop
+// for the case where the daemon is alive (runtime stays online) but its
+// lock-acquisition goroutine is hung. The daemon's own ctx-driven timeout
+// handles the common case; this catches the tail. If the daemon dies,
+// RecoverOrphanedTasksForRuntime or FailTasksForOfflineRuntimes reclaims
+// those rows at restart / runtime-offline sweep.
 func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, failStaleTasks, arg.DispatchTimeoutSecs, arg.RunningTimeoutSecs)
+	rows, err := q.db.Query(ctx, failStaleTasks, arg.DispatchTimeoutSecs, arg.RunningTimeoutSecs, arg.WaitingLocalDirectoryTimeoutSecs)
 	if err != nil {
 		return nil, err
 	}
