@@ -50,6 +50,23 @@ function isWarmingUpError(cause: unknown): boolean {
 }
 
 /**
+ * Auto warm-up retry tuning (FIR-2048). A cold hviske GPU boots in ~30s and the
+ * backend answers every too-early attempt with 503 `warming_up`. Instead of
+ * making the user keep tapping Re-send, we auto-retry the kept clip on an
+ * interval until the engine is warm, so the transcript runs itself the moment
+ * it's ready — and we surface a climbing progress cue while we wait. The retries
+ * are capped so a genuinely-down backend settles back into the manual Re-send
+ * fallback instead of looping forever.
+ */
+const WARMUP_EXPECTED_MS = 30_000;
+const WARMUP_RETRY_DELAY_MS = 4_000;
+const WARMUP_MAX_AUTO_RETRIES = 10;
+const WARMUP_PROGRESS_TICK_MS = 500;
+// Hold the bar just shy of full until the transcript actually lands, so it never
+// reads "done" while we're still waiting on the engine.
+const WARMUP_PROGRESS_CEILING = 0.95;
+
+/**
  * React hook wrapping the MediaRecorder lifecycle for dictation. The hook
  * is UI-agnostic: a `MicButton` (slice 2) renders state via `status` and
  * triggers `start()`/`stop()`, while consumers in arbitrary text inputs
@@ -80,6 +97,19 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
   // re-renders or get duplicated into state.
   const [canResend, setCanResend] = useState(false);
   const pendingAudioRef = useRef<Blob | null>(null);
+  // While the engine is cold-booting we auto-retry the kept clip and surface a
+  // climbing progress value (0..1) so the user sees it's working, not stuck
+  // (FIR-2048). `null` whenever we are not in a warm-up retry cycle.
+  const [warmupProgress, setWarmupProgress] = useState<number | null>(null);
+  const warmupStartRef = useRef<number | null>(null);
+  const warmupTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const warmupRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warmupAttemptsRef = useRef(0);
+  // Forward ref so the auto-retry timer can call the latest `runTranscribe`
+  // without `runTranscribe` needing to depend on itself.
+  const runTranscribeRef = useRef<(audio: Blob) => Promise<void>>(() =>
+    Promise.resolve(),
+  );
   // Surfaced to the UI so a waveform can read the live mic input. Kept as
   // state (not just the ref below) so consumers re-render when it appears
   // and disappears.
@@ -135,6 +165,47 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     onErrorRef.current?.(next);
   }, []);
 
+  // Stop the warm-up progress ticker and any pending auto-retry, without
+  // touching the kept clip or the progress value itself.
+  const clearWarmupTimers = useCallback(() => {
+    if (warmupTickRef.current !== null) {
+      clearInterval(warmupTickRef.current);
+      warmupTickRef.current = null;
+    }
+    if (warmupRetryRef.current !== null) {
+      clearTimeout(warmupRetryRef.current);
+      warmupRetryRef.current = null;
+    }
+    warmupStartRef.current = null;
+  }, []);
+
+  // Fully reset the warm-up cycle: stop timers, forget the attempt count, and
+  // clear the progress cue. Called on success, a new recording, and cancel.
+  const resetWarmup = useCallback(() => {
+    clearWarmupTimers();
+    warmupAttemptsRef.current = 0;
+    setWarmupProgress(null);
+  }, [clearWarmupTimers]);
+
+  // Drive the climbing progress value off the wall clock, estimated against a
+  // typical ~30s cold boot. Held below 1 until the transcript actually lands.
+  const startWarmupProgress = useCallback(() => {
+    if (warmupStartRef.current === null) {
+      warmupStartRef.current = Date.now();
+    }
+    if (warmupTickRef.current !== null) return;
+    const tick = () => {
+      const startedAt = warmupStartRef.current;
+      if (startedAt === null) return;
+      const elapsed = Date.now() - startedAt;
+      setWarmupProgress(
+        Math.min(WARMUP_PROGRESS_CEILING, elapsed / WARMUP_EXPECTED_MS),
+      );
+    };
+    tick();
+    warmupTickRef.current = setInterval(tick, WARMUP_PROGRESS_TICK_MS);
+  }, []);
+
   const teardown = useCallback(() => {
     if (stopTimerRef.current !== null) {
       clearTimeout(stopTimerRef.current);
@@ -166,9 +237,10 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     return () => {
       cancelledRef.current = true;
       abortRef.current?.abort();
+      clearWarmupTimers();
       teardown();
     };
-  }, [teardown]);
+  }, [clearWarmupTimers, teardown]);
 
   const pickMimeType = useCallback(
     (preferred: string | undefined): string | undefined => {
@@ -203,6 +275,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     // A new recording supersedes any kept clip from a previous failure.
     pendingAudioRef.current = null;
     setCanResend(false);
+    resetWarmup();
     setStatus("requesting-permission");
     cancelledRef.current = false;
     streamingFinalRef.current = null;
@@ -337,7 +410,16 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     stopTimerRef.current = setTimeout(() => {
       void stopRef.current();
     }, maxDurationMs);
-  }, [isSupported, maxDurationMs, mimeType, pickMimeType, reportError, status, teardown]);
+  }, [
+    isSupported,
+    maxDurationMs,
+    mimeType,
+    pickMimeType,
+    reportError,
+    resetWarmup,
+    status,
+    teardown,
+  ]);
 
   // Run the one-shot transcriber on a captured clip, shared by `stop` (first
   // attempt) and `resend` (retry the kept clip). On success it clears the kept
@@ -363,6 +445,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
         }
         pendingAudioRef.current = null;
         setCanResend(false);
+        resetWarmup();
         setLastTranscript(text);
         setStatus("idle");
         onTranscribedRef.current?.(text);
@@ -378,18 +461,43 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
         // Keep the clip so the user can retry without re-recording (FIR-2048).
         pendingAudioRef.current = audio;
         setCanResend(true);
+        const warming = isWarmingUpError(cause);
         reportError({
-          kind: isWarmingUpError(cause) ? "warming-up" : "transcription-failed",
+          kind: warming ? "warming-up" : "transcription-failed",
           message:
             cause instanceof Error ? cause.message : "Transcription failed.",
           cause,
         });
+        // On a cold start, auto-retry the kept clip until the engine is warm so
+        // the transcript runs itself the moment it's ready — no manual Re-send
+        // needed (FIR-2048). Capped; once exhausted we fall back to the manual
+        // Re-send button and a one-off message.
+        if (warming && warmupAttemptsRef.current < WARMUP_MAX_AUTO_RETRIES) {
+          warmupAttemptsRef.current += 1;
+          startWarmupProgress();
+          warmupRetryRef.current = setTimeout(() => {
+            warmupRetryRef.current = null;
+            if (cancelledRef.current || abortRef.current) return;
+            const keep = pendingAudioRef.current;
+            if (keep) void runTranscribeRef.current(keep);
+          }, WARMUP_RETRY_DELAY_MS);
+        } else {
+          // A hard failure, or the cold start never cleared within the cap: stop
+          // the progress cue and leave the manual Re-send as the path forward.
+          clearWarmupTimers();
+          setWarmupProgress(null);
+        }
       } finally {
         abortRef.current = null;
       }
     },
-    [reportError],
+    [clearWarmupTimers, reportError, resetWarmup, startWarmupProgress],
   );
+  // Keep the forward ref pointed at the latest closure so the auto-retry timer
+  // always calls the current `runTranscribe`.
+  useEffect(() => {
+    runTranscribeRef.current = runTranscribe;
+  }, [runTranscribe]);
 
   const stop = useCallback(async () => {
     const recorder = recorderRef.current;
@@ -472,8 +580,12 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     if (!audio || abortRef.current) {
       return;
     }
+    // A manual re-send starts a fresh auto-retry budget and clears any pending
+    // scheduled retry so the two don't race.
+    clearWarmupTimers();
+    warmupAttemptsRef.current = 0;
     await runTranscribe(audio);
-  }, [runTranscribe]);
+  }, [clearWarmupTimers, runTranscribe]);
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
@@ -484,8 +596,9 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     // Cancelling discards the kept clip too — the user chose to abandon it.
     pendingAudioRef.current = null;
     setCanResend(false);
+    resetWarmup();
     setStatus("idle");
-  }, [teardown]);
+  }, [resetWarmup, teardown]);
 
   useEffect(() => {
     stopRef.current = stop;
@@ -502,5 +615,6 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     cancel,
     canResend,
     resend,
+    warmupProgress,
   };
 }

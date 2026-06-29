@@ -379,7 +379,7 @@ describe("MicButton", () => {
     expect(screen.getByText("Added")).toBeInTheDocument();
   });
 
-  it("shows a Re-send button after a kept failure and calls resend on click (FIR-2048)", () => {
+  it("shows a Re-send button after the auto-retry gives up and calls resend on click (FIR-2048)", () => {
     const resend = vi.fn();
     mocks.useDictation.mockReturnValue({
       status: "error",
@@ -391,6 +391,8 @@ describe("MicButton", () => {
       lastTranscript: null,
       mediaStream: null,
       canResend: true,
+      // null = the auto-retry cycle has ended; manual Re-send is the fallback.
+      warmupProgress: null,
       resend,
     });
 
@@ -403,7 +405,7 @@ describe("MicButton", () => {
     expect(resend).toHaveBeenCalledTimes(1);
   });
 
-  it("surfaces a warming-up cold start as a calm message, not a red error (FIR-2048)", () => {
+  it("surfaces a warming-up cold start as a calm message once auto-retry gives up, not a red error (FIR-2048)", () => {
     mocks.useDictation.mockReturnValue({
       status: "error",
       error: { kind: "warming-up", message: "warming up" },
@@ -413,6 +415,7 @@ describe("MicButton", () => {
       cancel: vi.fn(),
       lastTranscript: null,
       mediaStream: null,
+      warmupProgress: null,
       canResend: true,
       resend: vi.fn(),
     });
@@ -420,6 +423,40 @@ describe("MicButton", () => {
     render(<MicButton onTranscribed={vi.fn()} />);
 
     expect(mocks.toastMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+
+  it("shows a climbing warm-up progress cue and no Re-send/toast while auto-retrying (FIR-2048)", () => {
+    mocks.useDictation.mockReturnValue({
+      status: "error",
+      error: { kind: "warming-up", message: "warming up" },
+      isSupported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+      // A number (not null) means the auto-retry cycle is active.
+      warmupProgress: 0.4,
+      canResend: true,
+      resend: vi.fn(),
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} />);
+
+    // Progress is visible…
+    expect(screen.getByText("Warming up the speech engine…")).toBeInTheDocument();
+    const bar = screen.getByRole("progressbar", {
+      name: "Speech engine warm-up progress",
+    });
+    expect(bar).toHaveAttribute("aria-valuenow", "40");
+    // …and the manual Re-send + toast stay out of the way while it auto-retries.
+    expect(
+      screen.queryByRole("button", {
+        name: "Re-send recording for transcription",
+      }),
+    ).not.toBeInTheDocument();
+    expect(mocks.toastMessage).not.toHaveBeenCalled();
     expect(mocks.toastError).not.toHaveBeenCalled();
   });
 });

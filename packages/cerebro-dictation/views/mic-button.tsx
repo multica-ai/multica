@@ -141,14 +141,29 @@ export function MicButton({
     [onTranscribed],
   );
 
-  const { status, error, isSupported, mediaStream, start, stop, canResend, resend } =
-    useDictation({
-      transcribe: transcribe ?? backendNotDeployedTranscriber,
-      streamTranscribe: streamTranscribe ?? defaultStreamTranscribe,
-      onPartial: onPartialTranscribed,
-      onTranscribed: handleTranscribed,
-      onError,
-    });
+  const {
+    status,
+    error,
+    isSupported,
+    mediaStream,
+    start,
+    stop,
+    canResend,
+    resend,
+    warmupProgress,
+  } = useDictation({
+    transcribe: transcribe ?? backendNotDeployedTranscriber,
+    streamTranscribe: streamTranscribe ?? defaultStreamTranscribe,
+    onPartial: onPartialTranscribed,
+    onTranscribed: handleTranscribed,
+    onError,
+  });
+
+  // True while the engine is cold-booting and we auto-retry the kept clip
+  // (FIR-2048). Drives the climbing "warming up" cue and suppresses the plain
+  // transcribing label / Re-send button so the two don't fight for the slot.
+  // Gated on a real number so an absent value reads as "not warming up".
+  const isWarmingUp = typeof warmupProgress === "number";
 
   // Bubble every status change to the host so a wrapper can render a
   // destination-side cue (the transcribing skeleton, Forslag B) — MicButton
@@ -181,15 +196,16 @@ export function MicButton({
   // nothing". Toast every non-aborted error so the user knows what happened.
   useEffect(() => {
     if (!error || error.kind === "aborted") return;
-    // A warming-up cold start is expected, not a failure — show it as a neutral
-    // message, not a red error toast, since the recording is safe and re-sendable
-    // (FIR-2048).
+    // A warming-up cold start is expected, not a failure (FIR-2048). While we
+    // auto-retry, the inline climbing progress cue speaks for itself — don't
+    // spam a toast on every attempt. Only show a neutral message once the
+    // auto-retry has given up and the manual Re-send is the path forward.
     if (error.kind === "warming-up") {
-      toast.message(errorToastMessage(error));
-    } else {
-      toast.error(errorToastMessage(error));
+      if (!isWarmingUp) toast.message(errorToastMessage(error));
+      return;
     }
-  }, [error]);
+    toast.error(errorToastMessage(error));
+  }, [error, isWarmingUp]);
 
   // Hold the "Inserted" confirmation for a beat, then fade it. Starting a new
   // recording clears it immediately so the live meter isn't crowded by a stale
@@ -268,13 +284,43 @@ export function MicButton({
       {/* "Text is on its way" — the visible processing state between releasing
           the mic and the transcript arriving (FIR-1637). aria-live announces it
           to screen readers. */}
-      {isTranscribing && (
+      {isTranscribing && !isWarmingUp && (
         <span
           className="flex items-center gap-1 text-xs text-muted-foreground"
           aria-live="polite"
         >
           <Loader2 className="size-3 animate-spin" aria-hidden="true" />
           Transcribing…
+        </span>
+      )}
+      {/* Climbing "warming up" cue while the engine cold-boots and we auto-retry
+          the kept clip (FIR-2048). The percentage is a wall-clock estimate; the
+          transcript runs itself the moment the engine is ready, so the user
+          never has to tap anything. A thin bar + percent makes the progress
+          legible at a glance. */}
+      {isWarmingUp && !isRecording && (
+        <span
+          className="flex items-center gap-1.5 text-xs text-muted-foreground"
+          aria-live="polite"
+        >
+          <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+          <span className="whitespace-nowrap">Warming up the speech engine…</span>
+          <span
+            className="h-1 w-12 overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            aria-valuenow={Math.round((warmupProgress ?? 0) * 100)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Speech engine warm-up progress"
+          >
+            <span
+              className="block h-full rounded-full bg-brand transition-all"
+              style={{ width: `${Math.round((warmupProgress ?? 0) * 100)}%` }}
+            />
+          </span>
+          <span className="tabular-nums">
+            {Math.round((warmupProgress ?? 0) * 100)}%
+          </span>
         </span>
       )}
       {/* Green "Inserted" confirmation, sitting to the LEFT of the mic so it
@@ -289,8 +335,9 @@ export function MicButton({
         </span>
       )}
       {/* Re-send the kept recording after a failure / cold start, without
-          speaking again (FIR-2048). Hidden while recording or transcribing. */}
-      {canResend && !isRecording && !isTranscribing && (
+          speaking again (FIR-2048). Hidden while recording, transcribing, or
+          while the auto-retry warm-up cue is already handling it. */}
+      {canResend && !isRecording && !isTranscribing && !isWarmingUp && (
         <Button
           type="button"
           size="xs"

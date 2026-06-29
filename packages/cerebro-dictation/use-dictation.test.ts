@@ -400,4 +400,97 @@ describe("useDictation", () => {
     expect(onTranscribed).toHaveBeenCalledWith("varmt nu");
     expect(transcribe).toHaveBeenCalledTimes(2);
   });
+
+  it("auto-retries a warming-up cold start until warm and runs itself — no manual click (FIR-2048)", async () => {
+    vi.useFakeTimers();
+    try {
+      const recorder = createFakeRecorder();
+      installFakeMediaRecorder(recorder);
+      installGetUserMedia(() => Promise.resolve(fakeStream()));
+      let calls = 0;
+      const transcribe = vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw Object.assign(new Error("cold"), {
+            status: 503,
+            code: "warming_up",
+          });
+        }
+        return "varmt nu";
+      });
+      const onTranscribed = vi.fn();
+
+      const { result } = renderHook(() =>
+        useDictation({ transcribe, onTranscribed }),
+      );
+
+      await act(async () => {
+        await result.current.start();
+      });
+      await act(async () => {
+        await result.current.stop();
+      });
+
+      // First attempt cold-failed; the clip is kept and we begin auto-retrying
+      // with a visible progress estimate — without any user action.
+      expect(result.current.error?.kind).toBe("warming-up");
+      expect(result.current.warmupProgress).not.toBeNull();
+      expect(transcribe).toHaveBeenCalledTimes(1);
+
+      // The scheduled auto-retry fires on its own; the engine is now warm.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4_000);
+      });
+
+      expect(transcribe).toHaveBeenCalledTimes(2);
+      expect(result.current.lastTranscript).toBe("varmt nu");
+      expect(result.current.status).toBe("idle");
+      expect(result.current.warmupProgress).toBeNull();
+      expect(result.current.canResend).toBe(false);
+      expect(onTranscribed).toHaveBeenCalledWith("varmt nu");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops auto-retrying after the cap and leaves the manual Re-send fallback (FIR-2048)", async () => {
+    vi.useFakeTimers();
+    try {
+      const recorder = createFakeRecorder();
+      installFakeMediaRecorder(recorder);
+      installGetUserMedia(() => Promise.resolve(fakeStream()));
+      const transcribe = vi.fn(async () => {
+        // Never warms up — every attempt cold-fails.
+        throw Object.assign(new Error("cold"), {
+          status: 503,
+          code: "warming_up",
+        });
+      });
+
+      const { result } = renderHook(() => useDictation({ transcribe }));
+
+      await act(async () => {
+        await result.current.start();
+      });
+      await act(async () => {
+        await result.current.stop();
+      });
+
+      // Drive every scheduled auto-retry to completion.
+      for (let i = 0; i < 10; i += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(4_000);
+        });
+      }
+
+      // 1 initial attempt + 10 auto-retries, then it gives up and hands back to
+      // the manual Re-send button (progress cleared, clip still kept).
+      expect(transcribe).toHaveBeenCalledTimes(11);
+      expect(result.current.warmupProgress).toBeNull();
+      expect(result.current.canResend).toBe(true);
+      expect(result.current.error?.kind).toBe("warming-up");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

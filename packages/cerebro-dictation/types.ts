@@ -139,4 +139,13 @@ export interface UseDictationReturn {
    * flight. Used by the "Re-send" button the UI shows after a failure.
    */
   resend: () => Promise<void>;
+  /**
+   * Progress (0..1) of the engine cold-boot while we auto-retry the kept clip,
+   * or `null` when no warm-up retry cycle is running (FIR-2048). It is a
+   * wall-clock estimate against a typical ~30s boot — held just below 1 until
+   * the transcript actually lands. The UI shows it as a climbing "warming up"
+   * cue so a cold start reads as working, not stuck, and the transcript runs
+   * itself the moment the engine is ready (no manual Re-send needed).
+   */
+  warmupProgress: number | null;
 }
