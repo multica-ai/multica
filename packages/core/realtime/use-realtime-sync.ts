@@ -12,6 +12,8 @@ import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
+// CEREBRO-PATCH(realtime-handlers): cerebro WS handlers registered from cerebro-realtime
+import { registerCerebroHandlers } from "@multica/cerebro-realtime";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
@@ -43,6 +45,8 @@ import {
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
+// CEREBRO-PATCH(channel-unread-detail-sync): channel list/detail invalidation on comment events
+import { channelKeys } from "../channels/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
@@ -546,6 +550,10 @@ export function useRealtimeSync(
         // Refetching every mounted preview on every workspace task event caused
         // visible flicker, so the preview now refetches only on input change
         // (signature), mirroring its query design (MUL-3375).
+        // CEREBRO-PATCH(inbox-active-run-realtime): task lifecycle drives the inbox run pips (JEH-1425).
+        qc.invalidateQueries({ queryKey: inboxKeys.activeIssueTasks(wsId) });
+        // CEREBRO-PATCH(inbox-wakeup-realtime): FIR-1677 — refresh the inbox wakeup list so the row shows Running.
+        qc.invalidateQueries({ queryKey: ["cerebro-inbox-wakeups", wsId] });
       },
     };
 
@@ -674,20 +682,33 @@ export function useRealtimeSync(
         refetchType: "none",
       });
     };
+    // CEREBRO-PATCH(channel-unread-detail-sync): channel/DM inbox rows track unread via channelKeys; refresh the list on comment events (JEH-1249).
+    const invalidateChannelList = () => {
+      const wsId = getCurrentWsId();
+      if (wsId) qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
+    };
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (comment?.issue_id) {
+        invalidateTimeline(comment.issue_id);
+        // CEREBRO-PATCH(channel-unread-detail-sync): keep channel detail unread_count in sync (JEH-1249).
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.detail(wsId, comment.issue_id) });
+      }
+      invalidateChannelList();
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
       const { comment } = p as CommentUpdatedPayload;
       if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      invalidateChannelList(); // CEREBRO-PATCH(channel-unread-detail-sync): refresh channel/DM unread on edit.
     });
 
     const unsubCommentDeleted = ws.on("comment:deleted", (p) => {
       const { issue_id } = p as CommentDeletedPayload;
       if (issue_id) invalidateTimeline(issue_id);
+      invalidateChannelList(); // CEREBRO-PATCH(channel-unread-detail-sync): refresh channel/DM unread on delete.
     });
 
     const unsubCommentResolved = ws.on("comment:resolved", (p) => {
@@ -1095,8 +1116,12 @@ export function useRealtimeSync(
       }
     });
 
+    // CEREBRO-PATCH(realtime-handlers): cerebro WS handlers registered from cerebro-realtime
+    const unsubCerebro = registerCerebroHandlers(ws, qc);
+
     return () => {
       unsubAny();
+      unsubCerebro(); // CEREBRO-PATCH(realtime-handlers): tear down cerebro WS handlers
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();
