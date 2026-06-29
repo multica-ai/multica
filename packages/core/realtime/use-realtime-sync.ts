@@ -340,6 +340,14 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
   qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
   qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+  // Per-chat-session caches are also keyed without wsId, so the
+  // chatKeys.all(wsId) prefix above only reaches session lists / aggregates.
+  // Message streams rely on WS invalidation with staleTime: Infinity; recover
+  // sessions that missed chat/task events while the socket was disconnected.
+  qc.invalidateQueries({ queryKey: chatKeys.messagesAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.messagesPageAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.pendingTaskAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.taskMessagesAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
