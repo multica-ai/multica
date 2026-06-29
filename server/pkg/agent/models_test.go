@@ -1011,3 +1011,40 @@ func TestCachedDiscovery(t *testing.T) {
 		t.Errorf("expected 1 underlying call due to cache, got %d", calls)
 	}
 }
+
+func TestParseOmpModels(t *testing.T) {
+	t.Parallel()
+	// Inline fixture mirroring `omp models`: two provider sections with a
+	// box-drawing table each (anthropic: 2 rows, openai: 1 row).
+	fixture := strings.Join([]string{
+		"anthropic (2)",
+		"┌─────────────────┬─────────┬─────────┬──────────────────┬────────┐",
+		"│ model           │ context │ max-out │ thinking         │ images │",
+		"├─────────────────┼─────────┼─────────┼──────────────────┼────────┤",
+		"│ claude-opus-4-8 │ 1M      │ 128K    │ minimal,low,high │ yes    │",
+		"│ claude-sonnet-4 │ 1M      │ 64K     │ minimal,low      │ yes    │",
+		"└─────────────────┴─────────┴─────────┴──────────────────┴────────┘",
+		"",
+		"openai (1)",
+		"┌──────────┬─────────┬─────────┬──────────┬────────┐",
+		"│ model    │ context │ max-out │ thinking │ images │",
+		"├──────────┼─────────┼─────────┼──────────┼────────┤",
+		"│ gpt-5    │ 400K    │ 128K    │          │ yes    │",
+		"└──────────┴─────────┴─────────┴──────────┴────────┘",
+	}, "\n")
+
+	got := parseOmpModels(fixture)
+	want := []Model{
+		{ID: "anthropic/claude-opus-4-8", Label: "claude-opus-4-8", Provider: "anthropic"},
+		{ID: "anthropic/claude-sonnet-4", Label: "claude-sonnet-4", Provider: "anthropic"},
+		{ID: "openai/gpt-5", Label: "gpt-5", Provider: "openai"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parseOmpModels returned %d models, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("model[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

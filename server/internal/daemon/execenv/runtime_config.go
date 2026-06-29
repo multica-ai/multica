@@ -187,7 +187,7 @@ func runtimeConfigPath(workDir, provider string) string {
 	switch provider {
 	case "claude", "codebuddy":
 		return filepath.Join(workDir, "CLAUDE.md")
-	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder":
+	case "codex", "copilot", "opencode", "openclaw", "hermes", "omp", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder":
 		return filepath.Join(workDir, "AGENTS.md")
 	default:
 		return ""
@@ -760,9 +760,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			// Antigravity inherits Gemini CLI's workspace skill layout —
 			// {workDir}/.agents/skills/ — see resolveSkillsDir.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "hermes":
-			// Hermes has no native skill discovery path wired up in resolveSkillsDir;
-			// fall back to referencing the files explicitly under .agent_context/skills/.
+		case "gemini", "hermes", "omp":
+			// Gemini reads GEMINI.md directly. Hermes and omp have no native
+			// skill discovery path wired up in resolveSkillsDir; all fall back
+			// to referencing the files explicitly under .agent_context/skills/.
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		default:
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")

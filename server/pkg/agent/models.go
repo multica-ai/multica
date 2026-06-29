@@ -140,6 +140,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverPiModels(ctx, executablePath)
 		})
+	case "omp":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverOmpModels(ctx, executablePath)
+		})
 	case "openclaw":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenclawAgents(ctx, executablePath)
@@ -696,6 +700,90 @@ func parsePiModels(output string) []Model {
 			provider = id[:i]
 		}
 		models = append(models, Model{ID: id, Label: id, Provider: provider})
+	}
+	return models
+}
+
+// discoverOmpModels runs `omp models` and parses its provider-grouped
+// box-drawing table. omp's `session/new` returns models in a non-standard
+// configOptions entry rather than models.availableModels, so we discover
+// from the CLI instead. Any failure (binary missing, parse error, timeout)
+// returns an empty list so the UI falls back to manual model entry;
+// cachedDiscovery never caches empty results, so this retries once the
+// cause clears.
+func discoverOmpModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "omp"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return []Model{}, nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "models")
+	hideAgentWindow(cmd)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
+	if err != nil && len(stdout) == 0 && stderr.Len() == 0 {
+		return []Model{}, nil
+	}
+	text := string(stdout)
+	if strings.TrimSpace(text) == "" {
+		text = stderr.String()
+	}
+	return parseOmpModels(text), nil
+}
+
+// ompProviderHeaderRe matches an `omp models` provider section header like
+// `anthropic (26)` — a provider slug followed by a parenthesised count.
+var ompProviderHeaderRe = regexp.MustCompile(`^(\S+)\s+\(\d+\)$`)
+
+// parseOmpModels parses `omp models` output. The CLI groups models by
+// provider: a header line (`<provider> (<n>)`) sets the current provider,
+// then a box-drawing table lists one model per `│ <model> │ … │` row. We
+// emit `<provider>/<model>` ids to match the `--model` slug and the ACP
+// currentValue form. The table header row (`model | context | …`),
+// box-border lines, and blanks are skipped. No Thinking, no Default.
+func parseOmpModels(output string) []Model {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var models []Model
+	seen := map[string]bool{}
+	provider := ""
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if m := ompProviderHeaderRe.FindStringSubmatch(line); m != nil {
+			provider = m[1]
+			continue
+		}
+		// Only data rows start with the vertical box separator. Border
+		// lines start with corner/junction glyphs (┌ ├ └ ┬ …) and are
+		// skipped here.
+		if !strings.HasPrefix(line, "│") {
+			continue
+		}
+		cells := strings.Split(line, "│")
+		if len(cells) < 2 {
+			continue
+		}
+		model := strings.TrimSpace(cells[1])
+		if model == "" || model == "model" {
+			// blank cell or the header row (`model | context | …`).
+			continue
+		}
+		if provider == "" {
+			continue
+		}
+		id := provider + "/" + model
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		models = append(models, Model{ID: id, Label: model, Provider: provider})
 	}
 	return models
 }

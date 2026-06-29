@@ -2239,3 +2239,61 @@ func TestHermesKeepsRemoteMcpWhenCapabilityAdvertised(t *testing.T) {
 		t.Fatalf("session/new.mcpServers: got %d entries, want 3", len(servers))
 	}
 }
+
+func TestSelectAllowOption(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		params string
+		want   string
+	}{
+		{
+			name: "omp standard kinds prefer allow_always",
+			params: `{"options":[
+				{"optionId":"allow_once","name":"Allow once","kind":"allow_once"},
+				{"optionId":"allow_always","name":"Always allow","kind":"allow_always"},
+				{"optionId":"reject_once","name":"Reject once","kind":"reject_once"},
+				{"optionId":"reject_always","name":"Always reject","kind":"reject_always"}
+			]}`,
+			want: "allow_always",
+		},
+		{
+			name: "omp without allow_always falls to allow_once",
+			params: `{"options":[
+				{"optionId":"allow_once","name":"Allow once","kind":"allow_once"},
+				{"optionId":"reject_once","name":"Reject once","kind":"reject_once"}
+			]}`,
+			want: "allow_once",
+		},
+		{
+			name: "legacy kimi approve_for_session matched by id",
+			params: `{"options":[
+				{"optionId":"approve_for_session","name":"Approve for session","kind":"other"},
+				{"optionId":"reject","name":"Reject","kind":"reject"}
+			]}`,
+			want: "approve_for_session",
+		},
+		{
+			name:   "empty options falls back",
+			params: `{"options":[]}`,
+			want:   "approve_for_session",
+		},
+		{
+			name:   "absent options falls back",
+			params: `{}`,
+			want:   "approve_for_session",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := selectAllowOption(json.RawMessage(tt.params))
+			if got != tt.want {
+				t.Errorf("selectAllowOption(%s) = %q, want %q", tt.params, got, tt.want)
+			}
+		})
+	}
+	// Nil params (no params key in the request) must also fall back.
+	if got := selectAllowOption(nil); got != "approve_for_session" {
+		t.Errorf("selectAllowOption(nil) = %q, want approve_for_session", got)
+	}
+}

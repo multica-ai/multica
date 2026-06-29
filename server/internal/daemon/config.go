@@ -272,6 +272,12 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_HERMES_PATH", "hermes", "MULTICA_HERMES_MODEL"); ok {
 		agents["hermes"] = e
 	}
+	if e, ok := probe("MULTICA_OMP_PATH", "omp", "MULTICA_OMP_MODEL"); ok {
+		agents["omp"] = e
+	}
+	if e, ok := probe("MULTICA_GEMINI_PATH", "gemini", "MULTICA_GEMINI_MODEL"); ok {
+		agents["gemini"] = e
+	}
 	if e, ok := probe("MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL"); ok {
 		agents["pi"] = e
 	}
@@ -305,7 +311,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, or qodercli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, openclaw, hermes, omp, gemini, pi, cursor-agent, kimi, kiro-cli, agy, or qodercli and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -653,8 +659,8 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // list to pre-fetch canonical paths for every known agent in a single shell
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
-	"claude", "codex", "opencode", "openclaw", "hermes",
-	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy",
+	"claude", "codex", "opencode", "openclaw", "hermes", "omp",
+	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy",
 }
 
 var codexDesktopAppBundlePaths = func() []string {
