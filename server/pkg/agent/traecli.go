@@ -121,6 +121,10 @@ func buildTraecliArgs(task, trajectoryPath string, opts ExecOptions, logger *slo
 		args = append(args, "--model", model)
 	}
 
+	// ExtraArgs (daemon-wide defaults) are filtered and applied before the
+	// per-agent CustomArgs, matching the Antigravity backend's ordering, so a
+	// future daemon-wide MULTICA_TRAECLI_ARGS default would compose correctly.
+	args = append(args, filterCustomArgs(opts.ExtraArgs, traecliBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, traecliBlockedArgs, logger)...)
 	return args
 }

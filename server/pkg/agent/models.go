@@ -330,7 +330,8 @@ func traecliStaticModels() []Model {
 	}
 }
 
-// cursorStaticModels is a minimal fallback used when// `cursor-agent --list-models` isn't available (binary missing,
+// cursorStaticModels is a minimal fallback used when
+// `cursor-agent --list-models` isn't available (binary missing,
 // offline, etc). The real catalog is fetched dynamically because
 // Cursor's model IDs shift (e.g. `composer-2-fast`,
 // `claude-4.6-sonnet-medium`, `gemini-3.1-pro`) and any static
