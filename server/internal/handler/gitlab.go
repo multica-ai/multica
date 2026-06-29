@@ -70,11 +70,19 @@ func verifyGitLabState(token string) (payload, namespace string, ok bool) {
 	if secret == "" {
 		return "", "", false
 	}
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
+
+	// Split from the right so payload/namespace can contain '.' safely.
+	lastDot := strings.LastIndex(token, ".")
+	if lastDot < 0 {
 		return "", "", false
 	}
-	combined, nonce, sig := parts[0], parts[1], parts[2]
+	beforeSig, sig := token[:lastDot], token[lastDot+1:]
+	secondDot := strings.LastIndex(beforeSig, ".")
+	if secondDot < 0 {
+		return "", "", false
+	}
+	combined, nonce := beforeSig[:secondDot], beforeSig[secondDot+1:]
+
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(combined))
 	mac.Write([]byte("."))
