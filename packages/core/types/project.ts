@@ -55,7 +55,12 @@ export interface ListProjectsResponse {
 //   - github_repo: cloud-side git checkout, ref = { url, ref?, default_branch_hint? }
 //   - local_directory: in-place agent execution on a specific daemon,
 //     ref = { local_path, daemon_id, label? }
-export type ProjectResourceType = "github_repo" | "local_directory";
+//   - azure_devops_repo: Azure DevOps git checkout,
+//     ref = { url, organization?, project?, repository?, default_branch_hint?, installation_id? }
+export type ProjectResourceType =
+  | "github_repo"
+  | "local_directory"
+  | "azure_devops_repo";
 
 export interface GithubRepoResourceRef {
   url: string;
@@ -69,9 +74,20 @@ export interface LocalDirectoryResourceRef {
   label?: string;
 }
 
+export interface AzureDevOpsRepoResourceRef {
+  url: string;
+  organization?: string;
+  project?: string;
+  repository?: string;
+  default_branch_hint?: string;
+  /** Links to an ado_installation row for PAT-based clone auth. */
+  installation_id?: string;
+}
+
 export type ProjectResourceRef =
   | GithubRepoResourceRef
   | LocalDirectoryResourceRef
+  | AzureDevOpsRepoResourceRef
   | Record<string, unknown>;
 
 export interface ProjectResource {

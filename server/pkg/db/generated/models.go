@@ -898,6 +898,45 @@ type Workspace struct {
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 }
 
+// ── Azure DevOps models ───────────────────────────────────────────────────────
+
+type AdoInstallation struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	OrgURL         string             `json:"org_url"`
+	DisplayName    string             `json:"display_name"`
+	PatEncrypted   []byte             `json:"pat_encrypted"`
+	WebhookSecret  string             `json:"webhook_secret"`
+	ConnectedByID  pgtype.UUID        `json:"connected_by_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AdoPullRequest struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	OrgURL         string             `json:"org_url"`
+	Project        string             `json:"project"`
+	RepoName       string             `json:"repo_name"`
+	RepoIDAdo      string             `json:"repo_id_ado"`
+	PrIDAdo        int32              `json:"pr_id_ado"`
+	Title          string             `json:"title"`
+	State          string             `json:"state"`
+	HtmlUrl        string             `json:"html_url"`
+	Branch         pgtype.Text        `json:"branch"`
+	AuthorLogin    pgtype.Text        `json:"author_login"`
+	AuthorAvatarUrl pgtype.Text       `json:"author_avatar_url"`
+	MergedAt       pgtype.Timestamptz `json:"merged_at"`
+	ClosedAt       pgtype.Timestamptz `json:"closed_at"`
+	PrCreatedAt    pgtype.Timestamptz `json:"pr_created_at"`
+	PrUpdatedAt    pgtype.Timestamptz `json:"pr_updated_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	PolicyStatus   pgtype.Text        `json:"policy_status"`
+	MergeStatus    pgtype.Text        `json:"merge_status"`
+}
+
 type WorkspaceInvitation struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

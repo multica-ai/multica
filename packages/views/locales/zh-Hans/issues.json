@@ -232,7 +232,14 @@
     "link_copy_failed": "复制链接失败",
     "workdir_path_copied": "已复制本地 workdir 路径",
     "workdir_path_copy_failed": "复制本地 workdir 路径失败",
-    "workdir_path_unavailable": "暂无本地 workdir — 这个 issue 还没被本地 agent 运行过"
+    "workdir_path_unavailable": "暂无本地 workdir — 这个 issue 还没被本地 agent 运行过",
+    "section_ado_pull_requests": "Azure DevOps PR",
+    "ado_pull_requests_loading": "加载中…",
+    "ado_pull_requests_empty": "尚无关联的 Azure DevOps 拉取请求。",
+    "ado_pr_state_abandoned": "已放弃",
+    "ado_policy_approved": "策略已批准",
+    "ado_policy_blocked": "策略已阻止",
+    "ado_policy_pending": "策略待处理"
   },
   "timeline": {
     "loading": "加载中…"
