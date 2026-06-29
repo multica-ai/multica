@@ -68,6 +68,10 @@ const (
 	EventSkillUpdated = "skill:updated"
 	EventSkillDeleted = "skill:deleted"
 
+	// Document events
+	EventDocumentUpdated = "document:updated"
+	EventDocumentDeleted = "document:deleted"
+
 	// Chat events
 	EventChatMessage        = "chat:message"
 	EventChatDone           = "chat:done"

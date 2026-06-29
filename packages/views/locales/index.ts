@@ -16,6 +16,7 @@ import enWorkspace from "./en/workspace.json";
 import enProjects from "./en/projects.json";
 import enAutopilots from "./en/autopilots.json";
 import enSkills from "./en/skills.json";
+import enDocuments from "./en/documents.json";
 import enChat from "./en/chat.json";
 import enModals from "./en/modals.json";
 import enRuntimes from "./en/runtimes.json";
@@ -41,6 +42,7 @@ import zhHansWorkspace from "./zh-Hans/workspace.json";
 import zhHansProjects from "./zh-Hans/projects.json";
 import zhHansAutopilots from "./zh-Hans/autopilots.json";
 import zhHansSkills from "./zh-Hans/skills.json";
+import zhHansDocuments from "./zh-Hans/documents.json";
 import zhHansChat from "./zh-Hans/chat.json";
 import zhHansModals from "./zh-Hans/modals.json";
 import zhHansRuntimes from "./zh-Hans/runtimes.json";
@@ -122,6 +124,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     projects: enProjects,
     autopilots: enAutopilots,
     skills: enSkills,
+    documents: enDocuments,
     chat: enChat,
     modals: enModals,
     runtimes: enRuntimes,
@@ -149,6 +152,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     projects: zhHansProjects,
     autopilots: zhHansAutopilots,
     skills: zhHansSkills,
+    documents: zhHansDocuments,
     chat: zhHansChat,
     modals: zhHansModals,
     runtimes: zhHansRuntimes,

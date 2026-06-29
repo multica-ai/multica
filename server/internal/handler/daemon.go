@@ -33,6 +33,24 @@ import (
 // Daemon workspace ownership helpers
 // ---------------------------------------------------------------------------
 
+// DaemonWorkspaceAccessFromURL returns middleware that gates a daemon route
+// group on workspace ownership using requireDaemonWorkspaceAccess against
+// whatever workspaceID has already been resolved by an upstream middleware
+// (typically workspaceIDFromURLParam). Without this gate the daemon document
+// routes would accept any X-Workspace-ID header value, letting a daemon token
+// or PAT reach foreign workspaces — see #docs-cross-tenant-leak.
+func (h *Handler) DaemonWorkspaceAccessFromURL() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			workspaceID := h.resolveWorkspaceID(r)
+			if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // requireDaemonWorkspaceAccess verifies the caller has access to the given workspace.
 // For daemon tokens (mdt_), compares the token's workspace ID directly.
 // For PAT/JWT fallback, verifies user membership in the workspace.
@@ -1487,6 +1505,46 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
 					resp.Repos = repos
 				}
+			}
+		}
+
+		// Populate knowledge base context for agent prompt injection.
+		// Use resp.WorkspaceID (already resolved above) to avoid scoping issues.
+		// Guard against empty WorkspaceID: GetIssue above may have failed,
+		// leaving resp.WorkspaceID unset — parseUUID("") panics.
+		if resp.WorkspaceID != "" {
+			wsID := parseUUID(resp.WorkspaceID)
+			if ws, err := h.Queries.GetWorkspace(r.Context(), wsID); err == nil && ws.Context.Valid {
+				resp.WorkspaceContext = ws.Context.String
+			}
+			if pinnedDocs, err := h.Queries.ListPinnedWorkspaceDocuments(r.Context(), wsID); err == nil {
+				for _, d := range pinnedDocs {
+					resp.PinnedDocuments = append(resp.PinnedDocuments, DocumentData{
+						Path:        d.Path,
+						Title:       d.Title.String,
+						Description: d.Description.String,
+						Content:     d.Content,
+					})
+				}
+			}
+			if indexRows, err := h.Queries.ListWorkspaceDocumentIndex(r.Context(), wsID); err == nil {
+				for _, row := range indexRows {
+					resp.DocumentIndex = append(resp.DocumentIndex, DocumentIndexData{
+						Path:        row.Path,
+						Description: row.Description.String,
+						Pinned:      row.Pinned,
+					})
+				}
+			}
+		}
+		if linkedDocs, err := h.Queries.ListLinkedDocumentsForIssue(r.Context(), task.IssueID); err == nil {
+			for _, d := range linkedDocs {
+				resp.IssueLinkedDocuments = append(resp.IssueLinkedDocuments, DocumentData{
+					Path:        d.Path,
+					Title:       d.Title.String,
+					Description: d.Description.String,
+					Content:     d.Content,
+				})
 			}
 		}
 

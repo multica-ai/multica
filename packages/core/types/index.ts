@@ -113,6 +113,23 @@ export type {
   GitHubConnectResponse,
 } from "./github";
 export type {
+  WorkspaceDocument,
+  DocumentIndexEntry,
+  DocumentRevision,
+  DocumentRevisionSummary,
+  DocumentAuthorType,
+  DocumentOperation,
+  IssueLinkType,
+  IssueDocumentLink,
+  UpsertDocumentRequest,
+  PatchDocumentRequest,
+  RenameDocumentRequest,
+  UpdateDocumentTagsRequest,
+  RestoreDocumentRequest,
+  LinkIssueDocumentRequest,
+  ListDocumentsParams,
+} from "./document";
+export type {
   LarkInstallation,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,

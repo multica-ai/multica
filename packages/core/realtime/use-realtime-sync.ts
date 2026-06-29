@@ -10,6 +10,7 @@ import { clearWorkspaceStorage } from "../platform/storage-cleanup";
 import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
+import { documentKeys } from "../documents/queries";
 import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
@@ -321,6 +322,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: documentKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
   }
@@ -446,6 +448,16 @@ export function useRealtimeSync(
           // squad:deleted triggers assignee transfer — refresh issues too.
           qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
         }
+      },
+      // document:updated / document:deleted — refresh the workspace's KB
+      // document tree, list, detail, revisions, and issue-links queries.
+      // The backend emits document:updated for both create and update, so a
+      // single prefix-invalidate covers list refresh on creation, detail
+      // refresh on edits, and revision refresh on saves; document:deleted
+      // funnels through the same prefix and clears the dead row from caches.
+      document: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: documentKeys.all(wsId) });
       },
       label: () => {
         // label:created/updated/deleted — also refresh issues, since each
