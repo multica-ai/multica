@@ -1905,7 +1905,19 @@ func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
 		}
 	}
 
-	d.runHeartbeatTick(ctx, rid)
+	consecutiveTransientFailures := 0
+	tick := func() {
+		if d.runHeartbeatTick(ctx, rid) {
+			consecutiveTransientFailures++
+			if consecutiveTransientFailures == 2 {
+				d.client.CloseIdleConnections()
+			}
+			return
+		}
+		consecutiveTransientFailures = 0
+	}
+
+	tick()
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -1914,12 +1926,14 @@ func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			d.runHeartbeatTick(ctx, rid)
+			tick()
 		}
 	}
 }
 
-func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
+// runHeartbeatTick returns true when the HTTP heartbeat hit a transient
+// failure that should count toward stale idle-connection cleanup.
+func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	// Skip HTTP heartbeat for runtimes that successfully acked a recent
 	// WebSocket heartbeat. The WS path keeps last_seen_at fresh and delivers
 	// actions, so the HTTP write would be a duplicate DB update. If the WS
@@ -1928,7 +1942,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	// relies on.
 	if d.wsHeartbeatRecentlyAcked(rid) {
 		d.logger.Debug("heartbeat: skipping HTTP tick, WS recently acked", "runtime_id", rid)
-		return
+		return false
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
 	resp, err := d.client.SendHeartbeat(ctx, rid)
@@ -1941,20 +1955,21 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 				// the daemon root context so notifyRuntimeSetChanged
 				// tearing down this heartbeat goroutine cannot abort it.
 				go d.handleRuntimeGone(rid)
-				return
+				return false
 			}
 			d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)
 		}
-		return
+		return ctx.Err() == nil && isTransientError(err)
 	}
 	if resp != nil && resp.RuntimeGone {
 		// The WS path returns a successful ack with RuntimeGone=true for the
 		// same scenario; treat it the same way here in case HTTP starts
 		// surfacing this signal too.
 		go d.handleRuntimeGone(rid)
-		return
+		return false
 	}
 	d.handleHeartbeatActions(ctx, rid, resp)
+	return false
 }
 
 // handleHeartbeatActions dispatches the pending-action set returned by either
