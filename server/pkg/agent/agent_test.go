@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -117,9 +119,28 @@ func TestDetectVersionTimesOutOnHang(t *testing.T) {
 
 	dir := t.TempDir()
 	script := filepath.Join(dir, "hang.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 60\n"), 0o755); err != nil {
+	pidFile := filepath.Join(dir, "child.pid")
+	// The CLI hangs forever (`wait`) and backgrounds a child that inherits and
+	// holds our stdout pipe open even after the parent is killed on timeout —
+	// the exact case cmd.WaitDelay must cover. The child records its PID so we
+	// can reap it in Cleanup instead of leaking a 60s `sleep` into CI.
+	body := fmt.Sprintf("#!/bin/sh\nsleep 60 &\necho $! > %q\nwait\n", pidFile)
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write hang script: %v", err)
 	}
+	t.Cleanup(func() {
+		data, err := os.ReadFile(pidFile)
+		if err != nil {
+			return // child never recorded its PID; nothing to reap
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+		if err != nil {
+			return
+		}
+		if proc, err := os.FindProcess(pid); err == nil {
+			_ = proc.Kill()
+		}
+	})
 
 	orig := detectVersionTimeout
 	detectVersionTimeout = 200 * time.Millisecond
