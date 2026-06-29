@@ -631,6 +631,18 @@ SELECT * FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
 ORDER BY priority DESC, created_at ASC;
 
+-- name: ListCancelledTasksForRuntimes :many
+-- Returns tasks that were cancelled server-side while the daemon's WebSocket
+-- was disconnected. Called on WS reconnect so the server can proactively push
+-- daemon:task_cancelled frames — the daemon can then abort those tasks
+-- immediately instead of waiting for the watchTaskCancellation poll (up to 5 s).
+-- Limited to tasks cancelled within the last hour so we don't re-notify for
+-- ancient cancelled rows on every reconnect.
+SELECT * FROM agent_task_queue
+WHERE runtime_id = ANY(@runtime_ids::uuid[])
+  AND status = 'cancelled'
+  AND completed_at > now() - make_interval(secs => 3600);
+
 -- name: ListActiveTasksByIssue :many
 -- Backs the issue-detail "agent live" banner. Includes 'queued' so the
 -- banner shows up the moment a task is enqueued — not only after a runtime

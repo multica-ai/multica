@@ -284,6 +284,23 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				d.logger.Debug("task wakeup received", "runtime_id", payload.RuntimeID, "task_id", payload.TaskID)
 			}
 			signalTaskWakeup(taskWakeups, payload.RuntimeID)
+		case protocol.EventDaemonTaskCancelled:
+			var payload protocol.TaskCancelledPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				d.logger.Debug("task cancel websocket invalid payload", "error", err)
+				continue
+			}
+			if payload.TaskID == "" || payload.RuntimeID == "" {
+				d.logger.Debug("task cancel websocket missing ids")
+				continue
+			}
+			d.logger.Info("task cancelled via websocket push",
+				"runtime_id", payload.RuntimeID,
+				"task_id", payload.TaskID,
+			)
+			// Trigger an immediate task poll so the daemon discovers the
+			// cancelled status without waiting for the next 5 s poll cycle.
+			signalTaskWakeup(taskWakeups, payload.RuntimeID)
 		case protocol.EventDaemonRuntimeProfilesChanged:
 			var payload protocol.RuntimeProfilesChangedPayload
 			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
