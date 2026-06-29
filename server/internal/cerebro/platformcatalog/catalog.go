@@ -357,6 +357,8 @@ var catalog = []Capability{
 			"POST /api/notes/{id}/versions/{versionId}/restore",
 			"POST /api/notes/{id}/lock",
 			"DELETE /api/notes/{id}/lock",
+			// FIR-1317: conflict detection + AI merge dialog.
+			"POST /api/notes/{id}/merge",
 		},
 	},
 	{
