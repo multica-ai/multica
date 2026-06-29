@@ -35,6 +35,10 @@ export interface RuntimeDevice {
    */
   profile_id?: string | null;
   last_seen_at: string | null;
+  /** ISO timestamp when the runtime's hold expires; null when not on hold. Absent on older backends. */
+  hold_until?: string | null;
+  /** Reason for the current hold (e.g. "session_limit"); null when not on hold. Absent on older backends. */
+  hold_reason?: string | null;
   created_at: string;
   updated_at: string;
 }

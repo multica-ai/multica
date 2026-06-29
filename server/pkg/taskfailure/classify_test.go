@@ -62,7 +62,15 @@ func TestClassifyRules(t *testing.T) {
 		{"does not have access", "Your account does not have access to this model", ReasonAgentProviderAuthOrAccess},
 		{"may not have access", "you may not have access to claude-3-opus", ReasonAgentProviderAuthOrAccess},
 
-		// 4. Provider quota / billing.
+		// 4. Session limit (checked before quota). Requires both the
+		//    "session limit" phrase AND a "reset" marker — the hold is only
+		//    useful when a reset time can be parsed into an expiry, so a
+		//    session-limit message without "reset" must NOT land here (see
+		//    TestClassifySessionLimitRequiresResetToken).
+		{"session limit pm", "You've hit your session limit · resets 5:10pm (UTC)", ReasonSessionLimit},
+		{"session limit am", "You've hit your session limit · resets 10:10am (UTC)", ReasonSessionLimit},
+
+		// 5. Provider quota / billing.
 		{"402", "API Error: 402 Payment Required", ReasonAgentProviderQuotaLimit},
 		{"insufficient_balance", `{"error":{"code":"insufficient_balance"}}`, ReasonAgentProviderQuotaLimit},
 		{"balance is too low", "balance is too low to make this request", ReasonAgentProviderQuotaLimit},
@@ -185,6 +193,38 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 				t.Errorf("Classify(%q) = %q, want %q", c.in, got, c.want)
 			}
 		})
+	}
+}
+
+// TestClassifySessionLimitRequiresResetToken pins the contract that a
+// "session limit" message is only classified as ReasonSessionLimit when it
+// also carries a "reset" marker. The hold path keys off this reason and only
+// works when ParseSessionLimitResetTime can extract an expiry; a session-limit
+// message without "reset" would otherwise be held with no hold_until, leaving
+// the runtime stuck until a manual resume. Without the token it must fall
+// through to the broader (still-retryable) quota rule instead.
+func TestClassifySessionLimitRequiresResetToken(t *testing.T) {
+	t.Parallel()
+
+	// With a reset marker: classified as the session-limit reason.
+	withReset := []string{
+		"You've hit your session limit · resets 5:10pm (UTC)",
+		"task failed: session limit reached, resets 9:00am",
+	}
+	for _, in := range withReset {
+		if got := Classify(in); got != ReasonSessionLimit {
+			t.Errorf("Classify(%q) = %q, want %q", in, got, ReasonSessionLimit)
+		}
+	}
+
+	// Without a reset marker: must NOT be the session-limit reason. The
+	// "usage limit" phrasing routes to the quota bucket; the bare phrase
+	// falls through to the catchall. Either way it is not held.
+	if got := Classify("You've hit your session limit"); got == ReasonSessionLimit {
+		t.Errorf(`Classify(%q) = %q, want anything but %q`, "You've hit your session limit", got, ReasonSessionLimit)
+	}
+	if got := Classify("session limit: monthly usage limit reached"); got != ReasonAgentProviderQuotaLimit {
+		t.Errorf("Classify(session limit without reset) = %q, want %q", got, ReasonAgentProviderQuotaLimit)
 	}
 }
 

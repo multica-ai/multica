@@ -99,7 +99,23 @@ func Classify(rawError string) Reason {
 	):
 		return ReasonAgentProviderAuthOrAccess
 
-	// 4. Quota / billing. 402 / insufficient balance / monthly usage
+	// 4. Session limit. Checked before quota because the Claude session
+	//    limit message ("You've hit your session limit · resets ...")
+	//    overlaps with the quota/billing patterns but is structurally
+	//    different: the runtime goes on hold until the reset time
+	//    rather than requiring a billing action.
+	//
+	//    The "reset" token is required, not just "session limit": the
+	//    hold is only useful when the message also carries a reset time
+	//    we can parse into an expiry. A "session limit" message without a
+	//    reset marker would otherwise classify here, get held, but never
+	//    receive a real hold_until — leaving the runtime stuck on hold
+	//    until a manual resume. Such messages fall through to the broader
+	//    quota rule (still retryable, but no open-ended hold).
+	case strings.Contains(lower, "session limit") && strings.Contains(lower, "reset"):
+		return ReasonSessionLimit
+
+	// 5. Quota / billing. 402 / insufficient balance / monthly usage
 	//    limit / credits exhausted.
 	case containsAny(lower,
 		"402",

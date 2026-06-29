@@ -12,23 +12,29 @@
 // This package lifts that classifier into the in-flight write path so the
 // stored failure_reason is already refined when the row is first
 // persisted, and so server / daemon / cloud share a single source of
-// truth for the canonical 21 values. PR1 of the Grafana board plan
+// truth for the canonical 22 values. PR1 of the Grafana board plan
 // ([MUL-2946](https://multica/issues/MUL-2946)). Subsequent PRs use
 // AllReasons() to pre-warm the Prometheus failure_reason label set.
 //
-// The 21 canonical values fall into two groups:
+// The 22 canonical values fall into two groups:
 //
-//   - 7 platform-side values (no `agent_error.` prefix) emitted by the
-//     server-side sweepers and daemon classifiers when the failure is
-//     attributable to the platform/scheduler/runtime layer rather than
-//     anything the agent process did:
+//   - 8 platform-side values (no `agent_error.` prefix) attributable to
+//     the platform/scheduler/runtime layer rather than anything the agent
+//     process did:
 //
 //     queued_expired, runtime_offline, runtime_recovery, timeout,
-//     iteration_limit, agent_blocked, api_invalid_request
+//     iteration_limit, agent_blocked, api_invalid_request, session_limit
+//
+//     Most are emitted by the server-side sweepers and daemon classifiers.
+//     session_limit is the exception: it is platform-side (the runtime is
+//     placed on hold rather than the agent process having erred) but is
+//     produced by Classify(rawError) when it detects a session-limit
+//     message — so Classify's output is NOT exclusively agent-side.
 //
 //   - 14 agent-side values (with `agent_error.` prefix) produced by
 //     Classify(rawError) when the agent process surfaced an error string.
-//     IsAgentError reports membership in this set.
+//     IsAgentError reports membership in this set (and returns false for
+//     session_limit, which carries no `agent_error.` prefix).
 //
 // Wire stability: the string forms of these constants are persisted into
 // the database and surfaced as Prometheus labels. Renaming a value is a
@@ -98,6 +104,11 @@ const (
 	// same 400 — GetLastTaskSession excludes this reason from the
 	// resume lookup. Written by classifyPoisonedError in daemon/poisoned.go.
 	ReasonAPIInvalidRequest Reason = "api_invalid_request"
+
+	// ReasonSessionLimit: the runtime hit a session limit (e.g. Claude
+	// "You've hit your session limit"). The runtime is placed on hold
+	// until the reset time; tasks are auto-retried after the hold lifts.
+	ReasonSessionLimit Reason = "session_limit"
 
 	// Agent process side: failure surfaced by the agent CLI / SDK as
 	// an error string. Classify(rawError) is responsible for picking
@@ -174,7 +185,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 21 reasons. Order is
+// allReasons is the canonical ordered list of the 22 reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -192,6 +203,7 @@ var allReasons = []Reason{
 	ReasonIterationLimit,
 	ReasonAgentBlocked,
 	ReasonAPIInvalidRequest,
+	ReasonSessionLimit,
 
 	// Agent process side: provider errors.
 	ReasonAgentProviderAuthOrAccess,
@@ -231,7 +243,7 @@ func (r Reason) IsAgentError() bool {
 	return strings.HasPrefix(string(r), agentErrorPrefix)
 }
 
-// AllReasons returns the canonical 21 reasons in a stable order. The
+// AllReasons returns the canonical 22 reasons in a stable order. The
 // caller MUST NOT mutate the returned slice; a copy is returned so
 // concurrent callers can append to their local copy without corrupting
 // the package-level fixture.

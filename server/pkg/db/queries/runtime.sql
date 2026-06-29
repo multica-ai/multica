@@ -323,6 +323,32 @@ UPDATE agent_runtime
 SET legacy_daemon_id = COALESCE(legacy_daemon_id, $2)
 WHERE id = $1;
 
+-- name: SetRuntimeHold :one
+UPDATE agent_runtime
+SET hold_until = @hold_until, hold_reason = @hold_reason, updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: ClearRuntimeHold :one
+UPDATE agent_runtime
+SET hold_until = NULL, hold_reason = NULL, updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: ClearExpiredHolds :many
+-- Releases holds only after hold_until plus the release margin has fully
+-- elapsed. The margin absorbs clock skew between when we parsed the reset time
+-- and when the provider actually lifts the limit (the quota is often not
+-- released on the very first run after the stated reset), so we keep the
+-- runtime held a little longer rather than dispatch into a still-throttled
+-- provider. The margin is passed from the single holdExpiryMargin source in Go
+-- so the sweeper, both claim paths, and runtimeOnHold cannot drift apart.
+UPDATE agent_runtime
+SET hold_until = NULL, hold_reason = NULL, updated_at = now()
+WHERE hold_until IS NOT NULL
+  AND hold_until <= now() - make_interval(secs => @hold_expiry_margin_seconds::double precision)
+RETURNING id, workspace_id;
+
 -- name: DeleteStaleOfflineRuntimes :many
 -- Deletes runtimes that have been offline for longer than the TTL and have
 -- no agents bound (active or archived). The FK constraint on agent.runtime_id

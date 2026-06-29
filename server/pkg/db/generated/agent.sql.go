@@ -547,6 +547,17 @@ WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
       AND NOT EXISTS (
+          SELECT 1 FROM agent_runtime ar
+          WHERE ar.id = atq.runtime_id
+            AND ar.hold_until IS NOT NULL
+            -- Stay blocked for the release margin past hold_until: the provider
+            -- quota is often not released on the very first run after the
+            -- stated reset, so we hold dispatch a little longer to absorb clock
+            -- skew. The margin comes from the single holdExpiryMargin source in
+            -- Go, shared with ClearExpiredHolds and runtimeOnHold.
+            AND ar.hold_until > now() - make_interval(secs => $3::double precision)
+      )
+      AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
             AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
@@ -571,8 +582,9 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 `
 
 type ClaimAgentTaskParams struct {
-	AgentID          pgtype.UUID `json:"agent_id"`
-	PrepareLeaseSecs float64     `json:"prepare_lease_secs"`
+	AgentID                 pgtype.UUID `json:"agent_id"`
+	PrepareLeaseSecs        float64     `json:"prepare_lease_secs"`
+	HoldExpiryMarginSeconds float64     `json:"hold_expiry_margin_seconds"`
 }
 
 // Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
@@ -585,7 +597,7 @@ type ClaimAgentTaskParams struct {
 // otherwise a user mashing the create button could fire concurrent quick-creates
 // whose completion lookup would race over "most recent issue by this agent".
 func (q *Queries) ClaimAgentTask(ctx context.Context, arg ClaimAgentTaskParams) (AgentTaskQueue, error) {
-	row := q.db.QueryRow(ctx, claimAgentTask, arg.AgentID, arg.PrepareLeaseSecs)
+	row := q.db.QueryRow(ctx, claimAgentTask, arg.AgentID, arg.PrepareLeaseSecs, arg.HoldExpiryMarginSeconds)
 	var i AgentTaskQueue
 	err := row.Scan(
 		&i.ID,
@@ -2273,10 +2285,21 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 }
 
 const listQueuedClaimCandidatesByRuntime = `-- name: ListQueuedClaimCandidatesByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id FROM agent_task_queue
-WHERE runtime_id = $1 AND status = 'queued'
-ORDER BY priority DESC, created_at ASC
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id FROM agent_task_queue atq
+WHERE atq.runtime_id = $1 AND atq.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_runtime ar
+      WHERE ar.id = atq.runtime_id
+        AND ar.hold_until IS NOT NULL
+        AND ar.hold_until > now() - make_interval(secs => $2::double precision)
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC
 `
+
+type ListQueuedClaimCandidatesByRuntimeParams struct {
+	RuntimeID               pgtype.UUID `json:"runtime_id"`
+	HoldExpiryMarginSeconds float64     `json:"hold_expiry_margin_seconds"`
+}
 
 // Returns rows the runtime can attempt to claim. Status is restricted to
 // 'queued' (in contrast to ListPendingTasksByRuntime which also includes
@@ -2286,8 +2309,13 @@ ORDER BY priority DESC, created_at ASC
 // ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
 // runtime is busy on a long-running task. Backed by the partial index
 // idx_agent_task_queue_claim_candidates so the warm path is cheap.
-func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, listQueuedClaimCandidatesByRuntime, runtimeID)
+// Skips results when the runtime is on hold, including the release margin past
+// hold_until (see ClearExpiredHolds: the provider quota is often not released
+// on the first run after the stated reset, so we keep the runtime held a
+// little longer to absorb clock skew). The margin comes from the single
+// holdExpiryMargin source in Go, shared with ClearExpiredHolds and ClaimAgentTask.
+func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, arg ListQueuedClaimCandidatesByRuntimeParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listQueuedClaimCandidatesByRuntime, arg.RuntimeID, arg.HoldExpiryMarginSeconds)
 	if err != nil {
 		return nil, err
 	}

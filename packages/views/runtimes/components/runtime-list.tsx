@@ -6,6 +6,8 @@ import {
   Globe,
   Loader2,
   MoreHorizontal,
+  PauseCircle,
+  PlayCircle,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,6 +30,7 @@ import {
   deriveRuntimeHealth,
   runtimeProfileListOptions,
   runtimeUsageOptions,
+  useResumeRuntime,
 } from "@multica/core/runtimes";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
@@ -57,6 +60,7 @@ import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import {
   computeCostInWindow,
+  formatHoldUntil,
   formatLastSeen,
   pctChange,
 } from "../utils";
@@ -309,23 +313,42 @@ function HealthCell({
   const health = deriveRuntimeHealth(runtime, now);
   const offline = health === "offline" || health === "about_to_gc";
   const lastSeen = formatLastSeen(runtime.last_seen_at);
+  const holdTime = formatHoldUntil(runtime.hold_until);
   const active = workload.runningCount + workload.queuedCount;
 
   return (
-    <ListGridCell className="gap-1.5">
-      <HealthIcon health={health} />
-      <span className="block min-w-0 truncate text-xs">
-        {labelOf(health)}
-        {health !== "online" && runtime.last_seen_at && (
-          <span className="text-muted-foreground"> · {lastSeen}</span>
-        )}
-        {!offline && active > 0 && (
-          <span className="text-muted-foreground">
-            {" · "}
-            {tAgents(($) => $.row.task_count, { count: active })}
-          </span>
-        )}
-      </span>
+    <ListGridCell className="flex-col items-start gap-0.5">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <HealthIcon health={health} />
+        <span className="block min-w-0 truncate text-xs">
+          {labelOf(health)}
+          {health !== "online" && runtime.last_seen_at && (
+            <span className="text-muted-foreground"> · {lastSeen}</span>
+          )}
+          {!offline && active > 0 && (
+            <span className="text-muted-foreground">
+              {" · "}
+              {tAgents(($) => $.row.task_count, { count: active })}
+            </span>
+          )}
+        </span>
+      </div>
+      {holdTime && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <div className="flex min-w-0 items-center gap-1">
+                <PauseCircle className="h-3 w-3 shrink-0 text-warning" />
+                <span className="truncate text-xs text-warning">
+                  {t(($) => $.health.on_hold.label)} ·{" "}
+                  {t(($) => $.health.on_hold.resumes_in, { time: holdTime })}
+                </span>
+              </div>
+            }
+          />
+          <TooltipContent>{t(($) => $.health.on_hold.tooltip)}</TooltipContent>
+        </Tooltip>
+      )}
     </ListGridCell>
   );
 }
@@ -502,14 +525,15 @@ export function RuntimeRowMenu({
 }) {
   const { t } = useT("runtimes");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const resumeMutation = useResumeRuntime(wsId);
   const isCustomRuntime = !!runtime.profile_id;
-  // Delete is currently the only row action; if the row can't run it, drop
-  // the kebab entirely so the column doesn't render an empty popover. We
-  // used to also hide it for self-healing runtimes (live local daemon
-  // re-registers within seconds), but MUL-3352 surfaced that owners read
-  // a missing kebab as "I lost my permission" rather than "the daemon
-  // would undo this". The dialog now carries the self-heal warning and
-  // the user gets to decide.
+  const onHold = !!runtime.hold_until;
+  // The kebab is dropped entirely when the row can't be deleted, so the
+  // column doesn't render an empty popover. We used to also hide it for
+  // self-healing runtimes (live local daemon re-registers within seconds),
+  // but MUL-3352 surfaced that owners read a missing kebab as "I lost my
+  // permission" rather than "the daemon would undo this". The delete dialog
+  // now carries the self-heal warning and the user gets to decide.
 
   if (!canDelete) {
     return <span aria-hidden />;
@@ -530,6 +554,21 @@ export function RuntimeRowMenu({
           }
         />
         <DropdownMenuContent align="end" className="w-40">
+          {onHold && (
+            <DropdownMenuItem
+              onClick={() =>
+                resumeMutation.mutate(runtime.id, {
+                  onSuccess: () =>
+                    toast.success(t(($) => $.health.on_hold.resume_toast)),
+                  onError: () =>
+                    toast.error(t(($) => $.health.on_hold.resume_failed)),
+                })
+              }
+            >
+              <PlayCircle className="h-3.5 w-3.5" />
+              {t(($) => $.health.on_hold.resume_button)}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             variant="destructive"
             onClick={() => setDeleteOpen(true)}

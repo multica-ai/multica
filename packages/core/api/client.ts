@@ -1133,6 +1133,12 @@ export class ApiClient {
     });
   }
 
+  async resumeRuntime(runtimeId: string): Promise<AgentRuntime> {
+    return this.fetch(`/api/runtimes/${runtimeId}/resume`, {
+      method: "POST",
+    });
+  }
+
   async updateRuntime(
     runtimeId: string,
     patch: { visibility?: "private" | "public" },
