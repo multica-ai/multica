@@ -804,9 +804,30 @@ func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
 	return f.Name(), nil
 }
 
+// detectVersionTimeout bounds a single `<cli> --version` probe. Version
+// detection runs inside the daemon's blocking preflight (registerRuntimesForWorkspace),
+// so a CLI that never returns from `--version` — e.g. a brew-installed claude
+// wedged by a bun regression (MUL-3812) — would otherwise stall the whole
+// registration loop, the daemon would never flip /health from "starting" to
+// "running", and *every* runtime on the host would appear disconnected. A real
+// `--version` returns well under this bound even on a cold cache or with
+// Windows AV scanning; the timeout exists only to fail a wedged probe fast and
+// in isolation so the remaining runtimes still register. A var (not const) so
+// tests can shrink it without waiting out the real bound.
+var detectVersionTimeout = 10 * time.Second
+
 func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, execPath, "--version")
 	hideAgentWindow(cmd)
+	// exec.CommandContext only kills the direct child on timeout. A broken CLI
+	// (node/bun shim) can leave grandchildren that inherited and still hold our
+	// stdout pipe open, and cmd.Output() blocks in Wait() until that pipe
+	// closes — defeating the timeout above. WaitDelay forces the pipes shut and
+	// reaps shortly after the context fires so this call always returns.
+	cmd.WaitDelay = 2 * time.Second
 	data, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)

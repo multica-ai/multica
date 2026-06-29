@@ -2,6 +2,9 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -95,6 +98,50 @@ func TestDetectVersionFailsForMissingBinary(t *testing.T) {
 	_, err := DetectVersion(context.Background(), "/nonexistent/binary")
 	if err == nil {
 		t.Fatal("expected error for missing binary")
+	}
+}
+
+// TestDetectVersionTimesOutOnHang guards MUL-3812: a CLI whose `--version`
+// never returns (e.g. a brew-installed claude wedged by a bun regression) must
+// not stall version detection forever. The daemon detects every runtime's
+// version sequentially inside its blocking preflight, so an unbounded probe
+// would leave the daemon stuck "starting" and *every* runtime on the host
+// disconnected. detectCLIVersion must bound the probe and return an error so
+// the registration loop isolates the broken runtime and the rest still
+// register. The script also leaves an orphaned child holding the stdout pipe
+// open after the parent is killed, exercising the cmd.WaitDelay path.
+func TestDetectVersionTimesOutOnHang(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on a /bin/sh hang script")
+	}
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "hang.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 60\n"), 0o755); err != nil {
+		t.Fatalf("write hang script: %v", err)
+	}
+
+	orig := detectVersionTimeout
+	detectVersionTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { detectVersionTimeout = orig })
+
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		_, err := DetectVersion(context.Background(), script)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected an error from a hanging --version probe, got nil")
+		}
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			t.Fatalf("detection took %v; expected it to be bounded by the timeout", elapsed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("DetectVersion did not return: version probe is unbounded (regression of MUL-3812)")
 	}
 }
 
