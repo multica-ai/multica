@@ -1,12 +1,13 @@
 "use client";
 
-// Agent Office (FIR-1775) — the collapsible tab-section shell for the agent
-// detail page. The upstream agent-overview-pane renders a single flat strip of
-// tab buttons; this component groups those same buttons into three labelled,
-// collapsible sections per the approved v2 layout:
+// Agent Office (FIR-1775, FIR-2280) — the collapsible tab-section shell for the
+// agent detail page. The upstream agent-overview-pane renders a single flat
+// strip of tab buttons; this component groups those same buttons into three
+// labelled, collapsible sections, each rendered as its own separate card so the
+// three groups read as three distinct boxes rather than rows packed into one:
 //
-//   - Activity (open)   — Activity / Tasks / Capabilities
-//   - Setup    (open)   — Instructions / Skills / Tools
+//   - Activity (open)   — Activity / Tasks
+//   - Context  (open)   — Instructions / Skills / Tools / Capabilities
 //   - Advanced (closed) — everything else (Secrets / Custom Args / Sandbox / MCP / …)
 //
 // One tab is active across all sections; collapsing a section only hides its
@@ -44,13 +45,13 @@ const SECTIONS: {
     id: "activity",
     title: "Activity",
     defaultOpen: true,
-    tabIds: ["activity", "tasks", "capabilities"],
+    tabIds: ["activity", "tasks"],
   },
   {
     id: "setup",
-    title: "Setup",
+    title: "Context",
     defaultOpen: true,
-    tabIds: ["instructions", "skills", "tools"],
+    tabIds: ["instructions", "skills", "tools", "capabilities"],
   },
   {
     id: "advanced",
@@ -81,7 +82,7 @@ export function AgentTabSections({
   );
 
   return (
-    <div className="flex shrink-0 flex-col border-b">
+    <div className="flex shrink-0 flex-col gap-2 border-b p-2 md:gap-3 md:p-3">
       {SECTIONS.map((section) => {
         // Preserve the section's declared tab order, then append any
         // unclaimed tabs that fell through to this section (Advanced only).
@@ -104,9 +105,9 @@ export function AgentTabSections({
             onOpenChange={(next) =>
               setOpenSections((prev) => ({ ...prev, [section.id]: next }))
             }
-            className="border-b last:border-b-0"
+            className="rounded-lg border bg-muted/20"
           >
-            <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground md:px-4">
+            <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground md:px-4">
               <ChevronDown
                 className={`h-3.5 w-3.5 shrink-0 transition-transform ${
                   open ? "" : "-rotate-90"
@@ -115,7 +116,7 @@ export function AgentTabSections({
               {section.title}
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <div className="flex flex-wrap items-center gap-0 px-1 pb-1 md:px-2">
+              <div className="flex flex-wrap items-center gap-0 px-1.5 pb-1.5 md:px-2">
                 {sectionTabs.map((tab) => (
                   <button
                     key={tab.id}
