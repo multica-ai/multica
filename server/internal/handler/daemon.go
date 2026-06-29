@@ -1336,7 +1336,18 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task, runtimeWorkspaceID)
+
+	// CEREBRO-PATCH(agent-browser-sandbox-gate): FIR-1428 — resolve the agent's
+	// agent-browser tool policy and, if it allows/asks, merge the unix-socket
+	// opener into the sandbox policy the daemon receives (folded in below, after
+	// the agent row is loaded for its owner/workspace). Default Deny: sealed.
+	agentBrowserAllowed := false
+
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+		// CEREBRO-PATCH(agent-browser-sandbox-gate): FIR-1428 — resolve here, where
+		// the agent's owner (user-ceiling layer) and workspace are known, so the
+		// full chain (workspace→runtime→agent→group→user) decides the verdict.
+		agentBrowserAllowed = h.resolveAgentBrowserAllowed(r.Context(), agent.WorkspaceID, task.RuntimeID, task.AgentID, agent.OwnerID)
 		// Workspace-bound skills first, then platform built-in skills. Built-in
 		// names carry a "multica-" prefix so their on-disk slugs never collide
 		// with a user-authored workspace skill (see writeSkillFiles).
@@ -1384,6 +1395,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			OwnerID:       uuidToString(agent.OwnerID),
 			RuntimeConfig: runtimeConfig,
 		}
+	}
+
+	// CEREBRO-PATCH(agent-browser-sandbox-gate): FIR-1428 — fold the resolved
+	// agent-browser verdict into the sandbox policy the daemon receives. Only an
+	// allow/ask grant opens the Unix-socket bind + ~/.agent-browser write rule;
+	// deny / no-grant leaves the policy untouched and the socket sealed.
+	if agentBrowserAllowed {
+		resp.RuntimeSandboxPolicy = withAgentBrowserSandbox(resp.RuntimeSandboxPolicy)
 	}
 
 	// Resolve the runtime owner's profile description so the daemon can
