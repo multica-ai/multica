@@ -10,11 +10,16 @@ import (
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 )
 
-// Composio integration handlers (MUL-3720, Stage 2 MVP). All routes are
-// user-scoped (requireUserID) and live outside the workspace-membership group —
-// a Composio connection belongs to a user, not a workspace. The whole block
-// returns 503 when h.Composio is nil (COMPOSIO_API_KEY unset), matching the
-// Lark/GitHub "integration not configured" convention.
+// Composio integration handlers (MUL-3720, Stage 2 MVP). A Composio connection
+// belongs to a user, not a workspace, so these handlers live outside the
+// workspace-membership group. The four management endpoints (connect/init,
+// toolkits, connections, delete) are user-scoped (requireUserID) and sit under
+// the Auth middleware. ComposioCallback is the exception: it is a public route
+// (outside the Auth group, see router.go / MUL-3843) because the browser often
+// arrives without a session cookie — its identity comes from the signed state,
+// not requireUserID. The whole block returns 503 when h.Composio is nil
+// (COMPOSIO_API_KEY unset), matching the Lark/GitHub "integration not
+// configured" convention.
 
 // ComposioConnectInitRequest is the POST /connect/init body.
 type ComposioConnectInitRequest struct {
@@ -87,13 +92,15 @@ func (h *Handler) ComposioConnectInit(w http.ResponseWriter, r *http.Request) {
 }
 
 // ComposioCallback (GET /api/integrations/composio/callback) is the browser
-// redirect target Composio sends the user back to after the hosted flow. The
-// signed `state` query param is the source of truth for the user identity, so
-// the request is attributed from it (the route still sits under Auth so the
-// browser session is present, but identity comes from the state). On success
-// the row is upserted and the browser is redirected to the settings page; any
-// failure redirects to the same page with a stable error code so the user is
-// never left on a blank API response.
+// redirect target Composio sends the user back to after the hosted flow. It is
+// registered as a PUBLIC route (outside the Auth middleware group — see
+// router.go / MUL-3843), because the browser frequently lands here without a
+// session cookie (expired session, SameSite/ITP stripping, private window,
+// self-hosted callback subdomain). Identity therefore comes solely from the
+// HMAC-signed `state` query param, which CompleteCallback verifies before
+// doing anything. On success the row is upserted and the browser is redirected
+// to the settings page; any failure redirects to the same page with a stable
+// error code so the user is never left on a blank API response.
 func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 	if h.Composio == nil {
 		writeError(w, http.StatusServiceUnavailable, "composio integration not configured")

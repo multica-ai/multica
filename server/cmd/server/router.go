@@ -612,6 +612,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// HandleCloudBillingStripeWebhook for the rationale).
 	r.Post("/api/webhooks/stripe", h.HandleCloudBillingStripeWebhook)
 
+	// Composio OAuth callback (MUL-3843). NOT under the Auth group on purpose:
+	// Composio 302-redirects the user's browser here at the end of the OAuth
+	// flow, and the cookie session is frequently absent (expired session,
+	// SameSite=Strict / Safari ITP stripping cross-site cookies, private
+	// windows, self-hosted callbacks on a different subdomain). Identity is NOT
+	// taken from the session — it comes from the HMAC-signed `state` query
+	// param, which CompleteCallback verifies (signature, expiry, replay) before
+	// doing anything. h.Composio == nil still returns 503. Keeping it inside the
+	// Auth group made a missing cookie a hard 401, breaking the flow for exactly
+	// the browsers above; the other four composio endpoints stay session-gated.
+	r.Get("/api/integrations/composio/callback", h.ComposioCallback)
+
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
@@ -770,12 +782,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/lark/binding/redeem", h.RedeemLarkBindingToken)
 
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
-		// a connection belongs to a user. The callback is a GET so it works as
-		// a top-level browser redirect under cookie auth (no CSRF gate on GET).
-		// All four return 503 when COMPOSIO_API_KEY is unset.
+		// a connection belongs to a user. These four require a logged-in
+		// session; the OAuth callback is the outlier and lives outside the Auth
+		// group (registered above with the other public OAuth/webhook routes —
+		// see MUL-3843). All return 503 when COMPOSIO_API_KEY is unset.
 		r.Route("/api/integrations/composio", func(r chi.Router) {
 			r.Post("/connect/init", h.ComposioConnectInit)
-			r.Get("/callback", h.ComposioCallback)
 			r.Get("/toolkits", h.ListComposioToolkits)
 			r.Get("/connections", h.ListComposioConnections)
 			r.Delete("/connections/{id}", h.DeleteComposioConnection)
