@@ -439,15 +439,20 @@ func (s *Service) CreateMCPSession(ctx context.Context, userID pgtype.UUID) (*MC
 }
 
 // CallbackRedirect builds the browser redirect target for the callback handler.
-// On success it points at the settings page with the connected toolkit slug; on
-// failure it carries a stable error code. When FrontendBaseURL is unset it
+// On success it points at the settings page (Integrations tab) with the
+// connected toolkit slug; on failure it carries a stable error code. The path
+// is the slug-less `/settings?tab=integrations&...` form on purpose: the web
+// proxy's legacy-route redirect prepends the user's last workspace slug, so it
+// resolves to the real `/{slug}/settings?tab=integrations` route that mounts
+// the Composio tab. The older `/settings/integrations` path was NOT a real
+// route and 404'd after the legacy rewrite. When FrontendBaseURL is unset it
 // returns a site-relative path.
 func (s *Service) CallbackRedirect(slug string, success bool) string {
 	var path string
 	if success {
-		path = "/settings/integrations?connected=" + url.QueryEscape(slug)
+		path = "/settings?tab=integrations&connected=" + url.QueryEscape(slug)
 	} else {
-		path = "/settings/integrations?error=composio_connect_failed"
+		path = "/settings?tab=integrations&error=composio_connect_failed"
 	}
 	return s.frontendURL + path
 }

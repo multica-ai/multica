@@ -673,10 +673,10 @@ func TestCreateMCPSession_PinsConnectedAccounts(t *testing.T) {
 func TestCallbackRedirect(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t, &fakeSDK{}, newFakeStore())
-	if got := svc.CallbackRedirect("notion", true); got != "https://app.multica.ai/settings/integrations?connected=notion" {
+	if got := svc.CallbackRedirect("notion", true); got != "https://app.multica.ai/settings?tab=integrations&connected=notion" {
 		t.Errorf("success redirect = %q", got)
 	}
-	if got := svc.CallbackRedirect("notion", false); got != "https://app.multica.ai/settings/integrations?error=composio_connect_failed" {
+	if got := svc.CallbackRedirect("notion", false); got != "https://app.multica.ai/settings?tab=integrations&error=composio_connect_failed" {
 		t.Errorf("failure redirect = %q", got)
 	}
 }

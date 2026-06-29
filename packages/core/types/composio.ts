@@ -21,7 +21,10 @@ export interface ComposioToolkit {
 export interface ComposioConnection {
   id: string;
   toolkit_slug: string;
-  status: "active" | "revoked" | string;
+  /** Connection lifecycle state. `expired` surfaces a Reconnect affordance in
+   * the UI; the backend only starts emitting it once Stage 4 webhook handling
+   * lands (MUL-3719), but the client renders the branch ahead of that. */
+  status: "active" | "expired" | "revoked" | string;
   connected_at: string;
   last_used_at?: string | null;
 }

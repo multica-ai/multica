@@ -401,6 +401,12 @@
     "disconnect_confirm_title": "Disconnect this app?",
     "disconnect_confirm_description": "Your connected account will be revoked at Composio and your agents will lose access to this toolkit. You can reconnect later.",
     "disconnect_confirm_cancel": "Cancel",
-    "connections_load_failed": "Couldn't load your existing connections, so connected status may be incomplete."
+    "connections_load_failed": "Couldn't load your existing connections, so connected status may be incomplete.",
+    "toast_connected": "연결되었습니다",
+    "toast_connect_failed": "연결을 완료하지 못했습니다. 다시 시도해 주세요.",
+    "last_used": "마지막 사용 {{when}}",
+    "last_used_never": "사용한 적 없음",
+    "expired": "토큰 만료됨",
+    "reconnect": "다시 연결"
   }
 }
