@@ -58,12 +58,12 @@ export function CerebroAgentContextTab({
     <div className="space-y-5 p-4 md:p-6">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold">Agent Office</h3>
+          <h3 className="text-sm font-semibold">Instructions</h3>
           <p className="mt-0.5 max-w-prose text-xs text-muted-foreground">
             This agent&apos;s instructions and configuration are versioned and
-            reviewable. Propose a change, review pending proposals, compare
-            versions, and roll back — so the harness stays auditable instead of
-            drifting.
+            reviewable. Edit through Propose change — review pending proposals,
+            compare versions, and roll back — so the harness stays auditable
+            instead of drifting.
           </p>
         </div>
         <AgentContextProposeDialog agent={agent} />

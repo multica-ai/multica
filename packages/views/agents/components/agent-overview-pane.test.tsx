@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -127,6 +127,13 @@ beforeEach(() => {
   larkListingRef.current = { installations: [], configured: false };
 });
 
+// CEREBRO-PATCH(agent-office-tab): FIR-1775 — MCP and Integrations now live in
+// the collapsed-by-default "Advanced" section, so their tab buttons only render
+// once that section header is expanded.
+function expandAdvanced() {
+  fireEvent.click(screen.getByRole("button", { name: /^Advanced$/i }));
+}
+
 describe("AgentOverviewPane MCP tab visibility", () => {
   it.each([
     ["Claude", "claude"],
@@ -138,6 +145,7 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     ["OpenClaw", "openclaw"],
   ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
     renderPane([makeRuntime(provider)]);
+    expandAdvanced();
     expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
   });
 
@@ -145,6 +153,7 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     // Saving an MCP config on e.g. Gemini would be a silent no-op at run
     // time — that's the bug this hiding logic is meant to prevent.
     renderPane([makeRuntime("gemini")]);
+    expandAdvanced();
     expect(
       screen.queryByRole("button", { name: /^MCP$/i }),
     ).not.toBeInTheDocument();
@@ -155,6 +164,7 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     // the runtimes query resolving. Hiding the tab would flicker it off and
     // then back on, which reads as a bug.
     renderPane([]);
+    expandAdvanced();
     expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
   });
 });
@@ -163,6 +173,7 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
   it("shows the Integrations tab once the deployment has Lark configured", async () => {
     larkListingRef.current = { installations: [], configured: true };
     renderPane([makeRuntime("claude")]);
+    expandAdvanced();
     expect(
       await screen.findByRole("button", { name: /^Integrations$/i }),
     ).toBeInTheDocument();
@@ -172,6 +183,7 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
     // Default ref is configured:false; the tab must not appear on
     // deployments without the integration, which are the common case.
     renderPane([makeRuntime("claude")]);
+    expandAdvanced();
     expect(
       screen.queryByRole("button", { name: /^Integrations$/i }),
     ).not.toBeInTheDocument();
