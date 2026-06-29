@@ -1,7 +1,7 @@
 # Issue 详情页 — Workflow 执行全景图设计
 
 **Status:** Implemented
-**Last updated:** 2026-06-28
+**Last updated:** 2026-06-29
 **Reference documents:**
 - `docs/issue需求文档.md`（用户需求）
 - `docs/issue-data-model-analysis.md`（数据模型分析）
@@ -183,7 +183,7 @@ IssueDetail
 │   └── scroll container (relative flex-1 overflow-y-auto)
 │       ├── IssueHeader
 │       └── 全景图容器 (flex-1 min-h-0 flex flex-col)
-│           └── <div flex-1 min-h-0 px-8 py-6>
+│           └── <div flex-1 min-h-0 py-6>
 │               └── ExecutionPanoramaPage
 │                   ├── PanoramaSvgOverlay（absolute, pointer-events: none）
 │                   ├── StageTransitionBar[]
@@ -205,7 +205,7 @@ IssueDetail
     │           │   └── ReactionBar + FileUploadButton
     │           ├── {hasWorkflow ? (
     │           │     <全景图容器 (w-full border-y bg-muted/20 py-6)>
-    │           │       <div px-8>
+    │           │       <div px-6>
     │           │         <ExecutionPanoramaPage />
     │           │           ├── ...（同上）
     │           │       </div>
@@ -394,14 +394,16 @@ useQuery(builtinPluginListOptions(wsId))                     // Plugin 信息
 | 全景图容器 (全屏模式) | `flex-1 min-h-0 flex flex-col`，无 border/背景条带 |
 | 全景图容器背景 (详情模式) | `bg-muted/20` + `border-y` |
 | 全景图容器纵向内边距 (详情模式) | 24px（`py-6`） |
+| 全景图容器横向内边距 (详情模式) | 24px（`px-6`） |
 | 全景图容器纵向内边距 (全屏模式) | 24px（`py-6`，在内部 div 上） |
-| 统一横向内边距 | 32px（`px-8`，三段一致） |
+| 全景图容器横向内边距 (全屏模式) | 无（全屏模式全景图撑满宽度） |
+| 统一横向内边距 | 32px（`px-8`，描述区和协作区） |
 
 ### 全景图内部间距
 
 | 层级 | 值 |
 |------|-----|
-| 画布内边距 | 12px（`p-3`） |
+| 画布内边距 | 无（`relative`，无边距） |
 | 节点卡片间距 | 32px（`gap-8`, `justify-evenly`，同 Panorama） |
 | 卡片外边距 | 12px（`p-3`） |
 | 卡片内行间垂直间距 | 8px（`gap-2`，flex-col 行间距） |
