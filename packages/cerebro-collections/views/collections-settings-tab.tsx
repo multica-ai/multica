@@ -65,7 +65,6 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { projectTreeOptions } from "@multica/core/projects/nesting";
 import type { ProjectTreeItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { useNavigation } from "@multica/views/navigation";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import {
@@ -494,7 +493,6 @@ function ProjectTree({
 
 export function CollectionsTab() {
   const wsId = useWorkspaceId();
-  const nav = useNavigation();
   const wsPaths = useWorkspacePaths();
   const openModal = useModalStore((s) => s.open);
   const [activeTab, setActiveTab] = React.useState("Documents");
@@ -592,13 +590,13 @@ export function CollectionsTab() {
                 autopilots navigate to the full creation page (require assignee). */}
             <div className="mb-3">
               {g.entityKind === "autopilot" ? (
-                <button
-                  onClick={() => nav.push(wsPaths.autopilotNew())}
+                <a
+                  href={wsPaths.autopilotNew()}
                   className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted/50"
                 >
                   <FilePlus className="size-3.5" />
                   New autopilot
-                </button>
+                </a>
               ) : creatingItem[g.group] ? (
                 <div className="flex items-center gap-1 px-1">
                   <Input
