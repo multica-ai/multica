@@ -186,6 +186,8 @@ func main() {
 	logPoolConfig(pool)
 
 	bus := events.New()
+	registerMarvisOfficeSync(bus)
+
 	hub := realtime.NewHub()
 	go hub.Run()
 	daemonHub := daemonws.NewHub()
