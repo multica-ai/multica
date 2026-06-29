@@ -1644,7 +1644,7 @@ func TestRegisterTaskReposAllowsProjectOnlyURL(t *testing.T) {
 	// the only repo URL the agent should be able to check out.
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	d.registerTaskRepos("ws-1", []RepoData{{URL: sourceRepo}})
+	d.registerTaskRepos("ws-1", "task-project-only", []RepoData{{URL: sourceRepo}})
 
 	// The async clone goroutine in registerTaskRepos may not have finished;
 	// poll briefly until the cache is populated so the test isn't racy.
@@ -1691,7 +1691,7 @@ func TestRegisterTaskReposSurvivesWorkspaceRefresh(t *testing.T) {
 		})
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
-	d.registerTaskRepos("ws-1", []RepoData{{URL: sourceRepo}})
+	d.registerTaskRepos("ws-1", "task-refresh", []RepoData{{URL: sourceRepo}})
 
 	// Wait for the registration to populate the cache.
 	deadline := time.Now().Add(5 * time.Second)
@@ -1705,6 +1705,39 @@ func TestRegisterTaskReposSurvivesWorkspaceRefresh(t *testing.T) {
 
 	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
 		t.Fatal("project repo URL was wiped by workspace refresh")
+	}
+}
+
+func TestTaskRepoDefaultRefScopedByTask(t *testing.T) {
+	t.Parallel()
+
+	const repoURL = "https://github.com/example/shared"
+	d := &Daemon{
+		workspaces: map[string]*workspaceState{
+			"ws-1": newWorkspaceState("ws-1", nil, "", nil, nil),
+		},
+	}
+
+	d.registerTaskRepos("ws-1", "task-a", []RepoData{
+		{URL: repoURL, Ref: "release/a"},
+		{URL: repoURL, Ref: "late-duplicate"},
+	})
+	d.registerTaskRepos("ws-1", "task-b", []RepoData{{URL: repoURL, Ref: "release/b"}})
+
+	if got := d.taskRepoDefaultRef("ws-1", "task-a", repoURL); got != "release/a" {
+		t.Fatalf("task-a default ref = %q, want release/a", got)
+	}
+	if got := d.taskRepoDefaultRef("ws-1", "task-b", repoURL); got != "release/b" {
+		t.Fatalf("task-b default ref = %q, want release/b", got)
+	}
+
+	d.clearTaskRepoRefs("ws-1", "task-a")
+
+	if got := d.taskRepoDefaultRef("ws-1", "task-a", repoURL); got != "" {
+		t.Fatalf("task-a default ref after cleanup = %q, want empty", got)
+	}
+	if got := d.taskRepoDefaultRef("ws-1", "task-b", repoURL); got != "release/b" {
+		t.Fatalf("task-b default ref after task-a cleanup = %q, want release/b", got)
 	}
 }
 
@@ -1823,7 +1856,7 @@ func TestDefaultArgsForProvider(t *testing.T) {
 	if got := defaultArgsForProvider(cfg, "codex"); strings.Join(got, " ") != "--sandbox workspace-write" {
 		t.Fatalf("unexpected codex args: %#v", got)
 	}
-	if got := defaultArgsForProvider(cfg, "gemini"); got != nil {
+	if got := defaultArgsForProvider(cfg, "unsupported"); got != nil {
 		t.Fatalf("expected nil for unsupported provider, got %#v", got)
 	}
 }

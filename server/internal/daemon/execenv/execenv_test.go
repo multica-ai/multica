@@ -157,7 +157,7 @@ func TestPrepareWithProjectResources(t *testing.T) {
 			{
 				ID:           "33333333-4444-5555-6666-777777777777",
 				ResourceType: "github_repo",
-				ResourceRef:  json.RawMessage(`{"url":"https://github.com/multica-ai/multica","default_branch_hint":"main"}`),
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/multica-ai/multica","ref":"release/v2","default_branch_hint":"main"}`),
 			},
 		},
 	}
@@ -221,7 +221,8 @@ func TestPrepareWithProjectResources(t *testing.T) {
 		"Always write copy in British English. Ship behind a feature flag.",
 		"GitHub repo",
 		"https://github.com/multica-ai/multica",
-		"default branch: `main`",
+		"checkout ref: `release/v2`",
+		"default branch hint: `main`",
 		".multica/project/resources.json",
 	} {
 		if !strings.Contains(s, want) {
@@ -290,7 +291,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	taskCtx := TaskContextForEnv{
 		IssueID: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
 		Repos: []RepoContextForEnv{
-			{URL: "https://github.com/org/backend"},
+			{URL: "https://github.com/org/backend", Ref: "release/v2"},
 			{URL: "https://github.com/org/frontend"},
 		},
 	}
@@ -333,6 +334,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	for _, want := range []string{
 		"multica repo checkout",
 		"https://github.com/org/backend",
+		"default ref: `release/v2`",
 		"https://github.com/org/frontend",
 	} {
 		if !strings.Contains(s, want) {
@@ -817,7 +819,6 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 		{"claude", "CLAUDE.md"},
 		{"codex", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
-		{"gemini", "GEMINI.md"},
 		{"hermes", "AGENTS.md"},
 	}
 
@@ -912,44 +913,6 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		if strings.Contains(s, banned) {
 			t.Errorf("AGENTS.md should not inject non-core command %q\n---\n%s", banned, s)
 		}
-	}
-}
-
-func TestInjectRuntimeConfigGemini(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID:     "test-issue-id",
-		AgentSkills: []SkillContextForEnv{{Name: "Writing", Content: "Write clearly."}},
-	}
-
-	if _, err := InjectRuntimeConfig(dir, "gemini", ctx); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-
-	content, err := os.ReadFile(filepath.Join(dir, "GEMINI.md"))
-	if err != nil {
-		t.Fatalf("failed to read GEMINI.md: %v", err)
-	}
-
-	s := string(content)
-	for _, want := range []string{
-		"Multica Agent Runtime",
-		"multica issue get",
-		"Writing",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("GEMINI.md missing %q", want)
-		}
-	}
-
-	// Should not write CLAUDE.md or AGENTS.md for gemini provider.
-	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
-		t.Error("gemini provider should not create CLAUDE.md")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); !os.IsNotExist(err) {
-		t.Error("gemini provider should not create AGENTS.md")
 	}
 }
 
@@ -1593,7 +1556,7 @@ func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 	t.Cleanup(func() { runtimeGOOS = saved })
 
 	for _, host := range []string{"linux", "darwin", "windows"} {
-		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor", "gemini"} {
+		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor"} {
 			t.Run(provider+"/"+host, func(t *testing.T) {
 				runtimeGOOS = host
 				dir := t.TempDir()
@@ -1604,9 +1567,6 @@ func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 				configFile := "CLAUDE.md"
 				if provider != "claude" {
 					configFile = "AGENTS.md"
-				}
-				if provider == "gemini" {
-					configFile = "GEMINI.md"
 				}
 				data, err := os.ReadFile(filepath.Join(dir, configFile))
 				if err != nil {

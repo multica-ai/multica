@@ -278,10 +278,21 @@ export function useUpdateIssue() {
         old ? { ...old, ...patch } : old,
       );
       if (parentId) {
+        // When the write re-parents this issue away from `parentId` (detach
+        // to standalone, or move under a different parent), prune it from the
+        // old parent's children cache. The parent's sub-issues list renders
+        // that array directly, so a bare patch to parent_issue_id: null would
+        // leave an orphaned row in the list until the settle refetch lands.
+        // onError restores prevChildren, so the prune rolls back on failure.
+        const detachedFromParent =
+          Object.prototype.hasOwnProperty.call(patch, "parent_issue_id") &&
+          patch.parent_issue_id !== parentId;
         qc.setQueryData<Issue[]>(
           issueKeys.children(wsId, parentId),
           (old) =>
-            old?.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+            detachedFromParent
+              ? old?.filter((c) => c.id !== id)
+              : old?.map((c) => (c.id === id ? { ...c, ...patch } : c)),
         );
       }
       return { prevLists, prevDetail, prevChildren, parentId, id };
@@ -332,6 +343,15 @@ export function useUpdateIssue() {
         Object.prototype.hasOwnProperty.call(vars, "project_id")
       ) {
         qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      }
+      // Local safety net for a project move. The WS echo now carries
+      // project_changed, but a moved issue must also drop out of the OLD
+      // project's filtered list here in case the echo is delayed or dropped. The
+      // surgical onMutate patch is filter-blind — it never removes a card that no
+      // longer matches the list's project filter — so reconcile by refetching
+      // myAll whenever project_id was part of this update (MUL-3669 / #4548).
+      if (Object.prototype.hasOwnProperty.call(vars, "project_id")) {
+        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
       }
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
@@ -522,6 +542,11 @@ export function useBatchUpdateIssues() {
         Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")
       ) {
         qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      }
+      // Local safety net mirroring useUpdateIssue: drop moved issues from the old
+      // project's filtered list even if the WS echo is delayed (MUL-3669 / #4548).
+      if (Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")) {
+        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
       }
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {

@@ -48,7 +48,7 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 		// themselves or it survived from a crashed prior run we can't
 		// safely distinguish from intentional content. Refusing the
 		// write is the correct call: the runtime brief (CLAUDE.md /
-		// AGENTS.md / GEMINI.md) already carries every fact this file
+		// AGENTS.md) already carries every fact this file
 		// would, so the agent runs fine without the sidecar copy.
 		// Anything else is a real failure.
 		if !errors.Is(err, errPathPreExists) {

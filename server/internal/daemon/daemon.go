@@ -119,13 +119,17 @@ var (
 // surfaced through a per-task claim (project github_repo resources today,
 // possibly other typed sources later) — those don't show up in
 // GetWorkspaceRepos, so they would be wiped on refresh if we shared one map.
+// taskRepoRefs tracks optional checkout refs for the specific task that
+// surfaced each project repo so two projects using the same URL don't leak refs
+// into each other.
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
 	reposVersion    string // stored for future use: skip refresh when version unchanged
 	allowedRepoURLs map[string]struct{}
 	taskRepoURLs    map[string]struct{}
-	settings        json.RawMessage // workspace settings (JSONB)
+	taskRepoRefs    map[string]map[string]string // taskID -> repo URL -> checkout ref
+	settings        json.RawMessage              // workspace settings (JSONB)
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
 	// profileSetSig is a content hash of the workspace's custom runtime
@@ -1020,6 +1024,18 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 				"workspace_id", workspaceID, "profile_id", profile.ID, "display_name", profile.DisplayName)
 			continue
 		}
+		if !agent.IsSupportedType(profile.ProtocolFamily) {
+			reason := "unsupported protocol_family: " + profile.ProtocolFamily
+			d.logger.Warn("skip custom runtime profile: unsupported protocol_family",
+				"workspace_id", workspaceID, "profile_id", profile.ID,
+				"display_name", profile.DisplayName, "protocol_family", profile.ProtocolFamily)
+			*failedProfiles = append(*failedProfiles, map[string]string{
+				"profile_id":   profile.ID,
+				"command_name": profile.CommandName,
+				"reason":       reason,
+			})
+			continue
+		}
 		// Resolve the executable to launch for this profile. A per-machine
 		// path override (MUL-3284, `multica runtime profile set-path`) wins
 		// over the PATH lookup when it is set AND points at a real
@@ -1224,7 +1240,7 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 // idempotent. Called from runTask before the agent spawns so
 // `multica repo checkout` accepts project-only URLs without an extra round
 // trip back to GetWorkspaceRepos (which doesn't carry project resources).
-func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
+func (d *Daemon) registerTaskRepos(workspaceID, taskID string, repos []RepoData) {
 	if len(repos) == 0 {
 		return
 	}
@@ -1243,6 +1259,9 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 	if ws.taskRepoURLs == nil {
 		ws.taskRepoURLs = make(map[string]struct{}, len(repos))
 	}
+	if taskID != "" && ws.taskRepoRefs == nil {
+		ws.taskRepoRefs = make(map[string]map[string]string)
+	}
 	candidates := make([]repoCandidate, 0, len(repos))
 	for _, repo := range repos {
 		url := strings.TrimSpace(repo.URL)
@@ -1254,6 +1273,14 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 		_, inWorkspace := ws.allowedRepoURLs[url]
 		_, inTask := ws.taskRepoURLs[url]
 		ws.taskRepoURLs[url] = struct{}{}
+		if taskID != "" {
+			if ws.taskRepoRefs[taskID] == nil {
+				ws.taskRepoRefs[taskID] = make(map[string]string, len(repos))
+			}
+			if _, exists := ws.taskRepoRefs[taskID][url]; !exists {
+				ws.taskRepoRefs[taskID][url] = strings.TrimSpace(repo.Ref)
+			}
+		}
 		candidates = append(candidates, repoCandidate{
 			url:     url,
 			tracked: inWorkspace || inTask,
@@ -1279,6 +1306,33 @@ func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 			defer d.bgSyncs.Done()
 			d.syncWorkspaceRepos(workspaceID, toSync)
 		}()
+	}
+}
+
+func (d *Daemon) taskRepoDefaultRef(workspaceID, taskID, repoURL string) string {
+	taskID = strings.TrimSpace(taskID)
+	repoURL = strings.TrimSpace(repoURL)
+	if taskID == "" || repoURL == "" {
+		return ""
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok || ws.taskRepoRefs == nil {
+		return ""
+	}
+	return strings.TrimSpace(ws.taskRepoRefs[taskID][repoURL])
+}
+
+func (d *Daemon) clearTaskRepoRefs(workspaceID, taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if ws, ok := d.workspaces[workspaceID]; ok && ws.taskRepoRefs != nil {
+		delete(ws.taskRepoRefs, taskID)
 	}
 }
 
@@ -1911,6 +1965,7 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
+	execenv.ApplyFeatureFlagSnapshot(resp.FeatureFlags)
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
@@ -3159,23 +3214,20 @@ func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 		}
 	}
 
-	if len(misses) > 0 {
-		bundles, err := d.client.ResolveSkillBundles(ctx, task.RuntimeID, task.ID, misses)
+	// Resolve each missing bundle in its own request, caching it the moment it
+	// arrives. The download is the slow part on jittery links, so fetching the
+	// whole set in one atomic body read meant a single timeout discarded all
+	// progress and the cache never converged — every dispatch re-downloaded
+	// everything and timed out again. Per-skill, each download fits its own
+	// size-scaled deadline and is persisted independently, so even a dispatch
+	// that ultimately fails leaves the skills it did fetch cached for the next
+	// one. (GitHub #4505 / MUL-3650)
+	for _, ref := range misses {
+		bundle, err := d.resolveSkillBundle(ctx, task, ref)
 		if err != nil {
 			return fmt.Errorf("resolve skill bundles: %w", err)
 		}
-		for _, bundle := range bundles {
-			ref := skillRefFromBundle(bundle)
-			if !validateSkillBundle(ref, bundle) {
-				return fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
-			}
-			if err := d.skillCache.WithRefLock(task.WorkspaceID, ref, func() error {
-				return d.skillCache.Store(task.WorkspaceID, bundle)
-			}); err != nil {
-				return fmt.Errorf("store skill bundle cache: %w", err)
-			}
-			resolved[skillRefKey(bundle.Source, bundle.ID)] = bundle
-		}
+		resolved[skillRefKey(bundle.Source, bundle.ID)] = bundle
 	}
 
 	skills := make([]SkillData, 0, len(task.Agent.SkillRefs))
@@ -3188,6 +3240,71 @@ func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 	}
 	task.Agent.Skills = skills
 	return nil
+}
+
+// resolveSkillBundle downloads one skill bundle and writes it to the on-disk
+// cache before returning. The request runs under its own deadline, scaled to
+// the bundle's declared size rather than the daemon's fixed 30s control-plane
+// timeout, so a large bundle on a slow link is given room to finish instead of
+// being cut off mid-body. Caching on success is what lets the resolve converge
+// across dispatches. (GitHub #4505 / MUL-3650)
+func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRefData) (SkillData, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, skillBundleResolveTimeout(ref.SizeBytes))
+	defer cancel()
+
+	bundle, err := d.client.ResolveSkillBundle(reqCtx, task.RuntimeID, task.ID, ref)
+	if err != nil {
+		return SkillData{}, err
+	}
+	// The resolve endpoint serves the agent's *current* bundle and hash, which
+	// may differ from the claim-time ref when the skill was edited between
+	// claim and prepare (see ResolveTaskSkillBundles). So confirm only that the
+	// server returned the skill we asked for (source/id), then validate the
+	// bundle for self-consistency against a ref derived from itself — pinning
+	// it to the possibly-stale requested hash would reject a legitimate update.
+	if bundle.Source != ref.Source || bundle.ID != ref.ID {
+		return SkillData{}, fmt.Errorf("resolve skill bundle returned wrong skill: requested source=%s id=%s, got source=%s id=%s", ref.Source, ref.ID, bundle.Source, bundle.ID)
+	}
+	bundleRef := skillRefFromBundle(bundle)
+	if !validateSkillBundle(bundleRef, bundle) {
+		return SkillData{}, fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
+	}
+	if err := d.skillCache.WithRefLock(task.WorkspaceID, bundleRef, func() error {
+		return d.skillCache.Store(task.WorkspaceID, bundle)
+	}); err != nil {
+		return SkillData{}, fmt.Errorf("store skill bundle cache: %w", err)
+	}
+	return bundle, nil
+}
+
+const (
+	// skillBundleResolveMinTimeout floors the per-skill resolve deadline so a
+	// tiny bundle still tolerates connection setup and round-trip latency.
+	skillBundleResolveMinTimeout = 30 * time.Second
+	// skillBundleResolveMaxTimeout caps it so a wedged download cannot pin a
+	// task in prepare indefinitely.
+	skillBundleResolveMaxTimeout = 5 * time.Minute
+	// skillBundleResolveMinThroughput is the pessimistic floor throughput
+	// (bytes/sec) used to scale the deadline to bundle size — deliberately low
+	// to cover slow, jittery links rather than ideal bandwidth.
+	skillBundleResolveMinThroughput = 50 * 1024
+)
+
+// skillBundleResolveTimeout returns the deadline budget for downloading a
+// bundle of the given size: at least skillBundleResolveMinTimeout, scaled up at
+// skillBundleResolveMinThroughput, and capped at skillBundleResolveMaxTimeout.
+func skillBundleResolveTimeout(sizeBytes int64) time.Duration {
+	if sizeBytes <= 0 {
+		return skillBundleResolveMinTimeout
+	}
+	scaled := time.Duration(sizeBytes/skillBundleResolveMinThroughput) * time.Second
+	if scaled < skillBundleResolveMinTimeout {
+		return skillBundleResolveMinTimeout
+	}
+	if scaled > skillBundleResolveMaxTimeout {
+		return skillBundleResolveMaxTimeout
+	}
+	return scaled
 }
 
 func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, taskLog *slog.Logger) func() {
@@ -3268,7 +3385,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// in the per-workspace allowlist and the local cache, otherwise
 	// `multica repo checkout` would reject project-only URLs that aren't also
 	// bound at the workspace level.
-	d.registerTaskRepos(task.WorkspaceID, task.Repos)
+	d.registerTaskRepos(task.WorkspaceID, task.ID, task.Repos)
+	defer d.clearTaskRepoRefs(task.WorkspaceID, task.ID)
 
 	entry, ok := d.cfg.Agents[provider]
 	// A custom runtime profile (MUL-3284) overrides the executable path: the
@@ -3464,7 +3582,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// In local_directory mode the workdir is the user's own repo, reuse is
 	// already disabled above (see localAssignment == nil), and the brief
 	// would otherwise live on inside the user's repository — a subsequent
-	// manual `claude` / `codex` / `gemini` run in that directory would pick
+	// manual `claude` / `codex` run in that directory would pick
 	// up stale Multica instructions (issue id, trigger comment id, reply
 	// rules) and start acting on the previous task's context. Excise the
 	// marker block on the way out instead.
@@ -3478,7 +3596,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// into the user's repo. Without this pass the user's tree
 			// accumulates one directory layer per task — see MUL-2784.
 			// CleanupRuntimeConfig handles the runtime brief inside
-			// CLAUDE.md / AGENTS.md / GEMINI.md; CleanupSidecars handles
+			// CLAUDE.md / AGENTS.md; CleanupSidecars handles
 			// every other file Prepare placed under WorkDir. Together
 			// they round-trip the workdir to its exact pre-task bytes.
 			if cerr := execenv.CleanupSidecars(env.RootDir); cerr != nil {
@@ -4310,7 +4428,7 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
-		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, Ref: r.Ref}
 	}
 	return result
 }

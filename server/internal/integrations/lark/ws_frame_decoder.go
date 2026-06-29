@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // LarkJSONFrameDecoder decodes the JSON event payload Lark nests
@@ -36,7 +34,7 @@ type LarkJSONFrameDecoder struct{}
 func NewLarkJSONFrameDecoder() *LarkJSONFrameDecoder { return &LarkJSONFrameDecoder{} }
 
 // Decode implements FrameDecoder.
-func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst db.LarkInstallation) (InboundMessage, bool, error) {
+func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (InboundMessage, bool, error) {
 	if len(payload) == 0 {
 		return InboundMessage{}, false, nil
 	}

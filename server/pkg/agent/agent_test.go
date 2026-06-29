@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -105,13 +106,25 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// runtime the daemon actually spawns. If a new backend is added, add an
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
-		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor", "gemini",
+		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor",
 		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "qoder",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {
 			t.Errorf("LaunchHeader(%q) returned empty string — add it to launchHeaders", t_)
 		}
+	}
+}
+
+func TestLaunchHeaderAntigravityAvoidsTextOnlyPrintModeLabel(t *testing.T) {
+	t.Parallel()
+
+	header := LaunchHeader("antigravity")
+	if header != "agy -p (non-interactive)" {
+		t.Fatalf("unexpected Antigravity launch header: %q", header)
+	}
+	if strings.Contains(header, "print mode") {
+		t.Fatalf("Antigravity launch header must not imply a text-only mode: %q", header)
 	}
 }
 

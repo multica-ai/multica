@@ -16,6 +16,7 @@ import (
 type RepoContextForEnv struct {
 	URL         string // remote URL
 	Description string // optional repo description
+	Ref         string // optional default checkout ref for this task
 }
 
 // ProjectResourceForEnv describes a single resource attached to the issue's

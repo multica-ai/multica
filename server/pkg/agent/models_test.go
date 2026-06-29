@@ -11,7 +11,7 @@ import (
 
 func TestListModelsStaticProviders(t *testing.T) {
 	ctx := context.Background()
-	for _, provider := range []string{"claude", "codex", "gemini", "cursor"} {
+	for _, provider := range []string{"claude", "codex", "cursor"} {
 		got, err := ListModels(ctx, provider, "")
 		if err != nil {
 			t.Fatalf("ListModels(%q) error: %v", provider, err)
@@ -77,37 +77,6 @@ func TestClaudeStaticModelsExposesFable5(t *testing.T) {
 	}
 	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
 		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
-	}
-}
-
-func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
-	// Gemini CLI has no `models list` subcommand, so we expose the
-	// CLI's own aliases (auto / pro / flash / flash-lite) plus
-	// explicit version pins including Gemini 3. Regression guard
-	// for multica-ai/multica#1503 — Gemini 3 must be selectable.
-	models := geminiStaticModels()
-	ids := map[string]Model{}
-	for _, m := range models {
-		ids[m.ID] = m
-	}
-	for _, want := range []string{
-		"auto", "auto-gemini-2.5",
-		"pro", "flash", "flash-lite",
-		"gemini-3-pro-preview", "gemini-3-flash-preview",
-		"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
-	} {
-		if _, ok := ids[want]; !ok {
-			t.Errorf("missing expected Gemini model %q in: %+v", want, models)
-		}
-	}
-	auto, ok := ids["auto"]
-	if !ok || !auto.Default {
-		t.Errorf("expected `auto` to be the default Gemini entry, got %+v", auto)
-	}
-	for _, m := range models {
-		if m.Provider != "google" {
-			t.Errorf("all Gemini entries must carry Provider=google, got %+v", m)
-		}
 	}
 }
 
@@ -361,7 +330,6 @@ func TestStaticCatalogsHaveAtMostOneDefault(t *testing.T) {
 	catalogs := map[string][]Model{
 		"claude":  claudeStaticModels(),
 		"codex":   codexStaticModels(),
-		"gemini":  geminiStaticModels(),
 		"cursor":  cursorStaticModels(),
 		"copilot": copilotStaticModels(),
 	}

@@ -181,8 +181,18 @@ S3 앞에 CloudFront를 두는 경우 세 가지 변수가 적용됩니다: `CLO
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 최대 동시 작업 수 |
 | `MULTICA_<PROVIDER>_PATH` | CLI 이름과 일치 | 각 AI 코딩 도구 실행 파일의 경로 (예: `MULTICA_CLAUDE_PATH`) |
 | `MULTICA_<PROVIDER>_MODEL` | 비어 있음 | 각 AI 코딩 도구의 기본 모델 |
+| `MULTICA_<PROVIDER>_ARGS` | 비어 있음 | 백엔드별 데몬 전역 기본 CLI 인자. 각 작업에 대해 각 에이전트 자체의 `custom_args`보다 먼저 적용됩니다. `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`를 지원 |
 
 각 파라미터가 데몬 동작에 어떻게 영향을 미치는지에 대한 전체 설명은 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
+
+### 기본 에이전트 인자 (`MULTICA_<PROVIDER>_ARGS`)
+
+백엔드에 대해 **플릿 전역 기본값** 계층의 CLI 플래그를 설정합니다. 각 에이전트의 `custom_args`를 일일이 수정하지 않고도 데몬의 모든 에이전트에 기본 비용·리소스 기준선(예: `--max-turns`)을 적용할 수 있는 편리한 방법입니다. 이는 넘을 수 없는 상한이 아니라 기본 계층입니다. 각 에이전트 자체의 `custom_args`가 뒤에 추가되어 이를 덮어쓸 수 있습니다(아래 **우선순위** 참고).
+
+- **우선순위:** 기본 인자가 먼저 적용되고, 그다음 각 에이전트 자체의 `custom_args`가 추가됩니다. 값을 받는 플래그의 경우 다운스트림 CLI 자체의 인자 파서가 최종 적용 값을 결정합니다(대부분의 도구는 마지막 항목이 우선). 따라서 개별 에이전트는 데몬 기본값을 높일 수 있지만, 에이전트가 덮어쓰지 않은 부분에는 기본값이 계속 적용됩니다.
+- **파싱:** 값은 POSIX 셸 단어 규칙으로 분할되므로 따옴표를 사용할 수 있습니다 — `MULTICA_CLAUDE_ARGS='--append-system-prompt "multi word"'`는 두 개의 토큰으로 파싱됩니다.
+- **안전성:** 기본 인자 계층과 에이전트별 `custom_args` 계층 모두 동일한 blocked-flags 필터를 통과합니다. 따라서 프로토콜에 중요한 플래그(Claude의 `-p`, `--output-format`, `--input-format`, `--permission-mode`, `--mcp-config` 및 Codex의 `--listen` 등)는 어느 계층을 통해서도 주입할 수 없습니다.
+- **미설정/빈 값**은 동작에 변화가 없음을 의미합니다.
 
 ## 프론트엔드 액세스 제어
 

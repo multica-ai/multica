@@ -5,7 +5,9 @@ import {
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   DuplicateIssueErrorBodySchema,
+  EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_USER,
+  InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
@@ -413,5 +415,45 @@ describe("AppConfigSchema cdn_signed drift", () => {
   it("keeps cdn_signed=true from a signing-enabled server", () => {
     const parsed = AppConfigSchema.parse({ cdn_signed: true });
     expect(parsed.cdn_signed).toBe(true);
+  });
+});
+
+describe("InboxUnreadSummarySchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/inbox/unread-summary" };
+
+  it("parses a well-formed summary and tolerates extra fields", () => {
+    const parsed = parseWithFallback(
+      [
+        { workspace_id: "ws-1", count: 2 },
+        { workspace_id: "ws-2", count: 0, future_field: "ignored" },
+      ],
+      InboxUnreadSummarySchema,
+      EMPTY_INBOX_UNREAD_SUMMARY,
+      ENDPOINT,
+    );
+    expect(parsed).toEqual([
+      { workspace_id: "ws-1", count: 2 },
+      { workspace_id: "ws-2", count: 0, future_field: "ignored" },
+    ]);
+  });
+
+  it("returns the empty fallback (dot hidden) for a non-array body", () => {
+    expect(
+      parseWithFallback({ rows: [] }, InboxUnreadSummarySchema, EMPTY_INBOX_UNREAD_SUMMARY, ENDPOINT),
+    ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+    expect(
+      parseWithFallback(null, InboxUnreadSummarySchema, EMPTY_INBOX_UNREAD_SUMMARY, ENDPOINT),
+    ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+  });
+
+  it("returns the empty fallback when an entry has a wrong-typed count", () => {
+    expect(
+      parseWithFallback(
+        [{ workspace_id: "ws-1", count: "lots" }],
+        InboxUnreadSummarySchema,
+        EMPTY_INBOX_UNREAD_SUMMARY,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
   });
 });

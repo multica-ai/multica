@@ -7,10 +7,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
-import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { cn } from "@multica/ui/lib/utils";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import { api } from "@multica/core/api";
+import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask } from "@multica/core/types";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { ActiveTaskRow } from "./execution-log-section";
@@ -21,10 +21,12 @@ import { useT } from "../../i18n";
 // signal stays in one fixed place and never competes with future sticky
 // banners in the content column. Replaces the in-body sticky live card.
 //
-// Derives state from the workspace-wide agent task snapshot filtered by
-// issue id — the same single source of truth that powers the board-card /
-// list-row IssueAgentActivityIndicator, so the chip is always consistent
-// with those surfaces and costs zero extra network.
+// Reads the same per-issue task list as the right-panel Execution log
+// (shared `issueKeys.tasks(issueId)` cache), so the header chip and the log
+// always agree on what is active. Both surfaces derive from one query, which
+// removes the race where the old workspace-wide agent-task-snapshot refetched
+// slower than this per-issue list and left the chip lagging behind the log's
+// "agent is working".
 //
 // Collapsed display stays intentionally shallow:
 //   - one running agent  → avatar + "{name} is working"
@@ -44,14 +46,20 @@ interface IssueAgentHeaderChipProps {
 export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
   issueId,
 }: IssueAgentHeaderChipProps) {
-  const wsId = useWorkspaceId();
-  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  // Same query options as ExecutionLogSection so both observe one cache entry.
+  const { data: tasks = [] } = useQuery({
+    queryKey: issueKeys.tasks(issueId),
+    queryFn: () => api.listTasksByIssue(issueId),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
 
   const { running, queued } = useMemo(() => {
     const running: AgentTask[] = [];
     const queued: AgentTask[] = [];
-    for (const task of snapshot) {
-      if (task.issue_id !== issueId) continue;
+    // The list is already issue-scoped by the endpoint, so only the status
+    // split matters here.
+    for (const task of tasks) {
       if (task.status === "running") running.push(task);
       else if (
         task.status === "queued" ||
@@ -64,7 +72,7 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
       // Terminal statuses are the execution log's story, not the live chip's.
     }
     return { running, queued };
-  }, [snapshot, issueId]);
+  }, [tasks]);
 
   // No active work → render nothing.
   if (running.length === 0 && queued.length === 0) return null;

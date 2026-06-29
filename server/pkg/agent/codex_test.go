@@ -1574,6 +1574,86 @@ func TestCodexExecuteFailsWhenProcessExitsDuringActiveTurn(t *testing.T) {
 		t.Fatalf("process exit should fail fast instead of timeout, got %q", result.Error)
 	}
 }
+func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos
+	// globally, so running concurrently with other codex Execute tests
+	// would shrink their grace window too and risk flakes.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Regression for GH#4520. On `thread/resume`, the fake codex emits a
+	// single stdout line larger than the daemon's bufio.Scanner cap (10 MB),
+	// which trips "bufio.Scanner: token too long" in the reader goroutine.
+	// Pre-fix, drainAndWait then hung forever on cmd.Wait(): the reader had
+	// stopped consuming the pipe, codex was blocked writing into a full
+	// stdout buffer, stdin.Close never unblocked codex, and the deferred
+	// cancel() ran AFTER drainAndWait in the LIFO defer order. The failed
+	// Result therefore never reached the outer daemon and its
+	// fresh-session fallback never fired.
+	//
+	// Post-fix, drainAndWait does graceful-then-cancel in two bounded phases
+	// (see codex.go), and cmd.Cancel group-SIGKILLs the codex tree so the
+	// process exits even when stdin EOF isn't sufficient. We verify the
+	// failed Result reaches the caller within a small bound and carries an
+	// empty SessionID so the outer daemon's PriorSessionID-with-empty-
+	// SessionID fallback can retry a fresh session.
+	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		// Emit a > 10 MB single line with no embedded newline. printf
+		// avoids the trailing newline echo would add; head + tr generates
+		// the bulk payload in pure POSIX shell. The scanner errors out at
+		// 10 MB even though we write 11 MB.
+		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
+		`head -c 11000000 /dev/zero | tr '\0' 'x'`+"\n"+
+		`printf '"}}\n'`+"\n"+
+		// Hold the process open without reading more stdin. Pre-fix this
+		// hangs cmd.Wait() because codex never sees stdin EOF (it isn't
+		// in a read syscall) and the stdout pipe stays full. Cleanup must
+		// fall back to the group-SIGKILL path to make progress.
+		`sleep 30`+"\n")
+
+	start := time.Now()
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Cwd:                       t.TempDir(),
+		ResumeSessionID:           "thr_prior",
+		Timeout:                   30 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	elapsed := time.Since(start)
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q, elapsed=%s)",
+			result.Status, result.Error, elapsed)
+	}
+	if !strings.Contains(result.Error, "token too long") {
+		t.Fatalf("expected error to surface scanner overflow cause, got %q",
+			result.Error)
+	}
+	// Empty SessionID is the contract the outer daemon fallback relies on
+	// (daemon.go: result.Status == "failed" && PriorSessionID != "" &&
+	// result.SessionID == "" → retry fresh). Verify thread/resume failure
+	// preserves that contract.
+	if result.SessionID != "" {
+		t.Fatalf("expected empty SessionID so outer fallback retries fresh, got %q",
+			result.SessionID)
+	}
+	// With the shrunken 500 ms grace, two bounded phases plus the SIGKILL
+	// round-trip should complete in ~1-2 s. Pre-fix this test would block
+	// until the executeFakeCodex 10 s outer timeout and fail with "timeout
+	// waiting for result". We assert a much tighter bound so a future
+	// regression cannot quietly slip back up to 10 s.
+	if elapsed > 5*time.Second {
+		t.Fatalf("cleanup took %s, expected < 5s with shrunken grace (bug regressed?)",
+			elapsed)
+	}
+}
+
 
 func TestCodexExecuteSurfacesUnsupportedServerRequestOnInterruptedTurn(t *testing.T) {
 	t.Parallel()

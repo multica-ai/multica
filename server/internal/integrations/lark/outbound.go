@@ -144,18 +144,18 @@ type PatcherQueries interface {
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
-	GetLarkInstallation(ctx context.Context, id pgtype.UUID) (db.LarkInstallation, error)
-	GetLarkChatSessionBindingBySession(ctx context.Context, chatSessionID pgtype.UUID) (db.LarkChatSessionBinding, error)
-	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (db.LarkOutboundCardMessage, error)
-	CreateLarkOutboundCardMessage(ctx context.Context, arg db.CreateLarkOutboundCardMessageParams) (db.LarkOutboundCardMessage, error)
-	UpdateLarkOutboundCardStatus(ctx context.Context, arg db.UpdateLarkOutboundCardStatusParams) error
+	GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error)
+	GetLarkChatSessionBindingBySession(ctx context.Context, chatSessionID pgtype.UUID) (ChatSessionBinding, error)
+	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error)
+	CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error)
+	UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error
 }
 
 // CredentialsResolver decrypts an installation's app_secret for the
 // transport layer. *InstallationService satisfies it directly; tests
 // substitute a fake.
 type CredentialsResolver interface {
-	DecryptAppSecret(inst db.LarkInstallation) (string, error)
+	DecryptAppSecret(inst Installation) (string, error)
 }
 
 // PatcherConfig tunes the outbound Patcher. Defaults via withDefaults;
@@ -354,7 +354,7 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 // the task without producing visible output, which only happens for
 // edge cases like a chat task that just acknowledged a system event;
 // not emitting a message there is the right product call.
-func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding db.LarkChatSessionBinding, payload any) error {
+func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, payload any) error {
 	content := chatDoneContent(payload)
 	if content == "" {
 		return nil
@@ -364,7 +364,7 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 		return sendWithThreadFallback(p.cfg.Logger, "send markdown card", target, func(t ReplyTarget) error {
 			_, err := p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
 				InstallationID: creds,
-				ChatID:         ChatID(binding.LarkChatID),
+				ChatID:         ChatID(binding.ChannelChatID),
 				Markdown:       content,
 				ReplyTarget:    t,
 			})
@@ -374,7 +374,7 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 	return sendWithThreadFallback(p.cfg.Logger, "send text message", target, func(t ReplyTarget) error {
 		_, err := p.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
-			ChatID:         ChatID(binding.LarkChatID),
+			ChatID:         ChatID(binding.ChannelChatID),
 			Text:           content,
 			ReplyTarget:    t,
 		})
@@ -389,10 +389,10 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 // path, and only an @-mention that happened inside a thread gets a
 // threaded reply (replying to last_lark_message_id with reply_in_thread).
 // The zero ReplyTarget means "send at the chat level".
-func threadReplyTarget(binding db.LarkChatSessionBinding) ReplyTarget {
-	if binding.LastLarkThreadID.Valid && binding.LastLarkThreadID.String != "" &&
-		binding.LastLarkMessageID.Valid && binding.LastLarkMessageID.String != "" {
-		return ReplyTarget{MessageID: binding.LastLarkMessageID.String, InThread: true}
+func threadReplyTarget(binding ChatSessionBinding) ReplyTarget {
+	if binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
+		binding.LastMessageID.Valid && binding.LastMessageID.String != "" {
+		return ReplyTarget{MessageID: binding.LastMessageID.String, InThread: true}
 	}
 	return ReplyTarget{}
 }
@@ -432,7 +432,7 @@ func sendWithThreadFallback(log *slog.Logger, op string, target ReplyTarget, sen
 	return fmt.Errorf("%s: %w", op, err)
 }
 
-func (p *Patcher) installationCredentials(inst db.LarkInstallation) (InstallationCredentials, error) {
+func (p *Patcher) installationCredentials(inst Installation) (InstallationCredentials, error) {
 	if p.credentials == nil {
 		return InstallationCredentials{}, errors.New("lark patcher: credentials resolver missing")
 	}
@@ -460,7 +460,7 @@ func (p *Patcher) installationCredentials(inst db.LarkInstallation) (Installatio
 // One-shot send (no patching, no DB row): if the task fails a second
 // time we'd just send a second card, which is fine — failure is
 // usually a single terminal event.
-func (p *Patcher) fail(ctx context.Context, creds InstallationCredentials, binding db.LarkChatSessionBinding, taskID pgtype.UUID, agentName string, payload any) error {
+func (p *Patcher) fail(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, taskID pgtype.UUID, agentName string, payload any) error {
 	render, err := p.cfg.Renderer.Render(RenderInput{
 		Kind:         CardKindError,
 		AgentName:    agentName,
@@ -473,7 +473,7 @@ func (p *Patcher) fail(ctx context.Context, creds InstallationCredentials, bindi
 	return sendWithThreadFallback(p.cfg.Logger, "send error card", threadReplyTarget(binding), func(t ReplyTarget) error {
 		_, err := p.client.SendInteractiveCard(ctx, SendCardParams{
 			InstallationID: creds,
-			ChatID:         ChatID(binding.LarkChatID),
+			ChatID:         ChatID(binding.ChannelChatID),
 			CardJSON:       render.JSON,
 			ReplyTarget:    t,
 		})

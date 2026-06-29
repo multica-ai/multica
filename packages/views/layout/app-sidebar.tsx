@@ -70,7 +70,7 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
+import { inboxKeys, deduplicateInboxItems, inboxUnreadSummaryOptions, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
 import { api, ApiError } from "@multica/core/api";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
@@ -101,6 +101,7 @@ const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
+const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>> = [];
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see AppSidebar body).
@@ -364,6 +365,20 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
     [inboxItems],
   );
+  // Cross-workspace unread summary backs the workspace-switcher dot. One
+  // shared cache entry across workspaces; gated on an active workspace since
+  // the endpoint resolves through the workspace-member middleware.
+  const { data: unreadSummary = EMPTY_INBOX_SUMMARY } = useQuery({
+    ...inboxUnreadSummaryOptions(),
+    enabled: !!wsId,
+  });
+  const otherWorkspaceUnread = React.useMemo(
+    () => hasOtherWorkspaceUnread(unreadSummary, wsId),
+    [unreadSummary, wsId],
+  );
+  // Which workspaces have unread, so the switcher dropdown can point at the
+  // specific one(s) rather than just the aggregate avatar dot.
+  const unreadWsIds = React.useMemo(() => unreadWorkspaceIds(unreadSummary), [unreadSummary]);
   const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
   const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
@@ -486,7 +501,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <SidebarMenuButton>
                       <span className="relative">
                         <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="sm" />
-                        {myInvitations.length > 0 && (
+                        {/* Shared brand dot: a pending invitation OR another
+                            workspace with unread inbox items. The active
+                            workspace's own unread stays on the Inbox nav count
+                            (below), so it is deliberately excluded here. */}
+                        {(myInvitations.length > 0 || otherWorkspaceUnread) && (
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
                       </span>
@@ -533,6 +552,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       >
                         <WorkspaceAvatar name={ws.name} avatarUrl={ws.avatar_url} size="sm" />
                         <span className="flex-1 truncate">{ws.name}</span>
+                        {/* Points at the specific workspace holding unread
+                            inbox items. Sits in the same right-edge slot as the
+                            active-workspace check; the active workspace is
+                            excluded (its unread is the Inbox nav count), so dot
+                            and check never collide on one row. */}
+                        {ws.id !== workspace?.id && unreadWsIds.has(ws.id) && (
+                          <span className="size-2 rounded-full bg-brand" />
+                        )}
                         {ws.id === workspace?.id && (
                           <Check className="h-3.5 w-3.5 text-primary" />
                         )}

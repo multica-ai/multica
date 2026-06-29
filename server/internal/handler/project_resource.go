@@ -84,6 +84,7 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 type githubRepoRef struct {
 	URL               string `json:"url"`
 	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
+	Ref               string `json:"ref,omitempty"`
 }
 
 func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
@@ -99,6 +100,7 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 		return nil, errors.New("github_repo: url must be a valid http(s) or ssh git URL")
 	}
 	payload.DefaultBranchHint = strings.TrimSpace(payload.DefaultBranchHint)
+	payload.Ref = strings.TrimSpace(payload.Ref)
 	out, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
