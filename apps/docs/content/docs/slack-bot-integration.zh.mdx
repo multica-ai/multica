@@ -165,7 +165,7 @@ App-level token 用来授权 Socket Mode 连接。它只能在控制台里创建
 2. 重启 API。在密钥设置好之前，**Settings → Integrations** 会显示一条「Slack integration not enabled」提示，**Connect Slack** 入口也会保持隐藏。
 
 <Callout type="info">
-这个密钥必须正好解码出 32 字节——`openssl rand -base64 32` 就能做到。把它当成一个长期有效的密钥：轮换或丢失它会让已存储的 token 无法解密，迫使每个 Bot 重新连接。绑定链接还需要设置 `MULTICA_PUBLIC_URL`（它是「绑定你的账号」URL 的基础地址）。
+这个密钥必须正好解码出 32 字节——`openssl rand -base64 32` 就能做到。把它当成一个长期有效的密钥：轮换或丢失它会让已存储的 token 无法解密，迫使每个 Bot 重新连接。「绑定你的账号」链接是用你的 Web 应用地址（`MULTICA_APP_URL`，未设置时回退到 `FRONTEND_ORIGIN`）拼出来的——正常部署里这个值本来就有，不需要额外配置。
 </Callout>
 
 ## 下一步

@@ -165,7 +165,7 @@ For self-host, Slack is **off until you set an at-rest encryption key**. The key
 2. Restart the API. Until the key is set, **Settings → Integrations** shows a "Slack integration not enabled" notice and the **Connect Slack** entry points stay hidden.
 
 <Callout type="info">
-The key must decode to exactly 32 bytes — `openssl rand -base64 32` does this. Treat it as a long-lived secret: rotating or losing it makes already-stored tokens undecryptable, forcing every bot to reconnect. The bind link also needs `MULTICA_PUBLIC_URL` set (it's the base of the "link your account" URL).
+The key must decode to exactly 32 bytes — `openssl rand -base64 32` does this. Treat it as a long-lived secret: rotating or losing it makes already-stored tokens undecryptable, forcing every bot to reconnect. The "link your account" link is built from your web app URL (`MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN`) — a normal deployment already sets this, so there's nothing extra to configure.
 </Callout>
 
 ## Next
