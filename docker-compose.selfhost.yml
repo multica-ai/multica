@@ -40,6 +40,7 @@ services:
 
   backend:
     image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
+    pull_policy: ${MULTICA_PULL_POLICY:-missing}
     depends_on:
       postgres:
         condition: service_healthy
@@ -118,10 +119,16 @@ services:
       # in the database, so this single deployment-wide key is all the operator
       # needs to set here.
       MULTICA_SLACK_SECRET_KEY: ${MULTICA_SLACK_SECRET_KEY:-}
+      GITLAB_URL: ${GITLAB_URL:-}
+      GITLAB_APP_ID: ${GITLAB_APP_ID:-}
+      GITLAB_APP_SECRET: ${GITLAB_APP_SECRET:-}
+      GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
+      GITLAB_SECRET_KEY: ${GITLAB_SECRET_KEY:-}
     restart: unless-stopped
 
   frontend:
     image: ${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:${MULTICA_IMAGE_TAG:-latest}
+    pull_policy: ${MULTICA_PULL_POLICY:-missing}
     depends_on:
       - backend
     ports:

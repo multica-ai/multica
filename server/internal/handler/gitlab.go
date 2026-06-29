@@ -1,24 +1,29 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -39,7 +44,9 @@ func gitlabWebhookSecret() string { return strings.TrimSpace(os.Getenv("GITLAB_W
 
 // signGitLabState and verifyGitLabState mirror the GitHub state-token pattern,
 // using GITLAB_WEBHOOK_SECRET as the HMAC key.
-func signGitLabState(workspaceID string) (string, error) {
+// Token format: "{payload}|{namespace}.{nonce}.{sig}"
+// namespace may be empty (login flow); payload is workspaceID or "login".
+func signGitLabState(payload, namespace string) (string, error) {
 	secret := gitlabWebhookSecret()
 	if secret == "" {
 		return "", errors.New("gitlab webhook secret not configured")
@@ -49,33 +56,35 @@ func signGitLabState(workspaceID string) (string, error) {
 		return "", err
 	}
 	nonce := hex.EncodeToString(nonceBytes)
+	combined := payload + "|" + namespace
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(workspaceID))
+	mac.Write([]byte(combined))
 	mac.Write([]byte("."))
 	mac.Write([]byte(nonce))
 	sig := hex.EncodeToString(mac.Sum(nil))
-	return workspaceID + "." + nonce + "." + sig, nil
+	return combined + "." + nonce + "." + sig, nil
 }
 
-func verifyGitLabState(token string) (string, bool) {
+func verifyGitLabState(token string) (payload, namespace string, ok bool) {
 	secret := gitlabWebhookSecret()
 	if secret == "" {
-		return "", false
+		return "", "", false
 	}
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return "", false
+		return "", "", false
 	}
-	workspaceID, nonce, sig := parts[0], parts[1], parts[2]
+	combined, nonce, sig := parts[0], parts[1], parts[2]
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(workspaceID))
+	mac.Write([]byte(combined))
 	mac.Write([]byte("."))
 	mac.Write([]byte(nonce))
 	expected := hex.EncodeToString(mac.Sum(nil))
 	if !hmac.Equal([]byte(expected), []byte(sig)) {
-		return "", false
+		return "", "", false
 	}
-	return workspaceID, true
+	p, ns, _ := strings.Cut(combined, "|")
+	return p, ns, true
 }
 
 // ── Response types ───────────────────────────────────────────────────────────
@@ -110,6 +119,13 @@ type ListGitLabConnectionsResponse struct {
 	Connections []GitLabConnectionResponse `json:"connections"`
 	Configured  bool                       `json:"configured"`
 	CanManage   bool                       `json:"can_manage"`
+}
+
+type GitLabIssueResponse struct {
+	GlIssueIID         int32   `json:"gl_issue_iid"`
+	ProjectPath        string  `json:"project_path"`
+	URL                string  `json:"url"`
+	GlAssigneeUsername *string `json:"gl_assignee_username"`
 }
 
 func gitlabConnectionToResponse(c db.GitlabConnection) GitLabConnectionResponse {
@@ -161,12 +177,428 @@ func (h *Handler) HandleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid webhook token")
 		return
 	}
-	if r.Header.Get("X-Gitlab-Event") != "Merge Request Hook" {
-		w.WriteHeader(http.StatusNoContent)
+	switch r.Header.Get("X-Gitlab-Event") {
+	case "Merge Request Hook":
+		h.handleGitLabMergeRequestEvent(r.Context(), body)
+	case "Issue Hook":
+		h.handleGitLabIssueEvent(r.Context(), body)
+	case "Note Hook":
+		h.handleGitLabNoteEvent(r.Context(), body)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// gitlabIssuePayload is the subset of GitLab's Issue Hook webhook we consume.
+type gitlabIssuePayload struct {
+	ObjectKind       string `json:"object_kind"`
+	ObjectAttributes struct {
+		IID         int32  `json:"iid"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Action      string `json:"action"`
+	} `json:"object_attributes"`
+	Project struct {
+		ID                int64  `json:"id"`
+		PathWithNamespace string `json:"path_with_namespace"`
+		Namespace         string `json:"namespace"`
+	} `json:"project"`
+	Labels []struct {
+		Title string `json:"title"`
+	} `json:"labels"`
+	Assignees []struct {
+		Username string `json:"username"`
+	} `json:"assignees"`
+}
+
+// gitlabNotePayload is the subset of GitLab's Note Hook webhook we consume.
+type gitlabNotePayload struct {
+	ObjectKind       string `json:"object_kind"`
+	ObjectAttributes struct {
+		NoteableType string `json:"noteable_type"`
+		System      bool   `json:"system"`
+		ID          int64  `json:"id"`
+		Note        string `json:"note"`
+	} `json:"object_attributes"`
+	Project struct {
+		PathWithNamespace string `json:"path_with_namespace"`
+		Namespace         string `json:"namespace"`
+	} `json:"project"`
+	Issue struct {
+		IID int32 `json:"iid"`
+	} `json:"issue"`
+	User struct {
+		Username string `json:"username"`
+	} `json:"user"`
+}
+
+func (h *Handler) handleGitLabNoteEvent(ctx context.Context, body []byte) {
+	var p gitlabNotePayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		slog.Error("gitlab: failed to parse note payload", "err", err)
 		return
 	}
-	h.handleGitLabMergeRequestEvent(r.Context(), body)
-	w.WriteHeader(http.StatusNoContent)
+
+	// Only handle issue comments; skip system notes.
+	if p.ObjectAttributes.NoteableType != "Issue" || p.ObjectAttributes.System {
+		return
+	}
+
+	namespace := p.Project.Namespace
+	projectPath := p.Project.PathWithNamespace
+
+	conn, err := h.resolveGitLabConnectionByNamespace(ctx, namespace)
+	if err != nil {
+		slog.Warn("gitlab: no connection for namespace", "namespace", namespace)
+		return
+	}
+
+	if ws, err := h.Queries.GetWorkspace(ctx, conn.WorkspaceID); err == nil && !workspaceGitLabCommentSyncEnabled(ws.Settings) {
+		return
+	}
+
+	// Find the linked gitlab_issue row.
+	row, err := h.Queries.GetGitLabIssueByProjectAndIID(ctx, db.GetGitLabIssueByProjectAndIIDParams{
+		WorkspaceID: conn.WorkspaceID,
+		ProjectPath: projectPath,
+		GlIssueIid:  p.Issue.IID,
+	})
+	if err != nil {
+		// Issue not synced — skip.
+		return
+	}
+
+	noteID := pgtype.Int8{Int64: p.ObjectAttributes.ID, Valid: true}
+
+	// Echo prevention: skip if this note_id already exists.
+	if _, err := h.Queries.GetCommentByGitLabNoteID(ctx, noteID); err == nil {
+		return
+	}
+
+	// Build attributed content.
+	content := "**" + p.User.Username + "** (GitLab):\n" + p.ObjectAttributes.Note
+
+	// Resolve creator for author fields.
+	authorID, ok := h.gitlabCreatorID(ctx, conn)
+	if !ok {
+		slog.Error("gitlab: no author available for note comment", "workspace", uuidToString(conn.WorkspaceID))
+		return
+	}
+
+	issue, err := h.Queries.GetIssue(ctx, row.IssueID)
+	if err != nil {
+		slog.Warn("gitlab: issue not found for note", "issue_id", uuidToString(row.IssueID))
+		return
+	}
+
+	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "member",
+		AuthorID:    authorID,
+		Content:     content,
+		Type:        "comment",
+	})
+	if err != nil {
+		slog.Error("gitlab: failed to create comment from note", "err", err)
+		return
+	}
+
+	// Store the note_id for echo loop prevention.
+	if err := h.Queries.SetCommentGitLabNoteID(ctx, db.SetCommentGitLabNoteIDParams{
+		ID:           comment.ID,
+		GitlabNoteID: noteID,
+	}); err != nil {
+		slog.Warn("gitlab: failed to set gitlab_note_id on comment", "err", err)
+	}
+}
+
+// refreshGitLabToken exchanges the stored refresh token for a new access token,
+// encrypts and persists both, and returns the plain new access token.
+func (h *Handler) refreshGitLabToken(ctx context.Context, conn db.GitlabConnection) (string, error) {
+	if !conn.RefreshToken.Valid || conn.RefreshToken.String == "" {
+		return "", errors.New("no refresh token stored")
+	}
+	resp, err := http.PostForm(gitlabBaseURL()+"/oauth/token", url.Values{
+		"client_id":     {os.Getenv("GITLAB_APP_ID")},
+		"client_secret": {os.Getenv("GITLAB_APP_SECRET")},
+		"refresh_token": {conn.RefreshToken.String},
+		"grant_type":    {"refresh_token"},
+	})
+	if err != nil {
+		return "", fmt.Errorf("refresh request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	tok, expiresAt, err := parseGitLabTokenResponse(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("refresh response parse: %w", err)
+	}
+	sealed, err := h.GitLabBox.Seal([]byte(tok.AccessToken))
+	if err != nil {
+		return "", fmt.Errorf("encrypt refreshed token: %w", err)
+	}
+	if dbErr := h.Queries.UpdateGitLabConnectionTokens(ctx, db.UpdateGitLabConnectionTokensParams{
+		ID:             conn.ID,
+		AccessToken:    base64.StdEncoding.EncodeToString(sealed),
+		RefreshToken:   pgtype.Text{String: tok.RefreshToken, Valid: tok.RefreshToken != ""},
+		TokenExpiresAt: expiresAt,
+	}); dbErr != nil {
+		slog.Warn("gitlab: failed to persist refreshed token", "err", dbErr)
+	}
+	return tok.AccessToken, nil
+}
+
+// postCommentToGitLab posts a newly-created Multica comment to the linked
+// GitLab issue via the API, then stores the returned note ID on the comment
+// row for echo loop prevention. It is called as a goroutine from CreateComment
+// and from TaskService.createAgentComment.
+func (h *Handler) postCommentToGitLab(ctx context.Context, comment db.Comment, issue db.Issue) {
+	// Look up the gitlab_issue link.
+	glIssue, err := h.Queries.GetGitLabIssueByIssueID(ctx, issue.ID)
+	if err != nil {
+		slog.Debug("gitlab: comment relay skipped — issue not linked to GitLab", "issue_id", uuidToString(issue.ID))
+		return
+	}
+
+	// Load the connection for the access token.
+	conn, err := h.Queries.GetGitLabConnectionByID(ctx, glIssue.ConnectionID)
+	if err != nil {
+		slog.Warn("gitlab: connection not found for comment post", "connection_id", uuidToString(glIssue.ConnectionID))
+		return
+	}
+
+	if ws, err := h.Queries.GetWorkspace(ctx, conn.WorkspaceID); err == nil && !workspaceGitLabCommentSyncEnabled(ws.Settings) {
+		return
+	}
+
+	if h.GitLabBox == nil {
+		slog.Warn("gitlab: comment post skipped — GITLAB_SECRET_KEY not configured")
+		return
+	}
+
+	// Refresh the access token if it has expired.
+	var plainToken string
+	if conn.TokenExpiresAt.Valid && conn.TokenExpiresAt.Time.Before(time.Now()) {
+		refreshed, err := h.refreshGitLabToken(ctx, conn)
+		if err != nil {
+			slog.Warn("gitlab: token refresh failed, skipping comment post",
+				"connection_id", uuidToString(conn.ID), "err", err)
+			return
+		}
+		plainToken = refreshed
+	} else {
+		tokenBytes, err := base64.StdEncoding.DecodeString(conn.AccessToken)
+		if err != nil {
+			slog.Error("gitlab: failed to base64-decode token", "err", err)
+			return
+		}
+		plain, err := h.GitLabBox.Open(tokenBytes)
+		if err != nil {
+			slog.Error("gitlab: failed to decrypt token", "err", err)
+			return
+		}
+		plainToken = string(plain)
+	}
+
+	// POST to GitLab notes API.
+	apiURL := gitlabAPIURL() + fmt.Sprintf("/projects/%d/issues/%d/notes",
+		glIssue.GlProjectID, glIssue.GlIssueIid)
+	body, _ := json.Marshal(map[string]string{"body": comment.Content})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
+	if err != nil {
+		slog.Error("gitlab: failed to build note request", "err", err)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+plainToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		slog.Error("gitlab: failed to post note", "err", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		slog.Error("gitlab: note post returned error status", "status", resp.StatusCode)
+		return
+	}
+
+	var noteResp struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&noteResp); err != nil || noteResp.ID == 0 {
+		slog.Error("gitlab: failed to decode note response", "err", err)
+		return
+	}
+
+	// Store note_id on comment for echo loop prevention.
+	if err := h.Queries.SetCommentGitLabNoteID(ctx, db.SetCommentGitLabNoteIDParams{
+		ID:           comment.ID,
+		GitlabNoteID: pgtype.Int8{Int64: noteResp.ID, Valid: true},
+	}); err != nil {
+		slog.Warn("gitlab: failed to store gitlab_note_id", "err", err)
+	}
+}
+
+// containsLabel reports whether the labels slice contains a label with the given title.
+func containsLabel(labels []struct{ Title string `json:"title"` }, title string) bool {
+	for _, l := range labels {
+		if l.Title == title {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) handleGitLabIssueEvent(ctx context.Context, body []byte) {
+	var p gitlabIssuePayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		slog.Error("gitlab: failed to parse issue payload", "err", err)
+		return
+	}
+
+	namespace := p.Project.Namespace
+	projectPath := p.Project.PathWithNamespace
+	action := p.ObjectAttributes.Action
+
+	conn, err := h.resolveGitLabConnectionByNamespace(ctx, namespace)
+	if err != nil {
+		slog.Warn("gitlab: no connection for namespace", "namespace", namespace)
+		return
+	}
+	workspaceID := uuidToString(conn.WorkspaceID)
+
+	hasAgent := containsLabel(p.Labels, "agent")
+
+	assigneeUsername := ""
+	if len(p.Assignees) > 0 {
+		assigneeUsername = p.Assignees[0].Username
+	}
+
+	// Look up existing gitlab_issue row.
+	row, rowErr := h.Queries.GetGitLabIssueByProjectAndIID(ctx, db.GetGitLabIssueByProjectAndIIDParams{
+		WorkspaceID: conn.WorkspaceID,
+		ProjectPath: projectPath,
+		GlIssueIid:  p.ObjectAttributes.IID,
+	})
+	rowExists := rowErr == nil
+
+	// Agent label removed while row exists → delete Multica issue (cascade deletes row).
+	if !hasAgent && rowExists {
+		if err := h.Queries.DeleteIssue(ctx, db.DeleteIssueParams{
+			ID:          row.IssueID,
+			WorkspaceID: conn.WorkspaceID,
+		}); err != nil {
+			slog.Error("gitlab: failed to delete issue on label removal", "err", err)
+			return
+		}
+		h.publish(protocol.EventIssueDeleted, workspaceID, "system", "", map[string]any{
+			"issue_id": uuidToString(row.IssueID),
+		})
+		return
+	}
+
+	if hasAgent {
+		if !rowExists && (action == "open" || action == "update") {
+			// Create Multica issue.
+			creatorID, ok := h.gitlabCreatorID(ctx, conn)
+			if !ok {
+				slog.Error("gitlab: no creator available, skipping issue creation", "workspace", workspaceID)
+				return
+			}
+
+			res, err := h.IssueService.Create(ctx, service.IssueCreateParams{
+				WorkspaceID:    conn.WorkspaceID,
+				Title:          p.ObjectAttributes.Title,
+				Description:    pgtype.Text{String: p.ObjectAttributes.Description, Valid: p.ObjectAttributes.Description != ""},
+				Status:         "todo",
+				Priority:       "none",
+				CreatorType:    "member",
+				CreatorID:      creatorID,
+				AllowDuplicate: true,
+			}, service.IssueCreateOpts{})
+			if err != nil {
+				slog.Error("gitlab: failed to create issue", "err", err)
+				return
+			}
+
+			glRow, err := h.Queries.InsertGitLabIssue(ctx, db.InsertGitLabIssueParams{
+				WorkspaceID:        conn.WorkspaceID,
+				ConnectionID:       conn.ID,
+				ProjectPath:        projectPath,
+				GlIssueIid:         p.ObjectAttributes.IID,
+				GlProjectID:        p.Project.ID,
+				IssueID:            res.Issue.ID,
+				GlAssigneeUsername: pgtype.Text{String: assigneeUsername, Valid: assigneeUsername != ""},
+			})
+			if err != nil {
+				slog.Error("gitlab: failed to insert gitlab_issue row", "err", err)
+				return
+			}
+			row = glRow
+			rowExists = true
+
+		} else if rowExists {
+			// Sync description.
+			if err := h.Queries.UpdateIssueDescription(ctx, db.UpdateIssueDescriptionParams{
+				ID:          row.IssueID,
+				Description: pgtype.Text{String: p.ObjectAttributes.Description, Valid: p.ObjectAttributes.Description != ""},
+			}); err != nil {
+				slog.Warn("gitlab: failed to sync description", "err", err)
+			}
+			// Sync assignee.
+			if err := h.Queries.UpdateGitLabIssueAssignee(ctx, db.UpdateGitLabIssueAssigneeParams{
+				ID:                 row.ID,
+				GlAssigneeUsername: pgtype.Text{String: assigneeUsername, Valid: assigneeUsername != ""},
+			}); err != nil {
+				slog.Warn("gitlab: failed to sync assignee", "err", err)
+			}
+		}
+	}
+
+	// Status transitions — applied after the create/sync block.
+	if rowExists {
+		issue, err := h.Queries.GetIssue(ctx, row.IssueID)
+		if err != nil {
+			slog.Warn("gitlab: issue not found for status transition", "issue_id", uuidToString(row.IssueID))
+			return
+		}
+		switch action {
+		case "close":
+			h.advanceIssueToDone(ctx, issue, workspaceID, "gitlab_issue_closed")
+		case "reopen":
+			updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ID:          issue.ID,
+				Status:      "in_progress",
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil {
+				slog.Warn("gitlab: failed to reopen issue", "err", err)
+				return
+			}
+			prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
+			h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", map[string]any{
+				"issue":          issueToResponse(updated, prefix),
+				"status_changed": true,
+				"prev_status":    issue.Status,
+				"source":         "gitlab_issue_reopened",
+			})
+		}
+	}
+}
+
+// gitlabCreatorID returns the user UUID to use as creator for webhook-triggered
+// issue creation. Prefers the connection's connected_by_id; falls back to the
+// first workspace member.
+func (h *Handler) gitlabCreatorID(ctx context.Context, conn db.GitlabConnection) (pgtype.UUID, bool) {
+	if conn.ConnectedByID.Valid {
+		return conn.ConnectedByID, true
+	}
+	members, err := h.Queries.ListMembers(ctx, conn.WorkspaceID)
+	if err != nil || len(members) == 0 {
+		return pgtype.UUID{}, false
+	}
+	return members[0].UserID, true
 }
 
 // gitlabMRPayload is the subset of GitLab's merge_request webhook we consume.
@@ -321,6 +753,21 @@ func (h *Handler) resolveGitLabConnectionByNamespace(ctx context.Context, namesp
 	return h.Queries.GetGitLabConnectionByNamespaceGlobal(ctx, namespace)
 }
 
+// workspaceGitLabCommentSyncEnabled returns true (sync on) unless the workspace
+// has explicitly set gitlab_comment_sync_enabled=false in its settings JSON.
+func workspaceGitLabCommentSyncEnabled(settings []byte) bool {
+	if len(settings) == 0 {
+		return true
+	}
+	var s struct {
+		CommentSync *bool `json:"gitlab_comment_sync_enabled"`
+	}
+	if err := json.Unmarshal(settings, &s); err != nil || s.CommentSync == nil {
+		return true
+	}
+	return *s.CommentSync
+}
+
 // ── Workspace OAuth ──────────────────────────────────────────────────────────
 
 // GitLabConnect (GET /api/workspaces/{id}/gitlab/connect) begins the OAuth flow.
@@ -333,7 +780,8 @@ func (h *Handler) GitLabConnect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]bool{"configured": false})
 		return
 	}
-	state, err := signGitLabState(workspaceID)
+	namespace := strings.TrimSpace(r.URL.Query().Get("ns"))
+	state, err := signGitLabState(workspaceID, namespace)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to sign state")
 		return
@@ -372,7 +820,7 @@ func (h *Handler) GitLabSetupCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, settingsURL+"&gitlab_error=missing_params", http.StatusFound)
 		return
 	}
-	workspaceID, ok := verifyGitLabState(state)
+	workspaceID, nsFromState, ok := verifyGitLabState(state)
 	if !ok {
 		http.Redirect(w, r, settingsURL+"&gitlab_error=invalid_state", http.StatusFound)
 		return
@@ -383,14 +831,14 @@ func (h *Handler) GitLabSetupCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, expiresAt, err := gitlabExchangeCode(r.Context(), code)
+	tokenResp, expiresAt, err := gitlabExchangeCode(r.Context(), code)
 	if err != nil {
 		slog.Error("gitlab: token exchange failed", "err", err)
 		http.Redirect(w, r, settingsURL+"&gitlab_error=token_exchange_failed", http.StatusFound)
 		return
 	}
 
-	userInfo, err := gitlabFetchUser(r.Context(), token)
+	userInfo, err := gitlabFetchUser(r.Context(), tokenResp.AccessToken)
 	if err != nil {
 		slog.Error("gitlab: fetch user failed", "err", err)
 		http.Redirect(w, r, settingsURL+"&gitlab_error=user_fetch_failed", http.StatusFound)
@@ -402,7 +850,7 @@ func (h *Handler) GitLabSetupCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, settingsURL+"&gitlab_error=not_configured", http.StatusFound)
 		return
 	}
-	sealed, err := h.GitLabBox.Seal([]byte(token))
+	sealed, err := h.GitLabBox.Seal([]byte(tokenResp.AccessToken))
 	if err != nil {
 		http.Redirect(w, r, settingsURL+"&gitlab_error=encrypt_failed", http.StatusFound)
 		return
@@ -419,12 +867,19 @@ func (h *Handler) GitLabSetupCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	resolvedNamespace := nsFromState
+	resolvedType := "group"
+	if resolvedNamespace == "" {
+		resolvedNamespace = userInfo.Namespace
+		resolvedType = userInfo.NamespaceType
+	}
 	conn, err := h.Queries.CreateGitLabConnection(r.Context(), db.CreateGitLabConnectionParams{
 		WorkspaceID:    wsUUID,
-		Namespace:      userInfo.Namespace,
-		NamespaceType:  userInfo.NamespaceType,
-		AvatarUrl:      pgtype.Text{String: userInfo.AvatarURL, Valid: userInfo.AvatarURL != ""},
-		AccessToken:    string(sealed),
+		Namespace:      resolvedNamespace,
+		NamespaceType:  resolvedType,
+		AvatarUrl:      pgtype.Text{String: userInfo.AvatarURL, Valid: resolvedType == "user" && userInfo.AvatarURL != ""},
+		AccessToken:    base64.StdEncoding.EncodeToString(sealed),
+		RefreshToken:   pgtype.Text{String: tokenResp.RefreshToken, Valid: tokenResp.RefreshToken != ""},
 		TokenExpiresAt: expiresAt,
 		ConnectedByID:  connectedBy,
 	})
@@ -499,7 +954,28 @@ type gitlabUserInfo struct {
 	AvatarURL     string
 }
 
-func gitlabExchangeCode(ctx context.Context, code string) (token string, expiresAt pgtype.Timestamptz, err error) {
+type gitlabTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"`
+}
+
+func parseGitLabTokenResponse(r io.Reader) (gitlabTokenResponse, pgtype.Timestamptz, error) {
+	var body gitlabTokenResponse
+	if err := json.NewDecoder(r).Decode(&body); err != nil {
+		return body, pgtype.Timestamptz{}, err
+	}
+	if body.AccessToken == "" {
+		return body, pgtype.Timestamptz{}, errors.New("empty access_token in response")
+	}
+	exp := pgtype.Timestamptz{}
+	if body.ExpiresIn > 0 {
+		exp = pgtype.Timestamptz{Time: time.Now().Add(time.Duration(body.ExpiresIn) * time.Second), Valid: true}
+	}
+	return body, exp, nil
+}
+
+func gitlabExchangeCode(ctx context.Context, code string) (tok gitlabTokenResponse, expiresAt pgtype.Timestamptz, err error) {
 	serverURL := strings.TrimRight(os.Getenv("MULTICA_PUBLIC_URL"), "/")
 	if serverURL == "" {
 		serverURL = strings.TrimRight(os.Getenv("FRONTEND_ORIGIN"), "/")
@@ -514,25 +990,10 @@ func gitlabExchangeCode(ctx context.Context, code string) (token string, expires
 		"redirect_uri":  {callbackURL},
 	})
 	if err != nil {
-		return "", pgtype.Timestamptz{}, err
+		return tok, pgtype.Timestamptz{}, err
 	}
 	defer resp.Body.Close()
-
-	var body struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", pgtype.Timestamptz{}, err
-	}
-	if body.AccessToken == "" {
-		return "", pgtype.Timestamptz{}, errors.New("empty access_token in response")
-	}
-	exp := pgtype.Timestamptz{}
-	if body.ExpiresIn > 0 {
-		exp = pgtype.Timestamptz{Time: time.Now().Add(time.Duration(body.ExpiresIn) * time.Second), Valid: true}
-	}
-	return body.AccessToken, exp, nil
+	return parseGitLabTokenResponse(resp.Body)
 }
 
 func gitlabFetchUser(ctx context.Context, token string) (gitlabUserInfo, error) {
@@ -579,4 +1040,28 @@ func (h *Handler) ListMergeRequestsForIssue(w http.ResponseWriter, r *http.Reque
 		resp[i] = gitlabMRToResponse(mr)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"merge_requests": resp})
+}
+
+// GetGitLabIssueForIssue (GET /api/issues/{id}/gitlab-issue) returns the linked
+// GitLab issue info for display in the sidebar, or 404 if none.
+func (h *Handler) GetGitLabIssueForIssue(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+	issueUUID, ok := parseUUIDOrBadRequest(w, issueID, "issue id")
+	if !ok {
+		return
+	}
+
+	glIssue, err := h.Queries.GetGitLabIssueByIssueID(r.Context(), issueUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no gitlab issue linked")
+		return
+	}
+
+	issueURL := gitlabBaseURL() + "/" + glIssue.ProjectPath + "/-/issues/" + strconv.Itoa(int(glIssue.GlIssueIid))
+	writeJSON(w, http.StatusOK, GitLabIssueResponse{
+		GlIssueIID:         glIssue.GlIssueIid,
+		ProjectPath:        glIssue.ProjectPath,
+		URL:                issueURL,
+		GlAssigneeUsername: textToPtr(glIssue.GlAssigneeUsername),
+	})
 }

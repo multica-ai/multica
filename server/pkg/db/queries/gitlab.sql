@@ -1,19 +1,28 @@
 -- name: CreateGitLabConnection :one
 INSERT INTO gitlab_connection (
     workspace_id, namespace, namespace_type, avatar_url, access_token,
-    token_expires_at, connected_by_id
+    refresh_token, token_expires_at, connected_by_id
 ) VALUES (
     $1, $2, $3, sqlc.narg('avatar_url'), $4,
-    sqlc.narg('token_expires_at'), sqlc.narg('connected_by_id')
+    sqlc.narg('refresh_token'), sqlc.narg('token_expires_at'), sqlc.narg('connected_by_id')
 )
 ON CONFLICT (workspace_id, namespace) DO UPDATE SET
     namespace_type   = EXCLUDED.namespace_type,
     avatar_url       = EXCLUDED.avatar_url,
     access_token     = EXCLUDED.access_token,
+    refresh_token    = EXCLUDED.refresh_token,
     token_expires_at = EXCLUDED.token_expires_at,
     connected_by_id  = EXCLUDED.connected_by_id,
     updated_at       = now()
 RETURNING *;
+
+-- name: UpdateGitLabConnectionTokens :exec
+UPDATE gitlab_connection SET
+    access_token     = $2,
+    refresh_token    = $3,
+    token_expires_at = $4,
+    updated_at       = now()
+WHERE id = $1;
 
 -- name: ListGitLabConnectionsByWorkspace :many
 SELECT * FROM gitlab_connection
@@ -92,3 +101,24 @@ SELECT
 FROM gitlab_merge_request mr
 JOIN issue_merge_request imr ON imr.merge_request_id = mr.id
 WHERE imr.issue_id = $1;
+
+-- name: GetGitLabIssueByProjectAndIID :one
+SELECT * FROM gitlab_issue
+WHERE workspace_id = $1 AND project_path = $2 AND gl_issue_iid = $3;
+
+-- name: GetGitLabIssueByIssueID :one
+SELECT * FROM gitlab_issue WHERE issue_id = $1;
+
+-- name: InsertGitLabIssue :one
+INSERT INTO gitlab_issue (
+    workspace_id, connection_id, project_path, gl_issue_iid,
+    gl_project_id, issue_id, gl_assignee_username
+) VALUES (
+    $1, $2, $3, $4, $5, $6, sqlc.narg('gl_assignee_username')
+)
+ON CONFLICT (workspace_id, project_path, gl_issue_iid) DO NOTHING
+RETURNING *;
+
+-- name: UpdateGitLabIssueAssignee :exec
+UPDATE gitlab_issue SET gl_assignee_username = sqlc.narg('gl_assignee_username'), updated_at = now()
+WHERE id = $1;

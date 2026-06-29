@@ -1357,6 +1357,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	originatorUserID := h.invokeOriginatorFromRequest(r, authorType, authorID)
 	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs)
 
+	// Post comment to GitLab if the issue is synced — fire and forget.
+	go h.postCommentToGitLab(context.Background(), comment, issue)
+
 	writeJSON(w, http.StatusCreated, resp)
 }
 
