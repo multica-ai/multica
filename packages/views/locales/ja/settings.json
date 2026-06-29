@@ -324,7 +324,13 @@
     "disconnect_confirm_title": "Disconnect this app?",
     "disconnect_confirm_description": "Your connected account will be revoked at Composio and your agents will lose access to this toolkit. You can reconnect later.",
     "disconnect_confirm_cancel": "Cancel",
-    "connections_load_failed": "Couldn't load your existing connections, so connected status may be incomplete."
+    "connections_load_failed": "Couldn't load your existing connections, so connected status may be incomplete.",
+    "toast_connected": "接続しました",
+    "toast_connect_failed": "接続を完了できませんでした。もう一度お試しください。",
+    "last_used": "最終使用 {{when}}",
+    "last_used_never": "未使用",
+    "expired": "トークンの有効期限切れ",
+    "reconnect": "再接続"
   },
   "repositories": {
     "section_title": "リポジトリ",

@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Check, Loader2, Plug, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Plug, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Input } from "@multica/ui/components/ui/input";
@@ -24,7 +24,8 @@ import {
   composioToolkitsOptions,
 } from "@multica/core/composio";
 import type { ComposioToolkit } from "@multica/core/types";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
+import { useNavigation } from "../../navigation";
 
 // ComposioTab renders the full Composio toolkit catalog and lets the user
 // connect / disconnect the apps their agents can act on.
@@ -35,6 +36,7 @@ import { useT } from "../../i18n";
 export function ComposioTab() {
   const { t } = useT("settings");
   const qc = useQueryClient();
+  const navigation = useNavigation();
 
   const toolkitsQuery = useQuery(composioToolkitsOptions());
   const connectionsQuery = useQuery(composioConnectionsOptions());
@@ -47,12 +49,62 @@ export function ComposioTab() {
   } | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
+  // The hosted Composio consent flow is a full-page redirect that lands back
+  // on the settings page carrying either `?connected=<slug>` (success) or
+  // `?error=composio_connect_failed` (any backend-side failure — see
+  // Service.CallbackRedirect, MUL-3720). Consume it exactly once: fire a toast,
+  // refresh the connections list so the freshly-linked card flips to Connected
+  // without a manual reload, then strip the one-shot params via `replace` so a
+  // browser refresh doesn't re-toast.
+  const connectedParam = navigation.searchParams.get("connected");
+  const errorParam = navigation.searchParams.get("error");
+  useEffect(() => {
+    if (!connectedParam && errorParam !== "composio_connect_failed") return;
+    if (connectedParam) {
+      toast.success(t(($) => $.composio.toast_connected));
+      void qc.invalidateQueries({ queryKey: composioKeys.connections() });
+    } else {
+      toast.error(t(($) => $.composio.toast_connect_failed));
+    }
+    // Drop only the Composio one-shot params; keep everything else (notably
+    // ?tab=integrations) so the user stays on this tab.
+    const params = new URLSearchParams(navigation.searchParams);
+    params.delete("connected");
+    params.delete("error");
+    const qs = params.toString();
+    navigation.replace(qs ? `${navigation.pathname}?${qs}` : navigation.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectedParam, errorParam]);
+
   // Map active connections by toolkit slug so each card knows whether it is
   // already connected (and which connection id to disconnect).
   const connectionBySlug = useMemo(() => {
     const m = new Map<string, string>();
     for (const c of connectionsQuery.data ?? []) {
       if (c.status === "active") m.set(c.toolkit_slug, c.id);
+    }
+    return m;
+  }, [connectionsQuery.data]);
+
+  // Toolkits whose latest connection is expired render a Reconnect affordance
+  // instead of Connected/Connect. Backend only emits `expired` once Stage 4
+  // (MUL-3719) lands, but the branch is wired up now so it lights up for free.
+  const expiredBySlug = useMemo(() => {
+    const m = new Set<string>();
+    for (const c of connectionsQuery.data ?? []) {
+      if (c.status === "expired") m.add(c.toolkit_slug);
+    }
+    return m;
+  }, [connectionsQuery.data]);
+
+  // Last-used timestamp per active connection, for the "Last used …" line on a
+  // connected card. Backend leaves this null until tool-call dispatch starts
+  // stamping it (Stage 3, MUL-3721); the card shows a "never used" placeholder
+  // until then.
+  const lastUsedBySlug = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const c of connectionsQuery.data ?? []) {
+      if (c.status === "active") m.set(c.toolkit_slug, c.last_used_at ?? null);
     }
     return m;
   }, [connectionsQuery.data]);
@@ -151,6 +203,8 @@ export function ComposioTab() {
                 key={tk.slug}
                 toolkit={tk}
                 connectionId={connectionBySlug.get(tk.slug)}
+                expired={expiredBySlug.has(tk.slug)}
+                lastUsedAt={lastUsedBySlug.get(tk.slug) ?? null}
                 connecting={connectingSlug === tk.slug}
                 anyConnecting={connectingSlug !== null}
                 onConnect={() => handleConnect(tk)}
@@ -195,6 +249,8 @@ export function ComposioTab() {
 function ToolkitCard({
   toolkit,
   connectionId,
+  expired,
+  lastUsedAt,
   connecting,
   anyConnecting,
   onConnect,
@@ -202,12 +258,15 @@ function ToolkitCard({
 }: {
   toolkit: ComposioToolkit;
   connectionId?: string;
+  expired: boolean;
+  lastUsedAt: string | null;
   connecting: boolean;
   anyConnecting: boolean;
   onConnect: () => void;
   onDisconnect: (connectionId: string, name: string) => void;
 }) {
   const { t } = useT("settings");
+  const timeAgo = useTimeAgo();
   const isConnected = !!connectionId;
 
   return (
@@ -216,7 +275,16 @@ function ToolkitCard({
         <ToolkitLogo toolkit={toolkit} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{toolkit.name || toolkit.slug}</p>
-          {toolkit.category ? (
+          {isConnected ? (
+            // Last-used line. Backend leaves last_used_at null until Stage 3
+            // dispatch stamps it, so show a localized "never used" placeholder
+            // rather than hiding the line entirely.
+            <p className="truncate text-[10px] text-muted-foreground">
+              {lastUsedAt
+                ? t(($) => $.composio.last_used, { when: timeAgo(lastUsedAt) })
+                : t(($) => $.composio.last_used_never)}
+            </p>
+          ) : toolkit.category ? (
             <p className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">
               {toolkit.category}
             </p>
@@ -236,6 +304,23 @@ function ToolkitCard({
               aria-label={t(($) => $.composio.disconnect)}
             >
               <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+        ) : expired ? (
+          // Token-expired connection: surface the failure and let the user
+          // re-run the same connect flow in one click (no disconnect step).
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 text-xs text-amber-600">
+              <AlertTriangle className="h-3 w-3" />
+              {t(($) => $.composio.expired)}
+            </span>
+            <Button size="sm" variant="outline" onClick={onConnect} disabled={anyConnecting}>
+              {connecting ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+              {connecting ? t(($) => $.composio.connecting) : t(($) => $.composio.reconnect)}
             </Button>
           </div>
         ) : toolkit.connectable ? (
