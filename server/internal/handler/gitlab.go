@@ -241,6 +241,10 @@ func (h *Handler) handleGitLabNoteEvent(ctx context.Context, body []byte) {
 	if p.ObjectAttributes.NoteableType != "Issue" || p.ObjectAttributes.System {
 		return
 	}
+	// Echo-loop prevention for notes created by Multica itself (see postCommentToGitLab).
+	if strings.Contains(p.ObjectAttributes.Note, "<!-- multica:gitlab-relay -->") {
+		return
+	}
 
 	namespace := p.Project.Namespace
 	projectPath := p.Project.PathWithNamespace
