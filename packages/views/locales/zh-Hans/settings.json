@@ -342,6 +342,7 @@
     "byo_dialog_title": "连接 Slack 机器人",
     "byo_dialog_intro": "创建你自己的 Slack app，安装到你的工作区，然后把它的两个 token 粘贴到下面。同一个工作区里，每个 agent 可以连接不同的 app。",
     "byo_video_cta": "观看配置教程视频",
+    "byo_docs_link": "查看配置指南",
     "byo_bot_token_label": "Bot token（xoxb-）",
     "byo_bot_token_hint": "Slack app → OAuth & Permissions → Bot User OAuth Token。",
     "byo_app_token_label": "App-level token（xapp-）",

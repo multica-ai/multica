@@ -242,6 +242,21 @@ function InstallationRow({
 // shows how to create the Slack app + copy its two tokens is recorded.
 const SLACK_BYO_VIDEO_URL = "";
 
+// slackDocsUrl points at the Slack integration guide on the docs site,
+// localized to the viewer's language. The docs site uses /<lang>/ path
+// prefixes (English has none), matching the convention used elsewhere in the
+// app for doc links (e.g. the autopilots webhook docs link).
+function slackDocsUrl(lang: string | undefined): string {
+  const prefix = lang?.startsWith("zh")
+    ? "/zh"
+    : lang?.startsWith("ja")
+      ? "/ja"
+      : lang?.startsWith("ko")
+        ? "/ko"
+        : "";
+  return `https://multica.ai/docs${prefix}/slack-bot-integration`;
+}
+
 // SlackAgentBindButton is the per-agent CTA exposed from the agent detail page.
 // Slack uses the bring-your-own-app model: the button opens a dialog where the
 // admin pastes the bot token (xoxb-) + app-level token (xapp-) of the Slack app
@@ -267,7 +282,7 @@ export function SlackAgentBindButton({
    */
   onShowConnectedDetails?: () => void;
 }) {
-  const { t } = useT("settings");
+  const { t, i18n } = useT("settings");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
@@ -385,6 +400,16 @@ export function SlackAgentBindButton({
               {t(($) => $.slack.byo_video_cta)}
             </button>
           ) : null}
+
+          <button
+            type="button"
+            onClick={() => openExternal(slackDocsUrl(i18n.language))}
+            className="inline-flex w-fit items-center gap-1.5 text-xs font-medium text-primary underline-offset-2 hover:underline"
+            data-testid="slack-byo-docs-link"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            {t(($) => $.slack.byo_docs_link)}
+          </button>
 
           <p className="rounded-md bg-muted px-3 py-2 text-[11px] text-muted-foreground">
             {t(($) => $.slack.byo_scopes_hint)}
