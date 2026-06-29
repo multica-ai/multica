@@ -18,6 +18,7 @@ import {
   YouTubeIcon,
   GitHubIcon,
 } from "../components/brand-icons";
+import { useConfigStore } from "@multica/core/config";
 import { StepQuestion, type QuestionOption } from "./step-question";
 import { useT } from "../../i18n";
 
@@ -39,6 +40,10 @@ export function StepSource({
   onBack?: () => void;
 }) {
   const { t } = useT("onboarding");
+  // Self-host onboarding source beacon (MUL-3708): a production self-host
+  // anonymously reports the chosen channel to Multica, so disclose it here.
+  // The flag is true only on those deployments; official cloud shows nothing.
+  const showSelfHostNotice = useConfigStore((s) => s.selfHostSourceNotice);
 
   const options: QuestionOption[] = [
     { slug: "friends_colleagues", icon: <Users className="h-4 w-4" />, label: t(($) => $.questions.source.friends_colleagues) },
@@ -83,6 +88,7 @@ export function StepSource({
       number={1}
       eyebrow={t(($) => $.questions.eyebrow_about_you)}
       question={t(($) => $.questions.source.question)}
+      notice={showSelfHostNotice ? t(($) => $.questions.source.self_host_notice) : undefined}
       options={options}
       selectedSlugs={selected}
       otherValue={answers.source_other ?? ""}

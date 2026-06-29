@@ -66,7 +66,8 @@
       "event_conference": "컨퍼런스 / 밋업",
       "dont_remember": "기억나지 않음",
       "other": "기타",
-      "other_placeholder": "예: 자주 듣는 팟캐스트"
+      "other_placeholder": "예: 자주 듣는 팟캐스트",
+      "self_host_notice": "익명 집계: 선택하신 유입 경로만 수집하여 사용자가 Multica를 어디서 알게 되었는지 파악하는 데 사용합니다. 이름, 이메일, 조직 정보나 자유 입력 내용은 전송하지 않습니다."
     },
     "role": {
       "question": "어떤 역할에 가장 가까우신가요?",

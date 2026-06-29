@@ -3,6 +3,8 @@ package metrics
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/sourcebeacon"
 )
 
 // PR3 normalizers. All inputs go through fixed allow-lists so a misbehaving
@@ -393,4 +395,14 @@ func NormalizeFeedbackKind(value string) string {
 
 func NormalizeContactSalesSource(value string) string {
 	return normalizeFromAllowList(value, knownContactSalesSources, "other")
+}
+
+// NormalizeSourceChannel bounds the self-host source beacon's `source`
+// label to the onboarding channel allowlist (anything else → "other"),
+// reusing sourcebeacon's single Go-side allowlist rather than a third copy.
+func NormalizeSourceChannel(value string) string {
+	if sourcebeacon.IsValidChannel(value) {
+		return value
+	}
+	return "other"
 }

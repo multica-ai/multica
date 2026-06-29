@@ -61,6 +61,7 @@ type businessEventMetrics struct {
 	cloudRuntimeRequestDurationSecs *prometheus.HistogramVec
 	feedbackSubmitted               *prometheus.CounterVec
 	contactSalesSubmitted           *prometheus.CounterVec
+	selfHostSourceChannel           *prometheus.CounterVec
 }
 
 func newBusinessEventMetrics() *businessEventMetrics {
@@ -192,6 +193,10 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_contact_sales_submitted_total",
 			Help: "Total contact-sales inquiries submitted.",
 		}, metricLabels("multica_contact_sales_submitted_total")),
+		selfHostSourceChannel: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "multica_self_host_source_channel_total",
+			Help: "Total self-host onboarding source channel reports received (MUL-3708), by source.",
+		}, metricLabels("multica_self_host_source_channel_total")),
 	}
 }
 
@@ -231,6 +236,7 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 		e.cloudRuntimeRequestDurationSecs,
 		e.feedbackSubmitted,
 		e.contactSalesSubmitted,
+		e.selfHostSourceChannel,
 	}
 }
 
@@ -348,6 +354,8 @@ func (m *BusinessMetrics) IncForEvent(ev analytics.Event) {
 		).Inc()
 	case analytics.EventContactSalesSubmitted:
 		m.events.contactSalesSubmitted.WithLabelValues(NormalizeContactSalesSource(stringProp(ev.Properties, "form_source"))).Inc()
+	case analytics.EventSelfHostSourceChannel:
+		m.events.selfHostSourceChannel.WithLabelValues(NormalizeSourceChannel(stringProp(ev.Properties, "source"))).Inc()
 	default:
 		// agent_task_* lifecycle telemetry is recorded straight to Prometheus
 		// via the typed BusinessMetrics.RecordTask* methods (they take

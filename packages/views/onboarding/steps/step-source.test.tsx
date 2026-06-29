@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { QuestionnaireAnswers } from "@multica/core/onboarding";
+import { configStore } from "@multica/core/config";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enOnboarding from "../../locales/en/onboarding.json";
@@ -42,7 +43,11 @@ function renderStep(answers: QuestionnaireAnswers = EMPTY) {
 }
 
 describe("StepSource (single-select primary source)", () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    // Default: not a self-host that ships the source beacon, so no notice.
+    configStore.setState({ selfHostSourceNotice: false });
+  });
 
   it("clicking a non-Other option writes a one-element source array", async () => {
     const user = userEvent.setup();
@@ -104,6 +109,36 @@ describe("StepSource (single-select primary source)", () => {
     const input = await screen.findByPlaceholderText(/podcast/i);
     await user.type(input, "x");
     expect(onChange).toHaveBeenLastCalledWith({ source_other: "x" });
+  });
+
+  it("shows the anonymous-collection notice only on a self-host that ships the beacon", () => {
+    // Official cloud / default: no notice.
+    const { unmount } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <StepSource
+          answers={EMPTY}
+          onChange={vi.fn()}
+          onAdvance={vi.fn()}
+          onSkip={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+    expect(screen.queryByText(/we only collect the source you pick/i)).toBeNull();
+    unmount();
+
+    // Production self-host: notice shown.
+    configStore.setState({ selfHostSourceNotice: true });
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <StepSource
+          answers={EMPTY}
+          onChange={vi.fn()}
+          onAdvance={vi.fn()}
+          onSkip={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+    expect(screen.getByText(/we only collect the source you pick/i)).toBeInTheDocument();
   });
 
   it("switching away from Other clears source_other so a stale value can't leak", async () => {
