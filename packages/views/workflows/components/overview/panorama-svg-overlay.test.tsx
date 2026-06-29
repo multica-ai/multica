@@ -70,7 +70,7 @@ describe("computeEdgePaths", () => {
     expect(paths).toEqual([]);
   });
 
-  it("computes horizontal path for same-stage adjacent nodes", () => {
+  it("computes direct straight line for same-stage adjacent nodes", () => {
     const positions = new Map<string, DOMRect>([
       ["n1", fakeRect(0, 0, 120, 72)],
       ["n2", fakeRect(130, 0, 120, 72)],
@@ -78,7 +78,10 @@ describe("computeEdgePaths", () => {
     const paths = computeEdgePaths(MOCK_EDGES.slice(0, 1), MOCK_NODES, MOCK_STAGES, positions, new Map());
     expect(paths.length).toBe(1);
     expect(paths[0]!.type).toBe("horizontal");
-    expect(paths[0]!.d).toContain("M");
+    // Verify a single direct segment with no midpoint detour
+    const parts = paths[0]!.d.split(" L ");
+    expect(parts.length).toBe(2);
+    expect(paths[0]!.d).toMatch(/^M \d+ \d+ L \d+ \d+$/);
   });
 
   it("computes channeled orthogonal path for edges between stages", () => {
