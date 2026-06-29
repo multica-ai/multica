@@ -59,7 +59,7 @@ export function MergeRequestList({ issueId }: { issueId: string }) {
       {visible.map((mr) => (
         <MergeRequestRow key={mr.id} mr={mr} />
       ))}
-      {mrs.length >= MR_LIMIT_BEFORE_COLLAPSE && (
+      {mrs.length > MR_LIMIT_BEFORE_COLLAPSE && (
         <button
           type="button"
           className="px-1.5 text-left text-xs text-muted-foreground hover:text-foreground"
