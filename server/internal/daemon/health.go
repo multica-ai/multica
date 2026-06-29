@@ -32,6 +32,8 @@ type HealthResponse struct {
 	ServerURL       string            `json:"server_url"`
 	CLIVersion      string            `json:"cli_version"`
 	ActiveTaskCount int64             `json:"active_task_count"`
+	ReloadPending   bool              `json:"reload_pending"`
+	ReloadReason    string            `json:"reload_pending_reason"`
 	Agents          []string          `json:"agents"`
 	Workspaces      []healthWorkspace `json:"workspaces"`
 }
@@ -91,6 +93,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 		if d.ready.Load() {
 			status = "running"
 		}
+		reloadPending, reloadReason := d.reloadPendingState()
 
 		resp := HealthResponse{
 			Status:          status,
@@ -102,6 +105,8 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			ServerURL:       d.cfg.ServerBaseURL,
 			CLIVersion:      d.cfg.CLIVersion,
 			ActiveTaskCount: d.activeTasks.Load(),
+			ReloadPending:   reloadPending,
+			ReloadReason:    reloadReason,
 			Agents:          agents,
 			Workspaces:      wsList,
 		}

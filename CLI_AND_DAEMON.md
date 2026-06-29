@@ -109,6 +109,16 @@ To run in the foreground (useful for debugging):
 multica daemon start --foreground
 ```
 
+CLI-launched daemons watch the `--version` output of the `multica` binary and detected agent CLIs. When a version changes, the daemon pauses new task claims, waits for active tasks to finish, then restarts so runtime capabilities are refreshed. Disable this with:
+
+```bash
+MULTICA_DAEMON_AUTO_RELOAD=0 multica daemon start
+# or
+multica daemon start --auto-reload-on-version-change=false
+```
+
+Desktop-managed daemons ignore this watcher because Desktop owns its bundled CLI lifecycle.
+
 ### Stop
 
 ```bash

@@ -60,6 +60,28 @@ func TestPrintDaemonStatusIncludesCLIVersion(t *testing.T) {
 	}
 }
 
+func TestPrintDaemonStatusIncludesReloadPending(t *testing.T) {
+	t.Parallel()
+
+	health := map[string]any{
+		"status":                "running",
+		"pid":                   float64(1234),
+		"uptime":                "1h2m3s",
+		"cli_version":           "v9.9.9",
+		"reload_pending":        true,
+		"reload_pending_reason": "codex version changed: 0.1.0 -> 0.1.1",
+		"workspaces":            []any{},
+	}
+
+	var out bytes.Buffer
+	printDaemonStatusReport(&out, "Daemon", health)
+
+	got := out.String()
+	if !strings.Contains(got, "Reload:") || !strings.Contains(got, "codex version changed") {
+		t.Fatalf("daemon status output = %q, want reload pending line", got)
+	}
+}
+
 // TestPrintDaemonStatusOmitsVersionWhenMissing pins the back-compat contract:
 // when the daemon doesn't report cli_version (older daemon paired with a newer
 // CLI) or reports an empty string, the CLI must skip the line entirely instead
