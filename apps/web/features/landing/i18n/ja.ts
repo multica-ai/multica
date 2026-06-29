@@ -270,6 +270,19 @@ export function createJaDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
+          version: "0.3.33",
+          date: "2026-06-29",
+          title: "GitLab 連携",
+          changes: [],
+          features: [
+            "「設定 → GitLab」で GitLab グループを一度接続するだけで、Multica の Issue 番号を参照するマージリクエストが Issue サイドバーに自動表示されます。",
+            "「agent」ラベルが付いた GitLab Issue は Multica に自動作成され、説明・担当者・ステータス・コメントが双方向で同期されます。",
+            "クローズキーワード（Closes / Fixes / Resolves）を含む MR がマージされると、紐づいた Issue が自動的に「完了」に移動します。連携中の GitLab Issue をクローズまたは再オープンすると、Multica の状態も即時に反映されます。",
+          ],
+          improvements: [],
+          fixes: [],
+        },
+        {
           version: "0.3.32",
           date: "2026-06-29",
           title: "サブ Issue の切り離し、より堅牢なデーモン再接続、どこからでも開ける添付プレビュー",

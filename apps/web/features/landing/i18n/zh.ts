@@ -294,6 +294,19 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.33",
+        date: "2026-06-29",
+        title: "GitLab 集成",
+        changes: [],
+        features: [
+          "在「设置 → GitLab」中一次性连接 GitLab group，引用了 Multica issue 编号的合并请求会自动出现在 issue 侧边栏。",
+          "打了「agent」标签的 GitLab issue 会自动在 Multica 中创建，描述、负责人、状态和评论双向同步。",
+          "包含关闭关键字（Closes、Fixes、Resolves）的 MR 合并后，关联 issue 自动变为「已完成」；关闭或重新打开同步中的 GitLab issue，Multica 状态会立即跟随变更。",
+        ],
+        improvements: [],
+        fixes: [],
+      },
+      {
         version: "0.3.32",
         date: "2026-06-29",
         title: "支持解除父子 Issue、守护进程重连更稳，附件预览处处可开",

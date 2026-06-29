@@ -269,6 +269,19 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
+          version: "0.3.33",
+          date: "2026-06-29",
+          title: "GitLab 연동",
+          changes: [],
+          features: [
+            "「설정 → GitLab」에서 GitLab 그룹을 한 번 연결하면, Multica issue 식별자를 참조하는 머지 리퀘스트가 issue 사이드바에 자동으로 표시됩니다.",
+            "「agent」 레이블이 붙은 GitLab issue는 Multica에 자동 생성되며 설명, 담당자, 상태, 댓글이 양방향으로 동기화됩니다.",
+            "닫기 키워드(Closes, Fixes, Resolves)를 포함한 MR이 머지되면 연결된 issue가 자동으로 「완료」로 이동합니다. 연동된 GitLab issue를 닫거나 다시 열면 Multica 상태가 즉시 반영됩니다.",
+          ],
+          improvements: [],
+          fixes: [],
+        },
+        {
           version: "0.3.32",
           date: "2026-06-29",
           title: "하위 Issue 분리, 더 견고한 데몬 재연결, 어디서나 열리는 첨부 미리보기",

@@ -294,6 +294,19 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.33",
+        date: "2026-06-29",
+        title: "GitLab Integration",
+        changes: [],
+        features: [
+          "Connect a GitLab group once in Settings → GitLab. Merge requests that reference a Multica issue identifier appear automatically in the issue sidebar.",
+          "GitLab issues labeled 'agent' are created in Multica and kept in sync — description, assignee, status, and comments flow both ways.",
+          "Merging an MR that closes an issue moves it to Done automatically. Closing or reopening a synced GitLab issue reflects in Multica immediately.",
+        ],
+        improvements: [],
+        fixes: [],
+      },
+      {
         version: "0.3.32",
         date: "2026-06-29",
         title: "Detach sub-Issues, sturdier daemon reconnects, and friendlier attachment previews",
