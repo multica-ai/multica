@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Trash2, Plus, Pencil, Check, X } from "lucide-react";
+import { Trash2, Plus, Pencil, Check, X, Sparkles } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label as UILabel } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
@@ -46,6 +46,7 @@ export function LabelsPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editColor, setEditColor] = useState("");
+  const [editInstructions, setEditInstructions] = useState("");
   const [editError, setEditError] = useState("");
 
   const [pendingDeletion, setPendingDeletion] = useState<Label | null>(null);
@@ -71,6 +72,7 @@ export function LabelsPanel() {
     setEditingId(label.id);
     setEditName(label.name);
     setEditColor(label.color);
+    setEditInstructions(label.instructions || "");
     setEditError("");
   };
 
@@ -78,6 +80,7 @@ export function LabelsPanel() {
     setEditingId(null);
     setEditName("");
     setEditColor("");
+    setEditInstructions("");
     setEditError("");
   };
 
@@ -92,7 +95,7 @@ export function LabelsPanel() {
     }
     setEditError("");
     update.mutate(
-      { id, name, color: editColor },
+      { id, name, color: editColor, instructions: editInstructions },
       {
         onSuccess: cancelEdit,
         onError: (err: unknown) => {
@@ -214,6 +217,28 @@ export function LabelsPanel() {
                   </>
                 )}
               </div>
+              {isEditing && (
+                <div className="mt-2">
+                  <textarea
+                    value={editInstructions}
+                    onChange={(e) => setEditInstructions(e.target.value)}
+                    placeholder="Agent instructions (optional) — appended to the agent's prompt when this label is on an issue"
+                    maxLength={2000}
+                    className="w-full rounded-md border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[60px]"
+                    rows={2}
+                  />
+                </div>
+              )}
+              {!isEditing && label.instructions && (
+                <p className="mt-1.5 flex items-center gap-1 pl-1 text-xs italic text-muted-foreground">
+                  <Sparkles className="h-3 w-3 shrink-0" strokeWidth={2.5} aria-hidden />
+                  <span>
+                    {label.instructions.length > 80
+                      ? label.instructions.slice(0, 80) + "…"
+                      : label.instructions}
+                  </span>
+                </p>
+              )}
               {isEditing && editError && (
                 <p
                   id={`label-edit-error-${label.id}`}

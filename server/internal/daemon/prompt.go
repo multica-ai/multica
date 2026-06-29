@@ -39,6 +39,7 @@ func BuildPrompt(task Task, provider string) string {
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Start with `multica issue comment list %s --recent 10 --output json` to read the 10 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. Resolved threads come back folded — `--full` to expand. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	appendLabelInstructions(&b, task)
 	return b.String()
 }
 
@@ -166,12 +167,6 @@ func buildCommentPrompt(task Task, provider string) string {
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
-	// Comment-reading pointer. Warm path with new comments: issue-wide
-	// since-delta count, but steer the agent to read the triggering thread
-	// first. Warm resumed path with no new comments: the trigger is already
-	// injected, so don't force a duplicate thread read. Cold path: read the
-	// triggering thread, not the flat timeline. Final fallback (no trigger id,
-	// shouldn't happen here): plain read.
 	if hint := execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount); hint != "" {
 		b.WriteString(hint)
 	} else if task.PriorSessionID != "" {
@@ -181,6 +176,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	} else {
 		fmt.Fprintf(&b, "Read the discussion: `multica issue comment list %s --recent 10 --output json` (resolved threads come back folded — `--full` to expand).\n\n", task.IssueID)
 	}
+	appendLabelInstructions(&b, task)
 	b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
 	return b.String()
 }
@@ -277,4 +273,19 @@ func buildAutopilotPrompt(task Task) string {
 	}
 	b.WriteString("Do not run `multica issue get`; this run does not have an issue ID.\n")
 	return b.String()
+}
+
+// appendLabelInstructions appends label-linked instructions to the prompt.
+// Each label on the issue can carry optional agent instructions (configured
+// in the Manage Labels dialog). When present, they're injected here so the
+// agent is context-aware of the label's intent without changing the
+// assignment model. Multiple labels stack additively.
+func appendLabelInstructions(b *strings.Builder, task Task) {
+	if len(task.LabelInstructions) == 0 {
+		return
+	}
+	b.WriteString("\n\nLabel-linked instructions (respect ALL of these while working on this issue):\n\n")
+	for _, li := range task.LabelInstructions {
+		fmt.Fprintf(b, "[%s] %s\n\n", li.Name, li.Instructions)
+	}
 }

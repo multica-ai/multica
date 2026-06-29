@@ -45,6 +45,7 @@ const labelA: Label = {
   color: "#ef4444",
   created_at: "2025-01-01T00:00:00Z",
   updated_at: "2025-01-01T00:00:00Z",
+  instructions: "",
 };
 
 const labelB: Label = {
@@ -54,6 +55,7 @@ const labelB: Label = {
   color: "#22c55e",
   created_at: "2025-01-01T00:00:00Z",
   updated_at: "2025-01-01T00:00:00Z",
+  instructions: "",
 };
 
 const baseIssue: Issue = {
