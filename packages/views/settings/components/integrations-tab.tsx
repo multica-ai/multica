@@ -1,14 +1,9 @@
 "use client";
 
 import { LarkTab } from "./lark-tab";
+import { WechatTab } from "./wechat-tab";
 import { useT } from "../../i18n";
 
-// Integrations is the umbrella tab for third-party platform connections.
-// GitHub has its own top-level tab (see github-tab.tsx); everything else
-// — currently just Lark, with Slack/Linear etc. to follow — lives in
-// here under its own section heading so additional integrations slot in
-// without changing the IA. IntegrationsTab is just the host; each
-// integration owns its own description and install flow.
 export function IntegrationsTab() {
   const { t } = useT("settings");
   return (
@@ -16,6 +11,15 @@ export function IntegrationsTab() {
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">{t(($) => $.lark.section_title)}</h2>
         <LarkTab />
+      </section>
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">
+          {t(($) => $.wechat.section_title)}
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          {t(($) => $.wechat.page_description)}
+        </p>
+        <WechatTab />
       </section>
     </div>
   );

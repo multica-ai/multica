@@ -134,4 +134,7 @@ const (
 	// deleting the row; the audit trail is preserved.
 	EventLarkInstallationCreated = "lark_installation:created"
 	EventLarkInstallationRevoked = "lark_installation:revoked"
+
+	EventWechatInstallationCreated = "wechat_installation:created"
+	EventWechatInstallationRevoked = "wechat_installation:revoked"
 )

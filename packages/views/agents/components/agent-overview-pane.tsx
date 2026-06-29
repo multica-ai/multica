@@ -17,6 +17,7 @@ import type { Agent, AgentRuntime } from "@multica/core/types";
 import { providerSupportsMcpConfig } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
+import { wechatInstallationsOptions } from "@multica/core/wechat";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -142,6 +143,12 @@ export function AgentOverviewPane({
   });
   const larkConfigured = larkListing?.configured === true;
 
+  const { data: wechatListing } = useQuery({
+    ...wechatInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
+  const wechatConfigured = wechatListing?.configured === true;
+
   // The MCP tab is only shown when the agent's runtime backend actually
   // consumes mcp_config — see providerSupportsMcpConfig. We default to
   // showing it when the runtime row hasn't loaded yet so a slow fetch
@@ -161,11 +168,11 @@ export function AgentOverviewPane({
     const showRuntimeConfig = runtime ? runtime.provider === "openclaw" : false;
     return detailTabs.filter((tab) => {
       if (tab.id === "mcp_config") return showMcp;
-      if (tab.id === "integrations") return larkConfigured;
+      if (tab.id === "integrations") return larkConfigured || wechatConfigured;
       if (tab.id === "runtime_config") return showRuntimeConfig;
       return true;
     });
-  }, [runtime, larkConfigured]);
+  }, [runtime, larkConfigured, wechatConfigured]);
 
   // If the active tab disappears (e.g. user just switched the agent's
   // runtime to one that doesn't read mcp_config), fall back to Activity

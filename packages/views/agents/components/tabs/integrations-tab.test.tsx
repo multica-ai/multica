@@ -27,14 +27,20 @@ const installationsRef = vi.hoisted(() => ({
   },
 }));
 
+const wechatInstallationsRef = vi.hoisted(() => ({
+  current: { installations: [] as unknown[], configured: false },
+}));
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (opts: { queryKey: unknown[]; enabled?: boolean }) => {
     if (opts.enabled === false) return { data: undefined };
     const key = JSON.stringify(opts.queryKey);
     if (key.includes("members")) return { data: membersRef.current };
+    if (key.includes("wechat")) return { data: wechatInstallationsRef.current };
     if (key.includes("installations")) return { data: installationsRef.current };
     return { data: undefined };
   },
+  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
   queryOptions: <T,>(opts: T) => opts,
 }));
 
@@ -51,6 +57,14 @@ vi.mock("@multica/core/lark", () => ({
     queryKey: ["lark", "installations"],
     queryFn: vi.fn(),
   }),
+}));
+
+vi.mock("@multica/core/wechat", () => ({
+  wechatInstallationsOptions: () => ({
+    queryKey: ["wechat", "installations"],
+    queryFn: vi.fn(),
+  }),
+  wechatKeys: { installations: () => ["wechat", "installations"] },
 }));
 
 vi.mock("@multica/core/auth", () => {
@@ -113,6 +127,7 @@ function resetFixtures() {
     configured: true,
     install_supported: true,
   };
+  wechatInstallationsRef.current = { installations: [], configured: false };
 }
 
 describe("IntegrationsTab", () => {

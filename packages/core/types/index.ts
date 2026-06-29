@@ -120,6 +120,10 @@ export type {
   RedeemLarkBindingTokenResponse,
 } from "./lark";
 export type {
+  WechatInstallation,
+  ListWechatInstallationsResponse,
+} from "./wechat";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

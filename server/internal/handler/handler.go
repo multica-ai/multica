@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflagdispatch"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/wechat"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -176,7 +177,16 @@ type Handler struct {
 	// delivering events, to flush debounced run triggers and join in-flight
 	// reply goroutines. Built unconditionally (even without Lark).
 	ChannelRouter *engine.Router
-	cfg           Config
+
+	// WeChat Work integration. These run their own per-bot WebSocket
+	// supervisor (server/internal/integrations/wechat/hub.go) rather than
+	// going through ChannelSupervisor — wechat predates the channel.Channel
+	// generalization and has not yet been ported onto the shared engine.
+	// Both are nil when the master key (MULTICA_WECHAT_SECRET_KEY) is unset.
+	WechatInstallations *wechat.InstallationService
+	WechatHub           *wechat.Hub
+
+	cfg Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {

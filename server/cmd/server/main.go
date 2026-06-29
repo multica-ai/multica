@@ -384,6 +384,9 @@ func main() {
 	if h.ChannelSupervisor != nil {
 		go h.ChannelSupervisor.Run(sweepCtx)
 	}
+	if h.WechatHub != nil {
+		go h.WechatHub.Run(sweepCtx)
+	}
 
 	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
 	// `sys_cron_executions` table into the distributed lease + audit
@@ -477,6 +480,13 @@ func main() {
 		}
 		if h.ChannelRouter != nil {
 			h.ChannelRouter.Drain()
+		}
+	}
+	if h.WechatHub != nil {
+		if !h.WechatHub.WaitWithTimeout(h.WechatHub.ShutdownTimeout()) {
+			slog.Warn("wechat hub: supervisors did not exit within shutdown timeout; proceeding",
+				"timeout", h.WechatHub.ShutdownTimeout().String(),
+			)
 		}
 	}
 

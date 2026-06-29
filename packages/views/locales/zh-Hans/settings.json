@@ -376,5 +376,36 @@
         "description": "创建并处理 issue"
       }
     }
+  },
+  "wechat": {
+    "section_title": "企业微信",
+    "page_description": "将 Multica 智能体绑定到企业微信 AI Bot。成员可在企微私聊或群聊中 @Bot 发起对话，智能体会以流式消息实时回复。",
+    "not_configured_title": "未启用企微集成",
+    "not_configured_description_prefix": "需要在服务器上设置",
+    "not_configured_description_suffix": "才能启用企业微信 Bot 绑定。",
+    "enabled": "已启用",
+    "no_bots": "暂无机器人连接。前往智能体的「集成」选项卡绑定企业微信机器人。",
+    "bots_connected": "{{count}} 个机器人已连接。在各智能体的「集成」选项卡中管理绑定。",
+    "agent_section_title": "企业微信",
+    "agent_section_description": "将企业微信智能机器人绑定到此智能体。发送给该机器人的消息将由此智能体处理。",
+    "no_manage_permission": "仅工作区所有者和管理员可管理机器人绑定。",
+    "connected": "已连接",
+    "bot_id_label": "Bot ID",
+    "secret_label": "Secret",
+    "bot_id_placeholder": "企业微信智能机器人 Bot ID",
+    "secret_placeholder": "企业微信管理后台的机器人 Secret",
+    "connect_bot": "连接机器人",
+    "connecting": "连接中...",
+    "disconnect": "断开连接",
+    "disconnecting": "断开中...",
+    "disconnect_confirm_title": "断开机器人连接？",
+    "disconnect_confirm_description": "断开后机器人将不再接收消息。你可以稍后重新连接。",
+    "disconnect_confirm_cancel": "取消",
+    "toast_connected": "机器人已连接",
+    "toast_disconnected": "机器人已断开",
+    "toast_connect_failed": "连接机器人失败",
+    "toast_disconnect_failed": "断开连接失败",
+    "toast_fields_required": "Bot ID 和 Secret 不能为空",
+    "loading": "加载中…"
   }
 }
