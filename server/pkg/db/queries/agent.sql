@@ -377,6 +377,15 @@ SET status = 'completed', completed_at = now(), result = $2, session_id = $3, wo
 WHERE id = $1 AND status = 'running'
 RETURNING *;
 
+-- name: CompleteOrReclaimAgentTask :one
+-- Dedicated interface for long-running task completion. Allows reclaiming a task
+-- that was prematurely marked failed by background sweepers due to network jitter
+-- or liveness timeouts (e.g. runtime_offline, timeout, runtime_recovery, queued_expired).
+UPDATE agent_task_queue
+SET status = 'completed', completed_at = now(), result = $2, session_id = $3, work_dir = $4, prepare_lease_expires_at = NULL, error = NULL, failure_reason = NULL
+WHERE id = $1 AND (status = 'running' OR (status = 'failed' AND failure_reason IN ('runtime_offline', 'timeout', 'runtime_recovery', 'queued_expired')))
+RETURNING *;
+
 -- name: GetLastTaskSession :one
 -- Returns the session_id and work_dir from the most recent task for a given
 -- (agent_id, issue_id) pair, used for session resumption on the auto-retry
@@ -455,6 +464,21 @@ SET status = 'failed',
     work_dir = COALESCE(sqlc.narg('work_dir'), work_dir),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+RETURNING *;
+
+-- name: FailOrReclaimAgentTask :one
+-- Dedicated interface for long-running task failure reporting. Allows reclaiming a task
+-- that was prematurely marked failed by background sweepers due to network jitter
+-- or liveness timeouts (e.g. runtime_offline, timeout, runtime_recovery, queued_expired).
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    error = $2,
+    failure_reason = COALESCE(sqlc.narg('failure_reason'), 'agent_error'),
+    session_id = COALESCE(sqlc.narg('session_id'), session_id),
+    work_dir = COALESCE(sqlc.narg('work_dir'), work_dir),
+    prepare_lease_expires_at = NULL
+WHERE id = $1 AND (status IN ('dispatched', 'running', 'waiting_local_directory') OR (status = 'failed' AND failure_reason IN ('runtime_offline', 'timeout', 'runtime_recovery', 'queued_expired')))
 RETURNING *;
 
 -- name: UpdateAgentTaskSession :exec

@@ -1253,7 +1253,7 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir string) (*db.AgentTaskQueue, error) {
 	var task db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
-		t, err := qtx.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
+		t, err := qtx.CompleteOrReclaimAgentTask(ctx, db.CompleteOrReclaimAgentTaskParams{
 			ID:        taskID,
 			Result:    result,
 			SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
@@ -1446,7 +1446,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	}
 	var task db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
-		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
+		t, err := qtx.FailOrReclaimAgentTask(ctx, db.FailOrReclaimAgentTaskParams{
 			ID:            taskID,
 			Error:         pgtype.Text{String: errMsg, Valid: true},
 			FailureReason: pgtype.Text{String: failureReason, Valid: failureReason != ""},

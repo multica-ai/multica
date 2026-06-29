@@ -746,6 +746,65 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 	return i, err
 }
 
+const completeOrReclaimAgentTask = `-- name: CompleteOrReclaimAgentTask :one
+UPDATE agent_task_queue
+SET status = 'completed', completed_at = now(), result = $2, session_id = $3, work_dir = $4, prepare_lease_expires_at = NULL, error = NULL, failure_reason = NULL
+WHERE id = $1 AND (status = 'running' OR (status = 'failed' AND failure_reason IN ('runtime_offline', 'timeout', 'runtime_recovery', 'queued_expired')))
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at
+`
+
+type CompleteOrReclaimAgentTaskParams struct {
+	ID        pgtype.UUID `json:"id"`
+	Result    []byte      `json:"result"`
+	SessionID pgtype.Text `json:"session_id"`
+	WorkDir   pgtype.Text `json:"work_dir"`
+}
+
+// Dedicated interface for long-running task completion. Allows reclaiming a task
+// that was prematurely marked failed by background sweepers due to network jitter
+// or liveness timeouts (e.g. runtime_offline, timeout, runtime_recovery, queued_expired).
+func (q *Queries) CompleteOrReclaimAgentTask(ctx context.Context, arg CompleteOrReclaimAgentTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, completeOrReclaimAgentTask,
+		arg.ID,
+		arg.Result,
+		arg.SessionID,
+		arg.WorkDir,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+	)
+	return i, err
+}
+
 const countRunningTasks = `-- name: CountRunningTasks :one
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
@@ -1221,6 +1280,73 @@ type FailAgentTaskParams struct {
 // 'agent_error' is the safe default when the daemon doesn't supply one.
 func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, failAgentTask,
+		arg.ID,
+		arg.Error,
+		arg.FailureReason,
+		arg.SessionID,
+		arg.WorkDir,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+	)
+	return i, err
+}
+
+const failOrReclaimAgentTask = `-- name: FailOrReclaimAgentTask :one
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    error = $2,
+    failure_reason = COALESCE($3, 'agent_error'),
+    session_id = COALESCE($4, session_id),
+    work_dir = COALESCE($5, work_dir),
+    prepare_lease_expires_at = NULL
+WHERE id = $1 AND (status IN ('dispatched', 'running', 'waiting_local_directory') OR (status = 'failed' AND failure_reason IN ('runtime_offline', 'timeout', 'runtime_recovery', 'queued_expired')))
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at
+`
+
+type FailOrReclaimAgentTaskParams struct {
+	ID            pgtype.UUID `json:"id"`
+	Error         pgtype.Text `json:"error"`
+	FailureReason pgtype.Text `json:"failure_reason"`
+	SessionID     pgtype.Text `json:"session_id"`
+	WorkDir       pgtype.Text `json:"work_dir"`
+}
+
+// Dedicated interface for long-running task failure reporting. Allows reclaiming a task
+// that was prematurely marked failed by background sweepers due to network jitter
+// or liveness timeouts (e.g. runtime_offline, timeout, runtime_recovery, queued_expired).
+func (q *Queries) FailOrReclaimAgentTask(ctx context.Context, arg FailOrReclaimAgentTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, failOrReclaimAgentTask,
 		arg.ID,
 		arg.Error,
 		arg.FailureReason,
