@@ -10,7 +10,6 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -385,18 +384,15 @@ export function SlackAgentBindButton({
         <DialogContent className="sm:max-w-lg" data-testid="slack-byo-dialog">
           <DialogHeader>
             <DialogTitle>{t(($) => $.slack.byo_dialog_title)}</DialogTitle>
-            <DialogDescription>
-              {t(($) => $.slack.byo_dialog_intro)}
-            </DialogDescription>
           </DialogHeader>
 
           {SLACK_BYO_VIDEO_URL ? (
             <button
               type="button"
               onClick={() => openExternal(SLACK_BYO_VIDEO_URL)}
-              className="inline-flex w-fit items-center gap-1.5 text-xs font-medium text-primary underline-offset-2 hover:underline"
+              className="inline-flex w-fit items-center gap-2 text-sm font-medium text-primary underline-offset-2 hover:underline"
             >
-              <ExternalLink className="h-3.5 w-3.5" />
+              <ExternalLink className="h-4 w-4" />
               {t(($) => $.slack.byo_video_cta)}
             </button>
           ) : null}
@@ -404,16 +400,12 @@ export function SlackAgentBindButton({
           <button
             type="button"
             onClick={() => openExternal(slackDocsUrl(i18n.language))}
-            className="inline-flex w-fit items-center gap-1.5 text-xs font-medium text-primary underline-offset-2 hover:underline"
+            className="inline-flex w-fit items-center gap-2 text-sm font-medium text-primary underline-offset-2 hover:underline"
             data-testid="slack-byo-docs-link"
           >
-            <ExternalLink className="h-3.5 w-3.5" />
+            <ExternalLink className="h-4 w-4" />
             {t(($) => $.slack.byo_docs_link)}
           </button>
-
-          <p className="rounded-md bg-muted px-3 py-2 text-[11px] text-muted-foreground">
-            {t(($) => $.slack.byo_scopes_hint)}
-          </p>
 
           <div className="space-y-4">
             <div className="space-y-1.5">
@@ -430,9 +422,6 @@ export function SlackAgentBindButton({
                 spellCheck={false}
                 disabled={submitting}
               />
-              <p className="text-[11px] text-muted-foreground">
-                {t(($) => $.slack.byo_bot_token_hint)}
-              </p>
             </div>
 
             <div className="space-y-1.5">
@@ -449,9 +438,6 @@ export function SlackAgentBindButton({
                 spellCheck={false}
                 disabled={submitting}
               />
-              <p className="text-[11px] text-muted-foreground">
-                {t(($) => $.slack.byo_app_token_hint)}
-              </p>
             </div>
           </div>
 

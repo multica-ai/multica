@@ -75,10 +75,6 @@ settings:
 
 这里**没有 OAuth 重定向 URL**，因为 BYO 不使用 OAuth。
 
-<Callout type="warning">
-请保留 scopes 里的 `users:read`。连接时 Multica 会调用 `bots.info` 来确认 bot token 和 app-level token 来自**同一个** app——这个调用需要 `users:read`。没有它，**Connect** 会失败。
-</Callout>
-
 <Callout type="info">
 想在 Slack 里用一个特定的名字？在创建之前改 `display_information.name` 和 `features.bot_user.display_name`（比如改成你智能体的名字），或者之后在 **App Home** 里编辑。Slack 是按 Bot 的**显示名（bot display name）**来展示它的，这个名字可以和 app 名不一样。
 </Callout>

@@ -75,10 +75,6 @@ This manifest configures everything Multica needs, so you don't set anything by 
 
 There is **no OAuth redirect URL**, because BYO doesn't use OAuth.
 
-<Callout type="warning">
-Keep `users:read` in the scopes. At connect time Multica calls `bots.info` to confirm the bot token and app-level token come from the **same** app — that call needs `users:read`. Without it, **Connect** fails.
-</Callout>
-
 <Callout type="info">
 Want a specific name in Slack? Change `display_information.name` and `features.bot_user.display_name` (e.g. to your agent's name) before creating, or edit it later under **App Home**. Slack shows the bot by its **bot display name**, which can differ from the app name.
 </Callout>

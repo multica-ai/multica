@@ -75,10 +75,6 @@ settings:
 
 **OAuth redirect URL은 없습니다.** BYO는 OAuth를 사용하지 않기 때문입니다.
 
-<Callout type="warning">
-스코프에 `users:read`를 유지하세요. 연결 시점에 Multica는 bot token과 app-level token이 **같은** 앱에서 왔는지 확인하기 위해 `bots.info`를 호출하는데 — 이 호출에는 `users:read`가 필요합니다. 이것이 없으면 **Connect**가 실패합니다.
-</Callout>
-
 <Callout type="info">
 Slack에서 특정 이름을 쓰고 싶나요? 생성하기 전에 `display_information.name`과 `features.bot_user.display_name`을 (예: 에이전트 이름으로) 변경하거나, 나중에 **App Home**에서 편집하세요. Slack은 봇을 **bot display name**으로 표시하며, 이는 앱 이름과 다를 수 있습니다.
 </Callout>
