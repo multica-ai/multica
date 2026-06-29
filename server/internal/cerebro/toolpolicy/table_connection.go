@@ -428,26 +428,40 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 	return result, connName, nil
 }
 
-// ConnectionEndpointEffective resolves the effective Allow/Ask/Deny verdict for a
-// single API-connection endpoint call (`<METHOD> <path>`, e.g. "GET /secrets")
-// through the full Workspace › Runtime › Agent › Group › User › System chain —
-// i.e. the same per-actor-level control MCP connections already get, extended to
-// REST connections (FIR-2166 "C": connect any API and control it at every actor
-// level). Today API endpoint rows are authored and shown but never enforced at
-// runtime ("config-only"); this resolver is the engine half the API-call gate
-// uses, so the gateway gate and the admin screen can never drift.
+// ConnectionEndpointEffective resolves the effective verdict for a single
+// API-connection endpoint call (`<METHOD> <path>`, e.g. "GET /secrets") for one
+// actor, over the connection-wide row (`connection:<name>`, empty
+// resource_pattern) AND the matching per-endpoint row (source
+// connection-endpoint, resource_pattern "<METHOD> <path>"), at EVERY actor layer
+// (Workspace › Runtime › Agent › Group › User). It is the engine half the
+// API-call gate uses, so the gateway gate and the admin screen can never drift.
 //
-// The verdict folds two rows for the named connection, MOST RESTRICTIVE wins
-// (Deny > Ask > Allow): the connection-wide cap (`connection:<name>`, empty
-// resource_pattern) and the per-endpoint row (source connection-endpoint,
-// resource_pattern "<METHOD> <path>"). A per-endpoint row can only ever tighten
-// the connection-wide row. No matching row resolves to SettingAllow (ungated):
-// connection permissions only ever tighten from an allow baseline. Returns the
-// resolved setting and the connection name when the verdict tightens past the
-// allow baseline (so callers can surface "which integration" in an approval).
+// API-connection endpoints resolve against a PER-CONNECTION default — FIR-2166
+// "C" v2. Each connection carries a default_access mode (allow/ask/deny) chosen
+// when it is created/edited (connections.DefaultAccess*); per-actor tool-policy
+// rows override that default. This is NOT the tighten-only Resolve, for the same
+// reason tools:test-as-user uses ResolveOptIn (FIR-1771): the tighten chain only
+// ever tightens below its Base and refuses to loosen, so a Deny base could never
+// be lifted by an Allow grant. The rule, over all of the above rows/layers:
+//
+//   - an explicit Deny at any layer wins (revokes) — fail-safe;
+//   - else an explicit Allow at any layer grants the call;
+//   - else an explicit Ask at any layer gates the call (human approval);
+//   - else (no per-actor row) fall back to the connection's default_access.
+//
+// A server-side-dispatched API connection can reach internal `.internal` URLs
+// with a stored credential the agent never sees (e.g. infisical-admin fronts the
+// secrets box), so such a connection is set to default 'deny': "allow only Sara
+// & Mia" is then an agent-layer Allow on connection:<name> per agent, and every
+// other — and every NEW — agent is denied. A harmless API can be set to 'allow'
+// (open, deny to restrict) or 'ask' (approval-gated). This is independent of MCP
+// connections (ConnectionToolEffective / ConnectionToolDenied), which keep their
+// Allow-baseline shape and are unaffected. Returns the resolved setting and, on a
+// non-Allow, the connection name so callers can surface "which integration".
 func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, connName, method, path string) (Setting, string, error) {
 	if connName == "" || method == "" || path == "" {
-		return SettingAllow, "", nil
+		// An unidentifiable endpoint cannot be matched to a grant; fail closed.
+		return SettingDeny, connName, nil
 	}
 	rows, err := s.Table(ctx, TableQuery{
 		WorkspaceID: workspaceID,
@@ -456,28 +470,82 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 		UserID:      userID,
 	})
 	if err != nil {
-		return SettingAllow, "", err
+		// Return the error so the caller's fail-open(list)/fail-closed(call) policy
+		// in apiEndpointSetting decides; the Deny is a safe default for any caller
+		// that ignores the error.
+		return SettingDeny, connName, err
 	}
 	wantKey := connectionToolKeyPrefix + connName
 	wantPattern := method + " " + path
-	result := SettingAllow
+	var hasAllow, hasAsk bool
 	for _, r := range rows {
 		if r.ToolKey != wantKey {
 			continue
 		}
-		// The connection-wide cap (empty pattern) and the matching per-endpoint
+		// The connection-wide row (empty pattern) and the matching per-endpoint
 		// row both gate this call; everything else for the connection is ignored.
 		isWide := r.Source == "connection" && r.ResourcePattern == ""
 		isEndpoint := r.Source == connectionEndpointSource && r.ResourcePattern == wantPattern
 		if !isWide && !isEndpoint {
 			continue
 		}
-		result = MoreRestrictive(result, r.Effective.Setting)
+		// Inspect the raw per-layer settings (NOT r.Effective, whose tighten-only
+		// verdict carries an Allow base). Deny wins immediately; otherwise an
+		// explicit Allow grants and an explicit Ask gates, overriding the default.
+		for _, set := range r.Layers {
+			switch set {
+			case SettingDeny:
+				return SettingDeny, connName, nil
+			case SettingAllow:
+				hasAllow = true
+			case SettingAsk:
+				hasAsk = true
+			}
+		}
 	}
-	if result == SettingAllow {
+	// Per-actor precedence: Deny (returned above) > Allow > Ask. An explicit
+	// per-actor row always overrides the connection default.
+	if hasAllow {
 		return SettingAllow, "", nil
 	}
-	return result, connName, nil
+	if hasAsk {
+		return SettingAsk, connName, nil
+	}
+	// No explicit per-actor row — fall back to the connection's configured default
+	// access (allow/ask/deny), chosen when the connection was created/edited. A
+	// missing row or column (mid-migration) resolves to Deny (fail closed).
+	switch s.connectionDefaultAccess(ctx, workspaceID, connName) {
+	case SettingAllow:
+		return SettingAllow, "", nil
+	case SettingAsk:
+		return SettingAsk, connName, nil
+	default:
+		return SettingDeny, connName, nil
+	}
+}
+
+// connectionDefaultAccess reads a connection's configured default access mode
+// (FIR-2166 "C" v2) and maps it to a Setting. It queries workspace_connection
+// directly (toolpolicy stays import-free of the connections package, exactly like
+// discoverConnectionTools). Any error — missing connection, undefined column
+// during a migration window, missing table — resolves to Deny (fail closed): a
+// gate that fronts the secrets box must never open on an unresolved default.
+func (s *Store) connectionDefaultAccess(ctx context.Context, workspaceID pgtype.UUID, connName string) Setting {
+	var mode string
+	if err := s.pool.QueryRow(ctx, `
+		SELECT default_access FROM workspace_connection
+		WHERE workspace_id = $1 AND name = $2
+	`, workspaceID, connName).Scan(&mode); err != nil {
+		return SettingDeny
+	}
+	switch mode {
+	case "allow":
+		return SettingAllow
+	case "ask":
+		return SettingAsk
+	default:
+		return SettingDeny
+	}
 }
 
 // DeniedConnectionTools resolves, for the given chain context, every MCP

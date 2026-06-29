@@ -942,10 +942,12 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		// cerebro_api_connection_tools is on (default off). Additive — the tools
 		// are appended to whatever the cascade/policy already enabled and
 		// registered in this task's registry so the registry tool loop dispatches
-		// them. Per-actor filtering (hide/deny an endpoint via
-		// ConnectionEndpointEffective) lands in PR3; until then the flag stays off
-		// in production, because while on every agent in the workspace would get
-		// every endpoint of every enabled API connection.
+		// them. Per-actor enforcement is OPT-IN (FIR-2166 "C" v2): every endpoint
+		// tool is registered (so the call-time guard can resolve it) but only the
+		// ones this agent holds an explicit Allow grant for are LISTED —
+		// filterDeniedAPIEndpoints drops everything ConnectionEndpointEffective
+		// resolves to its default Deny. So even flag-on, an un-granted agent sees
+		// and can call nothing.
 		if apiTools := e.apiConnectionTools(ctx, workspaceID); len(apiTools) > 0 {
 			// Register every endpoint tool so the call-time guard can resolve it by
 			// name (defence in depth), then LIST only the ones this agent is not

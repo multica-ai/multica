@@ -51,6 +51,9 @@ type createRequest struct {
 	AuthConfig          AuthConfig           `json:"auth_config"`
 	EndpointPermissions []EndpointPermission `json:"endpoint_permissions"`
 	ScopableArgs        []ScopableArg        `json:"scopable_args"`
+	// DefaultAccess is the per-connection baseline verdict (allow/ask/deny) for
+	// actors with no explicit per-actor rule. Empty defaults to deny (store-side).
+	DefaultAccess string `json:"default_access"`
 }
 
 type updateRequest struct {
@@ -61,6 +64,7 @@ type updateRequest struct {
 	EndpointPermissions []EndpointPermission `json:"endpoint_permissions"`
 	ScopableArgs        []ScopableArg        `json:"scopable_args"`
 	Enabled             bool                 `json:"enabled"`
+	DefaultAccess       string               `json:"default_access"`
 }
 
 // --- handlers ---------------------------------------------------------------
@@ -134,6 +138,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		AuthConfig:          req.AuthConfig,
 		EndpointPermissions: req.EndpointPermissions,
 		ScopableArgs:        req.ScopableArgs,
+		DefaultAccess:       req.DefaultAccess,
 	})
 	if errors.Is(err, ErrDuplicateName) {
 		writeError(w, http.StatusConflict, "a connection with that name already exists")
@@ -180,6 +185,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		EndpointPermissions: req.EndpointPermissions,
 		ScopableArgs:        req.ScopableArgs,
 		Enabled:             req.Enabled,
+		DefaultAccess:       req.DefaultAccess,
 	})
 	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "connection not found")

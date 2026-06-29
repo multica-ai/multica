@@ -30,7 +30,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { AppLink, useNavigation } from "@multica/views/navigation";
 import { PageHeader } from "@multica/views/layout/page-header";
 
-import type { Connection, ConnectionType, CreateConnectionInput, EndpointPermission, ScopableArg, UpdateConnectionInput } from "../types";
+import type { Connection, ConnectionType, CreateConnectionInput, DefaultAccess, EndpointPermission, ScopableArg, UpdateConnectionInput } from "../types";
 import {
   useConnection,
   useCreateConnection,
@@ -63,6 +63,7 @@ const EMPTY_FORM = {
   cf_access_id: "",
   cf_access_secret: "",
   enabled: true,
+  default_access: "deny" as DefaultAccess,
 };
 
 // HTTP methods an admin can allow per endpoint. Order matches CRUD intuition.
@@ -458,6 +459,28 @@ function ConnectionFormBody({
             </div>
           </div>
 
+          {/* Default access — baseline verdict for an actor with no explicit
+              per-actor rule (FIR-2166 "C" v2). */}
+          <div className="space-y-1.5">
+            <Label htmlFor="conn-default-access">Default access</Label>
+            <Select
+              value={form.default_access}
+              onValueChange={(v) => setForm((f) => ({ ...f, default_access: v as DefaultAccess }))}
+            >
+              <SelectTrigger id="conn-default-access">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="deny">Deny — closed; only explicitly allowed actors</SelectItem>
+                <SelectItem value="ask">Ask — approval required unless explicitly allowed</SelectItem>
+                <SelectItem value="allow">Allow — open unless an actor is explicitly denied</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Baseline for actors with no explicit rule. Per-agent overrides still apply (Deny wins, then Allow, then Ask).
+            </p>
+          </div>
+
           {/* Authentication */}
           <div className="space-y-3 rounded-md border p-4">
             <div className="space-y-1.5">
@@ -780,6 +803,7 @@ export function ConnectionCreatePage() {
       auth_config: buildAuthConfig(form, authType),
       endpoint_permissions: endpoints,
       scopable_args: scopableArgs,
+      default_access: form.default_access,
     };
     await create.mutateAsync(input);
     toast.success("Connection created.");
@@ -854,6 +878,7 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
     cf_access_id: conn.auth_config.cf_access_id ?? "",
     cf_access_secret: conn.auth_config.cf_access_secret === "***" ? "" : (conn.auth_config.cf_access_secret ?? ""),
     enabled: conn.enabled,
+    default_access: conn.default_access,
   };
 
   async function handleSave(
@@ -870,6 +895,7 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
       endpoint_permissions: endpoints,
       scopable_args: scopableArgs,
       enabled: form.enabled,
+      default_access: form.default_access,
     };
     await update.mutateAsync(input);
     toast.success("Connection updated.");

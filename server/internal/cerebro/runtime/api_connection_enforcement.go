@@ -21,6 +21,14 @@ package runtime
 // All of this is still behind the default-off cerebro_api_connection_tools flag:
 // with the flag off PR2 exposes no API tools, so there is nothing for this to
 // resolve.
+//
+// FIR-2166 "C" v2: ConnectionEndpointEffective is now OPT-IN (default Deny) for
+// API connections — an endpoint is granted only by an explicit Allow at some
+// actor layer, otherwise it resolves to Deny. So the LIST-TIME filter drops every
+// endpoint an agent was not explicitly granted (not just authored Denies), and an
+// un-granted agent sees nothing. Ask is not a grant on this gate (anything short
+// of an explicit Allow is Deny), so the call-time Ask path is unreachable for API
+// connections; it remains for MCP connection tools, which keep Allow-baseline.
 
 import (
 	"context"

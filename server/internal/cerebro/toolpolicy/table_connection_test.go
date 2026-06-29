@@ -508,8 +508,10 @@ func TestConnectionToolEffective(t *testing.T) {
 	}
 }
 
-// FIR-2166 "C": API-connection endpoints must be controllable per actor level,
-// folding the connection-wide cap and the per-endpoint row through the chain.
+// FIR-2166 "C" v2: API-connection endpoints resolve against the connection's
+// per-connection default_access (allow/ask/deny); per-actor tool-policy rows
+// override it with precedence Deny > Allow > Ask. This is NOT the tighten-only
+// chain (which could never lift a Deny default with an Allow grant — FIR-1771).
 func TestConnectionEndpointEffective(t *testing.T) {
 	s := newTPStore(t)
 	clearAll(t, s)
@@ -518,9 +520,11 @@ func TestConnectionEndpointEffective(t *testing.T) {
 
 	agent := uuidByte(31)
 	other := uuidByte(32)
+	owner := uuidByte(33)
 	const conn = "infisical-admin"
 	const toolKey = "connection:" + conn
 
+	// Seed with the column default ('deny'); setDefault flips it per phase.
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO workspace_connection
 		  (workspace_id, name, display_name, type, url, endpoint_permissions, enabled)
@@ -537,6 +541,13 @@ func TestConnectionEndpointEffective(t *testing.T) {
 			`DELETE FROM workspace_connection WHERE workspace_id = $1`, tpTestWorkspaceID)
 	})
 
+	setDefault := func(mode string) {
+		if _, err := s.pool.Exec(ctx,
+			`UPDATE workspace_connection SET default_access = $2 WHERE workspace_id = $1 AND name = $3`,
+			tpTestWorkspaceID, mode, conn); err != nil {
+			t.Fatalf("set default_access=%s: %v", mode, err)
+		}
+	}
 	mustSet := func(layer Layer, subj pgtype.UUID, pattern string, setting Setting) {
 		if _, err := s.Set(ctx, SetParams{
 			WorkspaceID: tpTestWorkspaceID, ToolKey: toolKey, Layer: layer,
@@ -545,45 +556,78 @@ func TestConnectionEndpointEffective(t *testing.T) {
 			t.Fatalf("set %s %q=%s: %v", layer, pattern, setting, err)
 		}
 	}
-	// Per-endpoint rules on the agent layer tighten the allow baseline.
-	mustSet(LayerAgent, agent, "POST /secrets", SettingDeny)
-	mustSet(LayerAgent, agent, "GET /secrets", SettingAsk)
+	// Per-actor rows for "agent" (like Sara/Mia). Authored at the endpoint level so
+	// the test does not depend on a cerebro_capability wide row. "other" has none.
+	mustSet(LayerAgent, agent, "GET /secrets", SettingAllow)  // explicit grant
+	mustSet(LayerAgent, agent, "POST /secrets", SettingDeny)  // explicit deny wins
+	mustSet(LayerAgent, agent, "GET /status", SettingAsk)     // explicit ask gates
 
 	var zero pgtype.UUID
-	cases := []struct {
+	type tc struct {
 		name         string
-		ag           pgtype.UUID
+		ag, user     pgtype.UUID
 		method, path string
 		want         Setting
 		wantConn     string
-	}{
-		{"endpoint deny on agent", agent, "POST", "/secrets", SettingDeny, conn},
-		{"endpoint ask on agent", agent, "GET", "/secrets", SettingAsk, conn},
-		{"ungated endpoint", agent, "GET", "/status", SettingAllow, ""},
-		{"other agent ungated", other, "POST", "/secrets", SettingAllow, ""},
-		{"empty args", agent, "", "", SettingAllow, ""},
 	}
-	for _, c := range cases {
-		got, gotConn, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, c.ag, zero, conn, c.method, c.path)
-		if err != nil {
-			t.Fatalf("%s: %v", c.name, err)
-		}
-		if got != c.want {
-			t.Fatalf("%s: got %s want %s", c.name, got, c.want)
-		}
-		if gotConn != c.wantConn {
-			t.Fatalf("%s: got connName %q want %q", c.name, gotConn, c.wantConn)
+	run := func(label string, cs []tc) {
+		for _, c := range cs {
+			got, gotConn, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, c.ag, c.user, conn, c.method, c.path)
+			if err != nil {
+				t.Fatalf("%s/%s: %v", label, c.name, err)
+			}
+			if got != c.want {
+				t.Fatalf("%s/%s: got %s want %s", label, c.name, got, c.want)
+			}
+			if gotConn != c.wantConn {
+				t.Fatalf("%s/%s: got connName %q want %q", label, c.name, gotConn, c.wantConn)
+			}
 		}
 	}
 
-	// All actor levels: a workspace-wide Deny on the connection must flow to its
-	// endpoints (the connection-wide cap caps every actor under the tighten model).
-	mustSet(LayerWorkspace, tpTestWorkspaceID, "", SettingDeny)
-	got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, agent, zero, conn, "GET", "/status")
-	if err != nil {
-		t.Fatalf("workspace-deny: %v", err)
+	// Default = deny (the secrets-box setting): only explicitly-granted actors in.
+	run("default-deny", []tc{
+		{"granted endpoint allows", agent, zero, "GET", "/secrets", SettingAllow, ""},
+		{"explicit deny wins", agent, zero, "POST", "/secrets", SettingDeny, conn},
+		{"explicit ask gates", agent, zero, "GET", "/status", SettingAsk, conn},
+		{"ungranted denied", other, zero, "GET", "/secrets", SettingDeny, conn},
+		{"ungranted other endpoint denied", other, zero, "GET", "/status", SettingDeny, conn},
+		{"empty args fail closed", agent, zero, "", "", SettingDeny, conn},
+	})
+
+	// Default = allow: ungranted actors are in unless a per-actor rule restricts.
+	setDefault("allow")
+	run("default-allow", []tc{
+		{"ungranted allowed by default", other, zero, "GET", "/secrets", SettingAllow, ""},
+		{"explicit deny still wins", agent, zero, "POST", "/secrets", SettingDeny, conn},
+		{"explicit ask still gates", agent, zero, "GET", "/status", SettingAsk, conn},
+	})
+
+	// Default = ask: ungranted actors are gated; an explicit Allow still grants.
+	setDefault("ask")
+	run("default-ask", []tc{
+		{"ungranted gated by default", other, zero, "GET", "/secrets", SettingAsk, conn},
+		{"explicit allow still grants", agent, zero, "GET", "/secrets", SettingAllow, ""},
+	})
+
+	// Deny wins across layers regardless of default: a workspace-layer Deny on an
+	// endpoint revokes a user-layer Allow on it.
+	setDefault("deny")
+	mustSet(LayerUser, owner, "POST /status", SettingAllow) // grant via owner layer
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE workspace_connection SET endpoint_permissions = $2 WHERE workspace_id = $1 AND name = $3`,
+		tpTestWorkspaceID, `[{"path":"/secrets","methods":["GET","POST"]},{"path":"/status","methods":["GET","POST"]}]`, conn); err != nil {
+		t.Fatalf("widen endpoints: %v", err)
 	}
-	if got != SettingDeny {
-		t.Fatalf("workspace-deny: got %s want deny (connection-wide cap must flow to endpoints)", got)
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, other, owner, conn, "POST", "/status"); err != nil {
+		t.Fatalf("user-grant: %v", err)
+	} else if got != SettingAllow {
+		t.Fatalf("user-grant: got %s want allow", got)
+	}
+	mustSet(LayerWorkspace, tpTestWorkspaceID, "POST /status", SettingDeny)
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, other, owner, conn, "POST", "/status"); err != nil {
+		t.Fatalf("workspace-deny: %v", err)
+	} else if got != SettingDeny {
+		t.Fatalf("workspace-deny: got %s want deny (deny must win over a grant)", got)
 	}
 }

@@ -11,11 +11,11 @@ package runtime
 //
 // The whole feature sits behind the workspace feature flag
 // `cerebro_api_connection_tools`, default OFF (apiConnectionToolsEnabled). With
-// the flag off no workspace is affected. Per-agent enforcement (hide/deny an
-// endpoint for a given actor via toolpolicy.ConnectionEndpointEffective) lands in
-// PR3 — until then the flag must stay OFF in production, because while ON every
-// agent in the workspace would get every endpoint of every enabled API
-// connection.
+// the flag off no workspace is affected. Per-agent enforcement is OPT-IN
+// (FIR-2166 "C" v2): even with the flag ON, an endpoint is exposed/callable only
+// for an actor with an explicit Allow grant (toolpolicy.ConnectionEndpointEffective
+// is default-deny) — every other and every NEW agent is denied. So turning the
+// flag on does not, by itself, grant any agent access to any API connection.
 
 import (
 	"bytes"

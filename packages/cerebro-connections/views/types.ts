@@ -34,6 +34,13 @@ export interface ScopableArg {
   label?: string;
 }
 
+// DefaultAccess is the per-connection baseline verdict applied to an actor with
+// no explicit per-actor permission row (FIR-2166 "C" v2), chosen on the form:
+//   - "deny"  — off by default; open only to actors explicitly granted Allow.
+//   - "ask"   — every call pauses for human approval unless explicitly allowed.
+//   - "allow" — open to everyone unless an actor is explicitly denied.
+export type DefaultAccess = "allow" | "ask" | "deny";
+
 export interface Connection {
   id: string;
   workspace_id: string;
@@ -45,6 +52,7 @@ export interface Connection {
   auth_config: AuthConfig;
   endpoint_permissions: EndpointPermission[];
   scopable_args: ScopableArg[];
+  default_access: DefaultAccess;
   tools?: Tool[];
   enabled: boolean;
   created_at: string;
@@ -60,6 +68,7 @@ export interface CreateConnectionInput {
   auth_config: AuthConfig;
   endpoint_permissions: EndpointPermission[];
   scopable_args: ScopableArg[];
+  default_access: DefaultAccess;
 }
 
 export interface UpdateConnectionInput {
@@ -70,6 +79,7 @@ export interface UpdateConnectionInput {
   endpoint_permissions: EndpointPermission[];
   scopable_args: ScopableArg[];
   enabled: boolean;
+  default_access: DefaultAccess;
 }
 
 // Option is one selectable value for a scopable arg, from the options endpoint.

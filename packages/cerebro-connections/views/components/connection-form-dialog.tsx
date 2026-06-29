@@ -20,7 +20,7 @@ import {
 import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
 
-import type { Connection, ConnectionType, CreateConnectionInput, UpdateConnectionInput } from "../types";
+import type { Connection, ConnectionType, CreateConnectionInput, DefaultAccess, UpdateConnectionInput } from "../types";
 import { useCreateConnection, useUpdateConnection } from "../queries";
 
 interface Props {
@@ -50,6 +50,7 @@ const EMPTY_FORM = {
   cf_access_id: "",
   cf_access_secret: "",
   enabled: true,
+  default_access: "deny" as DefaultAccess,
 };
 
 export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Props) {
@@ -71,6 +72,7 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
           cf_access_id: existing.auth_config.cf_access_id ?? "",
           cf_access_secret: existing.auth_config.cf_access_secret ?? "",
           enabled: existing.enabled,
+          default_access: existing.default_access,
         }
       : { ...EMPTY_FORM },
   );
@@ -113,6 +115,7 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
           // ones so an edit here never wipes a connection's scoping config.
           scopable_args: existing!.scopable_args ?? [],
           enabled: form.enabled,
+          default_access: form.default_access,
         };
         await update.mutateAsync(input);
         toast.success("Connection updated.");
@@ -126,6 +129,7 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
           auth_config,
           endpoint_permissions: [],
           scopable_args: [],
+          default_access: form.default_access,
         };
         await create.mutateAsync(input);
         toast.success("Connection created.");
@@ -216,6 +220,28 @@ export function ConnectionFormDialog({ wsId, open, onOpenChange, existing }: Pro
                 (*.internal — not reachable from outside)
               </span>
             </Label>
+          </div>
+
+          {/* Default access — the baseline verdict for an actor with no explicit
+              per-actor rule (FIR-2166 "C" v2). */}
+          <div className="space-y-1">
+            <Label htmlFor="conn-default-access">Default access</Label>
+            <Select
+              value={form.default_access}
+              onValueChange={(v) => setForm((f) => ({ ...f, default_access: v as DefaultAccess }))}
+            >
+              <SelectTrigger id="conn-default-access">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="deny">Deny — closed; only explicitly allowed actors</SelectItem>
+                <SelectItem value="ask">Ask — approval required unless explicitly allowed</SelectItem>
+                <SelectItem value="allow">Allow — open unless an actor is explicitly denied</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Baseline for actors with no explicit rule. Per-agent overrides still apply (Deny wins, then Allow, then Ask).
+            </p>
           </div>
 
           {/* Authentication — pick one type */}

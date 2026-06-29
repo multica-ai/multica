@@ -42,7 +42,7 @@ const ScopableArgSchema = z
   })
   .loose();
 
-const ConnectionSchema = z
+export const ConnectionSchema = z
   .object({
     id: z.string(),
     workspace_id: z.string(),
@@ -54,6 +54,9 @@ const ConnectionSchema = z
     auth_config: AuthConfigSchema.default({}),
     endpoint_permissions: z.array(EndpointPermissionSchema).default([]),
     scopable_args: z.array(ScopableArgSchema).default([]),
+    // Unknown/missing default_access downgrades to the safe "deny" rather than
+    // throwing (enum-drift rule); the server is the source of truth.
+    default_access: z.enum(["allow", "ask", "deny"]).catch("deny").default("deny"),
     tools: z
       .array(z.object({ name: z.string(), description: z.string().optional() }).loose())
       .optional(),
@@ -93,6 +96,7 @@ const EMPTY_CONNECTION_STUB = (wsId: string): Connection => ({
   auth_config: EMPTY_AUTH,
   endpoint_permissions: [],
   scopable_args: [],
+  default_access: "deny",
   enabled: true,
   created_at: "",
   updated_at: "",
@@ -268,6 +272,7 @@ export function useToggleConnection(wsId: string) {
         endpoint_permissions: conn.endpoint_permissions,
         scopable_args: conn.scopable_args,
         enabled,
+        default_access: conn.default_access,
       };
       const raw = await api.updateCerebroConnection(wsId, conn.id, input);
       return parseWithFallback(
