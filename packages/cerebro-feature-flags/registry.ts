@@ -1546,3 +1546,124 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
 export function flagsForGroup(group: CerebroFlagGroupKey): CerebroFlagDefinition[] {
   return CEREBRO_FLAGS.filter((flag) => flag.group === group);
 }
+
+/**
+ * A sub-group nests related flags under one parent heading inside a group, so a
+ * cluster of connected flags (e.g. the tool-policy chain) reads as one setting
+ * instead of a flat list of equal cards. Presentation-only — it changes layout,
+ * never what a flag does. FIR-2104.
+ */
+export interface CerebroFlagSubgroup {
+  key: string;
+  label: string;
+  description: string;
+}
+
+/**
+ * Sub-groups per group, in display order. A group with no entry here renders
+ * its flags flat (the previous behaviour). Today only `permissions` is
+ * sub-grouped — it carries the most flags and the most "I didn't know these
+ * were connected" confusion (FIR-2104). Flags in a sub-grouped group that are
+ * not mapped in {@link CEREBRO_FLAG_SUBGROUP_OF} render above the sub-groups.
+ */
+export const CEREBRO_FLAG_SUBGROUPS: Partial<
+  Record<CerebroFlagGroupKey, CerebroFlagSubgroup[]>
+> = {
+  permissions: [
+    {
+      key: "tool_permissions",
+      label: "Tool permissions",
+      description:
+        "The one chain that decides which tools an agent may use, where it's enforced, and how rules are written. These settings build on each other — turn them on together.",
+    },
+    {
+      key: "credentials",
+      label: "Credentials & secrets",
+      description: "How agents and people are granted access to secrets and vaults.",
+    },
+    {
+      key: "approvals",
+      label: "Approvals & sign-off",
+      description: "Who has to approve an action, and the inbox where approvals land.",
+    },
+    {
+      key: "content_access",
+      label: "Folders & content access",
+      description: "Who can see and change notes, documents, and folders.",
+    },
+    {
+      key: "agent_permissions",
+      label: "Agent permissions & visibility",
+      description: "What agents are allowed to start, see, and act as.",
+    },
+    {
+      key: "skills",
+      label: "Skills",
+      description: "Who owns skills and how they change or learn.",
+    },
+  ],
+};
+
+/**
+ * Maps a flag to the sub-group it lives under within its group. A flag with no
+ * entry renders flat (above any sub-groups). Only maps flags whose group has
+ * sub-groups defined in {@link CEREBRO_FLAG_SUBGROUPS}.
+ */
+export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> = {
+  // Tool permissions — the tool-policy chain and everything that feeds it.
+  cerebro_tool_policy: "tool_permissions",
+  cerebro_simple_tool_policy: "tool_permissions",
+  cerebro_runtime_tool_grant_ui: "tool_permissions",
+  cerebro_web_fetch_policy: "tool_permissions",
+  cerebro_platform_capabilities: "tool_permissions",
+  cerebro_approval_gate: "tool_permissions",
+  cerebro_local_tool_policy: "tool_permissions",
+  cerebro_local_tool_policy_enforce: "tool_permissions",
+  cerebro_policy_cel: "tool_permissions",
+  cerebro_credential_chain_grant: "tool_permissions",
+  cerebro_registry_access_hint: "tool_permissions",
+  // Credentials & secrets.
+  cerebro_credentials_per_actor: "credentials",
+  cerebro_agent_vault: "credentials",
+  cerebro_google_identity: "credentials",
+  // Approvals & sign-off.
+  cerebro_approvals: "approvals",
+  cerebro_agent_passes: "approvals",
+  cerebro_private_agent_requests: "approvals",
+  // Folders & content access.
+  cerebro_folder_access: "content_access",
+  cerebro_folder_action_guard: "content_access",
+  cerebro_collections: "content_access",
+  // Agent permissions & visibility.
+  cerebro_agent_surface_visibility: "agent_permissions",
+  cerebro_agent_trigger_permissions: "agent_permissions",
+  cerebro_test_as_user: "agent_permissions",
+  // Skills.
+  cerebro_skill_ownership: "skills",
+  cerebro_skill_learning: "skills",
+};
+
+/** Sub-groups defined for a group, or an empty array when it renders flat. */
+export function subgroupsForGroup(group: CerebroFlagGroupKey): CerebroFlagSubgroup[] {
+  return CEREBRO_FLAG_SUBGROUPS[group] ?? [];
+}
+
+/** Flags in a group that belong to the given sub-group, in display order. */
+export function flagsForSubgroup(
+  group: CerebroFlagGroupKey,
+  subgroupKey: string,
+): CerebroFlagDefinition[] {
+  return flagsForGroup(group).filter(
+    (flag) => CEREBRO_FLAG_SUBGROUP_OF[flag.key] === subgroupKey,
+  );
+}
+
+/**
+ * Flags in a group that are NOT in any sub-group. For a group with no
+ * sub-groups this is every flag (flat layout); for a sub-grouped group these
+ * render above the sub-groups.
+ */
+export function ungroupedFlags(group: CerebroFlagGroupKey): CerebroFlagDefinition[] {
+  if (!CEREBRO_FLAG_SUBGROUPS[group]) return flagsForGroup(group);
+  return flagsForGroup(group).filter((flag) => !CEREBRO_FLAG_SUBGROUP_OF[flag.key]);
+}

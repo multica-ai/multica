@@ -14,13 +14,19 @@ export {
   CEREBRO_FLAG_DEFAULTS,
   CEREBRO_FLAGS,
   CEREBRO_FLAG_GROUPS,
+  CEREBRO_FLAG_SUBGROUPS,
+  CEREBRO_FLAG_SUBGROUP_OF,
   flagsForGroup,
+  subgroupsForGroup,
+  flagsForSubgroup,
+  ungroupedFlags,
 } from "./registry";
 export type {
   CerebroFlagKey,
   CerebroFlagDefinition,
   CerebroFlagGroup,
   CerebroFlagGroupKey,
+  CerebroFlagSubgroup,
 } from "./registry";
 export { CerebroFeatureFlagsTab, FlagRow as CerebroFlagRow } from "./settings-tab";
 export { cerebroFeatureFlagTabs } from "./settings-tabs";
