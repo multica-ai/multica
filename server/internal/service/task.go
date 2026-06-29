@@ -2340,6 +2340,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	if err != nil {
 		return
 	}
+	s.enqueueAgentCommentMentionTasks(ctx, issue, comment)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventCommentCreated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
@@ -2362,6 +2363,105 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		},
 	})
 	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
+}
+
+func (s *TaskService) enqueueAgentCommentMentionTasks(ctx context.Context, issue db.Issue, comment db.Comment) {
+	if comment.Type != "comment" || comment.AuthorType != "agent" {
+		return
+	}
+	authorID := util.UUIDToString(comment.AuthorID)
+	for _, m := range util.ParseMentions(comment.Content) {
+		switch m.Type {
+		case "agent":
+			if m.ID == authorID {
+				continue
+			}
+			agentID, err := util.ParseUUID(m.ID)
+			if err != nil {
+				continue
+			}
+			agent, err := s.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+				ID:          agentID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+				continue
+			}
+			if s.hasPendingTaskForMention(ctx, issue.ID, agentID) {
+				continue
+			}
+			if _, err := s.EnqueueTaskForMention(ctx, issue, agentID, comment.ID); err != nil {
+				slog.Warn("enqueue fallback comment mention task failed",
+					"issue_id", util.UUIDToString(issue.ID),
+					"agent_id", util.UUIDToString(agentID),
+					"comment_id", util.UUIDToString(comment.ID),
+					"error", err,
+				)
+			}
+		case "squad":
+			squadID, err := util.ParseUUID(m.ID)
+			if err != nil {
+				continue
+			}
+			squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+				ID:          squadID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil {
+				continue
+			}
+			leaderID := squad.LeaderID
+			if authorID == util.UUIDToString(leaderID) && s.latestTaskWasLeader(ctx, issue.ID, leaderID) {
+				continue
+			}
+			agent, err := s.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+				ID:          leaderID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+				continue
+			}
+			if s.hasPendingTaskForMention(ctx, issue.ID, leaderID) {
+				continue
+			}
+			if _, err := s.EnqueueTaskForSquadLeader(ctx, issue, leaderID, comment.ID); err != nil {
+				slog.Warn("enqueue fallback comment squad mention task failed",
+					"issue_id", util.UUIDToString(issue.ID),
+					"squad_id", util.UUIDToString(squadID),
+					"leader_id", util.UUIDToString(leaderID),
+					"comment_id", util.UUIDToString(comment.ID),
+					"error", err,
+				)
+			}
+		}
+	}
+}
+
+func (s *TaskService) hasPendingTaskForMention(ctx context.Context, issueID, agentID pgtype.UUID) bool {
+	hasPending, err := s.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	if err != nil {
+		slog.Warn("checking fallback mention pending task failed",
+			"issue_id", util.UUIDToString(issueID),
+			"agent_id", util.UUIDToString(agentID),
+			"error", err,
+		)
+		return true
+	}
+	return hasPending
+}
+
+func (s *TaskService) latestTaskWasLeader(ctx context.Context, issueID, agentID pgtype.UUID) bool {
+	isLeader, err := s.Queries.GetLatestTaskIsLeaderForIssueAndAgent(ctx, db.GetLatestTaskIsLeaderForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	if err != nil {
+		return false
+	}
+	return isLeader
 }
 
 // AutoUnresolveThreadOnReply clears resolved_at on the thread root when a
