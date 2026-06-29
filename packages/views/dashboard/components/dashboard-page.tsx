@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { BarChart3, FolderKanban } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -20,7 +20,12 @@ import {
   dashboardUsageByAgentOptions,
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
+  dashboardUsageByModelOptions,
+  dashboardRuntimeDurationOptions,
+  dashboardModelRunTimeOptions,
+  dashboardUsageByRuntimeOptions,
 } from "@multica/core/dashboard";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { PageHeader } from "../../layout/page-header";
@@ -50,6 +55,8 @@ import {
   aggregateDailyTasks,
   aggregateDailyTime,
   aggregateDailyTokens,
+  aggregateModelRows,
+  aggregateRuntimeRows,
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
   computeDailyTotals,
@@ -57,6 +64,8 @@ import {
   formatDuration,
   mergeAgentDashboardRows,
   type AgentDashboardRow,
+  type ModelDashboardRow,
+  type RuntimeDashboardRow,
 } from "../utils";
 
 // Period selector — mirrors the runtime detail page so users see the same
@@ -98,9 +107,11 @@ const ALL_PROJECTS = "__all__";
 // reference-equality dep check and trips the exhaustive-deps lint rule.
 const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
+const EMPTY_BY_MODEL: import("@multica/core/types").DashboardUsageByModel[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
 const EMPTY_AGENTS: Agent[] = [];
+const EMPTY_RUNTIME_DURATION: import("@multica/core/types").DashboardRuntimeDuration[] = [];
 
 function fmtMoney(n: number): string {
   if (n >= 100) return `$${n.toFixed(0)}`;
@@ -125,6 +136,7 @@ function Segmented<T extends string | number>({
         <button
           key={String(o.value)}
           type="button"
+          aria-pressed={o.value === value}
           onClick={() => onChange(o.value)}
           className={`rounded-sm px-2.5 py-1 text-xs font-medium transition-colors ${
             o.value === value
@@ -174,6 +186,7 @@ export function DashboardPage() {
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const agentsQuery = useQuery(agentListOptions(wsId));
   const agents = agentsQuery.data ?? EMPTY_AGENTS;
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
 
   // Validate the picked project against the current workspace's list. A
   // stale UUID — left over from a project that's been deleted, or from the
@@ -207,11 +220,27 @@ export function DashboardPage() {
   const runTimeDailyQuery = useQuery(
     dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
   );
+  const byModelQuery = useQuery(
+    dashboardUsageByModelOptions(wsId, days, projectId, viewTZ),
+  );
+  const runtimeDurationQuery = useQuery(
+    dashboardRuntimeDurationOptions(wsId, days, projectId, viewTZ),
+  );
+  const modelRunTimeQuery = useQuery(
+    dashboardModelRunTimeOptions(wsId, days, projectId, viewTZ),
+  );
+  const usageByRuntimeQuery = useQuery(
+    dashboardUsageByRuntimeOptions(wsId, days, projectId, viewTZ),
+  );
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
+  const byModelUsage = byModelQuery.data ?? EMPTY_BY_MODEL;
   const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
   const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
+  const runtimeDuration = runtimeDurationQuery.data ?? EMPTY_RUNTIME_DURATION;
+  const modelRunTime = modelRunTimeQuery.data ?? [];
+  const usageByRuntime = usageByRuntimeQuery.data ?? [];
 
   // Daily-aggregation surfaces (cost/tokens/time/tasks KPIs and the Daily
   // trend chart) re-scope to the user-selected `days` even when we
@@ -236,8 +265,12 @@ export function DashboardPage() {
   const isLoading =
     dailyQuery.isLoading ||
     byAgentQuery.isLoading ||
+    byModelQuery.isLoading ||
     runTimeQuery.isLoading ||
-    runTimeDailyQuery.isLoading;
+    runTimeDailyQuery.isLoading ||
+    runtimeDurationQuery.isLoading ||
+    modelRunTimeQuery.isLoading ||
+    usageByRuntimeQuery.isLoading;
 
   // Four independent rollups, but the empty-state is one decision — only
   // show "no data yet" when ALL came back empty so a project with tokens
@@ -246,8 +279,10 @@ export function DashboardPage() {
     !isLoading &&
     dailyUsage.length === 0 &&
     byAgentUsage.length === 0 &&
+    byModelUsage.length === 0 &&
     runTimeRows.length === 0 &&
-    runTimeDailyRows.length === 0;
+    runTimeDailyRows.length === 0 &&
+    runtimeDuration.length === 0;
 
   // Cost / token math — re-derived when usage, days, or pricings change.
   const totals = useMemo(
@@ -404,7 +439,6 @@ export function DashboardPage() {
                   hint={t(($) => $.kpi.tasks_hint, {
                     failed: runTimeTotals.failedCount,
                   })}
-                  accent={runTimeTotals.failedCount > 0 ? "default" : "default"}
                 />
               </div>
 
@@ -426,11 +460,16 @@ export function DashboardPage() {
                 lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
               />
 
-              {/* Per-agent leaderboard — user picks the ranking metric;
-                  the progress bar and column emphasis follow the metric. */}
+              {/* Leaderboard — 3-way scope (Agent / Model / Runtime).
+                  User picks both the scope and the ranking metric. */}
               <Leaderboard
-                rows={visibleAgentRows}
+                agentRows={visibleAgentRows}
                 agents={agents}
+                byModelUsage={byModelUsage}
+                modelRunTime={modelRunTime}
+                runtimeDuration={runtimeDuration}
+                usageByRuntime={usageByRuntime}
+                runtimes={runtimes}
                 lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
               />
             </>
@@ -625,29 +664,82 @@ function TrendBlock({
   );
 }
 
+type LeaderboardScope = "agent" | "model" | "runtime";
+
 // Which metric ranks the leaderboard. Drives row order, progress bar
 // width, and which column header is emphasised — keeping the three in
 // lockstep so the user always sees what the ranking actually measures.
+// All four toggles remain visible in every scope; unavailable metrics
+// display "—" and sort at zero (natural zeroing, not hidden controls).
 type LeaderboardSort = "tokens" | "cost" | "time" | "tasks";
 
-const SORT_METRIC: Record<LeaderboardSort, (r: AgentDashboardRow) => number> = {
-  tokens: (r) => r.tokens,
-  cost: (r) => r.cost,
-  time: (r) => r.seconds,
-  tasks: (r) => r.taskCount,
+// Unified sort-metric extractor across all three scopes.
+const SCOPE_SORT_METRIC: Record<
+  LeaderboardScope,
+  Record<LeaderboardSort, (r: AgentDashboardRow | ModelDashboardRow | RuntimeDashboardRow) => number>
+> = {
+  agent: {
+    tokens: (r) => (r as AgentDashboardRow).tokens,
+    cost: (r) => (r as AgentDashboardRow).cost,
+    time: (r) => (r as AgentDashboardRow).seconds,
+    tasks: (r) => (r as AgentDashboardRow).taskCount,
+  },
+  model: {
+    tokens: (r) => (r as ModelDashboardRow).tokens,
+    cost: (r) => (r as ModelDashboardRow).cost,
+    time: (r) => (r as ModelDashboardRow).seconds,
+    tasks: (r) => (r as ModelDashboardRow).taskCount,
+  },
+  runtime: {
+    tokens: (r) => (r as RuntimeDashboardRow).tokens,
+    cost: (r) => (r as RuntimeDashboardRow).cost,
+    time: (r) => (r as RuntimeDashboardRow).seconds,
+    tasks: (r) => (r as RuntimeDashboardRow).taskCount,
+  },
 };
 
 function Leaderboard({
-  rows,
+  agentRows,
   agents,
+  byModelUsage,
+  modelRunTime,
+  runtimeDuration,
+  usageByRuntime,
+  runtimes,
   lessThanMinuteLabel,
 }: {
-  rows: AgentDashboardRow[];
+  agentRows: AgentDashboardRow[];
   agents: { id: string; name: string }[];
+  byModelUsage: import("@multica/core/types").DashboardUsageByModel[];
+  modelRunTime: import("@multica/core/types").DashboardModelRunTime[];
+  runtimeDuration: import("@multica/core/types").DashboardRuntimeDuration[];
+  usageByRuntime: import("@multica/core/types").DashboardUsageByRuntime[];
+  runtimes: { id: string; name: string }[];
   lessThanMinuteLabel: string;
 }) {
   const { t } = useT("usage");
+  const [scope, setScope] = useState<LeaderboardScope>("agent");
   const [sortBy, setSortBy] = useState<LeaderboardSort>("tokens");
+
+  const modelRows = useMemo(
+    () => aggregateModelRows(byModelUsage, modelRunTime),
+    [byModelUsage, modelRunTime],
+  );
+  const runtimeRows = useMemo(
+    () => aggregateRuntimeRows(runtimeDuration, usageByRuntime),
+    [runtimeDuration, usageByRuntime],
+  );
+
+  const activeRows: (AgentDashboardRow | ModelDashboardRow | RuntimeDashboardRow)[] = useMemo(() => {
+    const metric = SCOPE_SORT_METRIC[scope][sortBy];
+    const base = scope === "agent" ? agentRows : scope === "model" ? modelRows : runtimeRows;
+    return [...base].sort((a, b) => metric(b) - metric(a));
+  }, [scope, sortBy, agentRows, modelRows, runtimeRows]);
+
+  const maxValue = useMemo(() => {
+    const metric = SCOPE_SORT_METRIC[scope][sortBy];
+    return activeRows.reduce((m, r) => Math.max(m, metric(r)), 0);
+  }, [activeRows, scope, sortBy]);
 
   const sortOptions = useMemo(
     () => [
@@ -659,43 +751,53 @@ function Leaderboard({
     [t],
   );
 
-  // Re-rank when the metric changes; keep the merged input untouched so
-  // upstream `mergeAgentDashboardRows`'s tiebreaker (run time desc) still
-  // applies inside an equal-bucket.
-  const sortedRows = useMemo(() => {
-    const metric = SORT_METRIC[sortBy];
-    return rows.toSorted((a, b) => metric(b) - metric(a));
-  }, [rows, sortBy]);
+  const scopeOptions = useMemo(
+    () => [
+      { value: "agent" as const, label: t(($) => $.leaderboard.scope_agent) },
+      { value: "model" as const, label: t(($) => $.leaderboard.scope_model) },
+      { value: "runtime" as const, label: t(($) => $.leaderboard.scope_runtime) },
+    ],
+    [t],
+  );
 
-  const maxValue = useMemo(() => {
-    const metric = SORT_METRIC[sortBy];
-    return sortedRows.reduce((m, r) => Math.max(m, metric(r)), 0);
-  }, [sortedRows, sortBy]);
+  const caption =
+    scope === "agent"
+      ? t(($) => $.leaderboard.caption, { count: agentRows.length })
+      : scope === "model"
+        ? t(($) => $.leaderboard.caption_models, { count: modelRows.length })
+        : t(($) => $.leaderboard.caption_runtimes, { count: runtimeRows.length });
 
-  // Active column gets foreground text; others stay muted. Helps the user
-  // see "this is what the bar is measuring" at a glance.
+  const firstColHeader =
+    scope === "agent"
+      ? t(($) => $.leaderboard.header_agent)
+      : scope === "model"
+        ? t(($) => $.leaderboard.header_model)
+        : t(($) => $.leaderboard.header_runtime);
+
+  // Active column gets foreground text; others stay muted.
   const colClass = (key: LeaderboardSort) =>
     `text-right ${sortBy === key ? "text-foreground" : "text-muted-foreground"}`;
 
   return (
     <div className="rounded-lg border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 pt-4 pb-3">
-        <h4 className="text-sm font-semibold">{t(($) => $.leaderboard.title)}</h4>
         <div className="flex items-center gap-3">
+          <h4 className="text-sm font-semibold">{t(($) => $.leaderboard.title)}</h4>
+          <Segmented value={scope} onChange={setScope} options={scopeOptions} />
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
           <Segmented value={sortBy} onChange={setSortBy} options={sortOptions} />
-          <span className="text-xs text-muted-foreground">
-            {t(($) => $.leaderboard.caption, { count: rows.length })}
-          </span>
+          <span className="text-xs text-muted-foreground">{caption}</span>
         </div>
       </div>
-      {sortedRows.length === 0 ? (
+      {activeRows.length === 0 ? (
         <p className="px-4 py-8 text-center text-xs text-muted-foreground">
           {t(($) => $.leaderboard.no_data)}
         </p>
       ) : (
         <>
           <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
-            <span>{t(($) => $.leaderboard.header_agent)}</span>
+            <span>{firstColHeader}</span>
             <span />
             <span className={colClass("tokens")}>{t(($) => $.leaderboard.header_tokens)}</span>
             <span className={colClass("cost")}>{t(($) => $.leaderboard.header_cost)}</span>
@@ -703,58 +805,160 @@ function Leaderboard({
             <span className={colClass("tasks")}>{t(($) => $.leaderboard.header_tasks)}</span>
           </div>
           <div className="divide-y">
-            {sortedRows.map((row) => {
-              const agent = agents.find((a) => a.id === row.agentId);
-              const value = SORT_METRIC[sortBy](row);
+            {activeRows.map((row) => {
+              const metric = SCOPE_SORT_METRIC[scope][sortBy];
+              const value = metric(row);
               const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
+
+              if (scope === "agent") {
+                const r = row as AgentDashboardRow;
+                const agent = agents.find((a) => a.id === r.agentId);
+                return (
+                  <AgentLeaderboardRow
+                    key={r.agentId}
+                    row={r}
+                    agentName={agent?.name ?? r.agentId}
+                    pct={pct}
+                    sortBy={sortBy}
+                    lessThanMinuteLabel={lessThanMinuteLabel}
+                  />
+                );
+              }
+
+              if (scope === "model") {
+                const r = row as ModelDashboardRow;
+                return (
+                  <ModelLeaderboardRow
+                    key={r.model}
+                    row={r}
+                    pct={pct}
+                    sortBy={sortBy}
+                    lessThanMinuteLabel={lessThanMinuteLabel}
+                  />
+                );
+              }
+
+              const r = row as RuntimeDashboardRow;
+              const runtime = runtimes.find((rt) => rt.id === r.runtimeId);
               return (
-                <div
-                  key={row.agentId}
-                  className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <ActorAvatar
-                      actorType="agent"
-                      actorId={row.agentId}
-                      size={22}
-                      enableHoverCard
-                    />
-                    <span className="cursor-pointer truncate text-sm font-medium">
-                      {agent?.name ?? row.agentId}
-                    </span>
-                  </div>
-                  <div className="relative h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-chart-1 transition-[width] duration-300 ease-out"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <div
-                    className={`text-right text-xs tabular-nums ${sortBy === "tokens" ? "font-medium text-foreground" : "text-muted-foreground"}`}
-                  >
-                    {formatTokens(row.tokens)}
-                  </div>
-                  <div
-                    className={`text-right tabular-nums ${sortBy === "cost" ? "text-sm font-medium" : "text-xs text-muted-foreground"}`}
-                  >
-                    ${row.cost.toFixed(2)}
-                  </div>
-                  <div
-                    className={`text-right text-xs tabular-nums ${sortBy === "time" ? "font-medium text-foreground" : "text-muted-foreground"}`}
-                  >
-                    {formatDuration(row.seconds, lessThanMinuteLabel)}
-                  </div>
-                  <div
-                    className={`text-right text-xs tabular-nums ${sortBy === "tasks" ? "font-medium text-foreground" : "text-muted-foreground"}`}
-                  >
-                    {row.taskCount}
-                  </div>
-                </div>
+                <RuntimeLeaderboardRow
+                  key={r.runtimeId}
+                  row={r}
+                  runtimeName={runtime?.name ?? r.runtimeId}
+                  pct={pct}
+                  sortBy={sortBy}
+                  lessThanMinuteLabel={lessThanMinuteLabel}
+                />
               );
             })}
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function AgentLeaderboardRow({
+  row,
+  agentName,
+  pct,
+  sortBy,
+  lessThanMinuteLabel,
+}: {
+  row: AgentDashboardRow;
+  agentName: string;
+  pct: number;
+  sortBy: LeaderboardSort;
+  lessThanMinuteLabel: string;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2">
+      <div className="flex min-w-0 items-center gap-2">
+        <ActorAvatar actorType="agent" actorId={row.agentId} size={22} enableHoverCard />
+        <span className="truncate text-sm font-medium">{agentName}</span>
+      </div>
+      <ProgressBar pct={pct} />
+      <MetricCell active={sortBy === "tokens"}>{formatTokens(row.tokens)}</MetricCell>
+      <MetricCell active={sortBy === "cost"} size="sm">${row.cost.toFixed(2)}</MetricCell>
+      <MetricCell active={sortBy === "time"}>{formatDuration(row.seconds, lessThanMinuteLabel)}</MetricCell>
+      <MetricCell active={sortBy === "tasks"}>{row.taskCount}</MetricCell>
+    </div>
+  );
+}
+
+function ModelLeaderboardRow({
+  row,
+  pct,
+  sortBy,
+  lessThanMinuteLabel,
+}: {
+  row: ModelDashboardRow;
+  pct: number;
+  sortBy: LeaderboardSort;
+  lessThanMinuteLabel: string;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2">
+      <span className="truncate text-sm font-medium">{row.model}</span>
+      <ProgressBar pct={pct} />
+      <MetricCell active={sortBy === "tokens"}>{formatTokens(row.tokens)}</MetricCell>
+      <MetricCell active={sortBy === "cost"} size="sm">${row.cost.toFixed(2)}</MetricCell>
+      <MetricCell active={sortBy === "time"}>{formatDuration(row.seconds, lessThanMinuteLabel)}</MetricCell>
+      <MetricCell active={sortBy === "tasks"}>{row.taskCount}</MetricCell>
+    </div>
+  );
+}
+
+function RuntimeLeaderboardRow({
+  row,
+  runtimeName,
+  pct,
+  sortBy,
+  lessThanMinuteLabel,
+}: {
+  row: RuntimeDashboardRow;
+  runtimeName: string;
+  pct: number;
+  sortBy: LeaderboardSort;
+  lessThanMinuteLabel: string;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2">
+      <span className="truncate text-sm font-medium">{runtimeName}</span>
+      <ProgressBar pct={pct} />
+      <MetricCell active={sortBy === "tokens"}>{row.tokens > 0 ? formatTokens(row.tokens) : "—"}</MetricCell>
+      <MetricCell active={sortBy === "cost"} size="sm">{row.cost > 0 ? `$${row.cost.toFixed(2)}` : "—"}</MetricCell>
+      <MetricCell active={sortBy === "time"}>{formatDuration(row.seconds, lessThanMinuteLabel)}</MetricCell>
+      <MetricCell active={sortBy === "tasks"}>{row.taskCount}</MetricCell>
+    </div>
+  );
+}
+
+function ProgressBar({ pct }: { pct: number }) {
+  return (
+    <div className="relative h-2 overflow-hidden rounded-full bg-muted">
+      <div
+        className="h-full rounded-full bg-chart-1 transition-[width] duration-300 ease-out"
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+function MetricCell({
+  active,
+  size = "xs",
+  children,
+}: {
+  active: boolean;
+  size?: "xs" | "sm";
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={`text-right tabular-nums ${size === "sm" ? "text-sm" : "text-xs"} ${active ? "font-medium text-foreground" : "text-muted-foreground"}`}
+    >
+      {children}
     </div>
   );
 }

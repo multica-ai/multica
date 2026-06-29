@@ -228,6 +228,71 @@ func (q *Queries) ListDashboardRunTimeDaily(ctx context.Context, arg ListDashboa
 	return items, nil
 }
 
+const listDashboardRuntimeDuration = `-- name: ListDashboardRuntimeDuration :many
+SELECT
+    atq.runtime_id,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(*)::int AS task_count,
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY atq.runtime_id
+ORDER BY total_seconds DESC
+`
+
+type ListDashboardRuntimeDurationParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardRuntimeDurationRow struct {
+	RuntimeID    pgtype.UUID `json:"runtime_id"`
+	TotalSeconds int64       `json:"total_seconds"`
+	TaskCount    int32       `json:"task_count"`
+	FailedCount  int32       `json:"failed_count"`
+}
+
+// Per-runtime total task run time and task count for the workspace.
+// Mirrors ListDashboardAgentRunTime but groups on runtime_id. Same
+// terminal-task filter (completed or failed with both timestamps) and
+// @since treatment (viewer's local start-of-day, passed through without
+// re-truncation).
+func (q *Queries) ListDashboardRuntimeDuration(ctx context.Context, arg ListDashboardRuntimeDurationParams) ([]ListDashboardRuntimeDurationRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardRuntimeDuration, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardRuntimeDurationRow{}
+	for rows.Next() {
+		var i ListDashboardRuntimeDurationRow
+		if err := rows.Scan(
+			&i.RuntimeID,
+			&i.TotalSeconds,
+			&i.TaskCount,
+			&i.FailedCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardUsageByAgent = `-- name: ListDashboardUsageByAgent :many
 SELECT
     agent_id,
@@ -289,6 +354,66 @@ func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboa
 		if err := rows.Scan(
 			&i.AgentID,
 			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.TaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardUsageByModel = `-- name: ListDashboardUsageByModel :many
+SELECT
+    model,
+    SUM(input_tokens)::bigint        AS input_tokens,
+    SUM(output_tokens)::bigint       AS output_tokens,
+    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(task_count)::int             AS task_count
+FROM task_usage_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= $2::timestamptz
+  AND ($3::uuid IS NULL OR project_id = $3)
+GROUP BY model
+ORDER BY SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) DESC
+`
+
+type ListDashboardUsageByModelParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardUsageByModelRow struct {
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	TaskCount        int32  `json:"task_count"`
+}
+
+// Per-model token aggregates from task_usage_hourly. Groups workspace
+// usage by model for the dashboard's Model scope. No agent dimension.
+func (q *Queries) ListDashboardUsageByModel(ctx context.Context, arg ListDashboardUsageByModelParams) ([]ListDashboardUsageByModelRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardUsageByModel, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardUsageByModelRow{}
+	for rows.Next() {
+		var i ListDashboardUsageByModelRow
+		if err := rows.Scan(
 			&i.Model,
 			&i.InputTokens,
 			&i.OutputTokens,
@@ -430,4 +555,145 @@ func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams
 		arg.CacheWriteTokens,
 	)
 	return err
+}
+
+const listDashboardModelRunTime = `-- name: ListDashboardModelRunTime :many
+SELECT
+    tu.model,
+    COALESCE(
+        SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))::bigint,
+        0
+    )::bigint AS total_seconds,
+    COUNT(DISTINCT atq.id)::int AS task_count,
+    COUNT(DISTINCT atq.id) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+FROM (
+    SELECT DISTINCT task_id, model FROM task_usage
+) tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY tu.model
+ORDER BY total_seconds DESC
+`
+
+type ListDashboardModelRunTimeParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardModelRunTimeRow struct {
+	Model        string `json:"model"`
+	TotalSeconds int64  `json:"total_seconds"`
+	TaskCount    int32  `json:"task_count"`
+	FailedCount  int32  `json:"failed_count"`
+}
+
+// Per-model task run time and task count. Joins task_usage with
+// agent_task_queue on task_id. A task that uses multiple models
+// contributes its full duration to each model. A task that runs the
+// same model via multiple providers has its task_usage rows collapsed
+// to one (task_id, model) pair before joining, so its duration is
+// counted once per model — not duplicated per provider.
+func (q *Queries) ListDashboardModelRunTime(ctx context.Context, arg ListDashboardModelRunTimeParams) ([]ListDashboardModelRunTimeRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardModelRunTime, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardModelRunTimeRow{}
+	for rows.Next() {
+		var i ListDashboardModelRunTimeRow
+		if err := rows.Scan(
+			&i.Model,
+			&i.TotalSeconds,
+			&i.TaskCount,
+			&i.FailedCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardUsageByRuntime = `-- name: ListDashboardUsageByRuntime :many
+SELECT
+    atq.runtime_id,
+    tu.model,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens
+FROM agent_task_queue atq
+JOIN task_usage tu ON tu.task_id = atq.id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.started_at IS NOT NULL
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY atq.runtime_id, tu.model
+ORDER BY atq.runtime_id, tu.model
+`
+
+type ListDashboardUsageByRuntimeParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardUsageByRuntimeRow struct {
+	RuntimeID        pgtype.UUID `json:"runtime_id"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+}
+
+// Per-(runtime_id, model) token aggregates. Joins agent_task_queue with
+// task_usage on task_id. Model dimension preserved for client-side cost math.
+//
+// Token basis differs from the hourly-rollup scopes: this query reads the
+// live `task_usage` table joined to terminal agent tasks only, while
+// Agent/Model scopes roll up `task_usage_hourly` (no terminal filter,
+// bucket-windowed). Cross-scope totals will not reconcile; accepted
+// because `task_usage_hourly` has no `runtime_id` key.
+func (q *Queries) ListDashboardUsageByRuntime(ctx context.Context, arg ListDashboardUsageByRuntimeParams) ([]ListDashboardUsageByRuntimeRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardUsageByRuntime, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardUsageByRuntimeRow{}
+	for rows.Next() {
+		var i ListDashboardUsageByRuntimeRow
+		if err := rows.Scan(
+			&i.RuntimeID,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

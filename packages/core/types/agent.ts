@@ -630,6 +630,49 @@ export interface DashboardRunTimeDaily {
   failed_count: number;
 }
 
+// Per-model token totals for the workspace dashboard's Model scope.
+// No agent dimension — the client computes cost from its per-model pricing
+// table; model is the key.
+export interface DashboardUsageByModel {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
+}
+
+// Per-runtime total terminal-task run-time + counts. Powers the Runtime
+// scope on the workspace dashboard leaderboard.
+export interface DashboardRuntimeDuration {
+  runtime_id: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
+}
+
+// Per-model task run time and counts. Derived by joining task_usage with
+// agent_task_queue on task_id. Complements DashboardUsageByModel (tokens)
+// so the Model scope can show all four metrics.
+export interface DashboardModelRunTime {
+  model: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
+}
+
+// Per-(runtime_id, model) token aggregates. Model dimension preserved so
+// the client can compute per-model cost and sum per-runtime, mirroring
+// how DashboardUsageByAgent works for the agent scope.
+export interface DashboardUsageByRuntime {
+  runtime_id: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
 export type RuntimeUpdateStatus =
   | "pending"
   | "running"
