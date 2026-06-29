@@ -290,7 +290,7 @@ func TestChildDone_SquadPrivateLeader_PlainMemberNoEnqueue(t *testing.T) {
 }
 
 // TestComment_SquadPrivateLeader_AgentActorAllowed verifies that an agent
-// actor CAN trigger the private leader via comment on a squad-assigned issue.
+// actor CAN explicitly trigger the private leader via a squad mention.
 func TestComment_SquadPrivateLeader_AgentActorAllowed(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -340,10 +340,10 @@ func TestComment_SquadPrivateLeader_AgentActorAllowed(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 	})
 
-	// Agent posts a comment.
+	// Agent posts a comment with an explicit squad mention.
 	w := httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
-		"content": "agent reporting in",
+		"content": "[@Squad](mention://squad/" + squadID + ") agent reporting in",
 	})
 	r.Header.Set("X-Agent-ID", otherAgentID)
 	r.Header.Set("X-Task-ID", taskID)
@@ -353,7 +353,8 @@ func TestComment_SquadPrivateLeader_AgentActorAllowed(t *testing.T) {
 		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// The private leader SHOULD have a queued task — agents bypass private gate.
+	// The private leader SHOULD have a queued task — agents bypass private gate
+	// for explicit routing.
 	var count int
 	if err := testPool.QueryRow(ctx,
 		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
@@ -362,6 +363,6 @@ func TestComment_SquadPrivateLeader_AgentActorAllowed(t *testing.T) {
 		t.Fatalf("count tasks: %v", err)
 	}
 	if count == 0 {
-		t.Fatalf("private leader got 0 queued tasks from agent actor comment; want ≥1 (agents bypass private gate)")
+		t.Fatalf("private leader got 0 queued tasks from agent actor squad mention; want >=1 (agents bypass private gate)")
 	}
 }

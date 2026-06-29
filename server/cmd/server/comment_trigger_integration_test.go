@@ -304,7 +304,7 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		}
 	})
 
-	t.Run("reply to member thread without mentions suppresses trigger", func(t *testing.T) {
+	t.Run("reply to member thread without mentions falls back to assignee", func(t *testing.T) {
 		clearTasks(t, issueID)
 		// Member starts a thread.
 		threadID := postComment(t, issueID, "Hey team, what do you think?", nil)
@@ -312,8 +312,8 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		clearTasks(t, issueID)
 		// Another member reply (same user in this test, but the key is parent is by member).
 		postComment(t, issueID, "I agree with you", strPtr(threadID))
-		if n := countPendingTasks(t, issueID); n != 0 {
-			t.Errorf("expected 0 pending tasks (member-to-member reply), got %d", n)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (assignee fallback), got %d", n)
 		}
 	})
 
@@ -459,10 +459,10 @@ func TestCommentTriggerOnMentionNoStatusGate(t *testing.T) {
 	}
 }
 
-// TestCommentTriggerThreadInheritedMention verifies that when a top-level
-// comment @mentions an agent (not the assignee), replies in that thread
-// also trigger the mentioned agent — even without explicitly re-mentioning it.
-func TestCommentTriggerThreadInheritedMention(t *testing.T) {
+// TestCommentTriggerThreadExplicitMentions verifies that a top-level @mention
+// is a one-shot handoff: plain replies do not inherit it, while explicit
+// mentions in the reply still trigger normally.
+func TestCommentTriggerThreadExplicitMentions(t *testing.T) {
 	agentID := getAgentID(t)
 
 	// Create an issue NOT assigned to the agent, so on_comment won't fire.
@@ -473,7 +473,7 @@ func TestCommentTriggerThreadInheritedMention(t *testing.T) {
 		resp.Body.Close()
 	})
 
-	t.Run("reply in thread inherits parent mention", func(t *testing.T) {
+	t.Run("plain reply in thread does not inherit parent mention", func(t *testing.T) {
 		clearTasks(t, issueID)
 		// Top-level comment @mentions the agent.
 		content := fmt.Sprintf("[@Agent](mention://agent/%s) can you review this?", agentID)
@@ -485,8 +485,8 @@ func TestCommentTriggerThreadInheritedMention(t *testing.T) {
 		clearTasks(t, issueID)
 		// Reply in the thread WITHOUT mentioning the agent.
 		postComment(t, issueID, "Here is more context for you", strPtr(threadID))
-		if n := countPendingTasks(t, issueID); n != 1 {
-			t.Errorf("expected 1 pending task from thread-inherited mention, got %d", n)
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks from plain reply without inherited mention, got %d", n)
 		}
 	})
 

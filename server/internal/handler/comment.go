@@ -1001,12 +1001,41 @@ const (
 	commentTriggerSourceIssueAssignee      commentAgentTriggerSource = "issue_assignee"
 	commentTriggerSourceMentionAgent       commentAgentTriggerSource = "mention_agent"
 	commentTriggerSourceMentionSquadLeader commentAgentTriggerSource = "mention_squad_leader"
+	commentTriggerSourceThreadParent       commentAgentTriggerSource = "thread_parent"
 )
 
+const defaultCommentRoutingEscalationDelay = 5 * time.Minute
+
+func (h *Handler) commentRoutingEscalationDelay(ctx context.Context, workspaceID pgtype.UUID) time.Duration {
+	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
+	if err != nil || len(ws.Settings) == 0 {
+		return defaultCommentRoutingEscalationDelay
+	}
+
+	var settings struct {
+		CommentRouting struct {
+			EscalationSeconds *int `json:"escalation_seconds"`
+		} `json:"comment_routing"`
+	}
+	if err := json.Unmarshal(ws.Settings, &settings); err != nil || settings.CommentRouting.EscalationSeconds == nil {
+		return defaultCommentRoutingEscalationDelay
+	}
+	if *settings.CommentRouting.EscalationSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(*settings.CommentRouting.EscalationSeconds) * time.Second
+}
+
+type commentEscalationFallback struct {
+	Agent db.Agent
+	Squad *db.Squad
+}
+
 type commentAgentTrigger struct {
-	Agent  db.Agent
-	Source commentAgentTriggerSource
-	Squad  *db.Squad
+	Agent              db.Agent
+	Source             commentAgentTriggerSource
+	Squad              *db.Squad
+	EscalationFallback *commentEscalationFallback
 }
 
 type commentTriggerComputeOptions struct {
@@ -1021,6 +1050,8 @@ func commentAgentTriggerReason(trigger commentAgentTrigger) string {
 		return "This agent was mentioned in the comment."
 	case commentTriggerSourceMentionSquadLeader:
 		return "A mentioned squad will trigger its leader."
+	case commentTriggerSourceThreadParent:
+		return "This reply will trigger the parent comment's author."
 	default:
 		return "This comment will trigger this agent."
 	}
@@ -1264,6 +1295,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// the agent task path (TaskService.createAgentComment) — both reply paths
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(issue.WorkspaceID), authorType, authorID)
+	if authorType == "agent" {
+		h.TaskService.CancelDeferredEscalationsForIssueAgent(r.Context(), issue.ID, comment.AuthorID)
+	}
 
 	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, suppressAgentIDs)
 
@@ -1321,6 +1355,15 @@ func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppre
 }
 
 func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, triggers []commentAgentTrigger) {
+	var escalationDelay time.Duration
+	escalationDelayLoaded := false
+	getEscalationDelay := func() time.Duration {
+		if !escalationDelayLoaded {
+			escalationDelay = h.commentRoutingEscalationDelay(ctx, issue.WorkspaceID)
+			escalationDelayLoaded = true
+		}
+		return escalationDelay
+	}
 	for _, trigger := range triggers {
 		switch trigger.Source {
 		case commentTriggerSourceIssueAssignee:
@@ -1351,6 +1394,29 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 					"agent_id", uuidToString(trigger.Agent.ID),
 					"error", err)
 			}
+		case commentTriggerSourceThreadParent:
+			task, err := h.TaskService.EnqueueTaskForThreadParent(ctx, issue, trigger.Agent.ID, triggerCommentID)
+			if err != nil {
+				slog.Warn("enqueue thread-parent agent task failed",
+					"issue_id", uuidToString(issue.ID),
+					"agent_id", uuidToString(trigger.Agent.ID),
+					"error", err)
+				continue
+			}
+			if trigger.EscalationFallback == nil || getEscalationDelay() <= 0 {
+				continue
+			}
+			var squadID pgtype.UUID
+			if trigger.EscalationFallback.Squad != nil {
+				squadID = trigger.EscalationFallback.Squad.ID
+			}
+			if _, err := h.TaskService.EnqueueDeferredAssigneeFallback(ctx, issue, trigger.EscalationFallback.Agent.ID, squadID, task.ID, triggerCommentID, time.Now().Add(escalationDelay)); err != nil {
+				slog.Warn("enqueue deferred assignee fallback failed",
+					"issue_id", uuidToString(issue.ID),
+					"primary_agent_id", uuidToString(trigger.Agent.ID),
+					"fallback_agent_id", uuidToString(trigger.EscalationFallback.Agent.ID),
+					"error", err)
+			}
 		}
 	}
 }
@@ -1360,43 +1426,107 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		return nil
 	}
 
-	seen := make(map[string]struct{})
-	triggers := make([]commentAgentTrigger, 0, 2)
-	add := func(trigger commentAgentTrigger) {
-		id := uuidToString(trigger.Agent.ID)
-		if _, ok := seen[id]; ok {
-			return
+	mentions := util.ParseMentions(content)
+	if util.HasMentionAll(mentions) {
+		return nil
+	}
+
+	if hasAgentOrSquadMention(mentions) {
+		return h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
+	}
+	if hasMemberMention(mentions) {
+		return nil
+	}
+
+	if actorType != "member" {
+		return nil
+	}
+
+	if parentComment != nil && parentComment.AuthorType == "agent" {
+		trigger, ok := h.routeReplyToParentAuthor(ctx, issue, parentComment, actorType, actorID, opts)
+		if !ok {
+			return nil
 		}
-		seen[id] = struct{}{}
-		triggers = append(triggers, trigger)
-	}
-
-	if actorType == "member" && h.shouldEnqueueOnComment(ctx, issue, actorType, actorID, opts) &&
-		!h.commentMentionsOthersButNotAssignee(content, issue) &&
-		!h.isReplyToMemberThread(ctx, parentComment, content, issue) {
-		if agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
-			ID:          issue.AssigneeID,
-			WorkspaceID: issue.WorkspaceID,
-		}); err == nil {
-			add(commentAgentTrigger{Agent: agent, Source: commentTriggerSourceIssueAssignee})
+		if fallback, ok := h.routeAssigneeFallback(ctx, issue, actorType, actorID, opts); ok &&
+			uuidToString(fallback.Agent.ID) != uuidToString(trigger.Agent.ID) {
+			trigger.EscalationFallback = &commentEscalationFallback{
+				Agent: fallback.Agent,
+				Squad: fallback.Squad,
+			}
 		}
+		return []commentAgentTrigger{trigger}
 	}
 
-	if trigger, ok := h.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, parentComment, actorType, actorID, opts); ok {
-		add(trigger)
+	if trigger, ok := h.routeAssigneeFallback(ctx, issue, actorType, actorID, opts); ok {
+		return []commentAgentTrigger{trigger}
 	}
-
-	for _, trigger := range h.computeMentionedAgentCommentTriggers(ctx, issue, content, parentComment, actorType, actorID, opts) {
-		add(trigger)
-	}
-
-	return triggers
+	return nil
 }
 
-func (h *Handler) computeAssignedSquadLeaderCommentTrigger(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
+func hasAgentOrSquadMention(mentions []util.Mention) bool {
+	for _, m := range mentions {
+		if m.Type == "agent" || m.Type == "squad" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMemberMention(mentions []util.Mention) bool {
+	for _, m := range mentions {
+		if m.Type == "member" {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, parent *db.Comment, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
+	if parent == nil || parent.AuthorType != "agent" || !parent.AuthorID.Valid {
 		return commentAgentTrigger{}, false
 	}
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          parent.AuthorID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		return commentAgentTrigger{}, false
+	}
+	if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, uuidToString(issue.WorkspaceID)) {
+		return commentAgentTrigger{}, false
+	}
+	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, parent.AuthorID, opts)
+	if err != nil || hasPending {
+		return commentAgentTrigger{}, false
+	}
+	return commentAgentTrigger{Agent: agent, Source: commentTriggerSourceThreadParent}, true
+}
+
+func (h *Handler) routeAssigneeFallback(ctx context.Context, issue db.Issue, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
+	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
+		return commentAgentTrigger{}, false
+	}
+	switch issue.AssigneeType.String {
+	case "agent":
+		if !h.shouldEnqueueAssigneeFallback(ctx, issue, authorType, authorID, opts) {
+			return commentAgentTrigger{}, false
+		}
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          issue.AssigneeID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return commentAgentTrigger{}, false
+		}
+		return commentAgentTrigger{Agent: agent, Source: commentTriggerSourceIssueAssignee}, true
+	case "squad":
+		return h.routeAssignedSquadLeaderFallback(ctx, issue, authorType, authorID, opts)
+	default:
+		return commentAgentTrigger{}, false
+	}
+}
+
+func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db.Issue, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
@@ -1406,17 +1536,6 @@ func (h *Handler) computeAssignedSquadLeaderCommentTrigger(ctx context.Context, 
 	}
 	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
 		h.lastTaskWasLeader(ctx, issue.ID, squad.LeaderID) {
-		return commentAgentTrigger{}, false
-	}
-	// Suppress the leader trigger when a member comment routes work to
-	// someone — either by an explicit @mention in this comment, or via the
-	// parent-inheritance path that the @mention trigger uses (a plain reply
-	// to a member-authored parent inherits the parent's mentions; see
-	// shouldInheritParentMentions). Without the inheritance check, a reply
-	// like "hello" to a parent that @mentions AgentX double-triggers: the
-	// squad leader wakes via this branch AND AgentX wakes via the mention
-	// branch's inheritance — see MUL-3744.
-	if authorType == "member" && commentRoutesViaMention(content, parentComment, authorType) {
 		return commentAgentTrigger{}, false
 	}
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
@@ -1450,132 +1569,8 @@ func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, a
 	})
 }
 
-// commentMentionsOthersButNotAssignee returns true if the comment @mentions
-// anyone but does NOT @mention the issue's assignee agent. This is used to
-// suppress the on_comment trigger when the user is directing their comment at
-// someone else (e.g. sharing results with a colleague, asking another agent).
-// @all is treated as a broadcast — it suppresses the trigger because the user
-// is announcing to everyone, not specifically requesting work from the agent.
-func (h *Handler) commentMentionsOthersButNotAssignee(content string, issue db.Issue) bool {
-	mentions := util.ParseMentions(content)
-	// Filter out issue mentions — they are cross-references, not @people.
-	filtered := mentions[:0]
-	for _, m := range mentions {
-		if m.Type != "issue" {
-			filtered = append(filtered, m)
-		}
-	}
-	mentions = filtered
-	if len(mentions) == 0 {
-		return false // No mentions (or only issue refs) — normal on_comment behavior
-	}
-	// @all is a broadcast to all members — suppress agent trigger.
-	if util.HasMentionAll(mentions) {
-		return true
-	}
-	if !issue.AssigneeID.Valid {
-		return true // No assignee — mentions target others
-	}
-	assigneeID := uuidToString(issue.AssigneeID)
-	for _, m := range mentions {
-		if m.ID == assigneeID {
-			return false // Assignee is mentioned — allow trigger
-		}
-	}
-	return true // Others mentioned but not assignee — suppress trigger
-}
-
-// isReplyToMemberThread returns true if the comment is a reply in a thread
-// started by a member and does NOT @mention the issue's assignee agent.
-// When a member replies in a member-started thread, they are most likely
-// continuing a human conversation — not requesting work from the assigned agent.
-// Replying to an agent-started thread, or explicitly @mentioning the assignee
-// in the reply, still triggers on_comment as expected.
-// If the parent (thread root) itself @mentions the assignee, the thread is
-// considered a conversation with the agent, so replies are allowed to trigger.
-// If the assigned agent has already replied in the thread, the member is
-// conversing with the agent, so replies are allowed to trigger.
-func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment, content string, issue db.Issue) bool {
-	if parent == nil {
-		return false // Not a reply — normal top-level comment
-	}
-	if parent.AuthorType != "member" {
-		return false // Thread started by an agent — allow trigger
-	}
-	// Thread was started by a member. Suppress on_comment unless the reply
-	// or the parent explicitly @mentions the assignee agent, or the agent
-	// has already participated in this thread.
-	if !issue.AssigneeID.Valid {
-		return true // No assignee to mention
-	}
-	assigneeID := uuidToString(issue.AssigneeID)
-	// Check current comment mentions.
-	for _, m := range util.ParseMentions(content) {
-		if m.ID == assigneeID {
-			return false // Assignee explicitly mentioned in reply — allow trigger
-		}
-	}
-	// Check parent (thread root) mentions — if the thread was started by
-	// mentioning the assignee, replies continue that conversation.
-	for _, m := range util.ParseMentions(parent.Content) {
-		if m.ID == assigneeID {
-			return false // Assignee mentioned in thread root — allow trigger
-		}
-	}
-	// Check if the assigned agent has already replied in this thread —
-	// if so, the member is continuing a conversation with the agent.
-	if h.Queries != nil {
-		hasReplied, err := h.Queries.HasAgentRepliedInThread(ctx, db.HasAgentRepliedInThreadParams{
-			ParentID: parent.ID,
-			AgentID:  issue.AssigneeID,
-		})
-		if err == nil && hasReplied {
-			return false // Agent participated in thread — allow trigger
-		}
-	}
-	return true // Reply to member thread without agent participation — suppress
-}
-
-// shouldInheritParentMentions decides whether a reply with no explicit
-// mentions should inherit the parent (thread root) comment's mentions.
-//
-// Inheritance lets a member who started a thread by @mentioning an agent
-// continue the conversation with that agent without re-typing the mention
-// on every follow-up reply.
-//
-// It is intentionally narrow:
-//
-//   - Only when the reply contains zero mentions of its own. Any explicit
-//     mention in the reply is a deliberate choice about who to involve.
-//   - Only when the reply author is a member. Agent-authored replies must
-//     never inherit, otherwise an agent posting in a thread whose root
-//     mentioned another agent would re-trigger that agent and create a loop.
-//   - Only when the parent author is a member. When an agent authors a
-//     comment that @mentions another agent, it is typically a one-shot
-//     delegation (e.g. an agent posting a PR completion that @mentions a
-//     reviewer agent). Subsequent member follow-ups in the same thread are
-//     directed at the assignee, not at the delegated agent — inheriting
-//     would re-trigger the delegated agent on every plain reply.
-func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util.Mention, replyAuthorType string) bool {
-	if parentComment == nil {
-		return false
-	}
-	if len(replyMentions) > 0 {
-		return false
-	}
-	if replyAuthorType == "agent" {
-		return false
-	}
-	return parentComment.AuthorType == "member"
-}
-
-// computeMentionedAgentCommentTriggers parses @agent mentions from comment
-// content and returns a trigger for each mentioned agent. When parentComment
-// is non-nil (i.e. the comment is a reply), mentions from the parent (thread
-// root) are also included so that agents mentioned in the top-level comment
-// are re-triggered by subsequent replies in the same thread — unless the reply
-// explicitly @mentions only non-agent entities (members, issues), which
-// signals the user is talking to other people and not the agent.
+// resolveMentionedAgentCommentTriggers parses explicit @agent and @squad
+// mentions from the current comment and returns the runnable agent recipients.
 // Skips agents with on_mention trigger disabled, and private agents mentioned
 // by non-owner members (only the agent owner or workspace admin/owner can
 // mention a private agent). Self-mentions are intentionally allowed so an
@@ -1583,14 +1578,10 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // a child-issue run notifying the parent issue whose assignee is the same
 // agent); runaway loops are prevented by HasPendingTaskForIssueAndAgent
 // dedupe and the natural queued/dispatched coalescing of the task queue.
-// Note: no status gate here — @mention is an explicit action and should work
-// even on done/cancelled issues (the agent can reopen the issue if needed).
-func (h *Handler) computeMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string, opts commentTriggerComputeOptions) []commentAgentTrigger {
+// Note: no issue status gate here — @mention is an explicit action and should
+// work even on done/cancelled issues (the agent can reopen the issue if needed).
+func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, mentions []util.Mention, authorType, authorID string, opts commentTriggerComputeOptions) []commentAgentTrigger {
 	wsID := uuidToString(issue.WorkspaceID)
-	mentions := util.ParseMentions(content)
-	if shouldInheritParentMentions(parentComment, mentions, authorType) {
-		mentions = util.ParseMentions(parentComment.Content)
-	}
 	triggers := make([]commentAgentTrigger, 0, len(mentions))
 	seen := make(map[string]struct{}, len(mentions))
 	add := func(trigger commentAgentTrigger) {
