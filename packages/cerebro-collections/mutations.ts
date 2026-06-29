@@ -6,13 +6,50 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  createCollectionFolder,
+  createCollectionItem,
   moveCollectionFolder,
   removeFolderGrant,
+  removeProjectGrant,
   upsertFolderGrant,
+  upsertProjectGrant,
+  type CreateCollectionFolderInput,
+  type CreateCollectionItemInput,
   type MoveCollectionFolderInput,
 } from "./api";
-import { collectionFolderKeys, folderGrantKeys } from "./queries";
-import type { RemoveFolderGrantInput, UpsertFolderGrantInput } from "./types";
+import { collectionFolderKeys, folderGrantKeys, projectGrantKeys } from "./queries";
+import type {
+  RemoveFolderGrantInput,
+  RemoveProjectGrantInput,
+  UpsertFolderGrantInput,
+  UpsertProjectGrantInput,
+} from "./types";
+
+export function useCreateCollectionFolder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (input: CreateCollectionFolderInput) =>
+      createCollectionFolder(input),
+    onSettled: (_data, _err, input) => {
+      if (input.surface === "artifact") {
+        void qc.invalidateQueries({
+          queryKey: collectionFolderKeys.artifact(wsId),
+        });
+      } else {
+        void qc.invalidateQueries({
+          queryKey: collectionFolderKeys.entity(wsId, input.kind as "skill" | "autopilot"),
+        });
+      }
+    },
+  });
+}
+
+export function useCreateCollectionItem() {
+  return useMutation({
+    mutationFn: (input: CreateCollectionItemInput) => createCollectionItem(input),
+  });
+}
 
 export function useUpsertFolderGrant() {
   const qc = useQueryClient();
@@ -35,6 +72,32 @@ export function useRemoveFolderGrant() {
     onSettled: (_data, _err, input) => {
       void qc.invalidateQueries({
         queryKey: folderGrantKeys.folder(wsId, input.surface, input.folder_id),
+      });
+    },
+  });
+}
+
+export function useUpsertProjectGrant() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (input: UpsertProjectGrantInput) => upsertProjectGrant(input),
+    onSettled: (_data, _err, input) => {
+      void qc.invalidateQueries({
+        queryKey: projectGrantKeys.project(wsId, input.project_id),
+      });
+    },
+  });
+}
+
+export function useRemoveProjectGrant() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (input: RemoveProjectGrantInput) => removeProjectGrant(input),
+    onSettled: (_data, _err, input) => {
+      void qc.invalidateQueries({
+        queryKey: projectGrantKeys.project(wsId, input.project_id),
       });
     },
   });

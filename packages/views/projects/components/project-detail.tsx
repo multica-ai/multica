@@ -92,7 +92,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 // CEREBRO-PATCH(project-detail-access): RestrictedLock + ProjectAccessTab from cerebro-access after Phase 6 relocation
-import { RestrictedLock, ProjectAccessTab } from "@multica/cerebro-access/views";
+import { RestrictedLock, ProjectAccessTab, ProjectGrantsPanel } from "@multica/cerebro-access/views";
 // CEREBRO-PATCH(project-detail-group-access): JEH-1009 group-access section in Access tab.
 import { ProjectGroupAccessSection } from "@multica/cerebro-groups/views";
 // CEREBRO-PATCH(project-detail-sprints): FIR-2666 project sprint tab + feature flag gate.
@@ -550,6 +550,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [descriptionOpen, setDescriptionOpen] = useState(true);
   // CEREBRO-PATCH(project-detail-tabs): tab state for Issues/Documents/Access tab switcher; FIR-2666 adds "sprints" gated on cerebro_sprints.
   const sprintsFlag = useFeatureFlag("cerebro_sprints");
+  // CEREBRO-PATCH(cerebro-project-grants-routes): FIR-2125 project grants panel behind collections flag.
+  const collectionsFlag = useFeatureFlag("cerebro_collections");
   const [projectTab, setProjectTab] = useState<
     "issues" | "documents" | "access" | "sprints"
   >("issues");
@@ -1047,7 +1049,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 <ProjectDocuments projectId={projectId} />
               </TabsContent>
               <TabsContent value="access" className="flex-1 overflow-auto">
-                <ProjectAccessTab project={project} />
+                {/* CEREBRO-PATCH(cerebro-project-grants-routes): FIR-2125 role-based grants when collections flag is on. */}
+                {collectionsFlag ? (
+                  <div className="p-6"><ProjectGrantsPanel projectId={project.id} /></div>
+                ) : (
+                  <ProjectAccessTab project={project} />
+                )}
                 {/* CEREBRO-PATCH(project-detail-group-access): JEH-1009 group-access list under the Access tab. */}
                 <div className="px-6 pb-6"><ProjectGroupAccessSection projectId={project.id} /></div>
               </TabsContent>

@@ -27,6 +27,8 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Layers,
   Folder as FolderIcon,
+  FolderPlus,
+  FilePlus,
   ChevronDown,
   GripVertical,
   ArrowUpToLine,
@@ -44,6 +46,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   Tabs,
   TabsList,
@@ -58,7 +61,7 @@ import {
   entityCollectionFoldersOptions,
   folderGrantsOptions,
 } from "../queries";
-import { useMoveCollectionFolder } from "../mutations";
+import { useCreateCollectionFolder, useCreateCollectionItem, useMoveCollectionFolder } from "../mutations";
 import {
   buildFolderTree,
   collectSubtreeIds,
@@ -85,15 +88,16 @@ export interface ExtraSettingsTab {
 
 type LabelFor = (type: GranteeType, id: string | null) => string;
 
-// The four folder groups, one per tab. entityKind is the kind the entity
-// backend keys folders by; artifact folders don't need it.
+// The four folder groups, one per tab. entityKind/artifactKind is the kind the
+// respective backend keys folders by.
 const GROUPS: {
   group: string;
   surface: GrantSurface;
+  artifactKind?: "document" | "note";
   entityKind?: "skill" | "autopilot";
 }[] = [
-  { group: "Documents", surface: "artifact" },
-  { group: "Notes", surface: "artifact" },
+  { group: "Documents", surface: "artifact", artifactKind: "document" },
+  { group: "Notes", surface: "artifact", artifactKind: "note" },
   { group: "Autopilots", surface: "entity", entityKind: "autopilot" },
   { group: "Skills", surface: "entity", entityKind: "skill" },
 ];
@@ -256,17 +260,19 @@ function FolderCard({
 }
 
 function FolderTree({
-  group,
   folders,
   entityKind,
   active,
   onManage,
+  onCreate,
+  creating,
 }: {
-  group: string;
   folders: CollectionFolder[];
   entityKind?: "skill" | "autopilot";
   active: boolean;
   onManage: (folder: CollectionFolder) => void;
+  onCreate: (name: string, parentId: string | null) => void;
+  creating?: boolean;
 }) {
   // labelFor only needs the directories while this tab is open.
   const { labelFor } = useGranteeDirectory(active);
@@ -283,6 +289,8 @@ function FolderTree({
 
   const move = useMoveCollectionFolder();
   const [activeId, setActiveId] = React.useState<string | null>(null);
+  const [adding, setAdding] = React.useState(false);
+  const [newName, setNewName] = React.useState("");
   const activeNode = activeId ? (nodeById.get(activeId) ?? null) : null;
   // A folder can't drop into itself or any descendant; pre-compute the blocked
   // set once per drag so every card can flag itself as a valid/invalid target.
@@ -333,13 +341,15 @@ function FolderTree({
     });
   }
 
-  if (folders.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">No {group} folders yet.</p>
-    );
+  function submitFolder() {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    onCreate(trimmed, null);
+    setNewName("");
+    setAdding(false);
   }
 
-  return (
+  const folderList = folders.length > 0 ? (
     <DndContext
       sensors={sensors}
       collisionDetection={pointerWithin}
@@ -374,6 +384,43 @@ function FolderTree({
         ) : null}
       </DragOverlay>
     </DndContext>
+  ) : null;
+
+  return (
+    <div className="space-y-1.5">
+      {folderList}
+      {adding ? (
+        <div className="flex items-center gap-1 px-1">
+          <Input
+            autoFocus
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submitFolder();
+              if (e.key === "Escape") { setAdding(false); setNewName(""); }
+            }}
+            placeholder="Folder name"
+            className="h-7 text-xs"
+          />
+          <Button
+            size="sm"
+            className="h-7 shrink-0"
+            onClick={submitFolder}
+            disabled={creating || !newName.trim()}
+          >
+            Add
+          </Button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted/50"
+        >
+          <FolderPlus className="size-3.5" />
+          New folder
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -399,6 +446,34 @@ export function CollectionsTab() {
   };
 
   const [active, setActive] = React.useState<CollectionFolder | null>(null);
+  const createFolder = useCreateCollectionFolder();
+  const createItem = useCreateCollectionItem();
+
+  // Per-tab inline create-item state (name input + submitting flag).
+  const [creatingItem, setCreatingItem] = React.useState<Record<string, boolean>>({});
+  const [newItemName, setNewItemName] = React.useState<Record<string, string>>({});
+
+  function itemLabel(g: typeof GROUPS[number]): string {
+    if (g.artifactKind === "document") return "New document";
+    if (g.artifactKind === "note") return "New note";
+    if (g.entityKind === "skill") return "New skill";
+    return "New autopilot";
+  }
+
+  function submitItem(g: typeof GROUPS[number]) {
+    const name = (newItemName[g.group] ?? "").trim();
+    if (!name) return;
+    if (g.artifactKind === "document") {
+      createItem.mutate({ kind: "document", title: name });
+    } else if (g.artifactKind === "note") {
+      createItem.mutate({ kind: "note", title: name });
+    } else if (g.entityKind === "skill") {
+      createItem.mutate({ kind: "skill", name });
+    }
+    // Autopilots require an assignee; show a button that navigates in the consumer.
+    setNewItemName((prev) => ({ ...prev, [g.group]: "" }));
+    setCreatingItem((prev) => ({ ...prev, [g.group]: false }));
+  }
 
   return (
     <div className="space-y-6">
@@ -433,12 +508,60 @@ export function CollectionsTab() {
         </TabsList>
         {GROUPS.map((g) => (
           <TabsContent key={g.group} value={g.group} className="pt-2">
+            {/* New-item inline form — document / note / skill (not autopilot, which
+                requires an assignee and belongs in the Autopilots settings page). */}
+            {g.entityKind !== "autopilot" && (
+              <div className="mb-3">
+                {creatingItem[g.group] ? (
+                  <div className="flex items-center gap-1 px-1">
+                    <Input
+                      autoFocus
+                      value={newItemName[g.group] ?? ""}
+                      onChange={(e) =>
+                        setNewItemName((prev) => ({ ...prev, [g.group]: e.target.value }))
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") submitItem(g);
+                        if (e.key === "Escape")
+                          setCreatingItem((prev) => ({ ...prev, [g.group]: false }));
+                      }}
+                      placeholder={g.artifactKind ? "Title" : "Name"}
+                      className="h-7 text-xs"
+                    />
+                    <Button
+                      size="sm"
+                      className="h-7 shrink-0"
+                      onClick={() => submitItem(g)}
+                      disabled={createItem.isPending || !(newItemName[g.group] ?? "").trim()}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setCreatingItem((prev) => ({ ...prev, [g.group]: true }))}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted/50"
+                  >
+                    <FilePlus className="size-3.5" />
+                    {itemLabel(g)}
+                  </button>
+                )}
+              </div>
+            )}
             <FolderTree
-              group={g.group}
               folders={foldersByGroup[g.group] ?? []}
               entityKind={g.entityKind}
               active={activeTab === g.group}
               onManage={setActive}
+              onCreate={(name, parentId) =>
+                createFolder.mutate({
+                  surface: g.surface,
+                  name,
+                  kind: g.artifactKind ?? g.entityKind ?? "document",
+                  parentId,
+                })
+              }
+              creating={createFolder.isPending}
             />
           </TabsContent>
         ))}

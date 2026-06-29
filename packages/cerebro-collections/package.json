@@ -5,7 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./index.ts",
-    "./views": "./views/index.ts"
+    "./views": "./views/index.ts",
+    "./views/use-grantee-directory": "./views/use-grantee-directory.tsx",
+    "./queries": "./queries.ts",
+    "./mutations": "./mutations.ts",
+    "./types": "./types.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

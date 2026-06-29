@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@multica/cerebro-artifacts": "workspace:*",
+    "@multica/cerebro-collections": "workspace:*",
     "@multica/cerebro-dictation": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/core": "workspace:*",

@@ -675,6 +675,8 @@ var catalog = []Capability{
 			"DELETE /api/projects/{id}/members/{userId}",
 			"POST /api/projects/{id}/group-access",
 			"DELETE /api/projects/{id}/group-access/{groupId}",
+			"PUT /api/cerebro/project-grants/",
+			"DELETE /api/cerebro/project-grants/",
 		},
 	},
 	{

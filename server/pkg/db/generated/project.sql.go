@@ -278,6 +278,26 @@ WHERE p.workspace_id = $1
       WHERE pm.project_id = p.id AND pm.user_id = $3::uuid
     )
     OR EXISTS (SELECT 1 FROM cerebro_project_group_member pgm JOIN cerebro_group_member gm ON gm.group_id = pgm.group_id WHERE pgm.project_id = p.id AND gm.user_id = $3::uuid)
+    OR EXISTS (
+      WITH RECURSIVE ancestors AS (
+        SELECT p.id AS anc_id, 0 AS depth
+        UNION ALL
+        SELECT pn.parent_project_id, a.depth + 1
+        FROM project_nesting pn
+        JOIN ancestors a ON pn.project_id = a.anc_id
+        WHERE pn.parent_project_id IS NOT NULL AND a.depth < 3
+      )
+      SELECT 1 FROM ancestors anc
+      JOIN cerebro_project_grant g ON g.project_id = anc.anc_id AND g.workspace_id = $1
+      WHERE g.grantee_type = 'workspace'
+         OR (g.grantee_type = 'member' AND g.grantee_id = $3::uuid)
+         OR EXISTS (
+           SELECT 1 FROM cerebro_group_member cgm
+           WHERE cgm.user_id = $3::uuid
+             AND cgm.group_id = g.grantee_id
+             AND g.grantee_type = 'group'
+         )
+    )
   )
   AND ($4::text IS NULL OR p.status = $4)
   AND ($5::text IS NULL OR p.priority = $5)

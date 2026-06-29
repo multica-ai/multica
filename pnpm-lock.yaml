@@ -898,6 +898,9 @@ importers:
 
   packages/cerebro-access:
     dependencies:
+      '@multica/cerebro-collections':
+        specifier: workspace:*
+        version: link:../cerebro-collections
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
@@ -2747,6 +2750,9 @@ importers:
       '@multica/cerebro-artifacts':
         specifier: workspace:*
         version: link:../cerebro-artifacts
+      '@multica/cerebro-collections':
+        specifier: workspace:*
+        version: link:../cerebro-collections
       '@multica/cerebro-dictation':
         specifier: workspace:*
         version: link:../cerebro-dictation

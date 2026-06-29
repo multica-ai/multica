@@ -1,11 +1,13 @@
-// React Query options + keys for per-folder access grants.
+// React Query options + keys for per-folder and per-project access grants.
 
 import { queryOptions } from "@tanstack/react-query";
 import {
   fetchArtifactCollectionFolders,
   fetchEntityCollectionFolders,
   fetchFolderGrants,
+  fetchProjectGrants,
   type GrantView,
+  type ProjectGrantView,
 } from "./api";
 import type { GrantSurface } from "./types";
 
@@ -62,6 +64,28 @@ export function entityCollectionFoldersOptions(
     queryKey: collectionFolderKeys.entity(wsId, kind),
     queryFn: () => fetchEntityCollectionFolders(kind),
     enabled: Boolean(wsId),
+    staleTime: 30_000,
+  });
+}
+
+// Project grants (FIR-2125).
+export const projectGrantKeys = {
+  grants: (wsId: string, projectId: string, view: ProjectGrantView) =>
+    ["project-grants", wsId, projectId, view] as const,
+  project: (wsId: string, projectId: string) =>
+    ["project-grants", wsId, projectId] as const,
+};
+
+export function projectGrantsOptions(
+  wsId: string,
+  projectId: string,
+  view: ProjectGrantView,
+  opts?: { enabled?: boolean },
+) {
+  return queryOptions({
+    queryKey: projectGrantKeys.grants(wsId, projectId, view),
+    queryFn: () => fetchProjectGrants(projectId, view),
+    enabled: Boolean(wsId && projectId) && (opts?.enabled ?? true),
     staleTime: 30_000,
   });
 }

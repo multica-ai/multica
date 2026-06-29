@@ -41,3 +41,29 @@ export interface RemoveFolderGrantInput {
   grantee_type: GranteeType;
   grantee_id: string | null;
 }
+
+// Per-project access grants (FIR-2125). Mirrors FolderGrant but wired to the
+// project tree (project_nesting) instead of folder trees.
+// Backend: server/internal/cerebro/projectgrant/handler.go
+export interface ProjectGrant {
+  project_id: string;
+  grantee_type: GranteeType;
+  grantee_id: string | null;
+  role: GrantRole;
+  source_project_id: string;
+  is_direct: boolean;
+  depth: number;
+}
+
+export interface UpsertProjectGrantInput {
+  project_id: string;
+  grantee_type: GranteeType;
+  grantee_id: string | null;
+  role: GrantRole;
+}
+
+export interface RemoveProjectGrantInput {
+  project_id: string;
+  grantee_type: GranteeType;
+  grantee_id: string | null;
+}
