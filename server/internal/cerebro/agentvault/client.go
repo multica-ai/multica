@@ -25,13 +25,6 @@ func NewClient(cfg Config) *Client {
 	return &Client{cfg: cfg, http: &http.Client{Timeout: 20 * time.Second}}
 }
 
-// VaultAccess is one row of an agent's scoped access: a box (vault) and the
-// role the agent holds in it. Mirrors cerebro_agentvault_agent_access.
-type VaultAccess struct {
-	Vault string `json:"vault"`
-	Role  string `json:"role"`
-}
-
 // Vault is one Agent Vault box as listed by GET /v1/vaults. Only the two fields
 // the credential Permissions vault-picker needs are decoded — the Agent Vault
 // response also carries role/membership/pending_proposals/credential_store,
@@ -72,45 +65,6 @@ func (c *Client) login(ctx context.Context) (string, error) {
 	}
 	if out.Token == "" {
 		return "", fmt.Errorf("agentvault login: empty token")
-	}
-	return out.Token, nil
-}
-
-// MintAgentToken creates (or refreshes) the Agent Vault identity for a Multica
-// agent and returns a long-lived agent token scoped to the given vaults. The
-// agent's instance role is always "no-access" — it may only proxy traffic for
-// the vaults it was granted, and can never read or reveal a credential.
-//
-// Token shape (av_agt_...) is verified; the request body is the documented
-// agent-vault v0.31.0 create-agent contract and is validated end-to-end before
-// this path is wired into spawn (TECH-3196 Slice 2).
-func (c *Client) MintAgentToken(ctx context.Context, agentName string, access []VaultAccess) (string, error) {
-	adminTok, err := c.login(ctx)
-	if err != nil {
-		return "", err
-	}
-	vaults := make([]string, 0, len(access))
-	for _, a := range access {
-		role := a.Role
-		if role == "" {
-			role = "read-only"
-		}
-		vaults = append(vaults, fmt.Sprintf("%s:%s", a.Vault, role))
-	}
-	reqBody, _ := json.Marshal(map[string]any{
-		"name":       agentName,
-		"role":       "no-access",
-		"vaults":     vaults,
-		"token_only": true,
-	})
-	var out struct {
-		Token string `json:"token"`
-	}
-	if err := c.do(ctx, http.MethodPost, "/v1/agents", adminTok, reqBody, &out); err != nil {
-		return "", fmt.Errorf("agentvault mint token for %q: %w", agentName, err)
-	}
-	if out.Token == "" {
-		return "", fmt.Errorf("agentvault mint token for %q: empty token", agentName)
 	}
 	return out.Token, nil
 }
