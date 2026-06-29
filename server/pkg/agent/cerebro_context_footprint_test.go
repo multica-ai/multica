@@ -60,6 +60,62 @@ func TestLastTurnFootprint_ApplyToMap(t *testing.T) {
 	}
 }
 
+// FIR-1931 regression: the footprint is observed from the streamed assistant
+// messages with the PLAIN model id, but the result message keys per-model usage
+// with the gateway's [1m] long-context tag. The exact-key lookup misses, so
+// applyToMap must fall back to the single usage entry whose base model matches —
+// otherwise [1m] runs lose the footprint and the bar shows "estimate".
+func TestLastTurnFootprint_ApplyToMap_TaggedKeyMismatch(t *testing.T) {
+	var lt lastTurnFootprint
+	lt.observe("claude-opus-4-8", 238_000, 192_000) // plain id, as streamed
+	usage := map[string]TokenUsage{
+		"claude-opus-4-8[1m]": {InputTokens: 10_778}, // tagged id, as keyed by result
+	}
+	lt.applyToMap(usage)
+	got := usage["claude-opus-4-8[1m]"]
+	if got.ContextInputTokens != 238_000 || got.ContextCacheReadTokens != 192_000 {
+		t.Fatalf("tagged-key footprint not applied: got %+v", got)
+	}
+	if got.InputTokens != 10_778 {
+		t.Fatalf("applyToMap clobbered cumulative InputTokens: %d", got.InputTokens)
+	}
+	if _, ok := usage["claude-opus-4-8"]; ok {
+		t.Fatalf("applyToMap created a spurious plain-id entry instead of matching the tagged one")
+	}
+}
+
+// Safety: when more than one model entry shares the base, the ambiguous match is
+// skipped rather than guessing — the footprint stays on the cumulative fallback.
+func TestLastTurnFootprint_ApplyToMap_AmbiguousBaseSkipped(t *testing.T) {
+	var lt lastTurnFootprint
+	lt.observe("claude-opus-4-8", 200_000, 150_000)
+	usage := map[string]TokenUsage{
+		"claude-opus-4-8[1m]":  {InputTokens: 1},
+		"claude-opus-4-8[exp]": {InputTokens: 2},
+	}
+	lt.applyToMap(usage)
+	for k, v := range usage {
+		if v.ContextInputTokens != 0 {
+			t.Fatalf("ambiguous base should skip apply, but %s got footprint %d", k, v.ContextInputTokens)
+		}
+	}
+}
+
+// stripModelCapabilityTag strips only a single trailing bracketed tag.
+func TestStripModelCapabilityTag(t *testing.T) {
+	cases := map[string]string{
+		"claude-opus-4-8[1m]":  "claude-opus-4-8",
+		"claude-opus-4-8":      "claude-opus-4-8",
+		"claude-opus-4-8[exp]": "claude-opus-4-8",
+		"":                     "",
+	}
+	for in, want := range cases {
+		if got := stripModelCapabilityTag(in); got != want {
+			t.Fatalf("stripModelCapabilityTag(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // End-to-end through claude's handleAssistant: the footprint must equal the LAST
 // assistant turn's whole prompt (input + cache_read + cache_creation), even though
 // the per-turn cumulative usage keeps summing.

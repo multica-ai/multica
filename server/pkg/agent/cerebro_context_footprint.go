@@ -1,5 +1,7 @@
 package agent
 
+import "strings"
+
 // FIR-1870 — generalised last-turn context-window footprint capture.
 //
 // This file is in the cerebro zone (the `cerebro_` filename prefix carves it out
@@ -65,11 +67,52 @@ func (l *lastTurnFootprint) apply(u *TokenUsage) {
 
 // applyToMap writes the captured footprint onto the matching model entry of a
 // per-model usage map. No-op when nothing was observed or the model is unknown.
+//
+// FIR-1931: the footprint is observed from the streamed assistant messages,
+// which report the PLAIN model id (e.g. "claude-opus-4-8"), but the final
+// `result` message keys its per-model usage by the gateway-tagged id (e.g.
+// "claude-opus-4-8[1m]" for a long-context run). An exact-key lookup then
+// misses for every [1m] run, the footprint is silently dropped, and the
+// context bar falls back to the over-counting cumulative sum — showing
+// "estimate" (and a false ~100% on a heavy session). When the exact key is
+// absent, fall back to a single usage entry whose base model (trailing
+// bracketed capability tag stripped) matches the footprint's base model, so the
+// footprint lands on the tagged entry. The single-match guard keeps this safe
+// if a run ever reports more than one model.
 func (l *lastTurnFootprint) applyToMap(usage map[string]TokenUsage) {
 	if !l.set || l.model == "" {
 		return
 	}
-	u := usage[l.model]
-	l.apply(&u)
-	usage[l.model] = u
+	if u, ok := usage[l.model]; ok {
+		l.apply(&u)
+		usage[l.model] = u
+		return
+	}
+	base := stripModelCapabilityTag(l.model)
+	matchKey, matches := "", 0
+	for k := range usage {
+		if stripModelCapabilityTag(k) == base {
+			matchKey, matches = k, matches+1
+		}
+	}
+	if matches == 1 {
+		u := usage[matchKey]
+		l.apply(&u)
+		usage[matchKey] = u
+	}
+}
+
+// stripModelCapabilityTag removes a single trailing bracketed capability tag
+// from a model id, e.g. "claude-opus-4-8[1m]" -> "claude-opus-4-8". The gateway
+// appends the tag (the 1M long-context beta) to the usage model id while the
+// streamed assistant messages report the plain id, so the two must be compared
+// on their shared base. Mirrors sessions.capabilityTag on the read side.
+func stripModelCapabilityTag(model string) string {
+	if !strings.HasSuffix(model, "]") {
+		return model
+	}
+	if i := strings.LastIndexByte(model, '['); i >= 0 {
+		return model[:i]
+	}
+	return model
 }
