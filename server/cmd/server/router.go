@@ -122,6 +122,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler import
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
+	// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools for the Multica MCP server (import).
+	cerebroconnectiontools "github.com/multica-ai/multica/server/internal/cerebro/connectiontools"
 	// CEREBRO-PATCH(workspace-copy-routes): TECH-3582 non-destructive workspace copy handler import
 	cerebroworkspacecopy "github.com/multica-ai/multica/server/internal/cerebro/workspacecopy"
 	// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 per-workspace web_fetch policy handler import
@@ -576,6 +578,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler.
 	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
+	// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools handler for the Multica MCP server.
+	cerebroConnectionToolsHandler := cerebroconnectiontools.NewHandler(pool, cerebroQueries, cerebroconnectiontools.NewQueriesAgentResolver(queries))
 	// CEREBRO-PATCH(cerebro-mcp-relay-wire): FIR-1563 — when the relay is configured,
 	// swap the injector for the relay-aware module so internal connections are
 	// injected into LOCAL runtimes as Multica relay URLs (kald gennem Multica),
@@ -1928,6 +1932,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/cerebro/issues/check-similar/event", h.DupCheckEvent)
 			// CEREBRO-PATCH(personal-browser-authorize-route): FIR-2037 per-action personal-browser gate (agent token; host-conditioned, Base=Deny).
 			r.Post("/api/cerebro/personal-browser/authorize", h.AuthorizePersonalBrowser)
+			// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools for the Multica MCP server (agent token; default-deny per agent).
+			r.Get("/api/cerebro/connection-tools", cerebroConnectionToolsHandler.List)
+			r.Post("/api/cerebro/connection-tools/call", cerebroConnectionToolsHandler.Call)
 			// CEREBRO-PATCH(references-routes): JEH-837 reference-by-id mutations + reverse-lookup.
 			r.Route("/api/cerebro/references", func(r chi.Router) {
 				r.Get("/", cerebroReferencesHandler.ListByObject)

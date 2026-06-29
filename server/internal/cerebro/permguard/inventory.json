@@ -1619,6 +1619,10 @@
     {
       "id": "POST /api/cerebro/personal-browser/authorize",
       "gate": "tools:personal-browser"
+    },
+    {
+      "id": "POST /api/cerebro/connection-tools/call",
+      "gate": "connection_endpoint_policy — agent-only (X-Actor-Source=task_token); per-agent default-deny via toolpolicy.ConnectionEndpointEffective; behind feature flag cerebro_api_connection_tools (FIR-2273)"
     }
   ],
   "mcp": [

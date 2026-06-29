@@ -119,6 +119,17 @@ func (t *APIConnectionTool) ConnectionName() string { return t.connName }
 func (t *APIConnectionTool) Method() string         { return t.method }
 func (t *APIConnectionTool) Path() string           { return t.path }
 
+// BuildAPIConnectionTools is the exported wrapper around buildAPIConnectionTools
+// (FIR-2273). It lets sibling cerebro packages — notably the connectiontools
+// HTTP handler that fronts api-type connections for the Multica MCP server —
+// build the exact same per-endpoint *APIConnectionTool set the Firtal Gateway
+// builds, so the two surfaces can never drift. Identity, the feature flag, and
+// the per-agent endpoint gate are the caller's responsibility; this only turns a
+// connection list into tools.
+func BuildAPIConnectionTools(conns []connections.Connection, client *http.Client) []Tool {
+	return buildAPIConnectionTools(conns, client)
+}
+
 // buildAPIConnectionTools turns a set of (already enabled) connections into one
 // tool per allowed endpoint+method on every API-type connection. MCP connections
 // and connections without a usable URL are skipped. It is pure (no DB / network)
