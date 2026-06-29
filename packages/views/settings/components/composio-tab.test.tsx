@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { StrictMode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -70,6 +71,19 @@ function renderTab() {
     <I18nProvider locale="en" resources={{ en: { common: enCommon, settings: enSettings } }}>
       <ComposioTab />
     </I18nProvider>,
+  );
+}
+
+// StrictMode reproduces React's dev-mode mount → cleanup → mount double-invoke,
+// which is exactly what would double-fire the callback toast without the
+// consumed-key ref guard.
+function renderTabStrict() {
+  return render(
+    <StrictMode>
+      <I18nProvider locale="en" resources={{ en: { common: enCommon, settings: enSettings } }}>
+        <ComposioTab />
+      </I18nProvider>
+    </StrictMode>,
   );
 }
 
@@ -164,5 +178,16 @@ describe("ComposioTab", () => {
       expect(mockToastError).toHaveBeenCalledWith(enSettings.composio.toast_connect_failed);
     });
     expect(mockReplace).toHaveBeenCalledWith("/acme/settings?tab=integrations");
+  });
+
+  it("fires the success callback exactly once under StrictMode double-invoke", async () => {
+    searchParamsRef.current = new URLSearchParams("tab=integrations&connected=notion");
+    renderTabStrict();
+    await waitFor(() => {
+      expect(mockToastSuccess).toHaveBeenCalled();
+    });
+    // The consumed-key ref must suppress the second (cleanup → re-mount) run.
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+    expect(mockInvalidate).toHaveBeenCalledTimes(1);
   });
 });

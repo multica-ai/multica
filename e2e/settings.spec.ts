@@ -84,14 +84,18 @@ test.describe("Settings", () => {
     });
 
     await page.route("**/api/integrations/composio/connect/init", (route) => {
-      // Composio would 302 through its hosted consent and back to our callback;
-      // short-circuit straight to the success redirect the callback emits.
+      // Composio would 302 through its hosted consent and back to our callback,
+      // which emits CallbackRedirect's slug-less shape:
+      // `/settings?tab=integrations&connected=<slug>`. The web proxy's
+      // legacy-route redirect then prepends the last workspace slug, landing on
+      // the real settings route. Mock that exact backend shape (NOT the final
+      // slugged URL) so the test exercises the same redirect path real users hit.
       connected = true;
       return route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          redirect_url: `${settingsUrl}&connected=notion`,
+          redirect_url: `/settings?tab=integrations&connected=notion`,
         }),
       });
     });

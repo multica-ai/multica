@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Check, Loader2, Plug, RefreshCw, Trash2 } from "lucide-react";
@@ -58,8 +58,22 @@ export function ComposioTab() {
   // browser refresh doesn't re-toast.
   const connectedParam = navigation.searchParams.get("connected");
   const errorParam = navigation.searchParams.get("error");
+  // React Strict Mode (dev / Next) double-invokes mount effects as
+  // mount → cleanup → mount. On the second invoke the `replace` from the first
+  // hasn't committed yet, so the closure still sees the same params and would
+  // toast + invalidate twice. Guard with a ref keyed on the callback we already
+  // consumed; a genuinely new callback (different slug, or the redirect being a
+  // full page load that resets this ref) still fires.
+  const consumedCallbackKey = useRef<string | null>(null);
   useEffect(() => {
-    if (!connectedParam && errorParam !== "composio_connect_failed") return;
+    const callbackKey = connectedParam
+      ? `connected:${connectedParam}`
+      : errorParam === "composio_connect_failed"
+        ? "error:composio_connect_failed"
+        : null;
+    if (!callbackKey) return;
+    if (consumedCallbackKey.current === callbackKey) return;
+    consumedCallbackKey.current = callbackKey;
     if (connectedParam) {
       toast.success(t(($) => $.composio.toast_connected));
       void qc.invalidateQueries({ queryKey: composioKeys.connections() });
