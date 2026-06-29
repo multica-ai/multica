@@ -22,11 +22,11 @@ import {
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
   dashboardUsageByModelOptions,
-  dashboardRuntimeRunTimeOptions,
+  dashboardRuntimeDurationOptions,
   dashboardModelRunTimeOptions,
-  dashboardRuntimeUsageOptions,
   dashboardFailuresDailyOptions,
   dashboardFailuresByAgentOptions,
+  dashboardUsageByRuntimeOptions,
 } from "@multica/core/dashboard";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
@@ -82,9 +82,9 @@ const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = []
 const EMPTY_BY_MODEL: import("@multica/core/types").DashboardUsageByModel[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
-const EMPTY_RUNTIME_RUNTIME: import("@multica/core/types").DashboardRuntimeRunTime[] = [];
+const EMPTY_RUNTIME_DURATION: import("@multica/core/types").DashboardRuntimeDuration[] = [];
 const EMPTY_MODEL_RUN_TIME: import("@multica/core/types").DashboardModelRunTime[] = [];
-const EMPTY_RUNTIME_USAGE: import("@multica/core/types").DashboardRuntimeUsage[] = [];
+const EMPTY_USAGE_BY_RUNTIME: import("@multica/core/types").DashboardUsageByRuntime[] = [];
 const EMPTY_FAILURE_DAILY: import("@multica/core/types").DashboardFailureDaily[] = [];
 const EMPTY_FAILURE_BY_AGENT: import("@multica/core/types").DashboardFailureByAgent[] =
   [];
@@ -247,14 +247,14 @@ export function DashboardPage() {
   const byModelQuery = useQuery(
     dashboardUsageByModelOptions(wsId, days, projectId, viewTZ),
   );
-  const runtimeRunTimeQuery = useQuery(
-    dashboardRuntimeRunTimeOptions(wsId, days, projectId, viewTZ),
+  const runtimeDurationQuery = useQuery(
+    dashboardRuntimeDurationOptions(wsId, days, projectId, viewTZ),
   );
   const modelRunTimeQuery = useQuery(
     dashboardModelRunTimeOptions(wsId, days, projectId, viewTZ),
   );
-  const runtimeUsageQuery = useQuery(
-    dashboardRuntimeUsageOptions(wsId, days, projectId, viewTZ),
+  const usageByRuntimeQuery = useQuery(
+    dashboardUsageByRuntimeOptions(wsId, days, projectId, viewTZ),
   );
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
@@ -262,9 +262,9 @@ export function DashboardPage() {
   const byModelUsage = byModelQuery.data ?? EMPTY_BY_MODEL;
   const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
   const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
-  const runtimeRunTime = runtimeRunTimeQuery.data ?? EMPTY_RUNTIME_RUNTIME;
+  const runtimeDuration = runtimeDurationQuery.data ?? EMPTY_RUNTIME_DURATION;
   const modelRunTime = modelRunTimeQuery.data ?? EMPTY_MODEL_RUN_TIME;
-  const runtimeUsage = runtimeUsageQuery.data ?? EMPTY_RUNTIME_USAGE;
+  const usageByRuntime = usageByRuntimeQuery.data ?? EMPTY_USAGE_BY_RUNTIME;
   const failureDailyRows = failuresDailyQuery.data ?? EMPTY_FAILURE_DAILY;
   const failureByAgentRows = failuresByAgentQuery.data ?? EMPTY_FAILURE_BY_AGENT;
 
@@ -278,9 +278,9 @@ export function DashboardPage() {
     runTimeQuery.isFetching ||
     runTimeDailyQuery.isFetching ||
     byModelQuery.isFetching ||
-    runtimeRunTimeQuery.isFetching ||
+    runtimeDurationQuery.isFetching ||
     modelRunTimeQuery.isFetching ||
-    runtimeUsageQuery.isFetching ||
+    usageByRuntimeQuery.isFetching ||
     failuresDailyQuery.isFetching ||
     failuresByAgentQuery.isFetching;
   const handleRefresh = () => {
@@ -294,9 +294,9 @@ export function DashboardPage() {
       runTimeQuery.dataUpdatedAt,
       runTimeDailyQuery.dataUpdatedAt,
       byModelQuery.dataUpdatedAt,
-      runtimeRunTimeQuery.dataUpdatedAt,
+      runtimeDurationQuery.dataUpdatedAt,
       modelRunTimeQuery.dataUpdatedAt,
-      runtimeUsageQuery.dataUpdatedAt,
+      usageByRuntimeQuery.dataUpdatedAt,
       failuresDailyQuery.dataUpdatedAt,
       failuresByAgentQuery.dataUpdatedAt,
     ],
@@ -336,9 +336,9 @@ export function DashboardPage() {
     runTimeQuery.isLoading ||
     runTimeDailyQuery.isLoading ||
     byModelQuery.isLoading ||
-    runtimeRunTimeQuery.isLoading ||
+    runtimeDurationQuery.isLoading ||
     modelRunTimeQuery.isLoading ||
-    runtimeUsageQuery.isLoading;
+    usageByRuntimeQuery.isLoading;
   const errorsLoading =
     failuresDailyQuery.isLoading || failuresByAgentQuery.isLoading;
 
@@ -349,9 +349,9 @@ export function DashboardPage() {
     byModelUsage.length === 0 &&
     runTimeRows.length === 0 &&
     runTimeDailyRows.length === 0 &&
-    runtimeRunTime.length === 0 &&
+    runtimeDuration.length === 0 &&
     modelRunTime.length === 0 &&
-    runtimeUsage.length === 0;
+    usageByRuntime.length === 0;
 
   // Cost / token math — re-derived when usage, days, or pricings change.
   const totals = useMemo(
@@ -658,8 +658,8 @@ export function DashboardPage() {
                   deletedAgentCount={deletedAgentCount}
                   byModelUsage={byModelUsage}
                   modelRunTime={modelRunTime}
-                  runtimeRunTime={runtimeRunTime}
-                  runtimeUsage={runtimeUsage}
+                  runtimeDuration={runtimeDuration}
+                  usageByRuntime={usageByRuntime}
                   runtimes={runtimes}
                   lessThanMinuteLabel={lessThanMinuteLabel}
                 />

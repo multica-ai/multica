@@ -219,10 +219,10 @@ func TestGetDashboardModelRunTime(t *testing.T) {
 	})
 }
 
-// TestGetDashboardRuntimeUsage covers the per-(runtime_id, model) token
+// TestGetDashboardUsageByRuntime covers the per-(runtime_id, model) token
 // aggregation endpoint: tokens are grouped by runtime + model, the project
 // filter excludes out-of-scope tasks, and an invalid project_id returns 400.
-func TestGetDashboardRuntimeUsage(t *testing.T) {
+func TestGetDashboardUsageByRuntime(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -296,7 +296,7 @@ func TestGetDashboardRuntimeUsage(t *testing.T) {
 	mkTask(projectIssueID, "ru-gpt4", 3000)
 	mkTask(otherIssueID, "ru-sonnet", 1500)
 
-	type runtimeUsageRow struct {
+	type usageByRuntimeRow struct {
 		RuntimeID   string `json:"runtime_id"`
 		Model       string `json:"model"`
 		InputTokens int64  `json:"input_tokens"`
@@ -305,11 +305,11 @@ func TestGetDashboardRuntimeUsage(t *testing.T) {
 	// workspace-wide: both (runtimeID, model) rows must appear.
 	t.Run("workspace-wide returns tokens for both models", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardRuntimeUsage(w, newRequest("GET", "/api/dashboard/runtime-usage?days=1", nil))
+		testHandler.GetDashboardUsageByRuntime(w, newRequest("GET", "/api/dashboard/usage/by-runtime?days=1", nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
-		var rows []runtimeUsageRow
+		var rows []usageByRuntimeRow
 		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
@@ -330,11 +330,11 @@ func TestGetDashboardRuntimeUsage(t *testing.T) {
 	// project-scoped: only the project task's model should appear.
 	t.Run("project-scoped returns only project runtime tokens", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardRuntimeUsage(w, newRequest("GET", "/api/dashboard/runtime-usage?days=1&project_id="+projectID, nil))
+		testHandler.GetDashboardUsageByRuntime(w, newRequest("GET", "/api/dashboard/usage/by-runtime?days=1&project_id="+projectID, nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
-		var rows []runtimeUsageRow
+		var rows []usageByRuntimeRow
 		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
@@ -357,7 +357,7 @@ func TestGetDashboardRuntimeUsage(t *testing.T) {
 	// malformed project_id must be rejected with 400.
 	t.Run("invalid project_id rejected", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardRuntimeUsage(w, newRequest("GET", "/api/dashboard/runtime-usage?project_id=not-a-uuid", nil))
+		testHandler.GetDashboardUsageByRuntime(w, newRequest("GET", "/api/dashboard/usage/by-runtime?project_id=not-a-uuid", nil))
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected 400 for malformed uuid, got %d", w.Code)
 		}

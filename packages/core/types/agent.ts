@@ -1128,7 +1128,7 @@ export interface DashboardUsageByModel {
 
 // Per-runtime total terminal-task run-time + counts. Powers the Runtime
 // scope on the workspace dashboard leaderboard.
-export interface DashboardRuntimeRunTime {
+export interface DashboardRuntimeDuration {
   runtime_id: string;
   total_seconds: number;
   task_count: number;
@@ -1148,7 +1148,7 @@ export interface DashboardModelRunTime {
 // Per-(runtime_id, model) token aggregates. Model dimension preserved so
 // the client can compute per-model cost and sum per-runtime, mirroring
 // how DashboardUsageByAgent works for the agent scope.
-export interface DashboardRuntimeUsage {
+export interface DashboardUsageByRuntime {
   runtime_id: string;
   model: string;
   input_tokens: number;

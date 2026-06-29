@@ -157,11 +157,11 @@ func TestGetDashboardUsageByModel(t *testing.T) {
 	})
 }
 
-// TestGetDashboardRuntimeRunTime covers the new per-runtime aggregation endpoint
+// TestGetDashboardRuntimeDuration covers the new per-runtime aggregation endpoint
 // that powers the "Runtime" scope of the leaderboard: run-time seconds and task
 // counts are grouped by runtime_id, the project filter excludes out-of-scope
 // tasks, and an invalid project_id UUID returns 400.
-func TestGetDashboardRuntimeRunTime(t *testing.T) {
+func TestGetDashboardRuntimeDuration(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -181,7 +181,7 @@ func TestGetDashboardRuntimeRunTime(t *testing.T) {
 
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, 'runtime-runtime scope test') RETURNING id
+		INSERT INTO project (workspace_id, title) VALUES ($1, 'runtime-duration scope test') RETURNING id
 	`, testWorkspaceID).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestGetDashboardRuntimeRunTime(t *testing.T) {
 		if err := testPool.QueryRow(ctx, `
 			INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
 			VALUES (
-				$1, 'runtime-runtime test issue', $2, 'member', $3,
+				$1, 'runtime-duration test issue', $2, 'member', $3,
 				(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
 			)
 			RETURNING id
@@ -237,7 +237,7 @@ func TestGetDashboardRuntimeRunTime(t *testing.T) {
 
 	t.Run("workspace-wide returns run time for our runtime", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardRuntimeRunTime(w, newRequest("GET", "/api/dashboard/runtime-runtime?days=1", nil))
+		testHandler.GetDashboardRuntimeDuration(w, newRequest("GET", "/api/dashboard/runtime-duration?days=1", nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -265,7 +265,7 @@ func TestGetDashboardRuntimeRunTime(t *testing.T) {
 	// Project filter: only the 300 s project task should count.
 	t.Run("project-scoped returns only project runtime", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardRuntimeRunTime(w, newRequest("GET", "/api/dashboard/runtime-runtime?days=1&project_id="+projectID, nil))
+		testHandler.GetDashboardRuntimeDuration(w, newRequest("GET", "/api/dashboard/runtime-duration?days=1&project_id="+projectID, nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -297,7 +297,7 @@ func TestGetDashboardRuntimeRunTime(t *testing.T) {
 	// Invalid project_id UUID must produce a 400.
 	t.Run("invalid project_id rejected", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardRuntimeRunTime(w, newRequest("GET", "/api/dashboard/runtime-runtime?project_id=not-a-uuid", nil))
+		testHandler.GetDashboardRuntimeDuration(w, newRequest("GET", "/api/dashboard/runtime-duration?project_id=not-a-uuid", nil))
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected 400 for malformed uuid, got %d", w.Code)
 		}

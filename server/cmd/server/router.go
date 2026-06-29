@@ -2318,10 +2318,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/model-runtime", h.GetDashboardModelRunTime)
 				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
 				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
-				r.Get("/failures/daily", h.GetDashboardFailuresDaily)
-				r.Get("/failures/by-agent", h.GetDashboardFailuresByAgent)
-				r.Get("/runtime-runtime", h.GetDashboardRuntimeRunTime)
-				r.Get("/runtime-usage", h.GetDashboardRuntimeUsage)
+			r.Get("/failures/daily", h.GetDashboardFailuresDaily)
+			r.Get("/failures/by-agent", h.GetDashboardFailuresByAgent)
+			r.Get("/runtime-duration", h.GetDashboardRuntimeDuration)
+			r.Get("/usage/by-runtime", h.GetDashboardUsageByRuntime)
 			})
 
 			// Runtimes

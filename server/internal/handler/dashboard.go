@@ -504,20 +504,20 @@ func (h *Handler) GetDashboardUsageByModel(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// DashboardRuntimeRunTimeResponse is one runtime's total terminal-task
+// DashboardRuntimeDurationResponse is one runtime's total terminal-task
 // run time + counts over the window.
-type DashboardRuntimeRunTimeResponse struct {
+type DashboardRuntimeDurationResponse struct {
 	RuntimeID    string `json:"runtime_id"`
 	TotalSeconds int64  `json:"total_seconds"`
 	TaskCount    int32  `json:"task_count"`
 	FailedCount  int32  `json:"failed_count"`
 }
 
-// GetDashboardRuntimeRunTime returns per-runtime total task run time and
+// GetDashboardRuntimeDuration returns per-runtime total task run time and
 // task counts for the workspace, optionally scoped to a project. Powers
 // the Runtime scope on the leaderboard. Only terminal tasks with both
 // started_at and completed_at contribute.
-func (h *Handler) GetDashboardRuntimeRunTime(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetDashboardRuntimeDuration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
@@ -529,7 +529,7 @@ func (h *Handler) GetDashboardRuntimeRunTime(w http.ResponseWriter, r *http.Requ
 	tz := h.resolveViewingTZ(r)
 	since := parseSinceParamInTZ(r, 30, tz)
 
-	rows, err := h.Queries.ListDashboardRuntimeRunTime(r.Context(), db.ListDashboardRuntimeRunTimeParams{
+	rows, err := h.Queries.ListDashboardRuntimeDuration(r.Context(), db.ListDashboardRuntimeDurationParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Since:       since,
 		ProjectID:   projectID,
@@ -539,9 +539,9 @@ func (h *Handler) GetDashboardRuntimeRunTime(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	resp := make([]DashboardRuntimeRunTimeResponse, len(rows))
+	resp := make([]DashboardRuntimeDurationResponse, len(rows))
 	for i, row := range rows {
-		resp[i] = DashboardRuntimeRunTimeResponse{
+		resp[i] = DashboardRuntimeDurationResponse{
 			RuntimeID:    uuidToString(row.RuntimeID),
 			TotalSeconds: row.TotalSeconds,
 			TaskCount:    row.TaskCount,
@@ -598,9 +598,9 @@ func (h *Handler) GetDashboardModelRunTime(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// DashboardRuntimeUsageResponse is one (runtime_id, model) token aggregate.
+// DashboardUsageByRuntimeResponse is one (runtime_id, model) token aggregate.
 // The model dimension is preserved so the client can compute per-model cost.
-type DashboardRuntimeUsageResponse struct {
+type DashboardUsageByRuntimeResponse struct {
 	RuntimeID        string `json:"runtime_id"`
 	Model            string `json:"model"`
 	InputTokens      int64  `json:"input_tokens"`
@@ -609,10 +609,10 @@ type DashboardRuntimeUsageResponse struct {
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 }
 
-// GetDashboardRuntimeUsage returns per-(runtime_id, model) token aggregates
+// GetDashboardUsageByRuntime returns per-(runtime_id, model) token aggregates
 // for the workspace, optionally scoped to a project. Powers the Runtime scope
 // token and cost columns on the leaderboard.
-func (h *Handler) GetDashboardRuntimeUsage(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetDashboardUsageByRuntime(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
@@ -624,7 +624,7 @@ func (h *Handler) GetDashboardRuntimeUsage(w http.ResponseWriter, r *http.Reques
 	tz := h.resolveViewingTZ(r)
 	since := parseSinceParamInTZ(r, 30, tz)
 
-	rows, err := h.Queries.ListDashboardRuntimeUsage(r.Context(), db.ListDashboardRuntimeUsageParams{
+	rows, err := h.Queries.ListDashboardUsageByRuntime(r.Context(), db.ListDashboardUsageByRuntimeParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Since:       since,
 		ProjectID:   projectID,
@@ -634,9 +634,9 @@ func (h *Handler) GetDashboardRuntimeUsage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	resp := make([]DashboardRuntimeUsageResponse, len(rows))
+	resp := make([]DashboardUsageByRuntimeResponse, len(rows))
 	for i, row := range rows {
-		resp[i] = DashboardRuntimeUsageResponse{
+		resp[i] = DashboardUsageByRuntimeResponse{
 			RuntimeID:        uuidToString(row.RuntimeID),
 			Model:            row.Model,
 			InputTokens:      row.InputTokens,

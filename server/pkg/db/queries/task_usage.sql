@@ -248,7 +248,7 @@ WHERE workspace_id = $1
 GROUP BY model
 ORDER BY SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens) DESC;
 
--- name: ListDashboardRuntimeRunTime :many
+-- name: ListDashboardRuntimeDuration :many
 -- Per-runtime total task run time and task count for the workspace.
 -- Mirrors ListDashboardAgentRunTime but groups on runtime_id. Same
 -- terminal-task filter (completed or failed with both timestamps) and
@@ -420,14 +420,14 @@ WHERE a.workspace_id = $1
 GROUP BY tu.model
 ORDER BY total_seconds DESC;
 
--- name: ListDashboardRuntimeUsage :many
+-- name: ListDashboardUsageByRuntime :many
 -- Per-(runtime_id, model) token aggregates for the workspace. Derived by
 -- joining agent_task_queue with task_usage on task_id. The model dimension
 -- is preserved so the client can compute per-model cost and sum per-runtime,
 -- mirroring how ListDashboardUsageByAgent works for the agent scope.
 --
 -- Only terminal tasks with both timestamps contribute (consistent with
--- ListDashboardRuntimeRunTime so the time and token data cover the same
+-- ListDashboardRuntimeDuration so the time and token data cover the same
 -- set of tasks).
 --
 -- NOTE: token basis differs from the hourly-rollup scopes. This query reads

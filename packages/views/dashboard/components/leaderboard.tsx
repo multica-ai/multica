@@ -89,8 +89,8 @@ export function Leaderboard({
   deletedAgentCount,
   byModelUsage,
   modelRunTime,
-  runtimeRunTime,
-  runtimeUsage,
+  runtimeDuration,
+  usageByRuntime,
   runtimes,
   lessThanMinuteLabel,
 }: {
@@ -99,8 +99,8 @@ export function Leaderboard({
   deletedAgentCount: number;
   byModelUsage: import("@multica/core/types").DashboardUsageByModel[];
   modelRunTime: import("@multica/core/types").DashboardModelRunTime[];
-  runtimeRunTime: import("@multica/core/types").DashboardRuntimeRunTime[];
-  runtimeUsage: import("@multica/core/types").DashboardRuntimeUsage[];
+  runtimeDuration: import("@multica/core/types").DashboardRuntimeDuration[];
+  usageByRuntime: import("@multica/core/types").DashboardUsageByRuntime[];
   runtimes: { id: string; name: string }[];
   lessThanMinuteLabel: string;
 }) {
@@ -114,8 +114,8 @@ export function Leaderboard({
     [byModelUsage, modelRunTime],
   );
   const runtimeRows = useMemo(
-    () => aggregateRuntimeRows(runtimeRunTime, runtimeUsage),
-    [runtimeRunTime, runtimeUsage],
+    () => aggregateRuntimeRows(runtimeDuration, usageByRuntime),
+    [runtimeDuration, usageByRuntime],
   );
 
   const scopeOptions = useMemo(

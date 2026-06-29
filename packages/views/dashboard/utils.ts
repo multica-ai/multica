@@ -6,9 +6,9 @@ import type {
   DashboardRunTimeDaily,
   DashboardFailureDaily,
   DashboardFailureByAgent,
-  DashboardRuntimeRunTime,
+  DashboardRuntimeDuration,
   DashboardModelRunTime,
-  DashboardRuntimeUsage,
+  DashboardUsageByRuntime,
 } from "@multica/core/types";
 import {
   FAILURE_CLASSES,
@@ -888,8 +888,8 @@ export interface RuntimeDashboardRow {
 // runtime, matching how the agent scope computes per-agent cost.
 // Sorted by seconds desc, then cost desc.
 export function aggregateRuntimeRows(
-  runTimeRows: DashboardRuntimeRunTime[],
-  usageRows: DashboardRuntimeUsage[],
+  runTimeRows: DashboardRuntimeDuration[],
+  usageRows: DashboardUsageByRuntime[],
 ): RuntimeDashboardRow[] {
   // Fold (runtime, model) usage rows into per-runtime token+cost totals.
   const usageByRuntime = new Map<string, { tokens: number; cost: number }>();
