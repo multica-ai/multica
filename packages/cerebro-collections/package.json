@@ -21,6 +21,7 @@
     "@multica/cerebro-groups": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*",
     "lucide-react": "catalog:",
     "zod": "catalog:"
   },
