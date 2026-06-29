@@ -382,19 +382,15 @@ type FirtalRegistryTool struct {
 }
 
 // firtalRegistryGrantConfig is the per-agent grant config_json shape for the
-// firtal_registry tool. A grant row with empty/missing AllowedDataSources and
-// AllowedAll=false locks the agent out of every data source (deny-by-default).
+// firtal_registry tool. Data-source access is now governed solely by the
+// unified tool-policy chain (FIR-2208); the legacy allowed_data_sources /
+// allowed_data_sources_all fields have been retired and are no longer read.
 type firtalRegistryGrantConfig struct {
-	AllowedDataSources []string `json:"allowed_data_sources"`
-	AllowedAll         bool     `json:"allowed_data_sources_all"`
 	// AllowedApps opts the agent into the list_apps action (app + owner
-	// catalog lookup via /api/apps). Deny-by-default like the data-source
-	// allowlist: an agent without allowed_apps (and without
-	// allowed_data_sources_all) cannot read the apps catalog.
+	// catalog lookup via /api/apps). Deny-by-default.
 	AllowedApps bool `json:"allowed_apps"`
 	// AllowWrite opts the agent into the update_app action (deploy-write upsert
-	// via /api/apps/deploy). Strictly deny-by-default and NOT implied by
-	// allowed_data_sources_all (which is read scope): a write requires this
+	// via /api/apps/deploy). Strictly deny-by-default: a write requires this
 	// explicit flag. The registry itself still gates the call on a system key
 	// with apps_write_enabled + a per-app write grant.
 	AllowWrite bool `json:"allow_write"`
@@ -410,15 +406,6 @@ type fdrRegistrySettings struct {
 		APIKey  string `json:"api_key"`
 	} `json:"data_registry"`
 	FirtalGateway *WorkspaceFirtalGatewaySettings `json:"firtal_gateway"`
-	// RegistryGrantsEnabled flips the unified permission engine ON as a
-	// per-data-source gate for firtal_registry (FIR-1609 Phase 6), the twin of
-	// repo_grants_enabled for repo checkout. OFF/absent (the default) keeps the
-	// legacy per-agent allowlist (allowed_data_sources) as the sole enforcing
-	// source — zero behavior change. When ON, the chain runs AFTER the allowlist
-	// and can only TIGHTEN it (Base=Allow, so a source with no explicit row stays
-	// allowed; an Ask/Deny row blocks). It never loosens, so turning it on can
-	// never widen access beyond what the allowlist already grants.
-	RegistryGrantsEnabled *bool `json:"registry_grants_enabled"`
 }
 
 func (t *FirtalRegistryTool) Name() string { return "firtal_registry" }
@@ -431,24 +418,16 @@ func (t *FirtalRegistryTool) Description() string {
 // it without a redeploy (cerebro feature-flag rule).
 const flagRegistryAccessHint = "cerebro_registry_access_hint"
 
-// AccessSummaryForPrompt returns a per-agent line, derived from THIS agent's
-// firtal_registry grant config, that the prompt builder appends so the model
-// knows the tool IS its data access instead of guessing it lacks a database
-// (FIR-1914). It reads the same per-agent allowlist that enforces access at
-// call time, so the surfaced summary can never disagree with what the agent is
-// actually permitted to query, and it updates automatically when the grant
-// changes. Cost is a single agent_tool_grant read; no registry API call. It
-// fails safe to "" — a disabled flag or a config-load error must never break
-// prompt assembly.
+// AccessSummaryForPrompt returns the firtal_registry access line appended to
+// the agent's system prompt (FIR-1914). Data-source access is now governed by
+// the tool-policy chain (FIR-2208); list_data_sources already returns only
+// sources the chain permits, so the summary is a generic nudge rather than an
+// allowlist-derived count. Fails safe to "" on a disabled flag.
 func (t *FirtalRegistryTool) AccessSummaryForPrompt(ctx context.Context) string {
 	if !t.accessHintEnabled(ctx) {
 		return ""
 	}
-	cfg, err := t.loadGrantConfig(ctx)
-	if err != nil {
-		return ""
-	}
-	return registryAccessSummary(cfg)
+	return registryAccessSummary()
 }
 
 // accessHintEnabled reads the cerebro_registry_access_hint workspace flag.
@@ -470,29 +449,14 @@ func (t *FirtalRegistryTool) accessHintEnabled(ctx context.Context) bool {
 	return enabled
 }
 
-// registryAccessSummary renders the dynamic access line from a grant config.
-// Pure function (no ctx/DB) so it is unit-testable. Deny-by-default: an agent
-// with neither allowed_data_sources_all nor any allowed_data_sources gets ""
-// (we never claim access the allowlist does not grant). The line deliberately
-// counts sources rather than naming them: the names live in the registry
-// service (the allowlist stores ids only), so listing them would cost a
-// registry API call on every prompt build — the count plus the explicit nudge
-// to call list_data_sources fixes the misunderstanding without that cost.
-func registryAccessSummary(cfg firtalRegistryGrantConfig) string {
-	const base = " This tool IS your access to Firtal business data (orders, products, P/L, payments, and more) — never answer that you lack a database or data access without first calling firtal_registry with action=list_data_sources."
-	switch {
-	case cfg.AllowedAll:
-		return "\n\nYour firtal_registry access: you are permitted to query ALL data sources in the Firtal Data Registry." + base
-	case len(cfg.AllowedDataSources) > 0:
-		noun := "data source"
-		if len(cfg.AllowedDataSources) != 1 {
-			noun += "s"
-		}
-		return fmt.Sprintf("\n\nYour firtal_registry access: you are permitted to query %d %s in the Firtal Data Registry. Call action=list_data_sources to see exactly which ones (the result is already filtered to your permissions), then get_schema/execute to query them.%s",
-			len(cfg.AllowedDataSources), noun, base)
-	default:
-		return ""
-	}
+// registryAccessSummary returns the prompt line telling the agent it can query
+// the Firtal Data Registry. Data-source access is now governed by the
+// tool-policy chain (FIR-2208), so list_data_sources already returns only the
+// sources the chain permits — no need to advertise a count here.
+func registryAccessSummary() string {
+	return "\n\nThis tool IS your access to Firtal business data (orders, products, P/L, payments, and more). " +
+		"Use action=list_data_sources to discover which data sources you may query, then get_schema/execute to query them. " +
+		"Never answer that you lack a database or data access without first calling firtal_registry with action=list_data_sources."
 }
 func (t *FirtalRegistryTool) InputSchema() map[string]any {
 	return map[string]any{
@@ -577,11 +541,8 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 
 	switch action {
 	case "list_data_sources":
-		return t.callList(ctx, baseURL, apiKey, config)
+		return t.callList(ctx, baseURL, apiKey)
 	case "get_schema":
-		if !config.allows(dsID) {
-			return "", fmt.Errorf("firtal_registry: data_source_id %q is not in this agent's allowlist", dsID)
-		}
 		if err := t.chainGateDataSource(ctx, action, dsID, baseURL, apiKey); err != nil {
 			return "", err
 		}
@@ -590,9 +551,6 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 			"agent_metadata": true,
 		})
 	case "execute":
-		if !config.allows(dsID) {
-			return "", fmt.Errorf("firtal_registry: data_source_id %q is not in this agent's allowlist", dsID)
-		}
 		if err := t.chainGateDataSource(ctx, action, dsID, baseURL, apiKey); err != nil {
 			return "", err
 		}
@@ -604,7 +562,7 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 		}
 		return t.callExecute(ctx, baseURL, apiKey, body)
 	case "list_apps":
-		if !config.AllowedAll && !config.AllowedApps {
+		if !config.AllowedApps {
 			return "", fmt.Errorf("firtal_registry: list_apps is not enabled for this agent (set allowed_apps in the firtal_registry grant config)")
 		}
 		githubRepo, _ := args["github_repo"].(string)
@@ -626,49 +584,15 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 	return "", fmt.Errorf("firtal_registry: unreachable")
 }
 
-// allows reports whether the given data source UUID is permitted under this
-// registryGrantsEnabled reports whether the unified permission engine is wired
-// as a per-data-source gate for this workspace (FIR-1609 Phase 6), read from the
-// registry_grants_enabled workspace setting. Absent/false (the default) means the
-// legacy allowlist is the sole enforcing source and the chain gate is skipped —
-// the twin of repoGrantsEnabled on the daemon side. A workspace load failure is
-// treated as "off" so a transient DB error never tightens access unexpectedly;
-// the legacy allowlist (already checked by the caller) remains in force either way.
-func (t *FirtalRegistryTool) registryGrantsEnabled(ctx context.Context) bool {
-	ws, err := t.queries.GetWorkspace(ctx, t.tctx.WorkspaceID)
-	if err != nil || len(ws.Settings) == 0 {
-		return false
-	}
-	var envelope fdrRegistrySettings
-	if err := json.Unmarshal(ws.Settings, &envelope); err != nil {
-		return false
-	}
-	return envelope.RegistryGrantsEnabled != nil && *envelope.RegistryGrantsEnabled
-}
-
 // chainGateDataSource runs the unified permission chain for one data source
-// AFTER the legacy allowlist has already allowed it (FIR-1609 Phase 6). It can
-// only TIGHTEN: resource_pattern is the data-source id on the firtal_registry
-// tool key (the same projection rows the Permissions screen shows), Base=Allow,
-// so a source with no explicit row stays allowed and only an Ask/Deny row blocks.
-// Returns nil (allow) when the flag is off, when no resolver is wired (test
-// fixtures), or when the chain resolves to Allow. An Ask resolves to a block at
-// this gate: a registry query is an autonomous tool call with no inbox round-trip,
-// so anything other than Allow denies — mirroring the daemon repo and credential
-// gates' "only an explicit Allow passes" rule.
-//
-// The WHEN layer (FIR-1609) is threaded so a CONDITIONAL rule on a data source
-// actually evaluates here. action is the registry verb (get_schema/execute), put
-// on RequestContext.Action so both an action-scoped Condition (Actions term) and
-// a CEL `action` variable bind; Host is empty because a data source has no single
-// target host at this layer. Eval is the shared CEL evaluator, injected only when
-// cerebro_policy_cel is on — without this, a CEL-conditioned Allow silently became
-// unconditional and a CEL-conditioned Deny silently blocked always (Eval nil ⇒
-// undecidable ⇒ fail-closed by effect), so a "conditional yes on a data source"
-// could not work. This makes the registry gate the twin of the daemon/local-CLI
-// gate for conditions.
+// (FIR-2083 / FIR-2208). Base=Allow means a source with no explicit row stays
+// allowed; Ask/Deny rows block. The gate runs on two resource_patterns per call:
+// the per-source id (explicit override) and "" (capability-wide, where an
+// ArgAllow condition scopes a set of sources). Both must resolve Allow.
+// Eval is wired only when cerebro_policy_cel is on; nil → Expr conditions
+// fail closed (undecidable → Allow drops, Deny/Ask kept).
 func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, action, dsID, baseURL, apiKey string) error {
-	if t.cerebro == nil || !t.registryGrantsEnabled(ctx) {
+	if t.cerebro == nil {
 		return nil
 	}
 	store := toolpolicy.NewStoreFromQueries(t.cerebro)
@@ -750,70 +674,6 @@ func (t *FirtalRegistryTool) registryPolicyCELEvaluator(ctx context.Context) too
 	return eval.Eval
 }
 
-// grant's allowlist. allowed_data_sources_all=true short-circuits to allow.
-func (c firtalRegistryGrantConfig) allows(dsID string) bool {
-	if c.AllowedAll {
-		return true
-	}
-	for _, id := range c.AllowedDataSources {
-		if strings.EqualFold(strings.TrimSpace(id), dsID) {
-			return true
-		}
-	}
-	return false
-}
-
-// filterListed drops data-source entries from a /api/registry/data-sources
-// response whose `id` field is not in this grant's allowlist. The FDR returns
-// either a bare array or an envelope {data: [...]}; both shapes are handled.
-// On allowed_data_sources_all=true the body is passed through untouched.
-func (c firtalRegistryGrantConfig) filterListed(raw []byte) []byte {
-	if c.AllowedAll {
-		return raw
-	}
-	var asArray []map[string]any
-	if err := json.Unmarshal(raw, &asArray); err == nil {
-		return marshalListed(filterDataSources(asArray, c))
-	}
-	var asEnvelope map[string]any
-	if err := json.Unmarshal(raw, &asEnvelope); err == nil {
-		if items, ok := asEnvelope["data"].([]any); ok {
-			kept := make([]map[string]any, 0, len(items))
-			for _, item := range items {
-				if m, ok := item.(map[string]any); ok {
-					kept = append(kept, m)
-				}
-			}
-			asEnvelope["data"] = filterDataSources(kept, c)
-			if out, err := json.Marshal(asEnvelope); err == nil {
-				return out
-			}
-		}
-	}
-	// Unknown shape — fail safe: return an empty array rather than leak the
-	// upstream response unfiltered to an agent that does not have AllowedAll.
-	return []byte("[]")
-}
-
-func filterDataSources(items []map[string]any, c firtalRegistryGrantConfig) []map[string]any {
-	kept := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		id, _ := item["id"].(string)
-		if c.allows(id) {
-			kept = append(kept, item)
-		}
-	}
-	return kept
-}
-
-func marshalListed(items []map[string]any) []byte {
-	out, err := json.Marshal(items)
-	if err != nil {
-		return []byte("[]")
-	}
-	return out
-}
-
 // requiredDataSourceID pulls and validates the data_source_id argument shared
 // by the get_schema and execute actions.
 func requiredDataSourceID(args map[string]any) (string, error) {
@@ -878,7 +738,7 @@ func (t *FirtalRegistryTool) loadRegistryCredentials(ctx context.Context) (strin
 	return baseURL, apiKey, nil
 }
 
-func (t *FirtalRegistryTool) callList(ctx context.Context, baseURL, apiKey string, config firtalRegistryGrantConfig) (string, error) {
+func (t *FirtalRegistryTool) callList(ctx context.Context, baseURL, apiKey string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+firtalRegistryListPath, nil)
 	if err != nil {
 		return "", fmt.Errorf("firtal_registry: build list request: %w", err)
@@ -888,7 +748,7 @@ func (t *FirtalRegistryTool) callList(ctx context.Context, baseURL, apiKey strin
 	if err != nil {
 		return "", err
 	}
-	return string(config.filterListed(body)), nil
+	return string(body), nil
 }
 
 // resolveDataSourceFolder fetches the folder_id of one data source for the

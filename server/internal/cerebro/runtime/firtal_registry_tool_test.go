@@ -10,94 +10,6 @@ import (
 	"testing"
 )
 
-func TestFirtalRegistryGrantConfigAllows(t *testing.T) {
-	cases := []struct {
-		name   string
-		config firtalRegistryGrantConfig
-		dsID   string
-		want   bool
-	}{
-		{"empty config denies", firtalRegistryGrantConfig{}, "ds-1", false},
-		{"explicit allowlist matches", firtalRegistryGrantConfig{AllowedDataSources: []string{"ds-1", "ds-2"}}, "ds-1", true},
-		{"explicit allowlist misses", firtalRegistryGrantConfig{AllowedDataSources: []string{"ds-1"}}, "ds-other", false},
-		{"AllowedAll short-circuits", firtalRegistryGrantConfig{AllowedAll: true}, "ds-anything", true},
-		{"case-insensitive UUID match", firtalRegistryGrantConfig{AllowedDataSources: []string{"AbCd"}}, "abcd", true},
-		{"whitespace tolerated in allowlist", firtalRegistryGrantConfig{AllowedDataSources: []string{"  ds-1  "}}, "ds-1", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.config.allows(tc.dsID); got != tc.want {
-				t.Fatalf("allows(%q) = %v, want %v", tc.dsID, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestFirtalRegistryFilterListedArrayShape(t *testing.T) {
-	upstream := []byte(`[
-		{"id":"ds-allowed","name":"A"},
-		{"id":"ds-blocked","name":"B"},
-		{"id":"ds-also-allowed","name":"C"}
-	]`)
-	config := firtalRegistryGrantConfig{AllowedDataSources: []string{"ds-allowed", "ds-also-allowed"}}
-	got := config.filterListed(upstream)
-
-	var out []map[string]any
-	if err := json.Unmarshal(got, &out); err != nil {
-		t.Fatalf("filtered output is not a JSON array: %v\n%s", err, got)
-	}
-	if len(out) != 2 {
-		t.Fatalf("filterListed kept %d entries, want 2 (got %s)", len(out), got)
-	}
-	for _, item := range out {
-		if item["id"] == "ds-blocked" {
-			t.Fatalf("filterListed leaked a blocked data source: %v", item)
-		}
-	}
-}
-
-func TestFirtalRegistryFilterListedEnvelopeShape(t *testing.T) {
-	upstream := []byte(`{"data":[
-		{"id":"ds-allowed","name":"A"},
-		{"id":"ds-blocked","name":"B"}
-	],"meta":{"trace_id":"abc"}}`)
-	config := firtalRegistryGrantConfig{AllowedDataSources: []string{"ds-allowed"}}
-	got := config.filterListed(upstream)
-
-	var env map[string]any
-	if err := json.Unmarshal(got, &env); err != nil {
-		t.Fatalf("filtered output is not a JSON envelope: %v\n%s", err, got)
-	}
-	data, ok := env["data"].([]any)
-	if !ok {
-		t.Fatalf("envelope.data is not an array: %T (%s)", env["data"], got)
-	}
-	if len(data) != 1 {
-		t.Fatalf("filtered envelope kept %d entries, want 1", len(data))
-	}
-	if env["meta"] == nil {
-		t.Fatalf("filterListed dropped sibling envelope fields")
-	}
-}
-
-func TestFirtalRegistryFilterListedAllowedAllPassesThrough(t *testing.T) {
-	upstream := []byte(`[{"id":"x"},{"id":"y"}]`)
-	config := firtalRegistryGrantConfig{AllowedAll: true}
-	got := config.filterListed(upstream)
-	if string(got) != string(upstream) {
-		t.Fatalf("AllowedAll=true should pass through, got %s want %s", got, upstream)
-	}
-}
-
-func TestFirtalRegistryFilterListedUnknownShapeFailsClosed(t *testing.T) {
-	upstream := []byte(`{"not_data":[{"id":"ds-1"}]}`)
-	config := firtalRegistryGrantConfig{AllowedDataSources: []string{"ds-1"}}
-	got := config.filterListed(upstream)
-	if strings.TrimSpace(string(got)) != "[]" {
-		t.Fatalf("unknown shape should fail closed to [], got %s", got)
-	}
-}
-
 func TestFirtalRegistrySnakeToCamel(t *testing.T) {
 	cases := map[string]string{
 		"filter_group": "filterGroup",
@@ -170,10 +82,10 @@ func TestFirtalRegistryCallExecuteSendsApiKeyAndCamelCaseBody(t *testing.T) {
 	}
 }
 
-// TestFirtalRegistryCallListUsesGetAndFiltersByAllowlist verifies that listing
-// data sources sends GET to /api/registry/data-sources and the response is
-// filtered to only allowed data sources before being returned to the agent.
-func TestFirtalRegistryCallListUsesGetAndFiltersByAllowlist(t *testing.T) {
+// TestFirtalRegistryCallListUsesGet verifies that listing data sources sends GET
+// to /api/registry/data-sources and passes the response through to the caller.
+// Filtering is now delegated entirely to the tool-policy chain (FIR-2208).
+func TestFirtalRegistryCallListUsesGet(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %q, want GET", r.Method)
@@ -184,24 +96,17 @@ func TestFirtalRegistryCallListUsesGetAndFiltersByAllowlist(t *testing.T) {
 		if r.Header.Get("x-api-key") != "rk_test" {
 			t.Errorf("x-api-key = %q, want rk_test", r.Header.Get("x-api-key"))
 		}
-		_, _ = w.Write([]byte(`[
-			{"id":"ds-allowed","name":"Sales"},
-			{"id":"ds-blocked","name":"Payroll"}
-		]`))
+		_, _ = w.Write([]byte(`[{"id":"ds-1","name":"Sales"},{"id":"ds-2","name":"Payroll"}]`))
 	}))
 	defer srv.Close()
 
 	tool := &FirtalRegistryTool{}
-	cfg := firtalRegistryGrantConfig{AllowedDataSources: []string{"ds-allowed"}}
-	out, err := tool.callList(context.Background(), srv.URL, "rk_test", cfg)
+	out, err := tool.callList(context.Background(), srv.URL, "rk_test")
 	if err != nil {
 		t.Fatalf("callList: %v", err)
 	}
-	if strings.Contains(out, "ds-blocked") {
-		t.Fatalf("callList leaked a blocked data source: %s", out)
-	}
-	if !strings.Contains(out, "ds-allowed") {
-		t.Fatalf("callList dropped the allowed data source: %s", out)
+	if !strings.Contains(out, "ds-1") || !strings.Contains(out, "ds-2") {
+		t.Fatalf("callList should pass through all data sources: %s", out)
 	}
 }
 
@@ -269,10 +174,8 @@ func TestFirtalRegistryCallRejectsMissingAction(t *testing.T) {
 	}
 }
 
-// FIR-1609 Phase 6: the per-data-source chain gate is a no-op until a resolver
-// is wired AND the workspace flag is on. With no cerebro resolver (the test/
-// fixture path, and the default in any runtime that didn't wire the chain) the
-// gate must allow — it never blocks a source the legacy allowlist already passed.
+// FIR-2208: the chain gate runs whenever cerebro queries are wired; without a
+// resolver (the test/fixture path) the gate must allow — test.
 func TestFirtalRegistryChainGateNoOpWithoutResolver(t *testing.T) {
 	tool := &FirtalRegistryTool{} // cerebro == nil
 	if err := tool.chainGateDataSource(context.Background(), "execute", "ds-anything", "", ""); err != nil {
@@ -282,42 +185,11 @@ func TestFirtalRegistryChainGateNoOpWithoutResolver(t *testing.T) {
 
 // registryPolicyCELEvaluator fails closed (returns nil) when no cerebro queries
 // are wired, so an Expr condition on a data source is undecidable rather than
-// silently evaluated — the gateway twin of the daemon gate's behaviour. The
-// flag-on path is exercised end-to-end against a real workspace in the QA plan;
-// here we pin the no-queries floor that keeps CEL from arming by accident.
+// silently evaluated.
 func TestFirtalRegistryPolicyCELEvaluatorNilWithoutQueries(t *testing.T) {
 	tool := &FirtalRegistryTool{} // cerebro == nil
 	if eval := tool.registryPolicyCELEvaluator(context.Background()); eval != nil {
 		t.Fatal("registryPolicyCELEvaluator must be nil without cerebro queries (fail closed)")
-	}
-}
-
-// The registry_grants_enabled flag is read from the same workspace.settings
-// envelope as the registry credentials. Absent or false keeps the chain gate
-// off (legacy allowlist is the sole enforcing source); only an explicit true
-// arms it. This pins the JSON contract the daemon/admin screen writes.
-func TestFirtalRegistrySettingsGrantsEnabledFlag(t *testing.T) {
-	cases := []struct {
-		name string
-		raw  string
-		want bool
-	}{
-		{"absent → off", `{"data_registry":{"base_url":"x"}}`, false},
-		{"explicit false → off", `{"registry_grants_enabled":false}`, false},
-		{"explicit true → on", `{"registry_grants_enabled":true}`, true},
-		{"empty object → off", `{}`, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var env fdrRegistrySettings
-			if err := json.Unmarshal([]byte(tc.raw), &env); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
-			got := env.RegistryGrantsEnabled != nil && *env.RegistryGrantsEnabled
-			if got != tc.want {
-				t.Fatalf("registry_grants_enabled = %v, want %v", got, tc.want)
-			}
-		})
 	}
 }
 
@@ -416,11 +288,10 @@ func TestFirtalRegistryCallUpdateAppPostsToDeploy(t *testing.T) {
 }
 
 func TestFirtalRegistryUpdateAppRequiresAllowWrite(t *testing.T) {
-	// AllowWrite is gated in Call(); assert the config flag is independent of
-	// read scope so allowed_data_sources_all never implies write.
-	cfg := firtalRegistryGrantConfig{AllowedAll: true}
+	// AllowWrite is gated in Call(); assert the flag is deny-by-default.
+	cfg := firtalRegistryGrantConfig{}
 	if cfg.AllowWrite {
-		t.Fatal("allowed_data_sources_all must not imply AllowWrite")
+		t.Fatal("AllowWrite must default to false")
 	}
 }
 

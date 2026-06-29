@@ -601,10 +601,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAgentVaultHandler := cerebroagentvault.NewHandler(pool)
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from). FIR-1739: wire the Agent Vault vault lister so the Credentials tab also lists Agent Vault boxes (agentvault-vault:<name>) as grantable rows; nil-safe when admin creds absent.
 	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool).WithVaultLister(cerebroagentvault.NewVaultLister()))
-	// CEREBRO-PATCH(cerebro-tool-policy-registry-fold-in): FIR-1609 Phase 5 — inject
-	// the firtal_registry data-source lister + per-agent grant so the table appends
-	// one per-data-source row under firtal_registry. Keeps toolpolicy.Table pure.
-	cerebroToolPolicyHandler.RegistryRows = h.ToolPolicyRegistryRows
 	// CEREBRO-PATCH(cerebro-tool-policy-system-cap): FIR-1609 Phase 2 — resolve the
 	// owner a System (autopilot) subject is capped on, so a System rule looser than
 	// its owner is rejected at authoring time. Prefer the explicit owner_user_id;
@@ -1611,7 +1607,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Route("/tools/{name}", func(r chi.Router) {
 						r.Put("/", h.UpsertAgentTool)
 					})
-					r.Get("/firtal-registry/data-sources", h.ListFirtalRegistryDataSources) // CEREBRO-PATCH(firtal-registry-data-sources-route): TECH-2925 FDR catalog for allowlist UI.
 					// CEREBRO-PATCH(agent-tool-overrides-routes): JEH-1710 per-agent
 					// override of the runtime tool default.
 					r.Get("/tool-overrides", h.ListAgentToolOverrides)
