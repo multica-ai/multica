@@ -1,0 +1,50 @@
+name: Publish Docker Images
+
+on:
+  push:
+    branches:
+      - main
+      - feat/marvis-integration # 当您推送到这个定制分支时触发
+  workflow_dispatch: # 允许手动点击按钮触发
+
+jobs:
+  build-and-push-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          # 修改为您自己的 Docker 镜像名，例如 username/multica-backend
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/multica-backend:latest
+
+  build-and-push-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.web
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/multica-web:latest
