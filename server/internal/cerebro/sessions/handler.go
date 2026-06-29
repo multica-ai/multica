@@ -513,8 +513,19 @@ func (h *Handler) loadIssue(w http.ResponseWriter, r *http.Request) (db.Issue, b
 	if !ok {
 		return db.Issue{}, false
 	}
-	issueID, ok := parseUUIDParam(w, r, "issueId")
-	if !ok {
+	// The {issueId} path param may be a UUID or a human identifier (e.g.
+	// "FIR-1931") — the issue-detail UI passes the identifier. Resolve the
+	// identifier first (number within the workspace), then fall back to the UUID
+	// path. This mirrors the platform's loadIssueForUser so every session
+	// endpoint accepts both forms instead of 400-ing on a key, which left the
+	// context bar stuck on "estimate" even when real footprint data existed.
+	raw := chi.URLParam(r, "issueId")
+	if issue, ok := h.resolveIssueByIdentifier(r.Context(), raw, wsID); ok {
+		return issue, true
+	}
+	issueID, err := util.ParseUUID(raw)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found")
 		return db.Issue{}, false
 	}
 	issue, err := h.upstream.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: wsID})
@@ -523,6 +534,43 @@ func (h *Handler) loadIssue(w http.ResponseWriter, r *http.Request) (db.Issue, b
 		return db.Issue{}, false
 	}
 	return issue, true
+}
+
+// resolveIssueByIdentifier resolves a "PREFIX-NUMBER" identifier (e.g.
+// "FIR-1931") to an issue in the workspace. It returns false for any string not
+// in identifier form, so the caller falls through to UUID parsing. The prefix
+// is not validated — the number is unique per workspace — matching the
+// platform's resolveIssueByIdentifier.
+func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id string, wsID pgtype.UUID) (db.Issue, bool) {
+	num, ok := identifierNumber(id)
+	if !ok {
+		return db.Issue{}, false
+	}
+	issue, err := h.upstream.GetIssueByNumber(ctx, db.GetIssueByNumberParams{WorkspaceID: wsID, Number: num})
+	if err != nil {
+		return db.Issue{}, false
+	}
+	return issue, true
+}
+
+// identifierNumber extracts the trailing number from a "PREFIX-NUMBER"
+// identifier, returning false when the string is not in that form.
+func identifierNumber(id string) (int32, bool) {
+	idx := strings.LastIndexByte(id, '-')
+	if idx <= 0 || idx >= len(id)-1 {
+		return 0, false
+	}
+	num := 0
+	for _, c := range id[idx+1:] {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		num = num*10 + int(c-'0')
+	}
+	if num <= 0 {
+		return 0, false
+	}
+	return int32(num), true
 }
 
 type scanner interface {

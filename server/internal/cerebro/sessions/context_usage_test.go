@@ -118,3 +118,33 @@ func TestClampPercent(t *testing.T) {
 		}
 	}
 }
+
+// FIR-1931: loadIssue must accept the human identifier ("FIR-1931"), not only a
+// UUID. identifierNumber is the parser that decides identifier-vs-UUID; if it
+// rejects a real identifier the context bar 400s and falls back to "estimate"
+// even though real footprint data exists.
+func TestIdentifierNumber(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    int32
+		wantOK  bool
+	}{
+		{"FIR-1931", 1931, true},
+		{"MUL-3375", 3375, true},
+		{"A-1", 1, true},
+		{"MULTI-WORD-42", 42, true}, // only the trailing -NUMBER matters
+		{"b669a722-2e15-445a-b6a5-a5cdb576a989", 0, false}, // a UUID is not an identifier
+		{"FIR-", 0, false},
+		{"-1931", 0, false},
+		{"FIR1931", 0, false},
+		{"FIR-0", 0, false},
+		{"FIR-12a", 0, false},
+		{"", 0, false},
+	}
+	for _, c := range cases {
+		got, ok := identifierNumber(c.in)
+		if ok != c.wantOK || got != c.want {
+			t.Errorf("identifierNumber(%q) = (%d, %t), want (%d, %t)", c.in, got, ok, c.want, c.wantOK)
+		}
+	}
+}

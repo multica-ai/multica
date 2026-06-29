@@ -11,6 +11,7 @@ package sessions
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -399,5 +400,35 @@ func TestContextUsage_NoCompactionWhenSteady(t *testing.T) {
 	}
 	if resp.LastRunCompaction {
 		t.Errorf("last_run_compaction = true, want false (context only rose)")
+	}
+}
+
+// FIR-1931: the issue-detail UI calls the session endpoints with the human
+// identifier ("FIR-1931"), not the UUID. Before the loadIssue fix that 400'd
+// ("invalid issueId") and the context bar fell back to "estimate" even though
+// real footprint data existed. This proves the identifier form now resolves —
+// callContextUsage with "TEST-<number>" returns 200, same as the UUID form.
+func TestContextUsage_AcceptsIssueIdentifier(t *testing.T) {
+	issueID, workspaceID := seedIssue(t)
+
+	// seedIssue inserts raw SQL (number stays at its DEFAULT 0); real issues get
+	// a positive per-workspace number from the create handler. Give it one so it
+	// has a resolvable identifier.
+	const number int32 = 1931
+	if _, err := sessTestPool.Exec(context.Background(),
+		`UPDATE issue SET number = $2 WHERE id = $1::uuid`, issueID, number); err != nil {
+		t.Fatalf("set issue number: %v", err)
+	}
+	identifier := fmt.Sprintf("TEST-%d", number)
+
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
+
+	// Identifier form must resolve (200), not 400 "invalid issueId".
+	if rec := callContextUsage(h, identifier, workspaceID); rec.Code != http.StatusOK {
+		t.Fatalf("identifier form: want 200, got code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	// UUID form keeps working too.
+	if rec := callContextUsage(h, issueID, workspaceID); rec.Code != http.StatusOK {
+		t.Fatalf("uuid form: want 200, got code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
