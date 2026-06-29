@@ -53,8 +53,17 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@multica/ui/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { projectTreeOptions } from "@multica/core/projects/nesting";
+import type { ProjectTreeItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   artifactCollectionFoldersOptions,
@@ -72,6 +81,7 @@ import {
 import { summarizeAccess, type AccessTone } from "../access-summary";
 import { useGranteeDirectory } from "./use-grantee-directory";
 import { FolderAccessEditor } from "./folder-access-editor";
+import { ProjectGrantsPanel } from "./project-grants-panel";
 import type { CollectionFolder } from "../api";
 import type { GranteeType, GrantSurface } from "../types";
 
@@ -101,6 +111,8 @@ const GROUPS: {
   { group: "Autopilots", surface: "entity", entityKind: "autopilot" },
   { group: "Skills", surface: "entity", entityKind: "skill" },
 ];
+
+const PROJECTS_TAB = "Projects";
 
 const TONE_DOT: Record<AccessTone, string> = {
   everyone: "bg-emerald-500",
@@ -424,6 +436,60 @@ function FolderTree({
   );
 }
 
+function ProjectTree({
+  projects,
+  onManage,
+}: {
+  projects: ProjectTreeItem[];
+  onManage: (project: ProjectTreeItem) => void;
+}) {
+  if (projects.length === 0) {
+    return (
+      <p className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+        No projects yet.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {projects.map((project) => (
+        <React.Fragment key={project.id}>
+          <div style={{ marginLeft: project.depth * 24 }}>
+            <div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2.5">
+              <Layers className="size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="truncate text-sm font-medium">
+                    {project.title}
+                  </span>
+                  <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Project
+                  </span>
+                </div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {project.issue_count} issues
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 font-normal"
+                onClick={() => onManage(project)}
+              >
+                Manage access
+              </Button>
+            </div>
+          </div>
+          {project.children && project.children.length > 0 && (
+            <ProjectTree projects={project.children} onManage={onManage} />
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
 export function CollectionsTab() {
   const wsId = useWorkspaceId();
   const [activeTab, setActiveTab] = React.useState("Documents");
@@ -437,6 +503,7 @@ export function CollectionsTab() {
   const { data: autopilotFolders = [] } = useQuery(
     entityCollectionFoldersOptions(wsId, "autopilot"),
   );
+  const { data: projects = [] } = useQuery(projectTreeOptions(wsId));
 
   const foldersByGroup: Record<string, CollectionFolder[]> = {
     Documents: artifactFolders.filter((f) => f.group === "Documents"),
@@ -446,6 +513,8 @@ export function CollectionsTab() {
   };
 
   const [active, setActive] = React.useState<CollectionFolder | null>(null);
+  const [activeProject, setActiveProject] =
+    React.useState<ProjectTreeItem | null>(null);
   const createFolder = useCreateCollectionFolder();
   const createItem = useCreateCollectionItem();
 
@@ -482,8 +551,8 @@ export function CollectionsTab() {
         <p className="text-sm text-muted-foreground">
           Manage who can reach each folder. A grant gives a group, member, the
           whole workspace, an agent, or a runtime a role on a folder, and
-          cascades down to its sub-folders — so a sub-folder inherits its
-          parent&apos;s access by default until you set its own.
+          cascades down to its sub-folders and sub-projects — so a child item
+          inherits its parent&apos;s access by default until you set its own.
         </p>
       </div>
 
@@ -505,6 +574,12 @@ export function CollectionsTab() {
               {g.group}
             </TabsTrigger>
           ))}
+          <TabsTrigger
+            value={PROJECTS_TAB}
+            className="!w-auto !flex-none !justify-center"
+          >
+            Projects
+          </TabsTrigger>
         </TabsList>
         {GROUPS.map((g) => (
           <TabsContent key={g.group} value={g.group} className="pt-2">
@@ -565,6 +640,9 @@ export function CollectionsTab() {
             />
           </TabsContent>
         ))}
+        <TabsContent value={PROJECTS_TAB} className="pt-2">
+          <ProjectTree projects={projects} onManage={setActiveProject} />
+        </TabsContent>
       </Tabs>
 
       {active && (
@@ -577,6 +655,22 @@ export function CollectionsTab() {
             if (!open) setActive(null);
           }}
         />
+      )}
+      {activeProject && (
+        <Dialog open={Boolean(activeProject)} onOpenChange={(open) => {
+          if (!open) setActiveProject(null);
+        }}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Access — {activeProject.title}</DialogTitle>
+              <DialogDescription>
+                Set direct access on this project and review inherited access
+                from parent projects.
+              </DialogDescription>
+            </DialogHeader>
+            <ProjectGrantsPanel projectId={activeProject.id} />
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

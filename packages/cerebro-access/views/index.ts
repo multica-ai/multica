@@ -6,7 +6,7 @@ export { PrivateBadge } from "./components/private-badge";
 export { AutopilotPrivacySection } from "./components/autopilot-privacy-section";
 export { ProjectAccessTab } from "./projects/project-access-tab";
 // CEREBRO-PATCH(cerebro-project-grants-routes): FIR-2125 role-based project grants panel (replaces ProjectAccessTab).
-export { ProjectGrantsPanel } from "./projects/project-grants-panel";
+export { ProjectGrantsPanel } from "@multica/cerebro-collections/views";
 export {
   getMentionAccessContext,
   useEnsureMentionAccessData,

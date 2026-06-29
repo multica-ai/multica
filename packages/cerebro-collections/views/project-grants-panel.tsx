@@ -31,19 +31,14 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { useWorkspaceId } from "@multica/core/hooks";
-import {
-  projectGrantsOptions,
-} from "@multica/cerebro-collections/queries";
-import {
-  useUpsertProjectGrant,
-  useRemoveProjectGrant,
-} from "@multica/cerebro-collections/mutations";
+import { projectGrantsOptions } from "../queries";
+import { useUpsertProjectGrant, useRemoveProjectGrant } from "../mutations";
 import {
   GRANTEE_TYPE_LABELS,
   ROLE_LABELS,
   useGranteeDirectory,
-} from "@multica/cerebro-collections/views/use-grantee-directory";
-import type { GranteeType, GrantRole } from "@multica/cerebro-collections/types";
+} from "./use-grantee-directory";
+import type { GranteeType, GrantRole } from "../types";
 
 const ROLE_VALUES: GrantRole[] = ["viewer", "editor", "full_access"];
 const GRANTEE_TYPE_VALUES: GranteeType[] = [
