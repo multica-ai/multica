@@ -150,6 +150,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | Kimi | `kimi` | Moonshot coding agent |
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
 | [Qoder CLI](https://docs.qoder.com/) | `qodercli` | Qoder ACP coding agent |
+| [Trae CLI](https://github.com/bytedance/trae-agent) | `trae-cli` | ByteDance Trae Agent (one-shot `trae-cli run`) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -223,6 +224,8 @@ Agent-specific overrides:
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
 | `MULTICA_QODER_PATH` | Custom path to the `qodercli` binary |
 | `MULTICA_QODER_MODEL` | Override the Qoder model used |
+| `MULTICA_TRAECLI_PATH` | Custom path to the `trae-cli` binary |
+| `MULTICA_TRAECLI_MODEL` | Override the Trae model used (`provider/model` form, e.g. `doubao/doubao-seed-1.6`) |
 
 The daemon launches Qoder as `qodercli --yolo --acp`, matching Qoder’s ACP “bypass permissions” mode so tool runs do not block on interactive approval in headless runs.
 

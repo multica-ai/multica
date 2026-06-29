@@ -108,6 +108,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverAntigravityModels(ctx, executablePath)
 		})
+	case "traecli":
+		// Trae CLI has no model-list subcommand, and its usable models depend
+		// on which provider API keys the user configured (trae_config.yaml /
+		// env). Return a curated static catalog of the documented provider/model
+		// combinations; users can still type any provider/model string the
+		// manual-entry field accepts.
+		return traecliStaticModels(), nil
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -303,8 +310,27 @@ func codexStaticModels() []Model {
 	}
 }
 
-// cursorStaticModels is a minimal fallback used when
-// `cursor-agent --list-models` isn't available (binary missing,
+// traecliStaticModels is the curated catalog for ByteDance's Trae CLI. Trae
+// exposes no model-list command and its usable models depend entirely on which
+// provider API keys the user configured, so we ship the documented
+// provider/model examples from the upstream README. IDs use the shared
+// `provider/model` convention (the dropdown groups by Provider, and the backend
+// splits on the first "/" into Trae's --provider / --model flags), so model IDs
+// that themselves contain a slash — e.g. OpenRouter's
+// "anthropic/claude-3-5-sonnet" — round-trip correctly. Doubao is the default
+// since it is ByteDance's own first-party model for Trae.
+func traecliStaticModels() []Model {
+	return []Model{
+		{ID: "doubao/doubao-seed-1.6", Label: "Doubao Seed 1.6", Provider: "doubao", Default: true},
+		{ID: "openai/gpt-4o", Label: "GPT-4o", Provider: "openai"},
+		{ID: "anthropic/claude-sonnet-4-20250514", Label: "Claude Sonnet 4", Provider: "anthropic"},
+		{ID: "google/gemini-2.5-flash", Label: "Gemini 2.5 Flash", Provider: "google"},
+		{ID: "openrouter/anthropic/claude-3-5-sonnet", Label: "Claude 3.5 Sonnet (OpenRouter)", Provider: "openrouter"},
+		{ID: "ollama/qwen3", Label: "Qwen3 (Ollama)", Provider: "ollama"},
+	}
+}
+
+// cursorStaticModels is a minimal fallback used when// `cursor-agent --list-models` isn't available (binary missing,
 // offline, etc). The real catalog is fetched dynamically because
 // Cursor's model IDs shift (e.g. `composer-2-fast`,
 // `claude-4.6-sonnet-medium`, `gemini-3.1-pro`) and any static

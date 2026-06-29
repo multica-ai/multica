@@ -247,6 +247,22 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// Trae (ByteDance) — representative vector mark in Trae's brand red on a dark
+// rounded tile. Trae ships no small monochrome icon asset, so this is a clean
+// geometric "spark" glyph rather than a traced official logo; it stays
+// legible at 16px and matches the visual weight of the other provider tiles.
+function TraeLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5.2" fill="#0E0E10" />
+      <path
+        d="M12 4.5l2.2 5.3L19.5 12l-5.3 2.2L12 19.5l-2.2-5.3L4.5 12l5.3-2.2L12 4.5z"
+        fill="#FF4D2E"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -281,6 +297,8 @@ export function ProviderLogo({
       return <QoderLogo className={className} />;
     case "antigravity":
       return <AntigravityLogo className={className} />;
+    case "traecli":
+      return <TraeLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }
