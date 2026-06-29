@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -16,6 +17,9 @@ import { Spinner } from "@multica/ui/components/ui/spinner";
 import type { IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import { useUpdateIssue, useBatchUpdateIssues } from "@multica/core/issues/mutations";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { agentListOptions } from "@multica/core/workspace/queries";
+import { runtimeListOptions, readRuntimeCliVersion, handoffSupported } from "@multica/core/runtimes";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
 import { useT } from "../i18n";
 
@@ -90,9 +94,34 @@ export function RunConfirmModal({
   const loading = preview.isLoading;
   const willStart = preview.totalCount > 0;
   const canNote = mode === "assign" && willStart;
+
+  // Local-first handoff-support verdict. For a concrete agent assignee the
+  // target runtime is exactly that agent's, and its CLI version is already warm
+  // in the prefetched agent + runtime caches (useWorkspacePresencePrefetch) —
+  // so we can decide whether the note box is usable synchronously, the same way
+  // the quick-create version gate does, instead of waiting on the preview
+  // round-trip just to learn something the client already holds. Squad / status
+  // / unresolved-agent stay `null` and fall through to the server's verdict,
+  // because their resolved trigger set (hence runtime versions) is only known
+  // after the backend predicate lands.
+  const wsId = useWorkspaceId();
+  const { data: agents = [] } = useQuery({ ...agentListOptions(wsId), enabled: !!wsId });
+  const { data: runtimes = [] } = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
+  const localHandoff = useMemo<boolean | null>(() => {
+    if (mode !== "assign" || d.assigneeType !== "agent" || !d.assigneeId) return null;
+    const agent = agents.find((a) => a.id === d.assigneeId);
+    if (!agent?.runtime_id) return null;
+    const runtime = runtimes.find((r) => r.id === agent.runtime_id);
+    if (!runtime) return null;
+    return handoffSupported(readRuntimeCliVersion(runtime.metadata));
+  }, [mode, d.assigneeType, d.assigneeId, agents, runtimes]);
+
   // Soft gate: an old runtime can't render the note. Disable the box but let
-  // the assignment proceed (MUL-3375 §6.3).
-  const noteDisabled = canNote && !preview.handoffSupported;
+  // the assignment proceed (MUL-3375 §6.3). The local verdict resolves it
+  // instantly when available; otherwise we use the server's preview value once
+  // it lands (and only then, since `canNote` is false while loading).
+  const noteDisabled =
+    localHandoff !== null ? localHandoff === false : canNote && !preview.handoffSupported;
 
   const applyTo = (extra: Partial<UpdateIssueRequest>) => {
     const base: UpdateIssueRequest =
@@ -184,12 +213,16 @@ export function RunConfirmModal({
               id="handoff-note"
               value={note}
               maxLength={MAX_HANDOFF_NOTE}
-              disabled={loading || noteDisabled || submitting}
+              // Only block on the preview round-trip when we have no local
+              // verdict (squad / status). With a local verdict the box is
+              // usable the instant it opens — supported → editable, old runtime
+              // → disabled — never a "checking…" wait.
+              disabled={submitting || noteDisabled || (localHandoff === null && loading)}
               placeholder={t(($) => $.run_confirm.note_placeholder)}
               onChange={(e) => setNote(e.target.value)}
               rows={3}
             />
-            {!loading && noteDisabled ? (
+            {noteDisabled && (localHandoff !== null || !loading) ? (
               <p className="text-xs text-muted-foreground">{t(($) => $.run_confirm.note_unsupported)}</p>
             ) : null}
           </div>

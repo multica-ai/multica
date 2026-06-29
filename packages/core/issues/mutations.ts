@@ -278,10 +278,21 @@ export function useUpdateIssue() {
         old ? { ...old, ...patch } : old,
       );
       if (parentId) {
+        // When the write re-parents this issue away from `parentId` (detach
+        // to standalone, or move under a different parent), prune it from the
+        // old parent's children cache. The parent's sub-issues list renders
+        // that array directly, so a bare patch to parent_issue_id: null would
+        // leave an orphaned row in the list until the settle refetch lands.
+        // onError restores prevChildren, so the prune rolls back on failure.
+        const detachedFromParent =
+          Object.prototype.hasOwnProperty.call(patch, "parent_issue_id") &&
+          patch.parent_issue_id !== parentId;
         qc.setQueryData<Issue[]>(
           issueKeys.children(wsId, parentId),
           (old) =>
-            old?.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+            detachedFromParent
+              ? old?.filter((c) => c.id !== id)
+              : old?.map((c) => (c.id === id ? { ...c, ...patch } : c)),
         );
       }
       return { prevLists, prevDetail, prevChildren, parentId, id };

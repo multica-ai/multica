@@ -5,6 +5,7 @@ import {
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
   computeDailyTotals,
+  filterKnownAgentRows,
   formatDuration,
   mergeAgentDashboardRows,
 } from "./utils";
@@ -198,6 +199,29 @@ describe("mergeAgentDashboardRows", () => {
       ],
     );
     expect(merged.map((r) => r.agentId)).toEqual(["high", "low", "zero-cost-long"]);
+  });
+});
+
+describe("filterKnownAgentRows", () => {
+  const rows = [
+    { agentId: "live", tokens: 100, cost: 1, seconds: 10, taskCount: 1 },
+    { agentId: "deleted", tokens: 50, cost: 0.5, seconds: 5, taskCount: 1 },
+  ];
+
+  it("drops rows whose agent is no longer in the workspace", () => {
+    // "deleted" is absent from the known set — it's a hard-deleted agent whose
+    // legacy rollup row would otherwise render as a bare UUID.
+    const out = filterKnownAgentRows(rows, new Set(["live"]));
+    expect(out.map((r) => r.agentId)).toEqual(["live"]);
+  });
+
+  it("keeps every row while the agent list is still loading (null set)", () => {
+    const out = filterKnownAgentRows(rows, null);
+    expect(out.map((r) => r.agentId)).toEqual(["live", "deleted"]);
+  });
+
+  it("drops every row when the known set is empty", () => {
+    expect(filterKnownAgentRows(rows, new Set())).toEqual([]);
   });
 });
 

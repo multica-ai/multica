@@ -294,6 +294,31 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.31",
+        date: "2026-06-26",
+        title: "跨工作区未读小圆点、Composio 工具集底座、更顺手的编辑器",
+        changes: [],
+        features: [
+          "工作区切换器里，其他工作区有未读 Inbox 时会亮起小圆点。",
+          "新增 Composio 工具集底座，为后续第三方工具对接做好准备。",
+          "现在可以在多个本地检出里并行启动桌面端 dev，互不打架。",
+          "中文文档首页新增一段中文介绍视频，可点击播放。",
+        ],
+        improvements: [
+          "贡献者文档明确说明桌面端 dev 命令会按检出自动隔离。",
+        ],
+        fixes: [
+          "Issue 编辑器列表里按 Tab 现在能稳定缩进所选项，光标也不会跑出列表。",
+          "通过 @ 提及让小队 Leader 接手时，会带上完整的小队 Briefing；继承父级提及的回复也不会再次触发 Leader。",
+          "Issue 和评论里代码块的选区，在页面其他位置刷新时不再丢失。",
+          "把 Issue 直接交给某个智能体时，运行确认弹窗会立刻展开 Handoff 备注。",
+          "工作区切换器上的未读小圆点会和你看到的 Inbox 保持一致。",
+          "编辑 Issue 评论时，保存按钮会显示加载状态，直到保存完成。",
+          "搜索结果能够稳定加载。",
+          "自托管缺少 Docker Compose v2 时会立刻给出明确的安装提示。",
+        ],
+      },
+      {
         version: "0.3.30",
         date: "2026-06-25",
         title: "Slack 协作通道接入，编辑器更顺手，多项稳定性修复",

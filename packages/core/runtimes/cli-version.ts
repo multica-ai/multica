@@ -72,3 +72,33 @@ export function readRuntimeCliVersion(metadata: Record<string, unknown> | undefi
   const v = metadata?.cli_version;
   return typeof v === "string" ? v : "";
 }
+
+/**
+ * Frontend mirror of the server's `MinHandoffCLIVersion` soft gate
+ * (`server/pkg/agent/version.go`). The assignment handoff note is only rendered
+ * into the run's opening prompt by daemons at or above this multica CLI version
+ * (MUL-3375); older daemons silently drop it. Unlike the quick-create gate this
+ * never blocks the assignment — the UI just grays out the note box and warns.
+ *
+ * Keep in lockstep with the server constant; the two are enforced independently
+ * (the server is authoritative) but must agree so the warning matches reality.
+ */
+export const MIN_HANDOFF_CLI_VERSION = "0.3.28";
+
+/**
+ * Whether a daemon-reported CLI version is new enough to render a handoff note.
+ * Mirrors server `agent.HandoffSupported`: missing / unparsable / below-minimum
+ * all degrade to `false`, and dev-built daemons (git-describe shape) always
+ * pass — the version string is the shared signal, so frontend and server agree
+ * by construction. Pure and synchronous, so the note box can settle from the
+ * already-warm runtime cache instead of waiting on the trigger-preview
+ * round-trip, exactly like the quick-create version gate.
+ */
+export function handoffSupported(detected: string | undefined | null): boolean {
+  const current = (detected ?? "").trim();
+  if (!current) return false;
+  if (DEV_DESCRIBE_RE.test(current)) return true;
+  const parsed = parseSemver(current);
+  if (!parsed) return false;
+  return !lessThan(parsed, parseSemver(MIN_HANDOFF_CLI_VERSION)!);
+}

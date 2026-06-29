@@ -31,7 +31,7 @@ Multica 内置支持 **13 款 AI 编程工具**。它们都实现了同一套接
 
 ### Antigravity
 
-Google 出品。CLI 二进制名为 `agy`，搭配 Google Antigravity 服务，默认走 Gemini 系列模型。**会话恢复真用**——通过 `--conversation <id>`；因为 stdout 是纯文本而非结构化事件流，守护进程从 CLI 的日志文件里抓取 conversation UUID。**模型选择真用**——通过 `--model` flag（agy 1.0.6 新增）：守护进程用 `agy models` 枚举可选项，并把选中的值原样传入。注意这些是 `Claude Opus 4.6 (Thinking)` 这样的人类可读显示名，而非 `provider/model` slug；而且 agy 遇到无法识别的值会静默空跑，所以优先从发现列表里挑选，不要手填。Skill 文件写入 `.agents/skills/`（CLI 沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 迁移文档](https://antigravity.google/docs/gcli-migration)）。
+Google 出品。CLI 二进制名为 `agy`，搭配 Google Antigravity 服务，默认走 Gemini 系列模型。Multica 使用 `agy -p` 启动 Antigravity，因为这是适合 daemon 后台任务的一次性非交互模式；`agy -i` 需要连接 TTY，不适合后台执行。当前 Antigravity CLI 在 `agy -p` 下仍可执行工具，但 stdout 是纯文本而非结构化事件流，所以 Multica 会把 transcript 作为 text 转发，暂时无法展示逐工具 telemetry。**会话恢复真用**——通过 `--conversation <id>`，守护进程从 CLI 的日志文件里抓取 conversation UUID。**模型选择真用**——通过 `--model` flag（agy 1.0.6 新增）：守护进程用 `agy models` 枚举可选项，并把选中的值原样传入。注意这些是 `Claude Opus 4.6 (Thinking)` 这样的人类可读显示名，而非 `provider/model` slug；而且 agy 遇到无法识别的值会静默空跑，所以优先从发现列表里挑选，不要手填。Skill 文件写入 `.agents/skills/`（CLI 沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 迁移文档](https://antigravity.google/docs/gcli-migration)）。
 
 ### Claude Code
 

@@ -5,6 +5,7 @@ import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { Metadata } from "next";
 import { DocsHero } from "@/components/hero";
 import { Byline, NumberedCards, NumberedCard, NumberedSteps, Step } from "@/components/editorial";
+import { VideoEmbed } from "@/components/video-embed";
 import { i18n, type Lang } from "@/lib/i18n";
 import { homeCopy } from "@/lib/translations";
 import { docsAlternates } from "@/lib/site";
@@ -62,6 +63,7 @@ export default async function Page({
               NumberedCard,
               NumberedSteps,
               Step,
+              VideoEmbed,
             }}
           />
         </DocsLocaleProvider>

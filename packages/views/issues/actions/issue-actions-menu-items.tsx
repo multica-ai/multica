@@ -15,6 +15,7 @@ import {
   PinOff,
   Plus,
   Trash2,
+  Unlink,
   UserMinus,
 } from "lucide-react";
 import type { AgentTask, Issue } from "@multica/core/types";
@@ -104,6 +105,7 @@ export function IssueActionsMenuItems({
     copyLink,
     openCreateSubIssue,
     openSetParent,
+    removeParent,
     openAddChild,
     openDeleteConfirm,
   } = actions;
@@ -284,6 +286,12 @@ export function IssueActionsMenuItems({
             <ArrowUp className="h-3.5 w-3.5" />
             {t(($) => $.actions.set_parent_issue)}
           </P.Item>
+          {issue.parent_issue_id && (
+            <P.Item onClick={removeParent}>
+              <Unlink className="h-3.5 w-3.5" />
+              {t(($) => $.actions.remove_parent_issue)}
+            </P.Item>
+          )}
           <P.Item onClick={openAddChild}>
             <ArrowDown className="h-3.5 w-3.5" />
             {t(($) => $.actions.add_sub_issue)}

@@ -134,3 +134,29 @@ func TestNextOccurrenceAfterUTCIgnoresWallClock(t *testing.T) {
 		t.Fatalf("got %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
 	}
 }
+
+// TestNextOccurrenceAdvancesPastFiredSlot locks in the property the
+// scheduler's next_run_at write-back relies on (MUL-3749): once a
+// recurring trigger fires at a slot, the next computed occurrence is the
+// FOLLOWING slot, strictly after the one that just fired — never the same
+// instant. Regression guard for the bug where next_run_at froze at a past
+// slot and the list rendered it as "53m ago". Uses the exact reported
+// scenario: hourly cron in America/New_York, slot 03:00 EDT (07:00 UTC).
+func TestNextOccurrenceAdvancesPastFiredSlot(t *testing.T) {
+	const cron = "0 * * * *" // every hour, on the hour
+	const tz = "America/New_York"
+
+	fired := time.Date(2026, 6, 26, 7, 0, 0, 0, time.UTC) // 03:00 EDT
+	want := time.Date(2026, 6, 26, 8, 0, 0, 0, time.UTC)  // 04:00 EDT
+
+	got, err := NextOccurrenceAfterUTC(cron, tz, fired)
+	if err != nil {
+		t.Fatalf("NextOccurrenceAfterUTC: %v", err)
+	}
+	if !got.Equal(want) {
+		t.Fatalf("got %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+	if !got.After(fired) {
+		t.Fatalf("next occurrence %s must be strictly after the fired slot %s", got, fired)
+	}
+}
