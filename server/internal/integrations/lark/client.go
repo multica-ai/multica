@@ -69,6 +69,14 @@ type APIClient interface {
 	// is then frozen into lark_installation alongside the app_id /
 	// app_secret in the same transaction as the installer-bind.
 	GetBotInfo(ctx context.Context, creds InstallationCredentials) (BotInfo, error)
+
+	// ListChatMemberOpenIDs returns the open_ids that are already in a group
+	// chat. Used by the in-app @squad picker to decide whether a compact
+	// "invite" CTA should be shown before attempting to wake squad members.
+	ListChatMemberOpenIDs(ctx context.Context, p ListChatMemberParams) ([]OpenID, error)
+
+	// AddChatMembers invites the supplied open_ids into a group chat.
+	AddChatMembers(ctx context.Context, p AddChatMembersParams) error
 }
 
 // BotInfo is the slice of /open-apis/bot/v3/info (+ a follow-up
@@ -150,6 +158,23 @@ type BindingPromptParams struct {
 	BindURL string
 }
 
+// ListChatMemberParams asks Lark for the members of a group chat. The
+// production client returns member open_ids so callers can compare them with
+// bot_open_id values stored on lark_installation rows.
+type ListChatMemberParams struct {
+	InstallationID InstallationCredentials
+	ChatID         ChatID
+}
+
+// AddChatMembersParams invites one or more Lark users/bots into a group chat.
+// OpenIDs must be per-installation open_ids (the same identifier family as
+// lark_installation.bot_open_id).
+type AddChatMembersParams struct {
+	InstallationID InstallationCredentials
+	ChatID         ChatID
+	OpenIDs        []OpenID
+}
+
 // InstallationCredentials is the per-installation transport context the
 // client needs to authenticate against Lark on behalf of a workspace's
 // bot. Passing these explicitly to each call (rather than constructing
@@ -226,4 +251,14 @@ func (s *stubAPIClient) SendBindingPromptCard(ctx context.Context, p BindingProm
 func (s *stubAPIClient) GetBotInfo(ctx context.Context, creds InstallationCredentials) (BotInfo, error) {
 	s.log.Warn("lark stub client: GetBotInfo called", "app_id", creds.AppID)
 	return BotInfo{}, ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) ListChatMemberOpenIDs(ctx context.Context, p ListChatMemberParams) ([]OpenID, error) {
+	s.log.Warn("lark stub client: ListChatMemberOpenIDs called", "chat_id", string(p.ChatID))
+	return nil, ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) AddChatMembers(ctx context.Context, p AddChatMembersParams) error {
+	s.log.Warn("lark stub client: AddChatMembers called", "chat_id", string(p.ChatID), "count", len(p.OpenIDs))
+	return ErrAPIClientNotConfigured
 }

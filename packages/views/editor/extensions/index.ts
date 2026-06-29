@@ -110,6 +110,8 @@ export interface EditorExtensionsOptions {
   disableMentions?: boolean;
   /** When true, attach the `/` skill picker. Default false. */
   enableSlashCommands?: boolean;
+  /** Current chat session ref, when this editor is a channel-backed chat input. */
+  mentionChatSessionIdRef?: RefObject<string | null>;
 }
 
 export function createEditorExtensions(
@@ -157,7 +159,12 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient) }
+          ? {
+              suggestion: createMentionSuggestion(options.queryClient, {
+                getChatSessionId: () =>
+                  options.mentionChatSessionIdRef?.current ?? null,
+              }),
+            }
           : {}),
     }),
     SlashCommandExtension.configure({

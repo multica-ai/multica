@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -31,6 +33,12 @@ const chatSessionTitleMaxLen = 200
 type CreateChatSessionRequest struct {
 	AgentID string `json:"agent_id"`
 	Title   string `json:"title"`
+}
+
+type ChatSquadInviteStatusResponse struct {
+	WakeableCount int  `json:"wakeable_count"`
+	MissingCount  int  `json:"missing_count"`
+	CanInvite     bool `json:"can_invite"`
 }
 
 func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
@@ -240,6 +248,196 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, chatSessionToResponse(session))
+}
+
+func (h *Handler) GetChatSquadInviteStatus(w http.ResponseWriter, r *http.Request) {
+	plan, ok := h.chatSquadInvitePlan(w, r, false)
+	if !ok {
+		return
+	}
+	if !plan.supported {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusOK, plan.response())
+}
+
+func (h *Handler) InviteSquadToChat(w http.ResponseWriter, r *http.Request) {
+	plan, ok := h.chatSquadInvitePlan(w, r, true)
+	if !ok {
+		return
+	}
+	if len(plan.missingOpenIDs) > 0 {
+		if err := h.LarkAPIClient.AddChatMembers(r.Context(), lark.AddChatMembersParams{
+			InstallationID: plan.creds,
+			ChatID:         plan.chatID,
+			OpenIDs:        plan.missingOpenIDs,
+		}); err != nil {
+			slog.Warn("lark squad one-click invite failed", "error", err, "chat_session_id", chi.URLParam(r, "sessionId"), "squad_id", chi.URLParam(r, "squadId"))
+			writeError(w, http.StatusBadGateway, "failed to invite squad members")
+			return
+		}
+		plan.wakeableCount += len(plan.missingOpenIDs)
+		plan.missingOpenIDs = nil
+	}
+	writeJSON(w, http.StatusOK, plan.response())
+}
+
+type chatSquadInvitePlan struct {
+	supported      bool
+	creds          lark.InstallationCredentials
+	chatID         lark.ChatID
+	wakeableCount  int
+	missingOpenIDs []lark.OpenID
+}
+
+func (p chatSquadInvitePlan) response() ChatSquadInviteStatusResponse {
+	return ChatSquadInviteStatusResponse{
+		WakeableCount: p.wakeableCount,
+		MissingCount:  len(p.missingOpenIDs),
+		CanInvite:     len(p.missingOpenIDs) > 0,
+	}
+}
+
+func (h *Handler) chatSquadInvitePlan(w http.ResponseWriter, r *http.Request, requireConfigured bool) (chatSquadInvitePlan, bool) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return chatSquadInvitePlan{}, false
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return chatSquadInvitePlan{}, false
+	}
+	sessionID := chi.URLParam(r, "sessionId")
+	if _, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID); !ok {
+		return chatSquadInvitePlan{}, false
+	}
+
+	squadID := chi.URLParam(r, "squadId")
+	squadUUID, ok := parseUUIDOrBadRequest(w, squadID, "squad id")
+	if !ok {
+		return chatSquadInvitePlan{}, false
+	}
+	squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+		ID:          squadUUID,
+		WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "squad not found")
+		return chatSquadInvitePlan{}, false
+	}
+
+	if h.LarkInstallations == nil || h.LarkAPIClient == nil || !h.LarkAPIClient.IsConfigured() {
+		if requireConfigured {
+			writeError(w, http.StatusServiceUnavailable, "lark integration not configured")
+			return chatSquadInvitePlan{}, false
+		}
+		return chatSquadInvitePlan{}, true
+	}
+
+	sessionUUID, ok := parseUUIDOrBadRequest(w, sessionID, "chat session id")
+	if !ok {
+		return chatSquadInvitePlan{}, false
+	}
+	binding, err := h.Queries.GetLarkChatSessionBindingBySession(r.Context(), sessionUUID)
+	if err != nil {
+		if requireConfigured {
+			writeError(w, http.StatusBadRequest, "chat session is not linked to a Lark channel")
+			return chatSquadInvitePlan{}, false
+		}
+		return chatSquadInvitePlan{}, true
+	}
+	if binding.LarkChatType != string(lark.ChatTypeGroup) {
+		if requireConfigured {
+			writeError(w, http.StatusBadRequest, "one-click invite is only available in Lark group chats")
+			return chatSquadInvitePlan{}, false
+		}
+		return chatSquadInvitePlan{}, true
+	}
+
+	install, err := h.LarkInstallations.GetInWorkspace(r.Context(), binding.InstallationID, workspaceUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load lark installation")
+		return chatSquadInvitePlan{}, false
+	}
+	appSecret, err := h.LarkInstallations.DecryptAppSecret(install)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load lark installation credentials")
+		return chatSquadInvitePlan{}, false
+	}
+	creds := lark.InstallationCredentials{
+		AppID:     install.AppID,
+		AppSecret: appSecret,
+	}
+	if install.TenantKey.Valid {
+		creds.TenantKey = install.TenantKey.String
+	}
+	currentOpenIDs, err := h.LarkAPIClient.ListChatMemberOpenIDs(r.Context(), lark.ListChatMemberParams{
+		InstallationID: creds,
+		ChatID:         lark.ChatID(binding.LarkChatID),
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to load lark channel members")
+		return chatSquadInvitePlan{}, false
+	}
+
+	targetOpenIDs, err := h.squadLarkBotOpenIDs(r.Context(), workspaceUUID, squad)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load squad members")
+		return chatSquadInvitePlan{}, false
+	}
+	current := make(map[lark.OpenID]struct{}, len(currentOpenIDs))
+	for _, id := range currentOpenIDs {
+		current[id] = struct{}{}
+	}
+	plan := chatSquadInvitePlan{supported: true, creds: creds, chatID: lark.ChatID(binding.LarkChatID)}
+	for _, id := range targetOpenIDs {
+		if _, ok := current[id]; ok {
+			plan.wakeableCount++
+		} else {
+			plan.missingOpenIDs = append(plan.missingOpenIDs, id)
+		}
+	}
+	return plan, true
+}
+
+func (h *Handler) squadLarkBotOpenIDs(ctx context.Context, workspaceID pgtype.UUID, squad db.Squad) ([]lark.OpenID, error) {
+	members, err := h.Queries.ListSquadMembers(ctx, squad.ID)
+	if err != nil {
+		return nil, err
+	}
+	agentIDs := map[string]pgtype.UUID{uuidToString(squad.LeaderID): squad.LeaderID}
+	for _, m := range members {
+		if m.MemberType == "agent" {
+			agentIDs[uuidToString(m.MemberID)] = m.MemberID
+		}
+	}
+	out := make([]lark.OpenID, 0, len(agentIDs))
+	seen := make(map[lark.OpenID]struct{}, len(agentIDs))
+	for _, agentID := range agentIDs {
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+			ID:          agentID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil || agent.ArchivedAt.Valid {
+			continue
+		}
+		install, err := h.Queries.GetLarkInstallationByAgent(ctx, db.GetLarkInstallationByAgentParams{
+			WorkspaceID: workspaceID,
+			AgentID:     agentID,
+		})
+		if err != nil || install.Status != string(lark.InstallationActive) || install.BotOpenID == "" {
+			continue
+		}
+		openID := lark.OpenID(install.BotOpenID)
+		if _, ok := seen[openID]; ok {
+			continue
+		}
+		seen[openID] = struct{}{}
+		out = append(out, openID)
+	}
+	return out, nil
 }
 
 type UpdateChatSessionRequest struct {

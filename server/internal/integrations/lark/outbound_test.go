@@ -119,6 +119,12 @@ func (f *fakeAPIClient) SendBindingPromptCard(ctx context.Context, p BindingProm
 func (f *fakeAPIClient) GetBotInfo(ctx context.Context, creds InstallationCredentials) (BotInfo, error) {
 	return BotInfo{}, nil
 }
+func (f *fakeAPIClient) ListChatMemberOpenIDs(ctx context.Context, p ListChatMemberParams) ([]OpenID, error) {
+	return nil, nil
+}
+func (f *fakeAPIClient) AddChatMembers(ctx context.Context, p AddChatMembersParams) error {
+	return nil
+}
 
 func newTestPatcher(t *testing.T) (*Patcher, *fakePatcherQueries, *fakeAPIClient) {
 	t.Helper()

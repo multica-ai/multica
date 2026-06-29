@@ -900,6 +900,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/messages", h.ListChatMessages)
 					r.Get("/messages/page", h.ListChatMessagesPage)
 					r.Get("/pending-task", h.GetPendingChatTask)
+					r.Get("/squads/{squadId}/invite-status", h.GetChatSquadInviteStatus)
+					r.Post("/squads/{squadId}/invite", h.InviteSquadToChat)
 					r.Post("/read", h.MarkChatSessionRead)
 				})
 			})

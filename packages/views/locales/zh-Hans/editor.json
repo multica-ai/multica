@@ -56,7 +56,10 @@
     "group_issues": "Issues",
     "all_members": "所有成员",
     "searching": "搜索中...",
-    "no_results": "无结果"
+    "no_results": "无结果",
+    "one_click_invite": "一键邀请",
+    "wake_agents": "将唤醒 {{count}} 个智能体",
+    "no_wakeable_agents": "当前频道没有可唤醒的智能体"
   },
   "slash_command": {
     "no_skills_configured": "暂无配置的技能",

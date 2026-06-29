@@ -79,6 +79,12 @@ export interface SendChatMessageResponse {
   created_at: string;
 }
 
+export interface ChatSquadInviteStatus {
+  wakeable_count: number;
+  missing_count: number;
+  can_invite: boolean;
+}
+
 /**
  * Response from GET /api/chat/sessions/{id}/pending-task.
  * All fields are absent when the session has no in-flight task.

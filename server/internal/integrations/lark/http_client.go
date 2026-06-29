@@ -434,6 +434,111 @@ func (c *httpAPIClient) SendBindingPromptCard(ctx context.Context, p BindingProm
 	return nil
 }
 
+// ListChatMemberOpenIDs returns the current open_id membership of a Lark group
+// chat. Lark paginates this endpoint; the UI only needs a small squad-size
+// comparison, but we still follow page_token to avoid hiding the invite CTA in
+// larger rooms.
+func (c *httpAPIClient) ListChatMemberOpenIDs(ctx context.Context, p ListChatMemberParams) ([]OpenID, error) {
+	if p.ChatID == "" {
+		return nil, errors.New("lark http client: missing chat_id")
+	}
+	token, err := c.tenantAccessToken(ctx, p.InstallationID)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []OpenID
+	pageToken := ""
+	for {
+		q := url.Values{}
+		q.Set("member_id_type", "open_id")
+		q.Set("page_size", "100")
+		if pageToken != "" {
+			q.Set("page_token", pageToken)
+		}
+		var resp struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+			Data struct {
+				Items []struct {
+					MemberID string `json:"member_id"`
+					OpenID   string `json:"open_id"`
+					UserID   string `json:"user_id"`
+				} `json:"items"`
+				HasMore   bool   `json:"has_more"`
+				PageToken string `json:"page_token"`
+			} `json:"data"`
+		}
+		path := "/open-apis/im/v1/chats/" + url.PathEscape(string(p.ChatID)) + "/members?" + q.Encode()
+		if err := c.doJSON(ctx, http.MethodGet, path, token, nil, &resp); err != nil {
+			return nil, fmt.Errorf("lark http client: list chat members: %w", err)
+		}
+		if resp.Code != 0 {
+			if isTokenError(resp.Code) {
+				c.invalidateToken(p.InstallationID.AppID)
+			}
+			return nil, fmt.Errorf("lark http client: list chat members: code=%d msg=%q", resp.Code, resp.Msg)
+		}
+		for _, item := range resp.Data.Items {
+			id := item.MemberID
+			if id == "" {
+				id = item.OpenID
+			}
+			if id == "" {
+				id = item.UserID
+			}
+			if id != "" {
+				out = append(out, OpenID(id))
+			}
+		}
+		if !resp.Data.HasMore || resp.Data.PageToken == "" {
+			return out, nil
+		}
+		pageToken = resp.Data.PageToken
+	}
+}
+
+// AddChatMembers invites the supplied open_ids into a Lark group chat.
+func (c *httpAPIClient) AddChatMembers(ctx context.Context, p AddChatMembersParams) error {
+	if p.ChatID == "" {
+		return errors.New("lark http client: missing chat_id")
+	}
+	if len(p.OpenIDs) == 0 {
+		return errors.New("lark http client: missing open_ids")
+	}
+	token, err := c.tenantAccessToken(ctx, p.InstallationID)
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(p.OpenIDs))
+	for _, id := range p.OpenIDs {
+		if id != "" {
+			ids = append(ids, string(id))
+		}
+	}
+	if len(ids) == 0 {
+		return errors.New("lark http client: missing open_ids")
+	}
+	q := url.Values{}
+	q.Set("member_id_type", "open_id")
+	body := map[string][]string{"id_list": ids}
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	path := "/open-apis/im/v1/chats/" + url.PathEscape(string(p.ChatID)) + "/members?" + q.Encode()
+	if err := c.doJSON(ctx, http.MethodPost, path, token, body, &resp); err != nil {
+		return fmt.Errorf("lark http client: add chat members: %w", err)
+	}
+	if resp.Code != 0 {
+		if isTokenError(resp.Code) {
+			c.invalidateToken(p.InstallationID.AppID)
+		}
+		return fmt.Errorf("lark http client: add chat members: code=%d msg=%q", resp.Code, resp.Msg)
+	}
+	return nil
+}
+
 // GetBotInfo calls /open-apis/bot/v3/info to learn the Bot's
 // per-installation `open_id` and then /open-apis/contact/v3/users/
 // {open_id}?user_id_type=open_id to resolve its stable `union_id`.

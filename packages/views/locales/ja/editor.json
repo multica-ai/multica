@@ -56,7 +56,10 @@
     "group_issues": "イシュー",
     "all_members": "すべてのメンバー",
     "searching": "検索中...",
-    "no_results": "結果なし"
+    "no_results": "結果なし",
+    "one_click_invite": "一括招待",
+    "wake_agents": "{{count}} 件のエージェントを起動",
+    "no_wakeable_agents": "現在のチャンネルに起動できるエージェントはいません"
   },
   "code_block": {
     "copy_code": "コードをコピー",

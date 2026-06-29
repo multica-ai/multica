@@ -9,7 +9,12 @@ import {
   useRef,
   useState,
 } from "react";
-import type { QueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
@@ -57,6 +62,7 @@ interface MentionListProps {
   items: MentionItem[];
   query: string;
   command: (item: MentionItem) => void;
+  chatSessionId?: string | null;
 }
 
 export interface MentionListRef {
@@ -98,6 +104,9 @@ const MAX_ITEMS = 20;
 const SERVER_ISSUE_SEARCH_LIMIT = 20;
 const SERVER_SEARCH_DEBOUNCE_MS = 150;
 
+const chatSquadInviteStatusKey = (sessionId: string, squadId: string) =>
+  ["chat", "squad-invite-status", sessionId, squadId] as const;
+
 function mentionItemKey(item: MentionItem): string {
   return `${item.type}:${item.id}`;
 }
@@ -120,13 +129,13 @@ function mergeMentionItems(
 }
 
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(
-  function MentionList({ items, query, command }, ref) {
+  function MentionList({ items, query, command, chatSessionId }, ref) {
     const { t } = useT("editor");
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [serverIssueItems, setServerIssueItems] = useState<MentionItem[]>([]);
     const [isSearchingIssues, setIsSearchingIssues] = useState(false);
     const [searchedIssueQuery, setSearchedIssueQuery] = useState("");
-    const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+    const itemRefs = useRef<(HTMLElement | null)[]>([]);
     const normalizedQuery = query.trim();
 
     useEffect(() => {
@@ -268,6 +277,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
                 <MentionRow
                   key={`${item.type}-${item.id}`}
                   item={item}
+                  chatSessionId={chatSessionId}
                   selected={idx === selectedIndex}
                   onSelect={() => selectItem(idx)}
                   buttonRef={(el) => { itemRefs.current[idx] = el; }}
@@ -287,14 +297,16 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
 
 function MentionRow({
   item,
+  chatSessionId,
   selected,
   onSelect,
   buttonRef,
 }: {
   item: MentionItem;
+  chatSessionId?: string | null;
   selected: boolean;
   onSelect: () => void;
-  buttonRef: (el: HTMLButtonElement | null) => void;
+  buttonRef: (el: HTMLElement | null) => void;
 }) {
   const { t } = useT("editor");
   if (item.type === "issue") {
@@ -325,13 +337,16 @@ function MentionRow({
     );
   }
 
+  const rowClasses = `flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
+    selected ? "bg-accent" : "hover:bg-accent/50"
+  }`;
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={-1}
       ref={buttonRef}
-      className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
-        selected ? "bg-accent" : "hover:bg-accent/50"
-      }`}
+      className={rowClasses}
       onClick={onSelect}
     >
       <ActorAvatar
@@ -348,12 +363,73 @@ function MentionRow({
         // eslint-disable-next-line i18next/no-literal-string
         <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Agent</Badge>
       )}
-      {item.type === "squad" && (
+      {item.type === "squad" && chatSessionId && (
+        <SquadInviteStatus chatSessionId={chatSessionId} squadId={item.id} />
+      )}
+      {item.type === "squad" && !chatSessionId && (
         // "Squad" is a glossary-protected product term — kept un-translated.
         // eslint-disable-next-line i18next/no-literal-string
         <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Squad</Badge>
       )}
-    </button>
+    </div>
+  );
+}
+
+function SquadInviteStatus({
+  chatSessionId,
+  squadId,
+}: {
+  chatSessionId: string;
+  squadId: string;
+}) {
+  const { t } = useT("editor");
+  const qc = useQueryClient();
+  const statusQuery = useQuery({
+    queryKey: chatSquadInviteStatusKey(chatSessionId, squadId),
+    queryFn: () => api.getChatSquadInviteStatus(chatSessionId, squadId),
+    staleTime: 15_000,
+    retry: false,
+  });
+  const inviteMutation = useMutation({
+    mutationFn: () => api.inviteSquadToChat(chatSessionId, squadId),
+    onSuccess: (status) => {
+      qc.setQueryData(chatSquadInviteStatusKey(chatSessionId, squadId), status);
+    },
+  });
+
+  const status = statusQuery.data;
+  if (!status) {
+    // "Squad" is a glossary-protected product term — kept un-translated.
+    // eslint-disable-next-line i18next/no-literal-string
+    return <Badge variant="outline" className="ml-auto text-[10px] h-4 px-1.5">Squad</Badge>;
+  }
+  if (status.can_invite) {
+    return (
+      <button
+        type="button"
+        className="ml-auto shrink-0 rounded-md border border-brand/40 px-2 py-0.5 text-[10px] font-medium text-brand transition-colors hover:bg-brand/10 disabled:opacity-60"
+        disabled={inviteMutation.isPending}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          inviteMutation.mutate();
+        }}
+      >
+        {t(($) => $.mention.one_click_invite)}
+      </button>
+    );
+  }
+  if (status.wakeable_count > 0) {
+    return (
+      <span className="ml-auto shrink-0 text-muted-foreground">
+        {t(($) => $.mention.wake_agents, { count: status.wakeable_count })}
+      </span>
+    );
+  }
+  return (
+    <span className="ml-auto shrink-0 text-muted-foreground">
+      {t(($) => $.mention.no_wakeable_agents)}
+    </span>
   );
 }
 
@@ -371,7 +447,10 @@ function issueToMention(i: Pick<Issue, "id" | "identifier" | "title" | "status">
   };
 }
 
-export function createMentionSuggestion(qc: QueryClient): Omit<
+export function createMentionSuggestion(
+  qc: QueryClient,
+  options: { getChatSessionId?: () => string | null } = {},
+): Omit<
   SuggestionOptions<MentionItem>,
   "editor"
 > {
@@ -466,6 +545,7 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
         items: props.items,
         query: props.query,
         command: props.command,
+        chatSessionId: options.getChatSessionId?.() ?? null,
       }),
       onKeyDown: (ref, props) => ref?.onKeyDown(props) ?? false,
     }),

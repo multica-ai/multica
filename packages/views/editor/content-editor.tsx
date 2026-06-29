@@ -98,6 +98,8 @@ interface ContentEditorProps {
   disableMentions?: boolean;
   /** Enable the chat-only `/` skill picker. Defaults false. */
   enableSlashCommands?: boolean;
+  /** Chat session context for channel-aware @mention squad invite CTAs. */
+  mentionChatSessionId?: string | null;
   /**
    * Attachments referenced by this content. The download buttons on file
    * cards and images inside the editor look up an attachment by `url` and
@@ -142,6 +144,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       currentIssueId,
       disableMentions = false,
       enableSlashCommands = false,
+      mentionChatSessionId,
       attachments,
     },
     ref,
@@ -152,6 +155,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onBlurRef = useRef(onBlur);
     const onUploadFileRef = useRef(onUploadFile);
     const lastEmittedRef = useRef<string | null>(null);
+    const mentionChatSessionIdRef = useRef<string | null>(
+      mentionChatSessionId ?? null,
+    );
 
     // Current workspace slug kept in a ref so the click handler always sees the
     // latest value without recreating the editor. Used by openLink to prefix
@@ -165,6 +171,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
     onUploadFileRef.current = onUploadFile;
+    mentionChatSessionIdRef.current = mentionChatSessionId ?? null;
 
     const queryClient = useQueryClient();
 
@@ -186,6 +193,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         submitOnEnter,
         disableMentions,
         enableSlashCommands,
+        mentionChatSessionIdRef,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;

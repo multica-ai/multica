@@ -234,6 +234,7 @@ export function ChatInput({
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}
+            mentionChatSessionId={activeSessionId}
             // Chat intentionally leaves submitOnEnter at its default false:
             // Mod+Enter submits, while bare Enter falls through to Tiptap's
             // default behavior for lists, quotes, and paragraph breaks.

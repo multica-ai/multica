@@ -72,6 +72,14 @@ func (s *stubAPIClientWithRecorder) GetBotInfo(ctx context.Context, creds Instal
 	return BotInfo{}, nil
 }
 
+func (s *stubAPIClientWithRecorder) ListChatMemberOpenIDs(ctx context.Context, p ListChatMemberParams) ([]OpenID, error) {
+	return nil, nil
+}
+
+func (s *stubAPIClientWithRecorder) AddChatMembers(ctx context.Context, p AddChatMembersParams) error {
+	return nil
+}
+
 // stubCredentialsResolver returns a fixed plaintext secret.
 type stubCredentialsResolver struct{ secret string }
 

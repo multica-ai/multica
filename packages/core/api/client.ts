@@ -65,6 +65,7 @@ import type {
   ChatPendingTask,
   PendingChatTasksResponse,
   SendChatMessageResponse,
+  ChatSquadInviteStatus,
   Project,
   CreateProjectRequest,
   UpdateProjectRequest,
@@ -1642,6 +1643,22 @@ export class ApiClient {
 
   async getPendingChatTask(sessionId: string): Promise<ChatPendingTask> {
     return this.fetch(`/api/chat/sessions/${sessionId}/pending-task`);
+  }
+
+  async getChatSquadInviteStatus(
+    sessionId: string,
+    squadId: string,
+  ): Promise<ChatSquadInviteStatus | undefined> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/squads/${squadId}/invite-status`);
+  }
+
+  async inviteSquadToChat(
+    sessionId: string,
+    squadId: string,
+  ): Promise<ChatSquadInviteStatus> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/squads/${squadId}/invite`, {
+      method: "POST",
+    });
   }
 
   async listPendingChatTasks(): Promise<PendingChatTasksResponse> {
