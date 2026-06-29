@@ -11,7 +11,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func TestCerebroReminderSweeper_FreeReminderSurfacesInInbox(t *testing.T) {
@@ -133,5 +135,62 @@ func TestCerebroReminderSweeper_IssueAnchoredReminderSurfacesInInbox(t *testing.
 	}
 	if rowIssueID != issueID {
 		t.Fatalf("reminder inbox row issue_id = %q, want the source issue %q", rowIssueID, issueID)
+	}
+}
+
+// FIR-2278: firing records the created inbox row on cerebro_reminder
+// .fired_inbox_item_id, and that id can archive the row. This is the chain the
+// done/snooze/delete handlers rely on to clean a fired reminder out of the
+// inbox — before the fix the row was orphaned because the relation points from
+// reminder to inbox_item, not the other way.
+func TestCerebroReminderSweeper_FiredInboxItemIsArchivable(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	cerebro := cerebrodb.New(testPool)
+
+	const text = "FIR-2278 fired-inbox cleanup link"
+	var reminderID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO cerebro_reminder
+			(workspace_id, user_id, creator_id, recipient_type, recipient_id,
+			 remind_at, text, anchor_type, status)
+		VALUES ($1, $2, $2, 'member', $2,
+			 NOW() - interval '1 minute', $3, 'none', 'pending')
+		RETURNING id
+	`, testWorkspaceID, testUserID, text).Scan(&reminderID); err != nil {
+		t.Fatalf("insert reminder: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		testPool.Exec(bg, `DELETE FROM cerebro_reminder WHERE id = $1`, reminderID)
+		testPool.Exec(bg, `DELETE FROM inbox_item WHERE recipient_id = $1 AND title = $2`, testUserID, text)
+	})
+
+	tickCerebroReminders(ctx, cerebro, nil)
+
+	// The fired reminder recorded the inbox row it created.
+	var firedInboxItemID pgtype.UUID
+	if err := testPool.QueryRow(ctx,
+		`SELECT fired_inbox_item_id FROM cerebro_reminder WHERE id = $1`, reminderID).
+		Scan(&firedInboxItemID); err != nil {
+		t.Fatalf("read fired_inbox_item_id: %v", err)
+	}
+	if !firedInboxItemID.Valid {
+		t.Fatalf("fired_inbox_item_id is NULL, want the surfaced inbox row id")
+	}
+
+	// Archiving by that id (what done/snooze/delete now do) clears the row.
+	if _, err := db.New(testPool).ArchiveInboxItem(ctx, firedInboxItemID); err != nil {
+		t.Fatalf("ArchiveInboxItem: %v", err)
+	}
+	var archived bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT archived FROM inbox_item WHERE id = $1`, firedInboxItemID).Scan(&archived); err != nil {
+		t.Fatalf("read archived: %v", err)
+	}
+	if !archived {
+		t.Fatalf("fired reminder inbox row not archived after cleanup")
 	}
 }

@@ -28,11 +28,11 @@ function item(overrides: Partial<InboxItem>): InboxItem {
 }
 
 describe("deduplicateInboxItems", () => {
-  it("uses reminder time when picking and sorting resurfaced reminder rows", () => {
-    const olderReminder = item({
+  it("keeps a fired reminder as its own standalone row, not folded into its issue group", () => {
+    const firedReminder = item({
       id: "reminder",
       issue_id: "issue-1",
-      muted_until: "2000-01-01T11:00:00Z",
+      muted_until: "2000-01-01T11:00:00Z", // resurfaced: due in the past
       created_at: "2000-01-01T08:00:00Z",
     });
     const newerComment = item({
@@ -49,11 +49,13 @@ describe("deduplicateInboxItems", () => {
       created_at: "2000-01-01T10:30:00Z",
     });
 
+    // The reminder is its own signal (keyed by id), so it does NOT swallow the
+    // comment on the same issue; both survive, sorted by activation time.
     expect(
-      deduplicateInboxItems([newerComment, olderReminder, other]).map(
+      deduplicateInboxItems([newerComment, firedReminder, other]).map(
         (i) => i.id,
       ),
-    ).toEqual(["reminder", "other"]);
+    ).toEqual(["reminder", "other", "comment"]);
   });
 
   it("does not let a future muted reminder hide a newer active issue row", () => {
@@ -76,25 +78,30 @@ describe("deduplicateInboxItems", () => {
     ).toEqual(["comment"]);
   });
 
-  it("keeps a fired reminder visible when a newer notification shares its issue (FIR-2278)", () => {
-    const firedReminder = item({
+  it("a READ fired reminder does not hide a newer unread comment on the same issue (FIR-2278)", () => {
+    const readReminder = item({
       id: "reminder",
       issue_id: "issue-1",
-      muted_until: null, // fired: due now, not muted into the future
+      muted_until: null, // fired: due now
+      read: true, // user already opened the reminder
       created_at: "2000-01-01T08:00:00Z",
     });
-    const newerComment = item({
+    const newerUnreadComment = item({
       id: "comment",
       type: "new_comment",
       issue_id: "issue-1",
       muted_until: null,
+      read: false,
       created_at: "2000-01-01T10:00:00Z", // newer than the reminder
     });
 
-    // Without the fix the newer comment wins the per-issue dedup and hides the
-    // reminder; the reminder must remain the visible row for the issue.
-    expect(
-      deduplicateInboxItems([newerComment, firedReminder]).map((i) => i.id),
-    ).toEqual(["reminder"]);
+    // The earlier bug: once the reminder was read it still won the per-issue
+    // dedup and hid the newer comment. As a standalone row it no longer can —
+    // both are present, and the unread comment is its issue's visible row.
+    const ids = deduplicateInboxItems([readReminder, newerUnreadComment]).map(
+      (i) => i.id,
+    );
+    expect(ids).toContain("comment");
+    expect(ids).toContain("reminder");
   });
 });

@@ -27,28 +27,28 @@ const (
 // cerebro-only inbox_item columns added by cerebro DB migrations; the rest
 // of this struct is upstream.
 type InboxItemResponse struct {
-	ID            string          `json:"id"`
-	WorkspaceID   string          `json:"workspace_id"`
-	RecipientType string          `json:"recipient_type"`
-	RecipientID   string          `json:"recipient_id"`
-	Type          string          `json:"type"`
-	Severity      string          `json:"severity"`
-	Route         string          `json:"route"`
-	IssueID       *string         `json:"issue_id"`
-	ProjectID     *string         `json:"project_id"`
-	ParentIssueID    *string      `json:"parent_issue_id"`    // CEREBRO-PATCH(inbox-parent-grouping): backs the "Parent issue" group-by
-	ParentIssueTitle *string      `json:"parent_issue_title"` // CEREBRO-PATCH(inbox-parent-grouping)
-	Title         string          `json:"title"`
-	Body          *string         `json:"body"`
-	Read          bool            `json:"read"`
-	Archived      bool            `json:"archived"`
-	MutedUntil    *string         `json:"muted_until"`
-	ArchivedAt    *string         `json:"archived_at"` // CEREBRO-PATCH(inbox-archived-at-sort): FIR-1686 — archive time; sort key for the cerebro archived block.
-	CreatedAt     string          `json:"created_at"`
-	IssueStatus   *string         `json:"issue_status"`
-	ActorType     *string         `json:"actor_type"`
-	ActorID       *string         `json:"actor_id"`
-	Details       json.RawMessage `json:"details"`
+	ID               string          `json:"id"`
+	WorkspaceID      string          `json:"workspace_id"`
+	RecipientType    string          `json:"recipient_type"`
+	RecipientID      string          `json:"recipient_id"`
+	Type             string          `json:"type"`
+	Severity         string          `json:"severity"`
+	Route            string          `json:"route"`
+	IssueID          *string         `json:"issue_id"`
+	ProjectID        *string         `json:"project_id"`
+	ParentIssueID    *string         `json:"parent_issue_id"`    // CEREBRO-PATCH(inbox-parent-grouping): backs the "Parent issue" group-by
+	ParentIssueTitle *string         `json:"parent_issue_title"` // CEREBRO-PATCH(inbox-parent-grouping)
+	Title            string          `json:"title"`
+	Body             *string         `json:"body"`
+	Read             bool            `json:"read"`
+	Archived         bool            `json:"archived"`
+	MutedUntil       *string         `json:"muted_until"`
+	ArchivedAt       *string         `json:"archived_at"` // CEREBRO-PATCH(inbox-archived-at-sort): FIR-1686 — archive time; sort key for the cerebro archived block.
+	CreatedAt        string          `json:"created_at"`
+	IssueStatus      *string         `json:"issue_status"`
+	ActorType        *string         `json:"actor_type"`
+	ActorID          *string         `json:"actor_id"`
+	Details          json.RawMessage `json:"details"`
 }
 
 func inboxToResponse(i db.InboxItem) InboxItemResponse {
@@ -138,28 +138,28 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		resp := make([]InboxItemResponse, len(archived))
 		for i, item := range archived {
 			resp[i] = InboxItemResponse{
-				ID:            uuidToString(item.ID),
-				WorkspaceID:   uuidToString(item.WorkspaceID),
-				RecipientType: item.RecipientType,
-				RecipientID:   uuidToString(item.RecipientID),
-				Type:          item.Type,
-				Severity:      item.Severity,
-				Route:         item.Route,
-				IssueID:       uuidToPtr(item.IssueID),
-				ProjectID:     uuidToPtr(item.ProjectID),
-				ParentIssueID:    uuidToPtr(item.ParentIssueID),  // CEREBRO-PATCH(inbox-parent-grouping)
+				ID:               uuidToString(item.ID),
+				WorkspaceID:      uuidToString(item.WorkspaceID),
+				RecipientType:    item.RecipientType,
+				RecipientID:      uuidToString(item.RecipientID),
+				Type:             item.Type,
+				Severity:         item.Severity,
+				Route:            item.Route,
+				IssueID:          uuidToPtr(item.IssueID),
+				ProjectID:        uuidToPtr(item.ProjectID),
+				ParentIssueID:    uuidToPtr(item.ParentIssueID),    // CEREBRO-PATCH(inbox-parent-grouping)
 				ParentIssueTitle: textToPtr(item.ParentIssueTitle), // CEREBRO-PATCH(inbox-parent-grouping)
-				Title:         item.Title,
-				Body:          textToPtr(item.Body),
-				Read:          item.Read,
-				Archived:      item.Archived,
-				MutedUntil:    timestampToPtr(item.MutedUntil), // CEREBRO-PATCH(cerebro-inbox-fields)
-				ArchivedAt:    timestampToPtr(item.ArchivedAt), // CEREBRO-PATCH(inbox-archived-at-sort): FIR-1686
-				CreatedAt:     timestampToString(item.CreatedAt),
-				IssueStatus:   textToPtr(item.IssueStatus),
-				ActorType:     textToPtr(item.ActorType),
-				ActorID:       uuidToPtr(item.ActorID),
-				Details:       json.RawMessage(item.Details),
+				Title:            item.Title,
+				Body:             textToPtr(item.Body),
+				Read:             item.Read,
+				Archived:         item.Archived,
+				MutedUntil:       timestampToPtr(item.MutedUntil), // CEREBRO-PATCH(cerebro-inbox-fields)
+				ArchivedAt:       timestampToPtr(item.ArchivedAt), // CEREBRO-PATCH(inbox-archived-at-sort): FIR-1686
+				CreatedAt:        timestampToString(item.CreatedAt),
+				IssueStatus:      textToPtr(item.IssueStatus),
+				ActorType:        textToPtr(item.ActorType),
+				ActorID:          uuidToPtr(item.ActorID),
+				Details:          json.RawMessage(item.Details),
 			}
 		}
 		writeJSON(w, http.StatusOK, resp)
@@ -179,27 +179,27 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	resp := make([]InboxItemResponse, len(items))
 	for i, item := range items {
 		resp[i] = InboxItemResponse{
-			ID:            uuidToString(item.ID),
-			WorkspaceID:   uuidToString(item.WorkspaceID),
-			RecipientType: item.RecipientType,
-			RecipientID:   uuidToString(item.RecipientID),
-			Type:          item.Type,
-			Severity:      item.Severity,
-			Route:         item.Route,
-			IssueID:       uuidToPtr(item.IssueID),
-			ProjectID:     uuidToPtr(item.ProjectID),
-			ParentIssueID:    uuidToPtr(item.ParentIssueID),  // CEREBRO-PATCH(inbox-parent-grouping)
+			ID:               uuidToString(item.ID),
+			WorkspaceID:      uuidToString(item.WorkspaceID),
+			RecipientType:    item.RecipientType,
+			RecipientID:      uuidToString(item.RecipientID),
+			Type:             item.Type,
+			Severity:         item.Severity,
+			Route:            item.Route,
+			IssueID:          uuidToPtr(item.IssueID),
+			ProjectID:        uuidToPtr(item.ProjectID),
+			ParentIssueID:    uuidToPtr(item.ParentIssueID),    // CEREBRO-PATCH(inbox-parent-grouping)
 			ParentIssueTitle: textToPtr(item.ParentIssueTitle), // CEREBRO-PATCH(inbox-parent-grouping)
-			Title:         item.Title,
-			Body:          textToPtr(item.Body),
-			Read:          item.Read,
-			Archived:      item.Archived,
-			MutedUntil:    timestampToPtr(item.MutedUntil), // CEREBRO-PATCH(cerebro-inbox-fields)
-			CreatedAt:     timestampToString(item.CreatedAt),
-			IssueStatus:   textToPtr(item.IssueStatus),
-			ActorType:     textToPtr(item.ActorType),
-			ActorID:       uuidToPtr(item.ActorID),
-			Details:       json.RawMessage(item.Details),
+			Title:            item.Title,
+			Body:             textToPtr(item.Body),
+			Read:             item.Read,
+			Archived:         item.Archived,
+			MutedUntil:       timestampToPtr(item.MutedUntil), // CEREBRO-PATCH(cerebro-inbox-fields)
+			CreatedAt:        timestampToString(item.CreatedAt),
+			IssueStatus:      textToPtr(item.IssueStatus),
+			ActorType:        textToPtr(item.ActorType),
+			ActorID:          uuidToPtr(item.ActorID),
+			Details:          json.RawMessage(item.Details),
 		}
 	}
 
@@ -268,8 +268,9 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Archive all sibling inbox items for the same issue (issue-level archive)
-	if item.IssueID.Valid {
+	// Archive all sibling inbox items for the same issue (issue-level archive).
+	// CEREBRO-PATCH(inbox-reminder-archive-self): a fired reminder is a standalone signal, so archiving it must NOT sweep away other unread rows on its issue (FIR-2278).
+	if item.IssueID.Valid && item.Type != "reminder" {
 		h.Queries.ArchiveInboxByIssue(r.Context(), db.ArchiveInboxByIssueParams{
 			WorkspaceID:   item.WorkspaceID,
 			RecipientType: item.RecipientType,

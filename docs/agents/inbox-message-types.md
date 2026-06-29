@@ -197,6 +197,22 @@ Three `InboxItemType`s form the **reminders** family — they share the
 So "a reminder" is genuinely its own message type (three of them), distinct from
 the issue-lifecycle and conversation types above.
 
+**Standalone-row lifecycle (FIR-2278).** A *fired* `reminder` row (the cerebro
+reminder sweeper drops one for every reminder type — free, project, issue-,
+comment-, chat-anchored) is treated as a **standalone signal**, never folded
+into its issue's group:
+
+- **Dedup** (`deduplicateInboxItems`, `packages/core/inbox/queries.ts`): a fired
+  (due, not future-muted) reminder is keyed by its own id, so it neither hides
+  nor is hidden by other rows on the same issue.
+- **Badge** (`CountUnreadInboxForUserAllWorkspaces`): groups reminders by id too,
+  so the OS badge matches the visible inbox.
+- **Archive** (`ArchiveInboxItem`): archiving a reminder row archives only that
+  row, not the issue's other notifications.
+- **Cleanup**: `done` / `snooze` / `delete` archive the fired inbox row via
+  `cerebro_reminder.fired_inbox_item_id` (reminder handler), so a reminder never
+  lingers in the inbox after the user acts on it.
+
 ---
 
 ## Mentions come from two sources (comment and note)

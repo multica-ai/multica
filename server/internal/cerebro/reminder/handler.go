@@ -6,8 +6,10 @@
 package reminder
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -393,6 +395,9 @@ func (h *Handler) Snooze(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "until must be in the future")
 		return
 	}
+	// Hide the row the previous firing dropped in the inbox before re-arming;
+	// SnoozeReminder clears fired_inbox_item_id, so this must run first (FIR-2278).
+	h.archiveFiredInboxItem(r.Context(), row.FiredInboxItemID)
 	if _, err := h.Cerebro.SnoozeReminder(r.Context(), cerebrodb.SnoozeReminderParams{
 		ID:       row.ID,
 		RemindAt: pgtype.Timestamptz{Time: until, Valid: true},
@@ -422,6 +427,8 @@ func (h *Handler) MarkDone(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mark reminder done")
 		return
 	}
+	// Done means gone: clear the fired reminder row from the inbox too (FIR-2278).
+	h.archiveFiredInboxItem(r.Context(), row.FiredInboxItemID)
 	updated, err := h.Cerebro.GetReminder(r.Context(), row.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load reminder")
@@ -440,11 +447,26 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Archive the fired inbox row before deleting the reminder — the relation
+	// points reminder → inbox_item, so after delete we'd lose the link (FIR-2278).
+	h.archiveFiredInboxItem(r.Context(), row.FiredInboxItemID)
 	if err := h.Cerebro.DeleteReminder(r.Context(), row.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete reminder")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// archiveFiredInboxItem hides the inbox row a fired reminder created, so done,
+// snooze, and delete don't leave a stale reminder sitting in the inbox. No-op
+// when the reminder never fired (fired_inbox_item_id is NULL) (FIR-2278).
+func (h *Handler) archiveFiredInboxItem(ctx context.Context, firedInboxItemID pgtype.UUID) {
+	if !firedInboxItemID.Valid {
+		return
+	}
+	if _, err := h.Upstream.ArchiveInboxItem(ctx, firedInboxItemID); err != nil {
+		slog.Warn("reminder: failed to archive fired inbox item", "error", err)
+	}
 }
 
 // loadReminder fetches a reminder by URL param "id" and authorizes the caller.

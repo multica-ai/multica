@@ -81,7 +81,8 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
   const active = items.filter((i) => !i.archived);
   const groups = new Map<string, InboxItem[]>();
   for (const item of active) {
-    const key = item.issue_id ?? item.id;
+    // CEREBRO-PATCH(inbox-reminder-standalone-row): a fired (due, not future-muted) reminder is its own inbox signal, keyed by its own id so it is never folded into its issue's group — it can neither hide nor be hidden by other rows on the same issue (FIR-2278).
+    const key = isFiredReminder(item) ? item.id : (item.issue_id ?? item.id);
     const group = groups.get(key) ?? [];
     group.push(item);
     groups.set(key, group);
@@ -92,14 +93,18 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
       (a, b) =>
         inboxItemSortTime(b) - inboxItemSortTime(a),
     );
-    // CEREBRO-PATCH(inbox-reminder-wins-dedupe): keep a fired reminder visible when a newer notification shares its issue — pick it as the group's row instead of the newer one (FIR-2278). Future-muted reminders are excluded, so they still don't hide an active row.
-    const chosen = group.find((i) => i.type === "reminder" && (!i.muted_until || new Date(i.muted_until).getTime() <= Date.now())) ?? group[0];
-    if (chosen) merged.push(chosen);
+    if (group[0]) merged.push(group[0]);
   }
   return merged.sort(
     (a, b) =>
       inboxItemSortTime(b) - inboxItemSortTime(a),
   );
+}
+
+// CEREBRO-PATCH(inbox-reminder-standalone-row): a reminder is a live inbox signal once it is due (not muted into the future); at that point it stands as its own dedupe row (FIR-2278).
+function isFiredReminder(item: InboxItem): boolean {
+  if (item.type !== "reminder") return false;
+  return !item.muted_until || new Date(item.muted_until).getTime() <= Date.now();
 }
 
 // CEREBRO-PATCH(inbox-reminder-sort-time): reminders sort by planned activation time once they resurface.

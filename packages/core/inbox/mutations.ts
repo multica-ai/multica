@@ -4,6 +4,20 @@ import { inboxKeys } from "./queries";
 import { useWorkspaceId } from "../hooks";
 import type { InboxItem } from "../types";
 
+// CEREBRO-PATCH(inbox-reminder-archive-self-optimistic): mirror the server rule (FIR-2278) — archiving a fired reminder optimistically clears only that row, never its issue's other rows, since a reminder is a standalone signal.
+export function archiveInboxOptimisticItems(
+  items: InboxItem[] | undefined,
+  id: string,
+): InboxItem[] | undefined {
+  const target = items?.find((i) => i.id === id);
+  const issueId = target?.type === "reminder" ? null : target?.issue_id;
+  return items?.map((item) =>
+    item.id === id || (issueId && item.issue_id === issueId)
+      ? { ...item, archived: true }
+      : item,
+  );
+}
+
 export function useMarkInboxRead() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -34,15 +48,8 @@ export function useArchiveInbox() {
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
       const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-      // Archive all items for the same issue (same behavior as store)
-      const target = prev?.find((i) => i.id === id);
-      const issueId = target?.issue_id;
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
-        old?.map((item) =>
-          item.id === id || (issueId && item.issue_id === issueId)
-            ? { ...item, archived: true }
-            : item,
-        ),
+        archiveInboxOptimisticItems(old, id),
       );
       return { prev };
     },

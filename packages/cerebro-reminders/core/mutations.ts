@@ -1,5 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { appBadgeKeys, inboxKeys } from "@multica/core/inbox/queries";
 
 import {
   createReminder,
@@ -9,6 +10,15 @@ import {
 } from "./api";
 import { reminderKeys } from "./queries";
 import type { CreateReminderInput } from "./types";
+
+// FIR-2278: snooze/done/delete archive the fired reminder's inbox row server-
+// side, so the inbox feed and the OS badge must refetch too — not only the
+// reminder overview.
+function invalidateReminderAndInbox(qc: QueryClient, wsId: string) {
+  void qc.invalidateQueries({ queryKey: reminderKeys.all(wsId) });
+  void qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+  void qc.invalidateQueries({ queryKey: appBadgeKeys.unreadCount() });
+}
 
 // All mutations invalidate the whole reminder cache for the workspace so both
 // the overview list and any open reminder card re-fetch.
@@ -30,7 +40,7 @@ export function useSnoozeReminder() {
     mutationFn: ({ id, until }: { id: string; until: string }) =>
       snoozeReminder(id, until),
     onSettled: () => {
-      void qc.invalidateQueries({ queryKey: reminderKeys.all(wsId) });
+      invalidateReminderAndInbox(qc, wsId);
     },
   });
 }
@@ -41,7 +51,7 @@ export function useMarkReminderDone() {
   return useMutation({
     mutationFn: (id: string) => markReminderDone(id),
     onSettled: () => {
-      void qc.invalidateQueries({ queryKey: reminderKeys.all(wsId) });
+      invalidateReminderAndInbox(qc, wsId);
     },
   });
 }
@@ -52,7 +62,7 @@ export function useDeleteReminder() {
   return useMutation({
     mutationFn: (id: string) => deleteReminder(id),
     onSettled: () => {
-      void qc.invalidateQueries({ queryKey: reminderKeys.all(wsId) });
+      invalidateReminderAndInbox(qc, wsId);
     },
   });
 }

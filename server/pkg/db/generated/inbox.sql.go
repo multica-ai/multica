@@ -268,11 +268,11 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 
 const countUnreadInboxForUserAllWorkspaces = `-- name: CountUnreadInboxForUserAllWorkspaces :one
 SELECT count(*) FROM (
-    SELECT DISTINCT ON (COALESCE(issue_id, id)) read, muted_until
+    SELECT DISTINCT ON (CASE WHEN type = 'reminder' THEN id ELSE COALESCE(issue_id, id) END) read, muted_until
     FROM inbox_item
     WHERE recipient_type = 'member' AND recipient_id = $1
       AND archived = false AND route = 'inbox'
-    ORDER BY COALESCE(issue_id, id), created_at DESC
+    ORDER BY CASE WHEN type = 'reminder' THEN id ELSE COALESCE(issue_id, id) END, created_at DESC
 ) latest
 WHERE read = false
   -- CEREBRO-PATCH(sqlc-inbox): muted items don't contribute to the OS badge.
