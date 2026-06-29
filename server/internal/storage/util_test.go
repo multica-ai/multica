@@ -1,9 +1,6 @@
 package storage
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestIsInlineContentType(t *testing.T) {
 	cases := []struct {
@@ -57,79 +54,19 @@ func TestContentDisposition(t *testing.T) {
 	}
 }
 
-func TestContentDispositionNonASCII(t *testing.T) {
-	// Chinese filename — should include filename* and an ASCII-only fallback.
-	got := ContentDisposition("image/webp", "微信图片_2026-04-09_162004_785.webp")
-	if !strings.Contains(got, "filename*=UTF-8''") {
-		t.Fatalf("ContentDisposition should include filename* for non-ASCII: %q", got)
-	}
-	const legacyPrefix = `filename="`
-	start := strings.Index(got, legacyPrefix)
-	if start == -1 {
-		t.Fatalf("ContentDisposition should keep ASCII fallback: %q", got)
-	}
-	// Legacy filename parameter must be ASCII only.
-	start += len(legacyPrefix)
-	end := strings.IndexByte(got[start:], '"')
-	if end == -1 {
-		t.Fatalf("ContentDisposition fallback is not terminated: %q", got)
-	}
-	fallback := got[start : start+end]
-	for _, r := range fallback {
-		if r > 0x7f {
-			t.Fatalf("legacy filename parameter must be ASCII only, got: %q", fallback)
-		}
-	}
-	// Modern filename* must contain the percent-encoded original name.
-	if !strings.Contains(got, "%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87") {
-		t.Fatalf("filename* should encode the original Chinese name: %q", got)
-	}
-
-	// ASCII-only filename — no filename*
-	got2 := ContentDisposition("text/plain", "notes.txt")
-	if strings.Contains(got2, "filename*=") {
-		t.Fatalf("ContentDisposition should NOT include filename* for ASCII: %q", got2)
-	}
-
-	// Mixed ASCII + special chars (but no non-ASCII) — no filename*
-	got3 := ContentDisposition("image/png", `nice"file;.png`)
-	if strings.Contains(got3, "filename*=") {
-		t.Fatalf("ContentDisposition should NOT include filename* for pure ASCII with special chars: %q", got3)
-	}
-}
-
-func TestAttachmentContentDispositionNonASCII(t *testing.T) {
-	got := AttachmentContentDisposition("微信图片_2026-04-09_162004_785.webp")
-	wantPrefix := `attachment; filename="_____2026-04-09_162004_785.webp"; filename*=UTF-8''`
-	if !strings.HasPrefix(got, wantPrefix) {
-		t.Fatalf("AttachmentContentDisposition = %q, want prefix %q", got, wantPrefix)
-	}
-	if !strings.Contains(got, "%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87") {
-		t.Fatalf("AttachmentContentDisposition should encode the original Chinese name: %q", got)
-	}
-}
-
-func TestRFC5987Encode(t *testing.T) {
-	got := rfc5987Encode("微信图片")
-	want := "%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87"
+func TestContentDispositionUTF8Filename(t *testing.T) {
+	// RFC 6266: `filename=` is ASCII-only. A non-ASCII name (common for this
+	// product's users) must ride in `filename*=UTF-8''...` with an ASCII
+	// fallback, otherwise stricter clients/proxies garble the download name.
+	got := ContentDisposition("application/zip", "测试.zip")
+	want := `attachment; filename="__.zip"; filename*=UTF-8''%E6%B5%8B%E8%AF%95.zip`
 	if got != want {
-		t.Fatalf("rfc5987Encode(%q) = %q, want %q", "微信图片", got, want)
+		t.Fatalf("ContentDisposition utf8 = %q, want %q", got, want)
 	}
-	// ASCII pass-through
-	if got2 := rfc5987Encode("hello.txt"); got2 != "hello.txt" {
-		t.Fatalf("rfc5987Encode(ASCII) = %q, want %q", got2, "hello.txt")
-	}
-	// Space and special chars are encoded
-	if got3 := rfc5987Encode("a b"); got3 != "a%20b" {
-		t.Fatalf("rfc5987Encode(space) = %q, want %q", got3, "a%20b")
-	}
-}
 
-func TestNeedsRFC5987Encoding(t *testing.T) {
-	if needsRFC5987Encoding("hello.txt") {
-		t.Fatal("ASCII filename should not need RFC 5987 encoding")
-	}
-	if !needsRFC5987Encoding("微信图片.webp") {
-		t.Fatal("Chinese filename should need RFC 5987 encoding")
+	got2 := AttachmentContentDisposition("résumé.pdf")
+	want2 := `attachment; filename="r_sum_.pdf"; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf`
+	if got2 != want2 {
+		t.Fatalf("AttachmentContentDisposition utf8 = %q, want %q", got2, want2)
 	}
 }
