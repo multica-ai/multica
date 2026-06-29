@@ -842,6 +842,8 @@ const AutopilotListItemSchema = z.object({
   last_run_status: z.string().nullable().optional(),
   // Per-caller write capability; absent on older servers (treated as unknown).
   can_write: z.boolean().optional(),
+  // Narrower per-caller access-management capability (detail endpoint only).
+  can_manage_access: z.boolean().optional(),
 }).loose();
 
 export const ListAutopilotsResponseSchema = z.object({

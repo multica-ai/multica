@@ -54,6 +54,11 @@ export interface Autopilot {
   // Present on list and detail responses; absent on older servers — treat
   // undefined as "unknown" rather than "denied" (the server is the gate).
   can_write?: boolean;
+  // Whether the requesting user may manage the collaborator (access) list —
+  // narrower than can_write: held only by the creator and workspace
+  // owners/admins, NOT by granted collaborators. Detail-endpoint-only; absent
+  // on older servers (fall back to can_write).
+  can_manage_access?: boolean;
 }
 
 export interface WebhookEventFilter {

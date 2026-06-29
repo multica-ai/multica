@@ -692,6 +692,10 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   // real gate, so the UI only hides controls when the server explicitly says
   // the caller cannot write.
   const canWrite = autopilot.can_write !== false;
+  // Managing the access list is narrower than write: granted collaborators can
+  // edit/run but cannot grant/revoke. Fall back to canWrite when the server
+  // doesn't send the field (older backend).
+  const canManageAccess = autopilot.can_manage_access ?? canWrite;
 
   const handleRunNow = async () => {
     try {
@@ -756,10 +760,12 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         actions={
           canWrite ? (
             <>
-              <Button size="sm" variant="outline" onClick={() => setAccessDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.manage_access)}>
-                <Users className="h-3.5 w-3.5 sm:mr-1" />
-                <span className="hidden sm:inline">{t(($) => $.detail.manage_access)}</span>
-              </Button>
+              {canManageAccess && (
+                <Button size="sm" variant="outline" onClick={() => setAccessDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.manage_access)}>
+                  <Users className="h-3.5 w-3.5 sm:mr-1" />
+                  <span className="hidden sm:inline">{t(($) => $.detail.manage_access)}</span>
+                </Button>
+              )}
               <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.edit)}>
                 <Pencil className="h-3.5 w-3.5 sm:mr-1" />
                 <span className="hidden sm:inline">{t(($) => $.detail.edit)}</span>

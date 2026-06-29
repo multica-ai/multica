@@ -60,11 +60,17 @@ type AutopilotResponse struct {
 
 	// CanWrite reports whether the requesting caller may perform write/execute
 	// operations on this autopilot — editing, deleting, triggering, and
-	// managing triggers/access (creator, workspace owner/admin, or an explicit
-	// collaborator). Nil on responses built without a caller in context
-	// (older servers omit it; clients must treat absence as "unknown" and fall
-	// back to attempting the action). See MUL-3807.
+	// managing triggers/webhook secrets (creator, workspace owner/admin, or an
+	// explicit collaborator). Nil on responses built without a caller in
+	// context (older servers omit it; clients must treat absence as "unknown"
+	// and fall back to attempting the action). See MUL-3807.
 	CanWrite *bool `json:"can_write,omitempty"`
+
+	// CanManageAccess reports whether the caller may manage the collaborator
+	// (access) list — a narrower right held only by the creator and workspace
+	// owners/admins, NOT by granted collaborators (who can write but cannot
+	// re-grant). Nil when built without a caller in context. See MUL-3807.
+	CanManageAccess *bool `json:"can_manage_access,omitempty"`
 }
 
 // AutopilotCollaboratorEntry is a member explicitly granted write access to an
@@ -449,10 +455,15 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 	// other member sees the trigger metadata with the secret fields stripped
 	// (MUL-3807).
 	canWrite := false
+	canManageAccess := false
 	if member, err := h.getWorkspaceMember(r.Context(), requestUserID(r), workspaceID); err == nil {
 		canWrite = h.memberCanWriteAutopilot(r.Context(), autopilot, member)
+		// Managing the access list is narrower than write: collaborators can
+		// write but cannot re-grant (MUL-3807).
+		canManageAccess = autopilotWriteByOwnership(autopilot, member)
 	}
 	resp.CanWrite = &canWrite
+	resp.CanManageAccess = &canManageAccess
 
 	// Include triggers.
 	triggers, err := h.Queries.ListAutopilotTriggers(r.Context(), autopilot.ID)
@@ -549,6 +560,25 @@ func (h *Handler) requireAutopilotWrite(w http.ResponseWriter, r *http.Request, 
 	}
 	if !h.memberCanWriteAutopilot(r.Context(), ap, member) {
 		writeError(w, http.StatusForbidden, "only the autopilot creator, a workspace admin, or a granted collaborator can manage this autopilot")
+		return false
+	}
+	return true
+}
+
+// requireAutopilotAccessManagement enforces the narrower predicate used by the
+// collaborator (access list) endpoints: only the autopilot's creator or a
+// workspace owner/admin may grant or revoke access. A granted collaborator
+// keeps its own write/execute rights (edit, trigger, manage triggers/secrets)
+// but cannot manage the access list — this stops a collaborator from
+// re-granting access to others or revoking peers (privilege escalation).
+// See MUL-3807.
+func (h *Handler) requireAutopilotAccessManagement(w http.ResponseWriter, r *http.Request, ap db.Autopilot, workspaceID string) bool {
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if !autopilotWriteByOwnership(ap, member) {
+		writeError(w, http.StatusForbidden, "only the autopilot creator or a workspace admin can manage access")
 		return false
 	}
 	return true
@@ -994,9 +1024,9 @@ func (h *Handler) writeAutopilotCollaborators(w http.ResponseWriter, r *http.Req
 }
 
 // AddAutopilotCollaborator grants a workspace member explicit write access to
-// the autopilot. Only existing writers (creator / owner / admin / collaborator)
-// can manage the access list; collaborators cannot re-grant beyond what the
-// write gate already allows. See MUL-3807.
+// the autopilot. Only the autopilot's creator or a workspace owner/admin can
+// manage the access list; a granted collaborator cannot re-grant to others
+// (privilege escalation). See MUL-3807.
 func (h *Handler) AddAutopilotCollaborator(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
@@ -1005,7 +1035,7 @@ func (h *Handler) AddAutopilotCollaborator(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
+	if !h.requireAutopilotAccessManagement(w, r, ap, workspaceID) {
 		return
 	}
 
@@ -1054,8 +1084,10 @@ func (h *Handler) AddAutopilotCollaborator(w http.ResponseWriter, r *http.Reques
 	h.writeAutopilotCollaborators(w, r, ap.ID, http.StatusCreated)
 }
 
-// RemoveAutopilotCollaborator revokes a member's explicit write grant. Implicit
-// writers (creator / owner / admin) are unaffected — there is no row to remove.
+// RemoveAutopilotCollaborator revokes a member's explicit write grant. Only the
+// autopilot's creator or a workspace owner/admin can manage the access list; a
+// collaborator cannot revoke peers. Implicit writers (creator / owner / admin)
+// are unaffected — there is no row to remove.
 func (h *Handler) RemoveAutopilotCollaborator(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	userID := chi.URLParam(r, "userId")
@@ -1065,7 +1097,7 @@ func (h *Handler) RemoveAutopilotCollaborator(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
+	if !h.requireAutopilotAccessManagement(w, r, ap, workspaceID) {
 		return
 	}
 	targetUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
