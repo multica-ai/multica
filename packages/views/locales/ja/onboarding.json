@@ -66,7 +66,8 @@
       "dont_remember": "覚えていない",
       "other": "その他",
       "other_placeholder": "例: よく聴くポッドキャスト",
-      "social_github": "GitHub"
+      "social_github": "GitHub",
+      "self_host_notice": "匿名で集計します: 選択した流入チャネルのみを収集し、ユーザーが Multica をどこで知ったかを把握するために使います。氏名・メールアドレス・組織情報・自由記述は送信しません。"
     },
     "role": {
       "question": "あなたに最も近いのはどれですか?",

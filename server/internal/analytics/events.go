@@ -27,6 +27,13 @@ const (
 	EventContactSalesSubmitted         = "contact_sales_submitted"
 	EventSquadCreated                  = "squad_created"
 	EventAutopilotCreated              = "autopilot_created"
+	// EventSelfHostSourceChannel is the self-host onboarding source beacon
+	// event (MUL-3708). One event per (instance, user, channel), carrying
+	// only the channel + anonymous per-instance hashes — never identity.
+	// Deliberately a distinct name from onboarding_questionnaire_submitted
+	// so it never pollutes the official onboarding funnel; analysts compare
+	// the two series side by side, split by the deployment property.
+	EventSelfHostSourceChannel = "self_host_source_channel"
 )
 
 const EventSchemaVersion = 2

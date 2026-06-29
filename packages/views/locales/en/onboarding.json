@@ -66,7 +66,8 @@
       "event_conference": "Conference / meetup",
       "dont_remember": "Don't remember",
       "other": "Other",
-      "other_placeholder": "e.g. a podcast I listen to"
+      "other_placeholder": "e.g. a podcast I listen to",
+      "self_host_notice": "Anonymous: we only collect the source you pick, to understand where people hear about Multica. We never send your name, email, organization info, or any free-text."
     },
     "role": {
       "question": "Which best describes you?",

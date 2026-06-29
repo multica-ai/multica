@@ -25,6 +25,12 @@ type Event struct {
 	// Name of the event (e.g. "signup", "workspace_created").
 	Name string
 
+	// UUID, when non-empty, is sent as PostHog's top-level event `uuid`.
+	// PostHog deduplicates events sharing a uuid (best-effort), so a
+	// deterministic uuid makes re-sends idempotent. Empty → PostHog assigns
+	// its own (the default for every existing event).
+	UUID string
+
 	// DistinctID identifies the person this event belongs to. For logged-in
 	// users this is user.id; for anonymous events it should be the anon_id
 	// that was previously used on the frontend so identity merging works.

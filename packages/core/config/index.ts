@@ -15,11 +15,17 @@ interface ConfigState {
   // must be hidden. Defaults to false so unknown / older servers behave like
   // the managed-cloud case.
   workspaceCreationDisabled: boolean;
+  // Self-host onboarding source beacon (MUL-3708): true only on a production
+  // self-host that will ship the anonymous source channel. Drives the
+  // "anonymous collection" notice on the onboarding source step. Defaults to
+  // false so official cloud / unknown servers show nothing.
+  selfHostSourceNotice: boolean;
   setCdnConfig: (config: { cdnDomain: string; cdnSigned?: boolean }) => void;
   setAuthConfig: (config: {
     allowSignup: boolean;
     googleClientId?: string;
     workspaceCreationDisabled?: boolean;
+    selfHostSourceNotice?: boolean;
   }) => void;
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
@@ -35,9 +41,14 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonServerUrl: "",
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
+  selfHostSourceNotice: false,
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
-  setAuthConfig: ({ allowSignup, googleClientId = "", workspaceCreationDisabled = false }) =>
-    set({ allowSignup, googleClientId, workspaceCreationDisabled }),
+  setAuthConfig: ({
+    allowSignup,
+    googleClientId = "",
+    workspaceCreationDisabled = false,
+    selfHostSourceNotice = false,
+  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, selfHostSourceNotice }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
 }));

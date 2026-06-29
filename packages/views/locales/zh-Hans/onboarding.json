@@ -66,7 +66,8 @@
       "event_conference": "线下活动 / Meetup",
       "dont_remember": "想不起来了",
       "other": "其他",
-      "other_placeholder": "例如：一档播客"
+      "other_placeholder": "例如：一档播客",
+      "self_host_notice": "匿名统计：我们只会收集你选择的来源渠道，用于了解用户从哪里认识 Multica。不包含你的身份信息、邮箱、组织信息或自由文本内容。"
     },
     "role": {
       "question": "你是什么角色？",
