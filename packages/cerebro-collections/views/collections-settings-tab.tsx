@@ -65,6 +65,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { projectTreeOptions } from "@multica/core/projects/nesting";
 import type { ProjectTreeItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useModalStore } from "@multica/core/modals";
 import {
   artifactCollectionFoldersOptions,
   entityCollectionFoldersOptions,
@@ -85,9 +87,8 @@ import { ProjectGrantsPanel } from "./project-grants-panel";
 import type { CollectionFolder } from "../api";
 import type { GranteeType, GrantSurface } from "../types";
 
-// Mirrors @multica/views ExtraSettingsTab structurally. Defined locally so this
-// entrypoint stays free of a views dependency (and the topo-sort coupling it
-// brings), exactly like cerebro-tool-policy/views/workspace-settings-tab.
+// Mirrors @multica/views ExtraSettingsTab structurally. Defined locally to
+// avoid a re-export chain, exactly like cerebro-tool-policy/views/workspace-settings-tab.
 export interface ExtraSettingsTab {
   value: string;
   label: string;
@@ -492,6 +493,8 @@ function ProjectTree({
 
 export function CollectionsTab() {
   const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
+  const openModal = useModalStore((s) => s.open);
   const [activeTab, setActiveTab] = React.useState("Documents");
 
   const { data: artifactFolders = [] } = useQuery(
@@ -583,46 +586,52 @@ export function CollectionsTab() {
         </TabsList>
         {GROUPS.map((g) => (
           <TabsContent key={g.group} value={g.group} className="pt-2">
-            {/* New-item inline form — document / note / skill (not autopilot, which
-                requires an assignee and belongs in the Autopilots settings page). */}
-            {g.entityKind !== "autopilot" && (
-              <div className="mb-3">
-                {creatingItem[g.group] ? (
-                  <div className="flex items-center gap-1 px-1">
-                    <Input
-                      autoFocus
-                      value={newItemName[g.group] ?? ""}
-                      onChange={(e) =>
-                        setNewItemName((prev) => ({ ...prev, [g.group]: e.target.value }))
-                      }
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") submitItem(g);
-                        if (e.key === "Escape")
-                          setCreatingItem((prev) => ({ ...prev, [g.group]: false }));
-                      }}
-                      placeholder={g.artifactKind ? "Title" : "Name"}
-                      className="h-7 text-xs"
-                    />
-                    <Button
-                      size="sm"
-                      className="h-7 shrink-0"
-                      onClick={() => submitItem(g)}
-                      disabled={createItem.isPending || !(newItemName[g.group] ?? "").trim()}
-                    >
-                      Add
-                    </Button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setCreatingItem((prev) => ({ ...prev, [g.group]: true }))}
-                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted/50"
+            {/* New-item creation row — inline form for document/note/skill;
+                autopilots navigate to the full creation page (require assignee). */}
+            <div className="mb-3">
+              {g.entityKind === "autopilot" ? (
+                <a
+                  href={wsPaths.autopilotNew()}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted/50"
+                >
+                  <FilePlus className="size-3.5" />
+                  New autopilot
+                </a>
+              ) : creatingItem[g.group] ? (
+                <div className="flex items-center gap-1 px-1">
+                  <Input
+                    autoFocus
+                    value={newItemName[g.group] ?? ""}
+                    onChange={(e) =>
+                      setNewItemName((prev) => ({ ...prev, [g.group]: e.target.value }))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") submitItem(g);
+                      if (e.key === "Escape")
+                        setCreatingItem((prev) => ({ ...prev, [g.group]: false }));
+                    }}
+                    placeholder={g.artifactKind ? "Title" : "Name"}
+                    className="h-7 text-xs"
+                  />
+                  <Button
+                    size="sm"
+                    className="h-7 shrink-0"
+                    onClick={() => submitItem(g)}
+                    disabled={createItem.isPending || !(newItemName[g.group] ?? "").trim()}
                   >
-                    <FilePlus className="size-3.5" />
-                    {itemLabel(g)}
-                  </button>
-                )}
-              </div>
-            )}
+                    Add
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setCreatingItem((prev) => ({ ...prev, [g.group]: true }))}
+                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted/50"
+                >
+                  <FilePlus className="size-3.5" />
+                  {itemLabel(g)}
+                </button>
+              )}
+            </div>
             <FolderTree
               folders={foldersByGroup[g.group] ?? []}
               entityKind={g.entityKind}
@@ -641,6 +650,15 @@ export function CollectionsTab() {
           </TabsContent>
         ))}
         <TabsContent value={PROJECTS_TAB} className="pt-2">
+          <div className="mb-3">
+            <button
+              onClick={() => openModal("create-project")}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted/50"
+            >
+              <FilePlus className="size-3.5" />
+              New project
+            </button>
+          </div>
           <ProjectTree projects={projects} onManage={setActiveProject} />
         </TabsContent>
       </Tabs>
