@@ -2,63 +2,49 @@ package agentvault
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"testing"
 )
 
-type fakeMinter struct {
-	token string
-	err   error
-	got   []VaultAccess
-}
+// FIR-2210: the broker injects no agent-side transport — PrepareSpawnEnv always
+// returns a nil env (credential access is via Multica connections). These tests
+// reuse fakeGrantSource / fakeAccessStore from mirror_test.go.
 
-func (f *fakeMinter) MintAgentToken(_ context.Context, _ string, access []VaultAccess) (string, error) {
-	f.got = access
-	return f.token, f.err
-}
-
-type fakeLister struct {
-	access []Access
-	err    error
-}
-
-func (f *fakeLister) ListForAgent(_ context.Context, _, _ string) ([]Access, error) {
-	return f.access, f.err
-}
-
-func TestPrepareSpawnEnvNoAccessReturnsNil(t *testing.T) {
-	s := NewService(&fakeMinter{token: "av_agt_x"}, &fakeLister{}, "http://relay.internal:8090", "/tmp/ca.pem")
+func TestPrepareSpawnEnvNoMirrorReturnsNilEnv(t *testing.T) {
+	s := NewService()
 	env, err := s.PrepareSpawnEnv(context.Background(), "ws", "ag", "sara-agent")
 	if err != nil || env != nil {
-		t.Fatalf("expected (nil,nil) for no access, got (%v,%v)", env, err)
+		t.Fatalf("expected (nil,nil) with no mirror wired, got (%v,%v)", env, err)
 	}
 }
 
-func TestPrepareSpawnEnvMintsScopedTokenAndBuildsEnv(t *testing.T) {
-	m := &fakeMinter{token: "av_agt_scoped"}
-	l := &fakeLister{access: []Access{{Vault: "multica", Role: "read-only"}, {Vault: "cloudflare", Role: "member"}}}
-	s := NewService(m, l, "http://relay.internal:8090", "/tmp/ca.pem")
+func TestPrepareSpawnEnvReconcilesGrantsAndReturnsNilEnv(t *testing.T) {
+	src := fakeGrantSource{boxes: []BoxGrant{{Vault: "multica", Role: "read-only"}}}
+	rec := newFakeAccessStore(map[string]string{"stale": "member"})
+	s := NewService()
+	s.SetGrantMirror(src, rec)
+
 	env, err := s.PrepareSpawnEnv(context.Background(), "ws", "ag", "sara-agent")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if !strings.Contains(env[envHTTPSProxy], "av_agt_scoped@relay.internal:8090") {
-		t.Fatalf("proxy url missing token userinfo: %q", env[envHTTPSProxy])
+	if env != nil {
+		t.Fatalf("expected nil env (no agent-side transport), got %v", env)
 	}
-	if env[envSSLCertFile] != "/tmp/ca.pem" {
-		t.Fatalf("CA not set: %v", env)
+	// The granted box is written and the box no longer granted is removed.
+	if rec.setCalls != 1 || rec.rows["multica"] != "read-only" {
+		t.Fatalf("expected multica to be set, got rows=%v setCalls=%d", rec.rows, rec.setCalls)
 	}
-	// the minted token must be scoped to exactly the granted vaults+roles
-	if len(m.got) != 2 || m.got[0].Vault != "multica" || m.got[1].Role != "member" {
-		t.Fatalf("scope not passed through: %v", m.got)
+	if _, stillThere := rec.rows["stale"]; stillThere {
+		t.Fatalf("expected stale box to be deleted, got rows=%v", rec.rows)
 	}
 }
 
-func TestPrepareSpawnEnvMintErrorFailsClosed(t *testing.T) {
-	m := &fakeMinter{err: errors.New("boom")}
-	l := &fakeLister{access: []Access{{Vault: "multica", Role: "read-only"}}}
-	s := NewService(m, l, "http://relay.internal:8090", "/tmp/ca.pem")
+func TestPrepareSpawnEnvGrantSourceErrorFailsClosed(t *testing.T) {
+	src := fakeGrantSource{err: context.DeadlineExceeded}
+	rec := newFakeAccessStore(nil)
+	s := NewService()
+	s.SetGrantMirror(src, rec)
+
 	if _, err := s.PrepareSpawnEnv(context.Background(), "ws", "ag", "sara-agent"); err == nil {
 		t.Fatalf("expected error to fail the claim closed")
 	}

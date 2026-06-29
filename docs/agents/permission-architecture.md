@@ -327,10 +327,14 @@ the specific second model you will find in the code and must NOT cement.
 
 - **The secret itself lives in Agent Vault — that is storage, not a permission model.**
   `cerebro_agentvault_agent_access` (TECH-3196, flag `cerebro_agent_vault`) is *where credentials
-  live and are used*: at task claim the server mints a vault-scoped token and injects proxy env so
-  the agent uses the secret without ever holding it. This is storage + runtime brokering, **not** a
-  second place to express "who may use this credential" — do not confuse the vault-access table for
-  a permission interface.
+  live*: at task claim the server reconciles this table from the authoritative tool-policy grants
+  (FIR-1739 Part B), so it is a derived view of the chain, not an authority. **FIR-2210:** the old
+  agent-side forward-proxy transport (claim-time `HTTPS_PROXY`/CA injection + the standalone relay
+  listener) was removed — agents now reach a credential through Multica connections (the FIR-2166
+  server-side connection proxy), never a tunnel and never the internal Agent Vault path directly. The
+  table is storage + the per-agent grant model the connections path consumes, **not** a second place
+  to express "who may use this credential" — do not confuse the vault-access table for a permission
+  interface.
 
 - **The `cerebro_credential_policy` parallel store is RETIRED (FIR-1479) — there is no second model
   to wire in.** Earlier the `credentialpolicy` package + `cerebro_credential_policy` table (migration

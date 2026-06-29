@@ -2,10 +2,14 @@
 //
 // Kept in a cerebro-prefixed file so the upstream daemon.go claim path stays to
 // a single marked gate line. At task claim, if the workspace has the
-// cerebro_agent_vault flag on AND the agent has rows in the per-agent access
-// table, the broker mints a vault-scoped token and returns the proxy env that
-// routes the agent through the Multica relay. Merged into the agent's
-// custom_env (which the daemon injects and redacts from agent-actor reads).
+// cerebro_agent_vault flag on, the broker reconciles the agent's per-agent
+// access table from the authoritative tool-policy grants (FIR-1739 Part B).
+//
+// FIR-2210: the broker no longer injects any agent-side transport env — the
+// HTTPS_PROXY forward-proxy relay was removed (agents reach credentials via
+// Multica connections, never a tunnel). PrepareSpawnEnv therefore returns a nil
+// env today; this hook stays on the claim path as the reconcile trigger and the
+// seam the connections-backed credential path will populate.
 //
 // Fail-open: any error spawns the agent WITHOUT broker env rather than blocking
 // the claim — the agent simply lacks the brokered access; no secret is exposed.
