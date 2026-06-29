@@ -469,10 +469,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			slackBindingSvc := slack.NewBindingTokenService(queries, pool)
 			h.SlackBindingTokens = slackBindingSvc
 			slackReplier := slack.NewOutboundReplier(slack.OutboundReplierConfig{
-				Binding:   slackBindingSvc,
-				Decrypt:   box.Open,
-				PublicURL: signupConfig.PublicURL,
-				Logger:    slog.Default(),
+				Binding: slackBindingSvc,
+				Decrypt: box.Open,
+				// The bind link (/slack/bind) is a web-app page, so it must use the
+				// app URL (MULTICA_APP_URL ?? FRONTEND_ORIGIN), NOT MULTICA_PUBLIC_URL
+				// (the backend/API URL). Mirrors the Lark replier (appURLFromEnv).
+				AppURL: appURLFromEnv(),
+				Logger: slog.Default(),
 			})
 			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier))
 			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)

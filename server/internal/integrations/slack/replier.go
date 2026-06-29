@@ -46,18 +46,25 @@ type OutboundReplier struct {
 	binding     bindingMinter
 	decrypt     Decrypter
 	newSender   func(creds credentials) replySender
-	publicURL   string
+	appURL      string
 	bindingPath string
 	logger      *slog.Logger
 }
 
-// OutboundReplierConfig configures the replier. Binding + PublicURL are required
+// OutboundReplierConfig configures the replier. Binding + AppURL are required
 // for the NeedsBinding prompt to work; without them the prompt is skipped (the
 // offline/archived/issue notices still fire).
 type OutboundReplierConfig struct {
-	Binding     bindingMinter
-	Decrypt     Decrypter
-	PublicURL   string
+	Binding bindingMinter
+	Decrypt Decrypter
+	// AppURL is the Multica web app host the user clicks into to redeem the
+	// binding token (e.g. https://multica.example). It comes from MULTICA_APP_URL
+	// (falling back to FRONTEND_ORIGIN) and is intentionally separate from
+	// MULTICA_PUBLIC_URL, which is the backend/API public URL used for webhook and
+	// daemon-facing endpoints — the bind page (/slack/bind) is served by the web
+	// app, so the link must point at the app host, not the API host. Mirrors the
+	// Lark replier's AppURL.
+	AppURL      string
 	BindingPath string // default "/slack/bind"
 	Logger      *slog.Logger
 }
@@ -81,7 +88,7 @@ func NewOutboundReplier(cfg OutboundReplierConfig) *OutboundReplier {
 	r := &OutboundReplier{
 		binding:     cfg.Binding,
 		decrypt:     cfg.Decrypt,
-		publicURL:   strings.TrimRight(cfg.PublicURL, "/"),
+		appURL:      strings.TrimRight(cfg.AppURL, "/"),
 		bindingPath: bindingPath,
 		logger:      logger,
 	}
@@ -133,14 +140,14 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	if r.binding == nil {
 		return errors.New("binding service not configured")
 	}
-	if r.publicURL == "" {
-		return errors.New("public url not configured")
+	if r.appURL == "" {
+		return errors.New("app url not configured")
 	}
 	token, err := r.binding.Mint(ctx, inst.WorkspaceID, inst.ID, sender)
 	if err != nil {
 		return fmt.Errorf("mint binding token: %w", err)
 	}
-	bindURL := r.publicURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
+	bindURL := r.appURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
 	// Wrap the URL as an explicit Slack link <url|label>: formatMrkdwn protects
 	// these from its markdown passes, so the base64url token's `_`/`-` chars are
 	// not mangled into italics.

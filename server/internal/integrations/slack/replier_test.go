@@ -41,9 +41,9 @@ func (f *fakeBindingMinter) Mint(_ context.Context, ws, inst pgtype.UUID, user s
 
 func newTestReplier(binding bindingMinter, sender replySender) *OutboundReplier {
 	r := NewOutboundReplier(OutboundReplierConfig{
-		Binding:   binding,
-		Decrypt:   nil, // identity: stored bot token is base64 plaintext
-		PublicURL: "https://multica.example",
+		Binding: binding,
+		Decrypt: nil, // identity: stored bot token is base64 plaintext
+		AppURL:  "https://multica.example",
 	})
 	r.newSender = func(credentials) replySender { return sender }
 	return r
