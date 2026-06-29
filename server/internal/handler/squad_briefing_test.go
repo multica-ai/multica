@@ -31,6 +31,29 @@ func TestSquadOperatingProtocolWarnsAgainstDualTrigger(t *testing.T) {
 	}
 }
 
+// TestSquadOperatingProtocolRequiresRoleAwareDelegation locks in the
+// prompt-level routing contract: leaders must select by role fit before
+// availability, avoid self-review, ask when ambiguous, and leave an
+// auditable handoff trail. This intentionally asserts narrow substrings
+// rather than exact wording.
+func TestSquadOperatingProtocolRequiresRoleAwareDelegation(t *testing.T) {
+	compact := strings.Join(strings.Fields(squadOperatingProtocol), " ")
+	for _, want := range []string{
+		"required role/discipline first",
+		"availability/idleness as a tie-breaker only",
+		"idle mismatched member",
+		"For review, validation, QA, or sign-off, exclude the member who performed the implementation",
+		"ask the reporter/leader a clarifying question",
+		"`Required role:`",
+		"`Selected because:`",
+		"`Excluded:`",
+	} {
+		if !strings.Contains(compact, want) {
+			t.Errorf("expected squad operating protocol to contain %q\n--- protocol ---\n%s", want, squadOperatingProtocol)
+		}
+	}
+}
+
 // seedSquadForBriefing creates a squad with the seeded test agent as
 // leader. Returns the loaded db.Squad and a cleanup-registered ID.
 func seedSquadForBriefing(t *testing.T, leaderID string, name, instructions string) db.Squad {
