@@ -39,12 +39,14 @@ services:
       retries: 5
 
   backend:
-    image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
+    image: ${MULTICA_BACKEND_IMAGE:-qingkongyumian/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - backend_uploads:/app/data/uploads
     environment:
@@ -114,7 +116,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:${MULTICA_IMAGE_TAG:-latest}
+    image: ${MULTICA_WEB_IMAGE:-qingkongyumian/multica-web}:${MULTICA_IMAGE_TAG:-latest}
     depends_on:
       - backend
     ports:
