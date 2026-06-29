@@ -184,8 +184,17 @@ start: ## Start backend and frontend for the current checkout and run migrations
 stop: ## Stop backend and frontend processes for the current checkout
 	$(REQUIRE_ENV)
 	@echo "Stopping services..."
-	@-lsof -ti:$(PORT) | xargs kill -9 2>/dev/null
-	@-lsof -ti:$(FRONTEND_PORT) | xargs kill -9 2>/dev/null
+	@if command -v lsof >/dev/null 2>&1; then \
+		lsof -ti:$(PORT) 2>/dev/null | xargs kill -9 2>/dev/null || true; \
+		lsof -ti:$(FRONTEND_PORT) 2>/dev/null | xargs kill -9 2>/dev/null || true; \
+	else \
+		for pid in $$(netstat -ano 2>/dev/null | grep "LISTENING" | grep ":$(PORT) " | awk '{print $$5}'); do \
+			taskkill -f -pid $$pid >/dev/null 2>&1 || true; \
+		done; \
+		for pid in $$(netstat -ano 2>/dev/null | grep "LISTENING" | grep ":$(FRONTEND_PORT) " | awk '{print $$5}'); do \
+			taskkill -f -pid $$pid >/dev/null 2>&1 || true; \
+		done; \
+	fi
 	@case "$(DATABASE_URL)" in \
 		""|*@localhost:*|*@localhost/*|*@127.0.0.1:*|*@127.0.0.1/*|*@\[::1\]:*|*@\[::1\]/*) \
 			echo "✓ App processes stopped. Shared PostgreSQL is still running on localhost:$(POSTGRES_PORT)." ;; \
