@@ -37,6 +37,19 @@ const DEFAULT_MAX_DURATION_MS = 60_000;
 const ONE_SHOT_TIMESLICE_MS = 1_000;
 
 /**
+ * Whether a failed transcribe is the engine cold-booting rather than a real
+ * failure (FIR-2048). The HTTP transcriber throws a `TranscribeError` carrying
+ * the backend status/code; the backend answers a cold start with 503
+ * `warming_up`. Checked structurally (not via `instanceof`) so the hook stays
+ * decoupled from the HTTP transcriber implementation.
+ */
+function isWarmingUpError(cause: unknown): boolean {
+  if (!cause || typeof cause !== "object") return false;
+  const e = cause as { status?: unknown; code?: unknown };
+  return e.status === 503 || e.code === "warming_up";
+}
+
+/**
  * React hook wrapping the MediaRecorder lifecycle for dictation. The hook
  * is UI-agnostic: a `MicButton` (slice 2) renders state via `status` and
  * triggers `start()`/`stop()`, while consumers in arbitrary text inputs
@@ -61,6 +74,12 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
   const [status, setStatus] = useState<DictationStatus>("idle");
   const [error, setError] = useState<DictationError | null>(null);
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
+  // After a failed (one-shot) transcription we keep the recorded clip so the
+  // user can retry without speaking again (FIR-2048). `canResend` drives the
+  // "Re-send" button; the blob itself lives in a ref so it doesn't trigger
+  // re-renders or get duplicated into state.
+  const [canResend, setCanResend] = useState(false);
+  const pendingAudioRef = useRef<Blob | null>(null);
   // Surfaced to the UI so a waveform can read the live mic input. Kept as
   // state (not just the ref below) so consumers re-render when it appears
   // and disappears.
@@ -181,6 +200,9 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
 
     setError(null);
     setLastTranscript(null);
+    // A new recording supersedes any kept clip from a previous failure.
+    pendingAudioRef.current = null;
+    setCanResend(false);
     setStatus("requesting-permission");
     cancelledRef.current = false;
     streamingFinalRef.current = null;
@@ -317,6 +339,58 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     }, maxDurationMs);
   }, [isSupported, maxDurationMs, mimeType, pickMimeType, reportError, status, teardown]);
 
+  // Run the one-shot transcriber on a captured clip, shared by `stop` (first
+  // attempt) and `resend` (retry the kept clip). On success it clears the kept
+  // clip; on a non-aborted failure it keeps the clip and flags `canResend`,
+  // tagging a cold start as "warming-up" so the UI can stay calm (FIR-2048).
+  const runTranscribe = useCallback(
+    async (audio: Blob) => {
+      if (!transcribeRef.current) {
+        reportError({
+          kind: "transcription-failed",
+          message: "Dictation transcriber is not configured.",
+        });
+        return;
+      }
+      cancelledRef.current = false;
+      setStatus("transcribing");
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        const text = await transcribeRef.current(audio, controller.signal);
+        if (cancelledRef.current) {
+          return;
+        }
+        pendingAudioRef.current = null;
+        setCanResend(false);
+        setLastTranscript(text);
+        setStatus("idle");
+        onTranscribedRef.current?.(text);
+      } catch (cause) {
+        if (controller.signal.aborted) {
+          reportError({
+            kind: "aborted",
+            message: "Transcription was cancelled.",
+            cause,
+          });
+          return;
+        }
+        // Keep the clip so the user can retry without re-recording (FIR-2048).
+        pendingAudioRef.current = audio;
+        setCanResend(true);
+        reportError({
+          kind: isWarmingUpError(cause) ? "warming-up" : "transcription-failed",
+          message:
+            cause instanceof Error ? cause.message : "Transcription failed.",
+          cause,
+        });
+      } finally {
+        abortRef.current = null;
+      }
+    },
+    [reportError],
+  );
+
   const stop = useCallback(async () => {
     const recorder = recorderRef.current;
     if (!recorder || recorder.state === "inactive") {
@@ -387,38 +461,19 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
       return;
     }
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      if (!transcribeRef.current) {
-        throw new Error("Dictation transcriber is not configured.");
-      }
-      const text = await transcribeRef.current(audio, controller.signal);
-      if (cancelledRef.current) {
-        return;
-      }
-      setLastTranscript(text);
-      setStatus("idle");
-      onTranscribedRef.current?.(text);
-    } catch (cause) {
-      if (controller.signal.aborted) {
-        reportError({
-          kind: "aborted",
-          message: "Transcription was cancelled.",
-          cause,
-        });
-        return;
-      }
-      reportError({
-        kind: "transcription-failed",
-        message:
-          cause instanceof Error ? cause.message : "Transcription failed.",
-        cause,
-      });
-    } finally {
-      abortRef.current = null;
+    await runTranscribe(audio);
+  }, [reportError, runTranscribe, teardown]);
+
+  // Retry the kept clip from the last failure without re-recording (FIR-2048).
+  // No-op when there is nothing kept or a recording / transcription is already
+  // in flight (`abortRef` is held during both).
+  const resend = useCallback(async () => {
+    const audio = pendingAudioRef.current;
+    if (!audio || abortRef.current) {
+      return;
     }
-  }, [reportError, teardown]);
+    await runTranscribe(audio);
+  }, [runTranscribe]);
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
@@ -426,6 +481,9 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     abortRef.current?.abort();
     streamingSessionRef.current?.cancel();
     teardown();
+    // Cancelling discards the kept clip too — the user chose to abandon it.
+    pendingAudioRef.current = null;
+    setCanResend(false);
     setStatus("idle");
   }, [teardown]);
 
@@ -442,5 +500,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     start,
     stop,
     cancel,
+    canResend,
+    resend,
   };
 }

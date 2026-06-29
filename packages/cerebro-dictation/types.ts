@@ -17,6 +17,10 @@ export type DictationErrorKind =
   | "no-microphone"
   | "recording-failed"
   | "transcription-failed"
+  // The speech engine is still cold-booting (FIR-2048). Distinct from
+  // transcription-failed so the UI can show a calm "warming up" cue instead of a
+  // hard error — the recording is kept and can be re-sent in a moment.
+  | "warming-up"
   | "streaming-failed"
   | "aborted";
 
@@ -122,4 +126,17 @@ export interface UseDictationReturn {
    * producing a result. Safe to call from any state.
    */
   cancel: () => void;
+  /**
+   * True when the last transcription failed but the recorded clip was kept, so
+   * the user can retry without speaking again (FIR-2048). Set on a warming-up
+   * cold start or a transient transcription failure; cleared on success, on a
+   * new recording, and on cancel.
+   */
+  canResend: boolean;
+  /**
+   * Re-run transcription on the kept recording (see {@link canResend}). No-op
+   * when there is no kept clip or a recording/transcription is already in
+   * flight. Used by the "Re-send" button the UI shows after a failure.
+   */
+  resend: () => Promise<void>;
 }

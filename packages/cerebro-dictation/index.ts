@@ -15,7 +15,7 @@ export type {
 } from "./types";
 export { DEFAULT_MIME_TYPE_PREFERENCE, useDictation } from "./use-dictation";
 export { createWebSocketStreamingTranscriber } from "./streaming-transcriber";
-export { createHttpTranscriber } from "./http-transcriber";
+export { createHttpTranscriber, TranscribeError } from "./http-transcriber";
 export { insertAtCaret } from "./insert-at-caret";
 export { MicButton, type MicButtonProps } from "./views/mic-button";
 export { Waveform, type WaveformProps } from "./views/waveform";

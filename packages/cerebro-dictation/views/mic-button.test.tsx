@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   ),
   useDictation: vi.fn(),
   toastError: vi.fn(),
+  toastMessage: vi.fn(),
 }));
 
 vi.mock("@multica/cerebro-feature-flags", () => ({
@@ -20,12 +21,13 @@ vi.mock("../use-dictation", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: mocks.toastError },
+  toast: { error: mocks.toastError, message: mocks.toastMessage },
 }));
 
 describe("MicButton", () => {
   beforeEach(() => {
     mocks.toastError.mockClear();
+    mocks.toastMessage.mockClear();
     mocks.useFeatureFlag.mockImplementation(
       (key: string) =>
         key === "cerebro_voice_dictation_enabled" ||
@@ -375,5 +377,49 @@ describe("MicButton", () => {
     act(() => landed?.("hej med dig"));
 
     expect(screen.getByText("Added")).toBeInTheDocument();
+  });
+
+  it("shows a Re-send button after a kept failure and calls resend on click (FIR-2048)", () => {
+    const resend = vi.fn();
+    mocks.useDictation.mockReturnValue({
+      status: "error",
+      error: { kind: "warming-up", message: "warming up" },
+      isSupported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+      canResend: true,
+      resend,
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} />);
+
+    const button = screen.getByRole("button", {
+      name: "Re-send recording for transcription",
+    });
+    fireEvent.click(button);
+    expect(resend).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces a warming-up cold start as a calm message, not a red error (FIR-2048)", () => {
+    mocks.useDictation.mockReturnValue({
+      status: "error",
+      error: { kind: "warming-up", message: "warming up" },
+      isSupported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+      canResend: true,
+      resend: vi.fn(),
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} />);
+
+    expect(mocks.toastMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.toastError).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CircleCheck, Loader2, Mic, Square } from "lucide-react";
+import { CircleCheck, Loader2, Mic, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { Button } from "@multica/ui/components/ui/button";
@@ -47,6 +47,10 @@ function errorToastMessage(error: DictationError): string {
       return "No microphone was found.";
     case "unsupported":
       return "Dictation isn't supported in this browser.";
+    case "warming-up":
+      // A cold start, not a failure: the engine is booting (~30s). Keep it calm
+      // and point at the kept recording (FIR-2048).
+      return "The speech engine is warming up — your recording is saved. Tap Re-send in a moment.";
     case "transcription-failed":
     case "streaming-failed":
       // Append the concrete cause so a failure on a device we can't reproduce
@@ -137,13 +141,14 @@ export function MicButton({
     [onTranscribed],
   );
 
-  const { status, error, isSupported, mediaStream, start, stop } = useDictation({
-    transcribe: transcribe ?? backendNotDeployedTranscriber,
-    streamTranscribe: streamTranscribe ?? defaultStreamTranscribe,
-    onPartial: onPartialTranscribed,
-    onTranscribed: handleTranscribed,
-    onError,
-  });
+  const { status, error, isSupported, mediaStream, start, stop, canResend, resend } =
+    useDictation({
+      transcribe: transcribe ?? backendNotDeployedTranscriber,
+      streamTranscribe: streamTranscribe ?? defaultStreamTranscribe,
+      onPartial: onPartialTranscribed,
+      onTranscribed: handleTranscribed,
+      onError,
+    });
 
   // Bubble every status change to the host so a wrapper can render a
   // destination-side cue (the transcribing skeleton, Forslag B) — MicButton
@@ -175,7 +180,13 @@ export function MicButton({
   // silent — nothing landed in the field and it looked like dictation "did
   // nothing". Toast every non-aborted error so the user knows what happened.
   useEffect(() => {
-    if (error && error.kind !== "aborted") {
+    if (!error || error.kind === "aborted") return;
+    // A warming-up cold start is expected, not a failure — show it as a neutral
+    // message, not a red error toast, since the recording is safe and re-sendable
+    // (FIR-2048).
+    if (error.kind === "warming-up") {
+      toast.message(errorToastMessage(error));
+    } else {
       toast.error(errorToastMessage(error));
     }
   }, [error]);
@@ -276,6 +287,21 @@ export function MicButton({
           <CircleCheck className="size-3.5" aria-hidden="true" />
           {successLabel}
         </span>
+      )}
+      {/* Re-send the kept recording after a failure / cold start, without
+          speaking again (FIR-2048). Hidden while recording or transcribing. */}
+      {canResend && !isRecording && !isTranscribing && (
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          className="gap-1"
+          onClick={() => void resend()}
+          aria-label="Re-send recording for transcription"
+        >
+          <RotateCcw className="size-3" aria-hidden="true" />
+          Re-send
+        </Button>
       )}
       <Tooltip>
         <TooltipTrigger

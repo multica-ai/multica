@@ -80,7 +80,15 @@ app = modal.App("cerebro-hviske")
     region="eu",  # Frankfurt. GDPR-safe audio path.
     volumes={"/cache/hf": model_cache},
     secrets=[secrets, gateway_secret],
-    scaledown_window=300,
+    # FIR-2048 "middle path": keep a used container warm for 30 min after the
+    # last request instead of 5. The ~30s cold start is what makes a dictation
+    # fail when it lands on a scaled-to-zero GPU; a longer window means a whole
+    # work session pays at most ONE cold start, then every following dictation is
+    # warm (~1-2s). We deliberately do NOT set min_containers — that would keep a
+    # GPU billing 24/7 (~$0.80/h ≈ a few thousand DKK/month for pure idle). With
+    # scale-to-zero + a longer window we only pay while the engine is actually in
+    # use plus a short idle tail, so cost stays tied to real dictation activity.
+    scaledown_window=1800,
     max_containers=4,
 )
 @modal.asgi_app()

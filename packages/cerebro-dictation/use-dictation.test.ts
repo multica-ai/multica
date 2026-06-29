@@ -309,4 +309,95 @@ describe("useDictation", () => {
     expect(result.current.error?.kind).toBe("transcription-failed");
     expect(result.current.error?.message).toBe("boom");
   });
+
+  it("keeps the recording and flags canResend when transcription fails (FIR-2048)", async () => {
+    const recorder = createFakeRecorder();
+    installFakeMediaRecorder(recorder);
+    installGetUserMedia(() => Promise.resolve(fakeStream()));
+    const transcribe = vi.fn(async () => {
+      throw new Error("boom");
+    });
+
+    const { result } = renderHook(() => useDictation({ transcribe }));
+
+    await act(async () => {
+      await result.current.start();
+    });
+    await act(async () => {
+      await result.current.stop();
+    });
+
+    await waitFor(() => {
+      expect(result.current.canResend).toBe(true);
+    });
+    expect(result.current.error?.kind).toBe("transcription-failed");
+  });
+
+  it("tags a 503 warming_up failure as warming-up and keeps the clip (FIR-2048)", async () => {
+    const recorder = createFakeRecorder();
+    installFakeMediaRecorder(recorder);
+    installGetUserMedia(() => Promise.resolve(fakeStream()));
+    const transcribe = vi.fn(async () => {
+      // Mirrors TranscribeError from the HTTP transcriber: a 503 cold start.
+      throw Object.assign(new Error("warming up"), {
+        status: 503,
+        code: "warming_up",
+      });
+    });
+
+    const { result } = renderHook(() => useDictation({ transcribe }));
+
+    await act(async () => {
+      await result.current.start();
+    });
+    await act(async () => {
+      await result.current.stop();
+    });
+
+    await waitFor(() => {
+      expect(result.current.error?.kind).toBe("warming-up");
+    });
+    expect(result.current.canResend).toBe(true);
+  });
+
+  it("resend re-runs the transcriber on the kept clip and clears canResend on success (FIR-2048)", async () => {
+    const recorder = createFakeRecorder();
+    installFakeMediaRecorder(recorder);
+    installGetUserMedia(() => Promise.resolve(fakeStream()));
+    let calls = 0;
+    const transcribe = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new Error("cold"), { status: 503, code: "warming_up" });
+      }
+      return "varmt nu";
+    });
+    const onTranscribed = vi.fn();
+
+    const { result } = renderHook(() =>
+      useDictation({ transcribe, onTranscribed }),
+    );
+
+    await act(async () => {
+      await result.current.start();
+    });
+    await act(async () => {
+      await result.current.stop();
+    });
+    await waitFor(() => {
+      expect(result.current.canResend).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.resend();
+    });
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("idle");
+    });
+    expect(result.current.lastTranscript).toBe("varmt nu");
+    expect(result.current.canResend).toBe(false);
+    expect(onTranscribed).toHaveBeenCalledWith("varmt nu");
+    expect(transcribe).toHaveBeenCalledTimes(2);
+  });
 });

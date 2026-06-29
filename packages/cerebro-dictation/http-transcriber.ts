@@ -1,6 +1,25 @@
 import type { Transcriber } from "./types";
 
 /**
+ * Error thrown when the transcribe endpoint answers with a non-2xx status. It
+ * carries the HTTP `status` and the backend `code` so the dictation hook can
+ * tell a "warming up" cold start (503 `warming_up`, FIR-2048) apart from a hard
+ * failure and react accordingly — keep the recording and offer a re-send rather
+ * than discarding the clip.
+ */
+export class TranscribeError extends Error {
+  readonly status: number;
+  readonly code?: string;
+
+  constructor(status: number, code?: string) {
+    super(`dictation transcribe failed: HTTP ${status}`);
+    this.name = "TranscribeError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/**
  * Fire-and-forget warmup: ping the dictation warmup endpoint the moment the
  * mic is pressed so the hviske engine cold-boots while the user is still
  * speaking (Jesper, FIR-1637). The engine scales to zero when idle, so without
@@ -60,7 +79,15 @@ export function createHttpTranscriber(
     });
 
     if (!res.ok) {
-      throw new Error(`dictation transcribe failed: HTTP ${res.status}`);
+      // Read the backend error envelope ({ code, message }) when present so the
+      // hook can distinguish a warming-up cold start from a real failure. The
+      // body may be empty or non-JSON — degrade to status-only, never throw here.
+      const body: unknown = await res.json().catch(() => null);
+      const code =
+        body && typeof body === "object" && typeof (body as { code?: unknown }).code === "string"
+          ? (body as { code: string }).code
+          : undefined;
+      throw new TranscribeError(res.status, code);
     }
 
     // Defensive parse: never assume the body shape (see API Response

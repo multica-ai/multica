@@ -99,6 +99,17 @@ func (h *Handler) Transcribe(w http.ResponseWriter, r *http.Request) {
 	parsed, err := h.transcribeWithRetry(r.Context(), body, contentType, workspaceID, userID)
 	if err != nil {
 		slog.Warn("dictation transcribe upstream failed", "error", err)
+		// A retryable failure (transport error or 5xx) that survived our quick
+		// retries almost always means the hviske GPU is still cold-booting — that
+		// boot is ~30s, far longer than the few hundred ms we retry over (FIR-2048).
+		// Surface it as a distinct "warming up" signal (not a hard error) so the
+		// browser can keep the recording and offer a one-tap re-send once the
+		// engine is warm, instead of discarding the clip behind a generic failure.
+		// A deterministic 4xx is the caller's fault and stays a hard 502.
+		if errRetryable(err) {
+			writeJSONError(w, http.StatusServiceUnavailable, "warming_up", "The speech engine is warming up. Your recording is saved — try again in a moment.")
+			return
+		}
 		writeJSONError(w, http.StatusBadGateway, "backend_unavailable", "Dictation transcription backend is unavailable.")
 		return
 	}

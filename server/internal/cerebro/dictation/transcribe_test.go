@@ -104,6 +104,36 @@ func TestTranscribeDoesNotRetry4xx(t *testing.T) {
 	}
 }
 
+// TestTranscribeColdStartSurfacesWarmingUp proves the FIR-2048 signal: when the
+// upstream keeps 5xx-ing (the ~30s GPU cold boot we don't fully wait out), the
+// handler must answer 503 `warming_up` — not a hard 502 — so the browser keeps
+// the recording and offers a re-send instead of discarding the clip.
+func TestTranscribeColdStartSurfacesWarmingUp(t *testing.T) {
+	tokenString := signedTestToken(t, testUserID)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Always cold: every attempt 5xxs, mimicking a container still booting.
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, "Internal Server Error")
+	}))
+	defer upstream.Close()
+
+	handler := New(Options{
+		TranscribeURL: upstream.URL,
+		Queries:       newMemberQueries(testUserID, testWorkspaceID),
+	})
+
+	rec := httptest.NewRecorder()
+	handler.Transcribe(rec, newAudioRequest(t, tokenString))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (cold start should surface warming_up)", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("warming_up")) {
+		t.Fatalf("body = %s, want the warming_up code", rec.Body.String())
+	}
+}
+
 // TestWarmupAcceptsAndPingsEngine proves the pre-boot path: warmup answers the
 // browser immediately (202) and fires a real clip at the engine so it wakes up
 // while the user is still speaking.
