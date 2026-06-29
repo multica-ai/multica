@@ -696,15 +696,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Lark integration. Listing is member-visible (same
 				// rationale as GitHub: the Integrations tab must
 				// render for non-admins so they see "wired up by whom").
-				// Install / revoke require admin to prevent a non-admin
-				// from binding a Bot to a workspace agent or yanking
-				// an installation out from under one.
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/lark/installations", h.ListLarkInstallations)
 				})
 				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					// Install / revoke are member-visible at the route layer
+					// because the handler has to inspect the target agent:
+					// workspace owners/admins can manage any bot, while a
+					// plain member may manage only bots for agents they own.
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
 					// Device-flow scan-to-install. Begin opens a new
 					// registration session against Lark and returns

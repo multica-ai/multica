@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
 )
 
 // Lark-handler unit tests focus on the no-config short-circuits —
@@ -30,6 +31,66 @@ func TestRevokeLarkInstallation_NotConfigured(t *testing.T) {
 	}
 }
 
+func TestRevokeLarkInstallation_AllowsAgentOwnerMember(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, ownerID, _ := privateAgentTestFixture(t)
+	instID := createLarkHandlerTestInstallation(t, agentID, ownerID, "owner")
+	h := larkHandlerWithInstallationService(t)
+
+	req := withURLParams(
+		newRequestAs(ownerID, http.MethodDelete, "/api/workspaces/"+testWorkspaceID+"/lark/installations/"+instID, nil),
+		"id", testWorkspaceID,
+		"installationId", instID,
+	)
+	w := httptest.NewRecorder()
+	h.RevokeLarkInstallation(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for agent owner, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT status FROM lark_installation WHERE id = $1`, instID).Scan(&status); err != nil {
+		t.Fatalf("load installation status: %v", err)
+	}
+	if status != string(lark.InstallationRevoked) {
+		t.Fatalf("status = %q, want revoked", status)
+	}
+}
+
+func TestRevokeLarkInstallation_ForbidsPlainMemberForSomeoneElsesAgent(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, ownerID, memberID := privateAgentTestFixture(t)
+	instID := createLarkHandlerTestInstallation(t, agentID, ownerID, "other")
+	h := larkHandlerWithInstallationService(t)
+
+	req := withURLParams(
+		newRequestAs(memberID, http.MethodDelete, "/api/workspaces/"+testWorkspaceID+"/lark/installations/"+instID, nil),
+		"id", testWorkspaceID,
+		"installationId", instID,
+	)
+	w := httptest.NewRecorder()
+	h.RevokeLarkInstallation(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-owner member, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT status FROM lark_installation WHERE id = $1`, instID).Scan(&status); err != nil {
+		t.Fatalf("load installation status: %v", err)
+	}
+	if status != string(lark.InstallationActive) {
+		t.Fatalf("status = %q, want active", status)
+	}
+}
+
 func TestRedeemLarkBindingToken_NotConfigured(t *testing.T) {
 	h := &Handler{}
 	req := httptest.NewRequest(http.MethodPost, "/api/lark/binding/redeem", strings.NewReader(`{"token":"x"}`))
@@ -38,6 +99,42 @@ func TestRedeemLarkBindingToken_NotConfigured(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d", w.Code)
 	}
+}
+
+func larkHandlerWithInstallationService(t *testing.T) *Handler {
+	t.Helper()
+
+	key := []byte("0123456789abcdef0123456789abcdef")
+	box, err := secretbox.New(key)
+	if err != nil {
+		t.Fatalf("secretbox: %v", err)
+	}
+	svc, err := lark.NewInstallationService(testHandler.Queries, box)
+	if err != nil {
+		t.Fatalf("installation service: %v", err)
+	}
+	h := *testHandler
+	h.LarkInstallations = svc
+	return &h
+}
+
+func createLarkHandlerTestInstallation(t *testing.T, agentID, installerUserID, suffix string) string {
+	t.Helper()
+
+	svc := larkHandlerWithInstallationService(t).LarkInstallations
+	inst, err := svc.Upsert(context.Background(), lark.InstallationParams{
+		WorkspaceID:     parseUUID(testWorkspaceID),
+		AgentID:         parseUUID(agentID),
+		AppID:           "cli_lark_handler_" + suffix + "_" + agentID,
+		AppSecret:       "secret",
+		BotOpenID:       "ou_lark_handler_" + suffix,
+		InstallerUserID: parseUUID(installerUserID),
+		Region:          lark.RegionFeishu,
+	})
+	if err != nil {
+		t.Fatalf("create lark installation: %v", err)
+	}
+	return uuidToString(inst.ID)
 }
 
 func TestBeginLarkInstall_NotConfigured(t *testing.T) {

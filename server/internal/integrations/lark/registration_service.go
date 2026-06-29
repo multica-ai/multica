@@ -240,6 +240,9 @@ func (s *registrationSession) snapshot() RegistrationSessionState {
 	defer s.mu.Unlock()
 	return RegistrationSessionState{
 		ID:             s.id,
+		WorkspaceID:    s.workspaceID,
+		AgentID:        s.agentID,
+		InitiatorID:    s.initiatorID,
 		Status:         s.status,
 		InstallationID: s.installationID,
 		ErrorReason:    s.errorReason,
@@ -274,6 +277,9 @@ func (s *registrationSession) markError(reason, msg string, gcAfter time.Time) {
 // serializes to the frontend. Internal mutex is hidden by construction.
 type RegistrationSessionState struct {
 	ID             string
+	WorkspaceID    pgtype.UUID
+	AgentID        pgtype.UUID
+	InitiatorID    pgtype.UUID
 	Status         RegistrationSessionStatus
 	InstallationID pgtype.UUID
 	ErrorReason    string

@@ -46,7 +46,9 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   const installSupported = listing?.install_supported === true;
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage =
-    currentMember?.role === "owner" || currentMember?.role === "admin";
+    currentMember?.role === "owner" ||
+    currentMember?.role === "admin" ||
+    agent.owner_id === user?.id;
   const hasActiveInstall =
     listing?.installations.some(
       (inst) => inst.agent_id === agent.id && inst.status === "active",
@@ -79,10 +81,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
               {ts(($) => $.lark.not_enabled_title)}
             </p>
           ) : !canManage ? (
-            // The backend gates install / manage on workspace owner/admin.
-            // Members can still view connected bots in the (member-visible)
-            // Settings listing, so point them there rather than show a dead
-            // button.
+            // The backend gates install / manage on workspace owner/admin or
+            // this agent's owner. Other members can still view connected bots
+            // in the member-visible Settings listing, so point them there
+            // rather than show a dead button.
             <p className="text-xs text-muted-foreground">
               {t(($) => $.tab_body.integrations.members_note)}
             </p>
@@ -100,10 +102,14 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
               </p>
             </div>
           ) : (
-            // Owner/admin with either a supported transport or an existing
-            // bot: the shared button renders the scan-to-bind CTA or the
+            // Managers with either a supported transport or an existing bot:
+            // the shared button renders the scan-to-bind CTA or the
             // already-connected "Manage in Lark" badge.
-            <LarkAgentBindButton agentId={agent.id} agentName={agent.name} />
+            <LarkAgentBindButton
+              agentId={agent.id}
+              agentName={agent.name}
+              agentOwnerId={agent.owner_id}
+            />
           )}
         </div>
       </section>
