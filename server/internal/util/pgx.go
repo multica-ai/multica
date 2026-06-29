@@ -2,11 +2,21 @@ package util
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// IsUniqueViolation reports whether err is a PostgreSQL unique-constraint
+// violation (SQLSTATE 23505). Used to recover from races and email/identity
+// collisions outside the handler package (e.g. the Casdoor subject resolver).
+func IsUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
 
 // ParseUUID parses s into a pgtype.UUID. Invalid input returns an error
 // instead of a zero-valued UUID — silently dropping bad input has caused

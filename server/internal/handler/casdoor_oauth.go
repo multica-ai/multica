@@ -395,11 +395,36 @@ func (h *Handler) findOrCreateCasdoorUser(r *http.Request, info *casdoorUserInfo
 		Email: email,
 	})
 	if err != nil {
-		// Race condition: another request created the user between our
-		// lookup and insert. Re-fetch by subject_id.
 		if isUniqueViolation(err) {
-			existing, findErr := h.Queries.GetUserBySubjectID(ctx, subjectID)
-			if findErr == nil {
+			// Race condition: another request created the user with the same
+			// subject_id between our lookup and insert. Re-fetch by subject_id.
+			if existing, findErr := h.Queries.GetUserBySubjectID(ctx, subjectID); findErr == nil {
+				return existing, false, nil
+			}
+			// Email collision: an existing account holds this email but isn't
+			// linked to this subject_id yet (earlier provisioning under a
+			// different subject, or a pre-Casdoor local account). Adopt it by
+			// binding this subject_id, unless it already carries a *different*
+			// subject_id (a genuine two-identity collision we must not hijack).
+			if existing, findErr := h.Queries.GetUserByEmail(ctx, email); findErr == nil {
+				if existing.SubjectID.Valid && existing.SubjectID.String != info.Sub {
+					slog.Warn("casdoor: email owned by a different subject_id, refusing to adopt",
+						"subject_id", info.Sub,
+						"existing_subject_id", existing.SubjectID.String,
+						"existing_user_id", uuidToString(existing.ID),
+						"email", email,
+					)
+					return user, false, fmt.Errorf("create user: %w", err)
+				}
+				if !existing.SubjectID.Valid {
+					if setErr := h.Queries.SetUserSubjectID(ctx, db.SetUserSubjectIDParams{
+						ID:        existing.ID,
+						SubjectID: subjectID,
+					}); setErr != nil {
+						return user, false, fmt.Errorf("adopt user by email: %w", setErr)
+					}
+				}
+				slog.Info("casdoor: adopted existing user by email", "user_id", uuidToString(existing.ID), "subject_id", info.Sub, "email", email)
 				return existing, false, nil
 			}
 		}
