@@ -401,7 +401,12 @@ func (h *Handler) postCommentToGitLab(ctx context.Context, comment db.Comment, i
 	// POST to GitLab notes API.
 	apiURL := gitlabAPIURL() + fmt.Sprintf("/projects/%d/issues/%d/notes",
 		glIssue.GlProjectID, glIssue.GlIssueIid)
-	body, _ := json.Marshal(map[string]string{"body": comment.Content})
+	const sentinel = "<!-- multica:gitlab-relay -->"
+	body, err := json.Marshal(map[string]string{"body": comment.Content + "\n\n" + sentinel})
+	if err != nil {
+		slog.Error("gitlab: failed to marshal note body", "err", err)
+		return
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("gitlab: failed to build note request", "err", err)
