@@ -4426,12 +4426,28 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-note-conflict-merge): FIR-1317 Plan A — add
+  // base_updated_at for optimistic concurrency. The server returns 409 with
+  // {conflict, server_body, server_title} when the note was modified since the
+  // client last fetched it, triggering the AI merge dialog.
   async updateNote<T = unknown>(
     id: string,
-    body: { title?: string; body?: string },
+    body: { title?: string; body?: string; base_updated_at?: string },
   ): Promise<T> {
     return this.fetch<T>(`/api/notes/${id}`, {
       method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  // CEREBRO-PATCH(cerebro-note-conflict-merge): FIR-1317 Plan A — ask the AI
+  // to merge two concurrent note versions. Returns {merged: string}.
+  async mergeNote<T = unknown>(
+    id: string,
+    body: { your_body: string; server_body: string },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/notes/${id}/merge`, {
+      method: "POST",
       body: JSON.stringify(body),
     });
   }

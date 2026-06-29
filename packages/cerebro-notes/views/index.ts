@@ -16,3 +16,5 @@ export { NoteFolderCreateDialog } from "./note-folder-create-dialog";
 export { NoteLockBanner } from "./note-lock-banner";
 export { NoteCommentsPanel } from "./note-comments-panel";
 export { NoteVersionsDialog } from "./note-versions-dialog";
+export { NoteConflictDialog } from "./note-conflict-dialog";
+export type { NoteConflict } from "./note-conflict-dialog";

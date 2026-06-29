@@ -25,6 +25,7 @@ import {
   Replace,
   Share2,
   Check,
+  GitMerge,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -82,6 +83,7 @@ import {
   useSetNoteFolder,
   firstLineTitle,
   VISIBILITY_LABELS,
+  NoteConflictError,
 } from "../core";
 import type { Note, NoteVisibility } from "../core";
 import {
@@ -96,6 +98,8 @@ import { NoteFolderCreateDialog } from "./note-folder-create-dialog";
 import { NoteLockBanner } from "./note-lock-banner";
 import { NoteCommentsPanel } from "./note-comments-panel";
 import { NoteVersionsDialog } from "./note-versions-dialog";
+import { NoteConflictDialog } from "./note-conflict-dialog";
+import type { NoteConflict } from "./note-conflict-dialog";
 import { useCommentAnchors } from "./use-comment-anchors";
 import { useFindHighlight } from "./use-find-highlight";
 import {
@@ -761,7 +765,26 @@ export function NoteEditor({
   const lockEnabled = useFeatureFlag("cerebro_note_lock");
   const commentsEnabled = useFeatureFlag("cerebro_note_comments");
   const versionsEnabled = useFeatureFlag("cerebro_note_versions");
+  // FIR-1317 Plan A: per-note toggle for conflict merge (moved out of the
+  // workspace feature flag so each user can turn it on/off from the note ⋯ menu).
+  // Defaults to ON; stored in localStorage so the preference survives a reload.
+  const [conflictMergeEnabled, setConflictMergeEnabled] = React.useState(
+    () => localStorage.getItem(`note:conflict-merge:${note.id}`) !== "0",
+  );
+  function toggleConflictMerge() {
+    const next = !conflictMergeEnabled;
+    setConflictMergeEnabled(next);
+    localStorage.setItem(`note:conflict-merge:${note.id}`, next ? "1" : "0");
+  }
   const isMobile = useIsMobile();
+
+  // FIR-1317 Plan A: track the server's updated_at when we last fetched/saved
+  // the note. Sent with every save so the backend can detect concurrent edits.
+  // Seeded from the note's updated_at on mount; refreshed after each successful save.
+  const baseUpdatedAt = React.useRef<string>(note.updated_at);
+
+  // FIR-1317 Plan A: active conflict waiting for user resolution.
+  const [conflict, setConflict] = React.useState<NoteConflict | null>(null);
 
   const [sharedIds, setSharedIds] = React.useState<string[]>([]);
   const [showComments, setShowComments] = React.useState(false);
@@ -859,9 +882,30 @@ export function NoteEditor({
   // typing "@" opens the identical mention picker, and inline mentions are
   // stored as markdown that round-trips through the editor. Auto-save on the
   // debounced update and again on blur so nothing is lost on navigate-away.
+  // FIR-1317 Plan A: sends base_updated_at (when conflict merge is on) so the
+  // backend can detect if someone else saved in the meantime. On a 409 the
+  // NoteConflictError is caught and the merge dialog opens.
   function saveBody(markdown: string) {
     setLiveBody(markdown);
-    if (markdown !== note.body) updateNote.mutate({ id: note.id, body: markdown });
+    if (markdown === note.body) return;
+    updateNote.mutate(
+      {
+        id: note.id,
+        body: markdown,
+        baseUpdatedAt: conflictMergeEnabled ? baseUpdatedAt.current : undefined,
+      },
+      {
+        onSuccess: (saved) => {
+          // Refresh the base so subsequent saves don't false-positive.
+          if (saved?.updated_at) baseUpdatedAt.current = saved.updated_at;
+        },
+        onError: (err) => {
+          if (err instanceof NoteConflictError) {
+            setConflict(err.conflict);
+          }
+        },
+      },
+    );
   }
 
   // Find & replace hands back the fully replaced body. Remount the editor so the
@@ -1057,6 +1101,16 @@ export function NoteEditor({
               label: "Create issue",
               icon: ListPlus,
               onSelect: () => setCreatingIssue(true),
+            },
+            // FIR-1317: per-note conflict-merge toggle. Visible directly in the
+            // note so any user can switch it on/off without touching workspace settings.
+            {
+              key: "conflict-merge",
+              label: conflictMergeEnabled
+                ? "Conflict merge: On"
+                : "Conflict merge: Off",
+              icon: GitMerge,
+              onSelect: toggleConflictMerge,
             },
             // Delete is owner-only (the backend rejects others with 403). Show
             // it solely to the owner so the action never silently fails
@@ -1289,6 +1343,31 @@ export function NoteEditor({
         open={creatingIssue}
         onOpenChange={setCreatingIssue}
       />
+
+      {/* FIR-1317 Plan A: conflict merge dialog. Shown when two people save
+          the same note at the same time and the backend returns 409. */}
+      {conflictMergeEnabled && (
+        <NoteConflictDialog
+          conflict={conflict}
+          onResolve={(resolvedBody) => {
+            setConflict(null);
+            // Save the resolved body without the base_updated_at check so it
+            // goes through unconditionally (the user just made the decision).
+            updateNote.mutate(
+              { id: note.id, body: resolvedBody },
+              {
+                onSuccess: (saved) => {
+                  if (saved?.updated_at) baseUpdatedAt.current = saved.updated_at;
+                  setLiveBody(resolvedBody);
+                  // Remount the editor so it shows the resolved content.
+                  setReplaceToken((t) => t + 1);
+                },
+              },
+            );
+          }}
+          onCancel={() => setConflict(null)}
+        />
+      )}
     </div>
   );
 }

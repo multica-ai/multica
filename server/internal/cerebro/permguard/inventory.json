@@ -1069,6 +1069,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/notes/{id}/merge",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/notes/{id}/references",
       "gate": "workspace_member"
     },

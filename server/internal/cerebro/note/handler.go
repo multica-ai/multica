@@ -187,6 +187,9 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Get("/{id}/lock", h.GetLock)
 	r.Post("/{id}/lock", h.AcquireLock)
 	r.Delete("/{id}/lock", h.ReleaseLock)
+
+	// FIR-1317 Plan A — AI-assisted conflict merge. See merge.go.
+	r.Post("/{id}/merge", h.MergeNote)
 }
 
 // --- request / response shapes ---
@@ -208,6 +211,18 @@ type createNoteRequest struct {
 type updateNoteRequest struct {
 	Title *string `json:"title,omitempty"`
 	Body  *string `json:"body,omitempty"`
+	// BaseUpdatedAt is the note's updated_at when the client last fetched it.
+	// If provided and it doesn't match the server's current updated_at, the
+	// update is rejected with 409 and the server's current body is returned
+	// so the client can offer an AI-assisted merge (FIR-1317 Plan A).
+	BaseUpdatedAt *string `json:"base_updated_at,omitempty"`
+}
+
+// noteConflictResponse is the 409 body returned when a concurrent save is detected.
+type noteConflictResponse struct {
+	Conflict    bool   `json:"conflict"`
+	ServerBody  string `json:"server_body"`
+	ServerTitle string `json:"server_title"`
 }
 
 type setVisibilityRequest struct {
@@ -562,6 +577,23 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "note not found")
 		return
 	}
+
+	// FIR-1317 Plan A — optimistic concurrency: if the client sent the
+	// updated_at it last saw and it doesn't match, someone else saved in the
+	// meantime. Return 409 with the server's current content so the frontend
+	// can offer an AI-assisted merge dialog before retrying.
+	if req.BaseUpdatedAt != nil && *req.BaseUpdatedAt != "" {
+		serverTS := tsStr(artifact.UpdatedAt)
+		if *req.BaseUpdatedAt != serverTS {
+			writeJSON(w, http.StatusConflict, noteConflictResponse{
+				Conflict:    true,
+				ServerBody:  artifact.Body,
+				ServerTitle: artifact.Title,
+			})
+			return
+		}
+	}
+
 	title := artifact.Title
 	if req.Title != nil {
 		title = *req.Title

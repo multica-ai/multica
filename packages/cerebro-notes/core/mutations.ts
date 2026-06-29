@@ -1,10 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { artifactKeys, coupledNotesKeys } from "@multica/cerebro-artifacts/core";
 import { noteKeys } from "./queries";
 import { safeParseNote } from "./types";
 import type { CreateNoteInput, NoteVisibility } from "./types";
+import type { NoteConflict } from "../views/note-conflict-dialog";
 
 export function useCreateNote() {
   const qc = useQueryClient();
@@ -34,6 +35,23 @@ export function useCreateNote() {
   });
 }
 
+// NoteConflictError is thrown by useUpdateNote when the server returns 409.
+// It carries the conflict data so the caller can show the merge dialog.
+export class NoteConflictError extends Error {
+  readonly conflict: NoteConflict;
+  constructor(conflict: NoteConflict) {
+    super("note conflict");
+    this.conflict = conflict;
+  }
+}
+
+// NoteConflictResponse mirrors the 409 body from UpdateNote in handler.go.
+type NoteConflictResponse = {
+  conflict: boolean;
+  server_body: string;
+  server_title: string;
+};
+
 export function useUpdateNote() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -42,11 +60,38 @@ export function useUpdateNote() {
       id,
       title,
       body,
+      baseUpdatedAt,
     }: {
       id: string;
       title?: string;
       body?: string;
-    }) => safeParseNote(await api.updateNote(id, { title, body })),
+      // baseUpdatedAt is the note's updated_at when the client last fetched it.
+      // FIR-1317 Plan A: if provided and the note changed on the server since then,
+      // the server returns 409 and this mutation throws a NoteConflictError.
+      baseUpdatedAt?: string;
+    }) => {
+      try {
+        return safeParseNote(
+          await api.updateNote(id, {
+            title,
+            body,
+            base_updated_at: baseUpdatedAt,
+          }),
+        );
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          const raw = err.body as NoteConflictResponse | undefined;
+          if (raw?.conflict) {
+            throw new NoteConflictError({
+              noteId: id,
+              yourBody: body ?? "",
+              serverBody: raw.server_body ?? "",
+            });
+          }
+        }
+        throw err;
+      }
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: noteKeys.all(wsId) });
     },
