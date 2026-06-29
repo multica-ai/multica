@@ -17,7 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-import { api, ApiError } from "@multica/core/api";
+import { api } from "@multica/core/api";
 import {
   composioConnectionsOptions,
   composioKeys,
@@ -69,9 +69,10 @@ export function ComposioTab() {
     );
   }, [toolkits, query]);
 
-  // 503 from the API means COMPOSIO_API_KEY is unset on the server.
-  const notConfigured =
-    toolkitsQuery.error instanceof ApiError && toolkitsQuery.error.status === 503;
+  // 503 handling lives in the parent IntegrationsTab, which hides the whole
+  // Composio section when COMPOSIO_API_KEY is unset — this component only
+  // mounts when the integration is configured, so it deals with the loaded /
+  // error / empty / list states below.
 
   async function handleConnect(tk: ComposioToolkit) {
     if (connectingSlug) return;
@@ -108,18 +109,7 @@ export function ComposioTab() {
         <p className="text-sm text-muted-foreground">{t(($) => $.composio.page_description)}</p>
       </section>
 
-      {notConfigured ? (
-        <Card>
-          <CardContent className="space-y-2">
-            <p className="text-sm font-medium">{t(($) => $.composio.not_enabled_title)}</p>
-            <p className="text-xs text-muted-foreground">
-              {t(($) => $.composio.not_enabled_description_prefix)}{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-[10px]">COMPOSIO_API_KEY</code>{" "}
-              {t(($) => $.composio.not_enabled_description_suffix)}
-            </p>
-          </CardContent>
-        </Card>
-      ) : toolkitsQuery.isLoading ? (
+      {toolkitsQuery.isLoading ? (
         <Card>
           <CardContent>
             <p className="text-sm text-muted-foreground">{t(($) => $.composio.loading)}</p>
