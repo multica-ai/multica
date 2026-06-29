@@ -1,0 +1,131 @@
+{
+  "fab": {
+    "running": "Multica работает...",
+    "unread_one": "{{count}} непрочитанный чат",
+    "unread_few": "{{count}} непрочитанных чата",
+    "unread_many": "{{count}} непрочитанных чатов",
+    "unread_other": "{{count}} непрочитанных чата",
+    "default": "Спросить Multica"
+  },
+  "input": {
+    "placeholder_no_agent": "Создайте агента, чтобы начать общение",
+    "placeholder_archived": "Эта сессия в архиве",
+    "placeholder_named": "Написать {{name}}…",
+    "placeholder_default": "Начните сообщение…",
+    "send_tooltip": "Отправить",
+    "stop_tooltip": "Остановить",
+    "send_failed_toast": "Не удалось отправить сообщение",
+    "attachment_bind_failed_toast": "Сообщение отправлено, но файлы не прикрепились. Повторите попытку через мгновение."
+  },
+  "message_list": {
+    "show_details": "Показать детали",
+    "replied_in": "Ответ за {{elapsed}}",
+    "failed_after": "Не удалось за {{elapsed}}",
+    "task_failed_fallback": "Не удалось выполнить task",
+    "tools_one": "{{count}} инструмент",
+    "tools_few": "{{count}} инструмента",
+    "tools_many": "{{count}} инструментов",
+    "tools_other": "{{count}} инструмента",
+    "tool_result_named": "{{tool}} результат: ",
+    "tool_result_unnamed": "результат: ",
+    "process_steps_one": "{{count}} шаг",
+    "process_steps_few": "{{count}} шага",
+    "process_steps_many": "{{count}} шагов",
+    "process_steps_other": "{{count}} шага",
+    "copy_action": "Копировать",
+    "copied_toast": "Скопировано",
+    "copy_failed_toast": "Не удалось скопировать",
+    "loading_older": "Загрузка предыдущих сообщений…"
+  },
+  "session_history": {
+    "untitled": "Без названия",
+    "time": {
+      "just_now": "только что",
+      "minutes": "{{count}} мин назад",
+      "hours": "{{count}} ч назад",
+      "days": "{{count}} дн назад"
+    },
+    "row_delete_aria": "Удалить сессию чата",
+    "row_rename_aria": "Переименовать сессию чата",
+    "row_stop_aria": "Остановить текущий запуск",
+    "stop_action": "Остановить",
+    "row_subtitle": {
+      "working": "В работе",
+      "completed": "Завершено",
+      "new_reply": "Новый ответ"
+    },
+    "stop_dialog": {
+      "title": "Остановить этот запуск?",
+      "description_with_title": "Это отменит текущий task агента в «{{title}}». Частичный результат останется в чате.",
+      "description_default": "Это отменит текущий task агента. Частичный результат останется в чате.",
+      "cancel": "Не останавливать",
+      "confirm": "Остановить запуск",
+      "confirming": "Остановка..."
+    },
+    "delete_dialog": {
+      "title": "Удалить сессию чата",
+      "description_with_title": "«{{title}}» и его сообщения будут удалены безвозвратно. Это действие нельзя отменить.",
+      "description_default": "Эта сессия чата и её сообщения будут удалены безвозвратно. Это действие нельзя отменить.",
+      "cancel": "Отмена",
+      "confirm": "Удалить",
+      "confirming": "Удаление..."
+    }
+  },
+  "window": {
+    "new_chat_tooltip": "Новый чат",
+    "restore_tooltip": "Восстановить",
+    "expand_tooltip": "Развернуть",
+    "minimize_tooltip": "Свернуть",
+    "another_running": "Другой чат выполняется",
+    "another_unread": "В другом чате есть непрочитанные ответы",
+    "running": "Выполняется",
+    "unread": "Непрочитано",
+    "no_previous": "Прошлых чатов нет",
+    "untitled": "Новый чат",
+    "my_agents": "Мои агенты",
+    "others": "Другие",
+    "no_agents": "Нет агентов",
+    "history_group": "История чатов",
+    "agent_filter_placeholder": "Поиск агентов..."
+  },
+  "empty_state": {
+    "first_time_title": "Общайтесь со своими агентами",
+    "first_time_intro": "✨ Они знают ваше рабочее пространство —",
+    "first_time_pillars": "issues, проекты, skills",
+    "first_time_pillars_suffix": ".",
+    "first_time_actions": "Попросите сводку, спланируйте день или передайте быстрый task.",
+    "returning_title_named": "Привет, я {{name}}",
+    "returning_title_default": "Добро пожаловать в Multica",
+    "returning_subtitle": "Попробуйте спросить"
+  },
+  "starter_prompts": {
+    "list_open": "Покажи мои открытые tasks по приоритету",
+    "summarize_today": "Подведи итог, что я сделал сегодня",
+    "plan_next": "Спланируй, над чем работать дальше"
+  },
+  "no_agent_banner": "Чтобы начать общение, нужен агент.",
+  "offline_banner": {
+    "fallback_name": "агент",
+    "unstable": "Соединение с {{name}} нестабильно — ответы могут задерживаться.",
+    "offline": "{{name}} не в сети — ваше сообщение будет доставлено, когда он вернётся."
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "Не в сети",
+      "reconnecting": "Переподключение",
+      "queued": "В очереди",
+      "waiting_local_directory": "Ожидание локального каталога",
+      "starting_up": "Запуск",
+      "thinking": "Думает",
+      "typing": "Печатает"
+    },
+    "tools": {
+      "running_command": "Выполняет команду",
+      "reading_files": "Читает файлы",
+      "searching_code": "Ищет в коде",
+      "making_edits": "Вносит правки",
+      "searching_web": "Ищет в интернете",
+      "fallback": "Работает"
+    }
+  }
+}

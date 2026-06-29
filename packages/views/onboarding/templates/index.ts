@@ -35,6 +35,11 @@ const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
   "zh-Hans": "zh",
   ko: "ko",
   ja: "ja",
+  // ru UI is fully translated, but long-form onboarding content templates
+  // (helper instructions, seeded issue bodies, starter prompts) are not yet
+  // authored in Russian — fall back to English content, matching the
+  // "everything else falls back to English" rule below.
+  ru: "en",
 };
 
 /**

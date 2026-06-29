@@ -1,0 +1,111 @@
+{
+  "page": {
+    "title": "Отряды",
+    "new_button": "Создать отряд",
+    "empty_no_squads": "Отрядов пока нет. Создайте первый, чтобы начать.",
+    "empty_no_match": "Нет отрядов, подходящих под фильтры.",
+    "table": {
+      "name": "Отряд",
+      "leader": "Лидер",
+      "members": "Участники",
+      "creator": "Создал",
+      "created": "Создан"
+    },
+    "no_matches": "Нет подходящих отрядов",
+    "row_menu": "Действия с отрядом",
+    "archive_action": "В архив"
+  },
+  "inspector": {
+    "details_section": "Детали",
+    "archive_button": "В архив"
+  },
+  "archive_dialog": {
+    "title": "Архивировать этот отряд?",
+    "description": "«{{name}}» будет архивирован. issue, назначенные на этот отряд, будут переданы его лидеру. Это нельзя отменить — создайте новый отряд, если понадобится вернуть маршрутизацию.",
+    "cancel": "Отмена",
+    "confirm": "В архив",
+    "archiving": "Архивирование…",
+    "success": "Отряд архивирован"
+  },
+  "name_editor": {
+    "cancel": "Отмена"
+  },
+  "add_member_dialog": {
+    "title": "Добавить участника",
+    "description": "Добавьте участника рабочего пространства или агента в этот отряд.",
+    "label_member": "Участник",
+    "label_role": "Роль",
+    "label_optional": "(необязательно)",
+    "placeholder_role_inline": "Добавить роль…",
+    "cancel": "Отмена"
+  },
+  "description_dialog": {
+    "title": "Изменить описание",
+    "placeholder_empty": "Добавьте описание",
+    "cancel": "Отмена"
+  },
+  "discard_changes_dialog": {
+    "title": "Отменить несохранённые изменения?",
+    "description": "На этой вкладке есть несохранённые изменения. Переключение вкладок их отменит.",
+    "keep_editing": "Продолжить редактирование",
+    "discard_button": "Отменить"
+  },
+  "members_tab": {
+    "section_title": "Участники",
+    "section_count_one": "{{count}} участник в этом отряде",
+    "section_count_few": "{{count}} участника в этом отряде",
+    "section_count_many": "{{count}} участников в этом отряде",
+    "section_count_other": "{{count}} участника в этом отряде",
+    "add_member_button": "Добавить участника",
+    "create_agent_button": "Создать агента",
+    "leader_chip": "Лидер",
+    "view_agent_tooltip": "Открыть карточку агента",
+    "make_leader_tooltip": "Назначить лидером отряда",
+    "remove_member_tooltip": "Убрать из отряда",
+    "status_working": "Работает",
+    "status_idle": "Простаивает",
+    "status_offline": "Офлайн",
+    "status_unstable": "Нестабилен",
+    "status_archived": "В архиве",
+    "issue_status_blocked": "blocked",
+    "active_issue_more": "и ещё {{count}}",
+    "last_active_label": "последняя активность {{time}}"
+  },
+  "profile_card": {
+    "unavailable": "Отряд недоступен",
+    "detail_link": "Подробнее →",
+    "archived": "В архиве",
+    "member_count_one": "{{count}} участник",
+    "member_count_few": "{{count}} участника",
+    "member_count_many": "{{count}} участников",
+    "member_count_other": "{{count}} участника",
+    "members_section": "Участники",
+    "more_members_one": "+{{count}} ещё",
+    "more_members_few": "+{{count}} ещё",
+    "more_members_many": "+{{count}} ещё",
+    "more_members_other": "+{{count}} ещё"
+  },
+  "instructions_tab": {
+    "description": "Инструкции отряда добавляются в промпт агента-лидера каждый раз, когда он работает над issue, назначенным на этот отряд. С их помощью можно дать лидеру общие для отряда указания, рабочие договорённости или контекст, которому он должен следовать в каждом task.",
+    "unsaved_changes": "Несохранённые изменения",
+    "save_button": "Сохранить"
+  },
+  "scope": {
+    "mine": "Мои",
+    "all": "Все"
+  },
+  "toolbar": {
+    "display": "Отображение",
+    "sort_by": "Сортировать по",
+    "direction_asc": "По возрастанию",
+    "direction_desc": "По убыванию",
+    "section_columns": "Столбцы",
+    "result_count_title": "Подходящие отряды / все отряды",
+    "filter_label": "Фильтр",
+    "filter_active_count_one": "{{count}} фильтр",
+    "filter_active_count_few": "{{count}} фильтра",
+    "filter_active_count_many": "{{count}} фильтров",
+    "filter_active_count_other": "{{count}} фильтра",
+    "clear_filters": "Сбросить фильтры"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "page": {
+    "breadcrumb": "Мои issue",
+    "workspace_fallback": "Рабочее пространство",
+    "empty_title": "На вас не назначено ни одного issue",
+    "empty_description": "Здесь появятся issue, которые вы создаёте или на которые вас назначают."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Все",
+      "all_description": "Назначены на меня, созданы мной или связаны с моими агентами и отрядами",
+      "assigned_label": "Назначенные",
+      "assigned_description": "Issue, назначенные на меня",
+      "created_label": "Созданные",
+      "created_description": "Issue, созданные мной",
+      "agents_label": "Мои агенты и отряды",
+      "agents_description": "Issue, назначенные на моих агентов"
+    },
+    "filter_button": "Фильтр",
+    "filter_status": "Статус",
+    "filter_priority": "Приоритет",
+    "issue_count_one": "{{count}} issue",
+    "issue_count_few": "{{count}} issue",
+    "issue_count_many": "{{count}} issue",
+    "issue_count_other": "{{count}} issue",
+    "reset_filters": "Сбросить все фильтры",
+    "display_settings": "Настройки отображения",
+    "grouping": "Группировка",
+    "group_status": "Статус",
+    "group_assignee": "Исполнитель",
+    "ordering": "Сортировка",
+    "ascending": "По возрастанию",
+    "descending": "По убыванию",
+    "card_properties": "Свойства карточки",
+    "view_board": "Доска",
+    "view_list": "Список",
+    "view_swimlane": "Дорожки",
+    "view_label": "Вид",
+    "view_board_short": "Доска",
+    "view_list_short": "Список",
+    "view_swimlane_short": "Дорожки",
+    "sort_manual": "Вручную"
+  },
+  "errors": {
+    "move_failed": "Не удалось переместить issue"
+  }
+}
