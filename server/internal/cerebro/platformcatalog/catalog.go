@@ -1123,6 +1123,15 @@ var excluded = map[string]string{
 	// separately-governable platform capability (FIR-2037).
 	"POST /api/cerebro/personal-browser/authorize": "resolve-seam — agent-only per-action gate for the tools:personal-browser tool; runs the tool-policy chain internally with Base=Deny + host condition (FIR-2037), the enforcement point itself, not a separately-governable platform action",
 
+	// connection-tools — agent-only (mat_ token) dispatch of an api-type workspace
+	// connection as a server-side tool (FIR-2273). Per-endpoint authorization is
+	// enforced inside the handler by the tool-policy chain with Base=Deny on
+	// connection:<id>, behind the default-off cerebro_api_connection_tools flag —
+	// the route is the enforcement point itself, not a separately-governable
+	// platform capability (the connection:<id> tools are surfaced and set
+	// Allow/Ask/Deny per layer in the tool-policy table, like other runtime tools).
+	"POST /api/cerebro/connection-tools/call": "resolve-seam — agent-only per-action dispatch of an api-type connection tool; runs the tool-policy chain internally with Base=Deny on connection:<id> behind the cerebro_api_connection_tools flag (FIR-2273), the enforcement point itself, not a separately-governable platform action",
+
 	// pre-auth — establishes or clears identity, or a signed external webhook;
 	// there is no authenticated actor yet to gate on.
 	"POST /auth/google":                      "pre-auth — establishes identity",
