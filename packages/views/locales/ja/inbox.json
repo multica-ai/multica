@@ -42,6 +42,14 @@
     "delete": "削除",
     "unsubscribe_archive": "購読解除してアーカイブ"
   },
+  "sort": {
+    "sort_by": "並べ替え",
+    "date": "日付",
+    "priority": "優先度",
+    "unread": "未読を優先",
+    "asc": "昇順",
+    "desc": "降順"
+  },
   "list": {
     "loading_selection": "通知を読み込み中…",
     "empty": "通知はありません",

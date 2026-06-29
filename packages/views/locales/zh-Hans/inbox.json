@@ -42,6 +42,14 @@
     "delete": "删除",
     "unsubscribe_archive": "取消订阅并归档"
   },
+  "sort": {
+    "sort_by": "排序方式",
+    "date": "日期",
+    "priority": "优先级",
+    "unread": "未读优先",
+    "asc": "升序",
+    "desc": "降序"
+  },
   "list": {
     "loading_selection": "正在加载通知...",
     "empty": "暂无通知",
