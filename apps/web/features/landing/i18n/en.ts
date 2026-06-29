@@ -294,6 +294,26 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.32",
+        date: "2026-06-29",
+        title: "Detach sub-Issues, sturdier daemon reconnects, and friendlier attachment previews",
+        changes: [],
+        features: [
+          "Issues now have a Remove parent action, so you can detach a sub-Issue without first having to pick a different parent.",
+        ],
+        improvements: [
+          "The local daemon reconnects to Multica through a more resilient WebSocket flow with bounded backoff, so brief network drops recover smoothly instead of stalling.",
+          "The daemon now bounds each runtime probe with its own timeout, so a single wedged CLI can no longer block every other runtime from coming online.",
+        ],
+        fixes: [
+          "Scheduled autopilots advance their next-run time the moment a run is dispatched, so a slow runner can no longer cause back-to-back duplicate dispatches.",
+          "Attachment previews open correctly whether the URL redirects inside a frame, comes back from the same origin, or was uploaded locally — and local upload URLs are now preferred when available.",
+          "When the failed-task handler unsticks an Issue, the Issue view refreshes immediately instead of waiting for a manual reload.",
+          "Sticky Issue comment headers share the same background fade as the highlight, so settling on a comment no longer looks out of sync.",
+          "Chat conversations refresh their message cache when reconnecting, so you no longer see stale messages right after coming back online.",
+        ],
+      },
+      {
         version: "0.3.31",
         date: "2026-06-26",
         title: "Cross-workspace unread dot, Composio toolkit foundation, and a friendlier editor",
