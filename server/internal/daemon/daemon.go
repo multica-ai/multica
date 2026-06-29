@@ -3938,6 +3938,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
+			// CEREBRO-PATCH(daemon-report-context-footprint): FIR-1931 forward the last-turn context footprint the streaming runtimes (Claude et al.) compute, so the server persists real window occupancy instead of the cumulative "estimate".
+			ContextInputTokens:     u.ContextInputTokens,
+			ContextCacheReadTokens: u.ContextCacheReadTokens,
 		})
 	}
 
