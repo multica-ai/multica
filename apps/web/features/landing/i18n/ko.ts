@@ -476,7 +476,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.33",
           date: "2026-06-30",
-          title: "Autopilot 액세스 관리, Slack 히스토리 백필, 스킬 번들 아카이브 가져오기",
+          title: "Autopilot 액세스 관리, Slack 히스토리 백필, 스킬 번들 아카이브 가져오기, GitLab 연동",
           changes: [],
           features: [
             "Autopilot에 명확한 쓰기 권한 계층이 도입되었고, 상세 페이지의 '액세스 관리'를 통해 특정 멤버에게 단일 Autopilot의 쓰기 권한만 위임할 수 있습니다.",
@@ -485,6 +485,9 @@ export function createKoDict(allowSignup: boolean): LandingDict {
             "스킬 번들을 로컬 .skill / .zip 아카이브에서 가져올 수 있습니다.",
             "multica issue 계열 명령은 더 이상 짧은 UUID 접두사를 받지 않습니다. Issue Key(MUL-123) 또는 전체 UUID를 사용하세요.",
             "Agents 페이지가 모바일에 맞게 다듬어졌습니다.",
+            "「설정 → GitLab」에서 GitLab 그룹을 한 번 연결하면, Multica issue 식별자를 참조하는 머지 리퀘스트가 issue 사이드바에 자동으로 표시됩니다.",
+            "「agent」 레이블이 붙은 GitLab issue는 Multica에 자동 생성되며 설명, 담당자, 상태, 댓글이 양방향으로 동기화됩니다.",
+            "닫기 키워드(Closes, Fixes, Resolves)를 포함한 MR이 머지되면 연결된 issue가 자동으로 「완료」로 이동합니다. 연동된 GitLab issue를 닫거나 다시 열면 Multica 상태가 즉시 반영됩니다.",
           ],
           improvements: [
             "댓글 라우팅 캐스케이드를 전면 다시 작성해, 부모 체인 @멘션·에이전트 서명 답글·스쿼드 리더 폴백이 모두 충분히 테스트된 하나의 경로로 모입니다.",

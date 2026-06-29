@@ -501,7 +501,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.33",
         date: "2026-06-30",
-        title: "Autopilot access controls, Slack history backfill, and skill-archive imports",
+        title: "Autopilot access controls, Slack history backfill, skill-archive imports, and GitLab Integration",
         changes: [],
         features: [
           "Autopilots now have a clear write-permission layer, plus a Manage Access dialog that lets the creator grant write access to specific workspace members.",
@@ -510,6 +510,9 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Skill bundles can be installed from a local .skill or .zip archive.",
           "multica issue commands no longer accept short UUID prefixes — use the issue key (MUL-123) or the full UUID.",
           "The Agents page is now usable on mobile.",
+          "Connect a GitLab group once in Settings → GitLab. Merge requests that reference a Multica issue identifier appear automatically in the issue sidebar.",
+          "GitLab issues labeled 'agent' are created in Multica and kept in sync — description, assignee, status, and comments flow both ways.",
+          "Merging an MR that closes an issue moves it to Done automatically. Closing or reopening a synced GitLab issue reflects in Multica immediately.",
         ],
         improvements: [
           "Comment routing was rewritten end-to-end so parent-chain mentions, agent-authored replies, and squad-leader fallback all flow through one well-tested cascade.",

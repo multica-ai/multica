@@ -501,7 +501,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.33",
         date: "2026-06-30",
-        title: "Autopilot 协作权限、Slack 历史回灌、技能包归档导入",
+        title: "Autopilot 协作权限、Slack 历史回灌、技能包归档导入, GitLab 集成",
         changes: [],
         features: [
           "Autopilot 新增清晰的写权限分层，详情页提供「管理协作者」入口，可把单个 Autopilot 的写权限授予指定成员。",
@@ -510,6 +510,9 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "技能包支持从本地 .skill / .zip 归档导入。",
           "multica issue 命令不再接受短 UUID 前缀，请使用 Issue Key（MUL-123）或完整 UUID。",
           "Agents 页面适配移动端。",
+          "在「设置 → GitLab」中一次性连接 GitLab group，引用了 Multica issue 编号的合并请求会自动出现在 issue 侧边栏。",
+          "打了「agent」标签的 GitLab issue 会自动在 Multica 中创建，描述、负责人、状态和评论双向同步。",
+          "包含关闭关键字（Closes、Fixes、Resolves）的 MR 合并后，关联 issue 自动变为「已完成」；关闭或重新打开同步中的 GitLab issue，Multica 状态会立即跟随变更。",
         ],
         improvements: [
           "重写了评论路由级联：父链 @ 提及、智能体署名回复、小队 Leader 兜底，三条路径汇入同一条经过充分测试的流程。",

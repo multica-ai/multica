@@ -477,7 +477,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.33",
           date: "2026-06-30",
-          title: "Autopilot のアクセス管理、Slack の履歴バックフィル、スキル パッケージのアーカイブ取り込み",
+          title: "Autopilot のアクセス管理、Slack の履歴バックフィル、スキル パッケージのアーカイブ取り込み, GitLab 連携",
           changes: [],
           features: [
             "Autopilot に明確な書き込み権限レイヤーが入り、詳細ページの「アクセス管理」から特定メンバーに 1 つの Autopilot の書き込み権限だけを委譲できます。",
@@ -486,6 +486,9 @@ export function createJaDict(allowSignup: boolean): LandingDict {
             "スキル パッケージをローカルの .skill / .zip アーカイブから取り込めるようになりました。",
             "multica issue 系のコマンドは短い UUID プレフィックスを受け付けなくなりました。Issue Key（MUL-123）または完全な UUID を指定してください。",
             "Agents ページがモバイルに最適化されました。",
+            "「設定 → GitLab」で GitLab グループを一度接続するだけで、Multica の Issue 番号を参照するマージリクエストが Issue サイドバーに自動表示されます。",
+            "「agent」ラベルが付いた GitLab Issue は Multica に自動作成され、説明・担当者・ステータス・コメントが双方向で同期されます。",
+            "クローズキーワード（Closes / Fixes / Resolves）を含む MR がマージされると、紐づいた Issue が自動的に「完了」に移動します。連携中の GitLab Issue をクローズまたは再オープンすると、Multica の状態も即時に反映されます。",
           ],
           improvements: [
             "コメントのルーティング カスケードを全面的に書き直し、親リンクからの @ メンション、エージェント署名の返信、スクワッド リーダーへのフォールバックを十分にテストされた 1 本の経路にまとめました。",
