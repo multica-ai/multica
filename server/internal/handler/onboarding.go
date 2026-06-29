@@ -265,18 +265,6 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 
 	var after questionnaireAnswers
 	_ = json.Unmarshal(user.OnboardingQuestionnaire, &after)
-
-	// Self-host onboarding source beacon (MUL-3708). Fire once, when the
-	// user first fills in their acquisition source. A production self-host
-	// server ships the anonymous channel(s) to Multica's public ingest;
-	// official cloud / non-production / disabled deployments are a silent
-	// no-op (gated inside MaybeSend). Fire-and-forget — never blocks
-	// onboarding, and re-sends are idempotent via the deterministic event
-	// uuid, so the simple "newly non-empty" trigger is safe.
-	if len(after.Source) > 0 && len(before.Source) == 0 {
-		h.SourceBeacon.MaybeSend(userID, []string(after.Source))
-	}
-
 	if after.complete() && !before.complete() {
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.OnboardingQuestionnaireSubmitted(
 			userID,

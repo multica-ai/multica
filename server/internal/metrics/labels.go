@@ -82,7 +82,6 @@ var businessMetricLabels = map[string][]string{
 	"multica_cloudruntime_request_duration_seconds":    {labelOp},
 	"multica_feedback_submitted_total":                 {labelKind, labelPlatform},
 	"multica_contact_sales_submitted_total":            {labelSource},
-	"multica_self_host_source_channel_total":           {labelSource},
 }
 
 var forbiddenMetricLabels = map[string]struct{}{

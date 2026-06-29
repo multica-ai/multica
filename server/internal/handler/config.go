@@ -44,13 +44,6 @@ type AppConfig struct {
 	PosthogKey           string `json:"posthog_key"`
 	PosthogHost          string `json:"posthog_host"`
 	AnalyticsEnvironment string `json:"analytics_environment"`
-
-	// SelfHostSourceNotice is true when this deployment will ship the
-	// anonymous onboarding source beacon (MUL-3708) — i.e. a production
-	// self-host. The onboarding source step shows the "anonymous
-	// collection" notice only when this is true. Omitted (false) for the
-	// common official-cloud case so responses stay identical there.
-	SelfHostSourceNotice bool `json:"self_host_source_notice,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -68,11 +61,6 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
-
-	// Mirror the source-beacon enablement so the onboarding source step
-	// shows the anonymous-collection notice exactly when (and only when)
-	// this deployment will actually ship the beacon. Nil-safe.
-	config.SelfHostSourceNotice = h.SourceBeacon.Enabled()
 
 	// Re-read from env on every request so operators can rotate keys via
 	// secret refresh without a server restart.

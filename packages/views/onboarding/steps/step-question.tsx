@@ -55,15 +55,11 @@ export function StepQuestion({
   onSkip,
   onBack,
   multiSelect = false,
-  notice,
 }: {
   step: OnboardingStep;
   number: number;
   eyebrow?: string;
   question: string;
-  /** Optional sub-question note rendered under the heading (e.g. the
-   *  self-host anonymous-collection disclosure on the source step). */
-  notice?: ReactNode;
   options: readonly QuestionOption[];
   selectedSlugs: readonly string[];
   otherValue: string;
@@ -173,12 +169,6 @@ export function StepQuestion({
           <h1 className="text-balance font-serif text-[34px] font-medium leading-[1.15] tracking-tight text-foreground">
             {question}
           </h1>
-
-          {notice ? (
-            <p className="mt-3 max-w-[640px] text-sm leading-relaxed text-muted-foreground">
-              {notice}
-            </p>
-          ) : null}
 
           <fieldset
             role={multiSelect ? "group" : "radiogroup"}

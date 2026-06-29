@@ -156,10 +156,6 @@ type captureItem struct {
 	DistinctID string         `json:"distinct_id"`
 	Properties map[string]any `json:"properties"`
 	Timestamp  string         `json:"timestamp"`
-	// UUID is PostHog's top-level event id; set only when the caller
-	// supplied a deterministic one (for dedup). Omitted otherwise so
-	// PostHog assigns its own, preserving existing behaviour.
-	UUID string `json:"uuid,omitempty"`
 }
 
 func (c *PostHogClient) send(batch []Event) {
@@ -191,7 +187,6 @@ func (c *PostHogClient) send(batch []Event) {
 			DistinctID: e.DistinctID,
 			Properties: props,
 			Timestamp:  e.Timestamp.UTC().Format(time.RFC3339Nano),
-			UUID:       e.UUID,
 		})
 	}
 

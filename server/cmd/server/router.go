@@ -31,7 +31,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/sourcebeacon"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -204,30 +203,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.WebhookRateLimiter = handler.NewRedisWebhookRateLimiter(rdb, handler.DefaultWebhookRateLimit())
 		h.WebhookIPRateLimiter = handler.NewRedisWebhookIPRateLimiter(rdb, handler.DefaultWebhookIPRateLimit())
 	}
-
-	// Self-host onboarding source beacon (MUL-3708). Enabled only on a
-	// production self-host (sourcebeacon.ShouldSendFromEnv, judged by the
-	// deployment's own app/frontend host). The salt is the per-instance
-	// secret from system_settings so the hashes it ships can't be reversed
-	// to a user_id. A load failure / missing salt leaves it disabled. The
-	// upstream defaults to Multica's public API; MULTICA_SOURCE_BEACON_URL
-	// overrides it (used by tests / staging).
-	beaconEnabled := sourcebeacon.ShouldSendFromEnv()
-	var beaconSalt string
-	if beaconEnabled {
-		// Only the rare production self-host needs the salt — skip the
-		// construction-time DB call entirely otherwise (this also keeps the
-		// router constructible with a nil pool in routing-only tests).
-		// Bounded ctx so a stalled DB cannot slow startup.
-		saltCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		beaconSalt = loadInstanceSalt(saltCtx, pool)
-		cancel()
-	}
-	h.SourceBeacon = sourcebeacon.NewSender(sourcebeacon.SenderConfig{
-		Enabled:     beaconEnabled,
-		Salt:        beaconSalt,
-		UpstreamURL: os.Getenv("MULTICA_SOURCE_BEACON_URL"),
-	})
 
 	// Channel engine (MUL-3620): the platform-agnostic inbound runtime.
 	// Built UNCONDITIONALLY — it drives any channel.Channel, not just
@@ -611,7 +586,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
 	authVerifyRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH_VERIFY", 20), time.Minute, trustedProxies)
 	contactSalesRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_CONTACT_SALES", 5), time.Hour, trustedProxies)
-	sourceBeaconRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_SOURCE_BEACON", 30), time.Minute, trustedProxies)
 	r.With(authRL).Post("/auth/send-code", h.SendCode)
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
@@ -638,14 +612,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// only forward the bytes + the Stripe-Signature header; see
 	// HandleCloudBillingStripeWebhook for the rationale).
 	r.Post("/api/webhooks/stripe", h.HandleCloudBillingStripeWebhook)
-
-	// Self-host onboarding source beacon ingest (MUL-3708). Public,
-	// write-only, unauthenticated by design: self-host instances hold no
-	// Multica credential. The payload is anonymous (channel enums + two
-	// per-instance hashes only); abuse is bounded by the per-IP limiter, a
-	// 4 KiB body cap, the channel allowlist, and strict unknown-field
-	// rejection in the handler.
-	r.With(sourceBeaconRL).Post("/api/telemetry/self-host-source", h.HandleSelfHostSourceBeacon)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -1346,27 +1312,4 @@ func cloudRuntimeFleetURLFromEnv() string {
 		return url
 	}
 	return strings.TrimSpace(os.Getenv("MULTICA_FLEET_URL"))
-}
-
-// loadInstanceSalt returns the per-instance secret used by the self-host
-// source beacon (MUL-3708), seeding the singleton row defensively in case
-// the migration's seed was skipped. Returns "" on any error — the beacon
-// treats an empty salt as "disabled", so a DB hiccup degrades to no
-// telemetry rather than crashing boot.
-func loadInstanceSalt(ctx context.Context, pool *pgxpool.Pool) string {
-	// Routing-only tests construct the router with a nil pool; the beacon is
-	// disabled there anyway, so there is nothing to load.
-	if pool == nil {
-		return ""
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO system_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`); err != nil {
-		slog.Warn("sourcebeacon: ensure system_settings row failed; beacon disabled", "error", err)
-		return ""
-	}
-	var salt string
-	if err := pool.QueryRow(ctx, `SELECT instance_salt FROM system_settings WHERE id = 1`).Scan(&salt); err != nil {
-		slog.Warn("sourcebeacon: load instance_salt failed; beacon disabled", "error", err)
-		return ""
-	}
-	return salt
 }

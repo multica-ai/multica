@@ -27,13 +27,6 @@ const (
 	EventContactSalesSubmitted         = "contact_sales_submitted"
 	EventSquadCreated                  = "squad_created"
 	EventAutopilotCreated              = "autopilot_created"
-	// EventSelfHostSourceChannel is the self-host onboarding source beacon
-	// event (MUL-3708). One event per (instance, user, channel), carrying
-	// only the channel + anonymous per-instance hashes — never identity.
-	// Deliberately a distinct name from onboarding_questionnaire_submitted
-	// so it never pollutes the official onboarding funnel; analysts compare
-	// the two series side by side, split by the deployment property.
-	EventSelfHostSourceChannel = "self_host_source_channel"
 )
 
 const EventSchemaVersion = 2
@@ -473,27 +466,6 @@ func OnboardingQuestionnaireSubmitted(userID string, source []string, role strin
 			"source":   source,
 			"role":     role,
 			"use_case": useCase,
-		},
-	}
-}
-
-// SelfHostSourceChannel builds the self-host onboarding source beacon event
-// (MUL-3708) for one channel. The caller supplies the deterministic event
-// uuid (from sourcebeacon.EventUUID) because analytics must not import
-// sourcebeacon. distinct_id carries a ":" so the PostHog client never derives
-// a user_id from it, and $process_person_profile=false keeps the anonymous
-// hash from spawning a PostHog person. Carries no identity — only the channel
-// plus the per-instance hashes.
-func SelfHostSourceChannel(instanceHash, uidHash, channel, eventUUID string) Event {
-	return Event{
-		Name:       EventSelfHostSourceChannel,
-		DistinctID: "selfhost:" + uidHash,
-		UUID:       eventUUID,
-		Properties: map[string]any{
-			"source":                  channel,
-			"deployment":              "self_host",
-			"instance_hash":           instanceHash,
-			"$process_person_profile": false,
 		},
 	}
 }

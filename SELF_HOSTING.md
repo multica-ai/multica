@@ -388,25 +388,6 @@ If you already have a `pg_cron` job in production, the safe sequence to retire i
 
 External cron / systemd timer / Kubernetes `CronJob` setups that call `SELECT rollup_task_usage_hourly()` directly can be retired the same way — once `sys_cron_executions` shows steady SUCCESS rows from the in-process scheduler, the external job is redundant and can be removed.
 
-## Telemetry & Privacy
-
-Your self-host instance ships **no** product analytics to Multica by default —
-`POSTHOG_API_KEY` is empty, so the analytics client is a no-op.
-
-The one exception is a tiny, anonymous **onboarding source beacon**: when a
-user picks "how did you hear about Multica?" during onboarding, a *production*
-instance reports only that channel choice (e.g. `social_youtube`) plus two
-one-way per-instance hashes, so we can see where self-host users come from. It
-**never** sends your users' identities, emails, names, workspaces,
-organizations, domains, roles, use-cases, the free-text "other" answer, or IP
-addresses, and a failed report never blocks onboarding. The onboarding source
-step shows a short notice about this on self-host.
-
-To turn it off, set `ANALYTICS_DISABLED=true` (on self-host that is the only
-outbound telemetry). Full details — exactly what is and isn't sent, and how
-the production/official distinction is made — are in
-[`docs/analytics.md`](docs/analytics.md#self-host-onboarding-source-beacon-mul-3708).
-
 ## Stopping Services
 
 If you installed via the install script:
