@@ -74,6 +74,31 @@ describe("loadRuntimeConfig", () => {
     });
   });
 
+  it("ignores stale staging desktop.json in packaged builds", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "multica-desktop-config-"));
+    const configPath = join(dir, "desktop.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        apiUrl: "https://sara.firtal.com",
+        appUrl: "https://sara.firtal.com",
+      }),
+    );
+
+    await expect(
+      loadRuntimeConfig({ isDev: false, configPath, env: {} }),
+    ).resolves.toEqual({
+      ok: true,
+      config: {
+        schemaVersion: 1,
+        apiUrl: "https://multica-api.firtal.com",
+        wsUrl: "wss://multica-api.firtal.com/ws",
+        appUrl: "https://multica.firtal.com",
+      },
+    });
+  });
+
   it("fails closed when packaged desktop.json is invalid", async () => {
     const dir = await mkdtemp(join(tmpdir(), "multica-desktop-config-"));
     const configPath = join(dir, "desktop.json");

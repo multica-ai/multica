@@ -26,7 +26,11 @@ export async function loadRuntimeConfig(options: {
   const configPath = options.configPath ?? desktopConfigPath();
   try {
     const raw = await readFile(configPath, "utf-8");
-    return { ok: true, config: parseRuntimeConfig(raw) };
+    const config = parseRuntimeConfig(raw);
+    if (isStaleStagingConfig(config)) {
+      return { ok: true, config: { ...DEFAULT_RUNTIME_CONFIG } };
+    }
+    return { ok: true, config };
   } catch (err) {
     if (isMissingFileError(err)) {
       return { ok: true, config: { ...DEFAULT_RUNTIME_CONFIG } };
@@ -42,6 +46,21 @@ export async function loadRuntimeConfig(options: {
 
 export function desktopConfigPath(): string {
   return join(app.getPath("home"), ".multica", "desktop.json");
+}
+
+function isStaleStagingConfig(config: RuntimeConfig): boolean {
+  return (
+    hostname(config.apiUrl) === "sara.firtal.com" ||
+    hostname(config.appUrl) === "sara.firtal.com"
+  );
+}
+
+function hostname(rawUrl: string): string | null {
+  try {
+    return new URL(rawUrl).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 function isMissingFileError(err: unknown): boolean {
