@@ -57,12 +57,6 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@multica/ui/components/ui/select";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -85,18 +79,12 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
-  classFacets,
-  classifySideEffect,
   conditionFacets,
   isLockedFromElsewhere,
   permissionDescription,
-  SIDE_EFFECT_LABEL,
-  SIDE_EFFECTS,
   toolPolicyTableOptions,
   useClearToolPolicy,
   useSetToolPolicy,
-  type ClassFacet,
-  type SideEffect,
   type ToolCondition,
   type ToolEffectiveSetting,
   type ToolLayer,
@@ -135,13 +123,14 @@ export type ToolPolicyView =
   | "member"
   | "system";
 
-/** Restricts the rows shown to a specific category of tools. */
-export type ToolPolicyTabFilter =
-  | "repos"
-  | "connections"
-  | "runtime"
-  | "multica"
-  | "credentials";
+// FIR-2281: the permission flade is split into TWO tabs instead of five.
+//   "permissions" — every flat capability the subject can use (Multica + the
+//                   runtime-reported tools). The simple on/off rights.
+//   "resources"   — the things an agent is granted scoped access TO: workspace
+//                   connections, repositories, and credential boxes. These are
+//                   the per-resource rows (a connection, a repo URL, a vault
+//                   box), shown with a Type column + Type filter.
+export type ToolPolicyTabFilter = "permissions" | "resources";
 
 export interface ToolPolicyTableProps {
   wsId: string;
@@ -158,13 +147,12 @@ export interface ToolPolicyTableProps {
   userId?: string | null;
   groupIds?: string[];
   /**
-   * When set, restricts which rows are visible:
-   *   "repos"       — only per-repo rows (read/checkout/push per repository)
-   *   "connections" — only workspace connection tools (source === "connection")
-   *   "credentials" — only per-credential rows (source === "credential")
-   *   "runtime"     — only runtime/daemon capability tools
-   *   "multica"     — everything else (issues, agents, comments, etc.)
-   * When omitted, all rows are shown (original behaviour).
+   * Which half of the flade this instance renders (FIR-2281):
+   *   "permissions" — flat capability rows that are not a connection (Multica +
+   *                   runtime-reported tools).
+   *   "resources"   — connection rows (flat) plus the repo and credential
+   *                   collapsible sections.
+   * When omitted, all rows are shown (the single-table fallback).
    */
   tabFilter?: ToolPolicyTabFilter;
 }
@@ -236,6 +224,51 @@ const LAYER_LABEL: Record<string, string> = {
   "": "Default",
 };
 
+// FIR-2281: the permission "Type" — the single dimension that used to be the
+// five top-level tabs, now a column + filter. The "permissions" tab covers
+// Multica + Runtime; the "resources" tab covers the three resource kinds an
+// agent is scoped to. ONE classifier drives the Type column AND the
+// tab/filter partition, so a row can never land under the wrong type.
+export type PermissionType =
+  | "Multica"
+  | "Runtime"
+  | "Connections"
+  | "Repos"
+  | "Credentials";
+
+const PERMISSION_TYPES_BY_TAB: Record<ToolPolicyTabFilter, PermissionType[]> = {
+  permissions: ["Multica", "Runtime"],
+  resources: ["Connections", "Repos", "Credentials"],
+};
+
+// A runtime-reported tool is one a runtime actually advertised — built-ins and
+// MCP actions land with source "runtime_report" (the snapshot) or "scan" (the
+// daemon tools/list probe). The platform "Runtimes" category is the runtime
+// admin actions (manage_runtime, create_runtime) from platformcatalog; both
+// belong to the Runtime type.
+function isRuntimeReportedSource(r: ToolPolicyRow): boolean {
+  return r.source === "runtime_report" || r.source === "scan";
+}
+
+export function permissionType(r: ToolPolicyRow): PermissionType {
+  if (r.source === "connection") return "Connections";
+  if (r.source === "credential") return "Credentials";
+  // Any other per-resource row (a non-empty pattern that is not a connection
+  // sub-row or registry data source — those never reach the rendered sets) is a
+  // repository group.
+  if (r.resource_pattern) return "Repos";
+  if (isRuntimeReportedSource(r) || r.category === "Runtimes") return "Runtime";
+  return "Multica";
+}
+
+function TypeTag({ row }: { row: ToolPolicyRow }) {
+  return (
+    <Badge variant="outline" className="font-normal">
+      {permissionType(row)}
+    </Badge>
+  );
+}
+
 export function ToolPolicyTable({
   wsId,
   view,
@@ -273,10 +306,13 @@ export function ToolPolicyTable({
   const clearPolicy = useClearToolPolicy();
 
   const [search, setSearch] = useState("");
-  const [classes, setClasses] = useState<Set<string>>(new Set());
-  const [effects, setEffects] = useState<Set<SideEffect>>(new Set());
+  const [types, setTypes] = useState<Set<PermissionType>>(new Set());
   const [decisions, setDecisions] = useState<Set<ToolEffectiveSetting>>(new Set());
   const [showInherited, setShowInherited] = useState(true);
+  // Credential rows (FIR-1479) only exist once the workspace turns the feature
+  // on; gate them on the same flag the backend gates the rows with so the
+  // Credentials type is a consistent surface the moment an admin enables it.
+  const showCredentials = useFeatureFlag("cerebro_credentials_per_actor");
 
   // The layer this page authors, and the subject those writes target.
   const editLayer: ToolLayer = VIEW_EDIT_LAYER[view];
@@ -343,60 +379,66 @@ export function ToolPolicyTable({
     return map;
   }, [rows]);
 
-  // tabFilter narrows which rows this instance shows. TanStack Query deduplicates
-  // the underlying fetch, so multiple ToolPolicyTable instances on the same page
-  // (e.g. tabbed workspace permissions) share a single network request.
+  // tabFilter splits the flade in two (FIR-2281). TanStack Query deduplicates the
+  // underlying fetch, so the two ToolPolicyTable instances behind the tabs share a
+  // single network request.
   const capRows = useMemo(() => {
-    // A runtime-reported tool is one a runtime actually advertised — built-ins
-    // and MCP actions land with source "runtime_report" (the snapshot) or "scan"
-    // (the daemon tools/list probe). The platform "Runtimes" category is a
-    // different thing: the runtime *admin* actions (manage_runtime, create_runtime)
-    // from platformcatalog. The Runtime tab must show the reported tools (FIR-1708
-    // D(a)) — filtering on category === "Runtimes" hid them in the Multica tab.
-    const isRuntimeReported = (r: ToolPolicyRow) =>
-      r.source === "runtime_report" || r.source === "scan";
-    if (tabFilter === "repos") return [];
-    if (!tabFilter) return allCapRows;
-    if (tabFilter === "connections") return allCapRows.filter((r) => r.source === "connection");
-    // Credential rows carry a resource pattern (so they live in `rows`, not
-    // `allCapRows`), one row per box per capability. Like repos they render as
-    // collapsible per-box groups (credentialGroups below), NOT as flat catalog
-    // rows — so the flat table excludes them entirely on the credentials tab.
-    if (tabFilter === "credentials") return [];
-    if (tabFilter === "runtime")
-      return allCapRows.filter((r) => isRuntimeReported(r) || r.category === "Runtimes");
-    // "multica" = everything that isn't a connection, a runtime-reported tool, or
-    // a runtime-admin action (those have their own tabs above). Credential rows are
-    // already excluded here because they carry a resource pattern (not in allCapRows).
-    return allCapRows.filter(
-      (r) =>
-        r.source !== "connection" &&
-        !isRuntimeReported(r) &&
-        r.category !== "Runtimes",
-    );
-  }, [tabFilter, allCapRows, allCredentialRows]);
+    // Resources tab: the only FLAT capability rows are the connection rows — repos
+    // and credentials render as collapsible sections (repoGroups / credentialGroups
+    // below), so the flat table excludes them on this tab.
+    if (tabFilter === "resources")
+      return allCapRows.filter((r) => r.source === "connection");
+    if (tabFilter === "permissions")
+      // Everything that is not a connection — Multica + the runtime-reported tools.
+      return allCapRows.filter((r) => r.source !== "connection");
+    // No tabFilter: the single-table fallback shows every flat capability row.
+    return allCapRows;
+  }, [tabFilter, allCapRows]);
 
   const repoRows = useMemo(() => {
-    if (!tabFilter || tabFilter === "repos") return allRepoRows;
+    // Repos belong to the Resources tab (and the no-filter fallback).
+    if (!tabFilter || tabFilter === "resources") return allRepoRows;
     return [];
   }, [tabFilter, allRepoRows]);
 
-  const facets = useMemo(() => classFacets(capRows), [capRows]);
+  // The Type facets offered on this tab — only the types that actually have rows,
+  // so an empty type never shows a dead filter chip.
+  const typeFacets = useMemo<PermissionType[]>(() => {
+    if (tabFilter === "permissions" || !tabFilter) {
+      const present = new Set<PermissionType>();
+      for (const r of capRows) present.add(permissionType(r));
+      const order = tabFilter
+        ? PERMISSION_TYPES_BY_TAB.permissions
+        : [...PERMISSION_TYPES_BY_TAB.permissions, ...PERMISSION_TYPES_BY_TAB.resources];
+      return order.filter((t) => present.has(t));
+    }
+    const present: PermissionType[] = [];
+    if (capRows.length) present.push("Connections");
+    if (allRepoRows.length) present.push("Repos");
+    if (showCredentials && allCredentialRows.length) present.push("Credentials");
+    return present;
+  }, [tabFilter, capRows, allRepoRows, allCredentialRows, showCredentials]);
+
   const filtered = useMemo(
-    () => filterRows(capRows, { search, classes, effects, decisions, showInherited, editLayer }),
-    [capRows, search, classes, effects, decisions, showInherited, editLayer],
+    () => filterRows(capRows, { search, types, decisions, showInherited, editLayer }),
+    [capRows, search, types, decisions, showInherited, editLayer],
   );
-  // Repo groups are keyed by URL and narrowed only by the free-text search — the
-  // class/side-effect/decision facets describe capabilities, not repos.
-  const repoGroups = useMemo(() => groupRepoRows(repoRows, search), [repoRows, search]);
-  // Credential groups: one collapsible group per Agent Vault box, shown only on
-  // the credentials tab. Like repo groups they are keyed by resource_pattern and
-  // narrowed only by the free-text search (on the box name).
-  const credentialGroups = useMemo(
+  // Repo groups are keyed by URL and narrowed by the free-text search and the Type
+  // filter (the "Repos" type) — never by the per-capability decision facet.
+  const repoGroups = useMemo(
     () =>
-      tabFilter === "credentials" ? groupCredentialRows(allCredentialRows, search) : [],
-    [tabFilter, allCredentialRows, search],
+      types.size && !types.has("Repos") ? [] : groupRepoRows(repoRows, search),
+    [types, repoRows, search],
   );
+  // Credential groups: one collapsible group per Agent Vault box, shown on the
+  // Resources tab when the feature is on. Keyed by resource_pattern and narrowed by
+  // the free-text search (on the box name) and the "Credentials" type filter.
+  const credentialGroups = useMemo(() => {
+    const onResources = !tabFilter || tabFilter === "resources";
+    if (!onResources || !showCredentials) return [];
+    if (types.size && !types.has("Credentials")) return [];
+    return groupCredentialRows(allCredentialRows, search);
+  }, [tabFilter, showCredentials, types, allCredentialRows, search]);
 
   const busy = setPolicy.isPending || clearPolicy.isPending;
 
@@ -458,7 +500,7 @@ export function ToolPolicyTable({
     <div className="flex flex-col gap-4" data-testid="tool-policy-table">
       <CatalogHeader
         shown={filtered.length}
-        total={capRows.length + repoRows.length}
+        total={capRows.length + repoRows.length + (showCredentials ? allCredentialRows.length : 0)}
         busy={busy}
         onBulk={bulkSet}
       />
@@ -466,11 +508,9 @@ export function ToolPolicyTable({
       <FilterBar
         search={search}
         onSearch={setSearch}
-        facets={facets}
-        classes={classes}
-        onToggleClass={(c) => setClasses((s) => toggle(s, c))}
-        effects={effects}
-        onToggleEffect={(e) => setEffects((s) => toggle(s, e))}
+        typeFacets={typeFacets}
+        types={types}
+        onToggleType={(t) => setTypes((s) => toggle(s, t))}
         decisions={decisions}
         onToggleDecision={(d) => setDecisions((s) => toggle(s, d))}
         showInherited={showInherited}
@@ -482,11 +522,9 @@ export function ToolPolicyTable({
         <p className="text-sm text-muted-foreground">Loading tools…</p>
       ) : repoGroups.length === 0 && credentialGroups.length === 0 && filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {tabFilter === "credentials" && credentialGroups.length === 0
-            ? "No credentials available yet. Connect an Agent Vault to this workspace to grant credential access here."
-            : allCapRows.length === 0 && allRepoRows.length === 0
-              ? "No tools reported yet."
-              : "No tools match these filters."}
+          {allCapRows.length === 0 && allRepoRows.length === 0 && allCredentialRows.length === 0
+            ? "No tools reported yet."
+            : "No tools match these filters."}
         </p>
       ) : (
         <>
@@ -520,8 +558,7 @@ export function ToolPolicyTable({
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[38%]">Tool</TableHead>
-                  <TableHead>Class</TableHead>
-                  <TableHead>Side effect</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Decision</TableHead>
                   <TableHead>Origin</TableHead>
                 </TableRow>
@@ -547,14 +584,9 @@ export function ToolPolicyTable({
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <Badge variant="outline" className="font-normal">
-                          {row.category || "Uncategorised"}
-                        </Badge>
+                        <TypeTag row={row} />
                         {row.managed_externally && <ManagedExternallyTag />}
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <SideEffectTag effect={classifySideEffect(row)} />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -661,11 +693,8 @@ export function ToolPolicyTable({
                   </div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline" className="font-normal">
-                    {row.category || "Uncategorised"}
-                  </Badge>
+                  <TypeTag row={row} />
                   {row.managed_externally && <ManagedExternallyTag />}
-                  <SideEffectTag effect={classifySideEffect(row)} />
                   <OriginTag row={row} editLayer={editLayer} />
                   <ConditionControl
                     row={row}
@@ -688,10 +717,11 @@ export function ToolPolicyTable({
 }
 
 export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
-  // Credentials are a permission type only once the workspace turns the feature on
-  // (FIR-1479). Gate the tab on the same flag the backend gates the rows with, so
-  // the tab is a consistent permission surface the moment an admin enables it.
-  const showCredentials = useFeatureFlag("cerebro_credentials_per_actor");
+  // FIR-2281: two tabs instead of five. "Permissions" holds the flat capabilities
+  // (Multica + Runtime); "Resources" holds the things an agent is scoped to —
+  // connections, repos and credential boxes — distinguished by the Type column and
+  // filter inside the table. The credentials feature flag is read inside the table
+  // itself, so it never has to gate a whole tab here.
   return (
     // TECH-3156 Mangel 3: force the tab row horizontal. The shared Tabs primitive
     // renders its list vertically by default, so — like cost-optimization-tabs —
@@ -699,43 +729,21 @@ export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
     // on one horizontal row instead of stacked. On narrow screens the row scrolls
     // horizontally (flex-nowrap + overflow-x-auto) instead of wrapping and breaking
     // over the content below it.
-    <Tabs defaultValue="multica" orientation="horizontal">
+    <Tabs defaultValue="permissions" orientation="horizontal">
       <TabsList className="no-scrollbar !h-auto w-full max-w-full !flex-row flex-nowrap justify-start gap-1 overflow-x-auto">
-        <TabsTrigger className="!w-auto !flex-none !justify-center" value="multica">
-          Multica
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="permissions">
+          Permissions
         </TabsTrigger>
-        <TabsTrigger className="!w-auto !flex-none !justify-center" value="runtime">
-          Runtime
+        <TabsTrigger className="!w-auto !flex-none !justify-center" value="resources">
+          Resources
         </TabsTrigger>
-        <TabsTrigger className="!w-auto !flex-none !justify-center" value="repos">
-          Repos
-        </TabsTrigger>
-        <TabsTrigger className="!w-auto !flex-none !justify-center" value="connections">
-          Connections
-        </TabsTrigger>
-        {showCredentials && (
-          <TabsTrigger className="!w-auto !flex-none !justify-center" value="credentials">
-            Credentials
-          </TabsTrigger>
-        )}
       </TabsList>
-      <TabsContent value="multica" className="mt-4">
-        <ToolPolicyTable {...props} tabFilter="multica" />
+      <TabsContent value="permissions" className="mt-4">
+        <ToolPolicyTable {...props} tabFilter="permissions" />
       </TabsContent>
-      <TabsContent value="runtime" className="mt-4">
-        <ToolPolicyTable {...props} tabFilter="runtime" />
+      <TabsContent value="resources" className="mt-4">
+        <ToolPolicyTable {...props} tabFilter="resources" />
       </TabsContent>
-      <TabsContent value="repos" className="mt-4">
-        <ToolPolicyTable {...props} tabFilter="repos" />
-      </TabsContent>
-      <TabsContent value="connections" className="mt-4">
-        <ToolPolicyTable {...props} tabFilter="connections" />
-      </TabsContent>
-      {showCredentials && (
-        <TabsContent value="credentials" className="mt-4">
-          <ToolPolicyTable {...props} tabFilter="credentials" />
-        </TabsContent>
-      )}
     </Tabs>
   );
 }
@@ -744,25 +752,23 @@ export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
 
 interface FilterState {
   search: string;
-  classes: Set<string>;
-  effects: Set<SideEffect>;
+  types: Set<PermissionType>;
   decisions: Set<ToolEffectiveSetting>;
   showInherited: boolean;
   editLayer: ToolLayer;
 }
 
-// filterRows applies the combinable filters. Each facet (class / side effect /
-// decision) is OR within itself and AND across facets; an empty set means "all".
-// "Show inherited" off keeps only rows this page has explicitly authored at its
-// own layer, so a reviewer can see just the overrides they own.
+// filterRows applies the combinable filters. Each facet (type / decision) is OR
+// within itself and AND across facets; an empty set means "all". "Show inherited"
+// off keeps only rows this page has explicitly authored at its own layer, so a
+// reviewer can see just the overrides they own.
 export function filterRows(rows: ToolPolicyRow[], f: FilterState): ToolPolicyRow[] {
   const q = f.search.trim().toLowerCase();
   return rows.filter((r) => {
     if (q && !`${r.title} ${r.tool_key} ${r.category}`.toLowerCase().includes(q)) {
       return false;
     }
-    if (f.classes.size && !f.classes.has(r.category || "Uncategorised")) return false;
-    if (f.effects.size && !f.effects.has(classifySideEffect(r))) return false;
+    if (f.types.size && !f.types.has(permissionType(r))) return false;
     if (f.decisions.size && !f.decisions.has(r.effective.setting)) return false;
     if (!f.showInherited && !r.layers[f.editLayer]) return false;
     return true;
@@ -795,8 +801,7 @@ function CatalogHeader({
         <div>
           <h3 className="text-base font-semibold">All tools</h3>
           <p className="max-w-xl text-sm text-muted-foreground">
-            Permissions attach at the tool level; filter by capability class, side
-            effect or decision.
+            Permissions attach at the tool level; filter by type or decision.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -820,11 +825,9 @@ function CatalogHeader({
 function FilterBar({
   search,
   onSearch,
-  facets,
-  classes,
-  onToggleClass,
-  effects,
-  onToggleEffect,
+  typeFacets,
+  types,
+  onToggleType,
   decisions,
   onToggleDecision,
   showInherited,
@@ -833,21 +836,15 @@ function FilterBar({
 }: {
   search: string;
   onSearch: (v: string) => void;
-  facets: ClassFacet[];
-  classes: Set<string>;
-  onToggleClass: (c: string) => void;
-  effects: Set<SideEffect>;
-  onToggleEffect: (e: SideEffect) => void;
+  typeFacets: PermissionType[];
+  types: Set<PermissionType>;
+  onToggleType: (t: PermissionType) => void;
   decisions: Set<ToolEffectiveSetting>;
   onToggleDecision: (d: ToolEffectiveSetting) => void;
   showInherited: boolean;
   onShowInherited: (v: boolean) => void;
   editLayerLabel: string;
 }) {
-  const selectedClass = Array.from(classes)[0] ?? "__all__";
-  const selectedClassLabel =
-    selectedClass === "__all__" ? "All classes" : selectedClass;
-
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -856,52 +853,22 @@ function FilterBar({
           <Input
             value={search}
             onChange={(e) => onSearch(e.target.value)}
-            placeholder="Filter tools by name or class…"
+            placeholder="Filter tools by name…"
             className="h-9 pl-9"
             aria-label="Filter tools"
           />
         </div>
-
-        <Select
-          value={selectedClass}
-          onValueChange={(value) => {
-            if (!value) return;
-            if (value === "__all__") {
-              if (classes.size > 0) onToggleClass(selectedClass);
-              return;
-            }
-            if (classes.has(value)) return;
-            if (selectedClass !== "__all__") onToggleClass(selectedClass);
-            onToggleClass(value);
-          }}
-        >
-          <SelectTrigger className="h-9 w-full sm:w-56" aria-label="Filter by class">
-            <span data-slot="select-value" className="flex flex-1 text-left">
-              {selectedClassLabel}
-            </span>
-          </SelectTrigger>
-          <SelectContent align="start">
-            <SelectItem value="__all__">All classes</SelectItem>
-            {facets.map((facet) => (
-              <SelectItem key={facet.category} value={facet.category}>
-                {facet.category} ({facet.count})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
-      <FilterGroup label="Side effect">
-        {SIDE_EFFECTS.map((effect) => (
-          <FilterChip
-            key={effect}
-            active={effects.has(effect)}
-            onClick={() => onToggleEffect(effect)}
-          >
-            {SIDE_EFFECT_LABEL[effect]}
-          </FilterChip>
-        ))}
-      </FilterGroup>
+      {typeFacets.length > 1 && (
+        <FilterGroup label="Type">
+          {typeFacets.map((t) => (
+            <FilterChip key={t} active={types.has(t)} onClick={() => onToggleType(t)}>
+              {t}
+            </FilterChip>
+          ))}
+        </FilterGroup>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <FilterGroup label="Decision">
@@ -967,14 +934,6 @@ function FilterChip({
 }
 
 // --- row cells --------------------------------------------------------------
-
-function SideEffectTag({ effect }: { effect: SideEffect }) {
-  return (
-    <Badge variant="secondary" className="font-normal">
-      {SIDE_EFFECT_LABEL[effect]}
-    </Badge>
-  );
-}
 
 // ManagedExternallyTag marks a platform action whose access is decided by
 // another mechanism (membership ACL, daemon token, webhook secret), so its

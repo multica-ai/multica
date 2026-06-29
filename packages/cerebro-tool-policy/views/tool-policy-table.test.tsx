@@ -176,14 +176,17 @@ async function tableBody() {
 }
 
 describe("ToolPolicyTable (capability catalog)", () => {
-  it("renders one flat row per tool with its class, side effect and resolved-by layer", async () => {
+  it("renders one flat row per tool with its type and resolved-by layer", async () => {
     renderTable("agent");
     const table = await tableBody();
     expect(table.getByText("Post Slack message")).toBeInTheDocument();
     expect(table.getByText("Restart deploy")).toBeInTheDocument();
     expect(table.getByText("List issues")).toBeInTheDocument();
-    // Class label appears, never a raw id.
-    expect(table.getAllByText("MCP · Slack").length).toBeGreaterThan(0);
+    // The Type column (FIR-2281): a scanned tool reads "Runtime", a built-in reads
+    // "Multica". The old Class column ("MCP · Slack") is gone.
+    expect(table.getAllByText("Runtime").length).toBeGreaterThan(0);
+    expect(table.getAllByText("Multica").length).toBeGreaterThan(0);
+    expect(table.queryByText("MCP · Slack")).not.toBeInTheDocument();
     // The all-inherited row has no override on this level → inherited from the
     // workspace default at the root of the chain.
     const listRow = screen.getByTestId("tool-row-list_issues");
@@ -290,18 +293,16 @@ describe("ToolPolicyTable (capability catalog)", () => {
     expect(table.queryByText("List issues")).not.toBeInTheDocument();
   });
 
-  it("a class filter narrows the catalog to that capability class", async () => {
+  it("a type filter narrows the catalog to that permission type", async () => {
     const user = userEvent.setup();
     renderTable("agent");
     const table = await tableBody();
-    const classFilter = screen.getByRole("combobox", { name: "Filter by class" });
-    expect(classFilter).toHaveTextContent("All classes");
-    expect(classFilter).not.toHaveTextContent("__all__");
-    await user.click(classFilter);
-    await user.click(await screen.findByRole("option", { name: /MCP · Slack/ }));
-    expect(classFilter).toHaveTextContent("MCP · Slack");
+    // The Type chips replace the old Class select (FIR-2281). Pick Runtime — only
+    // the runtime-reported tool (Post Slack message, source "scan") survives.
+    await user.click(screen.getByRole("button", { name: "Runtime", pressed: false }));
     expect(table.getByText("Post Slack message")).toBeInTheDocument();
     expect(table.queryByText("Restart deploy")).not.toBeInTheDocument();
+    expect(table.queryByText("List issues")).not.toBeInTheDocument();
   });
 
   it("runtime view writes to the runtime layer", async () => {
@@ -909,7 +910,7 @@ describe("ToolPolicyTable (System actor — FIR-1692)", () => {
   });
 });
 
-describe("ToolPolicyTable runtime/multica tab split (FIR-1708 D(a))", () => {
+describe("ToolPolicyTable Permissions/Resources tab split (FIR-2281)", () => {
   const SPLIT = {
     tools: [
       {
@@ -936,10 +937,18 @@ describe("ToolPolicyTable runtime/multica tab split (FIR-1708 D(a))", () => {
         layers: { runtime: null, agent: null, group: null, user: null },
         effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
       },
+      {
+        tool_key: "connection:slack",
+        title: "Slack workspace",
+        category: "Connections",
+        source: "connection",
+        layers: { runtime: null, agent: null, group: null, user: null },
+        effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+      },
     ],
   };
 
-  function renderTab(tabFilter: "runtime" | "multica") {
+  function renderTab(tabFilter: "permissions" | "resources") {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
       <QueryClientProvider client={qc}>
@@ -955,33 +964,38 @@ describe("ToolPolicyTable runtime/multica tab split (FIR-1708 D(a))", () => {
     );
   }
 
-  it("Runtime tab shows runtime-reported tools, not only runtime-admin actions", async () => {
+  it("Permissions tab shows every flat capability (Multica + Runtime), not connections", async () => {
     mockCerebroRequest.mockResolvedValue(SPLIT);
-    renderTab("runtime");
+    renderTab("permissions");
     const table = await tableBody();
-    // The regression fix: a runtime-reported tool now appears on the Runtime tab.
+    // Runtime-reported tools, runtime-admin actions, and generic Multica tools all
+    // live on the one Permissions tab now — the old Runtime/Multica tabs are gone.
     expect(table.getByText("Bash")).toBeInTheDocument();
-    // Runtime-admin platform actions stay on the Runtime tab too.
     expect(table.getByText("Manage runtime")).toBeInTheDocument();
-    // A generic platform tool belongs to the Multica tab, not here.
-    expect(table.queryByText("Add comment")).not.toBeInTheDocument();
+    expect(table.getByText("Add comment")).toBeInTheDocument();
+    // The Type column distinguishes them in-row instead of across tabs.
+    expect(table.getAllByText("Runtime").length).toBeGreaterThan(0);
+    expect(table.getAllByText("Multica").length).toBeGreaterThan(0);
+    // A connection is a resource, not a flat permission — never on this tab.
+    expect(table.queryByText("Slack workspace")).not.toBeInTheDocument();
   });
 
-  it("Multica tab excludes runtime-reported tools and runtime-admin actions", async () => {
+  it("Resources tab shows connections and excludes the flat permissions", async () => {
     mockCerebroRequest.mockResolvedValue(SPLIT);
-    renderTab("multica");
+    renderTab("resources");
     const table = await tableBody();
-    expect(table.getByText("Add comment")).toBeInTheDocument();
+    expect(table.getByText("Slack workspace")).toBeInTheDocument();
+    expect(table.getAllByText("Connections").length).toBeGreaterThan(0);
     expect(table.queryByText("Bash")).not.toBeInTheDocument();
-    expect(table.queryByText("Manage runtime")).not.toBeInTheDocument();
+    expect(table.queryByText("Add comment")).not.toBeInTheDocument();
   });
 });
 
-// FIR-1479: credentials are a permission type, rendered as per-box rows under
-// their own "Credentials" tab. Each row carries a resource_pattern
+// FIR-1479 + FIR-2281: credentials are a resource type, rendered as per-box rows
+// inside the Resources tab. Each row carries a resource_pattern
 // ("cerebro-credential:<id>"), so a decision MUST be written scoped to that box —
 // the prior inline rendering dropped the scope and the toggle silently no-op'd.
-describe("ToolPolicyTable — Credentials tab (FIR-1479)", () => {
+describe("ToolPolicyTable — Credentials in the Resources tab (FIR-1479)", () => {
   // A single-action box (Agent Vault boxes expose only "Use secret") renders as a
   // plain permission row — resource agentvault-vault:<name>, one reveal capability.
   const vaultRow = (
@@ -1035,6 +1049,8 @@ describe("ToolPolicyTable — Credentials tab (FIR-1479)", () => {
   };
 
   function renderCredentials() {
+    // Credentials only render once the workspace turns the feature on (FIR-1479).
+    mockUseFeatureFlag.mockReturnValue(true);
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
       <QueryClientProvider client={qc}>
@@ -1044,7 +1060,7 @@ describe("ToolPolicyTable — Credentials tab (FIR-1479)", () => {
           subjectId="agent-1"
           runtimeId="rt-1"
           userId="user-1"
-          tabFilter="credentials"
+          tabFilter="resources"
         />
       </QueryClientProvider>,
     );
@@ -1121,14 +1137,16 @@ describe("ToolPolicyTable — Credentials tab (FIR-1479)", () => {
     });
   });
 
-  it("shows a credentials-specific hint when no boxes exist", async () => {
+  it("shows nothing on the Resources tab when only flat permissions exist", async () => {
     mockCerebroRequest.mockResolvedValue({ tools: [BUILTIN_ROW] });
     renderCredentials();
-    expect(await screen.findByText(/No credentials available yet/)).toBeInTheDocument();
+    // A builtin tool is a permission, not a resource → the Resources tab is empty.
+    expect(await screen.findByText(/No tools match these filters/)).toBeInTheDocument();
+    expect(screen.queryByText("List issues")).not.toBeInTheDocument();
   });
 });
 
-describe("ToolPolicyTabs — Credentials tab gated on the feature flag", () => {
+describe("ToolPolicyTabs — two tabs (FIR-2281)", () => {
   function renderTabs() {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
@@ -1138,16 +1156,12 @@ describe("ToolPolicyTabs — Credentials tab gated on the feature flag", () => {
     );
   }
 
-  it("renders the Credentials tab when cerebro_credentials_per_actor is on", async () => {
-    mockUseFeatureFlag.mockReturnValue(true);
+  it("renders exactly the Permissions and Resources tabs", async () => {
     renderTabs();
-    expect(await screen.findByRole("tab", { name: "Credentials" })).toBeInTheDocument();
-  });
-
-  it("hides the Credentials tab when the flag is off", async () => {
-    mockUseFeatureFlag.mockReturnValue(false);
-    renderTabs();
-    expect(await screen.findByRole("tab", { name: "Multica" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "Permissions" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Resources" })).toBeInTheDocument();
+    // The old five tabs are gone — Resources holds connections/repos/credentials.
+    expect(screen.queryByRole("tab", { name: "Multica" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Credentials" })).not.toBeInTheDocument();
   });
 });
