@@ -601,6 +601,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAgentVaultHandler := cerebroagentvault.NewHandler(pool)
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from). FIR-1739: wire the Agent Vault vault lister so the Credentials tab also lists Agent Vault boxes (agentvault-vault:<name>) as grantable rows; nil-safe when admin creds absent.
 	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool).WithVaultLister(cerebroagentvault.NewVaultLister()))
+	// CEREBRO-PATCH(cerebro-tool-policy-registry-fold-in): FIR-2269 restore FIR-1609 Phase 5 —
+	// re-wire the firtal_registry per-data-source projection removed by FIR-2208 so the unified
+	// tool-policy table appends per-source rows and the "Data sources (N)" per-actor picker renders.
+	cerebroToolPolicyHandler.RegistryRows = h.ToolPolicyRegistryRows
 	// CEREBRO-PATCH(cerebro-tool-policy-system-cap): FIR-1609 Phase 2 — resolve the
 	// owner a System (autopilot) subject is capped on, so a System rule looser than
 	// its owner is rejected at authoring time. Prefer the explicit owner_user_id;
