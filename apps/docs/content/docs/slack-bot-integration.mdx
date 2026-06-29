@@ -1,0 +1,179 @@
+---
+title: Slack Bot integration
+description: Connect a Multica agent to your own Slack app — create the app from a manifest, install it, paste the bot + app-level tokens, then @-mention it, DM it, or type /issue from inside Slack.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Connect any [agent](/agents) to a Slack bot and your team can work with it from inside Slack — DM the bot, @-mention it in a channel, or type `/issue` to file a [Multica issue](/issues) without opening the app.
+
+Slack uses a **bring-your-own-app (BYO)** model: a workspace admin creates a Slack app, installs it to their Slack workspace, and pastes its tokens into Multica. Each agent gets **its own** Slack app — so several agents can each have a distinct, separately @-mentionable bot in the same Slack workspace. (This differs from [Lark](/lark-bot-integration), where binding is a scan-to-install flow.)
+
+The whole setup is below and takes about five minutes. You'll end up with two tokens to paste into Multica:
+
+- a **Bot token** — starts with `xoxb-`
+- an **App-level token** — starts with `xapp-`
+
+## Set up your Slack app
+
+### 1. Create the app from a manifest
+
+1. Go to [https://api.slack.com/apps](https://api.slack.com/apps) and click **Create New App**.
+2. Choose **From a manifest**.
+3. Pick the Slack workspace to install the app into.
+4. Switch to the **YAML** tab, paste the manifest below, review, and create the app.
+
+```yaml
+display_information:
+  name: Multica
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Multica
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - chat:write
+      - users:read
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+      - message.channels
+      - message.groups
+      - message.mpim
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+```
+
+This manifest configures everything Multica needs, so you don't set anything by hand:
+
+| Section | Why it's there |
+|---|---|
+| `app_home.messages_tab_enabled: true` | Lets members open the bot and **DM** it. Without it, the bot can't be messaged directly. |
+| `bot_user` | Creates the bot identity that gets @-mentioned and posts replies. |
+| `chat:write` | Post the agent's replies back into Slack. |
+| `app_mentions:read` + `app_mention` event | Receive @-mentions in channels. |
+| `im:history` + `message.im` | Receive **DMs** to the bot (every DM message is read). |
+| `channels:history` / `groups:history` / `mpim:history` + the matching `message.*` events | Receive messages in public channels, private channels, and group DMs. In these, the bot only acts on messages that **@-mention** it. |
+| `users:read` | Required so Multica can verify (via `bots.info`) that your two tokens belong to the same app. |
+| `socket_mode_enabled: true` | The bot connects out over Socket Mode — **no public URL / request URL needed**. |
+| `interactivity.is_enabled: false` | Multica's prompts are plain links, not buttons, so interactivity isn't needed. |
+
+There is **no OAuth redirect URL**, because BYO doesn't use OAuth.
+
+<Callout type="warning">
+Keep `users:read` in the scopes. At connect time Multica calls `bots.info` to confirm the bot token and app-level token come from the **same** app — that call needs `users:read`. Without it, **Connect** fails.
+</Callout>
+
+<Callout type="info">
+Want a specific name in Slack? Change `display_information.name` and `features.bot_user.display_name` (e.g. to your agent's name) before creating, or edit it later under **App Home**. Slack shows the bot by its **bot display name**, which can differ from the app name.
+</Callout>
+
+### 2. Install the app and copy the Bot token
+
+1. In the app's left nav, open **Install App** (or **OAuth & Permissions**).
+2. Click **Install to Workspace** and approve.
+3. Copy the **Bot User OAuth Token** — it starts with `xoxb-`. This is your **Bot token**.
+
+### 3. Create the App-level token
+
+The app-level token authorizes the Socket Mode connection. It can only be created in the console (it isn't part of OAuth).
+
+1. Open **Basic Information → App-Level Tokens** and click **Generate Token and Scopes**.
+2. Give it any name.
+3. Click **Add Scope** and pick **`connections:write`** from the list (it's a picker — select it, don't type it).
+4. Click **Generate**, then copy the token — it starts with `xapp-`. This is your **App-level token**.
+
+### 4. Connect it in Multica
+
+1. Open the agent in **Agents → _your agent_** → the **Integrations** tab (or the **Integrations** section in the left sidebar).
+2. Click **Connect Slack**.
+3. Paste the **Bot token** (`xoxb-`) and the **App-level token** (`xapp-`), then click **Connect**.
+4. The agent shows **Connected to Slack**. The bot is now listening over its own Socket Mode connection.
+
+<Callout type="warning">
+The two tokens must be from the **same** Slack app, and that app maps to exactly **one** agent. Connecting an app that's already connected to a different agent or workspace is refused. To move an app to another agent, disconnect it first; re-connecting an agent with a **new** app updates that agent's bot in place.
+</Callout>
+
+<Callout type="info">
+Setting this up for **multiple agents**? Repeat the whole flow once per agent — each agent gets its own Slack app and its own pair of tokens, and they show up as separate bots in your Slack workspace.
+</Callout>
+
+## What the integration does
+
+| Surface | Behavior |
+|---|---|
+| **Agent → Integrations** | Owners and admins see **Connect Slack**; once connected it flips to a **Connected to Slack** badge with a **Disconnect** control. |
+| **DM the bot** | A workspace member messages the bot directly. The conversation becomes a Multica [chat](/chat) session with the agent; every DM message is read. |
+| **@-mention in a channel** | Invite the bot (`/invite @your-bot`) and @-mention it. Only the mentioning message is read — the bot does not listen to the whole channel. Each @bot **thread** is its own session. |
+| **`/issue` command** | Starting a message with `/issue <title>` (optionally with a body on the next lines) creates a new Multica issue in the workspace, attributed to you. |
+| **Reply** | The agent's answer is posted back into the same DM or thread. |
+
+## Use the bot (members)
+
+### First message: link your account
+
+The first time you @-mention or DM the bot, it replies with a **link your account** prompt. Tap the link, sign in to Multica, and your Slack identity is bound to your Multica membership — this is what lets the agent act as you (e.g. `/issue` files under your name). The link is single-use and expires in about 15 minutes; just message the bot again for a fresh one.
+
+<Callout type="warning">
+Only **members of the workspace** can use the bot. If you aren't a member, or you skip the identity link, the bot won't run — your message is dropped (recorded for audit, without its contents).
+</Callout>
+
+### Chat and `/issue`
+
+- **In a channel** — the bot isn't auto-joined. Run `/invite @your-bot` once, then `@your-bot <your message>`. Re-mention it for each follow-up (the bot only reads messages that mention it).
+- **In a DM** — open the bot from the Slack sidebar's **Apps** section and message it directly; no mention needed.
+- **File an issue** — send `/issue Fix the login redirect`; add more lines after the title for a description.
+
+## Manage and disconnect
+
+Workspace-wide management lives in **Settings → Integrations**:
+
+- **Connected bots** lists every bot in the workspace and the agent each is bound to (visible to all members).
+- **Disconnect** is **owner / admin only**. It stops the bot from receiving Slack messages and tears down its connection; the installation record is kept for audit, and you can re-connect later.
+
+## Permissions
+
+- **Connect / disconnect** require workspace **owner** or **admin**.
+- **Talking to the bot** requires being a workspace member with a linked Slack identity. Everyone else is dropped.
+- Message bodies for dropped messages are never stored — only a drop reason, for audit.
+
+## Self-host setup
+
+On Multica Cloud the integration is already available — skip this section.
+
+For self-host, Slack is **off until you set an at-rest encryption key**. The key encrypts each app's bot + app-level tokens before they touch the database. BYO needs **no** OAuth client id/secret and **no** deployment-level app token — each installation uses the tokens the admin pastes.
+
+1. Generate a 32-byte key and set it on the API server:
+
+   ```dotenv
+   MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
+   ```
+
+   For example: `openssl rand -base64 32`.
+
+2. Restart the API. Until the key is set, **Settings → Integrations** shows a "Slack integration not enabled" notice and the **Connect Slack** entry points stay hidden.
+
+<Callout type="info">
+The key must decode to exactly 32 bytes — `openssl rand -base64 32` does this. Treat it as a long-lived secret: rotating or losing it makes already-stored tokens undecryptable, forcing every bot to reconnect. The bind link also needs `MULTICA_PUBLIC_URL` set (it's the base of the "link your account" URL).
+</Callout>
+
+## Next
+
+- [Chat integrations](/channels) — how the channel engine, sessions, and authorization work
+- [Agents](/agents) · [Chat](/chat) · [Issues](/issues)
+- [Environment variables](/environment-variables) — full self-host configuration reference
