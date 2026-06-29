@@ -223,6 +223,14 @@ rm -rf "$NEXT_NEW"
 # with outputFileTracingExcludes in next.config.mjs, which shrinks the work
 # that step has to do in the first place. 8 GiB is comfortably under the
 # mini's RAM while well above what the trace step needs.
+#
+# Bake the deployed SHA + build time into the static /version response so an
+# external observer can curl https://<host>/version and verify which commit
+# is actually running, without guessing from page-bundle hashes (JEH-1761).
+# Exported before the function so both the first attempt and the retry inherit
+# the same values.
+export COMMIT_SHA="$NEW_SHA"
+export BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 build_frontend() {
   NEXT_DIST_DIR=.next.new NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=8192" \
     pnpm --filter @multica/web build
