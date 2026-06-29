@@ -280,6 +280,7 @@ func main() {
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	registerWebhookListeners(bus, queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server

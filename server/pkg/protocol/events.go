@@ -119,6 +119,11 @@ const (
 	EventDaemonTaskAvailable          = "daemon:task_available"
 	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
 
+	// Webhook events
+	EventWebhookCreated = "webhook:created"
+	EventWebhookUpdated = "webhook:updated"
+	EventWebhookDeleted = "webhook:deleted"
+
 	// GitHub integration events
 	EventGitHubInstallationCreated = "github_installation:created"
 	EventGitHubInstallationDeleted = "github_installation:deleted"
