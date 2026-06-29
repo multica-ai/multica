@@ -714,9 +714,20 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// Section is skipped for chat, quick-create, and run-only autopilot
 	// runs (no parent/child semantics there).
 	if ctx.IssueID != "" && ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" {
+		// CEREBRO-PATCH(agent-threads-vs-subissues): present a thread as the equal, lighter default before sub-issues so agents stop flooding the board (FIR-2220)
+		b.WriteString("## Threads vs. sub-issues — prefer the lighter tool\n\n")
+		b.WriteString("A THREAD (replying on this same issue) is the default when the work is one continuous track on this issue. Create a SUB-ISSUE only when at least ONE of these is true:\n\n")
+		b.WriteString("- the track must run **in parallel** with other work, or\n")
+		b.WriteString("- a **different agent or person** must own it, or\n")
+		b.WriteString("- it must be closable/trackable as its **own deliverable**.\n\n")
+		b.WriteString("If none of the three holds, stay in the thread and reply there — do NOT open a sub-issue.\n\n")
+		b.WriteString("Many sub-issues on the same matter **hurt the human's overview of the board** — that is a real cost, on par with tracking a chain by hand. Weigh both sides, not just the convenience of splitting.\n\n")
+		b.WriteString("- ✅ Thread (correct): \"fix bug 1, then bug 2 in the same PR\" → one track, same owner → reply in the thread.\n")
+		b.WriteString("- ❌ Sub-issue (wrong here): splitting \"fix the redirect\", \"write the tests\", \"update the docs\" into separate issues when one agent does all three in one go. Split only when they run in parallel or are owned separately.\n\n")
+
 		b.WriteString("## Sub-issue Creation\n\n")
 		b.WriteString("**Choosing `--status` when creating sub-issues.** `--status todo` = **start now** (the default — an agent assignee fires immediately). `--status backlog` = **wait** (assignee is set but no trigger fires; promote later with `multica issue status <child-id> todo`). Parallel children: all `--status todo`. Strict serial Step 1→2→3: only Step 1 is `todo`; Steps 2/3 are `--status backlog` from the start, promoted in turn.\n\n")
-		b.WriteString("**Ordering with stages.** When sub-issues run in phases or wait on each other, group them with `--stage <N>` (N ≥ 1) rather than hand-promoting the backlog chain above. Children sharing a stage run together; once a whole stage finishes (every child in it terminal — `done`/`cancelled`) you are woken once to review and promote the next stage. Create the first stage's children at `--status todo` and later stages at `--stage k --status backlog`; with no `--stage` the whole sibling set behaves as one implicit stage (woken once, when the last child finishes). Reach for stages whenever a plan has more than one step or a step must wait for a group — it is the intended way to express order, and it is cheaper than tracking the chain by hand. Run `multica issue children <id>` to see children grouped by stage before promoting.\n\n")
+		b.WriteString("**Ordering with stages.** When sub-issues run in phases or wait on each other, group them with `--stage <N>` (N ≥ 1) rather than hand-promoting the backlog chain above. Children sharing a stage run together; once a whole stage finishes (every child in it terminal — `done`/`cancelled`) you are woken once to review and promote the next stage. Create the first stage's children at `--status todo` and later stages at `--stage k --status backlog`; with no `--stage` the whole sibling set behaves as one implicit stage (woken once, when the last child finishes). Reach for stages only when steps must run in parallel or be owned separately; otherwise keep the sequence in one thread (see Threads vs. sub-issues above). Stages express order between independent tracks — they are not for splitting a single agent's own sequential work — and they are cheaper than tracking a chain of separate issues by hand. Run `multica issue children <id>` to see children grouped by stage before promoting.\n\n")
 	}
 
 	if len(ctx.AgentSkills) > 0 {
