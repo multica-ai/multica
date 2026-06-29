@@ -167,6 +167,18 @@ UPDATE agent_task_queue
 SET issue_id = $2
 WHERE id = $1 AND issue_id IS NULL;
 
+-- name: SetAgentTaskRuntimeMCPOverlay :exec
+-- Attaches the per-task MCP overlay (computed at dispatch time from the
+-- initiator user's active integrations — currently Composio) to a task
+-- still in 'queued'. The status guard means a task that already started
+-- (or was cancelled / failed between Create and this update) is never
+-- rewritten, so the daemon never reads a half-applied overlay. The trigger
+-- trg_clear_runtime_mcp_overlay automatically wipes the column whenever a
+-- task enters a terminal state, so callers do not need a paired clear.
+UPDATE agent_task_queue
+SET runtime_mcp_overlay = $2
+WHERE id = $1 AND status = 'queued';
+
 -- name: CreateRetryTask :one
 -- Clones a parent task into a fresh queued attempt. Carries forward the
 -- agent's resume context (session_id/work_dir) so the child can continue

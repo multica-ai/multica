@@ -1304,6 +1304,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
+		// Layer the per-task overlay (set at enqueue from the initiator
+		// user's active integrations — currently Composio) on top of the
+		// agent's saved mcp_config. Overlay wins on server-name collisions
+		// because it carries the live user-scoped session URL. Errors are
+		// logged but never fail the claim: a broken overlay must not prevent
+		// the agent from running with its base config.
+		if len(task.RuntimeMcpOverlay) > 0 {
+			if merged, err := mergeMCPOverlay(mcpConfig, json.RawMessage(task.RuntimeMcpOverlay)); err != nil {
+				slog.Warn("daemon claim: merge runtime_mcp_overlay failed; falling back to agent mcp_config", "task_id", uuidToString(task.ID), "error", err)
+			} else {
+				mcpConfig = merged
+			}
+		}
 		// runtime_config is stored as JSONB and may legitimately be the
 		// empty object `{}` for agents that haven't opted into any
 		// provider-specific tuning. Forward only non-empty payloads so the
