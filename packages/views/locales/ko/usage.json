@@ -41,6 +41,8 @@
   "leaderboard": {
     "title": "리더보드",
     "caption": "에이전트 {{count}}개",
+    "caption_with_deleted": "에이전트 {{count}}개 · 삭제됨 {{deleted}}개",
+    "deleted_agents": "삭제된 에이전트",
     "header_agent": "에이전트",
     "header_tokens": "토큰",
     "header_cost": "비용",
