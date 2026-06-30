@@ -57,11 +57,13 @@ import type {
   AutopilotRun,
   AutopilotSubscriber,
   AutopilotTrigger,
+  WebhookEventFilter,
 } from "@multica/core/types";
 import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
+import { WebhookEventFilterSection } from "./webhook-event-filter-section";
 import { ManageAccessDialog } from "./manage-access-dialog";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
@@ -402,6 +404,24 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
             {deleteButton}
           </div>
         )}
+        {isWebhook && trigger.event_filters && trigger.event_filters.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {t(($) => $.trigger_row.event_filters_label)}
+            </span>
+            {trigger.event_filters.map((f, idx) => (
+              <span
+                key={idx}
+                className="inline-flex items-center gap-1 rounded border bg-muted/50 px-1.5 py-0.5 text-xs"
+              >
+                <span className="font-mono font-medium text-foreground">{f.event}</span>
+                {f.actions && f.actions.length > 0 && (
+                  <span className="text-muted-foreground">: {f.actions.join(", ")}</span>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       {!showWebhookUrlRow && deleteButton}
       <AlertDialog open={confirmOpen} onOpenChange={(v) => { if (!v && !deleting) setConfirmOpen(false); }}>
@@ -466,6 +486,7 @@ function AddTriggerDialog({
   const [kind, setKind] = useState<"schedule" | "webhook">("schedule");
   const [config, setConfig] = useState<TriggerConfig>(getDefaultTriggerConfig);
   const [label, setLabel] = useState("");
+  const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
@@ -491,6 +512,7 @@ function AddTriggerDialog({
           autopilotId,
           kind: "webhook",
           label: label.trim() || undefined,
+          event_filters: eventFilters.length > 0 ? eventFilters : undefined,
         });
         toast.success(t(($) => $.add_trigger_dialog.toast_added_webhook));
       }
@@ -498,6 +520,7 @@ function AddTriggerDialog({
       setKind("schedule");
       setConfig(getDefaultTriggerConfig());
       setLabel("");
+      setEventFilters([]);
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -551,9 +574,12 @@ function AddTriggerDialog({
           {kind === "schedule" ? (
             <TriggerConfigSection config={config} onChange={setConfig} />
           ) : (
-            <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-              {t(($) => $.add_trigger_dialog.webhook_help)}
-            </p>
+            <div className="space-y-4">
+              <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                {t(($) => $.add_trigger_dialog.webhook_help)}
+              </p>
+              <WebhookEventFilterSection filters={eventFilters} onChange={setEventFilters} />
+            </div>
           )}
 
           <div>

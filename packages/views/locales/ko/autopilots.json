@@ -157,6 +157,7 @@
     "disabled_badge": "비활성",
     "deprecated_badge": "지원 중단",
     "next_label": "다음: {{date}}",
+    "event_filters_label": "이벤트",
     "webhook_url_label": "Webhook URL",
     "copy_url": "URL 복사",
     "url_copied": "Webhook URL을 복사했습니다",
