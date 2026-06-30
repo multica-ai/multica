@@ -100,6 +100,7 @@ import type {
   UpdateAutopilotTriggerRequest,
   ListAutopilotsResponse,
   GetAutopilotResponse,
+  AutopilotCollaboratorsResponse,
   ListAutopilotRunsResponse,
   ListWebhookDeliveriesResponse,
   WebhookDelivery,
@@ -2109,6 +2110,22 @@ export class ApiClient {
 
   async deleteAutopilot(id: string): Promise<void> {
     await this.fetch(`/api/autopilots/${id}`, { method: "DELETE" });
+  }
+
+  // Grant a workspace member explicit write access to the autopilot. Both
+  // grant and revoke return the full updated collaborator list so callers can
+  // refresh without a second round-trip.
+  async grantAutopilotAccess(id: string, userId: string): Promise<AutopilotCollaboratorsResponse> {
+    return this.fetch(`/api/autopilots/${id}/collaborators`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    });
+  }
+
+  async revokeAutopilotAccess(id: string, userId: string): Promise<AutopilotCollaboratorsResponse> {
+    return this.fetch(`/api/autopilots/${id}/collaborators/${userId}`, {
+      method: "DELETE",
+    });
   }
 
   async triggerAutopilot(id: string): Promise<AutopilotRun> {

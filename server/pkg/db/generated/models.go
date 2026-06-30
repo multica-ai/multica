@@ -140,6 +140,14 @@ type Autopilot struct {
 	ProjectID          pgtype.UUID        `json:"project_id"`
 }
 
+type AutopilotCollaborator struct {
+	AutopilotID pgtype.UUID        `json:"autopilot_id"`
+	UserType    string             `json:"user_type"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	GrantedBy   pgtype.UUID        `json:"granted_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type AutopilotRun struct {
 	ID             pgtype.UUID        `json:"id"`
 	AutopilotID    pgtype.UUID        `json:"autopilot_id"`

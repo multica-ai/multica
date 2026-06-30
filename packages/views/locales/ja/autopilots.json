@@ -70,6 +70,7 @@
     "pause_aria": "オートパイロットを一時停止",
     "activate_aria": "オートパイロットを有効化",
     "edit": "編集",
+    "manage_access": "アクセス管理",
     "run_now": "今すぐ実行",
     "running": "実行中...",
     "toast_triggered": "オートパイロットを実行しました",
@@ -100,6 +101,20 @@
       "confirm": "削除",
       "deleting": "削除中..."
     }
+  },
+  "access": {
+    "title": "アクセス管理",
+    "description": "追加したメンバーは、このオートパイロットの編集・実行や、トリガー・Webhook の管理ができます。",
+    "current_label": "アクセス権あり",
+    "add": "メンバーを追加",
+    "search_placeholder": "メンバーを検索…",
+    "no_results": "メンバーが見つかりません",
+    "remove_tooltip": "アクセス権を削除",
+    "empty": "まだ誰にもアクセス権が付与されていません。",
+    "toast_granted": "アクセス権を付与しました",
+    "toast_revoked": "アクセス権を削除しました",
+    "toast_failed": "アクセス権を更新できませんでした",
+    "owner_note": "作成者とワークスペース管理者は常にアクセスできます。"
   },
   "run_status": {
     "issue_created": "イシュー作成済み",

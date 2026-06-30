@@ -960,6 +960,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Post("/rotate-webhook-token", h.RotateAutopilotTriggerWebhookToken)
 						r.Put("/signing-secret", h.SetAutopilotTriggerSigningSecret)
 					})
+					r.Post("/collaborators", h.AddAutopilotCollaborator)
+					r.Delete("/collaborators/{userId}", h.RemoveAutopilotCollaborator)
 				})
 			})
 

@@ -70,6 +70,7 @@
     "pause_aria": "暂停自动化",
     "activate_aria": "启用自动化",
     "edit": "编辑",
+    "manage_access": "管理访问",
     "run_now": "立即运行",
     "running": "运行中...",
     "toast_triggered": "已触发自动化",
@@ -100,6 +101,20 @@
       "confirm": "删除",
       "deleting": "删除中..."
     }
+  },
+  "access": {
+    "title": "管理访问",
+    "description": "你添加的成员可以编辑、运行并管理这个自动化的触发器和 webhook。",
+    "current_label": "已授权",
+    "add": "添加成员",
+    "search_placeholder": "搜索成员…",
+    "no_results": "未找到成员",
+    "remove_tooltip": "移除访问权限",
+    "empty": "还没有授权任何人。",
+    "toast_granted": "已授予访问权限",
+    "toast_revoked": "已移除访问权限",
+    "toast_failed": "更新访问权限失败",
+    "owner_note": "创建者和工作区管理员始终拥有访问权限。"
   },
   "run_status": {
     "issue_created": "已创建 issue",
