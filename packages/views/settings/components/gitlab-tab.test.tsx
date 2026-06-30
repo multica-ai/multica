@@ -11,6 +11,7 @@ vi.mock("@multica/core/gitlab", () => ({
   }),
   useDeleteGitLabConnection: () => ({ mutateAsync: vi.fn(), isPending: false }),
   deriveGitLabSettings: () => ({ enabled: true, mrSidebar: true, issueSync: true, commentSync: true }),
+}));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws1" }));
 vi.mock("@multica/core/auth", () => ({

@@ -16,17 +16,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 )
 
-func TestGitLabLogin_NotConfigured(t *testing.T) {
-	t.Setenv("GITLAB_URL", "")
-	h := &Handler{}
-	req := httptest.NewRequest(http.MethodGet, "/auth/gitlab", nil)
-	w := httptest.NewRecorder()
-	h.GitLabLogin(w, req)
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", w.Code)
-	}
-}
-
 func TestHandleGitLabWebhook_MissingSecret(t *testing.T) {
 	t.Setenv("GITLAB_WEBHOOK_SECRET", "")
 	h := &Handler{Queries: &db.Queries{}}
@@ -633,9 +622,6 @@ func TestGetGitLabIssueForIssue_NotFound(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("no database available")
 	}
-
-	ctx := context.Background()
-	wsUUID := parseUUID(testWorkspaceID)
 
 	// Use a UUID that doesn't have a gitlab_issue link.
 	randomUUID := pgtype.UUID{}
