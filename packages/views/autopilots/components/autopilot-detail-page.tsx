@@ -336,6 +336,7 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
       className="h-7 w-7 shrink-0"
       onClick={() => setConfirmOpen(true)}
       title={t(($) => $.trigger_row.delete_dialog.confirm)}
+      aria-label={t(($) => $.trigger_row.delete_dialog.confirm)}
     >
       <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
     </Button>
@@ -383,6 +384,7 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
               className="h-7 w-7 shrink-0"
               onClick={handleCopy}
               title={t(($) => $.trigger_row.copy_url)}
+              aria-label={t(($) => $.trigger_row.copy_url)}
             >
               {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
             </Button>
@@ -392,6 +394,7 @@ function TriggerRow({ trigger, autopilotId }: { trigger: AutopilotTrigger; autop
               className="h-7 w-7 shrink-0"
               onClick={() => setRotateOpen(true)}
               title={t(($) => $.trigger_row.rotate_url)}
+              aria-label={t(($) => $.trigger_row.rotate_url)}
               disabled={rotateToken.isPending}
             >
               <RotateCw className={cn("h-3.5 w-3.5 text-muted-foreground", rotateToken.isPending && "animate-spin")} />

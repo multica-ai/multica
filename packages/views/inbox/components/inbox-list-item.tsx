@@ -71,6 +71,7 @@ export function InboxListItem({
               role="button"
               tabIndex={-1}
               title={t(($) => $.list.archive_tooltip)}
+              aria-label={t(($) => $.list.archive_tooltip)}
               onClick={(e) => {
                 e.stopPropagation();
                 onArchive();

@@ -1196,6 +1196,7 @@ function WebhookCreatedPanel({
                 className="h-9 w-9 shrink-0"
                 onClick={handleCopy}
                 title={t(($) => $.trigger_row.copy_url)}
+                aria-label={t(($) => $.trigger_row.copy_url)}
               >
                 {copied ? (
                   <Check className="size-4 text-emerald-500" />

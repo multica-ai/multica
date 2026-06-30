@@ -64,7 +64,8 @@
     "issue_count_other": "{{count}} issues",
     "reset": "Reset all filters",
     "active_count_one": "{{count}} filter",
-    "active_count_other": "{{count}} filters"
+    "active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters"
   },
   "display": {
     "tooltip": "Display settings",

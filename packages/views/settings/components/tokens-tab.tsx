@@ -234,7 +234,12 @@ export function TokensTab() {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Button variant="outline" size="icon" onClick={handleCopyToken}>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleCopyToken}
+                    aria-label={t(($) => $.tokens.created_dialog.copy_tooltip)}
+                  >
                     {tokenCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                   </Button>
                 }

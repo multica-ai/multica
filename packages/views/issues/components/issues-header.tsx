@@ -858,6 +858,7 @@ export function IssueDisplayControls({
                         <span
                           role="button"
                           tabIndex={-1}
+                          aria-label={t(($) => $.filters.clear_filters)}
                           className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
                           onClick={(e) => {
                             e.preventDefault();

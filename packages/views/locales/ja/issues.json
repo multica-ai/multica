@@ -62,7 +62,8 @@
     "squads_group": "スクワッド",
     "issue_count_other": "イシュー {{count}} 件",
     "reset": "すべてのフィルターをリセット",
-    "active_count_other": "フィルター {{count}} 件"
+    "active_count_other": "フィルター {{count}} 件",
+    "clear_filters": "フィルターをクリア"
   },
   "display": {
     "tooltip": "表示設定",

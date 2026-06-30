@@ -62,7 +62,8 @@
     "squads_group": "小队",
     "issue_count_other": "{{count}} 个 issue",
     "reset": "重置全部筛选",
-    "active_count_other": "{{count}} 个筛选"
+    "active_count_other": "{{count}} 个筛选",
+    "clear_filters": "清除筛选"
   },
   "display": {
     "tooltip": "显示设置",
