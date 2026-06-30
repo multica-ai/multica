@@ -419,5 +419,27 @@
         "description": "创建并处理 issue"
       }
     }
+  },
+  "jira": {
+    "section_title": "Jira",
+    "desktop_only": "Jira 同步仅在 Multica 桌面应用中可用。",
+    "site_url_label": "Jira 站点地址",
+    "site_url_placeholder": "https://your-company.atlassian.net",
+    "email_label": "账号邮箱",
+    "token_label": "API token",
+    "token_placeholder_stored": "•••••••• (已保存 —— 留空则保持不变)",
+    "token_placeholder_empty": "Jira API token",
+    "jql_label": "JQL",
+    "interval_label": "自动同步间隔(分钟,0 = 关闭)",
+    "status_map_label": "状态映射覆盖 (JSON)",
+    "status_map_placeholder": "{\"in qa\": \"in_review\"}",
+    "status_map_hint": "小写 Jira 状态名 → Multica 状态(backlog、todo、in_progress、in_review、done、blocked、cancelled)。未映射的状态默认归入 backlog。",
+    "save": "保存",
+    "sync_now": "立即同步",
+    "syncing": "同步中…",
+    "status_map_invalid": "状态映射必须是合法 JSON。",
+    "saved": "已保存。",
+    "last_sync": "上次同步:新建 {{created}},更新 {{updated}},{{comments}} 条评论。",
+    "last_sync_with_errors": "上次同步:新建 {{created}},更新 {{updated}},{{comments}} 条评论,{{errors}} 个错误。"
   }
 }

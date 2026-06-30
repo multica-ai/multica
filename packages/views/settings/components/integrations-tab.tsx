@@ -24,8 +24,7 @@ export function IntegrationsTab() {
         <SlackTab />
       </section>
       <section className="space-y-4">
-        {/* TODO(i18n): add a settings.jira.section_title glossary key. */}
-        <h2 className="text-sm font-semibold">Jira</h2>
+        <h2 className="text-sm font-semibold">{t(($) => $.jira.section_title)}</h2>
         <JiraTab />
       </section>
     </div>

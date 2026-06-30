@@ -419,5 +419,27 @@
     "byo_cancel": "취소",
     "byo_success_toast": "Slack 봇을 연결했어요",
     "byo_failed_toast": "Slack 봇을 연결하지 못했어요"
+  },
+  "jira": {
+    "section_title": "Jira",
+    "desktop_only": "Jira 동기화는 Multica 데스크톱 앱에서만 사용할 수 있습니다.",
+    "site_url_label": "Jira 사이트 URL",
+    "site_url_placeholder": "https://your-company.atlassian.net",
+    "email_label": "계정 이메일",
+    "token_label": "API 토큰",
+    "token_placeholder_stored": "•••••••• (저장됨 — 유지하려면 비워 두세요)",
+    "token_placeholder_empty": "Jira API 토큰",
+    "jql_label": "JQL",
+    "interval_label": "자동 동기화 간격(분, 0 = 끔)",
+    "status_map_label": "상태 매핑 재정의 (JSON)",
+    "status_map_placeholder": "{\"in qa\": \"in_review\"}",
+    "status_map_hint": "소문자 Jira 상태 이름 → Multica 상태(backlog, todo, in_progress, in_review, done, blocked, cancelled). 매핑되지 않은 상태는 backlog로 처리됩니다.",
+    "save": "저장",
+    "sync_now": "지금 동기화",
+    "syncing": "동기화 중…",
+    "status_map_invalid": "상태 매핑은 유효한 JSON이어야 합니다.",
+    "saved": "저장되었습니다.",
+    "last_sync": "마지막 동기화: 생성 {{created}}, 업데이트 {{updated}}, 댓글 {{comments}}개.",
+    "last_sync_with_errors": "마지막 동기화: 생성 {{created}}, 업데이트 {{updated}}, 댓글 {{comments}}개, 오류 {{errors}}개."
   }
 }

@@ -419,5 +419,27 @@
         "description": "Create and work on issues"
       }
     }
+  },
+  "jira": {
+    "section_title": "Jira",
+    "desktop_only": "Jira sync is only available in the Multica desktop app.",
+    "site_url_label": "Jira site URL",
+    "site_url_placeholder": "https://your-company.atlassian.net",
+    "email_label": "Account email",
+    "token_label": "API token",
+    "token_placeholder_stored": "•••••••• (stored — leave blank to keep)",
+    "token_placeholder_empty": "Jira API token",
+    "jql_label": "JQL",
+    "interval_label": "Auto-sync interval (minutes, 0 = off)",
+    "status_map_label": "Status mapping overrides (JSON)",
+    "status_map_placeholder": "{\"in qa\": \"in_review\"}",
+    "status_map_hint": "Lowercased Jira status name → Multica status (backlog, todo, in_progress, in_review, done, blocked, cancelled). Unmapped statuses default to backlog.",
+    "save": "Save",
+    "sync_now": "Sync now",
+    "syncing": "Syncing…",
+    "status_map_invalid": "Status mapping must be valid JSON.",
+    "saved": "Saved.",
+    "last_sync": "Last sync: {{created}} created, {{updated}} updated, {{comments}} comments.",
+    "last_sync_with_errors": "Last sync: {{created}} created, {{updated}} updated, {{comments}} comments, {{errors}} errors."
   }
 }

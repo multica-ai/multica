@@ -6,6 +6,7 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import { useT } from "../../i18n";
 import { getJiraBridge, useJiraSync } from "../jira/use-jira-sync";
 
 interface JiraFormState {
@@ -27,9 +28,10 @@ const EMPTY_FORM: JiraFormState = {
 };
 
 /** Jira → Multica one-way sync settings. Desktop-only: the Jira REST calls run
- *  in the Electron main process (via window.jiraAPI) to bypass browser CORS, so
- *  on web we render a notice instead of the form. */
+ *  in the Electron main process (via the desktop bridge) to bypass browser
+ *  CORS, so on web we render a notice instead of the form. */
 export function JiraTab() {
+  const { t } = useT("settings");
   const isDesktop = !!getJiraBridge();
   const { syncNow, running, lastResult, error } = useJiraSync();
   const [form, setForm] = useState<JiraFormState>(EMPTY_FORM);
@@ -50,13 +52,13 @@ export function JiraTab() {
       });
       setHasToken(cfg.hasToken === true);
     });
-  }, [isDesktop]);
+  }, []);
 
   if (!isDesktop) {
     return (
       <Card>
         <CardContent className="p-4 text-sm text-muted-foreground">
-          Jira sync is only available in the Multica desktop app.
+          {t(($) => $.jira.desktop_only)}
         </CardContent>
       </Card>
     );
@@ -70,7 +72,7 @@ export function JiraTab() {
     try {
       statusMapping = JSON.parse(form.statusMappingText || "{}") as Record<string, string>;
     } catch {
-      setSaveMessage("Status mapping must be valid JSON.");
+      setSaveMessage(t(($) => $.jira.status_map_invalid));
       return;
     }
     await bridge.setConfig({
@@ -84,24 +86,24 @@ export function JiraTab() {
     });
     setHasToken(hasToken || form.apiToken.length > 0);
     setForm((f) => ({ ...f, apiToken: "" }));
-    setSaveMessage("Saved.");
+    setSaveMessage(t(($) => $.jira.saved));
   };
 
   return (
     <Card>
       <CardContent className="space-y-4 p-4">
         <div className="space-y-2">
-          <Label htmlFor="jira-site">Jira site URL</Label>
+          <Label htmlFor="jira-site">{t(($) => $.jira.site_url_label)}</Label>
           <Input
             id="jira-site"
-            placeholder="https://your-company.atlassian.net"
+            placeholder={t(($) => $.jira.site_url_placeholder)}
             value={form.siteUrl}
             onChange={(e) => setForm((f) => ({ ...f, siteUrl: e.target.value }))}
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="jira-email">Account email</Label>
+          <Label htmlFor="jira-email">{t(($) => $.jira.email_label)}</Label>
           <Input
             id="jira-email"
             type="email"
@@ -111,18 +113,22 @@ export function JiraTab() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="jira-token">API token</Label>
+          <Label htmlFor="jira-token">{t(($) => $.jira.token_label)}</Label>
           <Input
             id="jira-token"
             type="password"
-            placeholder={hasToken ? "•••••••• (stored — leave blank to keep)" : "Jira API token"}
+            placeholder={
+              hasToken
+                ? t(($) => $.jira.token_placeholder_stored)
+                : t(($) => $.jira.token_placeholder_empty)
+            }
             value={form.apiToken}
             onChange={(e) => setForm((f) => ({ ...f, apiToken: e.target.value }))}
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="jira-jql">JQL</Label>
+          <Label htmlFor="jira-jql">{t(($) => $.jira.jql_label)}</Label>
           <Textarea
             id="jira-jql"
             rows={2}
@@ -132,7 +138,7 @@ export function JiraTab() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="jira-interval">Auto-sync interval (minutes, 0 = off)</Label>
+          <Label htmlFor="jira-interval">{t(($) => $.jira.interval_label)}</Label>
           <Input
             id="jira-interval"
             type="number"
@@ -145,26 +151,23 @@ export function JiraTab() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="jira-status-map">Status mapping overrides (JSON)</Label>
+          <Label htmlFor="jira-status-map">{t(($) => $.jira.status_map_label)}</Label>
           <Textarea
             id="jira-status-map"
             rows={4}
-            placeholder='{"in qa": "in_review"}'
+            placeholder={t(($) => $.jira.status_map_placeholder)}
             value={form.statusMappingText}
             onChange={(e) => setForm((f) => ({ ...f, statusMappingText: e.target.value }))}
           />
-          <p className="text-xs text-muted-foreground">
-            Lowercased Jira status name → Multica status (backlog, todo, in_progress, in_review,
-            done, blocked, cancelled). Unmapped statuses default to backlog.
-          </p>
+          <p className="text-xs text-muted-foreground">{t(($) => $.jira.status_map_hint)}</p>
         </div>
 
         <div className="flex items-center gap-3">
           <Button variant="outline" onClick={() => void onSave()}>
-            Save
+            {t(($) => $.jira.save)}
           </Button>
           <Button onClick={() => void syncNow()} disabled={running}>
-            {running ? "Syncing…" : "Sync now"}
+            {running ? t(($) => $.jira.syncing) : t(($) => $.jira.sync_now)}
           </Button>
         </div>
 
@@ -172,9 +175,18 @@ export function JiraTab() {
         {error && <p className="text-sm text-destructive">{error}</p>}
         {lastResult && (
           <p className="text-sm text-muted-foreground">
-            Last sync: {lastResult.created} created, {lastResult.updated} updated,{" "}
-            {lastResult.commentsAdded} comments
-            {lastResult.errors.length > 0 ? `, ${lastResult.errors.length} errors` : ""}.
+            {lastResult.errors.length > 0
+              ? t(($) => $.jira.last_sync_with_errors, {
+                  created: lastResult.created,
+                  updated: lastResult.updated,
+                  comments: lastResult.commentsAdded,
+                  errors: lastResult.errors.length,
+                })
+              : t(($) => $.jira.last_sync, {
+                  created: lastResult.created,
+                  updated: lastResult.updated,
+                  comments: lastResult.commentsAdded,
+                })}
           </p>
         )}
       </CardContent>

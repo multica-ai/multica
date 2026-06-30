@@ -10,13 +10,10 @@ const config: JiraConfig = {
   pollIntervalMinutes: 0,
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function fakeApi(existing: any[] = []): any {
   return {
     listIssues: vi.fn().mockResolvedValue({ issues: existing, total: existing.length }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createIssue: vi.fn(async (req: any) => ({ id: "new-" + req.title, ...req, metadata: {} })),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     updateIssue: vi.fn(async (id: string, req: any) => ({ id, ...req })),
     setIssueMetadata: vi.fn().mockResolvedValue(undefined),
     listComments: vi.fn().mockResolvedValue([]),
@@ -24,7 +21,6 @@ function fakeApi(existing: any[] = []): any {
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function searchResponse(issues: any[]) {
   return { issues, total: issues.length };
 }
@@ -32,7 +28,6 @@ function searchResponse(issues: any[]) {
 describe("syncJiraIssues — create/update/skip", () => {
   it("creates a Multica issue for an unseen Jira issue and stamps metadata", async () => {
     const api = fakeApi([]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transport = vi.fn(async ({ path }: any) =>
       path.includes("/search")
         ? searchResponse([
@@ -57,7 +52,6 @@ describe("syncJiraIssues — create/update/skip", () => {
 
     expect(api.createIssue).toHaveBeenCalledTimes(1);
     expect(api.createIssue.mock.calls[0][0].title).toBe("Fix login");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const keysWritten = api.setIssueMetadata.mock.calls.map((c: any[]) => c[1]);
     expect(keysWritten).toEqual([
       "source",
@@ -84,7 +78,6 @@ describe("syncJiraIssues — create/update/skip", () => {
         },
       },
     ]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transport = vi.fn(async ({ path }: any) =>
       path.includes("/search")
         ? searchResponse([
@@ -124,7 +117,6 @@ describe("syncJiraIssues — create/update/skip", () => {
         },
       },
     ]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transport = vi.fn(async ({ path }: any) =>
       path.includes("/search")
         ? searchResponse([
@@ -154,7 +146,6 @@ describe("syncJiraIssues — create/update/skip", () => {
   it("collects an error per failed issue without aborting the run", async () => {
     const api = fakeApi([]);
     api.createIssue.mockRejectedValueOnce(new Error("boom"));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transport = vi.fn(async ({ path }: any) =>
       path.includes("/search")
         ? searchResponse([
@@ -183,7 +174,6 @@ describe("syncJiraIssues — create/update/skip", () => {
 describe("syncJiraIssues — subtasks and comments", () => {
   it("creates subtasks as Multica child issues under their parent", async () => {
     const api = fakeApi([]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transport = vi.fn(async ({ path }: any) => {
       if (path.includes("/search")) {
         return searchResponse([
@@ -222,14 +212,12 @@ describe("syncJiraIssues — subtasks and comments", () => {
 
     const result = await syncJiraIssues({ transport, api, config, currentMemberId: "m1" });
     expect(result.created).toBe(2);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const childReq = api.createIssue.mock.calls.find((c: any[]) => c[0].title === "Child")[0];
     expect(childReq.parent_issue_id).toBe("new-Parent");
   });
 
   it("adds only Jira comments newer than the high-water mark", async () => {
     const api = fakeApi([]);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transport = vi.fn(async ({ path }: any) =>
       path.includes("/search")
         ? searchResponse([
