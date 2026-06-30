@@ -310,9 +310,17 @@ class OrderApiClient:
             raise UpstreamOrderAPIError(502, "taobao CLI cookie file is not configured or does not exist")
 
         python = self.config.taobao_cli_python or sys.executable
+        bootstrap = (
+            "import runpy, sys; "
+            "sys.path.insert(0, sys.argv[1]); "
+            "sys.argv = sys.argv[2:]; "
+            "runpy.run_module('taobao_cli', run_name='__main__')"
+        )
         cmd = [
             python,
-            "-m",
+            "-c",
+            bootstrap,
+            str(repo),
             "taobao_cli",
             "orders",
             "order",
