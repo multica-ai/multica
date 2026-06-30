@@ -1455,6 +1455,21 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	}
 
 	if actorType != "member" {
+		// Agent-authored comments do not participate in the member-driven
+		// conversation routing (parent-author / thread-root continuation) or
+		// the member assignee fallback. They retain one narrow path restored
+		// after MUL-3794 (MUL-3879): a worker-agent result comment on a
+		// squad-assigned issue can still wake the assigned squad leader, so
+		// the leader→worker→leader coordination loop stays closed. The leader
+		// self-trigger guard (lastTaskWasLeader) lives in
+		// routeAssignedSquadLeaderFallback. Explicit @agent / @squad mentions
+		// are already handled above, so this never double-enqueues a mentioned
+		// target alongside the assigned leader.
+		if issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" {
+			if trigger, ok := h.routeAssignedSquadLeaderFallback(ctx, issue, actorType, actorID, opts); ok {
+				return []commentAgentTrigger{trigger}
+			}
+		}
 		return nil
 	}
 
