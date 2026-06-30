@@ -182,8 +182,9 @@ export function AgentListToolbar({
   );
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
-      {/* Left: scope buttons + result count. Scope mixes the ownership lens
+    <div className="h-12 shrink-0 overflow-x-auto px-5 [-webkit-overflow-scrolling:touch]">
+      <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
+        {/* Left: scope buttons + result count. Scope mixes the ownership lens
           (mine/all) with the archived lifecycle stage; no search box (scope
           partitions the small set). Button styling and the <md dropdown
           collapse follow the issues header's scope buttons. */}
@@ -545,6 +546,7 @@ export function AgentListToolbar({
             </div>
           </PopoverContent>
         </Popover>
+      </div>
       </div>
     </div>
   );

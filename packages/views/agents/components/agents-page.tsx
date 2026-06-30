@@ -91,8 +91,8 @@ import { useT } from "../../i18n";
 // the TWO-LINE form: avatar left, name + description right, 64px tall —
 // the documented exception to the single-line management-list rule.
 const GRID_COLS =
-  "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_var(--agc-status)_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--agc-status)_var(--agc-owner)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem_0.75rem]";
+  "grid-cols-[0.75rem_minmax(120px,1fr)_var(--agc-status-mobile)_1.75rem_0.75rem] " +
+  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--agc-status-desktop)_var(--agc-owner)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem_0.75rem]";
 
 // Two-line rows; the virtualizer's fixed-size contract.
 const ROW_HEIGHT = 64;
@@ -128,7 +128,8 @@ function columnTrackVars(
       0,
     );
   return {
-    "--agc-status": width("status"),
+    "--agc-status-mobile": isVisible("status") ? "96px" : "0px",
+    "--agc-status-desktop": width("status"),
     "--agc-owner": width("owner"),
     "--agc-runtime": width("runtime"),
     "--agc-lastactive": width("lastActive"),
@@ -290,7 +291,7 @@ function CheckboxCell({
   onToggle: () => void;
 }) {
   return (
-    <ListGridCell className="justify-center px-0">
+    <ListGridCell className="hidden justify-center px-0 @2xl:flex">
       <button
         type="button"
         aria-pressed={checked}
@@ -488,7 +489,7 @@ function AgentListHeader({
   const anySelected = allSelected || someSelected;
   return (
     <ListGridHeader>
-      <div className="flex items-center justify-center">
+      <div className="hidden items-center justify-center @2xl:flex">
         <button
           type="button"
           aria-pressed={allSelected}
@@ -584,7 +585,7 @@ function LoadingSkeleton() {
       )}
     >
       <ListGridHeader>
-        <span aria-hidden="true" />
+        <span aria-hidden="true" className="hidden @2xl:inline" />
         <ListGridHeaderCell>
           <Skeleton className="h-3 w-12" />
         </ListGridHeaderCell>
@@ -609,7 +610,7 @@ function LoadingSkeleton() {
       </ListGridHeader>
       {Array.from({ length: 5 }).map((_, i) => (
         <ListGridRow key={i} className="h-16 hover:bg-transparent">
-          <span aria-hidden="true" />
+          <span aria-hidden="true" className="hidden @2xl:inline" />
           <ListGridCell className="gap-3">
             <Skeleton className="size-8 rounded-md" />
             <div className="min-w-0 flex-1 space-y-1.5">
