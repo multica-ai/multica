@@ -21,6 +21,12 @@ import "strings"
 // per-data-source access this projection governs.
 const RegistryToolKey = "firtal_registry"
 
+const registryToolTitle = "Firtal Data Registry"
+
+const registryToolCategory = "Built-in tools"
+
+const registryToolSource = "builtin"
+
 // registryDataSourceCategory groups the projected rows in the admin table, the
 // way repos render under "Repositories".
 const registryDataSourceCategory = "Data sources"
@@ -107,12 +113,30 @@ func ProjectRegistryDataSourceRows(dataSources []RegistryDataSource, grant Regis
 // after Store.Table returns, so toolpolicy.Table stays free of the registry list.
 func AppendRegistryProjection(rows []TableRow, proj RegistryProjection, layer Layer, base Setting) []TableRow {
 	authored := make(map[string]bool, len(rows))
+	hasBase := false
 	for _, row := range rows {
-		if row.ToolKey == RegistryToolKey && row.ResourcePattern != "" {
+		if row.ToolKey != RegistryToolKey {
+			continue
+		}
+		if row.ResourcePattern == "" {
+			hasBase = true
+		} else {
 			authored[row.ResourcePattern] = true
 		}
 	}
-	for _, pr := range ProjectRegistryDataSourceRows(proj.DataSources, proj.Grant, layer, base) {
+	projected := ProjectRegistryDataSourceRows(proj.DataSources, proj.Grant, layer, base)
+	if len(projected) > 0 && !hasBase {
+		rows = append(rows, TableRow{
+			ToolKey:    RegistryToolKey,
+			Title:      registryToolTitle,
+			Category:   registryToolCategory,
+			Source:     registryToolSource,
+			Layers:     map[Layer]Setting{},
+			Conditions: map[Layer]*Condition{},
+			Effective:  Resolve(Input{Base: base}),
+		})
+	}
+	for _, pr := range projected {
 		if !authored[pr.ResourcePattern] {
 			rows = append(rows, pr)
 		}

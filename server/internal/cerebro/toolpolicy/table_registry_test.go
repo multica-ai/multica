@@ -116,6 +116,44 @@ func TestAppendRegistryProjection_AppendsAndDedupes(t *testing.T) {
 	}
 }
 
+func TestAppendRegistryProjection_AddsBaseRowWhenRuntimeDidNotReportRegistryTool(t *testing.T) {
+	existing := []TableRow{
+		{ToolKey: "web_fetch", ResourcePattern: ""}, // unrelated tool, must survive
+	}
+	proj := RegistryProjection{
+		DataSources: []RegistryDataSource{
+			{ID: "ds-1", Name: "Orders"},
+			{ID: "ds-2", Name: "Finance"},
+		},
+		Grant: RegistryGrant{AllowedDataSources: []string{"ds-1"}},
+	}
+
+	out := AppendRegistryProjection(existing, proj, LayerAgent, SettingAllow)
+
+	baseRows := 0
+	for _, r := range out {
+		if r.ToolKey == RegistryToolKey && r.ResourcePattern == "" {
+			baseRows++
+			if r.Title != registryToolTitle {
+				t.Fatalf("base row title = %q, want %q", r.Title, registryToolTitle)
+			}
+			if r.Category != registryToolCategory || r.Source != registryToolSource {
+				t.Fatalf("base row category/source = %q/%q", r.Category, r.Source)
+			}
+		}
+	}
+	if baseRows != 1 {
+		t.Fatalf("got %d registry base rows, want 1", baseRows)
+	}
+
+	if r1, ok := rowByPattern(out, "ds-1"); !ok || r1.Effective.Setting != SettingAllow {
+		t.Fatalf("ds-1 should be projected Allow, got ok=%v row=%+v", ok, r1)
+	}
+	if r2, ok := rowByPattern(out, "ds-2"); !ok || r2.Effective.Setting != SettingDeny {
+		t.Fatalf("ds-2 should be projected Deny, got ok=%v row=%+v", ok, r2)
+	}
+}
+
 func TestAppendRegistryProjection_NoDataSourcesIsNoop(t *testing.T) {
 	existing := []TableRow{{ToolKey: RegistryToolKey, ResourcePattern: ""}}
 	out := AppendRegistryProjection(existing, RegistryProjection{}, LayerAgent, SettingAllow)
