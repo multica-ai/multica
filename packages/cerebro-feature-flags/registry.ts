@@ -242,6 +242,9 @@ export type CerebroFlagKey =
   | "cerebro_interactive_terminal"
   // TECH-3108: workspace connection registry (API + MCP connections managed from settings).
   | "cerebro_connections"
+  // FIR-2273: expose api-type connection endpoints as agent-callable tools
+  // (dispatched server-side so credentials stay on the backend). Default OFF.
+  | "cerebro_api_connection_tools"
   // TECH-3077: skill metadata — category/domain/tag filtering, data-domain links, impact analysis.
   // TECH-3077: skill self-learning — observation recording, pattern extraction, auto change-requests.
   | "cerebro_skill_learning"
@@ -606,6 +609,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3108: ON by default — feature shipped and QA done. TECH-3209: switching
   // to true-default so admins don't lose access when personal/workspace override is cleared.
   cerebro_connections: true,
+  // FIR-2273: OFF by default — exposing api-type connection endpoints as agent
+  // tools opens external endpoints (with server-side credentials) to agents, so
+  // it stays opt-in per workspace. Matches the backend default.
+  cerebro_api_connection_tools: false,
   // TECH-3077: ON — skill metadata schema (category, domain, tags, data-domain links).
   // TECH-3077: OFF — skill self-learning is a later phase; enable when observation
   // infrastructure is in place.
@@ -1440,6 +1447,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Enable the Connections settings tab where admins can register API and MCP endpoints (external or internal Sliplane paths) available to all runtimes, with per-layer tool-policy permissions. TECH-3108.",
+  },
+  // FIR-2273: surface api-type connection endpoints as agent-callable tools.
+  {
+    key: "cerebro_api_connection_tools",
+    label: "API connection tools for agents",
+    group: "agents",
+    description:
+      "Expose an api-type Workspace connection's endpoints as tools agents can call. Calls are dispatched server-side, so credentials stay on the backend and never reach the agent. Off by default because it opens external endpoints to agents; turn on per workspace to let agents use connections like the Infisical secrets API. Requires the connection's tool-policy to also allow the agent. FIR-2273.",
   },
   // TECH-3196: Agent Vault per-agent secret brokering.
   {
