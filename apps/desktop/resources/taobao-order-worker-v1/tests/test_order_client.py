@@ -5,7 +5,13 @@ from pathlib import Path
 import httpx
 import pytest
 
-from order_client import OrderApiClient, OrderApiClientConfig, UpstreamOrderAPIError, normalize_order
+from order_client import (
+    OrderApiClient,
+    OrderApiClientConfig,
+    UpstreamOrderAPIError,
+    normalize_order,
+    normalize_taobao_cli_payload,
+)
 
 
 SAMPLES = Path(__file__).resolve().parents[1] / "samples"
@@ -36,6 +42,66 @@ def test_normalize_order_supports_staging_aliases():
     assert normalized["orders"][0]["oid"] == "900000000001-1"
     assert normalized["orders"][0]["outer_sku_id"] == "ERP_SKU_STAGING_001"
     assert normalized["orders"][0]["refund_status"] == "NO_REFUND"
+
+
+def test_normalize_taobao_cli_payload_maps_compact_order():
+    payload = {
+        "orders": [
+            {
+                "order_id": "3306670536474051657",
+                "buyer_nick": "tb_user_xxx",
+                "create_time": "2026-06-30 10:00:00",
+                "status": "等待卖家发货",
+                "actual_fee": "199.00",
+                "items": [
+                    {
+                        "sub_order_id": "3306670536474051657-1",
+                        "title": "商品A",
+                        "sku": ["颜色:黑色", "尺码:L"],
+                        "sku_id": "sku_001",
+                        "quantity": 1,
+                        "price": "199.00",
+                    }
+                ],
+            }
+        ],
+        "raw": {
+            "mainOrders": [
+                {
+                    "id": "3306670536474051657",
+                    "buyer": {"nick": "tb_user_xxx"},
+                    "receiverName": "张三",
+                    "receiverMobile": "13800000000",
+                    "receiverState": "浙江省",
+                    "receiverCity": "杭州市",
+                    "receiverDistrict": "西湖区",
+                    "receiverAddress": "某某街道1号",
+                }
+            ]
+        },
+    }
+
+    normalized = normalize_order(normalize_taobao_cli_payload(payload, "3306670536474051657"))
+    assert normalized["tid"] == "3306670536474051657"
+    assert normalized["status"] == "WAIT_SELLER_SEND_GOODS"
+    assert normalized["buyer"]["receiver_mobile"] == "13800000000"
+    assert normalized["buyer"]["receiver_state"] == "浙江省"
+    assert normalized["orders"][0]["sku_properties_name"] == "颜色:黑色;尺码:L"
+
+
+def test_taobao_cli_adapter_is_read_only_for_write_actions():
+    client = OrderApiClient(
+        OrderApiClientConfig(
+            adapter="taobao_cli",
+            base_url="",
+            taobao_cli_repo_path="/tmp/unused",
+            taobao_cli_cookie_file="/tmp/unused/cookies.txt",
+        )
+    )
+    with pytest.raises(UpstreamOrderAPIError) as excinfo:
+        asyncio.run(client.create_shipping_draft("3306670536474051657", {"idempotency_key": "idem"}))
+    assert excinfo.value.status_code == 501
+    assert "read-only" in str(excinfo.value.detail)
 
 
 @pytest.mark.parametrize(

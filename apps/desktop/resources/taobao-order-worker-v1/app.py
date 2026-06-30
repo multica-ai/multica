@@ -37,12 +37,16 @@ ORDER_BRIDGE_API_TOKEN = os.getenv("ORDER_BRIDGE_API_TOKEN") or "dev-bridge-toke
 REQUIRE_ORDER_BRIDGE_API_AUTH = env_bool("REQUIRE_ORDER_BRIDGE_API_AUTH", True)
 CORS_ALLOW_ORIGINS = env_csv("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:8080")
 ORDER_API_BASE_URL = os.getenv("ORDER_API_BASE_URL", "").rstrip("/")
+ORDER_API_ADAPTER = os.getenv("ORDER_API_ADAPTER", "http").strip() or "http"
 ORDER_API_TOKEN = os.getenv("ORDER_API_TOKEN", "")
 ORDER_API_GET_ORDER_PATH = os.getenv("ORDER_API_GET_ORDER_PATH", "/api/orders/{tid}")
 ORDER_API_TIMEOUT_SECONDS = float(os.getenv("ORDER_API_TIMEOUT_SECONDS", "10"))
 ORDER_API_AUTH_HEADER = os.getenv("ORDER_API_AUTH_HEADER", "Authorization")
 ORDER_API_AUTH_SCHEME = os.getenv("ORDER_API_AUTH_SCHEME", "Bearer")
 ORDER_API_WRITE_THROUGH = env_bool("ORDER_API_WRITE_THROUGH", False)
+TAOBAO_API_REPO_PATH = os.getenv("TAOBAO_API_REPO_PATH", "")
+TAOBAO_API_COOKIE_FILE = os.getenv("TAOBAO_API_COOKIE_FILE", "")
+TAOBAO_API_PYTHON = os.getenv("TAOBAO_API_PYTHON", "")
 DEDUPE_DB_PATH = os.getenv("DEDUPE_DB_PATH", "./data/order_worker.sqlite3")
 ALLOW_PLAIN_RECEIVER_INFO = env_bool("ALLOW_PLAIN_RECEIVER_INFO", True)
 ALLOW_HIGH_RISK_ACTIONS = env_bool("ALLOW_HIGH_RISK_ACTIONS", False)
@@ -572,12 +576,16 @@ def upstream_detail(resp: httpx.Response, service: str) -> dict[str, Any]:
 def create_order_api_client() -> OrderApiClient:
     return OrderApiClient(
         OrderApiClientConfig(
+            adapter=ORDER_API_ADAPTER,
             base_url=ORDER_API_BASE_URL,
             token=ORDER_API_TOKEN,
             get_order_path=ORDER_API_GET_ORDER_PATH,
             timeout_seconds=ORDER_API_TIMEOUT_SECONDS,
             auth_header=ORDER_API_AUTH_HEADER,
             auth_scheme=ORDER_API_AUTH_SCHEME,
+            taobao_cli_repo_path=TAOBAO_API_REPO_PATH,
+            taobao_cli_cookie_file=TAOBAO_API_COOKIE_FILE,
+            taobao_cli_python=TAOBAO_API_PYTHON,
         )
     )
 
@@ -587,7 +595,7 @@ def order_api_error_to_http(exc: UpstreamOrderAPIError) -> HTTPException:
 
 
 async def get_order_from_source(tid: str, plain: bool) -> OrderDetail:
-    if not ORDER_API_BASE_URL:
+    if ORDER_API_ADAPTER == "http" and not ORDER_API_BASE_URL:
         return mock_order(tid)
 
     try:
@@ -626,7 +634,7 @@ async def post_multica_autopilot(payload: dict[str, Any]) -> dict[str, Any]:
 async def upstream_write(method: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not ORDER_API_WRITE_THROUGH:
         return {"skipped": True, "reason": "ORDER_API_WRITE_THROUGH is false; saved locally only"}
-    if not ORDER_API_BASE_URL:
+    if ORDER_API_ADAPTER == "http" and not ORDER_API_BASE_URL:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="ORDER_API_WRITE_THROUGH=true requires ORDER_API_BASE_URL",
