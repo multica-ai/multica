@@ -260,11 +260,35 @@ func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
 	// it is read-side only (agent_tool_grant stays the enforced source until the
 	// gate reads the chain in Phase 6), and an admin's explicit row for a data
 	// source always wins, so we never project over an authored rule.
-	if h.RegistryRows != nil && agentID.Valid {
+	if h.RegistryRows != nil {
 		if proj, ok, perr := h.RegistryRows(r.Context(), workspaceID, agentID); perr != nil {
 			slog.Warn("tool-policy registry fold-in skipped", append(logger.RequestAttrs(r), "error", perr)...)
 		} else if ok {
-			rows = AppendRegistryProjection(rows, proj, LayerAgent, base)
+			if agentID.Valid {
+				// Agent scope: project the per-agent grant (agent_tool_grant) as the
+				// data-source defaults on the agent layer — unchanged behaviour.
+				rows = AppendRegistryProjection(rows, proj, LayerAgent, base)
+			} else {
+				// FIR-2269: every other actor layer (workspace, runtime, group, user,
+				// system) has no per-agent grant, so each data source is folded in as
+				// an authorable row carrying the AUTHORED chain settings — the same
+				// rows the gate enforces in chainGateDataSource. This is what surfaces
+				// the "Data sources (N)" picker on the runtime/workspace/group/member
+				// permission views, not only the agent's Tools tab.
+				q := TableQuery{
+					WorkspaceID: workspaceID,
+					RuntimeID:   runtimeID,
+					UserID:      userID,
+					GroupIDs:    groupIDs,
+					SystemID:    systemID,
+					Base:        base,
+				}
+				if folded, ferr := h.Store.AppendRegistryDataSourceRows(r.Context(), q, proj.DataSources, rows); ferr != nil {
+					slog.Warn("tool-policy registry layer fold-in skipped", append(logger.RequestAttrs(r), "error", ferr)...)
+				} else {
+					rows = folded
+				}
+			}
 		}
 	}
 

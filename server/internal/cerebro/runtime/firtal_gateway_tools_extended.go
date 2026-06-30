@@ -597,6 +597,31 @@ func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, action, ds
 	}
 	store := toolpolicy.NewStoreFromQueries(t.cerebro)
 	eval := t.registryPolicyCELEvaluator(ctx)
+
+	// FIR-2269: enforce a data-source rule authored at ANY actor layer — not just
+	// the agent layer. The chain has six layers (workspace → runtime → agent →
+	// group → user → system) and the picker can now author at all of them, so the
+	// gate must load every layer's subject or a runtime/owner/group rule would be
+	// silently ignored. RuntimeID and the owner User ceiling come from the agent
+	// record (groups expand from the owner inside Store.Resolve), mirroring the
+	// general tool-policy gate (approval_gate.go) and the credentials policy. A
+	// missing agent or lookup failure fails closed: a permission gate must never
+	// widen access on an error.
+	runtimeID := pgtype.UUID{}
+	userID := t.tctx.UserID
+	if t.tctx.AgentID.Valid {
+		agent, aerr := t.queries.GetAgent(ctx, t.tctx.AgentID)
+		if aerr != nil {
+			return fmt.Errorf("firtal_registry: permission check failed for data_source_id %q (agent lookup)", dsID)
+		}
+		runtimeID = agent.RuntimeID
+		// The User layer is the agent's owner ceiling for an agent run; fall back to
+		// any explicit invoking user only when the owner is absent.
+		if agent.OwnerID.Valid {
+			userID = agent.OwnerID
+		}
+	}
+
 	// FIR-2083: thread the called data_source_id so an argument-allowlist condition
 	// (data-source scoping) can match it. The context query keys on an EXACT
 	// resource_pattern, so two resolves are needed and the call is allowed only when
@@ -629,8 +654,9 @@ func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, action, ds
 			WorkspaceID:     t.tctx.WorkspaceID,
 			ToolKey:         "firtal_registry",
 			ResourcePattern: resourcePattern,
+			RuntimeID:       runtimeID,
 			AgentID:         t.tctx.AgentID,
-			UserID:          t.tctx.UserID,
+			UserID:          userID,
 			Base:            toolpolicy.SettingAllow,
 			RequestContext:  reqCtx,
 			Eval:            eval,

@@ -110,6 +110,88 @@ func TestRegistryGate_ArgAllowScopesDataSources(t *testing.T) {
 	}
 }
 
+// TestRegistryGate_RuntimeLayerDenyBlocks is the FIR-2269 headline: a Deny rule
+// authored at the RUNTIME layer (subject = the agent's runtime) blocks the agent
+// from a data source — proving the gate now loads every actor layer, not just the
+// agent layer. Before FIR-2269 the gate passed only AgentID+UserID into the chain,
+// so a runtime-layer rule was silently ignored and this call would have been
+// allowed. A second, unruled source still passes (Base=Allow), proving the runtime
+// rule restricts precisely the source it names and nothing wider.
+func TestRegistryGate_RuntimeLayerDenyBlocks(t *testing.T) {
+	if runtimeAccountTestPool == nil {
+		t.Skip("DATABASE_URL not configured; skipping registry gate integration test")
+	}
+	pool := runtimeAccountTestPool
+	ctx := context.Background()
+
+	const deniedID = "runtime-blocked-source"
+	const allowedID = "runtime-other-source"
+
+	// An agent anchored to the test runtime/owner so the runtime layer resolves.
+	var agentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id, owner_id)
+		VALUES ($1, $2, 'local', $3, $4)
+		RETURNING id
+	`, runtimeAccountTestWSID, "registry-runtime-layer-probe", runtimeAccountTestRuntimeID, runtimeAccountTestUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	var prevSettings []byte
+	_ = pool.QueryRow(ctx, `SELECT settings FROM workspace WHERE id = $1`, runtimeAccountTestWSID).Scan(&prevSettings)
+	if _, err := pool.Exec(ctx, `UPDATE workspace SET settings = '{"registry_grants_enabled": true}'::jsonb WHERE id = $1`, runtimeAccountTestWSID); err != nil {
+		t.Fatalf("enable registry grants: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		if len(prevSettings) > 0 {
+			_, _ = pool.Exec(bg, `UPDATE workspace SET settings = $2 WHERE id = $1`, runtimeAccountTestWSID, prevSettings)
+		} else {
+			_, _ = pool.Exec(bg, `UPDATE workspace SET settings = '{}'::jsonb WHERE id = $1`, runtimeAccountTestWSID)
+		}
+		_, _ = pool.Exec(bg, `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1`, runtimeAccountTestWSID)
+		_, _ = pool.Exec(bg, `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	// The rule the Permissions screen authors at the runtime layer: Deny
+	// firtal_registry on one data source for the whole runtime. subject = runtime.
+	store := toolpolicy.NewStore(pool)
+	if _, err := store.Set(ctx, toolpolicy.SetParams{
+		WorkspaceID:     runtimeAccountTestWSID,
+		ToolKey:         "firtal_registry",
+		Layer:           toolpolicy.LayerRuntime,
+		SubjectID:       runtimeAccountTestRuntimeID,
+		Setting:         toolpolicy.SettingDeny,
+		ResourcePattern: deniedID,
+	}); err != nil {
+		t.Fatalf("author runtime-layer deny: %v", err)
+	}
+
+	tool := &FirtalRegistryTool{
+		queries: db.New(pool),
+		cerebro: cerebrodb.New(pool),
+		tctx: ToolContext{
+			WorkspaceID: runtimeAccountTestWSID,
+			AgentID:     agentID,
+			UserID:      runtimeAccountTestUserID,
+		},
+	}
+
+	// The runtime-layer Deny blocks the named source for the agent on that runtime.
+	err := tool.chainGateDataSource(ctx, "execute", deniedID, "", "")
+	if err == nil {
+		t.Fatalf("runtime-layer Deny on %q must block the agent, got allow", deniedID)
+	}
+	if !strings.Contains(err.Error(), deniedID) {
+		t.Fatalf("deny error should name the blocked source %q, got: %v", deniedID, err)
+	}
+
+	// A source the runtime rule does not name still passes (Base=Allow): the runtime
+	// rule restricts exactly its source, not the whole registry.
+	if err := tool.chainGateDataSource(ctx, "execute", allowedID, "", ""); err != nil {
+		t.Fatalf("unruled source %q must pass; got error: %v", allowedID, err)
+	}
+}
+
 // TestRegistryGate_NoScopingRuleAllowsAll proves the change is behavior-preserving:
 // with the flag ON but no scoping rule authored, every source passes (Base=Allow),
 // so enabling the gate without configuring scope does not brick the registry.

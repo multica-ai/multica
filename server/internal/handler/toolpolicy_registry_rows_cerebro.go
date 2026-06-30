@@ -29,7 +29,7 @@ import (
 // sources). Errors loading the grant or the catalog are returned so the caller
 // can log them, but never block the rest of the table.
 func (h *Handler) ToolPolicyRegistryRows(ctx context.Context, workspaceID, agentID pgtype.UUID) (cerebrotoolpolicy.RegistryProjection, bool, error) {
-	if !agentID.Valid || !workspaceID.Valid {
+	if !workspaceID.Valid {
 		return cerebrotoolpolicy.RegistryProjection{}, false, nil
 	}
 
@@ -43,9 +43,16 @@ func (h *Handler) ToolPolicyRegistryRows(ctx context.Context, workspaceID, agent
 		return cerebrotoolpolicy.RegistryProjection{}, false, nil
 	}
 
-	grant, err := h.loadFirtalRegistryGrant(ctx, agentID)
-	if err != nil {
-		return cerebrotoolpolicy.RegistryProjection{}, false, err
+	// FIR-2269: at a non-agent scope (workspace, runtime, group, user, system view)
+	// there is no per-agent grant to project — return the catalog alone so the
+	// caller folds in authorable rows from the authored chain. The per-agent grant
+	// (agent_tool_grant) is only meaningful, and only loaded, for an agent.
+	var grant cerebrotoolpolicy.RegistryGrant
+	if agentID.Valid {
+		grant, err = h.loadFirtalRegistryGrant(ctx, agentID)
+		if err != nil {
+			return cerebrotoolpolicy.RegistryProjection{}, false, err
+		}
 	}
 
 	rows := make([]cerebrotoolpolicy.RegistryDataSource, 0, len(dataSources))
