@@ -170,6 +170,7 @@ func gitlabMRToResponse(mr db.GitlabMergeRequest) GitLabMergeRequestResponse {
 
 // HandleGitLabWebhook (POST /api/webhooks/gitlab) verifies X-Gitlab-Token and
 // routes Merge Request / Issue / Note Hook events to the corresponding handlers.
+func (h *Handler) HandleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "cannot read body")
