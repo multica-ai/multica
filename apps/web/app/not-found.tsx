@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { buttonVariants } from "@multica/ui/components/ui/button";
-import { WEB_BRAND_NAME } from "@/lib/brand";
 
 export default function NotFound() {
   return (
@@ -13,7 +12,7 @@ export default function NotFound() {
         The page you are looking for doesn&rsquo;t exist or has been moved.
       </p>
       <Link href="/" className={buttonVariants({ className: "mt-2" })}>
-        Back to {WEB_BRAND_NAME}
+        Back to Multica
       </Link>
     </main>
   );

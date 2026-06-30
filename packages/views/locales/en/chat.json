@@ -1,9 +1,9 @@
 {
   "fab": {
-    "running": "{{productName}} is working...",
+    "running": "Multica is working...",
     "unread_one": "{{count}} unread chat",
     "unread_other": "{{count}} unread chats",
-    "default": "Ask {{productName}}"
+    "default": "Ask Multica"
   },
   "input": {
     "placeholder_no_agent": "Create an agent to start chatting",
@@ -72,7 +72,7 @@
     "first_time_pillars_suffix": ".",
     "first_time_actions": "Ask for a summary, plan your day, or hand off a quick task.",
     "returning_title_named": "Hi, I'm {{name}}",
-    "returning_title_default": "Welcome to {{productName}}",
+    "returning_title_default": "Welcome to Multica",
     "returning_subtitle": "Try asking"
   },
   "starter_prompts": {
@@ -81,15 +81,15 @@
     "plan_next": "Plan what to work on next"
   },
   "context_anchor": {
-    "tooltip_disabled": "Nothing to share with {{productName}} on this page",
-    "tooltip_off": "Let {{productName}} know what you're viewing",
-    "tooltip_on_issue": "{{productName}} knows you're viewing {{label}} · Click to turn off",
-    "tooltip_on_project": "{{productName}} knows you're viewing project \"{{label}}\" · Click to turn off",
-    "card_tooltip_issue_with_subtitle": "{{productName}} knows you're viewing {{label}} — {{subtitle}}",
-    "card_tooltip_issue": "{{productName}} knows you're viewing {{label}}",
-    "card_tooltip_project": "{{productName}} knows you're viewing project \"{{label}}\"",
+    "tooltip_disabled": "Nothing to share with Multica on this page",
+    "tooltip_off": "Let Multica know what you're viewing",
+    "tooltip_on_issue": "Multica knows you're viewing {{label}} · Click to turn off",
+    "tooltip_on_project": "Multica knows you're viewing project \"{{label}}\" · Click to turn off",
+    "card_tooltip_issue_with_subtitle": "Multica knows you're viewing {{label}} — {{subtitle}}",
+    "card_tooltip_issue": "Multica knows you're viewing {{label}}",
+    "card_tooltip_project": "Multica knows you're viewing project \"{{label}}\"",
     "aria_stop": "Stop sharing current page",
-    "aria_start": "Share current page with {{productName}}"
+    "aria_start": "Share current page with Multica"
   },
   "no_agent_banner": "You need an agent to start chatting.",
   "offline_banner": {

@@ -15,7 +15,7 @@ const TEST_RESOURCES = {
 function createWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return ({ children }: { children: ReactNode }) => (
-    <I18nProvider locale="en" resources={TEST_RESOURCES} variables={{ productName: "CoStrict" }}>
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
     </I18nProvider>
   );
@@ -97,7 +97,7 @@ describe("LoginPage", () => {
   it("renders login form with email input and continue button", () => {
     render(<LoginPage />, { wrapper: createWrapper() });
 
-    expect(screen.getByText("Sign in to CoStrict")).toBeInTheDocument();
+    expect(screen.getByText("Sign in to Multica")).toBeInTheDocument();
     expect(screen.getByText("Enter your email to get a login code")).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(
@@ -196,9 +196,6 @@ describe("LoginPage", () => {
       });
       expect(
         await screen.findByRole("button", { name: "Open Multica Desktop" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(/desktop client is still named Multica/i),
       ).toBeInTheDocument();
     } finally {
       Object.defineProperty(window, "location", {
