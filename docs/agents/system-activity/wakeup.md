@@ -14,15 +14,16 @@
 
 ```go
 const (
-    WakeupMinIntervalMinutes      = 15  // minimum fire_at afstand + postpone-delay
     WakeupMaxConsecutivePostpones = 3   // maks dispatches i træk → inbox-notifikation
 )
 ```
 
+`WakeupMinIntervalMinutes` er ikke længere en hardkodet konstant — det er et workspace-setting (`wakeup_min_interval_minutes`, default: 5 min, min floor: 1 min). En workspace-admin kan justere det via wakeup settings API.
+
 ## Håndhævede regler ved Create
 
-1. `fire_at` skal være mindst `WakeupMinIntervalMinutes` (15 min) frem i tid.
-2. Der må ikke allerede eksistere en pending wakeup for samme `agent_id + issue_id` oprettet inden for de seneste 15 minutter.
+1. `fire_at` skal være mindst `wakeup_min_interval_minutes` (workspace-setting, default 5 min, min 1 min) frem i tid.
+2. Der må ikke allerede eksistere en pending wakeup for samme `agent_id + issue_id` oprettet inden for den samme minimums-interval.
 
 ## Dispatch-flow (Phase 1)
 

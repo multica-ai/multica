@@ -37,7 +37,7 @@ check_constant() {
   fi
 }
 
-check_constant "WakeupMinIntervalMinutes"
+# WakeupMinIntervalMinutes was moved to a workspace setting in #1959 — no longer a constant.
 check_constant "WakeupMaxConsecutivePostpones"
 
 if [[ "$ok" -ne 1 ]]; then

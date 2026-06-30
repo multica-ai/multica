@@ -20,6 +20,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	// CEREBRO-PATCH(daemon-claim-connections-injection): FIR-2341 inject workspace mcp_http connections at claim.
+	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -1373,6 +1375,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		var mcpConfig json.RawMessage
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
+		}
+		// CEREBRO-PATCH(daemon-claim-connections-injection): FIR-2341 inject workspace mcp_http connections at claim.
+		if h.ConnectionsInjector != nil {
+			if connMCP := h.ConnectionsInjector.BuildMCPConfig(r.Context(), runtime.WorkspaceID); len(connMCP) > 0 {
+				mcpConfig = daemonmcp.Merge(connMCP, mcpConfig)
+			}
 		}
 		// runtime_config is stored as JSONB and may legitimately be the
 		// empty object `{}` for agents that haven't opted into any
