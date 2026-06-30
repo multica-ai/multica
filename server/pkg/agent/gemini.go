@@ -32,7 +32,8 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	runCtx, cancel := runContext(ctx, timeout)
 
 	// CEREBRO-PATCH(agent-gemini-managed-mcp): FIR-1459 - materialize workspace MCP config for gemini.
-	managedMCPCleanup, err := ensureGeminiProjectMCPConfig(opts.Cwd, opts.McpConfig, b.cfg.Logger)
+	// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 pass denied MCP tokens into Gemini project settings.
+	managedMCPCleanup, err := ensureGeminiProjectMCPConfig(opts.Cwd, opts.McpConfig, opts.DisallowedMCPTools, b.cfg.Logger)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("apply gemini mcp_config: %w", err)

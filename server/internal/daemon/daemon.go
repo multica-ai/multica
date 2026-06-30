@@ -3850,8 +3850,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
-		ThinkingLevel:             thinkingLevel,
-		OpenclawMode:              openclawMode,
+		// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 forward claim-time MCP denies into the provider spawn path.
+		DisallowedMCPTools: task.DisallowedMCPTools,
+		ThinkingLevel:      thinkingLevel,
+		OpenclawMode:       openclawMode,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:

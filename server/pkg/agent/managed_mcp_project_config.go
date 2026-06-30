@@ -108,17 +108,23 @@ func ensureCursorProjectMCPConfig(cwd string, mcpConfig json.RawMessage, disallo
 	return cleanupAll, nil
 }
 
-func ensureGeminiProjectMCPConfig(cwd string, mcpConfig json.RawMessage, logger *slog.Logger) (func(), error) {
-	if !hasManagedMCPConfig(mcpConfig) {
+// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 carry denied MCP tokens into provider-native config.
+func ensureGeminiProjectMCPConfig(cwd string, mcpConfig json.RawMessage, disallowedMCPTools []string, logger *slog.Logger) (func(), error) {
+	if !hasManagedMCPConfig(mcpConfig) && len(disallowedMCPTools) == 0 {
 		return func() {}, nil
 	}
 	if strings.TrimSpace(cwd) == "" {
 		return nil, fmt.Errorf("gemini: cwd is required to apply managed MCP config")
 	}
 
-	servers, names, err := parseManagedMCPServers(mcpConfig)
-	if err != nil {
-		return nil, err
+	servers := map[string]any{}
+	var names []string
+	if hasManagedMCPConfig(mcpConfig) {
+		var err error
+		servers, names, err = parseManagedMCPServers(mcpConfig)
+		if err != nil {
+			return nil, err
+		}
 	}
 	path := filepath.Join(cwd, ".gemini", "settings.json")
 	cfg, err := readJSONObjectFile(path)
@@ -126,13 +132,18 @@ func ensureGeminiProjectMCPConfig(cwd string, mcpConfig json.RawMessage, logger 
 		return nil, fmt.Errorf("read gemini settings: %w", err)
 	}
 
-	cfg["mcpServers"] = geminiMCPServers(servers)
+	addGeminiExcludeTools(servers, disallowedMCPTools)
+	if hasManagedMCPConfig(mcpConfig) {
+		cfg["mcpServers"] = geminiMCPServers(servers)
+	}
 	mcpObj, _ := cfg["mcp"].(map[string]any)
 	if mcpObj == nil {
 		mcpObj = map[string]any{}
 	}
-	mcpObj["allowed"] = names
-	delete(mcpObj, "excluded")
+	if hasManagedMCPConfig(mcpConfig) {
+		mcpObj["allowed"] = names
+		delete(mcpObj, "excluded")
+	}
 	cfg["mcp"] = mcpObj
 
 	content, err := json.MarshalIndent(cfg, "", "  ")
@@ -147,6 +158,38 @@ func ensureGeminiProjectMCPConfig(cwd string, mcpConfig json.RawMessage, logger 
 		logger.Debug("gemini managed MCP config materialized", "cwd", cwd)
 	}
 	return cleanup, nil
+}
+
+// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 translate Multica deny tokens to Gemini excludeTools.
+func addGeminiExcludeTools(servers map[string]any, tokens []string) {
+	denied := parseMCPDenyTokens(tokens)
+	if len(denied) == 0 {
+		return
+	}
+	for name, tools := range denied {
+		entry, ok := servers[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		set := map[string]struct{}{}
+		if existing, ok := entry["excludeTools"].([]any); ok {
+			for _, item := range existing {
+				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+					set[s] = struct{}{}
+				}
+			}
+		}
+		for _, tool := range tools {
+			set[tool] = struct{}{}
+		}
+		out := make([]string, 0, len(set))
+		for tool := range set {
+			out = append(out, tool)
+		}
+		sort.Strings(out)
+		entry["excludeTools"] = out
+		servers[name] = entry
+	}
 }
 
 func geminiMCPServers(servers map[string]any) map[string]any {

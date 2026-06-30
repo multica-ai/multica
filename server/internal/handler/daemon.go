@@ -1377,9 +1377,29 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
 		// CEREBRO-PATCH(daemon-claim-connections-injection): FIR-2341 inject workspace mcp_http connections at claim.
+		// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 resolve denied MCP connection tools before injecting claim-time connections.
+		var disallowedMCPTools []string
 		if h.ConnectionsInjector != nil {
 			if connMCP := h.ConnectionsInjector.BuildMCPConfig(r.Context(), runtime.WorkspaceID); len(connMCP) > 0 {
-				mcpConfig = daemonmcp.Merge(connMCP, mcpConfig)
+				injectConnections := true
+				if h.ConnectionToolDeny != nil {
+					tokens, err := h.ConnectionToolDeny.DisallowedMCPTools(r.Context(), runtime.WorkspaceID, task.RuntimeID, task.AgentID)
+					if err != nil {
+						injectConnections = false
+						slog.Warn("withholding workspace MCP connections after deny resolution failed",
+							"workspace_id", uuidToString(runtime.WorkspaceID),
+							"runtime_id", uuidToString(task.RuntimeID),
+							"agent_id", uuidToString(task.AgentID),
+							"error", err,
+						)
+					} else {
+						disallowedMCPTools = tokens
+					}
+				}
+				if injectConnections {
+					mcpConfig = daemonmcp.Merge(connMCP, mcpConfig)
+					resp.DisallowedMCPTools = disallowedMCPTools
+				}
 			}
 		}
 		// runtime_config is stored as JSONB and may legitimately be the

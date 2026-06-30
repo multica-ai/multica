@@ -283,6 +283,23 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 cover Claude Code denied MCP token forwarding.
+func TestBuildClaudeArgsIncludesDisallowedMCPTools(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{
+		DisallowedMCPTools: []string{"mcp__shopify__refund_order", "mcp__erp__delete_product"},
+	}, slog.Default())
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--disallowedTools AskUserQuestion") {
+		t.Fatalf("built-in disallowed tool missing: %v", args)
+	}
+	if !strings.Contains(joined, "--disallowedTools mcp__shopify__refund_order,mcp__erp__delete_product") {
+		t.Fatalf("connection disallowed tools missing: %v", args)
+	}
+}
+
 func TestFilterCustomArgsBlocksProtocolFlags(t *testing.T) {
 	t.Parallel()
 

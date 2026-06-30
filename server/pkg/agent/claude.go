@@ -259,7 +259,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// broken pipe, or been unblocked by the kill that ended cmd.
 		writeErr := <-writeDone
 
-
 		switch {
 		case runCtx.Err() == context.DeadlineExceeded:
 			finalStatus = "timeout"
@@ -611,6 +610,10 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// clarification belongs in an issue comment instead.
 		"--disallowedTools", "AskUserQuestion",
 	}
+	// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 forward connection-tool denies to Claude Code.
+	if len(opts.DisallowedMCPTools) > 0 {
+		args = append(args, "--disallowedTools", strings.Join(opts.DisallowedMCPTools, ","))
+	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
@@ -702,7 +705,6 @@ func mergeEnv(base []string, extra map[string]string) []string {
 	return env
 }
 
-
 // isStrippedClaudeAuth — CEREBRO-PATCH(claude-oauth-strips-api-key): Cerebro Claude-agenter
 // kører altid OAuth via CLAUDE_CONFIG_DIR. ANTHROPIC_API_KEY/AUTH_TOKEN må aldrig
 // arves fra host-env eller injiceres via CustomEnv — det ville få Claude Code til
@@ -718,7 +720,6 @@ func isStrippedClaudeAuth(key string) bool {
 func isClaudeAuthKey(key string) bool {
 	return key == "ANTHROPIC_API_KEY" || key == "ANTHROPIC_AUTH_TOKEN"
 }
-
 
 // isFilteredChildEnvKey reports whether an inherited env var is an internal
 // Claude Code runtime/session marker that must NOT leak into the spawned child

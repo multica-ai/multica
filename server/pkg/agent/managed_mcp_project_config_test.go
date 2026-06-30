@@ -84,6 +84,8 @@ func TestEnsureGeminiProjectMCPConfigWritesSettingsAndRestores(t *testing.T) {
 	cleanup, err := ensureGeminiProjectMCPConfig(
 		cwd,
 		json.RawMessage(`{"mcpServers":{"beta":{"command":"uvx","args":["server"]},"alpha":{"url":"https://mcp.example/mcp","headers":{"X-API-Key":"secret"}}}}`),
+		// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 assert Gemini receives per-tool MCP denies.
+		[]string{"mcp__alpha__delete_order", "mcp__alpha__refund_order"},
 		slog.Default(),
 	)
 	if err != nil {
@@ -115,6 +117,9 @@ func TestEnsureGeminiProjectMCPConfigWritesSettingsAndRestores(t *testing.T) {
 	if _, ok := alpha["url"]; ok {
 		t.Fatalf("alpha.url should be translated away for Gemini streamable HTTP config: %v", alpha)
 	}
+	if got := stringSliceFromAny(alpha["excludeTools"]); !reflect.DeepEqual(got, []string{"delete_order", "refund_order"}) {
+		t.Fatalf("alpha.excludeTools = %v, want [delete_order refund_order]", got)
+	}
 	beta := servers["beta"].(map[string]any)
 	if beta["command"] != "uvx" {
 		t.Fatalf("stdio server should pass through unchanged, got %v", beta)
@@ -133,7 +138,7 @@ func TestManagedProjectMCPConfigRejectsBadShapes(t *testing.T) {
 	if _, err := ensureCursorProjectMCPConfig(cwd, json.RawMessage(`not json`), nil, slog.Default()); err == nil {
 		t.Fatal("expected malformed cursor mcp_config to fail closed")
 	}
-	if _, err := ensureGeminiProjectMCPConfig(cwd, json.RawMessage(`{"mcpServers":{"bad":"not-object"}}`), slog.Default()); err == nil {
+	if _, err := ensureGeminiProjectMCPConfig(cwd, json.RawMessage(`{"mcpServers":{"bad":"not-object"}}`), nil, slog.Default()); err == nil {
 		t.Fatal("expected malformed gemini mcp_config server entry to fail closed")
 	}
 }
