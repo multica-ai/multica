@@ -1144,12 +1144,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 
-			// Agent-facing unified history read: `multica chat history` resolves
-			// the caller's task-scoped token to its own chat session and returns
-			// the bound channel's prior messages (MUL-3871). No session id is
-			// passed — the token IS the scope, so an agent can only read its own
-			// conversation.
+			// Agent-facing channel reads (MUL-3871). The caller's task-scoped token
+			// resolves to its own chat session; no session/channel id is passed, so
+			// an agent can only read its own conversation. `history` is the channel
+			// overview (top-level messages + thread metadata); `thread` reads one
+			// thread (?id for a specific one, else the thread the session is in).
 			r.Get("/api/chat/history", h.GetChatChannelHistory)
+			r.Get("/api/chat/thread", h.GetChatThread)
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {

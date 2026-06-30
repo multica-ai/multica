@@ -193,12 +193,20 @@ func buildChatPrompt(task Task) string {
 	// Channel awareness (MUL-3871). When the session is backed by an IM channel,
 	// the agent must KNOW it is operating inside that channel — otherwise an ask
 	// like "what did you just talk about" sends it to read Multica instead of the
-	// Slack conversation. State it explicitly and point history reads at the
-	// channel, not Multica. A web-only chat session gets no such line — its
-	// history is the Multica chat_session the agent already resumes.
+	// Slack conversation. State it explicitly, point reads at the channel (not
+	// Multica), and teach the two read commands, telling the agent which to start
+	// with based on where it was @mentioned. A web-only chat session gets no such
+	// block — its history is the Multica chat_session the agent already resumes.
 	if task.ChatChannelType != "" {
 		platform := channelDisplayName(task.ChatChannelType)
-		fmt.Fprintf(&b, "You are operating inside a %s conversation (a channel, thread, or DM) — not the Multica web app. This conversation and its history live in %s, NOT in Multica. When the user asks about earlier messages, what was discussed, or who said what here, read it with `multica chat history --output json`; do NOT look in Multica issues or comments for this conversation's history. The message below may be only what triggered you — `multica chat history` auto-selects the right scope (the surrounding channel on your first reply, your own thread on follow-ups; add `--scope channel` to pull the wider channel when needed).\n\n", platform, platform)
+		fmt.Fprintf(&b, "You are operating inside a %s conversation — not the Multica web app. This conversation and its history live in %s, NOT in Multica; never look in Multica issues or comments for it. The message below may be only what triggered you. Read the conversation with:\n", platform, platform)
+		b.WriteString("- `multica chat history --output json` — the channel overview: recent top-level messages, each thread tagged with a `thread_id` and `reply_count`. It does NOT expand thread contents.\n")
+		b.WriteString("- `multica chat thread [<thread_id>] --output json` — read one thread's messages; omit the id to read the thread you are in, or pass a `thread_id` from the overview to read a specific thread.\n")
+		if task.ChatInThread {
+			b.WriteString("You were @mentioned inside a thread: start with `multica chat thread` to read it; if you need the wider channel, run `multica chat history` and open a specific thread with `multica chat thread <thread_id>`.\n\n")
+		} else {
+			b.WriteString("You were @mentioned at the channel top level: start with `multica chat history` to see the channel, then read a specific thread's contents with `multica chat thread <thread_id>`.\n\n")
+		}
 	}
 	if task.Agent != nil && len(task.Agent.Skills) > 0 {
 		refs := ExtractSlashSkills(task.ChatMessage)
