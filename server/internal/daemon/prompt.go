@@ -190,13 +190,16 @@ func buildChatPrompt(task Task) string {
 	var b strings.Builder
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
-	// Discoverability nudge for the on-demand channel-history pull (MUL-3871).
-	// When this conversation came from an IM channel (e.g. Slack) the message
-	// below may be only the line that triggered the agent, not the surrounding
-	// thread/channel discussion. The agent has no other signal that earlier
-	// context exists, so point it at the unified command; it returns an empty
-	// list (with a note) for web-only sessions, so an always-on hint is safe.
-	b.WriteString("If this conversation came from a chat channel (e.g. a Slack thread, channel, or DM), the message below may be only what triggered you — not what was said earlier. Run `multica chat history --output json` before replying to read the prior conversation. It auto-selects the right scope — the surrounding channel on your first reply (where earlier context lives), your own thread on follow-ups — and you can add `--scope channel` to pull the wider channel when a follow-up needs more. It returns an empty list if there is no connected channel.\n\n")
+	// Channel awareness (MUL-3871). When the session is backed by an IM channel,
+	// the agent must KNOW it is operating inside that channel — otherwise an ask
+	// like "what did you just talk about" sends it to read Multica instead of the
+	// Slack conversation. State it explicitly and point history reads at the
+	// channel, not Multica. A web-only chat session gets no such line — its
+	// history is the Multica chat_session the agent already resumes.
+	if task.ChatChannelType != "" {
+		platform := channelDisplayName(task.ChatChannelType)
+		fmt.Fprintf(&b, "You are operating inside a %s conversation (a channel, thread, or DM) — not the Multica web app. This conversation and its history live in %s, NOT in Multica. When the user asks about earlier messages, what was discussed, or who said what here, read it with `multica chat history --output json`; do NOT look in Multica issues or comments for this conversation's history. The message below may be only what triggered you — `multica chat history` auto-selects the right scope (the surrounding channel on your first reply, your own thread on follow-ups; add `--scope channel` to pull the wider channel when needed).\n\n", platform, platform)
+	}
 	if task.Agent != nil && len(task.Agent.Skills) > 0 {
 		refs := ExtractSlashSkills(task.ChatMessage)
 		if len(refs) > 0 {
@@ -248,6 +251,16 @@ func buildChatPrompt(task Task) string {
 		b.WriteString("When creating an issue that should preserve one of these attachments, pass `--attachment-id <id>` to `multica issue create` in addition to keeping the attachment markdown inline.\n")
 	}
 	return b.String()
+}
+
+// channelDisplayName renders a chat_channel_type for prompt copy.
+func channelDisplayName(channelType string) string {
+	switch channelType {
+	case "slack":
+		return "Slack"
+	default:
+		return channelType
+	}
 }
 
 // buildAutopilotPrompt constructs a prompt for run_only autopilot tasks.
