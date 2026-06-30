@@ -102,6 +102,8 @@ type AgentTaskQueue struct {
 	HandoffNote           pgtype.Text        `json:"handoff_note"`
 	PrepareLeaseExpiresAt pgtype.Timestamptz `json:"prepare_lease_expires_at"`
 	SquadID               pgtype.UUID        `json:"squad_id"`
+	EscalationForTaskID   pgtype.UUID        `json:"escalation_for_task_id"`
+	FireAt                pgtype.Timestamptz `json:"fire_at"`
 }
 
 type Attachment struct {
