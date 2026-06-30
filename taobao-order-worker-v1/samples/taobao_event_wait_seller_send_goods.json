@@ -1,0 +1,13 @@
+{
+  "event": "taobao.trade.modified",
+  "eventId": "tb:shop_001:1234567890:2026-06-30T10:12:00+08:00",
+  "eventPayload": {
+    "platform": "taobao",
+    "shop_id": "shop_001",
+    "tid": "1234567890",
+    "status": "WAIT_SELLER_SEND_GOODS",
+    "modified": "2026-06-30T10:12:00+08:00",
+    "use_plain_receiver_info": true,
+    "idempotency_key": "taobao:shop_001:1234567890:modified:2026-06-30T10:12:00+08:00"
+  }
+}
