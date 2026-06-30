@@ -17,8 +17,10 @@ import {
 } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
+import { useT } from "@multica/views/i18n";
 
 function CallbackContent() {
+  const { t } = useT("auth");
   const router = useRouter();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
@@ -148,10 +150,9 @@ function CallbackContent() {
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Opening Multica</CardTitle>
+            <CardTitle className="text-2xl">{t(($) => $.web.desktop_handoff.opening_title)}</CardTitle>
             <CardDescription>
-              You should see a prompt to open the Multica desktop app. If
-              nothing happens, click the button below.
+              {t(($) => $.web.desktop_handoff.opening_description)}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
@@ -161,7 +162,7 @@ function CallbackContent() {
                 window.location.href = `multica://auth/callback?token=${encodeURIComponent(desktopToken)}`;
               }}
             >
-              Open Multica Desktop
+              {t(($) => $.web.desktop_handoff.open_button)}
             </Button>
           </CardContent>
         </Card>

@@ -1,8 +1,8 @@
 {
   "fab": {
-    "running": "Multica 正在工作...",
+    "running": "AIDO 正在工作...",
     "unread_other": "{{count}} 条未读对话",
-    "default": "问 Multica"
+    "default": "问 AIDO"
   },
   "input": {
     "placeholder_no_agent": "创建一个智能体后才能开始对话",
@@ -93,7 +93,7 @@
     "first_time_pillars_suffix": "。",
     "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
     "returning_title_named": "你好，我是 {{name}}",
-    "returning_title_default": "欢迎使用 Multica",
+    "returning_title_default": "欢迎使用 AIDO",
     "returning_subtitle": "试试问"
   },
   "starter_prompts": {

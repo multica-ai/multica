@@ -1,9 +1,9 @@
 {
   "fab": {
-    "running": "Multica가 작업 중입니다...",
+    "running": "AIDO가 작업 중입니다...",
     "unread_one": "읽지 않은 채팅 {{count}}개",
     "unread_other": "읽지 않은 채팅 {{count}}개",
-    "default": "Multica에 묻기"
+    "default": "AIDO에 묻기"
   },
   "input": {
     "placeholder_no_agent": "채팅을 시작하려면 에이전트를 만드세요",
@@ -96,7 +96,7 @@
     "first_time_pillars_suffix": ".",
     "first_time_actions": "요약을 요청하거나, 오늘 할 일을 계획하거나, 간단한 작업을 맡겨보세요.",
     "returning_title_named": "안녕하세요, 저는 {{name}}입니다",
-    "returning_title_default": "Multica에 오신 것을 환영합니다",
+    "returning_title_default": "AIDO에 오신 것을 환영합니다",
     "returning_subtitle": "이렇게 요청해 보세요"
   },
   "starter_prompts": {

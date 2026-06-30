@@ -4,11 +4,11 @@ import { AboutPageClient } from "@/features/landing/components/about-page-client
 export const metadata: Metadata = {
   title: "About",
   description:
-    "Learn about Multica — multiplexed information and computing agent. An open-source project management platform for human + agent teams.",
+    "Learn about AIDO — multiplexed information and computing agent. An open-source project management platform for human + agent teams.",
   openGraph: {
-    title: "About Multica",
+    title: "About AIDO",
     description:
-      "The story behind Multica and why we're building project management for human + agent teams.",
+      "The story behind AIDO and why we're building project management for human + agent teams.",
     url: "/about",
   },
   alternates: {

@@ -506,7 +506,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         </span>
                       ) : (
                         <span data-acceptance="nexai-wordmark" className="flex-1 truncate font-medium">
-                          {workspace?.name ?? "Multica"}
+                          {workspace?.name ?? "AIDO"}
                         </span>
                       )}
                       <ChevronDown className="size-3 text-muted-foreground" />

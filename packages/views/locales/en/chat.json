@@ -1,9 +1,9 @@
 {
   "fab": {
-    "running": "Multica is working...",
+    "running": "AIDO is working...",
     "unread_one": "{{count}} unread chat",
     "unread_other": "{{count}} unread chats",
-    "default": "Ask Multica"
+    "default": "Ask AIDO"
   },
   "input": {
     "placeholder_no_agent": "Create an agent to start chatting",
@@ -96,7 +96,7 @@
     "first_time_pillars_suffix": ".",
     "first_time_actions": "Ask for a summary, plan your day, or hand off a quick task.",
     "returning_title_named": "Hi, I'm {{name}}",
-    "returning_title_default": "Welcome to Multica",
+    "returning_title_default": "Welcome to AIDO",
     "returning_subtitle": "Try asking"
   },
   "starter_prompts": {
