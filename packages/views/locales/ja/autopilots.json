@@ -70,7 +70,6 @@
     "pause_aria": "オートパイロットを一時停止",
     "activate_aria": "オートパイロットを有効化",
     "edit": "編集",
-    "manage_access": "アクセス管理",
     "run_now": "今すぐ実行",
     "running": "実行中...",
     "toast_triggered": "オートパイロットを実行しました",
