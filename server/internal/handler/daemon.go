@@ -2342,6 +2342,24 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
+
+		// Surface prompt-cache effectiveness per run so cache hit rates are
+		// observable in logs, not just queryable from runtime_usage. The ratio
+		// is cached input over total input-side tokens; a persistently low
+		// value flags a prompt prefix that is not being reused across runs
+		// (e.g. volatile values poisoning the cacheable prefix). MUL-3887.
+		if totalInput := u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens; totalInput > 0 {
+			slog.Info("task prompt-cache usage",
+				"task_id", taskID,
+				"provider", provider,
+				"model", u.Model,
+				"input_tokens", u.InputTokens,
+				"output_tokens", u.OutputTokens,
+				"cache_read_tokens", u.CacheReadTokens,
+				"cache_write_tokens", u.CacheWriteTokens,
+				"cache_read_ratio", float64(u.CacheReadTokens)/float64(totalInput),
+			)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
