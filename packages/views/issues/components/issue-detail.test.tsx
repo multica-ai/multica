@@ -10,6 +10,12 @@ import enIssues from "../../locales/en/issues.json";
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+const mockCommentOrderStore = vi.hoisted(() => ({
+  order: "oldest_first" as "oldest_first" | "newest_first",
+  setOrder: vi.fn((order: "oldest_first" | "newest_first") => {
+    mockCommentOrderStore.order = order;
+  }),
+}));
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
@@ -258,6 +264,13 @@ vi.mock("@multica/core/issues/config", () => ({
 // Mock recent issues store
 const mockRecordVisit = vi.fn();
 vi.mock("@multica/core/issues/stores", () => ({
+  useIssueCommentOrderStore: (selector?: any) => {
+    const state = {
+      order: mockCommentOrderStore.order,
+      setOrder: mockCommentOrderStore.setOrder,
+    };
+    return selector ? selector(state) : state;
+  },
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
@@ -515,6 +528,8 @@ describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockViewport.isMobile = false;
+    mockCommentOrderStore.order = "oldest_first";
+    mockCommentOrderStore.setOrder.mockClear();
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
     // /timeline returns the entries flat in chronological order (oldest first).
@@ -794,6 +809,25 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  it("renders newest comments first and keeps the composer near the top when selected", async () => {
+    mockCommentOrderStore.order = "newest_first";
+
+    renderIssueDetail();
+
+    const newest = await screen.findByText("I can help with this");
+    const oldest = screen.getByText("Started working on this");
+    expect(
+      newest.compareDocumentPosition(oldest) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const composer = screen.getByPlaceholderText("Leave a comment...");
+    expect(
+      composer.compareDocumentPosition(newest) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("reruns the source task from an agent failure comment", async () => {
