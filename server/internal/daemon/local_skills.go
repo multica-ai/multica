@@ -128,6 +128,10 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		providerRoot = filepath.Join(home, ".cursor", "skills")
 	case "kiro":
 		providerRoot = filepath.Join(home, ".kiro", "skills")
+	case "traecli":
+		// Official TRAE CLI global skills live in ~/.traecli/skills.
+		// See https://docs.trae.cn/cli_skills
+		providerRoot = filepath.Join(home, ".traecli", "skills")
 	case "antigravity":
 		// agy inherits Gemini CLI's global skill root; see
 		// https://antigravity.google/docs/gcli-migration ("Global skills").

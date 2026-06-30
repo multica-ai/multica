@@ -108,6 +108,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverAntigravityModels(ctx, executablePath)
 		})
+	case "traecli":
+		// Official TRAE CLI is ACP-native: it returns its model catalog from
+		// session/new. Enumerate it on demand like the other ACP backends
+		// (requires a logged-in traecli; falls back to manual entry on error).
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverTraecliModels(ctx, executablePath)
+		})
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -301,6 +308,19 @@ func codexStaticModels() []Model {
 		{ID: "o3", Label: "o3", Provider: "openai"},
 		{ID: "o3-mini", Label: "o3-mini", Provider: "openai"},
 	}
+}
+
+// discoverTraecliModels spins up a throwaway `traecli acp serve --yolo` process
+// and parses the model catalog traecli returns from session/new (same shape as
+// Kiro/Qoder). The official TRAE CLI must be logged in for the catalog to be
+// non-empty; on any failure the caller falls back to the manual-entry field.
+func discoverTraecliModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "traecli",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-traecli-discovery-",
+		acpArgs:      []string{"acp", "serve", "--yolo"},
+	})
 }
 
 // cursorStaticModels is a minimal fallback used when

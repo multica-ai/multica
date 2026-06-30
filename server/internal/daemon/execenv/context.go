@@ -219,6 +219,11 @@ func skillsDirPath(workDir, provider string) string {
 		// Qoder CLI discovers project-level skills under .qoder/skills/.
 		// See https://docs.qoder.com/cli/Skills.md
 		return filepath.Join(workDir, ".qoder", "skills")
+	case "traecli":
+		// Official TRAE CLI discovers project-level skills from .traecli/skills/
+		// in the workdir (global skills live in ~/.traecli/skills). See
+		// https://docs.trae.cn/cli_skills
+		return filepath.Join(workDir, ".traecli", "skills")
 	case "antigravity":
 		// Antigravity (`agy`) auto-discovers workspace-level skills from
 		// .agents/skills/ in the workdir. The CLI inherits Gemini CLI's
