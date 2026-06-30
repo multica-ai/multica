@@ -53,6 +53,7 @@ import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
 import { HighlightExtension } from "./highlight";
 import { AutolinkEmailRepairExtension } from "./autolink-email-repair";
+import { InlineCodeFixedExtension } from "./inline-code-input";
 
 const lowlight = createLowlight(common);
 
@@ -162,8 +163,14 @@ export function createEditorExtensions(
       // list item (see list-item.ts). PatchedListItem below restores the
       // standard split → lift fallback chain.
       listItem: false,
+      // Disable StarterKit's stock Code mark so InlineCodeFixedExtension
+      // below replaces it without duplicate-mark / duplicate-input-rule
+      // collisions. See `./inline-code-input.ts` for the upstream bug being
+      // worked around (issue #4728).
+      code: false,
     }),
     PatchedListItem,
+    InlineCodeFixedExtension,
     // Checkbox task lists: `- [ ]` / `- [x]`. TaskList + TaskItem ship their own
     // markdown tokenizer / renderMarkdown, an input rule (typing `[] ` / `[x] `),
     // and a checkbox NodeView. The taskList tokenizer is consulted before
