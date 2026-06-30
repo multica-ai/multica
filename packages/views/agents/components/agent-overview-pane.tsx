@@ -243,28 +243,29 @@ export function AgentOverviewPane({
     onNavIntentHandled?.();
   }, [navIntent, requestTabChange, onNavIntentHandled]);
 
-  // CEREBRO-PATCH(agent-office-tab): FIR-2280 — the active tab's content is
-  // handed to AgentTabSections so it renders inside the owning section's card
-  // (tabs + content as one box), instead of a shared box below all three.
-  const activeTabContent = (
+  // CEREBRO-PATCH(agent-office-tab): FIR-2280 — render the content for a given
+  // tab id. AgentTabSections calls this once per section (each with that
+  // section's own shown tab) so every card carries its own tabs + content as
+  // one box, instead of a single shared content node below all three cards.
+  const renderTabContent = (tabId: string) => (
     <>
-      {effectiveTab === "activity" && <ActivityTab agent={agent} />}
-      {effectiveTab === "tasks" && (
+      {tabId === "activity" && <ActivityTab agent={agent} />}
+      {tabId === "tasks" && (
         <div className="flex h-full min-h-[520px] flex-col">
           <ActorIssuesPanel actorType="agent" actorId={agent.id} />
         </div>
       )}
       {/* Instructions now renders the versioned Agent Office surface (history /
           propose / approve / diff / restore); edited through Propose change. */}
-      {effectiveTab === "instructions" && (
+      {tabId === "instructions" && (
         <CerebroAgentContextTab agent={agent} canEdit={canEdit} />
       )}
-      {effectiveTab === "skills" && (
+      {tabId === "skills" && (
         <TabContent>
           <SkillsTab agent={agent} canEdit={canEdit} />
         </TabContent>
       )}
-      {effectiveTab === "env" && (
+      {tabId === "env" && (
         <TabContent>
           <EnvTab
             agent={agent}
@@ -274,7 +275,7 @@ export function AgentOverviewPane({
           />
         </TabContent>
       )}
-      {activeTab === "infisical" && (
+      {tabId === "infisical" && (
         <TabContent>
           <InfisicalFoldersTab
             agent={agent}
@@ -283,7 +284,7 @@ export function AgentOverviewPane({
           />
         </TabContent>
       )}
-      {effectiveTab === "custom_args" && (
+      {tabId === "custom_args" && (
         <TabContent>
           <CustomArgsTab
             agent={agent}
@@ -294,7 +295,7 @@ export function AgentOverviewPane({
           />
         </TabContent>
       )}
-      {effectiveTab === "sandbox" && (
+      {tabId === "sandbox" && (
         <TabContent>
           {/* CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — sandbox tab body */}
           <SandboxTab
@@ -304,7 +305,7 @@ export function AgentOverviewPane({
           />
         </TabContent>
       )}
-      {effectiveTab === "mcp_config" && (
+      {tabId === "mcp_config" && (
         <TabContent>
           <McpConfigTab
             agent={agent}
@@ -313,13 +314,13 @@ export function AgentOverviewPane({
           />
         </TabContent>
       )}
-      {effectiveTab === "integrations" && (
+      {tabId === "integrations" && (
         <TabContent>
           <IntegrationsTab agent={agent} />
         </TabContent>
       )}
       {detailTabs.map((tab) =>
-        "render" in tab && effectiveTab === tab.id ? (
+        "render" in tab && tabId === tab.id ? (
           <TabContent key={tab.id}>
             {tab.render({ agent, runtimes, canEdit })}
           </TabContent>
@@ -335,13 +336,13 @@ export function AgentOverviewPane({
     // the grid-driven full-height behavior on tablet and up.
     <div className="flex min-h-[60vh] flex-col overflow-hidden rounded-lg border bg-background md:h-full md:min-h-0">
       {/* CEREBRO-PATCH(agent-office-tab): FIR-1775/FIR-2280 — flat tab strip →
-          three section cards; the active tab's content renders inside its
-          owning card via the `content` prop (tabs + content as one box). */}
+          three self-contained section cards; each card renders its own shown
+          tab's content via renderContent (tabs + content as one box). */}
       <AgentTabSections
         tabs={sectionTabItems}
         activeTab={effectiveTab}
         onSelect={requestTabChange}
-        content={activeTabContent}
+        renderContent={renderTabContent}
       />
 
       {pendingTab !== null && (

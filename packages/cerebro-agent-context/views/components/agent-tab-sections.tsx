@@ -10,19 +10,24 @@
 //   - Context  (open)   — Instructions / Skills / Tools / Capabilities
 //   - Advanced (closed) — everything else (Secrets / Custom Args / Sandbox / MCP / …)
 //
-// One tab is active across all sections. The active tab's content renders
-// INSIDE the card whose group owns that tab — tab strip on top, its content
-// directly below, as a single box (FIR-2280 followup: previously the content
-// sat in one shared box below all three cards, which read as disconnected).
-// The section that owns the active tab is forced open so its content can never
-// be hidden; the other two cards show just their tab strips. Advanced is
-// collapsed by default so the page opens on the surfaces people actually visit.
+// Each section is a SELF-CONTAINED tabbed card: it remembers which of its own
+// tabs is showing and renders that tab's content INSIDE its own card — tab
+// strip on top, content directly below, as one box. So all three cards display
+// their own tabs + content at the same time, matching the requested
+// "Tabs / Indhold" per-card layout (FIR-2280 followup: previously a single
+// globally-active tab meant only one card carried content and the other two
+// showed bare tab strips, which read as "three rows of tabs").
+//
+// The pane still owns one "focus" tab (for sibling nav-intent and the
+// unsaved-changes guard); when it changes we point its owning section at it and
+// open that section. Advanced is collapsed by default so its (heavier, editable)
+// tabs only mount once the user expands it.
 //
 // Lives in the cerebro zone so the heavy layout logic stays out of the
 // upstream file — agent-overview-pane only carries a thin marked import + use,
-// and passes the active tab's content node in as `content`.
+// and passes a `renderContent(tabId)` function so each card can render its own.
 
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import {
   Collapsible,
@@ -76,23 +81,41 @@ export function AgentTabSections({
   tabs,
   activeTab,
   onSelect,
-  content,
+  renderContent,
 }: {
   tabs: AgentTabSectionItem[];
+  /** The pane's focus tab: when it changes, its owning section shows it. */
   activeTab: string;
   onSelect: (id: string) => void;
-  /** Rendered content of the active tab, placed inside its owning section. */
-  content: ReactNode;
+  /** Renders a given tab's content; each card calls this for its own tab. */
+  renderContent: (tabId: string) => ReactNode;
 }) {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(SECTIONS.map((s) => [s.id, s.defaultOpen])),
   );
+  // Each section remembers which of its own tabs is showing, so all three
+  // cards can carry their own content at once instead of just the one globally
+  // active section. Seeded lazily; the focus effect below keeps it in sync.
+  const [shownBySection, setShownBySection] = useState<Record<string, string>>(
+    {},
+  );
 
-  const activeSection = sectionForTab(activeTab);
+  // When the pane focuses a tab (initial load, a sibling's nav-intent, or a
+  // committed tab click), point its owning section at it and open that section.
+  // Routing clicks through the pane — not setting section state directly — is
+  // what preserves the unsaved-changes guard: a blocked change never lands here.
+  useEffect(() => {
+    if (!activeTab) return;
+    const owner = sectionForTab(activeTab);
+    setShownBySection((prev) =>
+      prev[owner] === activeTab ? prev : { ...prev, [owner]: activeTab },
+    );
+    setOpenSections((prev) => (prev[owner] ? prev : { ...prev, [owner]: true }));
+  }, [activeTab]);
 
   return (
     // This stack is the scrollable body of the pane: each section is its own
-    // card, and the active tab's content lives inside the card that owns it.
+    // self-contained card — its tab strip and the content of its shown tab.
     <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2 md:gap-3 md:p-3">
       {SECTIONS.map((section) => {
         // Preserve the section's declared tab order, then append any
@@ -106,12 +129,15 @@ export function AgentTabSections({
             !section.tabIds.includes(tab.id),
         );
         const sectionTabs = [...declared, ...fellThrough];
-        if (sectionTabs.length === 0) return null;
+        const firstTab = sectionTabs[0];
+        if (!firstTab) return null;
 
-        const ownsActive = activeSection === section.id;
-        // The section holding the active tab is always open — collapsing it
-        // would hide the very content the user is looking at.
-        const open = (openSections[section.id] ?? section.defaultOpen) || ownsActive;
+        // This card's own shown tab: the remembered one if it's still present,
+        // else the section's first tab. Each card renders its own content.
+        const shownTab =
+          sectionTabs.find((tab) => tab.id === shownBySection[section.id])?.id ??
+          firstTab.id;
+        const open = openSections[section.id] ?? section.defaultOpen;
         return (
           <Collapsible
             key={section.id}
@@ -137,7 +163,7 @@ export function AgentTabSections({
                     type="button"
                     onClick={() => onSelect(tab.id)}
                     className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
-                      activeTab === tab.id
+                      shownTab === tab.id
                         ? "border-foreground text-foreground"
                         : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
@@ -147,10 +173,10 @@ export function AgentTabSections({
                   </button>
                 ))}
               </div>
-              {/* The active tab's content sits in the same card as its tabs. */}
-              {ownsActive && (
-                <div className="border-t bg-background">{content}</div>
-              )}
+              {/* This card's own shown-tab content sits with its tab strip. */}
+              <div className="border-t bg-background">
+                {renderContent(shownTab)}
+              </div>
             </CollapsibleContent>
           </Collapsible>
         );

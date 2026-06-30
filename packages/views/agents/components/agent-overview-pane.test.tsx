@@ -38,6 +38,20 @@ vi.mock("../../common/actor-issues-panel", () => ({
   ActorIssuesPanel: () => <div>actor-issues-panel</div>,
 }));
 
+// FIR-2280: each section card now renders its own shown tab's content on mount,
+// so the default-open Context card eagerly mounts its Instructions surface
+// (CerebroAgentContextTab), which needs an auth store the harness doesn't set
+// up. Stub just that surface while keeping the real AgentTabSections layout —
+// the component actually under test here — intact.
+vi.mock("@multica/cerebro-agent-context/views", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@multica/cerebro-agent-context/views")>();
+  return {
+    ...actual,
+    CerebroAgentContextTab: () => <div>cerebro-agent-context-tab</div>,
+  };
+});
+
 // The pane now reads workspace context to decide whether the Integrations
 // tab is worth showing (it queries Lark installations to learn whether the
 // deployment has the feature configured). Provide a stable workspace id and
