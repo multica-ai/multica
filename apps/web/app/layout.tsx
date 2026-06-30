@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { headers, cookies } from "next/headers";
 import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
-import { WEB_BRAND_METADATA } from "@/lib/brand";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
@@ -75,10 +74,20 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.multica.ai"),
-  ...WEB_BRAND_METADATA,
+  title: {
+    default: "Multica — Project Management for Human + Agent Teams",
+    template: "%s | Multica",
+  },
+  description:
+    "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
     shortcut: ["/favicon.svg"],
+  },
+  openGraph: {
+    type: "website",
+    siteName: "Multica",
+    locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",

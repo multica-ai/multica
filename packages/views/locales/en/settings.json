@@ -81,7 +81,7 @@
     },
     "system": {
       "title": "System Notifications",
-      "description": "Control native OS notification banners shown when {{productName}} is in the background.",
+      "description": "Control native OS notification banners shown when Multica is in the background.",
       "label": "Show system notifications",
       "hint": "Show a banner from your operating system for new inbox items when the app isn't focused."
     }
@@ -181,7 +181,7 @@
     "manage_hint": "Only admins and owners can manage integrations."
   },
   "github": {
-    "page_description": "Connect a GitHub App, control how Pull Requests show up inside {{productName}}, and decide what your agents leave behind in commit history.",
+    "page_description": "Connect a GitHub App, control how Pull Requests show up inside Multica, and decide what your agents leave behind in commit history.",
     "section_master": "Enable GitHub features",
     "master_description_on": "When off, every GitHub UI affordance is hidden and no new side-effects are written. Existing data is kept on the backend. Not a development team? Just turn it off here.",
     "master_description_off": "GitHub features are turned off. The PR sidebar, co-author trailer, and auto-link are paused. Data on the backend is not deleted.",
@@ -198,7 +198,7 @@
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting…",
     "disconnect_confirm_title": "Disconnect GitHub App",
-    "disconnect_confirm_description": "{{productName}} will stop receiving webhooks for this installation. Existing PR mirrors and links are kept; reconnect any time to resume updates.",
+    "disconnect_confirm_description": "Multica will stop receiving webhooks for this installation. Existing PR mirrors and links are kept; reconnect any time to resume updates.",
     "disconnect_confirm_cancel": "Cancel",
     "disconnect_confirm_action": "Disconnect",
     "not_configured": "GitHub integration is not configured for this deployment. Operators must set",
@@ -224,7 +224,7 @@
     "toast_failed": "Failed to update GitHub settings"
   },
   "gitlab": {
-    "page_description": "Configure a GitLab personal access token and webhook to show Merge Requests inside {{productName}}.",
+    "page_description": "Configure a GitLab personal access token and webhook to show Merge Requests inside Multica.",
     "section_master": "Enable GitLab features",
     "master_description_on": "When off, every GitLab UI affordance is hidden and no new side-effects are written. Existing data is kept on the backend.",
     "master_description_off": "GitLab features are turned off. The MR sidebar and auto-link are paused. Data on the backend is not deleted.",

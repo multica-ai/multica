@@ -80,7 +80,6 @@ export function CoreProvider({
   identity,
   locale,
   resources,
-  i18nVariables,
   localeAdapter,
 }: CoreProviderProps) {
   // Initialize singletons on first render only. Dependencies are read-once:
@@ -125,7 +124,7 @@ export function CoreProvider({
   );
 
   return (
-    <I18nProvider locale={locale} resources={resources} variables={i18nVariables}>
+    <I18nProvider locale={locale} resources={resources}>
       {withAdapter}
     </I18nProvider>
   );

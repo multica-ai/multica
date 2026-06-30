@@ -14,12 +14,12 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     headlineLine1: "Your next 10 hires",
     headlineLine2: "won\u2019t be human.",
     subheading:
-      "CoStrict is an open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
+      "Multica is an open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
     cta: "Start free trial",
     downloadDesktop: "Download Desktop",
     talkToSales: "Talk to sales",
     worksWith: "Works with",
-    imageAlt: "CoStrict board view \u2014 issues managed by humans and agents",
+    imageAlt: "Multica board view \u2014 issues managed by humans and agents",
   },
 
   features: {
@@ -111,7 +111,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         {
           title: "Auto-detection on first run",
           description:
-            "CoStrict scans for 11 supported coding tools \u2014 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 11 supported coding tools \u2014 Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -154,13 +154,13 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     headlineLine1: "Open source",
     headlineLine2: "for all.",
     description:
-      "CoStrict is fully open source. Inspect every line, self-host on your own terms, and shape the future of human + agent collaboration.",
+      "Multica is fully open source. Inspect every line, self-host on your own terms, and shape the future of human + agent collaboration.",
     cta: "Star on GitHub",
     highlights: [
       {
         title: "Self-host anywhere",
         description:
-          "Run CoStrict on your own infrastructure. Docker Compose, single binary, or Kubernetes \u2014 your data never leaves your network.",
+          "Run Multica on your own infrastructure. Docker Compose, single binary, or Kubernetes \u2014 your data never leaves your network.",
       },
       {
         title: "No vendor lock-in",
@@ -185,30 +185,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     headline: "Questions & answers.",
     items: [
       {
-        question: "What coding agents does CoStrict support?",
+        question: "What coding agents does Multica support?",
         answer:
-          "CoStrict supports 11 coding tools out of the box: Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 11 coding tools out of the box: Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
         answer:
-          "Both. You can self-host CoStrict on your own infrastructure with Docker Compose or Kubernetes, or use our hosted cloud version. Your data, your choice.",
+          "Both. You can self-host Multica on your own infrastructure with Docker Compose or Kubernetes, or use our hosted cloud version. Your data, your choice.",
       },
       {
         question:
           "How is this different from just using coding agents directly?",
         answer:
-          "Coding agents are great at executing. CoStrict adds the management layer: task queues, team coordination, skill reuse, runtime monitoring, and a unified view of what every agent is doing. Think of it as the project manager for your agents.",
+          "Coding agents are great at executing. Multica adds the management layer: task queues, team coordination, skill reuse, runtime monitoring, and a unified view of what every agent is doing. Think of it as the project manager for your agents.",
       },
       {
         question: "Can agents work on long-running tasks autonomously?",
         answer:
-          "Yes. CoStrict manages the full task lifecycle \u2014 enqueue, claim, execute, complete or fail. Agents report blockers proactively and stream progress in real time. You can check in whenever you want or let them run overnight.",
+          "Yes. Multica manages the full task lifecycle \u2014 enqueue, claim, execute, complete or fail. Agents report blockers proactively and stream progress in real time. You can check in whenever you want or let them run overnight.",
       },
       {
         question: "Is my code safe? Where does agent execution happen?",
         answer:
-          "Agent execution happens on your machine (local daemon) or your own cloud infrastructure. Code never passes through CoStrict servers. The platform only coordinates task state and broadcasts events.",
+          "Agent execution happens on your machine (local daemon) or your own cloud infrastructure. Code never passes through Multica servers. The platform only coordinates task state and broadcasts events.",
       },
       {
         question: "How many agents can I run?",
@@ -254,22 +254,22 @@ export function createEnDict(allowSignup: boolean): LandingDict {
   },
 
   about: {
-    title: "About CoStrict",
+    title: "About Multica",
     nameLine: {
-      prefix: "Open-source project management for human + agent teams.",
-      mul: "",
-      tiplexed: "",
-      i: "",
-      nformationAnd: "",
-      c: "",
-      omputing: "",
-      a: "",
-      gent: "",
+      prefix: "Multica \u2014 ",
+      mul: "Mul",
+      tiplexed: "tiplexed ",
+      i: "I",
+      nformationAnd: "nformation and ",
+      c: "C",
+      omputing: "omputing ",
+      a: "A",
+      gent: "gent.",
     },
     paragraphs: [
-      "CoStrict is built for teams where humans and AI agents plan, execute, and learn together in one shared workspace.",
-      "We think the same inflection is happening again. For decades, software teams have been single-threaded \u2014 one engineer, one task, one context switch at a time. AI agents change that equation. CoStrict brings time-sharing back, but for an era where the \u201cusers\u201d multiplexing the system are both humans and autonomous agents.",
-      "In CoStrict, agents are first-class teammates. They get assigned issues, report progress, raise blockers, and ship code \u2014 just like their human colleagues. The assignee picker, the activity timeline, the task lifecycle, and the runtime infrastructure are all built around this idea from day one.",
+      "The name is a nod to Multics, the pioneering operating system of the 1960s that introduced time-sharing \u2014 letting multiple users share a single machine as if each had it to themselves. Unix was born as a deliberate simplification of Multics: one user, one task, one elegant philosophy.",
+      "We think the same inflection is happening again. For decades, software teams have been single-threaded \u2014 one engineer, one task, one context switch at a time. AI agents change that equation. Multica brings time-sharing back, but for an era where the \u201cusers\u201d multiplexing the system are both humans and autonomous agents.",
+      "In Multica, agents are first-class teammates. They get assigned issues, report progress, raise blockers, and ship code \u2014 just like their human colleagues. The assignee picker, the activity timeline, the task lifecycle, and the runtime infrastructure are all built around this idea from day one.",
       "Like Multics before it, the bet is on multiplexing: a small team shouldn\u2019t feel small. With the right system, two engineers and a fleet of agents can move like twenty.",
       "The platform is fully open source and self-hostable. Your data stays on your infrastructure. Inspect every line, extend the API, bring your own LLM providers, and contribute back to the community.",
     ],
@@ -278,7 +278,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
 
   changelog: {
     title: "Changelog",
-    subtitle: "New updates and improvements to CoStrict.",
+    subtitle: "New updates and improvements to Multica.",
     toc: "All releases",
     categories: {
       features: "New Features",
@@ -1295,36 +1295,36 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     hero: {
       macArm64: {
         title: "Multica for macOS",
-        sub: "Current CoStrict desktop client, installed as Multica · Apple Silicon · bundled daemon, zero setup",
+        sub: "Apple Silicon · bundled daemon, zero setup",
         primary: "Download (.dmg)",
         altZip: "or download .zip",
       },
       macIntel: {
         title: "Multica for macOS",
-        sub: "Current CoStrict desktop client, installed as Multica · Apple Silicon required — Intel Macs not yet supported.",
+        sub: "Apple Silicon required — Intel Macs not yet supported.",
         disabledCta: "Apple Silicon required",
         intelHint:
           "On an Intel Mac? Use the CLI below — it runs the same daemon.",
       },
       winX64: {
         title: "Multica for Windows",
-        sub: "Current CoStrict desktop client, installed as Multica · Bundled daemon, zero setup",
+        sub: "Bundled daemon, zero setup",
         primary: "Download (.exe)",
       },
       winArm64: {
         title: "Multica for Windows",
-        sub: "Current CoStrict desktop client, installed as Multica · ARM · bundled daemon, zero setup",
+        sub: "ARM · bundled daemon, zero setup",
         primary: "Download (.exe)",
       },
       linux: {
         title: "Multica for Linux",
-        sub: "Current CoStrict desktop client, installed as Multica · bundled daemon, zero setup",
+        sub: "Bundled daemon, zero setup",
         primary: "Download AppImage",
         altFormats: "or .deb / .rpm",
       },
       unknown: {
         title: "Choose your platform",
-        sub: "The current CoStrict desktop client is still installed as Multica. All installers are listed below.",
+        sub: "All installers are listed below.",
       },
       safariMacHint: "On an Intel Mac? Use the CLI below.",
       archFallbackHint: "Wrong architecture? See all formats below.",
@@ -1347,8 +1347,8 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       unavailable: "Not available",
     },
     cli: {
-      title: "Prefer the Multica CLI?",
-      sub: "CoStrict currently uses the Multica CLI for servers, remote dev boxes, and headless setups. Same daemon as Desktop, installed via terminal.",
+      title: "Prefer the CLI?",
+      sub: "For servers, remote dev boxes, and headless setups. Same daemon as Desktop, installed via terminal.",
       installLabel: "Install",
       startLabel: "Start daemon",
       sshNote: "Already on a server? Same commands work over SSH.",
@@ -1369,7 +1369,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
   contactSales: {
     pageTitle: "Contact Sales",
     pageDescription:
-      "Talk to the CoStrict team about rolling out human + agent workflows at your company.",
+      "Talk to the Multica team about rolling out human + agent workflows at your company.",
     eyebrow: "Contact Sales",
     title: "Let’s understand your needs",
     subtitle:
@@ -1387,10 +1387,10 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       companyName: "Company name",
       companySize: "Company size",
       countryRegion: "Country / Region",
-      useCase: "How do you plan to use or collaborate with CoStrict?",
+      useCase: "How do you plan to use or collaborate with Multica?",
       goals: "Your goals or challenges",
       goalsHint:
-        "Tell us what you’d like to achieve with CoStrict or the challenges you’re facing. The more details you provide, the better we can support you.",
+        "Tell us what you’d like to achieve with Multica or the challenges you’re facing. The more details you provide, the better we can support you.",
       selectPlaceholder: "Please select",
       submit: "Submit",
       submitting: "Submitting…",
@@ -1404,10 +1404,10 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       { value: "1000+", label: "1,000+ employees" },
     ],
     useCases: [
-      { value: "evaluate", label: "Evaluating CoStrict for my team" },
-      { value: "adopt_team", label: "Rolling out CoStrict to a team or company" },
+      { value: "evaluate", label: "Evaluating Multica for my team" },
+      { value: "adopt_team", label: "Rolling out Multica to a team or company" },
       { value: "self_host", label: "Self-hosting on our own infrastructure" },
-      { value: "integrate", label: "Integrating CoStrict with existing tools" },
+      { value: "integrate", label: "Integrating Multica with existing tools" },
       { value: "partner", label: "Partnership or reseller inquiry" },
       { value: "other", label: "Something else" },
     ],
@@ -1459,7 +1459,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       outreach:
         "I’d like to receive one-to-one communication from Multica, Inc., including service updates, support inquiries, and business-related follow-ups.",
       updates:
-        "I’d like to receive product updates, insights, and event invitations from CoStrict.",
+        "I’d like to receive product updates, insights, and event invitations from Multica.",
       unsubscribe:
         "You can unsubscribe from our communications at any time. For more details on how we handle your data and privacy rights, please review our",
       submitConsent:
@@ -1470,7 +1470,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     success: {
       title: "Thanks — we got it.",
       message:
-        "A member of the CoStrict team will respond within three business days. In the meantime, feel free to explore the docs or star us on GitHub.",
+        "A member of the Multica team will respond within three business days. In the meantime, feel free to explore the docs or star us on GitHub.",
       cta: "Back to home",
     },
     errors: {

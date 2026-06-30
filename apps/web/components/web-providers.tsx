@@ -11,10 +11,7 @@ import {
   setLoggedInCookie,
   clearLoggedInCookie,
 } from "@/features/auth/auth-cookie";
-import { WEB_BRAND_NAME } from "@/lib/brand";
 import { PageviewTracker } from "./pageview-tracker";
-
-const WEB_I18N_VARIABLES = { productName: WEB_BRAND_NAME };
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -90,7 +87,6 @@ export function WebProviders({
       identity={identity}
       locale={locale}
       resources={resources}
-      i18nVariables={WEB_I18N_VARIABLES}
       localeAdapter={localeAdapter}
     >
       {/* Suspense boundary is required by Next.js for useSearchParams in

@@ -17,7 +17,7 @@
   "new_page": {
     "back": "Back",
     "log_out": "Log out",
-    "title": "Welcome to {{productName}}",
+    "title": "Welcome to Multica",
     "description": "One workspace where you and your AI teammates work side by side — taking issues, leaving comments, sharing the same context.",
     "invite_hint": "You can invite teammates once your workspace is ready."
   },

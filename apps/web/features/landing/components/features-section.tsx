@@ -163,7 +163,7 @@ function TeammatesVisual() {
       {/* Header bar */}
       <div className="flex h-10 shrink-0 items-center border-b bg-background px-4 text-sm">
         <div className="flex items-center gap-1.5 min-w-0 text-xs">
-          <span className="text-muted-foreground">CoStrict Demo</span>
+          <span className="text-muted-foreground">Multica Demo</span>
           <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
           <span className="text-muted-foreground">MUL-18</span>
           <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
@@ -414,7 +414,7 @@ function AutonomousVisual() {
       {/* Header bar */}
       <div className="flex h-10 shrink-0 items-center border-b bg-background px-4 text-sm">
         <div className="flex items-center gap-1.5 min-w-0 text-xs">
-          <span className="text-muted-foreground">CoStrict Demo</span>
+          <span className="text-muted-foreground">Multica Demo</span>
           <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
           <span className="text-muted-foreground">MUL-18</span>
           <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
