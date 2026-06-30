@@ -294,6 +294,32 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.33",
+        date: "2026-06-30",
+        title: "Autopilot 协作权限、Slack 历史回灌、技能包归档导入",
+        changes: [],
+        features: [
+          "Autopilot 新增清晰的写权限分层，详情页提供「管理协作者」入口，可把单个 Autopilot 的写权限授予指定成员。",
+          "Slack 频道可以把过往对话回灌到 Multica，智能体一进入频道即拥有完整上下文。",
+          "Slack 智能体处理消息期间会在用户消息上加 👀 反应表情，处理结束后稳定清除，不再出现卡死。",
+          "技能包支持从本地 .skill / .zip 归档导入。",
+          "multica issue 命令不再接受短 UUID 前缀，请使用 Issue Key（MUL-123）或完整 UUID。",
+          "Agents 页面适配移动端。",
+        ],
+        improvements: [
+          "重写了评论路由级联：父链 @ 提及、智能体署名回复、小队 Leader 兜底，三条路径汇入同一条经过充分测试的流程。",
+          "语言包清理了 117 个事实上不渲染的 _one 复数键，并新增校验防止再次回归。",
+          "内置运行时清单中失效的 Gemini 替换为实际使用的 CodeBuddy。",
+          "自托管预检允许更新版的 Docker Compose CLI 插件，同时继续拦截 Docker Compose v1。",
+        ],
+        fixes: [
+          "WebSocket 断线重连后，守护进程会立即与服务端对账正在执行的任务和工作区状态。（社区贡献）",
+          "Antigravity 智能体「完成回合但未输出任何内容」时，回复会被从运行记录中补回，对话不再空白。",
+          "在拒绝 CLIENT SETNAME 的托管 Redis 上，服务端启动不再失败。（社区贡献）",
+          "智能体活动悬浮卡片头部计数改为「N 个任务正在执行」，与工作区显示保持一致。",
+        ],
+      },
+      {
         version: "0.3.32",
         date: "2026-06-29",
         title: "支持解除父子 Issue、守护进程重连更稳，附件预览处处可开",
