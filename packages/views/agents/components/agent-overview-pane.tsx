@@ -243,100 +243,106 @@ export function AgentOverviewPane({
     onNavIntentHandled?.();
   }, [navIntent, requestTabChange, onNavIntentHandled]);
 
+  // CEREBRO-PATCH(agent-office-tab): FIR-2280 — the active tab's content is
+  // handed to AgentTabSections so it renders inside the owning section's card
+  // (tabs + content as one box), instead of a shared box below all three.
+  const activeTabContent = (
+    <>
+      {effectiveTab === "activity" && <ActivityTab agent={agent} />}
+      {effectiveTab === "tasks" && (
+        <div className="flex h-full min-h-[520px] flex-col">
+          <ActorIssuesPanel actorType="agent" actorId={agent.id} />
+        </div>
+      )}
+      {/* Instructions now renders the versioned Agent Office surface (history /
+          propose / approve / diff / restore); edited through Propose change. */}
+      {effectiveTab === "instructions" && (
+        <CerebroAgentContextTab agent={agent} canEdit={canEdit} />
+      )}
+      {effectiveTab === "skills" && (
+        <TabContent>
+          <SkillsTab agent={agent} canEdit={canEdit} />
+        </TabContent>
+      )}
+      {effectiveTab === "env" && (
+        <TabContent>
+          <EnvTab
+            agent={agent}
+            // CEREBRO-PATCH(env-tab-redacted-readonly): gate edits when redacted by policy/role.
+            readOnly={!canEdit || agent.custom_env_redacted}
+            onDirtyChange={setActiveDirty}
+          />
+        </TabContent>
+      )}
+      {activeTab === "infisical" && (
+        <TabContent>
+          <InfisicalFoldersTab
+            agent={agent}
+            readOnly={!canEdit}
+            onDirtyChange={setActiveDirty}
+          />
+        </TabContent>
+      )}
+      {effectiveTab === "custom_args" && (
+        <TabContent>
+          <CustomArgsTab
+            agent={agent}
+            runtimeDevice={runtime ?? undefined}
+            readOnly={!canEdit}
+            onSave={(updates) => onUpdate(agent.id, updates)}
+            onDirtyChange={setActiveDirty}
+          />
+        </TabContent>
+      )}
+      {effectiveTab === "sandbox" && (
+        <TabContent>
+          {/* CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — sandbox tab body */}
+          <SandboxTab
+            agent={agent}
+            canEdit={canEdit}
+            onSave={(updates) => onUpdate(agent.id, updates)}
+          />
+        </TabContent>
+      )}
+      {effectiveTab === "mcp_config" && (
+        <TabContent>
+          <McpConfigTab
+            agent={agent}
+            onSave={(updates) => onUpdate(agent.id, updates)}
+            onDirtyChange={setActiveDirty}
+          />
+        </TabContent>
+      )}
+      {effectiveTab === "integrations" && (
+        <TabContent>
+          <IntegrationsTab agent={agent} />
+        </TabContent>
+      )}
+      {detailTabs.map((tab) =>
+        "render" in tab && effectiveTab === tab.id ? (
+          <TabContent key={tab.id}>
+            {tab.render({ agent, runtimes, canEdit })}
+          </TabContent>
+        ) : null,
+      )}
+    </>
+  );
+
   return (
     // On mobile the parent stacks the inspector and overview and scrolls the
     // page itself, so this pane has no inherited height. `min-h-[60vh]` keeps
     // the tab content area usably tall when content is short; `md:` restores
     // the grid-driven full-height behavior on tablet and up.
     <div className="flex min-h-[60vh] flex-col overflow-hidden rounded-lg border bg-background md:h-full md:min-h-0">
-      {/* CEREBRO-PATCH(agent-office-tab): FIR-1775 — flat tab strip → three
-          collapsible sections (Activity / Setup / Advanced). */}
+      {/* CEREBRO-PATCH(agent-office-tab): FIR-1775/FIR-2280 — flat tab strip →
+          three section cards; the active tab's content renders inside its
+          owning card via the `content` prop (tabs + content as one box). */}
       <AgentTabSections
         tabs={sectionTabItems}
         activeTab={effectiveTab}
         onSelect={requestTabChange}
+        content={activeTabContent}
       />
-
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        {effectiveTab === "activity" && <ActivityTab agent={agent} />}
-        {effectiveTab === "tasks" && (
-          <div className="flex h-full min-h-[520px] flex-col">
-            <ActorIssuesPanel actorType="agent" actorId={agent.id} />
-          </div>
-        )}
-        {/* CEREBRO-PATCH(agent-office-tab): FIR-1775 — Instructions now renders the
-            versioned Agent Office surface (history / propose / approve / diff /
-            restore); instructions are edited through Propose change. */}
-        {effectiveTab === "instructions" && (
-          <CerebroAgentContextTab agent={agent} canEdit={canEdit} />
-        )}
-        {effectiveTab === "skills" && (
-          <TabContent>
-            <SkillsTab agent={agent} canEdit={canEdit} />
-          </TabContent>
-        )}
-        {effectiveTab === "env" && (
-          <TabContent>
-            <EnvTab
-              agent={agent}
-              // CEREBRO-PATCH(env-tab-redacted-readonly): gate edits when redacted by policy/role.
-              readOnly={!canEdit || agent.custom_env_redacted}
-              onDirtyChange={setActiveDirty}
-            />
-          </TabContent>
-        )}
-        {activeTab === "infisical" && (
-          <TabContent>
-            <InfisicalFoldersTab
-              agent={agent}
-              readOnly={!canEdit}
-              onDirtyChange={setActiveDirty}
-            />
-          </TabContent>
-        )}
-        {effectiveTab === "custom_args" && (
-          <TabContent>
-            <CustomArgsTab
-              agent={agent}
-              runtimeDevice={runtime ?? undefined}
-              readOnly={!canEdit}
-              onSave={(updates) => onUpdate(agent.id, updates)}
-              onDirtyChange={setActiveDirty}
-            />
-          </TabContent>
-        )}
-        {effectiveTab === "sandbox" && (
-          <TabContent>
-            {/* CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — sandbox tab body */}
-            <SandboxTab
-              agent={agent}
-              canEdit={canEdit}
-              onSave={(updates) => onUpdate(agent.id, updates)}
-            />
-          </TabContent>
-        )}
-        {effectiveTab === "mcp_config" && (
-          <TabContent>
-            <McpConfigTab
-              agent={agent}
-              onSave={(updates) => onUpdate(agent.id, updates)}
-              onDirtyChange={setActiveDirty}
-            />
-          </TabContent>
-        )}
-        {effectiveTab === "integrations" && (
-          <TabContent>
-            <IntegrationsTab agent={agent} />
-          </TabContent>
-        )}
-        {detailTabs.map((tab) =>
-          "render" in tab && effectiveTab === tab.id ? (
-            <TabContent key={tab.id}>
-              {tab.render({ agent, runtimes, canEdit })}
-            </TabContent>
-          ) : null,
-        )}
-      </div>
 
       {pendingTab !== null && (
         <AlertDialog

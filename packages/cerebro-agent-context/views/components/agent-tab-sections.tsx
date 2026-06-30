@@ -10,15 +10,19 @@
 //   - Context  (open)   — Instructions / Skills / Tools / Capabilities
 //   - Advanced (closed) — everything else (Secrets / Custom Args / Sandbox / MCP / …)
 //
-// One tab is active across all sections; collapsing a section only hides its
-// button row, never the active tab's content (the content area stays in the
-// upstream pane). Advanced is collapsed by default so the page opens on the
-// surfaces people actually visit.
+// One tab is active across all sections. The active tab's content renders
+// INSIDE the card whose group owns that tab — tab strip on top, its content
+// directly below, as a single box (FIR-2280 followup: previously the content
+// sat in one shared box below all three cards, which read as disconnected).
+// The section that owns the active tab is forced open so its content can never
+// be hidden; the other two cards show just their tab strips. Advanced is
+// collapsed by default so the page opens on the surfaces people actually visit.
 //
 // Lives in the cerebro zone so the heavy layout logic stays out of the
-// upstream file — agent-overview-pane only carries a thin marked import + use.
+// upstream file — agent-overview-pane only carries a thin marked import + use,
+// and passes the active tab's content node in as `content`.
 
-import { useState, type ComponentType } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import {
   Collapsible,
@@ -72,17 +76,24 @@ export function AgentTabSections({
   tabs,
   activeTab,
   onSelect,
+  content,
 }: {
   tabs: AgentTabSectionItem[];
   activeTab: string;
   onSelect: (id: string) => void;
+  /** Rendered content of the active tab, placed inside its owning section. */
+  content: ReactNode;
 }) {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(SECTIONS.map((s) => [s.id, s.defaultOpen])),
   );
 
+  const activeSection = sectionForTab(activeTab);
+
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-b p-2 md:gap-3 md:p-3">
+    // This stack is the scrollable body of the pane: each section is its own
+    // card, and the active tab's content lives inside the card that owns it.
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2 md:gap-3 md:p-3">
       {SECTIONS.map((section) => {
         // Preserve the section's declared tab order, then append any
         // unclaimed tabs that fell through to this section (Advanced only).
@@ -97,7 +108,10 @@ export function AgentTabSections({
         const sectionTabs = [...declared, ...fellThrough];
         if (sectionTabs.length === 0) return null;
 
-        const open = openSections[section.id] ?? section.defaultOpen;
+        const ownsActive = activeSection === section.id;
+        // The section holding the active tab is always open — collapsing it
+        // would hide the very content the user is looking at.
+        const open = (openSections[section.id] ?? section.defaultOpen) || ownsActive;
         return (
           <Collapsible
             key={section.id}
@@ -105,7 +119,7 @@ export function AgentTabSections({
             onOpenChange={(next) =>
               setOpenSections((prev) => ({ ...prev, [section.id]: next }))
             }
-            className="rounded-lg border bg-muted/20"
+            className="flex shrink-0 flex-col overflow-hidden rounded-lg border bg-muted/20"
           >
             <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground md:px-4">
               <ChevronDown
@@ -133,6 +147,10 @@ export function AgentTabSections({
                   </button>
                 ))}
               </div>
+              {/* The active tab's content sits in the same card as its tabs. */}
+              {ownsActive && (
+                <div className="border-t bg-background">{content}</div>
+              )}
             </CollapsibleContent>
           </Collapsible>
         );
