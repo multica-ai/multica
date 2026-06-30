@@ -20,6 +20,21 @@ vi.mock("@tanstack/react-query", async () => {
     ...actual,
     useQuery: (opts: { queryKey: unknown[] }) => {
       queryKeys.push(opts.queryKey);
+      if (opts.queryKey[0] === "llm-limit-status") {
+        return {
+          data: {
+            five_hour_pct: 16,
+            seven_day_pct: 8,
+            sonnet_pct: 20,
+            gpt_five_hour_pct: 12,
+            gpt_seven_day_pct: 4,
+            weekly_progress_pct: 71,
+            gpt_status_source: "codex_status_snapshot",
+          },
+          isFetching: false,
+          refetch: vi.fn(),
+        };
+      }
       return { data: undefined, isLoading: true };
     },
   };
@@ -70,6 +85,7 @@ describe("DashboardPage — LLM limit gauge acceptance markers", () => {
     expect(document.body.textContent).toContain("GPT 7d limit");
     expect(document.querySelector("[data-llm-refresh-interval-ms='60000']")).toBeTruthy();
     expect(document.querySelector("[data-acceptance='llm-gauge-manual-refresh']")).toBeTruthy();
+    expect(document.querySelector("[data-acceptance='gpt-token-status'][data-codex-status='ok']")).toBeTruthy();
   });
 });
 

@@ -115,6 +115,7 @@ type LlmLimitStatus = {
   sonnet_reset_label?: string;
   gpt_five_reset_label?: string;
   gpt_seven_reset_label?: string;
+  gpt_status_source?: string;
   updated_at?: string;
 };
 
@@ -498,6 +499,7 @@ function LlmLimitGauge({
   onRefresh: () => void;
 }) {
   const weekDayIndex = Math.max(0, Math.min(6, Math.round(data.week_day_index ?? 0)));
+  const codexStatus = data.gpt_status_source === "codex_status_snapshot" ? "ok" : "stale";
   const cards = [
     { label: "세션 (5h)", pct: data.five_hour_pct, reset: data.five_hour_reset_label },
     { label: "주간 전체모델 (7d)", pct: data.seven_day_pct, reset: data.seven_day_reset_label },
@@ -510,6 +512,8 @@ function LlmLimitGauge({
     <section
       className="rounded-lg border bg-card p-4"
       data-llm-refresh-interval-ms="60000"
+      data-acceptance="gpt-token-status"
+      data-codex-status={codexStatus}
       aria-label="LLM 잔량 게이지"
     >
       <div className="mb-4 flex items-start justify-between gap-3">
