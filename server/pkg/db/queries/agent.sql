@@ -665,7 +665,43 @@ SET status = 'queued'
 WHERE runtime_id = @runtime_id
   AND status = 'deferred'
   AND fire_at <= now()
+  AND (context IS NULL OR context->>'type' IS DISTINCT FROM 'runtime_restore')
 RETURNING *;
+
+-- name: ListDueDeferredRuntimeRestoreTasks :many
+SELECT * FROM agent_task_queue
+WHERE runtime_id = @runtime_id
+  AND status = 'deferred'
+  AND fire_at <= now()
+  AND context->>'type' = 'runtime_restore';
+
+-- name: CancelDeferredRuntimeRestoreForAgent :many
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+WHERE agent_id = @agent_id
+  AND status = 'deferred'
+  AND context->>'type' = 'runtime_restore'
+RETURNING *;
+
+-- name: CreateDeferredRuntimeRestoreTask :one
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, context, fire_at
+)
+VALUES (
+    @agent_id, @runtime_id, @issue_id, 'deferred', 0, @context, @fire_at
+)
+RETURNING *;
+
+-- name: CompleteRuntimeRestoreTask :one
+UPDATE agent_task_queue
+SET status = 'completed', completed_at = now(), prepare_lease_expires_at = NULL
+WHERE id = $1 AND status IN ('deferred', 'queued')
+RETURNING *;
+
+-- name: UpdateAgentTaskRuntime :exec
+UPDATE agent_task_queue
+SET runtime_id = $2
+WHERE id = $1;
 
 -- name: CancelDeferredEscalationsForTask :many
 UPDATE agent_task_queue

@@ -1232,6 +1232,9 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 }
 
 func (s *TaskService) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+	if err := s.promoteDueRuntimeRestoreTasks(ctx, runtimeID); err != nil {
+		return err
+	}
 	tasks, err := s.Queries.PromoteDueDeferredTasksForRuntime(ctx, runtimeID)
 	if err != nil {
 		return fmt.Errorf("promote due deferred tasks: %w", err)
@@ -1829,6 +1832,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		)
 		return nil, err
 	}
+	s.maybeApplyRuntimeRateLimitFallback(ctx, parent, &child)
 	slog.Info("task auto-retry enqueued",
 		"parent_task_id", util.UUIDToString(parent.ID),
 		"child_task_id", util.UUIDToString(child.ID),
