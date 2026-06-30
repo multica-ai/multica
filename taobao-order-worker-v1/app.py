@@ -14,6 +14,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from order_client import OrderApiClient, OrderApiClientConfig, UpstreamOrderAPIError
+
 
 def env_bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
@@ -38,6 +40,8 @@ ORDER_API_BASE_URL = os.getenv("ORDER_API_BASE_URL", "").rstrip("/")
 ORDER_API_TOKEN = os.getenv("ORDER_API_TOKEN", "")
 ORDER_API_GET_ORDER_PATH = os.getenv("ORDER_API_GET_ORDER_PATH", "/api/orders/{tid}")
 ORDER_API_TIMEOUT_SECONDS = float(os.getenv("ORDER_API_TIMEOUT_SECONDS", "10"))
+ORDER_API_AUTH_HEADER = os.getenv("ORDER_API_AUTH_HEADER", "Authorization")
+ORDER_API_AUTH_SCHEME = os.getenv("ORDER_API_AUTH_SCHEME", "Bearer")
 ORDER_API_WRITE_THROUGH = env_bool("ORDER_API_WRITE_THROUGH", False)
 DEDUPE_DB_PATH = os.getenv("DEDUPE_DB_PATH", "./data/order_worker.sqlite3")
 ALLOW_PLAIN_RECEIVER_INFO = env_bool("ALLOW_PLAIN_RECEIVER_INFO", True)
@@ -565,34 +569,31 @@ def upstream_detail(resp: httpx.Response, service: str) -> dict[str, Any]:
     return {"message": f"{service} returned non-2xx", "status_code": resp.status_code, "body": upstream_body(resp)}
 
 
+def create_order_api_client() -> OrderApiClient:
+    return OrderApiClient(
+        OrderApiClientConfig(
+            base_url=ORDER_API_BASE_URL,
+            token=ORDER_API_TOKEN,
+            get_order_path=ORDER_API_GET_ORDER_PATH,
+            timeout_seconds=ORDER_API_TIMEOUT_SECONDS,
+            auth_header=ORDER_API_AUTH_HEADER,
+            auth_scheme=ORDER_API_AUTH_SCHEME,
+        )
+    )
+
+
+def order_api_error_to_http(exc: UpstreamOrderAPIError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+
 async def get_order_from_source(tid: str, plain: bool) -> OrderDetail:
     if not ORDER_API_BASE_URL:
         return mock_order(tid)
 
-    path = ORDER_API_GET_ORDER_PATH.format(tid=tid)
-    headers = {"Authorization": f"Bearer {ORDER_API_TOKEN}"} if ORDER_API_TOKEN else {}
     try:
-        async with httpx.AsyncClient(timeout=ORDER_API_TIMEOUT_SECONDS) as client:
-            resp = await client.get(
-                f"{ORDER_API_BASE_URL}{path}",
-                params={"plain": str(plain).lower()},
-                headers=headers,
-            )
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="order API timeout") from None
-    except httpx.RequestError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"message": "order API request failed", "error": str(exc)},
-        ) from exc
-
-    if resp.status_code == status.HTTP_404_NOT_FOUND:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="order not found")
-    if resp.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="order API upstream auth failed")
-    if not 200 <= resp.status_code < 300:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=upstream_detail(resp, "order API"))
-    return OrderDetail.model_validate(resp.json())
+        return OrderDetail.model_validate(await create_order_api_client().get_order(tid, plain=plain))
+    except UpstreamOrderAPIError as exc:
+        raise order_api_error_to_http(exc) from exc
 
 
 async def post_multica_autopilot(payload: dict[str, Any]) -> dict[str, Any]:
@@ -630,20 +631,10 @@ async def upstream_write(method: str, path: str, payload: dict[str, Any]) -> dic
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="ORDER_API_WRITE_THROUGH=true requires ORDER_API_BASE_URL",
         )
-    headers = {"Authorization": f"Bearer {ORDER_API_TOKEN}"} if ORDER_API_TOKEN else {}
     try:
-        async with httpx.AsyncClient(timeout=ORDER_API_TIMEOUT_SECONDS) as client:
-            resp = await client.request(method, f"{ORDER_API_BASE_URL}{path}", json=payload, headers=headers)
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="order API write timeout") from None
-    except httpx.RequestError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"message": "order API write request failed", "error": str(exc)},
-        ) from exc
-    if not 200 <= resp.status_code < 300:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=upstream_detail(resp, "order API write"))
-    return {"status_code": resp.status_code, "body": upstream_body(resp)}
+        return await create_order_api_client().write_action(method, path, payload)
+    except UpstreamOrderAPIError as exc:
+        raise order_api_error_to_http(exc) from exc
 
 
 def validate_mobile(phone: Optional[str]) -> bool:

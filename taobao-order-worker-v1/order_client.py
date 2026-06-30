@@ -1,0 +1,208 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+import httpx
+
+
+class OrderNormalizationError(ValueError):
+    pass
+
+
+class UpstreamOrderAPIError(Exception):
+    def __init__(self, status_code: int, detail: Any) -> None:
+        super().__init__(str(detail))
+        self.status_code = status_code
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class OrderApiClientConfig:
+    base_url: str
+    token: str = ""
+    get_order_path: str = "/api/orders/{tid}"
+    timeout_seconds: float = 10.0
+    auth_header: str = "Authorization"
+    auth_scheme: str = "Bearer"
+
+
+def _first_present(mapping: dict[str, Any], paths: list[str], default: Any = None) -> Any:
+    for path in paths:
+        value = _get_path(mapping, path)
+        if value is not None:
+            return value
+    return default
+
+
+def _get_path(mapping: dict[str, Any], path: str) -> Any:
+    current: Any = mapping
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _as_str(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    return str(value)
+
+
+def _normalize_buyer(upstream: dict[str, Any]) -> dict[str, Any]:
+    buyer = _first_present(upstream, ["buyer", "receiver", "receive_info", "recipient"], {})
+    if not isinstance(buyer, dict):
+        buyer = {}
+    merged = {**upstream, **buyer}
+    return {
+        "buyer_nick": _first_present(merged, ["buyer_nick", "buyerNick", "buyer_nickname", "nick"]),
+        "buyer_open_id": _first_present(merged, ["buyer_open_id", "buyerOpenId", "buyer_id", "buyerId"]),
+        "receiver_oaid": _first_present(merged, ["receiver_oaid", "receiverOaid", "oaid"]),
+        "receiver_name": _first_present(merged, ["receiver_name", "receiverName", "name", "recipientName"]),
+        "receiver_mobile": _first_present(merged, ["receiver_mobile", "receiverMobile", "mobile", "phone"]),
+        "receiver_phone": _first_present(merged, ["receiver_phone", "receiverPhone", "tel"]),
+        "receiver_state": _first_present(merged, ["receiver_state", "receiverState", "province", "state"]),
+        "receiver_city": _first_present(merged, ["receiver_city", "receiverCity", "city"]),
+        "receiver_district": _first_present(merged, ["receiver_district", "receiverDistrict", "district", "area"]),
+        "receiver_address": _first_present(merged, ["receiver_address", "receiverAddress", "address", "detailAddress"]),
+        "receiver_zip": _first_present(merged, ["receiver_zip", "receiverZip", "zip", "postcode"]),
+    }
+
+
+def _normalize_items(upstream: dict[str, Any]) -> list[dict[str, Any]]:
+    items = _first_present(upstream, ["orders", "items", "sub_orders", "subOrders", "order_items"], [])
+    if not isinstance(items, list):
+        raise OrderNormalizationError("order items must be a list")
+    if not items:
+        raise OrderNormalizationError("order items must not be empty")
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise OrderNormalizationError(f"order item at index {index} must be an object")
+        normalized.append(
+            {
+                "oid": _as_str(_first_present(item, ["oid", "order_id", "orderId", "id"], f"item-{index + 1}")),
+                "sku_id": _first_present(item, ["sku_id", "skuId", "sku"]),
+                "outer_sku_id": _first_present(item, ["outer_sku_id", "outerSkuId", "outerSku", "merchant_sku"]),
+                "title": _first_present(item, ["title", "item_title", "itemTitle", "name"]),
+                "sku_properties_name": _first_present(
+                    item, ["sku_properties_name", "skuPropertiesName", "sku_props", "spec"]
+                ),
+                "num": int(_first_present(item, ["num", "quantity", "qty"], 1) or 1),
+                "price": _first_present(item, ["price", "item_price", "itemPrice"]),
+                "payment": _first_present(item, ["payment", "paid_fee", "paidFee"]),
+                "refund_status": _first_present(item, ["refund_status", "refundStatus"], "NO_REFUND"),
+                "inventory_status": _first_present(item, ["inventory_status", "inventoryStatus"], "RESERVED"),
+            }
+        )
+    return normalized
+
+
+def normalize_order(upstream: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(upstream, dict):
+        raise OrderNormalizationError("upstream order payload must be an object")
+    tid = _first_present(upstream, ["tid", "trade_id", "tradeId", "order_id", "orderId", "id"])
+    status = _first_present(upstream, ["status", "order_status", "orderStatus", "trade_status", "tradeStatus"])
+    if tid is None:
+        raise OrderNormalizationError("missing order id: expected tid/trade_id/order_id")
+    if status is None:
+        raise OrderNormalizationError("missing order status: expected status/order_status/trade_status")
+
+    return {
+        "tid": _as_str(tid),
+        "platform": _as_str(_first_present(upstream, ["platform"], "taobao"), "taobao"),
+        "shop_id": _as_str(_first_present(upstream, ["shop_id", "shopId", "seller_id", "sellerId", "shop.id"], "")),
+        "status": _as_str(status),
+        "payment": _first_present(upstream, ["payment", "paid_fee", "paidFee", "total_fee", "totalFee"]),
+        "buyer": _normalize_buyer(upstream),
+        "orders": _normalize_items(upstream),
+        "buyer_message": _first_present(upstream, ["buyer_message", "buyerMessage", "buyer_memo"]),
+        "seller_memo": _first_present(upstream, ["seller_memo", "sellerMemo", "seller_note"]),
+        "created": _first_present(upstream, ["created", "created_at", "createdAt"]),
+        "modified": _first_present(upstream, ["modified", "modified_at", "modifiedAt", "updated_at", "updatedAt"]),
+    }
+
+
+class OrderApiClient:
+    def __init__(self, config: OrderApiClientConfig, transport: httpx.AsyncBaseTransport | None = None) -> None:
+        self.config = config
+        self._transport = transport
+
+    def _headers(self) -> dict[str, str]:
+        if not self.config.token:
+            return {}
+        value = self.config.token
+        if self.config.auth_scheme:
+            value = f"{self.config.auth_scheme} {value}"
+        return {self.config.auth_header: value}
+
+    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        url = f"{self.config.base_url.rstrip('/')}{path}"
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.config.timeout_seconds,
+                transport=self._transport,
+            ) as client:
+                return await client.request(method, url, headers=self._headers(), **kwargs)
+        except httpx.TimeoutException:
+            raise UpstreamOrderAPIError(504, "order API timeout") from None
+        except httpx.RequestError as exc:
+            raise UpstreamOrderAPIError(502, {"message": "order API request failed", "error": str(exc)}) from exc
+
+    @staticmethod
+    def _body(resp: httpx.Response) -> str:
+        return resp.text[:2000]
+
+    @classmethod
+    def _raise_for_read(cls, resp: httpx.Response) -> None:
+        if resp.status_code == 404:
+            raise UpstreamOrderAPIError(404, "order not found")
+        if resp.status_code in {401, 403}:
+            raise UpstreamOrderAPIError(502, "order API upstream auth failed")
+        if not 200 <= resp.status_code < 300:
+            raise UpstreamOrderAPIError(
+                502,
+                {"message": "order API returned non-2xx", "status_code": resp.status_code, "body": cls._body(resp)},
+            )
+
+    @classmethod
+    def _raise_for_write(cls, resp: httpx.Response) -> None:
+        if not 200 <= resp.status_code < 300:
+            raise UpstreamOrderAPIError(
+                502,
+                {
+                    "message": "order API write returned non-2xx",
+                    "status_code": resp.status_code,
+                    "body": cls._body(resp),
+                },
+            )
+
+    async def get_order(self, tid: str, plain: bool = True) -> dict[str, Any]:
+        path = self.config.get_order_path.format(tid=tid)
+        resp = await self._request("GET", path, params={"plain": str(plain).lower()})
+        self._raise_for_read(resp)
+        try:
+            return normalize_order(resp.json())
+        except (ValueError, TypeError) as exc:
+            raise UpstreamOrderAPIError(
+                502,
+                {"message": "order API normalization failed", "error": str(exc)},
+            ) from exc
+
+    async def write_action(self, method: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        resp = await self._request(method, path, json=payload)
+        self._raise_for_write(resp)
+        return {"status_code": resp.status_code, "body": self._body(resp)}
+
+    async def add_internal_note(self, tid: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self.write_action("POST", f"/api/orders/{tid}/internal-note", payload)
+
+    async def add_tag(self, tid: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self.write_action("POST", f"/api/orders/{tid}/tag", payload)
+
+    async def hold_order(self, tid: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self.write_action("POST", f"/api/orders/{tid}/hold", payload)
+
+    async def create_shipping_draft(self, tid: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self.write_action("POST", f"/api/orders/{tid}/create-shipping-draft", payload)

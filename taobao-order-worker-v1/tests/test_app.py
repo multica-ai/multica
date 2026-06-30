@@ -274,6 +274,42 @@ def test_upstream_write_failure_is_not_recorded_as_success(client, monkeypatch):
     assert app_module.store.get_action_record("ship-upstream-fail")["status"] == "succeeded"
 
 
+def test_order_api_base_url_uses_order_client_adapter(client, monkeypatch):
+    class FakeOrderClient:
+        async def get_order(self, tid, plain=True):
+            assert tid == "real-normal"
+            assert plain is True
+            return {
+                "tid": "real-normal",
+                "platform": "taobao",
+                "shop_id": "shop_staging_001",
+                "status": "WAIT_SELLER_SEND_GOODS",
+                "payment": "199.00",
+                "buyer": {
+                    "receiver_name": "测试收件人",
+                    "receiver_mobile": "13800000000",
+                    "receiver_state": "浙江省",
+                    "receiver_city": "杭州市",
+                    "receiver_district": "西湖区",
+                    "receiver_address": "测试街道1号",
+                },
+                "orders": [
+                    {
+                        "oid": "real-normal-1",
+                        "sku_id": "sku_staging_001",
+                        "refund_status": "NO_REFUND",
+                        "inventory_status": "RESERVED",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(app_module, "ORDER_API_BASE_URL", "https://orders.example.test")
+    monkeypatch.setattr(app_module, "create_order_api_client", lambda: FakeOrderClient())
+    resp = client.get("/api/orders/real-normal?plain=true", headers=BRIDGE_HEADERS)
+    assert resp.status_code == 200
+    assert resp.json()["shop_id"] == "shop_staging_001"
+
+
 def test_high_risk_endpoints_are_forbidden_with_auth(client):
     for action in ["ship", "refund", "close", "modify-address", "modify-price"]:
         resp = client.post(f"/api/orders/1234567890/{action}", headers=BRIDGE_HEADERS)

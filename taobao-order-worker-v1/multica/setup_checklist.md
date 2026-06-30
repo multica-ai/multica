@@ -74,6 +74,8 @@ ORDER_BRIDGE_BASE_URL=http://localhost:8090
 ORDER_API_BASE_URL=https://你的订单API域名
 ORDER_API_TOKEN=订单API访问Token
 ORDER_API_GET_ORDER_PATH=/api/orders/{tid}
+ORDER_API_AUTH_HEADER=Authorization
+ORDER_API_AUTH_SCHEME=Bearer
 ORDER_API_WRITE_THROUGH=false
 ALLOW_PLAIN_RECEIVER_INFO=true
 STORE_PLAIN_RECEIVER_IN_ACTION_LOG=false
@@ -92,7 +94,66 @@ uvicorn app:app --env-file .env --host 0.0.0.0 --port 8090
 
 如果 `ENV` 不是 `dev`，还必须配置 `MULTICA_AUTOPILOT_WEBHOOK_URL`。如果 `ORDER_API_WRITE_THROUGH=true`，还必须配置 `ORDER_API_BASE_URL`，否则安全写接口会失败并把幂等记录标记为 `failed`，不会伪装成成功。
 
-## 六、验收标准
+## 六、1.1 真实联调准备
+
+本阶段只做真实订单 API 联调准备，不接触真实淘宝账号密码、Cookie、AppSecret、Access Token 或真实客户隐私。真实凭证只能通过本机 `.env`、系统环境变量或 secret manager 配置，不能写入 Git、Skill、Issue 或聊天。
+
+新增的真实订单适配层：
+
+```text
+order_client.py
+```
+
+它负责：
+
+- 调用 `ORDER_API_BASE_URL` 指向的 staging 订单 API。
+- 把真实订单 API 返回标准化成 Order Bridge 的 `OrderDetail` 结构。
+- 统一映射上游 `401/403/404/5xx/timeout`。
+- 封装安全写动作：内部备注、打标签、挂起、创建发货草稿。
+
+第一轮联调必须保持只读：
+
+```env
+ORDER_API_WRITE_THROUGH=false
+```
+
+验收重点：
+
+- 真实待发货订单能读取并进入 `create_shipping_draft` 建议。
+- 真实退款中订单能识别为 `hold`。
+- 真实地址异常订单能识别为 `manual_review`。
+- 真实已关闭订单能识别为 `ignore`。
+- 真实禁止发货订单能识别为 `hold`。
+- Multica Issue 评论 JSON 结构稳定。
+
+第二轮联调才允许打开安全写动作：
+
+```env
+ORDER_API_WRITE_THROUGH=true
+```
+
+只允许写：
+
+- `internal-note`
+- `tag`
+- `hold`
+- `create-shipping-draft`
+
+继续禁止：
+
+- 正式发货
+- 退款
+- 关闭订单
+- 修改地址
+- 修改价格
+
+参考配置模板：
+
+```text
+.env.staging.example
+```
+
+## 七、验收标准
 
 - `POST /taobao/order-event` 后，Multica 自动创建 Issue。
 - 订单员工带 `X-Order-Bridge-Token` 后能读取 `/api/orders/{tid}?plain=true`。
@@ -101,3 +162,7 @@ uvicorn app:app --env-file .env --host 0.0.0.0 --port 8090
 - 退款中订单被挂起。
 - 地址异常订单进入人工审核。
 - 直接调用 `/ship`、`/refund`、`/close`、`/modify-address`、`/modify-price` 返回 403。
+- `ORDER_API_BASE_URL` 为空时仍走 mock 演示模式。
+- `ORDER_API_BASE_URL` 存在时走 `order_client.py` 真实 API 适配层。
+- `ORDER_API_WRITE_THROUGH=false` 时不写真实订单系统。
+- 上游失败不会把 action 伪装成 succeeded。
