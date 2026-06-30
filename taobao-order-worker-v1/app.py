@@ -46,13 +46,21 @@ REMOTE_AREA_KEYWORDS = env_csv("REMOTE_AREA_KEYWORDS", "新疆,西藏,内蒙古,
 UNSUPPORTED_AREA_KEYWORDS = env_csv("UNSUPPORTED_AREA_KEYWORDS", "香港,澳门,台湾,海外")
 STORE_PLAIN_RECEIVER_IN_ACTION_LOG = env_bool("STORE_PLAIN_RECEIVER_IN_ACTION_LOG", False)
 
-if ENV != "dev":
+
+def validate_runtime_config() -> None:
+    if ENV == "dev":
+        return
     if not TAOBAO_EVENT_SECRET or TAOBAO_EVENT_SECRET == "dev-secret":
         raise RuntimeError("TAOBAO_EVENT_SECRET must be set to a non-dev value outside dev")
     if REQUIRE_ORDER_BRIDGE_API_AUTH and (
         not ORDER_BRIDGE_API_TOKEN or ORDER_BRIDGE_API_TOKEN == "dev-bridge-token"
     ):
         raise RuntimeError("ORDER_BRIDGE_API_TOKEN must be set to a non-dev value outside dev")
+    if not MULTICA_AUTOPILOT_WEBHOOK_URL:
+        raise RuntimeError("MULTICA_AUTOPILOT_WEBHOOK_URL must be set outside dev")
+
+
+validate_runtime_config()
 
 
 app = FastAPI(title=APP_NAME, version="1.0.0")
@@ -185,6 +193,49 @@ class Store:
                     now,
                 ),
             )
+
+    def reserve_event(
+        self,
+        event_id: str,
+        tid: str,
+        idempotency_key: str,
+        payload: dict[str, Any],
+    ) -> tuple[str, Optional[dict[str, Any]]]:
+        now = utc_now()
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        try:
+            with self.connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO processed_events(
+                        event_id, tid, idempotency_key, payload_json, result_json, status, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (event_id, tid, idempotency_key, payload_json, "{}", "pending", now, now),
+                )
+            return "reserved", None
+        except sqlite3.IntegrityError:
+            existing = self.get_event(event_id)
+            if existing is None:
+                return "pending", None
+            if existing["status"] == "sent":
+                return "sent", existing["result"]
+            if existing["status"] == "pending":
+                return "pending", existing["result"]
+            if existing["status"] == "failed":
+                with self.connect() as conn:
+                    conn.execute(
+                        """
+                        UPDATE processed_events
+                        SET tid = ?, idempotency_key = ?, payload_json = ?, result_json = '{}',
+                            status = 'pending', updated_at = ?
+                        WHERE event_id = ?
+                        """,
+                        (tid, idempotency_key, payload_json, utc_now(), event_id),
+                    )
+                return "reserved", None
+            return "pending", existing
 
     def get_action_record(self, idempotency_key: str) -> Optional[dict[str, Any]]:
         with self.connect() as conn:
@@ -546,7 +597,16 @@ async def get_order_from_source(tid: str, plain: bool) -> OrderDetail:
 
 async def post_multica_autopilot(payload: dict[str, Any]) -> dict[str, Any]:
     if not MULTICA_AUTOPILOT_WEBHOOK_URL:
-        return {"skipped": True, "reason": "MULTICA_AUTOPILOT_WEBHOOK_URL is empty", "payload": payload}
+        if ENV == "dev":
+            return {
+                "skipped": True,
+                "reason": "MULTICA_AUTOPILOT_WEBHOOK_URL is empty in dev mode",
+                "payload": payload,
+            }
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="MULTICA_AUTOPILOT_WEBHOOK_URL is required outside dev",
+        )
     try:
         async with httpx.AsyncClient(timeout=ORDER_API_TIMEOUT_SECONDS) as client:
             resp = await client.post(MULTICA_AUTOPILOT_WEBHOOK_URL, json=payload)
@@ -563,8 +623,13 @@ async def post_multica_autopilot(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def upstream_write(method: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if not ORDER_API_WRITE_THROUGH or not ORDER_API_BASE_URL:
-        return {"skipped": True, "reason": "ORDER_API_WRITE_THROUGH is false or ORDER_API_BASE_URL is empty"}
+    if not ORDER_API_WRITE_THROUGH:
+        return {"skipped": True, "reason": "ORDER_API_WRITE_THROUGH is false; saved locally only"}
+    if not ORDER_API_BASE_URL:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ORDER_API_WRITE_THROUGH=true requires ORDER_API_BASE_URL",
+        )
     headers = {"Authorization": f"Bearer {ORDER_API_TOKEN}"} if ORDER_API_TOKEN else {}
     try:
         async with httpx.AsyncClient(timeout=ORDER_API_TIMEOUT_SECONDS) as client:
@@ -633,6 +698,7 @@ def fulfillment_response(
         summary=safe_summary,
         safe_summary=safe_summary,
         metadata={
+            "tid": order.tid,
             "shop_id": order.shop_id,
             "order_status": order.status,
             "fulfillment_status": fulfillment_status,
@@ -803,20 +869,19 @@ async def receive_taobao_order_event(
     payload = event.eventPayload
     tid = payload.tid
     idempotency_key = payload.idempotency_key or hashlib.sha256(event.eventId.encode("utf-8")).hexdigest()
-    existing = store.get_event(event.eventId)
-    if existing and existing["status"] == "sent":
+    event_payload = event.model_dump(mode="json")
+    reservation, existing_result = store.reserve_event(event.eventId, tid, idempotency_key, event_payload)
+    if reservation == "sent":
         return {
             "ok": True,
             "deduped": True,
             "event_id": event.eventId,
             "idempotency_key": idempotency_key,
-            "multica": existing["result"],
+            "multica": existing_result,
         }
-    if existing and existing["status"] == "pending":
+    if reservation == "pending":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="event is already being processed")
 
-    event_payload = event.model_dump(mode="json")
-    store.record_event_status(event.eventId, tid, idempotency_key, event_payload, "pending")
     multica_payload = {
         "event": event.event,
         "eventId": event.eventId,

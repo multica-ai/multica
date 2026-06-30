@@ -26,6 +26,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "TAOBAO_EVENT_SECRET", "test-secret")
     monkeypatch.setattr(app_module, "ORDER_BRIDGE_API_TOKEN", "test-token")
     monkeypatch.setattr(app_module, "REQUIRE_ORDER_BRIDGE_API_AUTH", True)
+    monkeypatch.setattr(app_module, "ENV", "dev")
     monkeypatch.setattr(app_module, "MULTICA_AUTOPILOT_WEBHOOK_URL", "")
     monkeypatch.setattr(app_module, "ORDER_API_BASE_URL", "")
     monkeypatch.setattr(app_module, "ORDER_API_WRITE_THROUGH", False)
@@ -106,6 +107,43 @@ def test_multica_webhook_failure_allows_event_retry(client, monkeypatch):
     assert "trigger_payload" not in seen_payloads[-1]
 
 
+def test_prod_requires_multica_webhook_and_event_is_failed(client, monkeypatch):
+    monkeypatch.setattr(app_module, "ENV", "prod")
+    monkeypatch.setattr(app_module, "MULTICA_AUTOPILOT_WEBHOOK_URL", "")
+
+    with pytest.raises(RuntimeError, match="MULTICA_AUTOPILOT_WEBHOOK_URL"):
+        app_module.validate_runtime_config()
+
+    payload = taobao_event(event_id="evt-prod-empty-webhook", tid="prod-tid")
+    failed = client.post("/taobao/order-event", json=payload, headers=EVENT_HEADERS)
+    assert failed.status_code == 500
+    assert app_module.store.get_event("evt-prod-empty-webhook")["status"] == "failed"
+
+
+def test_event_reservation_blocks_pending_duplicate(client):
+    payload = taobao_event(event_id="evt-pending", tid="pending-tid")
+    first_status, first_result = app_module.store.reserve_event(
+        "evt-pending",
+        "pending-tid",
+        "idem-pending",
+        payload,
+    )
+    assert first_status == "reserved"
+    assert first_result is None
+
+    second_status, second_result = app_module.store.reserve_event(
+        "evt-pending",
+        "pending-tid",
+        "idem-pending",
+        payload,
+    )
+    assert second_status == "pending"
+    assert second_result == {}
+
+    duplicate = client.post("/taobao/order-event", json=payload, headers=EVENT_HEADERS)
+    assert duplicate.status_code == 409
+
+
 def test_order_plain_requires_bridge_token(client):
     no_token = client.get("/api/orders/1234567890?plain=true")
     assert no_token.status_code == 401
@@ -124,6 +162,7 @@ def test_fulfillment_status_decisions(client):
     assert normal["can_ship"] is True
     assert normal["required_action"] == "create_shipping_draft"
     assert "safe_summary" in normal
+    assert normal["metadata"]["tid"] == "1234567890"
     assert normal["metadata"]["fulfillment_status"] == "shipping_draft_ready"
 
     refund = check(client, "123refund")
@@ -197,6 +236,18 @@ def test_create_shipping_draft_success_dedupe_and_failed_check(client):
 
 
 def test_upstream_write_failure_is_not_recorded_as_success(client, monkeypatch):
+    monkeypatch.setattr(app_module, "ORDER_API_WRITE_THROUGH", True)
+    monkeypatch.setattr(app_module, "ORDER_API_BASE_URL", "")
+    missing_base_url = client.post(
+        "/api/orders/1234567890/create-shipping-draft",
+        json=shipping_payload("ship-missing-upstream-base"),
+        headers=BRIDGE_HEADERS,
+    )
+    assert missing_base_url.status_code == 500
+    assert app_module.store.get_action_record("ship-missing-upstream-base")["status"] == "failed"
+
+    monkeypatch.setattr(app_module, "ORDER_API_WRITE_THROUGH", False)
+
     async def failing_write(method, path, payload):
         raise HTTPException(status_code=502, detail={"message": "order API write returned non-2xx", "status_code": 500})
 

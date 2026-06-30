@@ -177,7 +177,7 @@ X-Order-Bridge-Token: <ORDER_BRIDGE_API_TOKEN>
 }
 ```
 
-安全写接口先保留幂等记录为 `pending`，只有本地检查和可选上游写入都成功后才更新为 `succeeded`。如果 `ORDER_API_WRITE_THROUGH=true` 且上游订单 API 返回非 2xx、超时或网络错误，Order Bridge 返回 `502` 或 `504`，并把该 idempotency key 标记为 `failed`，允许后续用同一 key 重试。
+安全写接口先保留幂等记录为 `pending`，只有本地检查和可选上游写入都成功后才更新为 `succeeded`。如果 `ORDER_API_WRITE_THROUGH=false`，Order Bridge 明确处于本地演示模式，可以只保存本地安全动作。如果 `ORDER_API_WRITE_THROUGH=true` 且 `ORDER_API_BASE_URL` 为空，Order Bridge 返回 `500`，并把该 idempotency key 标记为 `failed`。如果 `ORDER_API_WRITE_THROUGH=true` 且上游订单 API 返回非 2xx、超时或网络错误，Order Bridge 返回 `502` 或 `504`，并把该 idempotency key 标记为 `failed`，允许后续用同一 key 重试。
 
 ## 4. 禁止接口
 
@@ -215,4 +215,4 @@ Order Bridge 调用已有订单 API 时，错误映射如下：
 - 上游超时：返回 `504`。
 - 上游网络错误：返回 `502`。
 
-Multica Webhook 非 2xx 也会返回 `502`，该订单事件会标记为 `failed`，同一 `eventId` 可在修复后重试，不会被错误地当作已处理事件去重。
+Multica Webhook 非 2xx 也会返回 `502`，该订单事件会标记为 `failed`，同一 `eventId` 可在修复后重试，不会被错误地当作已处理事件去重。`ENV=dev` 时可以缺省 `MULTICA_AUTOPILOT_WEBHOOK_URL` 以便本地演示；非 dev 环境必须配置该 webhook，否则应用启动失败，或订单事件返回 `500` 并标记为 `failed`。同一 `eventId` 处于 `pending` 时再次推送会返回 `409`，防止并发重复触发 Multica。

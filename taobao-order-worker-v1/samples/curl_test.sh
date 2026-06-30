@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Start the bridge from taobao-order-worker-v1 with:
+# uvicorn app:app --env-file .env --host 0.0.0.0 --port 8090
+
 BASE_URL="${BASE_URL:-http://localhost:8090}"
 SECRET="${TAOBAO_EVENT_SECRET:-dev-secret}"
 TOKEN="${ORDER_BRIDGE_API_TOKEN:-dev-bridge-token}"

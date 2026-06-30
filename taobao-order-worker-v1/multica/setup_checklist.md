@@ -84,6 +84,14 @@ ALLOW_HIGH_RISK_ACTIONS=false
 
 生产环境不能继续使用 `TAOBAO_EVENT_SECRET=dev-secret` 或 `ORDER_BRIDGE_API_TOKEN=dev-bridge-token`。`ORDER_API_WRITE_THROUGH=false` 只适合本地演示；接入真实订单系统时，安全写接口要在上游写成功后才会记录为成功。
 
+启动 Order Bridge 时需要显式加载 `.env`，不要只复制 `.env.example` 后直接启动：
+
+```bash
+uvicorn app:app --env-file .env --host 0.0.0.0 --port 8090
+```
+
+如果 `ENV` 不是 `dev`，还必须配置 `MULTICA_AUTOPILOT_WEBHOOK_URL`。如果 `ORDER_API_WRITE_THROUGH=true`，还必须配置 `ORDER_API_BASE_URL`，否则安全写接口会失败并把幂等记录标记为 `failed`，不会伪装成成功。
+
 ## 六、验收标准
 
 - `POST /taobao/order-event` 后，Multica 自动创建 Issue。
