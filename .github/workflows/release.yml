@@ -435,11 +435,13 @@ jobs:
       - name: Verify published chart
         run: helm show chart "$OCI_REGISTRY/multica" --version "$CHART_VERSION"
 
-  # Build the Desktop installers for Linux and Windows and upload them to
-  # the GitHub Release that the `release` job above just published. macOS
-  # Desktop continues to ship via the manual `release-desktop` skill so it
-  # can be signed + notarized with Apple Developer credentials that are
-  # not (yet) wired into CI.
+  # Build the Desktop installers for Linux, Windows and macOS and upload
+  # them to the GitHub Release that the `release` job above just published.
+  # macOS is built UNSIGNED here (ad-hoc signature, notarization skipped —
+  # see the APPLE_TEAM_ID note below): users get the dmg straight from the
+  # release and approve it once via right-click → Open. A fully signed +
+  # notarized macOS build still requires the manual `release-desktop` skill
+  # with Apple Developer credentials, which are not (yet) wired into CI.
   desktop:
     needs: release
     strategy:
@@ -450,6 +452,8 @@ jobs:
             target: linux
           - os: windows-latest
             target: win
+          - os: macos-latest
+            target: mac
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -485,9 +489,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # electron-builder's GitHub publisher reads this:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Disable code signing on Linux/Windows for now — the public
-          # release is unsigned for these platforms, the CLI carries the
-          # trust boundary. Set CSC_LINK in repo secrets to enable
-          # Windows signing later.
+          # Disable code signing on all platforms for now — the public
+          # release is unsigned, the CLI carries the trust boundary. On
+          # macOS this yields an ad-hoc signature; notarization is skipped
+          # automatically because APPLE_TEAM_ID is unset (see
+          # scripts/package.mjs). Set CSC_LINK (plus APPLE_ID /
+          # APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID for macOS) in repo
+          # secrets to enable signing later.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always
