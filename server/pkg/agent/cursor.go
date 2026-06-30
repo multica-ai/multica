@@ -31,10 +31,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
 	argv0, cmdArgs := chooseCursorInvocation(execName, lookedUp, args, b.cfg.Logger)
@@ -42,7 +39,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
-	cmd.WaitDelay = 20 * time.Second
+	cmd.WaitDelay = 500 * time.Millisecond
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -77,10 +74,12 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}()
 
 		startTime := time.Now()
+		configuredModel := strings.TrimSpace(opts.Model)
 		var output strings.Builder
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
+		resultSeen := false
 		// stepUsage accumulates per-step token counts from "step_finish" events.
 		// resultUsage holds authoritative session totals from "result" events.
 		// If the result event includes usage, we use resultUsage exclusively;
@@ -143,6 +142,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				})
 
 			case "result":
+				resultSeen = true
 				if evt.IsError || evt.Subtype == "error" {
 					finalStatus = "failed"
 					finalError = cursorErrorText(&evt)
@@ -150,10 +150,14 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if evt.ResultText != "" && output.Len() == 0 {
 					output.WriteString(evt.ResultText)
 				}
-				b.accumulateResultUsage(resultUsage, &evt)
-				if evt.Usage != nil {
+				b.accumulateResultUsage(resultUsage, &evt, configuredModel)
+				if evt.hasResultUsage() {
 					hasResultUsage = true
 				}
+				// Current Cursor Agent versions can emit the terminal result
+				// event but keep a worker process alive. Treat result as the
+				// protocol boundary so the daemon can report completion.
+				cancel()
 
 			case "error":
 				errMsg := cursorErrorText(&evt)
@@ -176,10 +180,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if evt.Part != nil {
 					var part cursorStepFinishPart
 					_ = json.Unmarshal(evt.Part, &part)
-					model := evt.Model
-					if model == "" {
-						model = "cursor"
-					}
+					model := cursorUsageModel(evt.Model, configuredModel)
 					u := stepUsage[model]
 					u.InputTokens += int64(part.Tokens.Input)
 					u.OutputTokens += int64(part.Tokens.Output)
@@ -201,10 +202,10 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		if runCtx.Err() == context.DeadlineExceeded {
 			finalStatus = "timeout"
 			finalError = fmt.Sprintf("cursor-agent timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
+		} else if runCtx.Err() == context.Canceled && !resultSeen {
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
-		} else if exitErr != nil && finalStatus == "completed" {
+		} else if exitErr != nil && finalStatus == "completed" && !resultSeen {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("cursor-agent exited with error: %v", exitErr)
 		}
@@ -264,18 +265,38 @@ func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- 
 	}
 }
 
-func (b *cursorBackend) accumulateResultUsage(usage map[string]TokenUsage, evt *cursorStreamEvent) {
-	if evt.Usage == nil {
+func cursorUsageModel(evtModel, configuredModel string) string {
+	if model := strings.TrimSpace(evtModel); model != "" {
+		return model
+	}
+	if model := strings.TrimSpace(configuredModel); model != "" {
+		return model
+	}
+	return "cursor"
+}
+
+func (b *cursorBackend) accumulateResultUsage(usage map[string]TokenUsage, evt *cursorStreamEvent, configuredModel string) {
+	model := cursorUsageModel(evt.Model, configuredModel)
+	u := usage[model]
+
+	// Cursor agent has emitted token usage in multiple shapes: top-level
+	// camelCase fields, nested camelCase usage, and nested legacy snake_case
+	// usage. Prefer top-level result totals when present, otherwise use the
+	// nested usage object.
+	if evt.InputTokens != 0 || evt.OutputTokens != 0 || evt.CacheReadTokens != 0 || evt.CacheWriteTokens != 0 {
+		u.InputTokens += evt.InputTokens
+		u.OutputTokens += evt.OutputTokens
+		u.CacheReadTokens += evt.CacheReadTokens
+		u.CacheWriteTokens += evt.CacheWriteTokens
+	} else if evt.Usage != nil {
+		u.InputTokens += evt.Usage.InputTokens
+		u.OutputTokens += evt.Usage.OutputTokens
+		u.CacheReadTokens += evt.Usage.CacheReadInputTokens
+		u.CacheWriteTokens += evt.Usage.CacheWriteInputTokens
+	} else {
 		return
 	}
-	model := evt.Model
-	if model == "" {
-		model = "cursor"
-	}
-	u := usage[model]
-	u.InputTokens += evt.Usage.InputTokens
-	u.OutputTokens += evt.Usage.OutputTokens
-	u.CacheReadTokens += evt.Usage.CacheReadInputTokens
+
 	usage[model] = u
 }
 
@@ -299,10 +320,14 @@ type cursorStreamEvent struct {
 	Output string `json:"output,omitempty"`
 
 	// result fields
-	ResultText string       `json:"result,omitempty"`
-	IsError    bool         `json:"is_error,omitempty"`
-	Usage      *cursorUsage `json:"usage,omitempty"`
-	TotalCost  float64      `json:"total_cost_usd,omitempty"`
+	ResultText       string       `json:"result,omitempty"`
+	IsError          bool         `json:"is_error,omitempty"`
+	InputTokens      int64        `json:"inputTokens,omitempty"`
+	OutputTokens     int64        `json:"outputTokens,omitempty"`
+	CacheReadTokens  int64        `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens int64        `json:"cacheWriteTokens,omitempty"`
+	Usage            *cursorUsage `json:"usage,omitempty"`
+	TotalCost        float64      `json:"total_cost_usd,omitempty"`
 
 	// error fields
 	ErrorMsg string `json:"error,omitempty"`
@@ -319,10 +344,59 @@ func (evt *cursorStreamEvent) readSessionID() string {
 	return ""
 }
 
+func (evt *cursorStreamEvent) hasResultUsage() bool {
+	return evt.Usage != nil || evt.InputTokens != 0 || evt.OutputTokens != 0 || evt.CacheReadTokens != 0 || evt.CacheWriteTokens != 0
+}
+
 type cursorUsage struct {
-	InputTokens          int64 `json:"input_tokens"`
-	OutputTokens         int64 `json:"output_tokens"`
-	CacheReadInputTokens int64 `json:"cached_input_tokens"`
+	InputTokens           int64 `json:"input_tokens"`
+	OutputTokens          int64 `json:"output_tokens"`
+	CacheReadInputTokens  int64 `json:"cached_input_tokens"`
+	CacheWriteInputTokens int64
+}
+
+func (u *cursorUsage) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		InputTokensSnake              int64 `json:"input_tokens"`
+		InputTokensCamel              int64 `json:"inputTokens"`
+		OutputTokensSnake             int64 `json:"output_tokens"`
+		OutputTokensCamel             int64 `json:"outputTokens"`
+		CachedInputTokensSnake        int64 `json:"cached_input_tokens"`
+		CachedInputTokensCamel        int64 `json:"cachedInputTokens"`
+		CacheReadTokensCamel          int64 `json:"cacheReadTokens"`
+		CacheReadInputTokensSnake     int64 `json:"cache_read_input_tokens"`
+		CacheReadInputTokensCamel     int64 `json:"cacheReadInputTokens"`
+		CacheWriteTokensCamel         int64 `json:"cacheWriteTokens"`
+		CacheCreationInputTokensSnake int64 `json:"cache_creation_input_tokens"`
+		CacheCreationInputTokensCamel int64 `json:"cacheCreationInputTokens"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	u.InputTokens = firstNonZeroInt64(raw.InputTokensSnake, raw.InputTokensCamel)
+	u.OutputTokens = firstNonZeroInt64(raw.OutputTokensSnake, raw.OutputTokensCamel)
+	u.CacheReadInputTokens = firstNonZeroInt64(
+		raw.CachedInputTokensSnake,
+		raw.CachedInputTokensCamel,
+		raw.CacheReadTokensCamel,
+		raw.CacheReadInputTokensSnake,
+		raw.CacheReadInputTokensCamel,
+	)
+	u.CacheWriteInputTokens = firstNonZeroInt64(
+		raw.CacheWriteTokensCamel,
+		raw.CacheCreationInputTokensSnake,
+		raw.CacheCreationInputTokensCamel,
+	)
+	return nil
+}
+
+func firstNonZeroInt64(values ...int64) int64 {
+	for _, v := range values {
+		if v != 0 {
+			return v
+		}
+	}
+	return 0
 }
 
 type cursorAssistantMessage struct {

@@ -2,10 +2,19 @@ package main
 
 import (
 	"net"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
+
+func TestMain(m *testing.M) {
+	os.Unsetenv("MULTICA_AGENT_ID")
+	os.Unsetenv("MULTICA_TASK_ID")
+	os.Unsetenv("MULTICA_TOKEN")
+	os.Exit(m.Run())
+}
 
 // testCmd returns a minimal cobra.Command with the --profile persistent flag
 // registered, matching the rootCmd setup used in production.
@@ -116,6 +125,50 @@ func TestResolveCallbackBinding(t *testing.T) {
 				t.Errorf("bind addr = %q, want %q", gotBind, tc.wantBind)
 			}
 		})
+	}
+}
+
+func TestBrowserLoginInstructionsSSHRemoteHint(t *testing.T) {
+	const loginURL = "https://multica.ai/login?cli_callback=http%3A%2F%2Flocalhost%3A43689%2Fcallback"
+
+	got := browserLoginInstructions(loginURL, "localhost", 43689, true)
+	if !strings.Contains(got, "ssh -L 43689:127.0.0.1:43689 <user>@<remote-host>") {
+		t.Fatalf("remote SSH instructions missing tunnel command:\n%s", got)
+	}
+	if !strings.Contains(got, loginURL) {
+		t.Fatalf("instructions missing login URL:\n%s", got)
+	}
+
+	got = browserLoginInstructions(loginURL, "localhost", 43689, false)
+	if strings.Contains(got, "ssh -L") {
+		t.Fatalf("local instructions should not include SSH tunnel command:\n%s", got)
+	}
+
+	got = browserLoginInstructions(loginURL, "192.168.1.25", 43689, true)
+	if strings.Contains(got, "ssh -L") {
+		t.Fatalf("non-loopback callback should not include SSH tunnel command:\n%s", got)
+	}
+}
+
+func TestCallbackHostFlagValueReadsParentSetupFlag(t *testing.T) {
+	var got string
+	setup := &cobra.Command{Use: "setup"}
+	setup.Flags().String(callbackHostFlag, "", "")
+	cloud := &cobra.Command{
+		Use: "cloud",
+		Run: func(cmd *cobra.Command, args []string) {
+			got = callbackHostFlagValue(cmd)
+		},
+	}
+	cloud.Flags().String(callbackHostFlag, "", "")
+	setup.AddCommand(cloud)
+	setup.SetArgs([]string{"--callback-host", "10.0.0.5", "cloud"})
+
+	if err := setup.Execute(); err != nil {
+		t.Fatalf("execute setup cloud: %v", err)
+	}
+	if got != "10.0.0.5" {
+		t.Fatalf("callback host = %q, want parent flag value", got)
 	}
 }
 
@@ -243,4 +296,53 @@ func TestNormalizeAPIBaseURL(t *testing.T) {
 			t.Fatalf("normalizeAPIBaseURL() = %q, want %q", got, "://bad-url")
 		}
 	})
+}
+
+// TestValidateLoginTokenPrefix pins the accepted PAT prefix set for
+// `multica login --token`. The original implementation hardcoded `mul_`
+// only, which rejected legitimate Multica Cloud Node PATs (`mcn_`) at
+// the CLI even though the server's middleware would have accepted them.
+// If a future change drops `mcn_` from the list (or accidentally
+// broadens the set to anything-goes), this test fails.
+func TestValidateLoginTokenPrefix(t *testing.T) {
+	cases := []struct {
+		name    string
+		token   string
+		wantErr bool
+	}{
+		{name: "mul_ PAT", token: "mul_abc123", wantErr: false},
+		{name: "mcn_ Cloud Node PAT", token: "mcn_abc123", wantErr: false},
+		{name: "empty token", token: "", wantErr: true},
+		{name: "no prefix", token: "abc123", wantErr: true},
+		{name: "wrong prefix mdt_", token: "mdt_abc123", wantErr: true},
+		{name: "wrong prefix mat_", token: "mat_abc123", wantErr: true},
+		{name: "case-sensitive: MUL_ rejected", token: "MUL_abc123", wantErr: true},
+		{name: "leading whitespace not allowed (callers TrimSpace first)", token: " mul_abc", wantErr: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateLoginTokenPrefix(tc.token)
+			if tc.wantErr && err == nil {
+				t.Fatalf("validateLoginTokenPrefix(%q) = nil, want error", tc.token)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("validateLoginTokenPrefix(%q) = %v, want nil", tc.token, err)
+			}
+		})
+	}
+
+	// The error string is user-facing; make sure it lists every accepted
+	// prefix so users hitting it can self-serve. Hardcoding the exact
+	// prefixes here is deliberate — if someone adds a new prefix to
+	// loginTokenPrefixes they should also update the docs / this test.
+	err := validateLoginTokenPrefix("nope_xxx")
+	if err == nil {
+		t.Fatal("expected error for unknown prefix")
+	}
+	for _, p := range []string{"mul_", "mcn_"} {
+		if !strings.Contains(err.Error(), p) {
+			t.Errorf("error %q does not mention prefix %q", err.Error(), p)
+		}
+	}
 }

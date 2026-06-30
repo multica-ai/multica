@@ -327,3 +327,403 @@ func TestLoadRuntimeLocalSkillBundle_Cursor(t *testing.T) {
 		t.Fatalf("source_path = %q", bundle.SourcePath)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Multi-root discovery: provider root + universal ~/.agents/skills (MUL-3333)
+// ---------------------------------------------------------------------------
+
+// A skill that lives only in the universal ~/.agents/skills root (no provider
+// directory at all) must be discovered and tagged Root="universal".
+func TestListRuntimeLocalSkills_DiscoversUniversalAgentsRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "universal-helper", map[string]string{
+		"SKILL.md":     "---\nname: Universal Helper\ndescription: Cross-tool skill\n---\n# Universal Helper\n",
+		"docs/info.md": "info",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("claude")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("claude should be supported")
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d (%v)", len(skills), skills)
+	}
+	if skills[0].Key != "universal-helper" {
+		t.Fatalf("key = %q, want universal-helper", skills[0].Key)
+	}
+	if skills[0].Name != "Universal Helper" {
+		t.Fatalf("name = %q, want Universal Helper", skills[0].Name)
+	}
+	if skills[0].Root != localSkillRootUniversal {
+		t.Fatalf("root = %q, want %q", skills[0].Root, localSkillRootUniversal)
+	}
+	if skills[0].SourcePath != "~/.agents/skills/universal-helper" {
+		t.Fatalf("source_path = %q", skills[0].SourcePath)
+	}
+	// 2 = supporting file (docs/info.md) + SKILL.md.
+	if skills[0].FileCount != 2 {
+		t.Fatalf("file_count = %d, want 2", skills[0].FileCount)
+	}
+}
+
+// A skill discovered under ~/.agents/skills must be importable, not just
+// listable — otherwise the import dialog shows a skill the load endpoint
+// can't fetch.
+func TestLoadRuntimeLocalSkillBundle_ImportsFromUniversalRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "shared-skill", map[string]string{
+		"SKILL.md":        "---\nname: Shared Skill\ndescription: Imported from agents root\n---\n# Shared Skill\n",
+		"examples/use.md": "usage",
+		"scripts/run.sh":  "echo hi",
+	})
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("claude", "shared-skill")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported {
+		t.Fatal("claude should be supported")
+	}
+	if bundle.Name != "Shared Skill" {
+		t.Fatalf("name = %q, want Shared Skill", bundle.Name)
+	}
+	if len(bundle.Files) != 2 {
+		t.Fatalf("expected 2 supporting files, got %d", len(bundle.Files))
+	}
+	if bundle.SourcePath != "~/.agents/skills/shared-skill" {
+		t.Fatalf("source_path = %q", bundle.SourcePath)
+	}
+}
+
+// When the same key exists in BOTH the provider root and the universal root,
+// the provider root wins: its SourcePath, Root tag and content are preserved
+// and the universal copy is dropped. This is the backward-compatibility
+// guarantee — adding the universal root never changes what an existing
+// provider-root key resolves to.
+func TestLocalSkills_ProviderRootWinsOnKeyConflict(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "dup", map[string]string{
+		"SKILL.md": "---\nname: Provider Copy\n---\n# provider\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "dup", map[string]string{
+		"SKILL.md": "---\nname: Universal Copy\n---\n# universal\n",
+	})
+
+	skills, _, err := listRuntimeLocalSkills("claude")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 deduped skill, got %d (%v)", len(skills), skills)
+	}
+	if skills[0].Name != "Provider Copy" {
+		t.Fatalf("name = %q, want Provider Copy (provider root must win)", skills[0].Name)
+	}
+	if skills[0].Root != localSkillRootProvider {
+		t.Fatalf("root = %q, want %q", skills[0].Root, localSkillRootProvider)
+	}
+	if skills[0].SourcePath != "~/.claude/skills/dup" {
+		t.Fatalf("source_path = %q, want provider path", skills[0].SourcePath)
+	}
+
+	// Load must resolve to the provider copy too, matching the list.
+	bundle, _, err := loadRuntimeLocalSkillBundle("claude", "dup")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if bundle.Name != "Provider Copy" {
+		t.Fatalf("bundle name = %q, want Provider Copy", bundle.Name)
+	}
+	if bundle.SourcePath != "~/.claude/skills/dup" {
+		t.Fatalf("bundle source_path = %q, want provider path", bundle.SourcePath)
+	}
+}
+
+// Both roots contribute their non-conflicting skills, merged and sorted once.
+func TestListRuntimeLocalSkills_MergesBothRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "provider-only", map[string]string{
+		"SKILL.md": "---\nname: Provider Only\n---\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "universal-only", map[string]string{
+		"SKILL.md": "---\nname: Universal Only\n---\n",
+	})
+
+	skills, _, err := listRuntimeLocalSkills("claude")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	keys := make([]string, 0, len(skills))
+	roots := make(map[string]string)
+	for _, s := range skills {
+		keys = append(keys, s.Key)
+		roots[s.Key] = s.Root
+	}
+	// Sorted once after merge: "provider-only" < "universal-only".
+	wantKeys := []string{"provider-only", "universal-only"}
+	if !reflect.DeepEqual(keys, wantKeys) {
+		t.Fatalf("keys = %v, want %v", keys, wantKeys)
+	}
+	if roots["provider-only"] != localSkillRootProvider {
+		t.Fatalf("provider-only root = %q", roots["provider-only"])
+	}
+	if roots["universal-only"] != localSkillRootUniversal {
+		t.Fatalf("universal-only root = %q", roots["universal-only"])
+	}
+}
+
+// A missing universal root is not an error: discovery still returns the
+// provider-root skills. (Mirror of the original single-root "missing root
+// returns empty" guarantee, now per-root.)
+func TestListRuntimeLocalSkills_MissingUniversalRootIsNotAnError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "only-provider", map[string]string{
+		"SKILL.md": "---\nname: Only Provider\n---\n",
+	})
+	// No ~/.agents/skills created.
+
+	skills, supported, err := listRuntimeLocalSkills("claude")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("claude should be supported")
+	}
+	if len(skills) != 1 || skills[0].Key != "only-provider" {
+		t.Fatalf("expected only-provider, got %v", skills)
+	}
+}
+
+// Both roots missing → empty list, no error.
+func TestListRuntimeLocalSkills_BothRootsMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	skills, supported, err := listRuntimeLocalSkills("claude")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("claude should be supported")
+	}
+	if len(skills) != 0 {
+		t.Fatalf("expected empty, got %v", skills)
+	}
+}
+
+// Nested layouts (a skill two levels deep) work in the universal root too.
+func TestListRuntimeLocalSkills_NestedSkillInUniversalRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "release/reporter", map[string]string{
+		"SKILL.md": "---\nname: Release Reporter\n---\n",
+	})
+
+	skills, _, err := listRuntimeLocalSkills("opencode")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if len(skills) != 1 || skills[0].Key != "release/reporter" {
+		t.Fatalf("expected release/reporter, got %v", skills)
+	}
+	if skills[0].Root != localSkillRootUniversal {
+		t.Fatalf("root = %q, want %q", skills[0].Root, localSkillRootUniversal)
+	}
+
+	bundle, _, err := loadRuntimeLocalSkillBundle("opencode", "release/reporter")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if bundle.Name != "Release Reporter" {
+		t.Fatalf("bundle name = %q", bundle.Name)
+	}
+}
+
+// loadRuntimeLocalSkillBundle falls through to the universal root only when
+// the provider root genuinely lacks the key (IsNotExist).
+func TestLoadRuntimeLocalSkillBundle_FallsThroughToUniversalOnNotExist(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Provider root exists but does NOT contain "only-universal".
+	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "something-else", map[string]string{
+		"SKILL.md": "---\nname: Something Else\n---\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "only-universal", map[string]string{
+		"SKILL.md": "---\nname: Only Universal\n---\n# only universal\n",
+	})
+
+	bundle, _, err := loadRuntimeLocalSkillBundle("claude", "only-universal")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if bundle.Name != "Only Universal" {
+		t.Fatalf("name = %q, want Only Universal", bundle.Name)
+	}
+	if bundle.SourcePath != "~/.agents/skills/only-universal" {
+		t.Fatalf("source_path = %q", bundle.SourcePath)
+	}
+}
+
+// When the provider root HAS the key but reading its SKILL.md fails for a
+// reason other than IsNotExist, loadRuntimeLocalSkillBundle must return that
+// error instead of silently loading a different same-key skill from the
+// universal root. Here we make ~/.claude/skills/clash/SKILL.md a directory so
+// the read fails ("is a directory") while the dir itself exists.
+func TestLoadRuntimeLocalSkillBundle_DoesNotMaskReadErrorWithUniversalFallback(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	clashDir := filepath.Join(home, ".claude", "skills", "clash")
+	if err := os.MkdirAll(filepath.Join(clashDir, "SKILL.md"), 0o755); err != nil {
+		t.Fatalf("mkdir SKILL.md-as-dir: %v", err)
+	}
+	// A valid same-key skill in the universal root that must NOT be used.
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "clash", map[string]string{
+		"SKILL.md": "---\nname: Universal Clash\n---\n",
+	})
+
+	bundle, _, err := loadRuntimeLocalSkillBundle("claude", "clash")
+	if err == nil {
+		t.Fatalf("expected an error, got bundle %+v", bundle)
+	}
+	if bundle != nil {
+		t.Fatalf("expected nil bundle on error, got %+v", bundle)
+	}
+}
+
+// A user can deliberately expose one on-disk skill under two names by
+// symlinking ~/.claude/skills/bar -> ~/.agents/skills/foo. Because each root
+// keeps its OWN `visited` set, the list returns both `bar` (from the claude
+// root) and `foo` (from the agents root). A shared visited set would drop one.
+func TestListRuntimeLocalSkills_PerRootVisitedAllowsCrossRootSymlinkAlias(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "foo", map[string]string{
+		"SKILL.md": "---\nname: Foo\n---\n",
+	})
+
+	claudeRoot := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(claudeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir claude root: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(claudeRoot, "bar")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	skills, _, err := listRuntimeLocalSkills("claude")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	keys := make([]string, 0, len(skills))
+	roots := make(map[string]string)
+	for _, s := range skills {
+		keys = append(keys, s.Key)
+		roots[s.Key] = s.Root
+	}
+	wantKeys := []string{"bar", "foo"}
+	if !reflect.DeepEqual(keys, wantKeys) {
+		t.Fatalf("keys = %v, want %v (per-root visited must not collapse the alias)", keys, wantKeys)
+	}
+	if roots["bar"] != localSkillRootProvider {
+		t.Fatalf("bar root = %q, want provider", roots["bar"])
+	}
+	if roots["foo"] != localSkillRootUniversal {
+		t.Fatalf("foo root = %q, want universal", roots["foo"])
+	}
+}
+
+// Regression (大彪): a provider-root directory that shares a skill's key but
+// contains NO SKILL.md must not shadow a valid universal-root skill at the
+// same key. listRuntimeLocalSkills descends past the invalid provider dir and
+// surfaces the universal skill, so loadRuntimeLocalSkillBundle MUST resolve to
+// that same universal skill — not error out on the invalid provider dir.
+// Before the fix, load only fell through on os.IsNotExist for the skill
+// directory, so an existing-but-invalid provider dir made list and load
+// disagree.
+func TestLoadRuntimeLocalSkillBundle_ProviderDirWithoutSkillMdFallsThrough(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Provider root has a same-key directory but NO SKILL.md (just a stray
+	// file), so it is NOT a valid skill.
+	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "shadowed", map[string]string{
+		"notes.md": "not a skill — no SKILL.md here",
+	})
+	// Universal root has the real skill at the same key.
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "shadowed", map[string]string{
+		"SKILL.md":     "---\nname: Real Shadowed\ndescription: The valid one\n---\n# Real Shadowed\n",
+		"docs/info.md": "info",
+	})
+
+	// list must surface exactly the universal skill at key "shadowed".
+	skills, _, err := listRuntimeLocalSkills("claude")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d (%v)", len(skills), skills)
+	}
+	if skills[0].Key != "shadowed" || skills[0].Root != localSkillRootUniversal {
+		t.Fatalf("list surfaced %+v, want key=shadowed root=universal", skills[0])
+	}
+	if skills[0].SourcePath != "~/.agents/skills/shadowed" {
+		t.Fatalf("list source_path = %q, want ~/.agents/skills/shadowed", skills[0].SourcePath)
+	}
+
+	// load must resolve to the SAME universal skill list showed — not error on
+	// the invalid provider dir.
+	bundle, _, err := loadRuntimeLocalSkillBundle("claude", "shadowed")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v (load disagreed with list)", err)
+	}
+	if bundle.Name != "Real Shadowed" {
+		t.Fatalf("bundle name = %q, want Real Shadowed", bundle.Name)
+	}
+	if bundle.SourcePath != "~/.agents/skills/shadowed" {
+		t.Fatalf("bundle source_path = %q, want ~/.agents/skills/shadowed", bundle.SourcePath)
+	}
+}
+
+// A provider-root entry that exists at the key but is NOT a directory (a plain
+// file) likewise must not shadow a valid universal skill — list never surfaces
+// a non-dir, so load must fall through too.
+func TestLoadRuntimeLocalSkillBundle_ProviderNonDirFallsThrough(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	claudeRoot := filepath.Join(home, ".claude", "skills")
+	if err := os.MkdirAll(claudeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir claude root: %v", err)
+	}
+	// A plain file where the skill dir would be.
+	if err := os.WriteFile(filepath.Join(claudeRoot, "filish"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	writeTestLocalSkill(t, filepath.Join(home, ".agents", "skills"), "filish", map[string]string{
+		"SKILL.md": "---\nname: Filish\n---\n# Filish\n",
+	})
+
+	bundle, _, err := loadRuntimeLocalSkillBundle("claude", "filish")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if bundle.Name != "Filish" || bundle.SourcePath != "~/.agents/skills/filish" {
+		t.Fatalf("bundle = %+v, want universal Filish", bundle)
+	}
+}

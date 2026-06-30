@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "Mine",
-    "all": "All"
+    "all": "All",
+    "archived": "Archived"
   },
   "sort": {
     "label_recent": "Recent activity",
@@ -25,7 +26,8 @@
     "all": "All",
     "online": "Online",
     "unstable": "Unstable",
-    "offline": "Offline"
+    "offline": "Offline",
+    "archived": "Archived"
   },
   "workload": {
     "working": "Working",
@@ -46,7 +48,18 @@
     "no_archived": "No archived agents yet.",
     "search_active": "No agents match \"{{query}}\".",
     "search_active_filtered": "No agents match \"{{query}}\" in this filter.",
-    "no_filter_match": "No agents match this filter."
+    "no_filter_match": "No agents match this filter.",
+    "search_runtime_filtered": "No agents on \"{{machine}}\" match \"{{query}}\".",
+    "runtime_filtered": "No agents on \"{{machine}}\"."
+  },
+  "runtime_filter": {
+    "all": "All runtimes",
+    "section_local": "Local",
+    "section_remote": "Remote",
+    "section_cloud": "Cloud",
+    "agent_count_one": "{{count}} agent",
+    "agent_count_other": "{{count}} agents",
+    "empty": "No machines yet"
   },
   "columns": {
     "agent": "Agent",
@@ -54,7 +67,11 @@
     "workload": "Workload",
     "runtime": "Runtime",
     "activity_7d": "Activity (7d)",
-    "runs": "Runs"
+    "runs": "Runs",
+    "last_active": "Last active",
+    "model": "Model",
+    "created": "Created",
+    "owner": "Owner"
   },
   "row": {
     "you": "You",
@@ -62,7 +79,9 @@
     "no_description": "No description",
     "fallback_runtime_cloud": "Cloud",
     "fallback_runtime_local": "Local",
-    "actions_aria": "Row actions"
+    "actions_aria": "Row actions",
+    "task_count_one": "{{count}} task",
+    "task_count_other": "{{count}} tasks"
   },
   "activity_tooltip": {
     "created_today": "Created today",
@@ -90,7 +109,9 @@
     "cancel_dialog_title": "Cancel all tasks for \"{{name}}\"?",
     "cancel_dialog_no_tasks": "There are no active tasks to cancel.",
     "cancel_dialog_running_one": "{{count}} running",
+    "cancel_dialog_running_other": "{{count}} running",
     "cancel_dialog_queued_one": "{{count}} queued",
+    "cancel_dialog_queued_other": "{{count}} queued",
     "cancel_dialog_impact_one": "This will cancel {{summary}} task.",
     "cancel_dialog_impact_other": "This will cancel {{summary}} tasks.",
     "cancel_dialog_running_note": " Running tasks may take up to 5 seconds to fully halt.",
@@ -128,6 +149,7 @@
     "section_properties": "Properties",
     "section_details": "Details",
     "section_skills": "Skills",
+    "section_integrations": "Integrations",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
     "prop_thinking": "Thinking",
@@ -195,6 +217,9 @@
     "skills": "Skills",
     "environment": "Environment",
     "custom_args": "Custom Args",
+    "mcp_config": "MCP",
+    "integrations": "Integrations",
+    "runtime_config": "Routing",
     "discard_dialog_title": "Discard unsaved changes?",
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
     "discard_keep": "Keep editing",
@@ -294,6 +319,38 @@
       "saved_toast": "Custom arguments saved",
       "save_failed_toast": "Failed to save custom arguments"
     },
+    "mcp_config": {
+      "intro": "MCP server configuration forwarded to the runtime CLI (Claude via --mcp-config, Codex via $CODEX_HOME/config.toml, Hermes/Kimi/Kiro via ACP mcpServers, OpenCode via OPENCODE_CONFIG_CONTENT, OpenClaw via the per-task config wrapper). Stored verbatim and may contain secrets — only the agent owner and workspace admins can read it. Leave empty to fall back to the CLI's own default. For OpenClaw HTTP/SSE entries use OpenClaw's own field name (e.g. \"transport\": \"streamable-http\") instead of Claude's \"type\".",
+      "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
+      "editor_aria": "MCP config JSON editor",
+      "clear_action": "Clear",
+      "invalid_json": "Invalid JSON: {{error}}",
+      "invalid_not_object": "MCP config must be a JSON object (e.g. {\"mcpServers\": …}).",
+      "saved_toast": "MCP config saved",
+      "save_failed_toast": "Failed to save MCP config",
+      "redacted_title": "Configured — hidden from your view",
+      "redacted_hint": "Only the agent owner or a workspace admin can read this config."
+    },
+    "runtime_config": {
+      "intro": "Choose how the OpenClaw runtime executes this agent's turns. Local mode runs the agent inside the daemon process. Gateway mode forwards each turn to an OpenClaw Gateway — useful when the daemon host is a lightweight coordinator and the agent should run on a more powerful machine.",
+      "mode_label": "Routing mode",
+      "mode_local": "Local",
+      "mode_gateway": "Gateway",
+      "mode_local_hint": "Default. The daemon spawns `openclaw agent --local …` and the agent loop runs on this host.",
+      "mode_gateway_hint": "The daemon dials an OpenClaw Gateway. Leave the endpoint fields blank to inherit them from the daemon host's `~/.openclaw/openclaw.json`.",
+      "gateway_legend": "Gateway endpoint",
+      "host_label": "Host",
+      "host_placeholder": "gw.internal",
+      "port_label": "Port",
+      "port_invalid": "Port must be a positive integer.",
+      "token_label": "Auth token",
+      "token_placeholder": "Bearer token issued by the gateway",
+      "token_masked_placeholder": "Saved — submit a new value to rotate, or leave blank to keep",
+      "tls_label": "Use TLS",
+      "tls_hint": "Dial https:// instead of http://",
+      "saved_toast": "Routing config saved",
+      "save_failed_toast": "Failed to save routing config"
+    },
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",
       "add_action": "Add skill",
@@ -312,6 +369,10 @@
       "add_dialog_confirm_other": "Add {{count}} skills",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
+    },
+    "integrations": {
+      "intro": "Connect this agent to external chat platforms so people can work with it where they already are.",
+      "members_note": "Only workspace owners and admins can connect an agent to an external chat platform. You can view connected bots in Settings → Integrations."
     },
     "activity": {
       "section_now": "Now",
@@ -413,5 +474,32 @@
     "runtime_offline": "Daemon offline",
     "runtime_recovery": "Daemon restarted",
     "manual": "Cancelled by user"
+  },
+  "last_active": {
+    "today": "Today",
+    "days_ago_one": "{{count}} day ago",
+    "days_ago_other": "{{count}} days ago",
+    "none": "No activity (30d)"
+  },
+  "toolbar": {
+    "result_count_title": "Matching agents / agents in scope",
+    "filter_label": "Filter",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters",
+    "section_availability": "Availability",
+    "section_runtime": "Runtime",
+    "display": "Display",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns",
+    "section_owner": "Owner",
+    "section_model": "Model"
+  },
+  "actions": {
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "clear_selection": "Clear selection"
   }
 }

@@ -30,7 +30,7 @@ make selfhost
 
 `make selfhost` will:
 
-1. Generate a `.env` from `.env.example` if missing, with a **random JWT_SECRET**
+1. Generate a `.env` from `.env.example` if missing, with a **random JWT_SECRET and Postgres password**
 2. Pull the official Docker images (PostgreSQL, Multica backend, Multica frontend)
 3. Bring up every service using `docker-compose.selfhost.yml`
 4. Wait until the backend's `/health` endpoint is ready
@@ -50,7 +50,7 @@ Once it's up:
 - **Backend**: [http://localhost:8080](http://localhost:8080)
 
 <Callout type="info">
-**Ports listen on `127.0.0.1` only.** `docker-compose.selfhost.yml` binds every published port to loopback — `ss -tlnp` will not show `0.0.0.0:8080`, and the services are unreachable from other machines by design. The default `JWT_SECRET` and Postgres credentials must never sit on the open internet. For cross-machine access, front the stack with a reverse proxy that terminates TLS — see [Step 5b — Cross-machine: front with a reverse proxy](#5b-cross-machine-front-with-a-reverse-proxy).
+**Ports listen on `127.0.0.1` only.** `docker-compose.selfhost.yml` binds every published port to loopback — `ss -tlnp` will not show `0.0.0.0:8080`, and the services are unreachable from other machines by design. Secrets and Postgres credentials must never sit on the open internet. For cross-machine access, front the stack with a reverse proxy that terminates TLS — see [Step 5b — Cross-machine: front with a reverse proxy](#5b-cross-machine-front-with-a-reverse-proxy).
 </Callout>
 
 ## 2. Important: keep production safety on
@@ -82,17 +82,51 @@ Two delivery backends are supported — pick whichever fits your network:
 
 **Option B — SMTP relay (internal networks / on-premise):**
 
-Use this when the deployment can't reach `api.resend.com`, or you already have an internal mail relay (Exchange, Postfix, on-prem SendGrid, etc.). `SMTP_HOST` takes priority over Resend when both are set.
+Use this when the deployment can't reach `api.resend.com`, or you already have an internal mail relay (Microsoft Exchange, Postfix, on-prem SendGrid, etc.). `SMTP_HOST` takes priority over Resend when both are set, so verification and invite mail stays on the internal relay. STARTTLS is upgraded automatically when advertised; port `465` (SMTPS / implicit TLS) auto-enables an immediate TLS handshake, and `SMTP_TLS=implicit` (aliases: `smtps`, `ssl`) forces it on a non-standard SMTPS port.
+
+For **anonymous Exchange internal relay (port 25)** — the host is trusted by IP and submits without credentials:
 
 ```bash
-SMTP_HOST=smtp.internal.example.com
-SMTP_PORT=587                  # default 25; use 587 for STARTTLS submission
-SMTP_USERNAME=multica          # leave empty for unauthenticated relay
-SMTP_PASSWORD=...
+SMTP_HOST=exchange.internal.example.com
+SMTP_PORT=25
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_TLS_INSECURE=false
 RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
 ```
 
-Then restart: `docker compose -f docker-compose.selfhost.yml restart backend`.
+For **authenticated submission (port 587, STARTTLS)** — the relay requires a service account; STARTTLS is upgraded automatically when advertised:
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # set true only for private CA / self-signed
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+For **implicit TLS / SMTPS (port 465)** — providers like Aliyun / Tencent enterprise mail that don't advertise STARTTLS. Port `465` auto-enables implicit TLS, so `SMTP_TLS` is optional here:
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+For **strict public relays (e.g. Google Workspace `smtp-relay.gmail.com`)** that reject the default `localhost` greeting from a public IP, set `SMTP_EHLO_NAME` to the FQDN the relay expects — otherwise the connection is dropped and surfaces as an opaque `EOF` on a later command. It defaults to the container hostname, which is usually not a valid FQDN:
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # FQDN the relay accepts; defaults to the (non-FQDN) container hostname
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+Then restart: `docker compose -f docker-compose.selfhost.yml restart backend`. On restart, the backend prints which provider it picked and the negotiated TLS mode (`EmailService: SMTP relay <host>:<port> (starttls|implicit-tls) from=…` / `Resend API` / `DEV mode`) — credentials are never logged, so this line is safe to share when asking for help.
 
 For more auth configuration (OAuth, signup allowlist) and the full SMTP variable reference, see [Auth setup](/auth-setup) and [Environment variables → Email](/environment-variables#email-configuration).
 
@@ -121,13 +155,17 @@ That points the CLI at `http://localhost:8080` (backend) and `http://localhost:3
 
 ### 5b. Cross-machine: front with a reverse proxy
 
-Because the compose stack only listens on `127.0.0.1`, a daemon on a different machine cannot reach `http://<server-ip>:8080` directly — and you do not want it to, since the default `JWT_SECRET` would otherwise be reachable from the open internet. Put a reverse proxy on the server that terminates TLS and forwards to `127.0.0.1:8080` (backend) and `127.0.0.1:3000` (frontend), then point the CLI at the public HTTPS URL:
+Because the compose stack only listens on `127.0.0.1`, a daemon on a different machine cannot reach `http://<server-ip>:8080` directly — and you do not want it to, since server secrets would otherwise be reachable from the open internet. Put a reverse proxy on the server that terminates TLS and forwards to `127.0.0.1:8080` (backend) and `127.0.0.1:3000` (frontend), then point the CLI at the public HTTPS URL:
 
 ```bash
 multica setup self-host \
   --server-url https://<your-domain> \
   --app-url https://<your-domain>
 ```
+
+<Callout type="info">
+Prefer environment variables over flags? `setup self-host` reads `MULTICA_SERVER_URL` and `MULTICA_APP_URL` when the matching flag is omitted — a flag still takes precedence over the env var. `MULTICA_SERVER_URL` also accepts the `ws://…/ws` daemon form from [Environment variables](/environment-variables) and normalizes it to the HTTP base.
+</Callout>
 
 A minimal Caddyfile that fronts both the frontend and the backend (with WebSocket support, which the daemon and the web app both need) on a single hostname:
 
@@ -159,44 +197,24 @@ After bringing the proxy up, set `FRONTEND_ORIGIN=https://multica.example.com` i
 
 Same flow as Cloud — see [Cloud quickstart → Steps 5-6](/cloud-quickstart#5-create-an-agent).
 
-## 7. Schedule the usage rollup (required for the Usage dashboard)
+## 7. Usage rollup (no operator action required)
 
-<Callout type="warning">
-The Usage / Runtime dashboards read from a derived `task_usage_hourly` table populated by `rollup_task_usage_hourly()`. The bundled `pgvector/pgvector:pg17` Postgres image **does not include `pg_cron`**, and the backend does not run the rollup in-process either. If nothing schedules `rollup_task_usage_hourly()`, raw `task_usage` rows keep arriving while the dashboard stays at zero forever.
+<Callout type="info">
+The Usage / Runtime dashboards read from a derived `task_usage_hourly` table populated by `rollup_task_usage_hourly()`. As of MUL-2957 the backend runs this rollup in-process via the DB-backed scheduler — `pg_cron` is no longer required, and external cron / systemd timers are no longer the recommended setup. The bundled `pgvector/pgvector:pg17` image works without changes.
 </Callout>
 
-Pick one of the supported options — only one is needed.
+The in-process scheduler ticks every 30 seconds and claims a 5-minute UTC plan via the `sys_cron_executions` table. Multiple backend replicas are safe — the unique key `(job_name, scope_kind, scope_id, plan_time)` means only one wins each plan. No setup is needed for new deployments.
 
-**Option A — External cron / systemd-timer (simplest).** Run the rollup every 5 minutes from any out-of-band scheduler. It's idempotent and watermark-driven, so missed ticks catch up:
-
-```bash
-# /etc/cron.d/multica-rollup — every 5 minutes
-*/5 * * * * root docker compose -f /path/to/multica/docker-compose.selfhost.yml \
-  exec -T postgres psql -U multica -d multica \
-  -c "SELECT rollup_task_usage_hourly();" >/dev/null
-```
-
-**Option B — Swap Postgres for an image that ships `pg_cron`.** Replace `pgvector/pgvector:pg17` in `docker-compose.selfhost.yml` with an image that has both `pgvector` and `pg_cron` (`supabase/postgres`, or a custom build), set `shared_preload_libraries=pg_cron`, restart, then register the job once:
+**Compatibility — existing `pg_cron` registrations.** If you previously registered the rollup as a `pg_cron` job (`SELECT cron.schedule('rollup_task_usage_hourly', '*/5 * * * *', …)`), you do not need to remove it — the SQL function holds advisory lock 4246 internally, so the app scheduler and `pg_cron` cannot double-write. To drop the redundant entry:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-SELECT cron.schedule(
-  'rollup_task_usage_hourly',
-  '*/5 * * * *',
-  $$SELECT rollup_task_usage_hourly()$$
-);
+SELECT cron.unschedule('rollup_task_usage_hourly')
+  FROM cron.job WHERE jobname = 'rollup_task_usage_hourly';
 ```
 
-**Option C — Backfill history first (upgrade path).** If you're upgrading from `v0.3.4 → v0.3.5+` and have existing `task_usage` rows, migration `103` will abort `migrate up` with `refusing to drop legacy daily rollups: ...` until the hourly table is seeded. Run the bundled backfill once, then set up Option A or B:
+**Upgrade from `v0.3.4 → v0.3.5+`.** The previous release asked operators to run `cmd/backfill_task_usage_hourly` manually before applying migration 103, otherwise the migration's fail-closed guard would abort `migrate up`. As of MUL-2957 this is automatic: the migrate command runs an idempotent monthly-slice backfill (under advisory lock 4246) immediately before applying migration 103, then continues. You may still run the standalone backfill on a busy DB to throttle read pressure with `--sleep-between-slices=2s`, but it is no longer required.
 
-```bash
-docker compose -f docker-compose.selfhost.yml exec backend \
-  ./backfill_task_usage_hourly --sleep-between-slices=2s
-```
-
-`--sleep-between-slices=2s` throttles read pressure on a busy DB. After it finishes, restart the backend container (migrations run on startup) and the upgrade completes.
-
-Full reference — including the Kubernetes `CronJob` template and the upgrade order — lives in the repo's [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
+Full reference — including operations notes and the Kubernetes deployment shape — lives in the repo's [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
 
 ## Kubernetes deployment (alternative)
 
@@ -250,8 +268,8 @@ The full reference — three login modes, the `backend` ExternalName workaround 
 - **Backend won't start**: check container logs with `docker compose -f docker-compose.selfhost.yml logs backend`; usually it's a bad `DATABASE_URL` or `JWT_SECRET` in `.env`
 - **Verification code not received**: no email backend is configured (neither Resend nor SMTP) → look for `[DEV] Verification code` in `docker compose logs backend`
 - **WebSocket won't connect**: for public deployments you must set `FRONTEND_ORIGIN` to your real frontend domain; see [Troubleshooting → WebSocket won't connect](/troubleshooting#websocket-wont-connect)
-- **Usage / Runtime dashboard stays at zero**: `rollup_task_usage_hourly()` isn't being scheduled — see [Step 7](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard) above and [Troubleshooting → Usage dashboard shows zero](/troubleshooting#usage-dashboard-stays-at-zero)
-- **`migrate up` fails with `refusing to drop legacy daily rollups`**: upgrade-path guard from `v0.3.4 → v0.3.5+`. Run `backfill_task_usage_hourly` first — see [Step 7 → Option C](#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)
+- **Usage / Runtime dashboard stays at zero**: `rollup_task_usage_hourly()` isn't being scheduled — see [Step 7](#7-usage-rollup-no-operator-action-required) above and [Troubleshooting → Usage dashboard shows zero](/troubleshooting#usage-dashboard-stays-at-zero)
+- **`migrate up` fails with `refusing to drop legacy daily rollups`**: upgrade-path guard from `v0.3.4 → v0.3.5+`. As of MUL-2957 the migrate command runs the backfill automatically before applying migration 103 — see [Step 7](#7-usage-rollup-no-operator-action-required)
 
 ## Next steps
 

@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -44,11 +45,17 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		return nil, fmt.Errorf("kiro executable not found at %q: %w", execPath, err)
 	}
 
-	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
+	// Translate the agent's mcp_config (Claude-style object of objects)
+	// into the array shape ACP `session/new` and `session/load` expect.
+	// Fail closed on malformed JSON so the launch surfaces the real error
+	// instead of silently dropping all MCP servers.
+	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("kiro: invalid mcp_config: %w", err)
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+
+	timeout := opts.Timeout
+	runCtx, cancel := runContext(ctx, timeout)
 
 	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, kiroArgs...)
@@ -100,6 +107,8 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var outputMu sync.Mutex
 	var output strings.Builder
 	var streamingCurrentTurn atomic.Bool
+	var sawCompletedGoalComplete atomic.Bool
+	var goalCompleteCallIDs sync.Map
 
 	promptDone := make(chan hermesPromptResult, 1)
 
@@ -117,6 +126,14 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			}
 			if msg.Type == MessageToolUse {
 				msg.Tool = kiroToolNameFromTitle(msg.Tool)
+				if msg.Tool == "goal_complete" && msg.CallID != "" {
+					goalCompleteCallIDs.Store(msg.CallID, struct{}{})
+				}
+			}
+			if msg.Type == MessageToolResult {
+				if _, ok := goalCompleteCallIDs.LoadAndDelete(msg.CallID); ok {
+					sawCompletedGoalComplete.Store(msg.Status == "completed")
+				}
 			}
 			if msg.Type == MessageText {
 				outputMu.Lock()
@@ -165,7 +182,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		var finalError string
 		var sessionID string
 
-		_, err := c.request(runCtx, "initialize", map[string]any{
+		initResult, err := c.request(runCtx, "initialize", map[string]any{
 			"protocolVersion": 1,
 			"clientInfo": map[string]any{
 				"name":    "multica-agent-sdk",
@@ -180,6 +197,12 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			return
 		}
 
+		// Drop MCP entries whose remote transport the runtime didn't
+		// advertise. See the matching comment in hermes.go for why
+		// unconditionally sending http/sse to a stdio-only ACP runtime
+		// tanks the whole session/new.
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kiro", b.cfg.Logger)
+
 		cwd := opts.Cwd
 		if cwd == "" {
 			cwd = "."
@@ -189,7 +212,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			result, err := c.request(runCtx, "session/load", map[string]any{
 				"cwd":        cwd,
 				"sessionId":  opts.ResumeSessionID,
-				"mcpServers": []any{},
+				"mcpServers": mcpServers,
 			})
 			if err != nil {
 				finalStatus = "failed"
@@ -217,7 +240,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
-				"mcpServers": []any{},
+				"mcpServers": mcpServers,
 			})
 			if err != nil {
 				finalStatus = "failed"
@@ -245,6 +268,17 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				b.cfg.Logger.Warn("kiro set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kiro could not switch to model %q: %v", opts.Model, err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					// On a resumed session with a model override, the dead
+					// session surfaces here instead of at session/prompt.
+					// Same fix as the prompt path below: clear the id so
+					// the daemon's resume-failure fallback retries fresh.
+					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
+						"backend", "kiro",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 				resCh <- Result{
 					Status:     finalStatus,
 					Error:      finalError,
@@ -284,6 +318,23 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kiro session/prompt failed: %v", err)
+				if sawCompletedGoalComplete.Load() && isKiroGoalCompleteCloseError(err) {
+					b.cfg.Logger.Warn("kiro session/prompt failed after goal_complete; preserving completed task status", "error", err)
+					finalStatus = "completed"
+					finalError = ""
+				} else if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					// See the hermes backend: the runtime echoes the
+					// requested id back from session/resume even when
+					// the session is gone, so the stale id only fails
+					// here, at prompt time. Empty SessionID lets the
+					// daemon's resume-failure fallback retry fresh and
+					// store the replacement id.
+					b.cfg.Logger.Warn("resumed session not found at prompt time; clearing session id so the daemon retries fresh",
+						"backend", "kiro",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 			}
 		} else {
 			select {
@@ -347,6 +398,20 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func isKiroGoalCompleteCloseError(err error) bool {
+	var rpcErr *acpRPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	if rpcErr.Method != "session/prompt" || rpcErr.Code != -32603 {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(rpcErr.Message), "Internal error") {
+		return false
+	}
+	return strings.Contains(strings.ToLower(rpcErr.Data), "failed to generate a response")
 }
 
 func kiroToolNameFromTitle(title string) string {

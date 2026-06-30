@@ -9,6 +9,44 @@ export interface TimelineItem {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  created_at?: string;
+}
+
+function canMergeStreamingText(prev: TimelineItem, next: TimelineItem): boolean {
+  return (prev.type === "thinking" || prev.type === "text") && prev.type === next.type;
+}
+
+/** Merge adjacent text/thinking fragments that were split only by daemon flush timing. */
+export function coalesceTimelineItems(items: TimelineItem[]): TimelineItem[] {
+  const sorted = [...items].sort((a, b) => a.seq - b.seq);
+  const out: TimelineItem[] = [];
+
+  for (const item of sorted) {
+    const prev = out[out.length - 1];
+    if (prev && canMergeStreamingText(prev, item)) {
+      out[out.length - 1] = {
+        ...prev,
+        content: `${prev.content ?? ""}${item.content ?? ""}`,
+        created_at: item.created_at ?? prev.created_at,
+      };
+      continue;
+    }
+    out.push(item);
+  }
+
+  return out;
+}
+
+export function appendTimelineItem(items: TimelineItem[], item: TimelineItem): TimelineItem[] {
+  return coalesceTimelineItems([...items, item]);
+}
+
+function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
+  return items.map((item) => ({
+    ...item,
+    content: item.content ? redactSecrets(item.content) : item.content,
+    output: item.output ? redactSecrets(item.output) : item.output,
+  }));
 }
 
 /** Build a chronologically ordered timeline from raw task messages. */
@@ -19,10 +57,11 @@ export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
       seq: msg.seq,
       type: msg.type,
       tool: msg.tool,
-      content: msg.content ? redactSecrets(msg.content) : msg.content,
+      content: msg.content,
       input: msg.input,
-      output: msg.output ? redactSecrets(msg.output) : msg.output,
+      output: msg.output,
+      created_at: msg.created_at,
     });
   }
-  return items.sort((a, b) => a.seq - b.seq);
+  return redactTimelineItems(coalesceTimelineItems(items));
 }

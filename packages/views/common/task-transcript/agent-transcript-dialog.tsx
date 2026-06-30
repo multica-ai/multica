@@ -17,10 +17,12 @@ import {
   Cloud,
   Cpu,
   Filter,
+  Folder,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import {
@@ -178,6 +180,7 @@ export function AgentTranscriptDialog({
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copiedWorkdir, setCopiedWorkdir] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
   const [selectedTools, setSelectedTools] = useState<Set<string>>(new Set());
@@ -276,6 +279,15 @@ export function AgentTranscriptDialog({
 
   // Copy all events as text. Use the displayed order so users get the same
   // sequence they see on screen — matters when sort is set to newest-first.
+  const handleCopyWorkdir = useCallback(() => {
+    if (!task.relative_work_dir) return;
+    void copyText(task.relative_work_dir).then((ok) => {
+      if (!ok) return;
+      setCopiedWorkdir(true);
+      setTimeout(() => setCopiedWorkdir(false), 2000);
+    });
+  }, [task.relative_work_dir]);
+
   const handleCopyAll = useCallback(() => {
     const text = displayItems
       .map((item) => {
@@ -284,7 +296,8 @@ export function AgentTranscriptDialog({
         return `[${label}] ${summary}`;
       })
       .join("\n");
-    navigator.clipboard.writeText(text).then(() => {
+    void copyText(text).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -472,6 +485,31 @@ export function AgentTranscriptDialog({
                 ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
                 : t(($) => $.transcript.events, { count: items.length })}
             </MetadataChip>
+
+            {/* Working directory — server-derived display path. Falls back to
+                nothing when older backends omit the field rather than rendering
+                `work_dir` raw and leaking the user's home directory. The
+                absolute `task.work_dir` deliberately never reaches the DOM
+                anywhere — only `relative_work_dir` is safe to render / put in
+                title / copy to clipboard, because the server has already
+                stripped $HOME and the username out of it. The button
+                truncates because real workdir paths are routinely long
+                enough to push every other chip off the row. */}
+            {task.relative_work_dir && (
+              <button
+                type="button"
+                onClick={handleCopyWorkdir}
+                title={task.relative_work_dir}
+                className="inline-flex max-w-[16rem] items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {copiedWorkdir ? (
+                  <Check className="h-3 w-3 shrink-0 text-emerald-500" />
+                ) : (
+                  <Folder className="h-3 w-3 shrink-0" />
+                )}
+                <span className="truncate font-mono">{task.relative_work_dir}</span>
+              </button>
+            )}
 
             {/* Created time */}
             {task.created_at && (
@@ -691,6 +729,10 @@ const TranscriptEventRow = ({
   const color = getEventColor(item);
   const label = getEventLabel(item);
   const summary = getEventSummary(item);
+  const date = useMemo(
+    () => (item.created_at ? new Date(item.created_at) : null),
+    [item.created_at],
+  );
 
   const hasDetail =
     (item.type === "tool_use" && item.input && Object.keys(item.input).length > 0) ||
@@ -747,6 +789,17 @@ const TranscriptEventRow = ({
           <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1">
             #{item.seq}
           </span>
+
+          {/* Timestamp */}
+          {date && (
+            <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1" title={date.toLocaleString()}>
+              {date.toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            </span>
+          )}
         </div>
 
         {/* Expanded detail */}

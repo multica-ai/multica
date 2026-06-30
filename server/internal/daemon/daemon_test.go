@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -77,6 +79,85 @@ func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	}
 	if got := d.RestartBinary(); got == deletedCellarPath {
 		t.Fatalf("restart binary used deleted Cellar path %q", got)
+	}
+}
+
+func TestIsBlockedEnvKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{key: "MULTICA_TOKEN", want: true},
+		{key: "multica_runtime_id", want: true},
+		{key: "HOME", want: true},
+		{key: "PATH", want: true},
+		{key: "CODEX_HOME", want: true},
+		{key: "CURSOR_DATA_DIR", want: true},
+		{key: "cursor_data_dir", want: true},
+		{key: "OPENCLAW_CONFIG_PATH", want: true},
+		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
+		{key: "ANTHROPIC_API_KEY", want: false},
+		{key: "CURSOR_AGENT", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			t.Parallel()
+			if got := isBlockedEnvKey(tt.key); got != tt.want {
+				t.Fatalf("isBlockedEnvKey(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskScopedAuthToken(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		token   string
+		want    string
+		wantErr string
+	}{
+		{
+			name:    "missing token fails closed",
+			wantErr: "server did not provide task-scoped auth token",
+		},
+		{
+			name:    "member token fails closed",
+			token:   "mul_member_token",
+			wantErr: "server provided non-task-scoped auth token",
+		},
+		{
+			name:  "task token accepted",
+			token: " mat_task_token ",
+			want:  "mat_task_token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := taskScopedAuthToken(Task{AuthToken: tt.token})
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("taskScopedAuthToken() error = nil, want %q", tt.wantErr)
+				}
+				if err.Error() != tt.wantErr {
+					t.Fatalf("taskScopedAuthToken() error = %q, want %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("taskScopedAuthToken(): %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("taskScopedAuthToken() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -703,8 +784,12 @@ func TestShouldInterruptAgent(t *testing.T) {
 		want   bool
 	}{
 		{name: "status cancelled", status: "cancelled", err: nil, want: true},
+		{name: "status failed (offline sweeper)", status: "failed", err: nil, want: true},
+		{name: "status completed (finished elsewhere)", status: "completed", err: nil, want: true},
 		{name: "task deleted (404)", status: "", err: notFound, want: true},
 		{name: "running normally", status: "running", err: nil, want: false},
+		{name: "waiting_local_directory keeps running", status: "waiting_local_directory", err: nil, want: false},
+		{name: "dispatched keeps running", status: "dispatched", err: nil, want: false},
 		{name: "transient 5xx is not a cancel signal", status: "", err: transient, want: false},
 		{name: "no information yet", status: "", err: nil, want: false},
 	}
@@ -890,6 +975,71 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	// "directory not empty" cleanup error.
 	t.Cleanup(d.waitBackgroundSyncs)
 	return d
+}
+
+func TestGateResumeToReusedWorkdir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		sessionID   string
+		priorDir    string
+		envDir      string
+		wantSession string
+		wantReused  bool
+	}{
+		{
+			name:        "same workdir keeps session",
+			sessionID:   "sess-1",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-a/workdir",
+			wantSession: "sess-1",
+			wantReused:  true,
+		},
+		{
+			name:        "fresh workdir drops session",
+			sessionID:   "sess-1",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+		{
+			name:        "session without recorded workdir drops session",
+			sessionID:   "sess-1",
+			priorDir:    "",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+		{
+			name:        "no prior session is a no-op",
+			sessionID:   "",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: tt.priorDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
+
+			reused := gateResumeToReusedWorkdir(&task, &taskCtx, tt.envDir, slog.Default())
+
+			if reused != tt.wantReused {
+				t.Fatalf("reused = %v, want %v", reused, tt.wantReused)
+			}
+			if task.PriorSessionID != tt.wantSession {
+				t.Fatalf("PriorSessionID = %q, want %q", task.PriorSessionID, tt.wantSession)
+			}
+			if taskCtx.PriorSessionResumed != (tt.wantSession != "") {
+				t.Fatalf("PriorSessionResumed = %v, want %v", taskCtx.PriorSessionResumed, tt.wantSession != "")
+			}
+		})
+	}
 }
 
 func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
@@ -1096,8 +1246,9 @@ func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
 
 // idleWatchdogBackend simulates the MUL-2225 hang: emit one message to mark
 // activity, then go silent forever. With a short AgentIdleWatchdog, the
-// watchdog should fire and short-circuit executeAndDrain instead of waiting
-// for the full drainTimeout (which is ~21 minutes by default).
+// watchdog should fire and short-circuit executeAndDrain. With no wall-clock
+// cap (opts.Timeout = 0) the drain loop imposes no deadline of its own, so the
+// idle watchdog is the only thing that ends this otherwise-forever-silent run.
 type idleWatchdogBackend struct {
 	emitOne bool // when true, emit one message before going silent; when false, never emit anything
 }
@@ -1285,6 +1436,45 @@ func TestExecuteAndDrain_IdleWatchdog_DoesNotFireDuringInFlightToolCall(t *testi
 	}
 }
 
+// stuckInFlightToolBackend models a hung tool: it emits a tool_use and then
+// goes silent forever — the matching tool_result never arrives, so inFlightTools
+// stays at 1 (e.g. a child process that never returns). With no wall-clock cap
+// (the MUL-3064 default), AgentToolWatchdog is the only thing that ends it.
+type stuckInFlightToolBackend struct{}
+
+func (stuckInFlightToolBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 2)
+	resCh := make(chan agent.Result)
+	msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "Bash", CallID: "c1"}
+	// Deliberately leave msgCh open, never emit tool_result, never write resCh.
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_IdleWatchdog_FiresOnStuckInFlightTool(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	// The normal idle window would be skipped while a tool is in flight; the
+	// AgentToolWatchdog budget is what must fire here.
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+	d.cfg.AgentToolWatchdog = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	start := time.Now()
+	result, _, err := d.executeAndDrain(ctx, stuckInFlightToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-stuck-tool")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog for a hung in-flight tool, got %q (err=%q)", result.Status, result.Error)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("tool watchdog took too long to fire: %s (window=%s)", elapsed, d.cfg.AgentToolWatchdog)
+	}
+}
+
 // tailIdleAfterToolBackend exercises the boundary case: a tool call completes,
 // and THEN the backend goes silent without ever finishing. After the
 // tool_result lands, in-flight count returns to zero and lastActivityAt is
@@ -1455,7 +1645,7 @@ func TestRegisterTaskReposAllowsProjectOnlyURL(t *testing.T) {
 	// the only repo URL the agent should be able to check out.
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	d.registerTaskRepos("ws-1", []RepoData{{URL: sourceRepo}})
+	d.registerTaskRepos("ws-1", "task-project-only", []RepoData{{URL: sourceRepo}})
 
 	// The async clone goroutine in registerTaskRepos may not have finished;
 	// poll briefly until the cache is populated so the test isn't racy.
@@ -1502,7 +1692,7 @@ func TestRegisterTaskReposSurvivesWorkspaceRefresh(t *testing.T) {
 		})
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
-	d.registerTaskRepos("ws-1", []RepoData{{URL: sourceRepo}})
+	d.registerTaskRepos("ws-1", "task-refresh", []RepoData{{URL: sourceRepo}})
 
 	// Wait for the registration to populate the cache.
 	deadline := time.Now().Add(5 * time.Second)
@@ -1516,6 +1706,39 @@ func TestRegisterTaskReposSurvivesWorkspaceRefresh(t *testing.T) {
 
 	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
 		t.Fatal("project repo URL was wiped by workspace refresh")
+	}
+}
+
+func TestTaskRepoDefaultRefScopedByTask(t *testing.T) {
+	t.Parallel()
+
+	const repoURL = "https://github.com/example/shared"
+	d := &Daemon{
+		workspaces: map[string]*workspaceState{
+			"ws-1": newWorkspaceState("ws-1", nil, "", nil, nil),
+		},
+	}
+
+	d.registerTaskRepos("ws-1", "task-a", []RepoData{
+		{URL: repoURL, Ref: "release/a"},
+		{URL: repoURL, Ref: "late-duplicate"},
+	})
+	d.registerTaskRepos("ws-1", "task-b", []RepoData{{URL: repoURL, Ref: "release/b"}})
+
+	if got := d.taskRepoDefaultRef("ws-1", "task-a", repoURL); got != "release/a" {
+		t.Fatalf("task-a default ref = %q, want release/a", got)
+	}
+	if got := d.taskRepoDefaultRef("ws-1", "task-b", repoURL); got != "release/b" {
+		t.Fatalf("task-b default ref = %q, want release/b", got)
+	}
+
+	d.clearTaskRepoRefs("ws-1", "task-a")
+
+	if got := d.taskRepoDefaultRef("ws-1", "task-a", repoURL); got != "" {
+		t.Fatalf("task-a default ref after cleanup = %q, want empty", got)
+	}
+	if got := d.taskRepoDefaultRef("ws-1", "task-b", repoURL); got != "release/b" {
+		t.Fatalf("task-b default ref after task-a cleanup = %q, want release/b", got)
 	}
 }
 
@@ -1634,7 +1857,7 @@ func TestDefaultArgsForProvider(t *testing.T) {
 	if got := defaultArgsForProvider(cfg, "codex"); strings.Join(got, " ") != "--sandbox workspace-write" {
 		t.Fatalf("unexpected codex args: %#v", got)
 	}
-	if got := defaultArgsForProvider(cfg, "gemini"); got != nil {
+	if got := defaultArgsForProvider(cfg, "unsupported"); got != nil {
 		t.Fatalf("expected nil for unsupported provider, got %#v", got)
 	}
 }
@@ -1719,32 +1942,49 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 	cases := []struct {
 		name              string
 		status            string
+		comment           string
 		failureReasonIn   string
 		wantFailureReason string
 	}{
 		{
 			name:              "blocked with explicit reason preserves it",
 			status:            "blocked",
+			comment:           "rate limit reached",
 			failureReasonIn:   "iteration_limit",
 			wantFailureReason: "iteration_limit",
 		},
 		{
-			name:              "blocked without reason defaults to agent_error",
+			// MUL-2946: when the daemon doesn't supply a refined
+			// reason, the comment text is run through
+			// taskfailure.Classify so the failure_reason column
+			// lands in the canonical refined taxonomy instead of
+			// the legacy "agent_error" coarse bucket.
+			name:              "blocked without reason classifies comment as rate-limit",
 			status:            "blocked",
+			comment:           "rate limit reached",
 			failureReasonIn:   "",
-			wantFailureReason: "agent_error",
+			wantFailureReason: "agent_error.provider_capacity_or_rate_limit",
 		},
 		{
-			name:              "cancelled defaults to cancelled reason",
+			name:              "blocked without reason and unrecognized comment lands in agent_error.unknown",
+			status:            "blocked",
+			comment:           "the agent gave up for reasons we don't recognize",
+			failureReasonIn:   "",
+			wantFailureReason: "agent_error.unknown",
+		},
+		{
+			name:              "cancelled defaults to cancelled reason regardless of comment",
 			status:            "cancelled",
+			comment:           "rate limit reached",
 			failureReasonIn:   "",
 			wantFailureReason: "cancelled",
 		},
 		{
-			name:              "unknown status fails closed",
+			name:              "unknown status routes through classifier",
 			status:            "weird_new_status",
+			comment:           "rate limit reached",
 			failureReasonIn:   "",
-			wantFailureReason: "agent_error",
+			wantFailureReason: "agent_error.provider_capacity_or_rate_limit",
 		},
 	}
 
@@ -1757,7 +1997,7 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 			d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
 			d.reportTaskResult(context.Background(), "task-x", TaskResult{
 				Status:        tc.status,
-				Comment:       "rate limit reached",
+				Comment:       tc.comment,
 				SessionID:     "ses-x",
 				WorkDir:       "/tmp/x",
 				FailureReason: tc.failureReasonIn,
@@ -1768,7 +2008,7 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 			if rec.path != "/api/daemon/tasks/task-x/fail" {
 				t.Fatalf("expected /fail endpoint for status=%q, got %s", tc.status, rec.path)
 			}
-			if rec.payload["error"] != "rate limit reached" {
+			if rec.payload["error"] != tc.comment {
 				t.Errorf("error body: got %v", rec.payload["error"])
 			}
 			if got := rec.payload["failure_reason"]; got != tc.wantFailureReason {
@@ -1778,6 +2018,123 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 				t.Errorf("session_id should be forwarded on failure paths so chat resume keeps working, got %v", rec.payload["session_id"])
 			}
 		})
+	}
+}
+
+// Regression test for the MUL-2780 incident: a short 502 burst on the
+// /complete callback used to (a) drop the task at the first failure and
+// (b) wrongly fall back to /fail, surfacing a successful run as red.
+// With the retry helper in place, a transient 502 followed by a 200 must
+// resolve via /complete without ever touching /fail.
+func TestReportTaskResult_RetriesTransientCompleteThenSucceeds(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var completeCalls, failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			n := completeCalls.Add(1)
+			if n == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-retry", TaskResult{
+		Status:  "completed",
+		Comment: "ok",
+	}, slog.Default())
+
+	if got := completeCalls.Load(); got != 2 {
+		t.Fatalf("expected 2 complete attempts (one 502, one 200), got %d", got)
+	}
+	if got := failCalls.Load(); got != 0 {
+		t.Fatalf("transient 502 must not fall back to /fail (would lose successful result), got %d /fail calls", got)
+	}
+}
+
+// Pins the new "don't downgrade success to failure on transient errors"
+// rule: when /complete is 502 across the entire retry schedule, we must
+// NOT fall through to /fail — that would surface a real success as a
+// failure in the UI. The task is left in running for a future recovery
+// path to pick up.
+func TestReportTaskResult_TransientCompleteExhaustedDoesNotFallback(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	prevSchedule := defaultTerminalRetrySchedule
+	defaultTerminalRetrySchedule = []time.Duration{time.Nanosecond, time.Nanosecond}
+	t.Cleanup(func() { defaultTerminalRetrySchedule = prevSchedule })
+
+	var completeCalls, failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			completeCalls.Add(1)
+			w.WriteHeader(http.StatusBadGateway)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-stuck", TaskResult{
+		Status:  "completed",
+		Comment: "ok",
+	}, slog.Default())
+
+	if got := completeCalls.Load(); got != int32(len(defaultTerminalRetrySchedule)+1) {
+		t.Fatalf("expected %d complete attempts, got %d", len(defaultTerminalRetrySchedule)+1, got)
+	}
+	if got := failCalls.Load(); got != 0 {
+		t.Fatalf("exhausted transient retries must NOT fall back to /fail; got %d /fail calls", got)
+	}
+}
+
+// On permanent 4xx from /complete (e.g. 400 bad body, 404 task not found)
+// the helper bails immediately and the daemon falls back to /fail so the
+// UI shows a concrete failure rather than a perpetually-running task.
+func TestReportTaskResult_PermanentCompleteFallsBackToFail(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var completeCalls, failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			completeCalls.Add(1)
+			w.WriteHeader(http.StatusBadRequest)
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-bad", TaskResult{
+		Status:  "completed",
+		Comment: "ok",
+	}, slog.Default())
+
+	if got := completeCalls.Load(); got != 1 {
+		t.Fatalf("permanent 400 should not retry, got %d complete attempts", got)
+	}
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("permanent /complete should fall back to /fail exactly once, got %d", got)
 	}
 }
 
@@ -1977,5 +2334,380 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 	// given that the runner blocks on runCtx.Done().
 	if usageIdx < pollStatusIdx {
 		t.Fatalf("usage reported before poll-status (order: %v) — poll-status must come first", order)
+	}
+}
+
+// TestWatchTaskCancellation_ReconcileBroadcastTriggersImmediateCheck pins the
+// fix for #4665. The 5s ticker in watchTaskCancellation is too coarse to catch
+// a server-side cancellation that landed during a WS disconnect: without the
+// reconcile broadcast, a reconnect followed by an immediate status flip is
+// invisible until the next tick fires. The test sets the ticker to a long
+// interval (so a tick would fail the test) and asserts the watcher reacts to
+// reconcile.broadcast() sub-second.
+func TestWatchTaskCancellation_ReconcileBroadcastTriggersImmediateCheck(t *testing.T) {
+	t.Parallel()
+
+	var status atomic.Value
+	status.Store("running")
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"` + status.Load().(string) + `"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:    NewClient(srv.URL),
+		logger:    slog.Default(),
+		reconcile: newReconcileBroadcaster(),
+	}
+	d.reconcile.minBroadcastInterval = 0 // tight timing under test
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// 30s ticker: if the watcher only reacts to its own ticker the test will
+	// time out at 2s, which is exactly the failure we want to catch.
+	cancelled := d.watchTaskCancellation(ctx, "task-reconcile", 30*time.Second, slog.Default())
+
+	// Simulate the gap: status flips during the WS disconnect.
+	status.Store("cancelled")
+
+	// And then the WS reconnects — broadcast must be heard.
+	if !d.reconcile.broadcast() {
+		t.Fatal("broadcast() returned false; expected first broadcast to fire")
+	}
+
+	select {
+	case <-cancelled:
+		// Expected: reconcile woke the watcher, it called GetTaskStatus,
+		// saw cancelled, and closed the channel.
+	case <-time.After(2 * time.Second):
+		t.Fatalf("watchTaskCancellation did not react to reconcile broadcast within 2s (calls=%d)", calls.Load())
+	}
+
+	if calls.Load() == 0 {
+		t.Fatal("GetTaskStatus was never called — reconcile path did not fire")
+	}
+}
+
+// TestWatchTaskCancellation_ReconcileWithRunningTaskStaysAlive ensures the
+// reconcile path does not falsely interrupt a still-running task. The watcher
+// must call GetTaskStatus on broadcast, see status=running, and continue.
+func TestWatchTaskCancellation_ReconcileWithRunningTaskStaysAlive(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"running"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:    NewClient(srv.URL),
+		logger:    slog.Default(),
+		reconcile: newReconcileBroadcaster(),
+	}
+	d.reconcile.minBroadcastInterval = 0
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	cancelled := d.watchTaskCancellation(ctx, "task-still-running", 30*time.Second, slog.Default())
+
+	// Three broadcasts back-to-back: watcher should call GetTaskStatus at
+	// least once and NOT close the cancelled channel.
+	for i := 0; i < 3; i++ {
+		d.reconcile.broadcast()
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	select {
+	case <-cancelled:
+		t.Fatal("watchTaskCancellation closed cancelled channel for a running task")
+	case <-time.After(200 * time.Millisecond):
+		// Expected: still running.
+	}
+
+	if calls.Load() == 0 {
+		t.Fatal("reconcile broadcasts did not result in any GetTaskStatus call")
+	}
+}
+
+// TestWorkspaceSyncLoop_ReconcileBroadcastTriggersImmediateSync pins that the
+// 30s workspace sync ticker is also short-circuited by reconcile broadcasts.
+// Without this, runtime/repo changes the server made during a WS disconnect
+// stay invisible to the daemon for up to 30 seconds.
+func TestWorkspaceSyncLoop_ReconcileBroadcastTriggersImmediateSync(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/workspaces" {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"workspaces":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:     NewClient(srv.URL),
+		logger:     slog.Default(),
+		workspaces: make(map[string]*workspaceState),
+		reconcile:  newReconcileBroadcaster(),
+	}
+	d.reconcile.minBroadcastInterval = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		d.workspaceSyncLoop(ctx)
+	}()
+
+	// Two broadcasts spaced apart. workspaceSyncLoop should re-acquire its
+	// subscription after the first wake and react to the second too.
+	d.reconcile.broadcast()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && calls.Load() < 1 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if calls.Load() < 1 {
+		cancel()
+		<-loopDone
+		t.Fatal("workspaceSyncLoop did not react to first reconcile broadcast within 2s")
+	}
+
+	d.reconcile.broadcast()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && calls.Load() < 2 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if calls.Load() < 2 {
+		cancel()
+		<-loopDone
+		t.Fatalf("workspaceSyncLoop did not react to second reconcile broadcast within 2s (calls=%d)", calls.Load())
+	}
+
+	cancel()
+	select {
+	case <-loopDone:
+	case <-time.After(time.Second):
+		t.Fatal("workspaceSyncLoop did not return after ctx cancel")
+	}
+}
+
+// TestWorkspaceSyncLoop_ReplaysBroadcastFromBeforeStart pins the daemon-
+// startup race fix: broadcast() that fired while no one was subscribed
+// MUST still wake the loop on its first subscription. Without the
+// reconcile broadcaster's replay slot, this race manifests in production
+// when the WS connects (and broadcasts) before workspaceSyncLoop has
+// finished its first notify() call.
+func TestWorkspaceSyncLoop_ReplaysBroadcastFromBeforeStart(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/workspaces" {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"workspaces":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:     NewClient(srv.URL),
+		logger:     slog.Default(),
+		workspaces: make(map[string]*workspaceState),
+		reconcile:  newReconcileBroadcaster(),
+	}
+	d.reconcile.minBroadcastInterval = 0
+
+	// Broadcast BEFORE the loop subscribes — the level-triggered replay slot
+	// must hold the event for the loop's first notify().
+	if !d.reconcile.broadcast() {
+		t.Fatal("seed broadcast suppressed")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		d.workspaceSyncLoop(ctx)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && calls.Load() < 1 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if calls.Load() < 1 {
+		cancel()
+		<-loopDone
+		t.Fatal("workspaceSyncLoop did not replay broadcast issued before its start")
+	}
+
+	cancel()
+	<-loopDone
+}
+
+// TestWatchTaskCancellation_BroadcastWakesAllConcurrentWatchers ensures the
+// fix scales: a single WS reconnect that fires broadcast() must drive every
+// in-flight task's watcher to re-check the server. Without fan-out, a busy
+// daemon with N tasks would still hit a wall of sequential 5s gaps.
+func TestWatchTaskCancellation_BroadcastWakesAllConcurrentWatchers(t *testing.T) {
+	t.Parallel()
+
+	var status atomic.Value
+	status.Store("running")
+	var totalCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		totalCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"` + status.Load().(string) + `"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:    NewClient(srv.URL),
+		logger:    slog.Default(),
+		reconcile: newReconcileBroadcaster(),
+	}
+	d.reconcile.minBroadcastInterval = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	const watchers = 8
+	chans := make([]<-chan struct{}, watchers)
+	for i := 0; i < watchers; i++ {
+		// 30s ticker: only the broadcast path can satisfy the assertion.
+		chans[i] = d.watchTaskCancellation(ctx, fmt.Sprintf("task-%d", i), 30*time.Second, slog.Default())
+	}
+
+	// Server state flips during the WS gap; broadcast lands the news to
+	// every watcher at once.
+	status.Store("cancelled")
+	if !d.reconcile.broadcast() {
+		t.Fatal("broadcast suppressed")
+	}
+
+	deadline := time.After(3 * time.Second)
+	for i, ch := range chans {
+		select {
+		case <-ch:
+		case <-deadline:
+			t.Fatalf("watcher %d did not react to broadcast (totalCalls=%d, woke=%d)", i, totalCalls.Load(), i)
+		}
+	}
+}
+
+// TestWatchTaskCancellation_ReconcileDoesNotPanicAfterCtxCancel ensures
+// teardown order is safe: even if a broadcast arrives after ctx is cancelled,
+// the watcher must exit cleanly without panic or double-close of cancelled.
+func TestWatchTaskCancellation_ReconcileDoesNotPanicAfterCtxCancel(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"running"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:    NewClient(srv.URL),
+		logger:    slog.Default(),
+		reconcile: newReconcileBroadcaster(),
+	}
+	d.reconcile.minBroadcastInterval = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelled := d.watchTaskCancellation(ctx, "task-ctx-cancelled", 30*time.Second, slog.Default())
+
+	cancel()
+	// Give the watcher a beat to observe ctx.Done() and exit.
+	time.Sleep(50 * time.Millisecond)
+
+	// Broadcast after cancel — must not panic and must not unblock the
+	// cancelled channel (the task was not interrupted server-side).
+	for i := 0; i < 5; i++ {
+		d.reconcile.broadcast()
+	}
+
+	select {
+	case <-cancelled:
+		t.Fatal("cancelled channel was closed after ctx cancel; server still reported running")
+	case <-time.After(150 * time.Millisecond):
+		// Expected: nothing happened.
+	}
+}
+
+// TestWatchTaskCancellation_ReconcileRunningKeepsTickerAlive proves that a
+// reconcile broadcast that sees status=running does not disturb the ticker;
+// a subsequent ticker fire still detects a later cancellation.
+func TestWatchTaskCancellation_ReconcileRunningKeepsTickerAlive(t *testing.T) {
+	t.Parallel()
+
+	var status atomic.Value
+	status.Store("running")
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"` + status.Load().(string) + `"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:    NewClient(srv.URL),
+		logger:    slog.Default(),
+		reconcile: newReconcileBroadcaster(),
+	}
+	d.reconcile.minBroadcastInterval = 0
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Short ticker so the test stays fast.
+	cancelled := d.watchTaskCancellation(ctx, "task-runs-then-cancelled", 50*time.Millisecond, slog.Default())
+
+	// First broadcast: server still reports running — watcher must NOT
+	// close cancelled.
+	if !d.reconcile.broadcast() {
+		t.Fatal("first broadcast suppressed")
+	}
+	select {
+	case <-cancelled:
+		t.Fatal("watcher closed cancelled on a running task")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Now flip status — ticker should pick it up within ~50ms.
+	status.Store("cancelled")
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("ticker did not detect cancellation after broadcast-running path (calls=%d)", calls.Load())
 	}
 }

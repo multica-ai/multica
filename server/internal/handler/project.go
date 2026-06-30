@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -182,6 +183,41 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// validProjectStatuses / validProjectPriorities mirror the CHECK constraints on
+// the project table (migrations 034, 035). CreateProject / UpdateProject
+// pre-validate against these so an unknown enum value returns a clean 400 with
+// the allowed list instead of surfacing the DB CHECK violation as a 500 — the
+// exact mismatch reported in #3925 (`--status active`).
+var validProjectStatuses = []string{"planned", "in_progress", "paused", "completed", "cancelled"}
+var validProjectPriorities = []string{"urgent", "high", "medium", "low", "none"}
+
+// validateProjectEnum writes a 400 and returns false when value is not in
+// allowed; the caller returns immediately on false.
+func validateProjectEnum(w http.ResponseWriter, field, value string, allowed []string) bool {
+	for _, a := range allowed {
+		if value == a {
+			return true
+		}
+	}
+	writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid %s %q; valid values: %s", field, value, strings.Join(allowed, ", ")))
+	return false
+}
+
+// writeProjectWriteError maps a failed project INSERT/UPDATE to an HTTP
+// response. A CHECK constraint violation is a client error (400) — pre-validation
+// already covers status/priority, so this backstops any other constrained column
+// (e.g. lead_type). Anything else is a genuine server fault: log the underlying
+// error so transient DB failures are diagnosable (#3925 had no server-side
+// signal) and return 500.
+func (h *Handler) writeProjectWriteError(w http.ResponseWriter, r *http.Request, err error, action string) {
+	if isCheckViolation(err) {
+		writeError(w, http.StatusBadRequest, "project "+action+" rejected: a field value failed a database constraint")
+		return
+	}
+	slog.Error("project "+action+" failed", append(logger.RequestAttrs(r), "error", err)...)
+	writeError(w, http.StatusInternalServerError, "failed to "+action+" project")
+}
+
 func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	var req CreateProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -201,9 +237,15 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if status == "" {
 		status = "planned"
 	}
+	if !validateProjectEnum(w, "status", status, validProjectStatuses) {
+		return
+	}
 	priority := req.Priority
 	if priority == "" {
 		priority = "none"
+	}
+	if !validateProjectEnum(w, "priority", priority, validProjectPriorities) {
+		return
 	}
 	var leadType pgtype.Text
 	var leadID pgtype.UUID
@@ -273,7 +315,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if len(req.Resources) == 0 {
 		project, err := h.Queries.CreateProject(r.Context(), createParams)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create project")
+			h.writeProjectWriteError(w, r, err, "create")
 			return
 		}
 		resp := projectToResponse(project)
@@ -293,7 +335,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 
 	project, err := qtx.CreateProject(r.Context(), createParams)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create project")
+		h.writeProjectWriteError(w, r, err, "create")
 		return
 	}
 
@@ -403,9 +445,15 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}
 	if req.Status != nil {
+		if !validateProjectEnum(w, "status", *req.Status, validProjectStatuses) {
+			return
+		}
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
 	}
 	if req.Priority != nil {
+		if !validateProjectEnum(w, "priority", *req.Priority, validProjectPriorities) {
+			return
+		}
 		params.Priority = pgtype.Text{String: *req.Priority, Valid: true}
 	}
 	if _, ok := rawFields["description"]; ok {
@@ -442,10 +490,11 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update project")
+		h.writeProjectWriteError(w, r, err, "update")
 		return
 	}
 	resp := projectToResponse(project)
+	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
@@ -469,10 +518,11 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	userID, ok := requireUserID(w, r)
+	requester, ok := h.requireWorkspaceRole(w, r, uuidToString(project.WorkspaceID), "project not found", "owner", "admin")
 	if !ok {
 		return
 	}
+	userID := uuidToString(requester.UserID)
 	if err := h.Queries.DeleteProject(r.Context(), db.DeleteProjectParams{
 		ID:          project.ID,
 		WorkspaceID: project.WorkspaceID,

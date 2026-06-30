@@ -14,15 +14,17 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  Milestone,
   MoreHorizontal,
   PanelRight,
   Pin,
   PinOff,
   Plus,
   Tag,
+  Unlink,
   Users,
 } from "lucide-react";
-import { PageHeader } from "../../layout/page-header";
+import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
@@ -43,26 +45,30 @@ import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar"
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { formatDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
+import { maxSiblingStage } from "./pickers/stage-picker";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
-import { collectThreadReplies } from "./thread-utils";
-import { AgentLiveCard } from "./agent-live-card";
+import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
+import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useRecentContextStore } from "@multica/core/chat";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -83,6 +89,13 @@ import { cn } from "@multica/ui/lib/utils";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
+import {
+  AnimatedRightSidebar,
+  getAnimatedRightSidebarInitialOpen,
+  rightSidebarPanelMotionProps,
+  useAnimatedRightSidebarState,
+} from "../../layout/animated-right-sidebar";
 
 function SubscriberPopoverContent({
   members,
@@ -168,10 +181,7 @@ function SubscriberPopoverContent({
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
 type ActivityT = ReturnType<typeof useT<"issues">>["t"];
@@ -221,12 +231,12 @@ function formatActivity(
     }
     case "start_date_changed": {
       if (!details.to) return t(($) => $.activity.start_date_removed);
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
       return t(($) => $.activity.start_date_set, { date: formatted });
     }
     case "due_date_changed": {
       if (!details.to) return t(($) => $.activity.due_date_removed);
-      const formatted = new Date(details.to).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      const formatted = formatDateOnly(details.to, { month: "short", day: "numeric" }, "en-US");
       return t(($) => $.activity.due_date_set, { date: formatted });
     }
     case "title_changed":
@@ -296,7 +306,11 @@ const EMPTY_REPLIES: TimelineEntry[] = [];
 // means appending here, wiring its row in the JSX switch below, and
 // adding a locale key. The picker, visibility rules, and add-property
 // menu all flow from this one list.
-const OPTIONAL_PROP_KEYS = ["priority", "start_date", "due_date", "labels"] as const;
+// `stage` is only meaningful for a sub-issue (relative to its siblings), so
+// its row and add-property entry are gated on `issue.parent_issue_id` at the
+// render site below — it stays in this list so seeding/visibility flow through
+// the same machinery as the other optional props.
+const OPTIONAL_PROP_KEYS = ["priority", "stage", "start_date", "due_date", "labels"] as const;
 type OptionalPropKey = (typeof OPTIONAL_PROP_KEYS)[number];
 
 function isOptionalPropSet(
@@ -307,6 +321,8 @@ function isOptionalPropSet(
   switch (key) {
     case "priority":
       return issue.priority !== "none";
+    case "stage":
+      return issue.stage !== null && issue.stage !== undefined;
     case "start_date":
       return !!issue.start_date;
     case "due_date":
@@ -314,6 +330,30 @@ function isOptionalPropSet(
     case "labels":
       return attachedLabelsCount > 0;
   }
+}
+
+// groupSubIssuesByStage orders a parent's children for display: staged groups
+// ascending by stage, then the unstaged group (stage === null) last. Callers
+// render a per-group stage header only when the set is actually staged.
+export function groupSubIssuesByStage(
+  children: Issue[],
+): { stage: number | null; items: Issue[] }[] {
+  const byStage = new Map<number, Issue[]>();
+  const unstaged: Issue[] = [];
+  for (const c of children) {
+    if (c.stage != null) {
+      const arr = byStage.get(c.stage);
+      if (arr) arr.push(c);
+      else byStage.set(c.stage, [c]);
+    } else {
+      unstaged.push(c);
+    }
+  }
+  const groups: { stage: number | null; items: Issue[] }[] = [...byStage.keys()]
+    .sort((a, b) => a - b)
+    .map((s) => ({ stage: s, items: byStage.get(s) as Issue[] }));
+  if (unstaged.length > 0) groups.push({ stage: null, items: unstaged });
+  return groups;
 }
 
 // Shallow array equality by element identity. Used to reuse the previous
@@ -661,7 +701,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
-  const workspace = useCurrentWorkspace();
   const paths = useWorkspacePaths();
 
   // Issue navigation — read from TQ list cache
@@ -683,7 +722,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   });
   const sidebarRef = usePanelRef();
   const isMobile = useIsMobile();
-  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(defaultSidebarOpen);
+  const desktopSidebarInitialOpen = getAnimatedRightSidebarInitialOpen(
+    defaultSidebarOpen,
+    defaultLayout,
+  );
+  const {
+    open: desktopSidebarOpen,
+    visualOpen: desktopSidebarVisualOpen,
+    motionEnabled: desktopSidebarMotionEnabled,
+    beginToggle: beginDesktopSidebarToggle,
+    handleResize: handleDesktopSidebarResize,
+  } = useAnimatedRightSidebarState(desktopSidebarInitialOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
@@ -734,6 +783,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       else next.delete(commentId);
       return next;
     });
+    // On collapse the thread shrinks and the viewport would jump to whatever was
+    // below; pull the just-folded thread back into view with the smallest
+    // movement. rAF waits for the collapse to land before measuring.
+    if (!expand) {
+      requestAnimationFrame(() =>
+        document.getElementById(`comment-${commentId}`)?.scrollIntoView({ block: "nearest" }),
+      );
+    }
   }, []);
   const clearResolvedExpand = useCallback((commentId: string) => {
     setExpandedResolved((prev) => {
@@ -809,9 +866,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
+  const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
   useEffect(() => {
     if (issue) {
       recordVisit(wsId, issue.id);
+      recordRecentContext(wsId, {
+        type: "issue",
+        id: issue.id,
+        label: issue.identifier,
+        subtitle: issue.title,
+        status: issue.status,
+      });
     }
   }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -853,10 +918,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // visually expanded after the second resolve.
   const handleResolveToggle = useCallback(
     (commentId: string, resolved: boolean) => {
-      clearResolvedExpand(commentId);
+      // Fold the thread back on any resolve change: clear the thread ROOT's
+      // expand entry (expand state is keyed on root id, but a resolve target
+      // can be a reply). Walk parent_id up to the root.
+      const byId = new Map(timeline.map((e) => [e.id, e]));
+      let cur = byId.get(commentId);
+      while (cur?.parent_id && byId.get(cur.parent_id)) cur = byId.get(cur.parent_id)!;
+      clearResolvedExpand(cur?.id ?? commentId);
       toggleResolveComment(commentId, resolved);
     },
-    [clearResolvedExpand, toggleResolveComment],
+    [timeline, clearResolvedExpand, toggleResolveComment],
   );
 
   // Memoized timeline grouping. Each render rebuilds the per-parent map from
@@ -1019,7 +1090,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Project segment in the breadcrumb. The issue's project_id is the source of
   // truth — same URL renders the same breadcrumb regardless of entry path.
   const issueProjectId = issue?.project_id;
-  const { data: breadcrumbProject = null, isError: breadcrumbProjectError } = useQuery({
+  const { data: breadcrumbProject = null } = useQuery({
     ...projectDetailOptions(wsId, issueProjectId ?? ""),
     enabled: !!issueProjectId,
   });
@@ -1080,25 +1151,71 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (didHighlightRef.current === highlightCommentId) return;
 
     const rootId = replyToRoot.get(highlightCommentId);
-    if (
-      rootId &&
-      rootId !== highlightCommentId &&
-      items[targetIdx]?.kind === "resolved-bar"
-    ) {
-      toggleResolvedExpand(rootId, true);
-      return;
+    if (rootId && rootId !== highlightCommentId) {
+      // Root resolved → the whole thread is a folded bar.
+      if (items[targetIdx]?.kind === "resolved-bar") {
+        toggleResolvedExpand(rootId, true);
+        return;
+      }
+      // A reply is the resolution → the other replies fold behind the
+      // "N comments" bar; expand if the target is one of those folded replies.
+      const rootItem = items[targetIdx];
+      if (rootItem?.kind === "comment" && !expandedResolved.has(rootId)) {
+        const resolution = deriveThreadResolution(
+          rootItem.entry,
+          timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES,
+        );
+        if (resolution.kind === "reply" && resolution.resolutionId !== highlightCommentId) {
+          toggleResolvedExpand(rootId, true);
+          return;
+        }
+      }
     }
 
     const el = document.getElementById(`comment-${highlightCommentId}`);
-    if (!el) return;
+    const container = scrollContainerEl;
+    if (!el || !container) return;
 
     didHighlightRef.current = highlightCommentId;
-    el.scrollIntoView({ block: "center" });
+
+    // Center the target comment WITHIN its own scroll container by driving the
+    // container's scrollTop directly — never native scrollIntoView. Native
+    // scrollIntoView is spec'd to scroll EVERY scrollable ancestor: on a cold
+    // mount where the timeline is still growing (streaming agent), the inner
+    // scroller can't satisfy centering on its own, so the scroll propagates up
+    // and moves the desktop shell's `overflow:hidden` wrapper — shoving the
+    // whole page, header included, off the top with no scrollbar to recover,
+    // until a resize reflows it (#3929). Scoping the scroll to `container`
+    // keeps it contained; re-centering across frames lands the comment
+    // precisely once async heights (markdown, code highlight, streamed replies)
+    // settle, instead of leaning on the ancestor scroll the way native did.
+    let rafId = 0;
+    let frames = 0;
+    let last = -1;
+    const center = () => {
+      const c = container.getBoundingClientRect();
+      const e = el.getBoundingClientRect();
+      const target = Math.max(
+        0,
+        container.scrollTop + (e.top - c.top) - (container.clientHeight - e.height) / 2,
+      );
+      container.scrollTop = target;
+      // Content is still laying out → the centered offset keeps shifting; keep
+      // re-centering until it stabilizes (within 1px) or we hit ~0.5s of frames.
+      if (Math.abs(target - last) > 1 && ++frames < 30) {
+        last = target;
+        rafId = requestAnimationFrame(center);
+      }
+    };
+    rafId = requestAnimationFrame(center);
 
     setHighlightedId(highlightCommentId);
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
-    return () => clearTimeout(fade);
-  }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, toggleResolvedExpand]);
+    return () => {
+      cancelAnimationFrame(rafId);
+      clearTimeout(fade);
+    };
+  }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
   // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
   // the viewport — off-screen comments are invisible to browser find-in-page.
@@ -1131,17 +1248,29 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // `attachment_ids` on the next description save. Drives editor previews
   // so text/code attachments show an Eye before the bind round-trips.
   const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
+  const descPendingAttachmentsRef = useRef<Attachment[]>([]);
   const descEditorAttachments = descPendingAttachments.length > 0
     ? [...(issueAttachments ?? []), ...descPendingAttachments]
     : issueAttachments;
   const handleDescriptionUpload = useCallback(
     async (file: File) => {
       const result = await uploadWithToast(file);
-      if (result) setDescPendingAttachments((prev) => [...prev, result]);
+      if (result) {
+        descPendingAttachmentsRef.current = [
+          ...descPendingAttachmentsRef.current,
+          result,
+        ];
+        setDescPendingAttachments(descPendingAttachmentsRef.current);
+      }
       return result;
     },
     [uploadWithToast],
   );
+
+  useEffect(() => {
+    descPendingAttachmentsRef.current = [];
+    setDescPendingAttachments([]);
+  }, [id]);
 
   // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
   // Called before the `if (!issue)` early return so hook order stays stable.
@@ -1216,9 +1345,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
     const panel = sidebarRef.current;
     if (!panel) return;
-    if (panel.isCollapsed()) panel.expand();
-    else panel.collapse();
-  }, [isMobile, sidebarRef]);
+    const nextOpen = panel.isCollapsed();
+    beginDesktopSidebarToggle(nextOpen);
+    window.requestAnimationFrame(() => {
+      if (nextOpen) panel.expand();
+      else panel.collapse();
+    });
+  }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
+
+  useIssueDetailScrollRestore({
+    restoreKey: `${wsId}:${id}`,
+    scrollContainerEl,
+    ready: !!issue && !loading && !timelineLoading,
+    disabled: !!highlightCommentId,
+  });
 
   if (loading) {
     return (
@@ -1324,6 +1464,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
             </PropRow>
           )}
+          {issue.parent_issue_id != null && visibleOptionalProps.has("stage") && (
+            <PropRow label={t(($) => $.detail.prop_stage)}>
+              <StagePicker
+                stage={issue.stage}
+                onUpdate={handleUpdateField}
+                maxStage={maxSiblingStage(parentChildIssues)}
+                align="start"
+                defaultOpen={autoOpenProp === "stage"}
+              />
+            </PropRow>
+          )}
           {visibleOptionalProps.has("start_date") && (
             <PropRow label={t(($) => $.detail.prop_start_date)}>
               <StartDatePicker
@@ -1356,7 +1507,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               not yet displayed. Hidden once every optional field is on
               screen. Sits inside the same grid as a full-row, with its
               own padding so the visual rhythm follows the rows above. */}
-          {OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k)) && (
+          {OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k) && (k !== "stage" || issue.parent_issue_id != null)) && (
             <div className="col-span-2 mt-1">
               <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
                 <PopoverTrigger
@@ -1370,7 +1521,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     icon the resulting picker uses, so the dropdown reads
                     as a preview of what will show up below. */}
                 <PopoverContent align="start" className="w-44 p-1">
-                  {OPTIONAL_PROP_KEYS.filter((k) => !visibleOptionalProps.has(k)).map((k) => (
+                  {OPTIONAL_PROP_KEYS.filter((k) => !visibleOptionalProps.has(k) && (k !== "stage" || issue.parent_issue_id != null)).map((k) => (
                     <button
                       key={k}
                       type="button"
@@ -1379,6 +1530,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     >
                       {k === "priority" && (
                         <PriorityIcon priority="medium" inheritColor className="text-muted-foreground" />
+                      )}
+                      {k === "stage" && (
+                        <Milestone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       )}
                       {k === "start_date" && (
                         <CalendarClock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -1391,6 +1545,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       )}
                       <span className="truncate">
                         {k === "priority" && t(($) => $.detail.prop_priority)}
+                        {k === "stage" && t(($) => $.detail.prop_stage)}
                         {k === "start_date" && t(($) => $.detail.prop_start_date)}
                         {k === "due_date" && t(($) => $.detail.prop_due_date)}
                         {k === "labels" && t(($) => $.detail.prop_labels)}
@@ -1419,14 +1574,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
           </button>
           {parentIssueOpen && <div className="pl-2">
-            <AppLink
-              href={paths.issueDetail(parentIssue.id)}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
-            >
-              <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-              <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
-              <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
-            </AppLink>
+            <div className="flex items-center gap-0.5 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors group">
+              <AppLink
+                href={paths.issueDetail(parentIssue.id)}
+                className="flex flex-1 min-w-0 items-center gap-1.5 py-1.5 text-xs"
+              >
+                <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
+                <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
+              </AppLink>
+              <button
+                type="button"
+                title={t(($) => $.actions.remove_parent_issue)}
+                aria-label={t(($) => $.actions.remove_parent_issue)}
+                onClick={() => actions.removeParent()}
+                className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <Unlink className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>}
         </div>
       )}
@@ -1576,6 +1742,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onToggleReaction={handleToggleReaction}
             onResolveToggle={handleResolveToggle}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
+            expandedResolvedIds={expandedResolved}
+            onResolvedExpandChange={toggleResolvedExpand}
             highlightedCommentId={highlightedId}
           />
         </div>
@@ -1604,60 +1772,49 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     );
   };
 
+  // Breadcrumb shows the single most-direct container, never a fabricated chain.
+  // project_id and parent_issue_id are orthogonal (a sub-issue can live in a
+  // different project than its parent), so we never render both: parent wins,
+  // else project, else nothing. The project is still shown in the properties
+  // panel. The workspace name is intentionally absent — "all issues" is a view,
+  // not a container.
+  const breadcrumbSegments: BreadcrumbSegment[] = parentIssue
+    ? [{ href: paths.issueDetail(parentIssue.id), label: parentIssue.identifier }]
+    : breadcrumbProject
+      ? [
+          {
+            href: paths.projectDetail(breadcrumbProject.id),
+            className: "flex items-center gap-1 min-w-0 max-w-72",
+            label: (
+              <>
+                <ProjectIcon project={breadcrumbProject} size="sm" />
+                <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
+              </>
+            ),
+          },
+        ]
+      : [];
+
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
-        <PageHeader className="gap-2 bg-background text-sm">
-          <div className="flex flex-1 items-center gap-1.5 min-w-0">
-            {workspace && (
-              <>
-                <AppLink
-                  href={paths.issues()}
-                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                >
-                  {workspace.name}
-                </AppLink>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            {issueProjectId && (
-              <>
-                {breadcrumbProject ? (
-                  <AppLink
-                    href={paths.projectDetail(breadcrumbProject.id)}
-                    className="flex items-center gap-1 min-w-0 max-w-72 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <ProjectIcon project={breadcrumbProject} size="sm" />
-                    <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
-                  </AppLink>
-                ) : breadcrumbProjectError ? (
-                  <span className="italic text-muted-foreground/70 shrink-0">
-                    {t(($) => $.detail.breadcrumb_project_unknown)}
-                  </span>
-                ) : (
-                  <Skeleton className="h-3.5 w-20 shrink-0" />
-                )}
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            {parentIssue && (
-              <>
-                <AppLink
-                  href={paths.issueDetail(parentIssue.id)}
-                  className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
-                >
-                  {parentIssue.identifier}
-                </AppLink>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            <span className="text-muted-foreground tabular-nums shrink-0">
-              {issue.identifier}
-            </span>
-            <span className="truncate font-medium text-foreground">
-              {issue.title}
-            </span>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
+        <BreadcrumbHeader
+          segments={breadcrumbSegments}
+          leaf={
+            <AppLink
+              href={paths.issueDetail(issue.id)}
+              className="flex min-w-0 transition-opacity hover:opacity-80"
+            >
+              <span className="truncate font-medium text-foreground">
+                {issue.identifier} {issue.title}
+              </span>
+            </AppLink>
+          }
+          actions={
+            <>
+            {/* Live "agent is working" chip, leftmost in the right cluster so
+                it never overlaps the title (which truncates to make room).
+                It self-hides when no agent is active. */}
+            <IssueAgentHeaderChip issueId={id} />
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger
@@ -1734,8 +1891,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
               <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
             </Tooltip>
-          </div>
-        </PageHeader>
+            </>
+          }
+        />
 
         <div
           ref={setScrollContainerEl}
@@ -1789,13 +1947,31 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 // Bind any pending uploads still referenced in the markdown
                 // so they appear in `issueAttachments` after refresh and the
                 // editor's text/code preview keeps working past reload.
-                const ids = descPendingAttachments
-                  .filter((a) => md.includes(a.url))
+                //
+                // Match with `contentReferencesAttachment`, NOT `md.includes(a.url)`:
+                // the editor persists the durable `markdownLink`
+                // (`/api/attachments/<id>/download` / `markdown_url`) into the
+                // body, never the raw storage `a.url`. A bare `md.includes(a.url)`
+                // therefore never matches, so the upload is never linked via
+                // `attachment_ids`. After reload it's absent from
+                // `issueAttachments`, the renderer can't resolve it to a
+                // freshly-signed `download_url`, and the persisted auth-gated
+                // download endpoint fails to load as a native <img> on clients
+                // whose origin isn't the API host (Desktop/Electron, mobile
+                // webview) — while still working on web via the cookie/proxy.
+                // This mirrors the comment/reply/chat composers, which already
+                // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
+                const ids = descPendingAttachmentsRef.current
+                  .filter((a) => contentReferencesAttachment(md, a))
                   .map((a) => a.id);
                 handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
               }}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
+              // Closing the issue modal must save what the user last saw —
+              // without the flush, a paste followed by a quick close loses
+              // the image markdown and its attachment_ids bind (MUL-3254).
+              flushPendingOnUnmount
               currentIssueId={id}
               attachments={descEditorAttachments}
             />
@@ -1887,16 +2063,31 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
                 {/* Inline batch toolbar — appears next to the rows when
                     selections exist, instead of as a far-away fixed bar. */}
-                <BatchActionToolbar placement="inline" />
+                <BatchActionToolbar issues={childIssues} placement="inline" />
 
                 {/* List */}
-                {!subIssuesCollapsed && (
-                  <div className="overflow-hidden rounded-lg border bg-card/30 divide-y divide-border/60">
-                    {childIssues.map((child) => (
-                      <SubIssueRow key={child.id} child={child} />
-                    ))}
-                  </div>
-                )}
+                {!subIssuesCollapsed && (() => {
+                  const groups = groupSubIssuesByStage(childIssues);
+                  const staged = childIssues.some((c) => c.stage != null);
+                  return (
+                    <div className="overflow-hidden rounded-lg border bg-card/30 divide-y divide-border/60">
+                      {groups.map(({ stage: groupStage, items }) => (
+                        <Fragment key={groupStage ?? "unstaged"}>
+                          {staged && (
+                            <div className="bg-muted/40 px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                              {groupStage == null
+                                ? t(($) => $.stage.none)
+                                : t(($) => $.stage.value, { n: groupStage })}
+                            </div>
+                          )}
+                          {items.map((child) => (
+                            <SubIssueRow key={child.id} child={child} />
+                          ))}
+                        </Fragment>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })()}
@@ -1953,13 +2144,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             <LocalDirectoryHint projectId={issue?.project_id} />
 
-            {/* Agent live output — sticky banner in the activity section,
-                keyed by issue id so switching issues remounts the card and
-                clears any in-flight task state from the previous issue.
-                The execution log itself (per-task timeline + past runs)
-                lives in the right panel via ExecutionLogSection — this
-                card is just a header-style "agent is working" anchor. */}
-            <AgentLiveCard key={id} issueId={id} />
+            {/* The "agent is working" live signal now lives in the header
+                (IssueAgentHeaderChip) so it stays in one fixed place and
+                doesn't compete with sticky banners in this content column.
+                The per-task timeline + past runs live in the right panel
+                via ExecutionLogSection. */}
 
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment
@@ -2060,19 +2249,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <ResizableHandle />
       <ResizablePanel
         id="sidebar"
-        defaultSize={defaultSidebarOpen ? 320 : 0}
+        {...rightSidebarPanelMotionProps}
+        data-right-sidebar-motion={desktopSidebarMotionEnabled ? "enabled" : undefined}
+        defaultSize={desktopSidebarOpen ? 320 : 0}
         minSize={260}
         maxSize={420}
         collapsible
         groupResizeBehavior="preserve-pixel-size"
         panelRef={sidebarRef}
-        onResize={(size) => setDesktopSidebarOpen(size.inPixels > 0)}
+        onResize={handleDesktopSidebarResize}
       >
-      <div className="overflow-y-auto border-l h-full">
-        <div className="p-4">
+        <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled}>
           {sidebarContent}
-        </div>
-      </div>
+        </AnimatedRightSidebar>
       </ResizablePanel>
     </ResizablePanelGroup>
   );

@@ -26,12 +26,95 @@ export interface RuntimeDevice {
   owner_id: string | null;
   /** Defaults to "private" when the backend predates the visibility flag. */
   visibility: RuntimeVisibility;
+  /**
+   * The custom runtime profile this registered runtime was launched from,
+   * or `null` for a built-in protocol family. The UI uses this to stamp a
+   * "Built-in" vs "Custom" badge on the runtime row. Older backends that
+   * predate the custom-runtime feature omit the field; consumers must treat
+   * a missing value as `null` (built-in).
+   */
+  profile_id?: string | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export type AgentRuntime = RuntimeDevice;
+
+// ---------------------------------------------------------------------------
+// Custom runtime profiles (MUL-3284)
+//
+// A RuntimeProfile is a workspace-level *definition* of a custom runtime
+// backend — distinct from a RuntimeDevice, which is a daemon-registered
+// *instance*. An admin authors a profile (display name + base protocol
+// family + the CLI command to launch), and daemons can then register
+// runtimes against it; those instances carry `profile_id` pointing back here.
+// ---------------------------------------------------------------------------
+
+// The fixed allow-list of base protocol families a custom runtime can wrap.
+// These are the only backends the create flow may select; the server rejects
+// anything else with 400. Kept as a const tuple so the union type is derived
+// from the single source of truth.
+export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
+  "claude",
+  "codebuddy",
+  "codex",
+  "copilot",
+  "opencode",
+  "openclaw",
+  "hermes",
+  "pi",
+  "cursor",
+  "kimi",
+  "kiro",
+  "antigravity",
+] as const;
+
+export type RuntimeProtocolFamily =
+  (typeof RUNTIME_PROFILE_PROTOCOL_FAMILIES)[number];
+
+// Profile visibility mirrors RuntimeVisibility's vocabulary but uses the
+// workspace/private axis the server documents for profiles.
+export type RuntimeProfileVisibility = "workspace" | "private";
+
+export interface RuntimeProfile {
+  id: string;
+  workspace_id: string;
+  display_name: string;
+  protocol_family: RuntimeProtocolFamily;
+  command_name: string;
+  description: string | null;
+  fixed_args: string[];
+  visibility: RuntimeProfileVisibility;
+  created_by: string | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// POST body. `protocol_family` is required and immutable after creation.
+// Optional fields are omitted entirely when unset (never sent as null/empty)
+// so the server applies its own defaults.
+export interface CreateRuntimeProfileRequest {
+  display_name: string;
+  protocol_family: RuntimeProtocolFamily;
+  command_name: string;
+  description?: string;
+  fixed_args?: string[];
+  visibility?: RuntimeProfileVisibility;
+  enabled?: boolean;
+}
+
+// PATCH body — every field optional; `protocol_family` is intentionally
+// absent because it is immutable.
+export interface UpdateRuntimeProfileRequest {
+  display_name?: string;
+  command_name?: string;
+  description?: string | null;
+  fixed_args?: string[];
+  visibility?: RuntimeProfileVisibility;
+  enabled?: boolean;
+}
 
 // Coarse classifier set by the backend when a task transitions to "failed".
 // Mirrors the migration-055 enum in agent_task_queue.failure_reason. Used by
@@ -113,6 +196,13 @@ export interface AgentTask {
    */
   trigger_summary?: string;
   /**
+   * Handoff instruction the assigner attached when starting this run (MUL-3375).
+   * Present only on assignment-triggered runs that carried a note; the execution
+   * log shows it inline as the trigger reason. Absent (legacy / no note) falls
+   * back to the generic "initial run" label.
+   */
+  handoff_note?: string;
+  /**
    * Server-computed source discriminator used by the activity row to label
    * tasks that have no linked issue (so e.g. quick-create tasks render
    * with a meaningful title instead of falling through to "Untracked").
@@ -120,9 +210,24 @@ export interface AgentTask {
   kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
   /**
    * Local working directory pinned for this task by the daemon. Empty until
-   * the daemon reports a work_dir (typically once execution starts).
+   * the daemon reports a work_dir (typically once execution starts). This is
+   * the canonical absolute path the agent runs in; UI surfaces should prefer
+   * `relative_work_dir` to avoid leaking the user's home directory.
    */
   work_dir?: string;
+  /**
+   * Privacy-safe display form of `work_dir`, derived on the server. For
+   * standard tasks the daemon's workspaces root has been stripped off
+   * (`<wsUUID>/<taskShort>/workdir`); for local_directory tasks where the
+   * path lives outside that layout, the server strips recognised home
+   * prefixes (`/Users/<name>/`, `/home/<name>/`, `<drive>:/Users/<name>/`)
+   * and otherwise falls back to the basename so neither the home directory
+   * nor the username leak into the UI. Older backends omit the field —
+   * render it conditionally and never render `work_dir` raw (not even in
+   * a tooltip / `title` / `aria-label`, since the goal is that screen
+   * shares and screenshots also stay safe).
+   */
+  relative_work_dir?: string;
 }
 
 export interface Agent {
@@ -153,6 +258,29 @@ export interface Agent {
    * alongside `has_custom_env`. Treat `undefined` as zero. MUL-2600.
    */
   custom_env_key_count?: number;
+  /**
+   * MCP server configuration forwarded to runtimes that consume
+   * `agent.mcp_config` (see providerSupportsMcpConfig). Each backend
+   * materialises it in the runtime-native place: Claude flags, Codex
+   * config.toml, ACP session params, OpenCode env config, OpenClaw
+   * wrapper config, etc. `null` (or the field omitted on legacy backends)
+   * means no managed config; the daemon falls back to the CLI's own
+   * default. MUL-2764.
+   *
+   * When the caller can't see secrets (an agent actor, or a non-owner
+   * non-admin), the server replaces the value with `null` and sets
+   * `mcp_config_redacted` to true so the UI can render a "configured
+   * but hidden" state without exposing potentially sensitive fields.
+   */
+  mcp_config?: unknown | null;
+  /**
+   * True when the server stripped `mcp_config` from this response
+   * because the caller lacks permission to see secrets. The UI uses
+   * this to distinguish "no config" (`mcp_config === null &&
+   * !mcp_config_redacted`) from "config exists but you can't see it".
+   * Older backends omit this field; treat `undefined` as false.
+   */
+  mcp_config_redacted?: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -295,6 +423,15 @@ export interface UpdateAgentRequest {
    * MUL-2600.
    */
   custom_args?: string[];
+  /**
+   * MCP server configuration. Tri-state semantics (MUL-2764):
+   *   - field omitted → no change
+   *   - `null` → clear the column; the daemon falls back to the CLI's
+   *     built-in default at launch
+   *   - object → replace the stored JSON verbatim; runtime backends
+   *     validate / translate it according to their own MCP integration
+   */
+  mcp_config?: unknown | null;
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
@@ -411,12 +548,14 @@ export interface RuntimeHourlyActivity {
   count: number;
 }
 
-// One (agent, model) row of the "Cost by agent" tab on the runtime detail
-// page. Model stays on the wire because cost is computed client-side from
-// a per-model pricing table — the client groups these rows by agent_id and
-// sums cost per agent across models.
+// One (agent, provider, model) row of the "Cost by agent" tab on the runtime
+// detail page. provider + model stay on the wire because cost is computed
+// client-side from a per-model pricing table (provider disambiguates bare
+// model ids that collide across providers) — the client groups these rows by
+// agent_id and sums cost per agent across models.
 export interface RuntimeUsageByAgent {
   agent_id: string;
+  provider: string;
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -438,12 +577,15 @@ export interface RuntimeUsageByHour {
   task_count: number;
 }
 
-// One (date, model) bucket of token usage for the workspace dashboard.
-// Same shape as RuntimeUsage but workspace-scoped (no runtime_id, no
-// provider field on the wire) and optionally narrowed to a single project
-// on the server side. Cost stays client-side via the model pricing table.
+// One (date, provider, model) bucket of token usage for the workspace
+// dashboard. Workspace-scoped (no runtime_id) and optionally narrowed to a
+// single project on the server side. `provider` is kept on the wire so the
+// client can disambiguate bare model ids that collide across providers
+// (e.g. Cursor's `auto` vs another provider's `auto`) when pricing. Cost
+// stays client-side via the model pricing table.
 export interface DashboardUsageDaily {
   date: string;
+  provider: string;
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -457,6 +599,7 @@ export interface DashboardUsageDaily {
 // sums cost.
 export interface DashboardUsageByAgent {
   agent_id: string;
+  provider: string;
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -512,7 +655,7 @@ export interface RuntimeModel {
   default?: boolean;
   /**
    * Per-model reasoning/effort catalog discovered by the daemon. Currently
-   * populated for claude and codex runtimes only; omitted (or undefined)
+   * populated for claude, codex, and opencode runtimes; omitted (or undefined)
    * for every other provider, which the UI treats as "no thinking-level
    * picker for this model". See MUL-2339.
    */
@@ -570,8 +713,17 @@ export type RuntimeLocalSkillStatus =
   | "pending"
   | "running"
   | "completed"
+  | "conflict"
   | "failed"
   | "timeout";
+
+export type RuntimeLocalSkillImportAction = "overwrite";
+
+export interface RuntimeLocalSkillImportConflict {
+  existing_skill_id: string;
+  existing_created_by?: string;
+  can_overwrite: boolean;
+}
 
 export interface RuntimeLocalSkillSummary {
   key: string;
@@ -579,6 +731,14 @@ export interface RuntimeLocalSkillSummary {
   description?: string;
   source_path: string;
   provider: string;
+  /**
+   * Which discovery root surfaced this skill: "provider" for the runtime's
+   * own skill directory (e.g. ~/.claude/skills) or "universal" for the
+   * cross-tool ~/.agents/skills fallback. Daemons that predate multi-root
+   * discovery omit the field; treat `undefined` as unknown rather than
+   * asserting either origin.
+   */
+  root?: "provider" | "universal";
   file_count: number;
 }
 
@@ -597,6 +757,9 @@ export interface CreateRuntimeLocalSkillImportRequest {
   skill_key: string;
   name?: string;
   description?: string;
+  action?: RuntimeLocalSkillImportAction;
+  target_skill_id?: string;
+  supports_conflict?: boolean;
 }
 
 export interface RuntimeLocalSkillImportRequest {
@@ -605,8 +768,12 @@ export interface RuntimeLocalSkillImportRequest {
   skill_key: string;
   name?: string;
   description?: string;
+  action?: RuntimeLocalSkillImportAction;
+  target_skill_id?: string;
+  supports_conflict?: boolean;
   status: RuntimeLocalSkillStatus;
   skill?: Skill;
+  conflict?: RuntimeLocalSkillImportConflict;
   error?: string;
   created_at: string;
   updated_at: string;
@@ -618,5 +785,7 @@ export interface RuntimeLocalSkillsResult {
 }
 
 export interface RuntimeLocalSkillImportResult {
-  skill: Skill;
+  status: "created" | "updated" | "conflict";
+  skill?: Skill;
+  conflict?: RuntimeLocalSkillImportConflict;
 }

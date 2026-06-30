@@ -16,11 +16,12 @@
  * - Rendering mentions with the same IssueMentionCard component and .mention class
  */
 
-import { isValidElement, memo, useMemo, useRef } from "react";
+import { isValidElement, memo, useMemo, useRef, useState } from "react";
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
 } from "react-markdown";
+import type { ReactNode } from "react";
 import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -29,15 +30,20 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
+import { Check, Copy } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
+import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
+import { ProjectChip } from "../projects/components/project-chip";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { highlightToHtml } from "./utils/highlight-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
@@ -64,9 +70,12 @@ const PRE_UNWRAP_RE = /(^|\s)language-(html|mermaid)(\s|$)/;
 
 const sanitizeSchema = {
   ...defaultSchema,
+  // Allow <mark> (text highlight) — emitted by highlightToHtml from `==text==`.
+  // It carries no attributes, so only the tag name needs whitelisting.
+  tagNames: [...(defaultSchema.tagNames ?? []), "mark"],
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "mention"],
+    href: [...(defaultSchema.protocols?.href ?? []), "mention", "slash"],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -95,6 +104,7 @@ const sanitizeSchema = {
 
 function urlTransform(url: string): string {
   if (url.startsWith("mention://")) return url;
+  if (url.startsWith("slash://skill/")) return url;
   return defaultUrlTransform(url);
 }
 
@@ -126,6 +136,80 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
   );
 }
 
+function ProjectMentionLink({ projectId, label }: { projectId: string; label?: string }) {
+  const { push, openInNewTab } = useNavigation();
+  const p = useWorkspacePaths();
+  const path = p.projectDetail(projectId);
+  return (
+    <span
+      className="inline align-middle"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          if (openInNewTab) {
+            openInNewTab(path, label);
+          }
+          return;
+        }
+        push(path);
+      }}
+    >
+      <ProjectChip projectId={projectId} fallbackLabel={label} className="cursor-pointer hover:bg-accent transition-colors" />
+    </span>
+  );
+}
+
+function getTextContent(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(getTextContent).join("");
+  if (isValidElement(node)) {
+    const props = node.props as { children?: ReactNode };
+    return getTextContent(props.children);
+  }
+  return "";
+}
+
+function ReadonlyCodeBlock({ children }: { children: ReactNode }) {
+  const { t } = useT("editor");
+  const [copied, setCopied] = useState(false);
+  const code = useMemo(
+    () => getTextContent(children).replace(/\n$/, ""),
+    [children],
+  );
+  const copyLabel = t(($) => $.code_block.copy_code) || "Copy code";
+
+  const handleCopy = async () => {
+    if (!code) return;
+    if (await copyText(code)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div className="code-block-wrapper group/code relative my-3">
+      <div className="absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100">
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          title={copyLabel}
+          aria-label={copyLabel}
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </div>
+      <pre className="!m-0 pr-12">{children}</pre>
+    </div>
+  );
+}
+
 // Named component so it can call useWorkspaceSlug() — arrow function inlined
 // inside `components` below would still work, but extracting it keeps the
 // hook usage explicit and avoids hook-in-object-literal surprises.
@@ -138,8 +222,12 @@ function ReadonlyLink({
 }) {
   const slug = useWorkspaceSlug();
 
+  if (href?.startsWith("slash://skill/")) {
+    return <span className="slash-command">{children}</span>;
+  }
+
   if (isMentionHref(href)) {
-    const match = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/);
+    const match = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/);
     if (match?.[1] === "issue" && match[2]) {
       const label =
         typeof children === "string"
@@ -148,6 +236,15 @@ function ReadonlyLink({
             ? children.join("")
             : undefined;
       return <IssueMentionLink issueId={match[2]} label={label} />;
+    }
+    if (match?.[1] === "project" && match[2]) {
+      const label =
+        typeof children === "string"
+          ? children
+          : Array.isArray(children)
+            ? children.join("")
+            : undefined;
+      return <ProjectMentionLink projectId={match[2]} label={label} />;
     }
     // Member / agent / all mentions
     return <span className="mention">{children}</span>;
@@ -261,7 +358,7 @@ function buildComponents(): Partial<Components> {
       );
     },
 
-    // Pre — pass through (CSS handles styling via .rich-text-editor pre).
+    // Pre — wrap regular code fences with copy chrome.
     // Special-case Mermaid / HtmlBlockPreview returned from the `code`
     // renderer above so the outer `<pre>` does not wrap them — this is the
     // standard two-layer pattern used to escape react-markdown's default
@@ -282,7 +379,7 @@ function buildComponents(): Partial<Components> {
           return <>{children}</>;
         }
       }
-      return <pre>{children}</pre>;
+      return <ReadonlyCodeBlock>{children}</ReadonlyCodeBlock>;
     },
   };
 }
@@ -317,7 +414,10 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   className,
   attachments,
 }: ReadonlyContentProps) {
-  const processed = useMemo(() => preprocessMarkdown(content), [content]);
+  const processed = useMemo(
+    () => highlightToHtml(preprocessMarkdown(content)),
+    [content],
+  );
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
 
@@ -325,17 +425,36 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   // <Attachment>, which reads the surrounding AttachmentDownloadProvider.
   const components = useMemo(() => buildComponents(), []);
 
+  // Memoize the whole react-markdown subtree on its only real inputs
+  // (`processed` + `components`). Unrelated parent re-renders (e.g. a sibling
+  // agent task streaming over WebSocket fires one every ~100ms) would otherwise
+  // re-run react-markdown, which hands `<code>` a fresh `dangerouslySetInnerHTML`
+  // object each time; React then rewrites the highlighted innerHTML even though
+  // the HTML string is byte-identical, tearing down and rebuilding every hljs
+  // <span> — which collapses any active text selection inside a code block
+  // (MUL-3621). A stable element reference lets React bail out of the subtree.
+  const markdown = useMemo(
+    () => (
+      <ReactMarkdown
+        remarkPlugins={[
+          [remarkMath, { singleDollarTextMath: false }],
+          remarkBreaks,
+          [remarkGfm, { singleTilde: false }],
+        ]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
+        urlTransform={urlTransform}
+        components={components}
+      >
+        {processed}
+      </ReactMarkdown>
+    ),
+    [processed, components],
+  );
+
   return (
     <AttachmentDownloadProvider attachments={attachments}>
       <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
-        <ReactMarkdown
-          remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
-          rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
-          urlTransform={urlTransform}
-          components={components}
-        >
-          {processed}
-        </ReactMarkdown>
+        {markdown}
         <LinkHoverCard {...hover} />
       </div>
     </AttachmentDownloadProvider>

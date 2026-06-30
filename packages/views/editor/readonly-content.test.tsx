@@ -92,7 +92,7 @@ describe("ReadonlyContent math rendering", () => {
     const { container } = render(
       <ReadonlyContent
         content={[
-          "Inline math: $E = mc^2$",
+          "Inline math: $$E = mc^2$$",
           "",
           "$$",
           "\\int_0^1 x^2 \\, dx",
@@ -123,6 +123,122 @@ describe("ReadonlyContent line breaks", () => {
   it("renders a blank-line gap as separate paragraphs", () => {
     const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("ReadonlyContent task lists", () => {
+  it("renders `- [ ]` / `- [x]` as checkboxes and preserves the checked state", () => {
+    const { container } = render(
+      <ReadonlyContent content={"- [ ] todo\n- [x] done"} />,
+    );
+
+    const boxes = container.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+    expect(boxes).toHaveLength(2);
+    // The completed item must render checked, not just present.
+    expect(boxes[0]!.checked).toBe(false);
+    expect(boxes[1]!.checked).toBe(true);
+    // Checkboxes are display-only in readonly mode.
+    expect(boxes[1]!.disabled).toBe(true);
+  });
+
+  it("nests a child task list inside its parent item (not as a sibling)", () => {
+    const { container } = render(
+      <ReadonlyContent content={"- [ ] parent\n  - [x] child\n  - [ ] child2"} />,
+    );
+
+    // One top-level list with a single parent item.
+    const root = container.querySelector("ul.contains-task-list");
+    expect(root).not.toBeNull();
+    const topItems = root!.querySelectorAll(":scope > li.task-list-item");
+    expect(topItems).toHaveLength(1);
+
+    // The child list lives INSIDE the parent <li> — this is the structural
+    // assumption the readonly CSS depends on (no <div> body wrapper, so the
+    // parent item must stay a block, not flex, or the nested <ul> shares the
+    // parent's row). If remark-gfm ever wrapped the body, this fails loudly.
+    const parent = topItems[0]!;
+    const nested = parent.querySelector(":scope > ul.contains-task-list");
+    expect(nested).not.toBeNull();
+
+    const childItems = nested!.querySelectorAll(":scope > li.task-list-item");
+    expect(childItems).toHaveLength(2);
+    const childBoxes = nested!.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+    expect(childBoxes[0]!.checked).toBe(true);
+    expect(childBoxes[1]!.checked).toBe(false);
+  });
+});
+
+describe("ReadonlyContent highlight Markdown", () => {
+  // `==text==` is lowered to a raw <mark> by highlightToHtml; rehype-raw turns
+  // it into an element and the sanitize schema must whitelist <mark> or it gets
+  // stripped. These guard both halves of that contract.
+  it("renders ==text== as a <mark> element", () => {
+    const { container } = render(<ReadonlyContent content={"a ==hi== b"} />);
+    const mark = container.querySelector("mark");
+    expect(mark).not.toBeNull();
+    expect(mark?.textContent).toBe("hi");
+  });
+
+  it("keeps inner Markdown formatting inside a highlight", () => {
+    const { container } = render(<ReadonlyContent content={"==**bold**=="} />);
+    expect(container.querySelector("mark strong")).not.toBeNull();
+  });
+
+  it("does not highlight == inside inline code", () => {
+    const { container } = render(<ReadonlyContent content={"`a ==b== c`"} />);
+    expect(container.querySelector("mark")).toBeNull();
+    expect(container.querySelector("code")?.textContent).toBe("a ==b== c");
+  });
+
+  // Boundary regressions (Emacs review, PR #3661).
+
+  it("wraps the whole span when an inner == lives in inline code", () => {
+    const { container } = render(<ReadonlyContent content={"==a `b==c` d=="} />);
+    const mark = container.querySelector("mark");
+    expect(mark).not.toBeNull();
+    // inner `==` stays inside the code, not consumed as the closing fence
+    expect(mark?.querySelector("code")?.textContent).toBe("b==c");
+    expect(mark?.textContent).toBe("a b==c d");
+  });
+
+  it("does not highlight across a blank line", () => {
+    const { container } = render(<ReadonlyContent content={"==a\n\nb=="} />);
+    expect(container.querySelector("mark")).toBeNull();
+  });
+});
+
+describe("ReadonlyContent issue mention Markdown", () => {
+  it("renders an issue mention inside a task list as an issue mention card", () => {
+    const { container, getByTestId } = render(
+      <ReadonlyContent content="- [ ] [MUL-123](mention://issue/issue-123)" />,
+    );
+
+    expect(container.querySelector('input[type="checkbox"]')).not.toBeNull();
+    expect(getByTestId("issue-mention-card").textContent).toBe("MUL-123");
+  });
+
+  it("documents the CommonMark quoted-emphasis edge case before Korean particles", () => {
+    const unsafe = render(
+      <ReadonlyContent content={'**"무엇을 먼저 정해두고 시작할지"**가'} />,
+    );
+
+    expect(unsafe.container.querySelector("strong")).toBeNull();
+    expect(unsafe.container.textContent).toContain(
+      '**"무엇을 먼저 정해두고 시작할지"**가',
+    );
+
+    const safe = render(
+      <ReadonlyContent content={'"**무엇을 먼저 정해두고 시작할지**"가'} />,
+    );
+
+    expect(safe.container.querySelector("strong")?.textContent).toBe(
+      "무엇을 먼저 정해두고 시작할지",
+    );
+    expect(safe.container.textContent).toContain('"무엇을 먼저 정해두고 시작할지"가');
   });
 });
 
@@ -158,6 +274,24 @@ describe("ReadonlyContent code styling", () => {
     );
     const blockCode = container.querySelector("pre code");
     expect(blockCode?.textContent?.trim()).toBe(token);
+  });
+
+  it("copies the whole fenced code block from the readonly toolbar", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const source = ["pnpm install", "pnpm test"].join("\n");
+    const { getByRole } = render(
+      <ReadonlyContent content={["```bash", source, "```"].join("\n")} />,
+    );
+
+    fireEvent.click(getByRole("button", { name: "Copy code" }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(source);
+    });
   });
 
   it("keeps editor code literal by disabling font ligatures", () => {
@@ -353,5 +487,51 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
     // AttachmentCard chrome surfaces the filename as visible text in a
     // <p class="truncate"> row. HtmlAttachmentPreview replaces it entirely.
     expect(queryByText("report.html")).toBeNull();
+  });
+
+  it("renders a stable attachment download URL as file-card chrome", () => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const href = `/api/attachments/${id}/download`;
+    const attachment = {
+      id,
+      url: "/uploads/report.pdf",
+      filename: "report.pdf",
+      content_type: "application/pdf",
+      size_bytes: 1024,
+      markdown_url: href,
+      download_url: href,
+    } as any;
+
+    const { container, getByText } = renderWithQuery(
+      <ReadonlyContent
+        content={`!file[report.pdf](${href})`}
+        attachments={[attachment]}
+      />,
+    );
+
+    expect(getByText("report.pdf")).toBeTruthy();
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
+  });
+});
+
+describe("ReadonlyContent slash command rendering", () => {
+  it("renders slash skill links as slash command pills", () => {
+    const { container } = render(
+      <ReadonlyContent content="[/deploy](slash://skill/abc-123)" />,
+    );
+
+    const pill = container.querySelector(".slash-command");
+    expect(pill).not.toBeNull();
+    expect(pill?.textContent).toBe("/deploy");
+  });
+
+  it("does not affect regular links", () => {
+    const { container } = render(
+      <ReadonlyContent content="[docs](https://example.com)" />,
+    );
+
+    expect(container.querySelector(".slash-command")).toBeNull();
+    expect(container.querySelector("a")).not.toBeNull();
   });
 });

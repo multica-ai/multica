@@ -13,9 +13,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// newRedisTestClient connects to REDIS_TEST_URL, flushes, and skips when
-// unset — same gating pattern the rest of the suite uses for Redis-backed
-// tests, so `go test ./...` works on a stock laptop without a Redis.
+const redisTestDB = 13
+
+// newRedisTestClient connects to REDIS_TEST_URL, uses this package's logical
+// test DB, flushes, and skips when unset — same gating pattern the rest of the
+// suite uses for Redis-backed tests, so `go test ./...` works on a stock laptop
+// without a Redis.
 func newRedisTestClient(t *testing.T) *redis.Client {
 	t.Helper()
 	url := os.Getenv("REDIS_TEST_URL")
@@ -26,6 +29,7 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 	if err != nil {
 		t.Fatalf("parse REDIS_TEST_URL: %v", err)
 	}
+	opts.DB = redisTestDB
 	rdb := redis.NewClient(opts)
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -299,7 +303,6 @@ func TestAuth_PATCacheHit(t *testing.T) {
 	}
 }
 
-
 // TestAuth_MCN_NoVerifierConfigured pins the same fail-closed branch
 // as the daemon side: with no MULTICA_CLOUD_FLEET_URL configured, an
 // mcn_ bearer token must be rejected with 401 at the prefix branch.
@@ -334,10 +337,11 @@ func TestAuth_MCN_ValidTokenSetsUserID(t *testing.T) {
 
 	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
 
-	var gotUser string
+	var gotUser, gotActorSource string
 	mw := Auth(nil, nil, verifier)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUser = r.Header.Get("X-User-ID")
+		gotActorSource = r.Header.Get("X-Actor-Source")
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -351,6 +355,14 @@ func TestAuth_MCN_ValidTokenSetsUserID(t *testing.T) {
 	}
 	if gotUser != "01972f7e-7e8d-77ef-a13d-1b0ce3e9c001" {
 		t.Errorf("expected owner_id propagated as X-User-ID, got %q", gotUser)
+	}
+	// Pinned per the cloud-billing review: a successful mcn_ verify
+	// MUST stamp X-Actor-Source so account-level guards (e.g.
+	// handler.RequireHumanActor on /api/cloud-billing/*) can tell a
+	// machine credential apart from a human PAT/JWT. Dropping this
+	// stamp would silently let an mcn_ holder reach billing.
+	if gotActorSource != "cloud_pat" {
+		t.Errorf("expected X-Actor-Source=cloud_pat, got %q", gotActorSource)
 	}
 }
 

@@ -2,14 +2,18 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,11 +46,17 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("hermes executable not found at %q: %w", execPath, err)
 	}
 
-	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
+	// Translate the agent's mcp_config (Claude-style object of objects)
+	// into the array shape ACP `session/new` expects. Fail closed on
+	// malformed JSON so the launch surfaces the real error instead of
+	// silently dropping all MCP servers.
+	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("hermes: invalid mcp_config: %w", err)
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+
+	timeout := opts.Timeout
+	runCtx, cancel := runContext(ctx, timeout)
 
 	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, hermesArgs...)
@@ -194,7 +204,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		effectiveModel := strings.TrimSpace(opts.Model)
 
 		// 1. Initialize handshake.
-		_, err := c.request(runCtx, "initialize", map[string]any{
+		initResult, err := c.request(runCtx, "initialize", map[string]any{
 			"protocolVersion": 1,
 			"clientInfo": map[string]any{
 				"name":    "multica-agent-sdk",
@@ -209,6 +219,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			return
 		}
 
+		// Drop MCP entries whose remote transport the runtime didn't
+		// advertise. ACP requires the client to honour
+		// agentCapabilities.mcpCapabilities; sending an http/sse entry to
+		// a runtime that says it only supports stdio reliably rejects the
+		// whole session/new request.
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "hermes", b.cfg.Logger)
+
 		// 2. Create or resume a session.
 		cwd := opts.Cwd
 		if cwd == "" {
@@ -216,9 +233,14 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		if opts.ResumeSessionID != "" {
+			// Per ACP Session Setup, session/resume accepts mcpServers and
+			// the runtime re-connects them as part of the resume. Without
+			// this, a resumed Hermes task lost access to MCP tools that a
+			// fresh task on the same agent would have.
 			result, err := c.request(runCtx, "session/resume", map[string]any{
-				"cwd":       cwd,
-				"sessionId": opts.ResumeSessionID,
+				"cwd":        cwd,
+				"sessionId":  opts.ResumeSessionID,
+				"mcpServers": mcpServers,
 			})
 			if err != nil {
 				finalStatus = "failed"
@@ -239,7 +261,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				effectiveModel = extractACPCurrentModelID(result)
 			}
 		} else {
-			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model))
+			result, err := c.request(runCtx, "session/new", buildHermesSessionParams(cwd, opts.Model, mcpServers))
 			if err != nil {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes session/new failed: %v", err)
@@ -277,6 +299,17 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				b.cfg.Logger.Warn("hermes set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes could not switch to model %q: %v", opts.Model, err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					// On a resumed session with a model override, the dead
+					// session surfaces here instead of at session/prompt.
+					// Same fix as the prompt path below: clear the id so
+					// the daemon's resume-failure fallback retries fresh.
+					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
+						"backend", "hermes",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 				resCh <- Result{
 					Status:     finalStatus,
 					Error:      finalError,
@@ -317,6 +350,23 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("hermes session/prompt failed: %v", err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					// The agent no longer knows the session we resumed.
+					// Hermes echoes the requested id back from
+					// session/resume even when the session is gone, so
+					// resolveResumedSessionID can't catch this — it only
+					// surfaces here, at prompt time. Return an empty
+					// SessionID so the daemon's resume-failure fallback
+					// retries with a fresh session and stores the
+					// replacement id; keeping the stale id makes every
+					// future dispatch on this (agent, issue) fail the
+					// same way.
+					b.cfg.Logger.Warn("resumed session not found at prompt time; clearing session id so the daemon retries fresh",
+						"backend", "hermes",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 			}
 		} else {
 			// The prompt completed. Check if we got a promptDone result
@@ -586,6 +636,46 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	}
 }
 
+// acpRPCError is a JSON-RPC error frame returned by the agent process.
+// It renders exactly like the flat string handleResponse used to build
+// with fmt.Errorf, so logs and surfaced task errors are unchanged, but
+// keeps the code and message structured so callers can branch on the
+// error class (see isACPSessionNotFound) instead of parsing text.
+type acpRPCError struct {
+	Method  string
+	Code    int
+	Message string
+	Data    string
+}
+
+func (e *acpRPCError) Error() string {
+	if e.Data != "" {
+		return fmt.Sprintf("%s: %s (code=%d, data=%s)", e.Method, e.Message, e.Code, e.Data)
+	}
+	return fmt.Sprintf("%s: %s (code=%d)", e.Method, e.Message, e.Code)
+}
+
+// isACPSessionNotFound reports whether err is the agent rejecting a
+// session id it no longer knows. Runtimes signal this with codes and
+// wording that vary — Hermes says "Session not found" under -32603
+// (Internal error), Kiro puts "No session found with id ..." in
+// `data` under -32603, and kimi-cli raises invalid_params (-32602)
+// with {"session_id": "Session not found"} in `data` for every
+// unknown-session path (src/kimi_cli/acp/server.py) — so neither the
+// code nor the text alone is discriminating and both are matched.
+func isACPSessionNotFound(err error) bool {
+	var rpcErr *acpRPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	if rpcErr.Code != -32603 && rpcErr.Code != -32602 {
+		return false
+	}
+	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
+	return strings.Contains(text, "session not found") ||
+		strings.Contains(text, "no session found")
+}
+
 func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 	var id int
 	if err := json.Unmarshal(raw["id"], &id); err != nil {
@@ -630,11 +720,7 @@ func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 				detail = string(rpcErr.Data)
 			}
 		}
-		if detail != "" {
-			pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d, data=%s)", pr.method, rpcErr.Message, rpcErr.Code, detail)}
-		} else {
-			pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d)", pr.method, rpcErr.Message, rpcErr.Code)}
-		}
+		pr.ch <- rpcResult{err: &acpRPCError{Method: pr.method, Code: rpcErr.Code, Message: rpcErr.Message, Data: detail}}
 	} else {
 		// If this is a prompt response, extract usage and stop reason.
 		if pr.method == "session/prompt" {
@@ -908,6 +994,7 @@ func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
 			Type:   MessageToolResult,
 			CallID: msg.ToolCallID,
 			Output: output,
+			Status: msg.Status,
 		})
 	}
 }
@@ -1193,15 +1280,245 @@ func resolveResumedSessionID(requested string, response json.RawMessage) (string
 // buildHermesSessionParams constructs the params map for the ACP `session/new`
 // request. The `model` field is only included when non-empty so Hermes falls
 // back to its default only when no explicit model was configured.
-func buildHermesSessionParams(cwd, model string) map[string]any {
+//
+// mcpServers should be the ACP-shaped array produced by buildACPMcpServers
+// from the agent's mcp_config; a nil slice is normalised to an empty array
+// so the wire request always carries the field (ACP requires it).
+func buildHermesSessionParams(cwd, model string, mcpServers []any) map[string]any {
+	if mcpServers == nil {
+		mcpServers = []any{}
+	}
 	params := map[string]any{
 		"cwd":        cwd,
-		"mcpServers": []any{},
+		"mcpServers": mcpServers,
 	}
 	if model != "" {
 		params["model"] = model
 	}
 	return params
+}
+
+// buildACPMcpServers translates an agent's Claude-style mcp_config
+// (`{"mcpServers": {"<name>": {...}}}`) into the array shape that ACP's
+// `session/new` and `session/load` requests expect.
+//
+// Each Claude-style entry maps to one of:
+//
+//   - Stdio:  `{name, command, args, env: [{name,value}, ...]}` —
+//     when the entry has a `command` field. No `type` field is emitted;
+//     ACP treats untagged entries as stdio.
+//   - HTTP / SSE: `{type, name, url, headers: [{name,value}, ...]}` —
+//     when the entry has a `url` field. `type` defaults to "http"; Claude's
+//     "sse" and "streamable-http" / "http_streamable" aliases are accepted.
+//
+// Empty / null input returns an empty slice — the launch proceeds with no
+// MCP servers (the existing default for ACP backends). Malformed top-level
+// JSON returns an error so the launch fails closed, mirroring codex's
+// `renderCodexMcpServersBlock` contract. Individual entries that have
+// neither `command` nor `url` are skipped with a warning rather than
+// failing the whole launch, so a single bad entry can't kill the agent.
+//
+// Output entries are sorted by name and each entry's env / headers are
+// sorted by key, so the wire request is deterministic across reruns —
+// useful for tests, log diffs, and reproducibility.
+func buildACPMcpServers(raw json.RawMessage, logger *slog.Logger) ([]any, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return []any{}, nil
+	}
+	var parsed struct {
+		McpServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		return nil, fmt.Errorf("parse mcp_config json: %w", err)
+	}
+	if len(parsed.McpServers) == 0 {
+		return []any{}, nil
+	}
+
+	names := make([]string, 0, len(parsed.McpServers))
+	for name := range parsed.McpServers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := make([]any, 0, len(names))
+	for _, name := range names {
+		entry, err := convertACPMcpServer(name, parsed.McpServers[name])
+		if err != nil {
+			if logger != nil {
+				logger.Warn("skipping invalid mcp_config entry", "name", name, "error", err)
+			}
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+// convertACPMcpServer converts a single Claude-style entry into the ACP
+// McpServer wire shape. Returns an error for entries that can't be
+// classified (no command and no url).
+func convertACPMcpServer(name string, raw json.RawMessage) (map[string]any, error) {
+	var entry struct {
+		Type    string            `json:"type"`
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+	}
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return nil, fmt.Errorf("parse entry: %w", err)
+	}
+
+	command := strings.TrimSpace(entry.Command)
+	url := strings.TrimSpace(entry.URL)
+
+	if command != "" {
+		args := entry.Args
+		if args == nil {
+			args = []string{}
+		}
+		envArr := make([]map[string]any, 0, len(entry.Env))
+		for _, k := range sortedStringMapKeys(entry.Env) {
+			envArr = append(envArr, map[string]any{
+				"name":  k,
+				"value": entry.Env[k],
+			})
+		}
+		return map[string]any{
+			"name":    name,
+			"command": command,
+			"args":    args,
+			"env":     envArr,
+		}, nil
+	}
+
+	if url != "" {
+		t := strings.ToLower(strings.TrimSpace(entry.Type))
+		switch t {
+		case "sse":
+			t = "sse"
+		case "", "http", "streamable-http", "http_streamable":
+			t = "http"
+		default:
+			// Unknown remote transport — degrade to "http" rather than fail.
+			// ACP servers that don't recognise the type will reject the
+			// session/new request and surface a real error to the user.
+			t = "http"
+		}
+		headerArr := make([]map[string]any, 0, len(entry.Headers))
+		for _, k := range sortedStringMapKeys(entry.Headers) {
+			headerArr = append(headerArr, map[string]any{
+				"name":  k,
+				"value": entry.Headers[k],
+			})
+		}
+		return map[string]any{
+			"type":    t,
+			"name":    name,
+			"url":     url,
+			"headers": headerArr,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("entry has neither command nor url")
+}
+
+func sortedStringMapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// acpMcpTransportCapabilities reports which remote MCP transports the ACP
+// runtime advertised in its `initialize` response. Stdio is always
+// supported (it's the baseline transport and the spec does not gate it),
+// so it's not represented here.
+type acpMcpTransportCapabilities struct {
+	HTTP bool
+	SSE  bool
+}
+
+// extractACPMcpCapabilities reads `agentCapabilities.mcpCapabilities.http`
+// and `.sse` out of an ACP `initialize` response. Missing or false fields
+// stay false, matching the spec default: the runtime must opt-in to
+// remote MCP transports. Unparseable responses degrade to "neither
+// supported" so we fail closed on remote entries.
+//
+// See https://agentclientprotocol.com/protocol/initialization — clients
+// MUST NOT send `mcpServers` entries with a type the agent did not
+// advertise support for.
+func extractACPMcpCapabilities(result json.RawMessage) acpMcpTransportCapabilities {
+	var r struct {
+		AgentCapabilities struct {
+			McpCapabilities struct {
+				HTTP bool `json:"http"`
+				SSE  bool `json:"sse"`
+			} `json:"mcpCapabilities"`
+		} `json:"agentCapabilities"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return acpMcpTransportCapabilities{}
+	}
+	return acpMcpTransportCapabilities{
+		HTTP: r.AgentCapabilities.McpCapabilities.HTTP,
+		SSE:  r.AgentCapabilities.McpCapabilities.SSE,
+	}
+}
+
+// filterACPMcpServersByCapability drops remote MCP entries whose transport
+// the runtime didn't advertise in its initialize response. Stdio entries
+// (no `type` field) always pass through.
+//
+// Sending an http/sse entry to a runtime that doesn't support it is a
+// protocol violation per the ACP spec, and Hermes / Kimi observed in
+// practice reject the whole session/new request with a JSON-RPC error.
+// Dropping the offending entries with a warning lets the rest of the
+// session start and surfaces the problem in the daemon log instead of
+// tanking every task on that agent.
+func filterACPMcpServersByCapability(
+	servers []any,
+	caps acpMcpTransportCapabilities,
+	backend string,
+	logger *slog.Logger,
+) []any {
+	if len(servers) == 0 {
+		return servers
+	}
+	filtered := make([]any, 0, len(servers))
+	for _, raw := range servers {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			filtered = append(filtered, raw)
+			continue
+		}
+		transport, _ := entry["type"].(string)
+		switch transport {
+		case "http":
+			if !caps.HTTP {
+				if logger != nil {
+					logger.Warn("dropping http MCP server: runtime did not advertise mcpCapabilities.http",
+						"backend", backend, "name", entry["name"])
+				}
+				continue
+			}
+		case "sse":
+			if !caps.SSE {
+				if logger != nil {
+					logger.Warn("dropping sse MCP server: runtime did not advertise mcpCapabilities.sse",
+						"backend", backend, "name", entry["name"])
+				}
+				continue
+			}
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
 }
 
 // hermesToolNameFromTitle extracts a tool name from the ACP tool call title.

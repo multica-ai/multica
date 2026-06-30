@@ -1,5 +1,6 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
+import type { TaskMessagePayload } from "../types/events";
 
 // NOTE on workspace scoping:
 // `wsId` is used only as part of queryKey for cache isolation per workspace.
@@ -13,12 +14,17 @@ export const chatKeys = {
   /** Full sessions list (active + archived); the dropdown splits locally. */
   sessions: (wsId: string) => [...chatKeys.all(wsId), "sessions"] as const,
   session: (wsId: string, id: string) => [...chatKeys.all(wsId), "session", id] as const,
-  messages: (sessionId: string) => ["chat", "messages", sessionId] as const,
-  pendingTask: (sessionId: string) => ["chat", "pending-task", sessionId] as const,
+  messagesAll: () => ["chat", "messages"] as const,
+  messages: (sessionId: string) => [...chatKeys.messagesAll(), sessionId] as const,
+  messagesPageAll: () => ["chat", "messages-page"] as const,
+  messagesPage: (sessionId: string) => [...chatKeys.messagesPageAll(), sessionId] as const,
+  pendingTaskAll: () => ["chat", "pending-task"] as const,
+  pendingTask: (sessionId: string) => [...chatKeys.pendingTaskAll(), sessionId] as const,
   /** Aggregate of in-flight chat tasks for the current user — FAB reads this. */
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
   /** Per-task execution messages — shared with issue agent cards. */
-  taskMessages: (taskId: string) => ["task-messages", taskId] as const,
+  taskMessagesAll: () => ["task-messages"] as const,
+  taskMessages: (taskId: string) => [...chatKeys.taskMessagesAll(), taskId] as const,
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -53,6 +59,19 @@ export function chatMessagesOptions(sessionId: string) {
   });
 }
 
+export function chatMessagesPageOptions(sessionId: string, limit = 50) {
+  return infiniteQueryOptions({
+    queryKey: chatKeys.messagesPage(sessionId),
+    queryFn: ({ pageParam }) =>
+      api.listChatMessagesPage(sessionId, { before: pageParam, limit }),
+    initialPageParam: null as { created_at: string; id: string } | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.has_more ? lastPage.next_cursor ?? undefined : undefined,
+    enabled: !!sessionId,
+    staleTime: Infinity,
+  });
+}
+
 /**
  * Pending task for a chat session — the "is something still running?" signal.
  * Refetched via WS invalidation in useRealtimeSync when chat:message / chat:done
@@ -79,6 +98,29 @@ export function taskMessagesOptions(taskId: string) {
     enabled: isTaskMessageTaskId(taskId),
     staleTime: Infinity,
   });
+}
+
+/**
+ * Merge task-message batches into one seq-ordered, seq-deduplicated list for
+ * the shared `["task-messages", taskId]` cache. Existing entries win on
+ * conflict, and the original array reference is preserved when nothing new
+ * arrives so React Query observers don't re-render on duplicate events.
+ *
+ * Both the realtime `task:message` handler (a single payload) and the
+ * transcript backfill (a full refetch) write this cache. Routing both through
+ * one helper keeps a forced backfill from blind-replacing a seq the WebSocket
+ * already delivered — and keeps a late WS event from being lost to an
+ * in-flight backfill.
+ */
+export function mergeTaskMessagesBySeq(
+  existing: readonly TaskMessagePayload[],
+  incoming: readonly TaskMessagePayload[],
+): TaskMessagePayload[] {
+  if (incoming.length === 0) return existing as TaskMessagePayload[];
+  const knownSeqs = new Set(existing.map((m) => m.seq));
+  const fresh = incoming.filter((m) => !knownSeqs.has(m.seq));
+  if (fresh.length === 0) return existing as TaskMessagePayload[];
+  return [...existing, ...fresh].sort((a, b) => a.seq - b.seq);
 }
 
 /**

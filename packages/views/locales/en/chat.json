@@ -8,10 +8,12 @@
   "input": {
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",
-    "placeholder_named": "Tell {{name}} what to do…",
-    "placeholder_default": "Tell me what to do…",
+    "placeholder_named": "Message {{name}}…",
+    "placeholder_default": "Start a message…",
     "send_tooltip": "Send",
-    "stop_tooltip": "Stop"
+    "stop_tooltip": "Stop",
+    "send_failed_toast": "Failed to send message",
+    "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment."
   },
   "message_list": {
     "show_details": "Show details",
@@ -26,7 +28,8 @@
     "process_steps_other": "{{count}} steps",
     "copy_action": "Copy",
     "copied_toast": "Copied",
-    "copy_failed_toast": "Copy failed"
+    "copy_failed_toast": "Copy failed",
+    "loading_older": "Loading older messages…"
   },
   "session_history": {
     "untitled": "Untitled",
@@ -38,6 +41,21 @@
     },
     "row_delete_aria": "Delete chat session",
     "row_rename_aria": "Rename chat session",
+    "row_stop_aria": "Stop current run",
+    "stop_action": "Stop",
+    "row_subtitle": {
+      "working": "Working",
+      "completed": "Completed",
+      "new_reply": "New reply"
+    },
+    "stop_dialog": {
+      "title": "Stop this run?",
+      "description_with_title": "This will cancel the current agent task in \"{{title}}\". Partial output will stay in the chat.",
+      "description_default": "This will cancel the current agent task. Partial output will stay in the chat.",
+      "cancel": "Keep running",
+      "confirm": "Stop run",
+      "confirming": "Stopping..."
+    },
     "delete_dialog": {
       "title": "Delete chat session",
       "description_with_title": "\"{{title}}\" and its messages will be permanently removed. This action cannot be undone.",
@@ -61,9 +79,8 @@
     "my_agents": "My agents",
     "others": "Others",
     "no_agents": "No agents",
-    "active_group": "Active",
-    "archived_group_one": "{{count}} archived chat",
-    "archived_group_other": "{{count}} archived chats"
+    "history_group": "Chat history",
+    "agent_filter_placeholder": "Search agents..."
   },
   "empty_state": {
     "first_time_title": "Chat with your agents",
@@ -79,17 +96,6 @@
     "list_open": "List my open tasks by priority",
     "summarize_today": "Summarize what I did today",
     "plan_next": "Plan what to work on next"
-  },
-  "context_anchor": {
-    "tooltip_disabled": "Nothing to share with Multica on this page",
-    "tooltip_off": "Let Multica know what you're viewing",
-    "tooltip_on_issue": "Multica knows you're viewing {{label}} · Click to turn off",
-    "tooltip_on_project": "Multica knows you're viewing project \"{{label}}\" · Click to turn off",
-    "card_tooltip_issue_with_subtitle": "Multica knows you're viewing {{label}} — {{subtitle}}",
-    "card_tooltip_issue": "Multica knows you're viewing {{label}}",
-    "card_tooltip_project": "Multica knows you're viewing project \"{{label}}\"",
-    "aria_stop": "Stop sharing current page",
-    "aria_start": "Share current page with Multica"
   },
   "no_agent_banner": "You need an agent to start chatting.",
   "offline_banner": {

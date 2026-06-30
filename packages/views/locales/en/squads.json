@@ -3,7 +3,17 @@
     "title": "Squads",
     "new_button": "New Squad",
     "empty_no_squads": "No squads yet. Create one to get started.",
-    "empty_no_match": "No squads match your filters."
+    "empty_no_match": "No squads match your filters.",
+    "table": {
+      "name": "Squad",
+      "leader": "Leader",
+      "members": "Members",
+      "creator": "Created by",
+      "created": "Created"
+    },
+    "no_matches": "No squads match",
+    "row_menu": "Squad actions",
+    "archive_action": "Archive"
   },
   "inspector": {
     "details_section": "Details",
@@ -14,7 +24,8 @@
     "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
     "cancel": "Cancel",
     "confirm": "Archive",
-    "archiving": "Archiving…"
+    "archiving": "Archiving…",
+    "success": "Squad archived"
   },
   "name_editor": {
     "cancel": "Cancel"
@@ -53,6 +64,7 @@
     "status_idle": "Idle",
     "status_offline": "Offline",
     "status_unstable": "Unstable",
+    "status_archived": "Archived",
     "issue_status_blocked": "blocked",
     "active_issue_more": "and {{count}} more",
     "last_active_label": "last active {{time}}"
@@ -71,5 +83,21 @@
     "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
     "unsaved_changes": "Unsaved changes",
     "save_button": "Save"
+  },
+  "scope": {
+    "mine": "Mine",
+    "all": "All"
+  },
+  "toolbar": {
+    "display": "Display",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns",
+    "result_count_title": "Matching squads / all squads",
+    "filter_label": "Filter",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters"
   }
 }

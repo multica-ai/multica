@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 )
 
 // newGCTestDaemon creates a minimal Daemon for GC testing with a mock HTTP server.
@@ -654,6 +657,218 @@ func TestIsBareRepo(t *testing.T) {
 	})
 }
 
+func TestPruneWorktree_RemovesOnlyStaleAgentBranches(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+
+	activeWorktree := filepath.Join(t.TempDir(), "active")
+	activeBranch := "agent/live/12345678"
+	staleBranch := "agent/stale/87654321"
+	keepBranch := "main"
+
+	runGitForGC(t, "", "-C", barePath, "worktree", "add", "-b", activeBranch, activeWorktree, "HEAD")
+	runGitForGC(t, "", "-C", barePath, "branch", staleBranch, "HEAD")
+
+	d.pruneWorktree(barePath)
+
+	if gitRefExists(t, barePath, "refs/heads/"+staleBranch) {
+		t.Fatalf("expected stale branch %q to be deleted", staleBranch)
+	}
+	if !gitRefExists(t, barePath, "refs/heads/"+activeBranch) {
+		t.Fatalf("expected active branch %q to be preserved", activeBranch)
+	}
+	if !gitRefExists(t, barePath, "refs/heads/"+keepBranch) {
+		t.Fatalf("expected non-agent branch %q to be preserved", keepBranch)
+	}
+}
+
+// TestPruneWorktree_IgnoresLiteralAgentBranch ensures the GC pattern is scoped
+// to the `agent/` namespace. A repo whose only `agent`-shaped ref is the
+// literal `refs/heads/agent` (no slash) must be left untouched — the
+// `for-each-ref` query is narrowed to `refs/heads/agent/` for that reason.
+func TestPruneWorktree_IgnoresLiteralAgentBranch(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+	runGitForGC(t, "", "-C", barePath, "branch", "agent", "HEAD")
+
+	d.pruneWorktree(barePath)
+
+	if !gitRefExists(t, barePath, "refs/heads/agent") {
+		t.Fatal("expected literal `agent` branch outside the daemon namespace to be preserved")
+	}
+}
+
+// TestPruneWorktree_SkipsMaintenanceWhenNothingDeleted pins the gate that
+// keeps the heavy `gc --prune` step from running on every GC tick. Uses an
+// unreachable loose blob backdated past the prune horizon as a sentinel: it
+// survives when no agent branch was deleted (no maintenance), and disappears
+// once a stale agent branch is reaped (maintenance ran).
+func TestPruneWorktree_SkipsMaintenanceWhenNothingDeleted(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+
+	// Park an active agent worktree so the scan has something to filter, and
+	// to make sure pruneWorktree exercises the full code path.
+	activeWorktree := filepath.Join(t.TempDir(), "active")
+	runGitForGC(t, "", "-C", barePath, "worktree", "add", "-b", "agent/live/12345678", activeWorktree, "HEAD")
+
+	sentinelPath := writeOldLooseBlob(t, barePath, "sentinel-content", 60*24*time.Hour)
+
+	// No stale agent branch → no deletion → no `gc --prune`. The sentinel
+	// blob must survive.
+	d.pruneWorktree(barePath)
+	if _, err := os.Stat(sentinelPath); err != nil {
+		t.Fatalf("expected sentinel blob to survive when nothing was deleted: %v", err)
+	}
+
+	// Introduce a stale agent branch → deletion happens → maintenance runs →
+	// `gc --prune=30.days` reaps the sentinel blob.
+	runGitForGC(t, "", "-C", barePath, "branch", "agent/stale/87654321", "HEAD")
+	d.pruneWorktree(barePath)
+	if _, err := os.Stat(sentinelPath); !os.IsNotExist(err) {
+		t.Fatalf("expected sentinel blob to be pruned after maintenance ran, stat err=%v", err)
+	}
+}
+
+// writeOldLooseBlob writes a dangling loose-object blob to the bare repo and
+// backdates its mtime so `git gc --prune=30.days` will consider it prunable.
+// Returns the absolute path to the loose object on disk.
+func writeOldLooseBlob(t *testing.T, barePath, content string, age time.Duration) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", barePath, "hash-object", "-w", "--stdin")
+	cmd.Stdin = strings.NewReader(content)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("hash-object failed: %v: %s", err, out)
+	}
+	sha := strings.TrimSpace(string(out))
+	if len(sha) < 4 {
+		t.Fatalf("unexpected sha output: %q", sha)
+	}
+	loose := filepath.Join(barePath, "objects", sha[:2], sha[2:])
+	if _, err := os.Stat(loose); err != nil {
+		t.Fatalf("expected loose object at %s: %v", loose, err)
+	}
+	old := time.Now().Add(-age)
+	if err := os.Chtimes(loose, old, old); err != nil {
+		t.Fatalf("chtimes failed: %v", err)
+	}
+	return loose
+}
+
+func TestPruneWorktree_SerializesWithCreateWorktree(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	cache := repocache.New(filepath.Join(d.cfg.WorkspacesRoot, ".repos"), slog.Default())
+	if err := cache.Sync("ws1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("cache sync failed: %v", err)
+	}
+
+	barePath := cache.Lookup("ws1", sourceRepo)
+	if barePath == "" {
+		t.Fatal("expected bare repo to be cached")
+	}
+
+	runGitForGC(t, "", "-C", barePath, "branch", "agent/stale/87654321", "HEAD")
+
+	blockingCache := &blockingRepoCache{
+		inner:   cache,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	d.repoCache = blockingCache
+
+	pruneDone := make(chan struct{})
+	go func() {
+		d.pruneWorktree(barePath)
+		close(pruneDone)
+	}()
+
+	select {
+	case <-blockingCache.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pruneWorktree to acquire repo lock")
+	}
+
+	createDone := make(chan error, 1)
+	go func() {
+		_, err := blockingCache.CreateWorktree(repocache.WorktreeParams{
+			WorkspaceID: "ws1",
+			RepoURL:     sourceRepo,
+			WorkDir:     t.TempDir(),
+			AgentName:   "tester",
+			TaskID:      "11111111-1111-1111-1111-111111111111",
+		})
+		createDone <- err
+	}()
+
+	select {
+	case err := <-createDone:
+		t.Fatalf("CreateWorktree should wait for GC lock, returned early with err=%v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(blockingCache.release)
+
+	select {
+	case err := <-createDone:
+		if err != nil {
+			t.Fatalf("CreateWorktree failed after GC lock released: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for CreateWorktree after releasing GC lock")
+	}
+
+	select {
+	case <-pruneDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pruneWorktree to finish")
+	}
+}
+
+type blockingRepoCache struct {
+	inner   *repocache.Cache
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingRepoCache) Lookup(workspaceID, url string) string {
+	return c.inner.Lookup(workspaceID, url)
+}
+
+func (c *blockingRepoCache) Sync(workspaceID string, repos []repocache.RepoInfo) error {
+	return c.inner.Sync(workspaceID, repos)
+}
+
+func (c *blockingRepoCache) WithRepoLock(barePath string, fn func() error) error {
+	return c.inner.WithRepoLock(barePath, func() error {
+		close(c.entered)
+		<-c.release
+		return fn()
+	})
+}
+
+func (c *blockingRepoCache) CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return c.inner.CreateWorktree(params)
+}
+
 // TestShouldCleanTaskDir_KindDispatch covers the four GCMeta kinds across
 // active / terminal / 404 / non-terminal axes. Each entry stands up a mock
 // server returning the expected payload (or 404) and asserts the action.
@@ -753,13 +968,44 @@ func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
 			want: gcActionSkip,
 		},
 		{
-			name: "autopilot completed within TTL — skip",
+			name: "autopilot pending — skip",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
+				body: map[string]any{"status": "pending"},
+			}},
+			want: gcActionSkip,
+		},
+		{
+			// The directory is never reused, so a terminal run is reclaimed on
+			// sight — the recent completed_at no longer buys it a 24h reprieve.
+			name: "autopilot completed within TTL — clean immediately (no 24h gate)",
 			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
 			servers: []serverResp{{
 				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
 				body: map[string]any{"status": "completed", "completed_at": withinTTL},
 			}},
-			want: gcActionSkip,
+			want: gcActionClean,
+		},
+		{
+			// Terminal status with no completed_at stamp at all still cleans —
+			// GC keys purely on the terminal status, not on any timestamp.
+			name: "autopilot skipped with no completed_at — clean",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
+				body: map[string]any{"status": "skipped"},
+			}},
+			want: gcActionClean,
+		},
+		{
+			name: "autopilot failed — clean",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
+			servers: []serverResp{{
+				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
+				body: map[string]any{"status": "failed"},
+			}},
+			want: gcActionClean,
 		},
 
 		// ---- quick-create -------------------------------------------------
@@ -830,6 +1076,116 @@ func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestShouldCleanTaskDir_EmptyParentIDFallsBackToOrphanMTime(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		meta *execenv.GCMeta
+	}{
+		{
+			name: "legacy issue meta",
+			meta: &execenv.GCMeta{WorkspaceID: "ws"},
+		},
+		{
+			name: "issue meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindIssue, WorkspaceID: "ws"},
+		},
+		{
+			name: "chat meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindChat, WorkspaceID: "ws"},
+		},
+		{
+			name: "autopilot run meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, WorkspaceID: "ws"},
+		},
+		{
+			name: "quick create meta",
+			meta: &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, WorkspaceID: "ws"},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			requests := 0
+			mux := http.NewServeMux()
+			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				http.Error(w, "unexpected request", http.StatusBadRequest)
+			})
+
+			d := newGCTestDaemon(t, mux)
+			d.cfg.GCOrphanTTL = 365 * 24 * time.Hour
+			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", tc.name, tc.meta)
+
+			got := d.shouldCleanTaskDir(context.Background(), taskDir)
+			if got != gcActionSkip {
+				t.Fatalf("empty parent id should skip while under orphan TTL, got %d", got)
+			}
+			if requests != 0 {
+				t.Fatalf("empty parent id should not call gc-check endpoint, got %d requests", requests)
+			}
+
+			old := time.Now().Add(-400 * 24 * time.Hour)
+			if err := os.Chtimes(taskDir, old, old); err != nil {
+				t.Fatalf("chtimes: %v", err)
+			}
+			got = d.shouldCleanTaskDir(context.Background(), taskDir)
+			if got != gcActionOrphan {
+				t.Fatalf("empty parent id over orphan TTL should orphan, got %d", got)
+			}
+			if requests != 0 {
+				t.Fatalf("empty parent id should not call gc-check endpoint after mtime fallback, got %d requests", requests)
+			}
+		})
+	}
+}
+
+func createGCGitRepo(t *testing.T) string {
+	t.Helper()
+
+	repoDir := t.TempDir()
+	runGitForGC(t, repoDir, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGitForGC(t, repoDir, "add", "README.md")
+	runGitForGC(t, repoDir, "commit", "-m", "initial commit")
+	return repoDir
+}
+
+func runGitForGC(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	fullArgs := args
+	if dir != "" {
+		fullArgs = append([]string{"-C", dir}, args...)
+	}
+	cmd := exec.Command("git", fullArgs...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %s: %v", strings.Join(fullArgs, " "), out, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func gitRefExists(t *testing.T, repoPath, ref string) bool {
+	t.Helper()
+
+	cmd := exec.Command("git", "-C", repoPath, "show-ref", "--verify", "--quiet", ref)
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return true
 }
 
 // TestShouldCleanTaskDir_ChatHardDeletedFreshMtime locks acceptance #3:

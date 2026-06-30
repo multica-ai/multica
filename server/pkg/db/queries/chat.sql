@@ -78,18 +78,44 @@ INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reaso
 VALUES ($1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms))
 RETURNING *;
 
+-- name: LinkChatMessageToTask :exec
+UPDATE chat_message
+SET task_id = $2
+WHERE id = $1 AND role = 'user';
+
+-- name: DeleteUserChatMessageByTask :one
+DELETE FROM chat_message
+WHERE task_id = $1 AND role = 'user'
+RETURNING *;
+
 -- name: ListChatMessages :many
 SELECT * FROM chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC;
+
+-- name: ListChatMessagesPage :many
+SELECT * FROM chat_message
+WHERE chat_session_id = $1
+  AND (
+    sqlc.narg('before_created_at')::timestamptz IS NULL
+    OR (created_at, id) < (sqlc.narg('before_created_at')::timestamptz, sqlc.narg('before_id')::uuid)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $2;
 
 -- name: GetChatMessage :one
 SELECT * FROM chat_message
 WHERE id = $1;
 
 -- name: CreateChatTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, chat_session_id,
+    initiator_user_id, force_fresh_session
+)
+VALUES (
+    $1, $2, NULL, 'queued', $3, $4, $5,
+    COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE)
+)
 RETURNING *;
 
 -- name: GetLastChatTaskSession :one
@@ -148,3 +174,14 @@ WHERE id = $1;
 -- unread boundary stable across multiple incoming replies.
 UPDATE chat_session SET unread_since = now()
 WHERE id = $1 AND unread_since IS NULL;
+
+-- name: GetMostRecentUserChatMessage :one
+-- Returns the most recent role='user' message in a session. Used by the
+-- Lark `/issue` command parser: when the user types `/issue` with no
+-- title, the spec falls back to "use the previous user message as the
+-- title". Bot replies (role='assistant') are excluded — only human
+-- input qualifies as a fallback title source.
+SELECT * FROM chat_message
+WHERE chat_session_id = $1 AND role = 'user'
+ORDER BY created_at DESC
+LIMIT 1;

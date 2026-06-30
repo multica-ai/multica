@@ -9,11 +9,11 @@ import (
 
 // BuildPrompt constructs the task prompt for an agent CLI.
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
-// injected by execenv.InjectRuntimeConfig. The provider string is used by
-// comment-triggered tasks: Codex's per-turn reply template needs the
-// platform-aware "stdin or file" variant, every other provider gets a
-// lightweight inline template (or Windows file for any provider on
-// Windows).
+// injected by execenv.InjectRuntimeConfig. The provider string is threaded
+// through to comment-triggered tasks' per-turn reply template; that template
+// is provider-agnostic AND host-agnostic now (every OS → write a UTF-8 file,
+// post with `--content-file`) because the shell-layer corruption it guards
+// against is not specific to any one provider or host (MUL-2904, #4182).
 func BuildPrompt(task Task, provider string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
@@ -30,8 +30,15 @@ func BuildPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	// Assignment handoff (MUL-3375): a free-text instruction the person who
+	// assigned/promoted this issue left for you. Frame it as a handoff, not a
+	// comment to reply to — there is no comment thread to answer here.
+	if task.HandoffNote != "" {
+		b.WriteString("You were handed this issue with a handoff note. Treat it as the assigner's scoping instruction for this run; follow it before doing anything broader, and do not reply to it as if it were a comment:\n\n")
+		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
+	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Start with `multica issue comment list %s --recent 10 --output json` to read the 10 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. Resolved threads come back folded — `--full` to expand. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
 	return b.String()
 }
 
@@ -159,7 +166,21 @@ func buildCommentPrompt(task Task, provider string) string {
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
-	fmt.Fprintf(&b, "For comment history, read the triggering thread first: `multica issue comment list %s --thread %s --tail 30 --output json` returns the root + the 30 most recent replies in that thread (root is always included, even at `--tail 0`, so you keep the \"what is this about\" context without dragging hundreds of replies into your prompt). If 30 replies aren't enough, walk older replies in the same thread one page at a time by passing the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line back as `--before <ts> --before-id <reply-id>` on the next call. If you also need cross-thread background, `multica issue comment list %s --recent 20 --output json` pulls the 20 most recently active threads on the issue; under `--recent` the same `--before` / `--before-id` flags walk older *threads* (stderr label: `Next thread cursor`) instead of older replies. Avoid the unfiltered `--output json` form on long-running issues; it dumps the full flat timeline (cap 2000) and wastes context. `--since <RFC3339>` is still available for incremental polling and may combine with `--thread --tail` or `--recent`.\n\n", task.IssueID, task.TriggerCommentID, task.IssueID)
+	// Comment-reading pointer. Warm path with new comments: issue-wide
+	// since-delta count, but steer the agent to read the triggering thread
+	// first. Warm resumed path with no new comments: the trigger is already
+	// injected, so don't force a duplicate thread read. Cold path: read the
+	// triggering thread, not the flat timeline. Final fallback (no trigger id,
+	// shouldn't happen here): plain read.
+	if hint := execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount); hint != "" {
+		b.WriteString(hint)
+	} else if task.PriorSessionID != "" {
+		b.WriteString(execenv.BuildResumedCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID))
+	} else if cold := execenv.BuildColdCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID); cold != "" {
+		b.WriteString(cold)
+	} else {
+		fmt.Fprintf(&b, "Read the discussion: `multica issue comment list %s --recent 10 --output json` (resolved threads come back folded — `--full` to expand).\n\n", task.IssueID)
+	}
 	b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
 	return b.String()
 }
@@ -169,6 +190,47 @@ func buildChatPrompt(task Task) string {
 	var b strings.Builder
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
 	b.WriteString("A user is chatting with you directly. Respond to their message.\n\n")
+	// Channel awareness (MUL-3871). When the session is backed by an IM channel,
+	// the agent must KNOW it is operating inside that channel — otherwise an ask
+	// like "what did you just talk about" sends it to read Multica instead of the
+	// Slack conversation. State it explicitly and point history reads at the
+	// channel, not Multica. A web-only chat session gets no such line — its
+	// history is the Multica chat_session the agent already resumes.
+	if task.ChatChannelType != "" {
+		platform := channelDisplayName(task.ChatChannelType)
+		fmt.Fprintf(&b, "You are operating inside a %s conversation (a channel, thread, or DM) — not the Multica web app. This conversation and its history live in %s, NOT in Multica. When the user asks about earlier messages, what was discussed, or who said what here, read it with `multica chat history --output json`; do NOT look in Multica issues or comments for this conversation's history. The message below may be only what triggered you — `multica chat history` auto-selects the right scope (the surrounding channel on your first reply, your own thread on follow-ups; add `--scope channel` to pull the wider channel when needed).\n\n", platform, platform)
+	}
+	if task.Agent != nil && len(task.Agent.Skills) > 0 {
+		refs := ExtractSlashSkills(task.ChatMessage)
+		if len(refs) > 0 {
+			agentSkills := make(map[string]string, len(task.Agent.Skills))
+			for _, s := range task.Agent.Skills {
+				agentSkills[s.ID] = s.Name
+			}
+
+			selected := make([]string, 0, len(refs))
+			seen := make(map[string]struct{}, len(refs))
+			for _, ref := range refs {
+				name, ok := agentSkills[ref.ID]
+				if !ok {
+					continue
+				}
+				if _, ok := seen[ref.ID]; ok {
+					continue
+				}
+				seen[ref.ID] = struct{}{}
+				selected = append(selected, name)
+			}
+
+			if len(selected) > 0 {
+				b.WriteString("Explicitly selected skills:\n")
+				for _, name := range selected {
+					fmt.Fprintf(&b, "- %s\n", name)
+				}
+				b.WriteString("\n")
+			}
+		}
+	}
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments
@@ -186,8 +248,19 @@ func buildChatPrompt(task Task) string {
 			}
 		}
 		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
+		b.WriteString("When creating an issue that should preserve one of these attachments, pass `--attachment-id <id>` to `multica issue create` in addition to keeping the attachment markdown inline.\n")
 	}
 	return b.String()
+}
+
+// channelDisplayName renders a chat_channel_type for prompt copy.
+func channelDisplayName(channelType string) string {
+	switch channelType {
+	case "slack":
+		return "Slack"
+	default:
+		return channelType
+	}
 }
 
 // buildAutopilotPrompt constructs a prompt for run_only autopilot tasks.

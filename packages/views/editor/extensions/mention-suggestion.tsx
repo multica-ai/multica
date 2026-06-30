@@ -8,9 +8,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
-import { ReactRenderer } from "@tiptap/react";
-import { computePosition, offset, flip, shift } from "@floating-ui/dom";
 import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
@@ -26,18 +25,24 @@ import type {
   Agent,
   Squad,
 } from "@multica/core/types";
+import { ListTodo } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { Badge } from "@multica/ui/components/ui/badge";
-import type { IssueStatus } from "@multica/core/types";
-import type { SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
+import { cn } from "@multica/ui/lib/utils";
+import type { IssueStatus, ProjectStatus } from "@multica/core/types";
+import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
+import type { SuggestionOptions } from "@tiptap/suggestion";
+import { PluginKey } from "@tiptap/pm/state";
 import {
   getRecencyMap,
   recordMentionUsage,
   sortUserItemsByRecency,
 } from "./mention-recency";
 import { matchesPinyin } from "./pinyin-match";
+import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,17 +51,24 @@ import { matchesPinyin } from "./pinyin-match";
 export interface MentionItem {
   id: string;
   label: string;
-  type: "member" | "agent" | "squad" | "issue" | "all";
+  type: "member" | "agent" | "squad" | "issue" | "project" | "all";
+  /** Optional grouping hint for injected context items. */
+  group?: "current" | "recent" | "search";
   /** Secondary text shown beside the label (e.g. issue title) */
   description?: string;
   /** Issue status for StatusIcon rendering */
   status?: IssueStatus;
+  /** Project emoji/icon snapshot for ProjectIcon rendering */
+  icon?: string | null;
+  /** Project status snapshot for recent/current project rendering */
+  projectStatus?: ProjectStatus;
 }
 
 interface MentionListProps {
   items: MentionItem[];
   query: string;
   command: (item: MentionItem) => void;
+  includeProjectSearch?: boolean;
 }
 
 export interface MentionListRef {
@@ -73,11 +85,20 @@ interface MentionGroup {
 }
 
 function groupItems(items: MentionItem[]): MentionGroup[] {
+  const current: MentionItem[] = [];
+  const recent: MentionItem[] = [];
+  const search: MentionItem[] = [];
   const users: MentionItem[] = [];
   const issues: MentionItem[] = [];
 
   for (const item of items) {
-    if (item.type === "issue") {
+    if (item.group === "current") {
+      current.push(item);
+    } else if (item.group === "recent") {
+      recent.push(item);
+    } else if (item.group === "search") {
+      search.push(item);
+    } else if (item.type === "issue" || item.type === "project") {
       issues.push(item);
     } else {
       users.push(item);
@@ -85,6 +106,9 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
   }
 
   const groups: MentionGroup[] = [];
+  if (current.length > 0) groups.push({ label: "Current", items: current });
+  if (recent.length > 0) groups.push({ label: "Recent", items: recent });
+  if (search.length > 0) groups.push({ label: "Search", items: search });
   if (users.length > 0) groups.push({ label: "Users", items: users });
   if (issues.length > 0) groups.push({ label: "Issues", items: issues });
   return groups;
@@ -96,6 +120,7 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
 
 const MAX_ITEMS = 20;
 const SERVER_ISSUE_SEARCH_LIMIT = 20;
+const SERVER_CONTEXT_SEARCH_LIMIT = 8;
 const SERVER_SEARCH_DEBOUNCE_MS = 150;
 
 function mentionItemKey(item: MentionItem): string {
@@ -103,13 +128,12 @@ function mentionItemKey(item: MentionItem): string {
 }
 
 function mergeMentionItems(
-  syncItems: MentionItem[],
-  serverIssueItems: MentionItem[],
+  ...itemGroups: MentionItem[][]
 ): MentionItem[] {
   const seen = new Set<string>();
   const merged: MentionItem[] = [];
 
-  for (const item of [...syncItems, ...serverIssueItems]) {
+  for (const item of itemGroups.flat()) {
     const key = mentionItemKey(item);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -120,54 +144,84 @@ function mergeMentionItems(
 }
 
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(
-  function MentionList({ items, query, command }, ref) {
+  function MentionList({ items, query, command, includeProjectSearch = false }, ref) {
     const { t } = useT("editor");
-    const [selectedIndex, setSelectedIndex] = useState(0);
-    const [serverIssueItems, setServerIssueItems] = useState<MentionItem[]>([]);
-    const [isSearchingIssues, setIsSearchingIssues] = useState(false);
-    const [searchedIssueQuery, setSearchedIssueQuery] = useState("");
+    // Selection is tracked by item identity, NOT by a positional index. The
+    // list is re-bucketed by groupItems() and grows asynchronously (server
+    // search results), so a slot index is not a stable target — the row under
+    // index N changes as the list reorders. selectedKey pins the highlight to
+    // a specific item; the numeric index is derived from it against the SAME
+    // order the popup renders (orderedItems). null means "no explicit pick yet"
+    // → the first rendered row is highlighted by default.
+    const [selectedKey, setSelectedKey] = useState<string | null>(null);
+    const [serverItems, setServerItems] = useState<MentionItem[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchedQuery, setSearchedQuery] = useState("");
     const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
     const normalizedQuery = query.trim();
 
     useEffect(() => {
       const q = normalizedQuery;
-      setServerIssueItems([]);
+      setServerItems([]);
 
       if (!q) {
-        setIsSearchingIssues(false);
-        setSearchedIssueQuery("");
+        setIsSearching(false);
+        setSearchedQuery("");
         return;
       }
 
       const wsId = getCurrentWsId();
       if (!wsId) {
-        setIsSearchingIssues(false);
-        setSearchedIssueQuery(q);
+        setIsSearching(false);
+        setSearchedQuery(q);
         return;
       }
 
       let cancelled = false;
       const controller = new AbortController();
-      setIsSearchingIssues(true);
+      setIsSearching(true);
 
       const timer = setTimeout(() => {
         void (async () => {
           try {
-            const res = await api.searchIssues({
-              q,
-              limit: SERVER_ISSUE_SEARCH_LIMIT,
-              include_closed: true,
-              signal: controller.signal,
-            });
-            if (!cancelled && !controller.signal.aborted) {
-              setServerIssueItems(res.issues.map(issueToMention));
+            if (includeProjectSearch) {
+              const [issues, projects] = await Promise.all([
+                api.searchIssues({
+                  q,
+                  limit: SERVER_CONTEXT_SEARCH_LIMIT,
+                  include_closed: true,
+                  signal: controller.signal,
+                }),
+                api.searchProjects({
+                  q,
+                  limit: SERVER_CONTEXT_SEARCH_LIMIT,
+                  include_closed: true,
+                  signal: controller.signal,
+                }),
+              ]);
+              if (!cancelled && !controller.signal.aborted) {
+                setServerItems([
+                  ...issues.issues.map((issue) => ({ ...issueToMention(issue), group: "search" as const })),
+                  ...projects.projects.map((project) => ({ ...projectToMention(project), group: "search" as const })),
+                ]);
+              }
+            } else {
+              const res = await api.searchIssues({
+                q,
+                limit: SERVER_ISSUE_SEARCH_LIMIT,
+                include_closed: true,
+                signal: controller.signal,
+              });
+              if (!cancelled && !controller.signal.aborted) {
+                setServerItems(res.issues.map(issueToMention));
+              }
             }
           } catch {
             // Aborted or network error: keep the synchronous cache results.
           } finally {
             if (!cancelled && !controller.signal.aborted) {
-              setSearchedIssueQuery(q);
-              setIsSearchingIssues(false);
+              setSearchedQuery(q);
+              setIsSearching(false);
             }
           }
         })();
@@ -178,31 +232,43 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
         clearTimeout(timer);
         controller.abort();
       };
-    }, [normalizedQuery]);
+    }, [includeProjectSearch, normalizedQuery]);
 
     const displayItems = useMemo(() => {
-      const currentServerIssueItems =
-        searchedIssueQuery === normalizedQuery ? serverIssueItems : [];
-      return mergeMentionItems(items, currentServerIssueItems).slice(0, MAX_ITEMS);
-    }, [items, normalizedQuery, searchedIssueQuery, serverIssueItems]);
+      const currentServerItems = searchedQuery === normalizedQuery ? serverItems : [];
+      return mergeMentionItems(items, currentServerItems).slice(0, MAX_ITEMS);
+    }, [items, normalizedQuery, searchedQuery, serverItems]);
 
-    useEffect(() => {
-      setSelectedIndex(0);
-    }, [displayItems]);
+    // The single index space for selection. groupItems() re-buckets displayItems
+    // (current → recent → search → users → issues); orderedItems is exactly what
+    // the popup renders, top to bottom. Keyboard nav, Enter, clicks, highlight,
+    // and scroll all index THIS, so the highlighted row always equals the
+    // committed item — there is no second "data order" to drift against.
+    const groups = useMemo(() => groupItems(displayItems), [displayItems]);
+    const orderedItems = useMemo(() => groups.flatMap((g) => g.items), [groups]);
+
+    // Derive the numeric index from the pinned identity. If the selected item
+    // is no longer in the list (query narrowed it away) or nothing is picked
+    // yet, fall back to the first row. This self-heals across reorders and
+    // async result arrival without ever force-resetting an active selection.
+    const selectedIndex = useMemo(() => {
+      if (selectedKey === null) return 0;
+      const i = orderedItems.findIndex((it) => mentionItemKey(it) === selectedKey);
+      return i === -1 ? 0 : i;
+    }, [orderedItems, selectedKey]);
 
     useEffect(() => {
       itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
     }, [selectedIndex]);
 
     const selectItem = useCallback(
-      (index: number) => {
-        const item = displayItems[index];
+      (item: MentionItem | undefined) => {
         if (!item) return;
         const wsId = getCurrentWsId();
         if (wsId) recordMentionUsage(wsId, item);
         command(item);
       },
-      [displayItems, command],
+      [command],
     );
 
     useImperativeHandle(ref, () => ({
@@ -211,30 +277,32 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
         // those keys belong to the IME (Enter commits composition, etc).
         if (isImeComposing(event)) return false;
         if (event.key === "ArrowUp") {
-          if (displayItems.length === 0) return true;
-          setSelectedIndex(
-            (i) => (i + displayItems.length - 1) % displayItems.length,
-          );
+          if (orderedItems.length === 0) return true;
+          const next = (selectedIndex + orderedItems.length - 1) % orderedItems.length;
+          setSelectedKey(mentionItemKey(orderedItems[next]!));
           return true;
         }
         if (event.key === "ArrowDown") {
-          if (displayItems.length === 0) return true;
-          setSelectedIndex((i) => (i + 1) % displayItems.length);
+          if (orderedItems.length === 0) return true;
+          const next = (selectedIndex + 1) % orderedItems.length;
+          setSelectedKey(mentionItemKey(orderedItems[next]!));
           return true;
         }
-        if (event.key === "Enter") {
-          if (displayItems.length === 0) return true;
-          selectItem(selectedIndex);
+        // Enter is the canonical accept; plain Tab is an additive alias (see
+        // isPickerAcceptKey). Shift/modifier+Tab fall through to focus nav.
+        if (isPickerAcceptKey(event)) {
+          if (orderedItems.length === 0) return true;
+          selectItem(orderedItems[selectedIndex]);
           return true;
         }
         return false;
       },
     }));
 
-    if (displayItems.length === 0) {
+    if (orderedItems.length === 0) {
       const isWaitingForServer =
         normalizedQuery !== "" &&
-        (isSearchingIssues || searchedIssueQuery !== normalizedQuery);
+        (isSearching || searchedQuery !== normalizedQuery);
 
       return (
         <div className="rounded-md border bg-popover p-2 text-xs text-muted-foreground shadow-md">
@@ -245,8 +313,12 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       );
     }
 
-    const groups = groupItems(displayItems);
+    const hasContextGroups = orderedItems.some((item) => item.group === "current" || item.group === "recent");
+    const contextLayout = hasContextGroups;
     const groupLabel = (label: string): string => {
+      if (label === "Current") return t(($) => $.mention.group_current);
+      if (label === "Recent") return t(($) => $.mention.group_recent);
+      if (label === "Search") return t(($) => $.mention.group_search);
       if (label === "Users") return t(($) => $.mention.group_users);
       if (label === "Issues") return t(($) => $.mention.group_issues);
       return label;
@@ -255,25 +327,42 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
     // Build a flat index mapping: globalIndex → item
     let globalIndex = 0;
 
+    const renderRows = (group: MentionGroup): ReactNode =>
+      group.items.map((item) => {
+        const idx = globalIndex++;
+        return (
+          <MentionRow
+            key={`${item.type}-${item.id}`}
+            item={item}
+            selected={idx === selectedIndex}
+            onSelect={() => selectItem(item)}
+            buttonRef={(el) => { itemRefs.current[idx] = el; }}
+          />
+        );
+      });
+
+    // One scroll container for every group. Previously the context layout made
+    // only the "Recent" group scrollable while the rest were `shrink-0`, so a
+    // query that mixed context items with search results squeezed Recent toward
+    // zero height and its un-clipped rows painted over the groups below it. With
+    // a single `overflow-y-auto` flex column the groups simply stack and the
+    // whole popup scrolls — no group can collapse onto another. The context
+    // variant only differs in width / max-height / chrome.
     return (
-      <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[300px] overflow-y-auto">
+      <div
+        className={cn(
+          "flex flex-col overflow-y-auto overscroll-contain border bg-popover py-1",
+          contextLayout
+            ? "max-h-[420px] w-96 rounded-lg shadow-xl"
+            : "max-h-[300px] w-72 rounded-md shadow-md",
+        )}
+      >
         {groups.map((group) => (
           <div key={group.label}>
-            <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+            <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/80">
               {groupLabel(group.label)}
             </div>
-            {group.items.map((item) => {
-              const idx = globalIndex++;
-              return (
-                <MentionRow
-                  key={`${item.type}-${item.id}`}
-                  item={item}
-                  selected={idx === selectedIndex}
-                  onSelect={() => selectItem(idx)}
-                  buttonRef={(el) => { itemRefs.current[idx] = el; }}
-                />
-              );
-            })}
+            {renderRows(group)}
           </div>
         ))}
       </div>
@@ -305,21 +394,58 @@ function MentionRow({
       <button
         type="button"
         ref={buttonRef}
-        className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
+        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
         } ${isClosed ? "opacity-60" : ""}`}
         onClick={onSelect}
       >
-        {item.status && (
-          <StatusIcon status={item.status} className="h-3.5 w-3.5 shrink-0" />
-        )}
-        <span className="shrink-0 text-muted-foreground">{item.label}</span>
-        {item.description && (
-          <span
-            className={`truncate text-muted-foreground ${isClosed ? "line-through" : ""}`}
-          >
-            {item.description}
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center">
+          {item.status ? (
+            <StatusIcon status={item.status} className="h-3.5 w-3.5" />
+          ) : (
+            <ListTodo className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 font-medium text-muted-foreground">{item.label}</span>
+            {item.description && (
+              <span
+                className={`truncate text-foreground ${isClosed ? "line-through" : ""}`}
+              >
+                {item.description}
+              </span>
+            )}
           </span>
+        </span>
+      </button>
+    );
+  }
+
+  if (item.type === "project") {
+    const projectStatusCfg = item.projectStatus ? PROJECT_STATUS_CONFIG[item.projectStatus] : null;
+    return (
+      <button
+        type="button"
+        ref={buttonRef}
+        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors ${
+          selected ? "bg-accent" : "hover:bg-accent/50"
+        }`}
+        onClick={onSelect}
+      >
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center">
+          <ProjectIcon project={{ icon: item.icon ?? null }} size="sm" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium text-foreground">{item.label}</span>
+          {item.description && (
+            <span className="block truncate text-muted-foreground">
+              {item.description}
+            </span>
+          )}
+        </span>
+        {projectStatusCfg && (
+          <span className={`${projectStatusCfg.dotColor} ml-auto size-1.5 shrink-0 rounded-full`} />
         )}
       </button>
     );
@@ -371,14 +497,43 @@ function issueToMention(i: Pick<Issue, "id" | "identifier" | "title" | "status">
   };
 }
 
-export function createMentionSuggestion(qc: QueryClient): Omit<
+function projectToMention(p: { id: string; title: string; description?: string | null; icon?: string | null; status?: ProjectStatus }): MentionItem {
+  return {
+    id: p.id,
+    label: p.title,
+    type: "project" as const,
+    description: p.description ?? undefined,
+    icon: p.icon ?? null,
+    projectStatus: p.status,
+  };
+}
+
+function matchesMentionQuery(item: MentionItem, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    item.label.toLowerCase().includes(q) ||
+    item.description?.toLowerCase().includes(q) === true ||
+    matchesPinyin(item.label, q) ||
+    (item.description ? matchesPinyin(item.description, q) : false)
+  );
+}
+
+interface MentionSuggestionOptions {
+  mode?: "default" | "context";
+  getContextItems?: () => MentionItem[];
+}
+
+export function createMentionSuggestion(
+  qc: QueryClient,
+  options: MentionSuggestionOptions = {},
+): Omit<
   SuggestionOptions<MentionItem>,
   "editor"
 > {
-  // Renderer/popup instances live in this closure so each ContentEditor owns
-  // its own TipTap suggestion popup lifecycle.
-  let renderer: ReactRenderer<MentionListRef> | null = null;
-  let popup: HTMLDivElement | null = null;
+  // The explicit key is passed into Tiptap Suggestion and reused by the
+  // shared popup controller when it dispatches exitSuggestion(view, pluginKey).
+  const pluginKey = new PluginKey("mentionSuggestion");
 
   function buildSyncItems(query: string): MentionItem[] {
     // Read workspace id imperatively because this runs in TipTap factory scope
@@ -454,78 +609,27 @@ export function createMentionSuggestion(qc: QueryClient): Omit<
   }
 
   return {
+    pluginKey,
     items: ({ query }) => {
-      const syncItems = buildSyncItems(query);
-      return syncItems;
+      if (options.mode === "context") {
+        const normalizedQuery = query.trim();
+        const contextItems = (options.getContextItems?.() ?? []).filter((item) => matchesMentionQuery(item, query));
+        if (!normalizedQuery) return contextItems;
+        return mergeMentionItems(contextItems, buildSyncItems(query));
+      }
+      return buildSyncItems(query);
     },
 
-    render: () => {
-      return {
-        onStart: (props: SuggestionProps<MentionItem>) => {
-          renderer = new ReactRenderer(MentionList, {
-            props: {
-              items: props.items,
-              query: props.query,
-              command: props.command,
-            },
-            editor: props.editor,
-          });
-
-          popup = document.createElement("div");
-          popup.style.position = "fixed";
-          popup.style.zIndex = "50";
-          popup.appendChild(renderer.element);
-          document.body.appendChild(popup);
-
-          updatePosition(popup, props.clientRect);
-        },
-
-        onUpdate: (props: SuggestionProps<MentionItem>) => {
-          renderer?.updateProps({
-            items: props.items,
-            query: props.query,
-            command: props.command,
-          });
-          if (popup) updatePosition(popup, props.clientRect);
-        },
-
-        onKeyDown: (props: { event: KeyboardEvent }) => {
-          if (props.event.key === "Escape") {
-            cleanup();
-            return true;
-          }
-          return renderer?.ref?.onKeyDown(props) ?? false;
-        },
-
-        onExit: () => {
-          cleanup();
-        },
-      };
-
-      function updatePosition(
-        el: HTMLDivElement,
-        clientRect: (() => DOMRect | null) | null | undefined,
-      ) {
-        if (!clientRect) return;
-        const virtualEl = {
-          getBoundingClientRect: () => clientRect() ?? new DOMRect(),
-        };
-        computePosition(virtualEl, el, {
-          placement: "bottom-start",
-          strategy: "fixed",
-          middleware: [offset(4), flip(), shift({ padding: 8 })],
-        }).then(({ x, y }) => {
-          el.style.left = `${x}px`;
-          el.style.top = `${y}px`;
-        });
-      }
-
-      function cleanup() {
-        renderer?.destroy();
-        renderer = null;
-        popup?.remove();
-        popup = null;
-      }
-    },
+    render: createSuggestionPopupRender<MentionItem, MentionItem, MentionListRef, MentionListProps>({
+      pluginKey,
+      component: MentionList,
+      getProps: (props) => ({
+        items: props.items,
+        query: props.query,
+        command: props.command,
+        includeProjectSearch: options.mode === "context",
+      }),
+      onKeyDown: (ref, props) => ref?.onKeyDown(props) ?? false,
+    }),
   };
 }

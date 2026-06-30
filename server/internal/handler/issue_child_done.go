@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -20,17 +21,33 @@ import (
 // hardcoding because the agent did not always know the workspace prefix).
 //
 // Guards on whether the comment fires at all:
-//   - prev.Status must not already be "done" (idempotent — repeat saves of
-//     done do not re-fire; only the transition fires)
-//   - issue.Status must be "done"
+//   - the child must transition from a non-terminal status INTO a terminal one
+//     (done or cancelled). Repeat saves of an already-terminal child do not
+//     re-fire; only the entering transition does. Cancelled counts because a
+//     cancelled sibling never finishes and so closes its stage (see the entry
+//     guard and isTerminalChildStatus).
 //   - issue.ParentIssueID must be set
 //   - parent must not be "done" or "cancelled" — the parent is already
 //     closed and a notification has no follow-up to drive
+//   - parent must not be "backlog" — a parent parked in backlog is being
+//     deliberately held for later; waking its assignee (which can then
+//     promote sibling backlog sub-issues into todo) is exactly the
+//     unwanted auto-activation reported in #4320 / MUL-3497. A parked
+//     parent stays inert until the user explicitly moves it out of backlog.
 //   - parent assignee must not be a member (human). Humans read their
 //     issues manually; an automated system comment is pure noise for them
 //     and there is nothing to "trigger" on a human assignee. Skipping the
 //     comment entirely (Bohan's call on MUL-2538) also sidesteps the
 //     mention question — no comment, no mention, no inbox row.
+//   - the completion must close a STAGE barrier (MUL-3508). Sub-issues under
+//     a parent can be grouped into ordered stages via issue.stage; the
+//     notification + wake fire only when every sibling in the lowest
+//     unfinished stage is terminal (stageBarrierClosed). An unstaged sibling
+//     set is one implicit stage, so this fires once when the last sub-issue
+//     finishes instead of on every child — the default fix for the
+//     fire-on-every-child cascade reported in #4320. The woken assignee
+//     decides whether to promote the next stage (agent-driven advancement);
+//     the server only detects the barrier and wakes.
 //
 // The comment is inserted directly via db.Queries (not through the
 // CreateComment HTTP handler) so it bypasses the generic on_comment trigger
@@ -48,11 +65,18 @@ import (
 // Errors are logged at warn level and swallowed: this is a best-effort
 // notification on the side of a successful status update; failing it must
 // not roll back the user's status change.
-func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue) {
+func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue, actorType, actorID string) {
 	if !issue.ParentIssueID.Valid {
 		return
 	}
-	if prev.Status == "done" || issue.Status != "done" {
+	// Fire on a transition INTO a terminal status (done OR cancelled), not only
+	// `done`. A cancelled child can close a stage too: isTerminalChildStatus
+	// treats cancelled as terminal (a cancelled sibling never finishes, so it
+	// must not hold the stage open), so the barrier has to be evaluated when the
+	// last open child of a stage is cancelled. Keying on the transition also
+	// makes a later cancelled -> done edit a no-op (terminal -> terminal), which
+	// avoids a lagging duplicate wake.
+	if isTerminalChildStatus(prev.Status) || !isTerminalChildStatus(issue.Status) {
 		return
 	}
 	parent, err := h.Queries.GetIssue(ctx, issue.ParentIssueID)
@@ -66,6 +90,14 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if parent.Status == "done" || parent.Status == "cancelled" {
 		return
 	}
+	// A parent parked in backlog is deliberately held for later. Posting the
+	// system comment would wake its assignee, and the woken agent can then
+	// promote sibling backlog sub-issues into todo — the surprise auto-
+	// activation reported in #4320 / MUL-3497. Skip the whole notification so
+	// a backlog parent stays inert until the user explicitly promotes it.
+	if parent.Status == "backlog" {
+		return
+	}
 	// Human-assigned parents read their own timeline; an automated system
 	// comment is just noise and there is no agent task to trigger. Skip the
 	// whole notification (comment + mention + inbox row) — MUL-2538.
@@ -73,20 +105,64 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 		return
 	}
 
+	// Stage barrier (MUL-3508 / discussion #4320). The notification + assignee
+	// wake fire only when this completion *closes a stage* — i.e. every sibling
+	// in the lowest unfinished stage is now terminal. An unstaged sibling set is
+	// one implicit stage, so this collapses to "wake once when the last
+	// sub-issue finishes" instead of the old fire-on-every-child behavior that
+	// caused the surprise cascade. A completion that does not close a stage is
+	// silent: no comment, no wake. ListChildIssues already reflects this child's
+	// committed `done` status (the status update commits before this runs).
+	children, err := h.Queries.ListChildIssues(ctx, parent.ID)
+	if err != nil {
+		slog.Warn("child done: failed to list siblings for stage barrier",
+			"error", err,
+			"child_id", uuidToString(issue.ID),
+			"parent_id", uuidToString(parent.ID))
+		return
+	}
+	if !stageBarrierClosed(children, issue) {
+		return
+	}
+	staged := siblingsAreStaged(children)
+
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	identifier := prefix + "-" + strconv.Itoa(int(issue.Number))
 	childID := uuidToString(issue.ID)
 	title := sanitizeChildTitleForSystemComment(issue.Title)
+	parentID := uuidToString(parent.ID)
 
 	// Build the parent-assignee mention prefix. Empty when the parent has no
 	// assignee or the assignee row is missing (deleted member, archived
 	// agent the workspace lost track of, etc.).
 	mentionPrefix := h.buildParentAssigneeMention(ctx, parent)
 
-	content := fmt.Sprintf(
-		"%sSub-issue [%s](mention://issue/%s) — \"%s\" — is done. Before promoting any waiting `backlog` sub-issue, read each sibling's description and only promote items whose stated dependencies are already satisfied — do not rely on this parent's higher-level breakdown alone. If a sibling's description conflicts with that breakdown (e.g. it lists a prerequisite the parent treats as parallel), do NOT change its status — leave it `backlog` and post a comment to confirm first.",
-		mentionPrefix, identifier, childID, title,
-	)
+	var content string
+	// When the set is staged and the barrier closed, the completed child is
+	// guaranteed to carry a stage (stageBarrierClosed returns false for an
+	// unstaged completed child in a staged set), so issue.Stage.Int32 is safe.
+	if staged {
+		closedStage := issue.Stage.Int32
+		summary, nextStage := stageProgressSummary(children, closedStage)
+		var advance string
+		if nextStage > 0 {
+			advance = fmt.Sprintf(
+				" Stage %d is next. Review the full layout with `multica issue children %s`, and if Stage %d's dependencies are satisfied promote its `backlog` sub-issues to `todo` to continue. Read each sub-issue's description first and only promote items whose stated dependencies are already met — do not rely on this parent's higher-level breakdown alone. If a description conflicts with that breakdown, leave it `backlog` and post a comment to confirm first.",
+				nextStage, parentID, nextStage,
+			)
+		} else {
+			advance = " This was the final stage. Wrap up the parent — synthesize the results and move it forward, or close it out if nothing remains."
+		}
+		content = fmt.Sprintf(
+			"%sStage %d of this issue is complete — its last sub-issue [%s](mention://issue/%s) — \"%s\" — just finished. Stage progress — %s.%s",
+			mentionPrefix, closedStage, identifier, childID, title, summary, advance,
+		)
+	} else {
+		content = fmt.Sprintf(
+			"%sAll sub-issues are complete — the last one, [%s](mention://issue/%s) — \"%s\", just finished. Continue the parent: synthesize the children's results and move it forward, or close it out if nothing remains.",
+			mentionPrefix, identifier, childID, title,
+		)
+	}
 
 	// author_type='system', author_id=zero UUID. The zero UUID is a valid 16
 	// byte value and the column is NOT NULL; frontend code should branch on
@@ -122,7 +198,106 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// author_type='system'); this keeps smuggled mentions from the child
 	// title inert and gives the platform a single place to apply the loop
 	// and idempotency guards.
-	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment)
+	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment, actorType, actorID)
+}
+
+// isTerminalChildStatus reports whether a child issue status counts as
+// "finished" for stage-barrier purposes. Cancelled counts as terminal: a
+// cancelled sibling will never complete, so it must not hold a stage open.
+func isTerminalChildStatus(status string) bool {
+	return status == "done" || status == "cancelled"
+}
+
+// siblingsAreStaged reports whether any child in the set carries an explicit
+// stage. A set with no stages is treated as a single implicit stage.
+func siblingsAreStaged(children []db.Issue) bool {
+	for _, c := range children {
+		if c.Stage.Valid {
+			return true
+		}
+	}
+	return false
+}
+
+// stageBarrierClosed reports whether the completion of `completed` closed a
+// stage barrier among `children` — the full sibling set under one parent,
+// already reflecting completed's terminal status.
+//
+//   - Unstaged sibling set (no child carries a stage): a single implicit
+//     stage. The barrier closes only when every child is terminal — the "wake
+//     once when the last sub-issue finishes" default.
+//   - Staged sibling set: only children that carry a stage form stages.
+//     Unstaged children do NOT participate (matches migration 123: a NULL
+//     stage does not take part in staged grouping) — completing one closes
+//     nothing, and a non-terminal unstaged child never holds a stage open.
+//     The completed child's stage S closes when every *staged* child with
+//     stage <= S is terminal (frontier closure). Later stages are normally
+//     parked in `backlog`, so they cannot fire out of order; the caller's
+//     idempotency guard collapses any duplicate wake.
+func stageBarrierClosed(children []db.Issue, completed db.Issue) bool {
+	if !siblingsAreStaged(children) {
+		for _, c := range children {
+			if !isTerminalChildStatus(c.Status) {
+				return false
+			}
+		}
+		return true
+	}
+	// Staged set: an unstaged completed child belongs to no stage, so it closes
+	// nothing.
+	if !completed.Stage.Valid {
+		return false
+	}
+	s := completed.Stage.Int32
+	for _, c := range children {
+		if !c.Stage.Valid {
+			continue // unstaged children are ignored by the frontier
+		}
+		if c.Stage.Int32 <= s && !isTerminalChildStatus(c.Status) {
+			return false
+		}
+	}
+	return true
+}
+
+// stageProgressSummary renders a compact per-stage breakdown for the
+// child-done system comment (e.g. "Stage 1: 3/3 done; Stage 2: 0/4 done") and
+// returns the lowest stage above closedStage that still has non-terminal
+// children — the next group to promote — or 0 when none remain. Unstaged
+// children are skipped (they are not part of any stage), so the breakdown
+// never renders a "Stage 0".
+func stageProgressSummary(children []db.Issue, closedStage int32) (summary string, nextStage int32) {
+	type agg struct{ total, done int }
+	byStage := map[int32]*agg{}
+	order := []int32{}
+	for _, c := range children {
+		if !c.Stage.Valid {
+			continue // unstaged children do not belong to any stage
+		}
+		s := c.Stage.Int32
+		a, ok := byStage[s]
+		if !ok {
+			a = &agg{}
+			byStage[s] = a
+			order = append(order, s)
+		}
+		a.total++
+		if isTerminalChildStatus(c.Status) {
+			a.done++
+		}
+	}
+	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
+	parts := make([]string, 0, len(order))
+	for _, s := range order {
+		a := byStage[s]
+		label := fmt.Sprintf("Stage %d: %d/%d done", s, a.done, a.total)
+		if nextStage == 0 && s > closedStage && a.done < a.total {
+			nextStage = s
+			label += " (next)"
+		}
+		parts = append(parts, label)
+	}
+	return strings.Join(parts, "; "), nextStage
 }
 
 // sanitizeChildTitleForSystemComment removes mention-style markdown from a
@@ -226,39 +401,50 @@ func sanitizeMentionLabel(name string) string {
 //
 // Guards applied here:
 //   - No-op when the parent has no assignee row.
-//   - Loop guard: skip when the agent that effectively "owns" the child
-//     (its agent assignee, or the leader of its squad assignee) is the same
-//     agent the parent would trigger (the parent agent itself, or the
-//     parent squad's leader). Without this an agent that drives both child
-//     and parent immediately re-runs on the parent and can post another
-//     child, looping — including the cross-squad case where two different
-//     squads share a leader.
+//   - Squad loop guard (squad parent only): skip when the finished child is
+//     the same squad, or its effective owner is the parent squad's leader. A
+//     squad leader already observes same-squad work through its own
+//     coordination cycle — the worker's completion comment wakes the leader
+//     via computeAssignedSquadLeaderCommentTrigger — so the child-done trigger would
+//     be redundant; this also closes the cross-squad shared-leader loop. The
+//     AGENT parent path intentionally has NO such guard (MUL-2808): a lone
+//     agent that decomposes its parent into sub-issues it owns itself has no
+//     other wake path, and waking the parent agent when its child finishes is
+//     a serial sub-task handoff across two DIFFERENT issues — explicitly not a
+//     self-loop per isAgentRunningOnIssue, and consistent with the @mention
+//     self-trigger path (computeMentionedAgentCommentTriggers). Runaway re-triggering is
+//     bounded by the idempotency guard below, not by suppressing the trigger.
 //   - Idempotency: HasPendingTaskForIssueAndAgent dedupes rapid-fire enqueues
 //     for the same parent (e.g. two children finishing back-to-back).
 //   - Readiness: archived agents / missing runtimes are silently skipped
 //     so a closed-out agent does not surface as a phantom assignee.
-func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent, child db.Issue, systemComment db.Comment) {
+func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent, child db.Issue, systemComment db.Comment, actorType, actorID string) {
 	if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid {
 		return
 	}
 
 	switch parent.AssigneeType.String {
 	case "agent":
-		h.triggerChildDoneAgent(ctx, parent, child, systemComment.ID)
+		h.triggerChildDoneAgent(ctx, parent, systemComment.ID)
 	case "squad":
-		h.triggerChildDoneSquad(ctx, parent, child, systemComment.ID)
+		h.triggerChildDoneSquad(ctx, parent, child, systemComment.ID, actorType, actorID)
 	}
 }
 
 // triggerChildDoneAgent enqueues a mention-style task for the parent's
-// agent assignee, applying the self-trigger guard documented on
-// dispatchParentAssigneeTrigger.
-func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID) {
-	if owner := h.effectiveChildAgentOwner(ctx, child); owner.Valid &&
-		uuidToString(owner) == uuidToString(parent.AssigneeID) {
-		return
-	}
-
+// agent assignee.
+//
+// There is intentionally NO same-agent self-trigger guard here, unlike the
+// squad path. Waking the parent agent when one of its children finishes is a
+// serial sub-task handoff between two DIFFERENT issues, which the platform
+// loop model treats as legitimate ("not a loop and must fire" — see
+// isAgentRunningOnIssue); only re-entering the SAME issue is a loop. A lone
+// agent that decomposes its parent into sub-issues it owns itself has no
+// other wake path, so the old "child owner == parent agent" guard silently
+// stranded those parents (MUL-2808). Runaway re-triggering is prevented by
+// the HasPendingTaskForIssueAndAgent dedup below, exactly as the @mention
+// self-trigger path relies on it (see computeMentionedAgentCommentTriggers).
+func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID) {
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
@@ -290,12 +476,17 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent, child db.Is
 //   - same effective leader on both sides — child agent == leader, or
 //     child squad's leader == this squad's leader (the cross-squad shared
 //     leader loop).
-func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID) {
+func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID, actorType, actorID string) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
 	})
 	if err != nil {
+		return
+	}
+
+	// Private-leader gate: deny if the actor cannot access the leader.
+	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, actorType, actorID, uuidToString(parent.WorkspaceID)) {
 		return
 	}
 
@@ -325,7 +516,7 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Is
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, triggerCommentID); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID); err != nil {
 		slog.Warn("child done: enqueue parent squad leader task failed",
 			"error", err,
 			"parent_id", uuidToString(parent.ID),

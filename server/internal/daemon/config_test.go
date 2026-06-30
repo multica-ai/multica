@@ -6,9 +6,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
@@ -584,7 +587,6 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 		"MULTICA_OPENCODE_PATH",
 		"MULTICA_OPENCLAW_PATH",
 		"MULTICA_HERMES_PATH",
-		"MULTICA_GEMINI_PATH",
 		"MULTICA_PI_PATH",
 		"MULTICA_CURSOR_PATH",
 		"MULTICA_COPILOT_PATH",
@@ -593,4 +595,264 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 	} {
 		t.Setenv(name, filepath.Join(missingDir, strings.ToLower(name)))
 	}
+}
+
+// =============================================================================
+// CLI config Backends.OpenClaw overrides (issue #3875)
+// =============================================================================
+
+// writeCLIConfigForProfile is a minimal helper for the override tests:
+// stages a HOME, writes a config.json under the given profile (empty profile
+// = default), and returns the resolved path so tests can assert against it.
+func writeCLIConfigForProfile(t *testing.T, profile string, cfg cli.CLIConfig) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+		t.Fatalf("write cli config: %v", err)
+	}
+}
+
+// TestApplyOpenclawOverride_DoesNothingWhenNil verifies the early-return
+// path. A daemon started with no override should not Setenv anything; the
+// existing probe / spawn flow remains undisturbed.
+func TestApplyOpenclawOverride_DoesNothingWhenNil(t *testing.T) {
+	// Pre-set both env vars to known values; verify they survive untouched.
+	t.Setenv("MULTICA_OPENCLAW_PATH", "/before/openclaw")
+	t.Setenv("OPENCLAW_STATE_DIR", "/before/state")
+
+	applyOpenclawOverride(nil)
+
+	if got := os.Getenv("MULTICA_OPENCLAW_PATH"); got != "/before/openclaw" {
+		t.Errorf("MULTICA_OPENCLAW_PATH mutated: got %q, want /before/openclaw", got)
+	}
+	if got := os.Getenv("OPENCLAW_STATE_DIR"); got != "/before/state" {
+		t.Errorf("OPENCLAW_STATE_DIR mutated: got %q, want /before/state", got)
+	}
+}
+
+// TestApplyOpenclawOverride_SetsBothWhenEnvUnset verifies the happy path:
+// neither env var is set, the override has both fields, both env vars get
+// set to the override values.
+func TestApplyOpenclawOverride_SetsBothWhenEnvUnset(t *testing.T) {
+	t.Setenv("MULTICA_OPENCLAW_PATH", "")
+	t.Setenv("OPENCLAW_STATE_DIR", "")
+	os.Unsetenv("MULTICA_OPENCLAW_PATH")
+	os.Unsetenv("OPENCLAW_STATE_DIR")
+	t.Cleanup(func() {
+		os.Unsetenv("MULTICA_OPENCLAW_PATH")
+		os.Unsetenv("OPENCLAW_STATE_DIR")
+	})
+
+	applyOpenclawOverride(&cli.OpenClawOverride{
+		BinaryPath: "/from/config/openclaw",
+		StateDir:   "/from/config/state",
+	})
+
+	if got := os.Getenv("MULTICA_OPENCLAW_PATH"); got != "/from/config/openclaw" {
+		t.Errorf("MULTICA_OPENCLAW_PATH: got %q, want /from/config/openclaw", got)
+	}
+	if got := os.Getenv("OPENCLAW_STATE_DIR"); got != "/from/config/state" {
+		t.Errorf("OPENCLAW_STATE_DIR: got %q, want /from/config/state", got)
+	}
+}
+
+// TestApplyOpenclawOverride_EnvWinsOverConfig is the precedence test
+// agreed with @YOMXXX in #3875 review: an env var set upstream by the user
+// (shell export, launchctl, systemd unit) MUST take precedence over the
+// config-file value. This is the back-compat contract — anyone with
+// MULTICA_OPENCLAW_PATH already in their environment must not see the
+// daemon silently change its meaning when they later add a config file.
+func TestApplyOpenclawOverride_EnvWinsOverConfig(t *testing.T) {
+	// User has already exported these in their shell.
+	t.Setenv("MULTICA_OPENCLAW_PATH", "/from/env/openclaw")
+	t.Setenv("OPENCLAW_STATE_DIR", "/from/env/state")
+
+	applyOpenclawOverride(&cli.OpenClawOverride{
+		BinaryPath: "/from/config/openclaw",
+		StateDir:   "/from/config/state",
+	})
+
+	if got := os.Getenv("MULTICA_OPENCLAW_PATH"); got != "/from/env/openclaw" {
+		t.Errorf("MULTICA_OPENCLAW_PATH: env should win, got %q want /from/env/openclaw", got)
+	}
+	if got := os.Getenv("OPENCLAW_STATE_DIR"); got != "/from/env/state" {
+		t.Errorf("OPENCLAW_STATE_DIR: env should win, got %q want /from/env/state", got)
+	}
+}
+
+// TestApplyOpenclawOverride_PartialFields_OnlySetsConfigured verifies that
+// an override with only one field set leaves the other env var alone (does
+// not Setenv to ""). This matters: a user who only configures state_dir
+// must not have their MULTICA_OPENCLAW_PATH discovery path forcibly
+// short-circuited to an empty string.
+func TestApplyOpenclawOverride_PartialFields_OnlySetsConfigured(t *testing.T) {
+	os.Unsetenv("MULTICA_OPENCLAW_PATH")
+	os.Unsetenv("OPENCLAW_STATE_DIR")
+	t.Cleanup(func() {
+		os.Unsetenv("MULTICA_OPENCLAW_PATH")
+		os.Unsetenv("OPENCLAW_STATE_DIR")
+	})
+
+	applyOpenclawOverride(&cli.OpenClawOverride{
+		StateDir: "/from/config/state",
+		// BinaryPath intentionally empty — must NOT call Setenv("MULTICA_OPENCLAW_PATH", "")
+	})
+
+	if _, set := os.LookupEnv("MULTICA_OPENCLAW_PATH"); set {
+		t.Errorf("MULTICA_OPENCLAW_PATH should remain unset when BinaryPath is empty; got %q", os.Getenv("MULTICA_OPENCLAW_PATH"))
+	}
+	if got := os.Getenv("OPENCLAW_STATE_DIR"); got != "/from/config/state" {
+		t.Errorf("OPENCLAW_STATE_DIR: got %q, want /from/config/state", got)
+	}
+}
+
+// TestOpenclawOverrideFrom_NavigationCases verifies the nullable-pointer
+// chain into Backends.OpenClaw. Three cases that all must safely return
+// nil without panicking: nil Backends, nil OpenClaw inside Backends, and
+// the happy path (returns the inner override unchanged).
+func TestOpenclawOverrideFrom_NavigationCases(t *testing.T) {
+	if got := openclawOverrideFrom(cli.CLIConfig{}); got != nil {
+		t.Errorf("nil Backends should produce nil override, got %+v", got)
+	}
+	if got := openclawOverrideFrom(cli.CLIConfig{Backends: &cli.BackendOverrides{}}); got != nil {
+		t.Errorf("nil OpenClaw inside Backends should produce nil override, got %+v", got)
+	}
+	want := &cli.OpenClawOverride{StateDir: "/x"}
+	got := openclawOverrideFrom(cli.CLIConfig{Backends: &cli.BackendOverrides{OpenClaw: want}})
+	if got != want {
+		t.Errorf("happy path should return inner pointer; got %p want %p", got, want)
+	}
+}
+
+// TestLoadConfig_AppliesBackendOverridesFromConfigFile is the integration
+// test that ties commit 1's schema to commit 2's wire-up: write a config
+// file with backends.openclaw.{binary_path,state_dir}, call LoadConfig
+// (with no env vars set), and verify the openclaw probe picked up the
+// configured BinaryPath and the OPENCLAW_STATE_DIR env var was injected.
+func TestLoadConfig_AppliesBackendOverridesFromConfigFile(t *testing.T) {
+	stageFakeAgent(t)
+	// stageFakeAgent left "claude" on PATH; we also need a fake "openclaw"
+	// at a custom path that the config file points at (mimicking a non-default
+	// installation: another bundled / isolated / CI deployment, etc).
+	customDir := t.TempDir()
+	customOpenclaw := filepath.Join(customDir, "non-default-openclaw")
+	if err := os.WriteFile(customOpenclaw, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake openclaw: %v", err)
+	}
+
+	// Make sure no env-var override is leaking in from the test runner.
+	os.Unsetenv("MULTICA_OPENCLAW_PATH")
+	os.Unsetenv("OPENCLAW_STATE_DIR")
+	t.Cleanup(func() {
+		os.Unsetenv("MULTICA_OPENCLAW_PATH")
+		os.Unsetenv("OPENCLAW_STATE_DIR")
+	})
+
+	// Drop a CLI config under the user's HOME (already pointed at TempDir
+	// by stageFakeAgent's t.Setenv chain — but reassert here for clarity).
+	homeForCLIConfig := t.TempDir()
+	t.Setenv("HOME", homeForCLIConfig)
+	cfg := cli.CLIConfig{
+		ServerURL: "http://localhost:8080",
+		Backends: &cli.BackendOverrides{
+			OpenClaw: &cli.OpenClawOverride{
+				BinaryPath: customOpenclaw,
+				StateDir:   "/var/lib/openclaw-isolated",
+			},
+		},
+	}
+	if err := cli.SaveCLIConfig(cfg); err != nil {
+		t.Fatalf("save cli config: %v", err)
+	}
+
+	loaded, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	openclaw, ok := loaded.Agents["openclaw"]
+	if !ok {
+		t.Fatalf("agents map missing 'openclaw' key; got keys=%v", agentKeys(loaded.Agents))
+	}
+	if openclaw.Path != customOpenclaw {
+		t.Errorf("openclaw.Path: got %q, want %q (the binary configured in CLI config)", openclaw.Path, customOpenclaw)
+	}
+	if got := os.Getenv("OPENCLAW_STATE_DIR"); got != "/var/lib/openclaw-isolated" {
+		t.Errorf("OPENCLAW_STATE_DIR: got %q, want injected from config", got)
+	}
+}
+
+// TestLoadConfig_BackendOverrides_BackwardCompat_NoConfigFile verifies that
+// the override mechanism is purely additive: a daemon started without any
+// CLI config file (or with an empty one) behaves identically to before
+// commit 1 — agents discovered from PATH, no env injection.
+func TestLoadConfig_BackendOverrides_BackwardCompat_NoConfigFile(t *testing.T) {
+	stageFakeAgent(t)
+
+	// Point HOME at an empty dir — no config.json present.
+	t.Setenv("HOME", t.TempDir())
+	os.Unsetenv("MULTICA_OPENCLAW_PATH")
+	os.Unsetenv("OPENCLAW_STATE_DIR")
+	t.Cleanup(func() {
+		os.Unsetenv("MULTICA_OPENCLAW_PATH")
+		os.Unsetenv("OPENCLAW_STATE_DIR")
+	})
+
+	_, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with no config file should not fail: %v", err)
+	}
+
+	if _, set := os.LookupEnv("OPENCLAW_STATE_DIR"); set {
+		t.Errorf("OPENCLAW_STATE_DIR should remain unset when no config file is present; got %q", os.Getenv("OPENCLAW_STATE_DIR"))
+	}
+}
+
+// TestLoadConfig_BackendOverrides_MalformedConfigFileNonFatal verifies the
+// fail-soft contract documented inline in LoadConfig: a corrupt config.json
+// must not prevent daemon startup. This matters for diskcorruption /
+// partial-write recovery — the daemon should log and proceed using
+// env-var-only configuration.
+func TestLoadConfig_BackendOverrides_MalformedConfigFileNonFatal(t *testing.T) {
+	stageFakeAgent(t)
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	// Write malformed JSON.
+	cfgDir := filepath.Join(homeDir, ".multica")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte("{not valid json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig should not fail on malformed config.json: %v", err)
+	}
+	// Should also have logged a slog Warn — we don't assert on the log
+	// output here (avoids brittle string matching), but the build does
+	// make sure log/slog stays imported.
+}
+
+// agentKeys is a tiny helper to make agent-map missing-key error messages
+// readable. Returns sorted keys.
+func agentKeys(m map[string]AgentEntry) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

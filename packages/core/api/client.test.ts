@@ -152,6 +152,97 @@ describe("ApiClient", () => {
     expect(headers["X-Client-OS"]).toBeUndefined();
   });
 
+  it("uses the expected HTTP contract for comment trigger preview and suppress", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ agents: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: "comment-1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "user-1",
+          content: "hello",
+          type: "comment",
+          parent_id: null,
+          reactions: [],
+          attachments: [],
+          created_at: "2026-06-05T00:00:00Z",
+          updated_at: "2026-06-05T00:00:00Z",
+        }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: "comment-1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "user-1",
+          content: "updated",
+          type: "comment",
+          parent_id: null,
+          reactions: [],
+          attachments: [],
+          created_at: "2026-06-05T00:00:00Z",
+          updated_at: "2026-06-05T00:01:00Z",
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.previewCommentTriggers("issue-1", "hello", "parent-1", "comment-1");
+    await client.createComment(
+      "issue-1",
+      "hello",
+      "comment",
+      "parent-1",
+      ["attachment-1"],
+      ["agent-1"],
+    );
+    await client.updateComment("comment-1", "updated", ["attachment-1"], ["agent-1"]);
+
+    expect(fetchMock.mock.calls.map(([url, init]) => ({
+      url,
+      method: init?.method,
+      body: init?.body,
+    }))).toMatchObject([
+      {
+        url: "https://api.example.test/api/issues/issue-1/comments/trigger-preview",
+        method: "POST",
+        body: JSON.stringify({ content: "hello", parent_id: "parent-1", editing_comment_id: "comment-1" }),
+      },
+      {
+        url: "https://api.example.test/api/issues/issue-1/comments",
+        method: "POST",
+        body: JSON.stringify({
+          content: "hello",
+          type: "comment",
+          parent_id: "parent-1",
+          attachment_ids: ["attachment-1"],
+          suppress_agent_ids: ["agent-1"],
+        }),
+      },
+      {
+        url: "https://api.example.test/api/comments/comment-1",
+        method: "PUT",
+        body: JSON.stringify({
+          content: "updated",
+          attachment_ids: ["attachment-1"],
+          suppress_agent_ids: ["agent-1"],
+        }),
+      },
+    ]);
+  });
+
   it("uses the Cloud Runtime node API contract", async () => {
     const node = {
       id: "node-1",
@@ -359,6 +450,171 @@ describe("ApiClient", () => {
       await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
         PreviewUnsupportedError,
       );
+    });
+  });
+
+  describe("listChatMessagesPage deployment-order fallback", () => {
+    const jsonResponse = (body: unknown, status: number, statusText = "") =>
+      new Response(JSON.stringify(body), {
+        status,
+        statusText,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    it("falls back to the legacy full-list endpoint when the paged route 404s", async () => {
+      const legacy = [
+        { id: "m1", role: "user", content: "hi", created_at: "2026-06-01T00:00:00Z" },
+        { id: "m2", role: "assistant", content: "yo", created_at: "2026-06-01T00:00:01Z" },
+      ];
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ error: "not found" }, 404, "Not Found"))
+        .mockResolvedValueOnce(jsonResponse(legacy, 200));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const page = await client.listChatMessagesPage("session-1", { limit: 50 });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0]![0]).toBe(
+        "https://api.example.test/api/chat/sessions/session-1/messages/page?limit=50",
+      );
+      expect(fetchMock.mock.calls[1]![0]).toBe(
+        "https://api.example.test/api/chat/sessions/session-1/messages",
+      );
+      expect(page).toEqual({ messages: legacy, limit: 50, has_more: false, next_cursor: null });
+    });
+
+    it("does NOT fall back on a cursor request — a 404 there propagates", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ error: "not found" }, 404, "Not Found"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.listChatMessagesPage("session-1", {
+          before: { created_at: "2026-06-01T00:00:00Z", id: "m1" },
+        }),
+      ).rejects.toBeInstanceOf(ApiError);
+      // Only the paged request fires; no legacy full-list call that would duplicate messages.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("propagates non-404 errors instead of masking them with the legacy list", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ error: "boom" }, 500, "Internal Server Error"));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listChatMessagesPage("session-1")).rejects.toMatchObject({
+        status: 500,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("cancelTaskById response parsing", () => {
+    const taskResponse = {
+      id: "task-1",
+      agent_id: "agent-1",
+      runtime_id: "runtime-1",
+      issue_id: "",
+      status: "cancelled",
+      priority: 0,
+      dispatched_at: null,
+      started_at: null,
+      completed_at: "2026-06-12T06:40:00Z",
+      result: null,
+      error: null,
+      created_at: "2026-06-12T06:39:00Z",
+    };
+
+    it("parses the cancelled chat message payload", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          ...taskResponse,
+          cancelled_chat_message: {
+            chat_session_id: "session-1",
+            message_id: "message-1",
+            content: "restore me",
+            restore_to_input: true,
+          },
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(fetchMock.mock.calls[0]).toMatchObject([
+        "https://api.example.test/api/tasks/task-1/cancel",
+        { method: "POST" },
+      ]);
+      expect(result.cancelled_chat_message).toEqual({
+        chat_session_id: "session-1",
+        message_id: "message-1",
+        content: "restore me",
+        restore_to_input: true,
+      });
+    });
+
+    it("treats a null cancelled chat message as absent", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({
+            ...taskResponse,
+            cancelled_chat_message: null,
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(result.id).toBe("task-1");
+      expect(result.cancelled_chat_message).toBeUndefined();
+    });
+
+    it.each([
+      ["a missing task id", { ...taskResponse, id: undefined }],
+      [
+        "a malformed cancelled chat message",
+        {
+          ...taskResponse,
+          cancelled_chat_message: {
+            chat_session_id: "session-1",
+            message_id: "message-1",
+            content: "restore me",
+            restore_to_input: "true",
+          },
+        },
+      ],
+      ["a null body", null],
+    ])("falls back for %s", async (_label, body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.cancelTaskById("task-1");
+
+      expect(result.id).toBe("");
+      expect(result.cancelled_chat_message).toBeUndefined();
     });
   });
 

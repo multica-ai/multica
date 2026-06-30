@@ -122,6 +122,13 @@ var agentSkillsSetCmd = &cobra.Command{
 	RunE:  runAgentSkillsSet,
 }
 
+var agentSkillsAddCmd = &cobra.Command{
+	Use:   "add <agent-id>",
+	Short: "Add skills to an agent without replacing existing assignments",
+	Args:  exactArgs(1),
+	RunE:  runAgentSkillsAdd,
+}
+
 func init() {
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentGetCmd)
@@ -136,6 +143,7 @@ func init() {
 
 	agentSkillsCmd.AddCommand(agentSkillsListCmd)
 	agentSkillsCmd.AddCommand(agentSkillsSetCmd)
+	agentSkillsCmd.AddCommand(agentSkillsAddCmd)
 
 	agentEnvCmd.AddCommand(agentEnvGetCmd)
 	agentEnvCmd.AddCommand(agentEnvSetCmd)
@@ -152,18 +160,16 @@ func init() {
 	agentCreateCmd.Flags().String("description", "", "Agent description")
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
 	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
-	// --from-template seeds the new agent from a curated template: imports the
-	// template's skills into the workspace (find-or-create by name) and applies
-	// the template's instructions. When set, --description/--instructions/
-	// --custom-args/--custom-env/--runtime-config are ignored (the template
-	// provides all the agent shape); --name and --runtime-id are still required.
-	agentCreateCmd.Flags().String("from-template", "", "Template slug to seed the agent from (e.g. code-reviewer). Lists are available via GET /api/agent-templates.")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
+	agentCreateCmd.Flags().String("thinking-level", "", "Reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex: none|minimal|low|medium|high|xhigh). The set is runtime/model-specific and validated server-side — an unknown value is rejected. Empty = runtime default.")
 	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
 	agentCreateCmd.Flags().String("custom-env", "", "Custom environment variables as JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --custom-env-stdin or --custom-env-file for real secrets. Pass '{}' to set an empty map.")
 	agentCreateCmd.Flags().Bool("custom-env-stdin", false, "Read the --custom-env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
 	agentCreateCmd.Flags().String("custom-env-file", "", "Read the --custom-env JSON object from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
+	agentCreateCmd.Flags().String("mcp-config", "", "MCP server configuration as a JSON object, e.g. '{\"mcpServers\":{\"shortcut\":{...}}}'. Treated as secret material (MCP entries often carry API tokens) — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --mcp-config-stdin or --mcp-config-file for real secrets.")
+	agentCreateCmd.Flags().Bool("mcp-config-stdin", false, "Read the --mcp-config JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --mcp-config and --mcp-config-file.")
+	agentCreateCmd.Flags().String("mcp-config-file", "", "Read the --mcp-config JSON object from a file path (suggested mode: 0600). Mutually exclusive with --mcp-config and --mcp-config-stdin.")
 	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -175,10 +181,19 @@ func init() {
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
+	agentUpdateCmd.Flags().String("thinking-level", "", "New reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex: none|minimal|low|medium|high|xhigh). The set is runtime/model-specific and validated server-side. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
 	// custom_env is intentionally NOT part of `agent update`. Use
 	// `multica agent env set <id>` — that path is owner/admin-only,
 	// denies agent actors, and writes a persisted audit trail.
+	//
+	// mcp_config, unlike custom_env, IS updatable here: it is persisted
+	// through the generic UpdateAgent endpoint (there is no dedicated
+	// audited endpoint for it). The same three secret-safe input channels
+	// as `agent create` are offered. Pass `--mcp-config null` to clear.
+	agentUpdateCmd.Flags().String("mcp-config", "", "New MCP server configuration as a JSON object, e.g. '{\"mcpServers\":{...}}'. Pass 'null' to clear. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --mcp-config-stdin or --mcp-config-file for real secrets.")
+	agentUpdateCmd.Flags().Bool("mcp-config-stdin", false, "Read the --mcp-config JSON from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --mcp-config and --mcp-config-file.")
+	agentUpdateCmd.Flags().String("mcp-config-file", "", "Read the --mcp-config JSON from a file path (suggested mode: 0600). Mutually exclusive with --mcp-config and --mcp-config-stdin.")
 	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
@@ -203,6 +218,10 @@ func init() {
 	// agent skills set
 	agentSkillsSetCmd.Flags().StringSlice("skill-ids", nil, "Skill IDs to assign (comma-separated)")
 	agentSkillsSetCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// agent skills add
+	agentSkillsAddCmd.Flags().StringSlice("skill-ids", nil, "Skill IDs to add (comma-separated)")
+	agentSkillsAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent env get
 	agentEnvGetCmd.Flags().String("output", "json", "Output format: json or table")
@@ -229,6 +248,9 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
+	}
+	if inAgentExecutionContext() && !strings.HasPrefix(token, "mat_") {
+		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
 	}
 
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
@@ -320,7 +342,7 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var agents []map[string]any
@@ -367,7 +389,7 @@ func runAgentGet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var agent map[string]any
@@ -409,14 +431,6 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--runtime-id is required")
 	}
 
-	// --from-template short-circuits to the dedicated endpoint, which
-	// fetches the template's skill URLs in parallel and creates the agent
-	// + skill rows atomically. Skip the manual-create body building and
-	// post the small template payload instead.
-	if templateSlug, _ := cmd.Flags().GetString("from-template"); templateSlug != "" {
-		return runAgentCreateFromTemplate(cmd, client, name, runtimeID, templateSlug)
-	}
-
 	body := map[string]any{
 		"name":       name,
 		"runtime_id": runtimeID,
@@ -448,9 +462,22 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	} else if ok {
 		body["custom_env"] = ce
 	}
+	if mc, ok, err := resolveMcpConfig(cmd); err != nil {
+		return err
+	} else if ok {
+		body["mcp_config"] = mc
+	}
 	if cmd.Flags().Changed("model") {
 		v, _ := cmd.Flags().GetString("model")
 		body["model"] = v
+	}
+	// thinking_level mirrors model: a thin pass-through to the top-level agent
+	// field the server already accepts and validates (IsKnownThinkingValue).
+	// The CLI deliberately does not enumerate valid levels — they are
+	// runtime/model-specific and the server owns the catalog (MUL-2339).
+	if cmd.Flags().Changed("thinking-level") {
+		v, _ := cmd.Flags().GetString("thinking-level")
+		body["thinking_level"] = v
 	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
@@ -461,7 +488,7 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		body["max_concurrent_tasks"] = v
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var result map[string]any
@@ -475,55 +502,6 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	fmt.Printf("Agent created: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
-	return nil
-}
-
-// runAgentCreateFromTemplate posts to POST /api/agents/from-template. The
-// server fetches every referenced skill in parallel and writes everything in
-// a single transaction; a 422 here means at least one upstream URL was
-// unreachable, in which case the body carries the failing URLs so we can
-// surface them verbatim to the operator instead of a generic error.
-func runAgentCreateFromTemplate(cmd *cobra.Command, client *cli.APIClient, name, runtimeID, slug string) error {
-	body := map[string]any{
-		"template_slug": slug,
-		"name":          name,
-		"runtime_id":    runtimeID,
-	}
-	if cmd.Flags().Changed("model") {
-		v, _ := cmd.Flags().GetString("model")
-		body["model"] = v
-	}
-	if cmd.Flags().Changed("visibility") {
-		v, _ := cmd.Flags().GetString("visibility")
-		body["visibility"] = v
-	}
-	if cmd.Flags().Changed("max-concurrent-tasks") {
-		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
-		body["max_concurrent_tasks"] = v
-	}
-
-	// 60s ceiling: templates fan out N HTTP fetches to GitHub, each ~200-500ms.
-	// Matches the timeout used by `multica skill import` (cmd_skill.go).
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/agents/from-template", body, &result); err != nil {
-		return fmt.Errorf("create agent from template: %w", err)
-	}
-
-	output, _ := cmd.Flags().GetString("output")
-	if output == "json" {
-		return cli.PrintJSON(os.Stdout, result)
-	}
-
-	agent, _ := result["agent"].(map[string]any)
-	imported, _ := result["imported_skill_ids"].([]any)
-	reused, _ := result["reused_skill_ids"].([]any)
-	fmt.Printf("Agent created from template %q: %s (%s)\n", slug, strVal(agent, "name"), strVal(agent, "id"))
-	if len(imported) > 0 || len(reused) > 0 {
-		fmt.Printf("  Skills: %d imported, %d reused\n", len(imported), len(reused))
-	}
 	return nil
 }
 
@@ -570,6 +548,13 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("model")
 		body["model"] = v
 	}
+	// thinking_level is a tri-state on the server (omitted = no change, "" =
+	// clear to runtime default, value = set). Sending the key only when the
+	// flag was provided produces exactly that, the same way --model behaves.
+	if cmd.Flags().Changed("thinking-level") {
+		v, _ := cmd.Flags().GetString("thinking-level")
+		body["thinking_level"] = v
+	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
@@ -582,12 +567,17 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
 		body["max_concurrent_tasks"] = v
 	}
-
-	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --custom-args, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+	if mc, ok, err := resolveMcpConfig(cmd); err != nil {
+		return err
+	} else if ok {
+		body["mcp_config"] = mc
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	if len(body) == 0 {
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --thinking-level, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var result map[string]any
@@ -610,7 +600,7 @@ func runAgentArchive(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var result map[string]any
@@ -633,7 +623,7 @@ func runAgentRestore(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var result map[string]any
@@ -656,7 +646,7 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var tasks []map[string]any
@@ -724,7 +714,7 @@ func runAgentAvatar(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("file too large: %d bytes (max 5MB)", len(fileData))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
 	defer cancel()
 
 	// Agent existence pre-check.
@@ -773,7 +763,7 @@ func runAgentSkillsList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var skills []map[string]any
@@ -808,21 +798,12 @@ func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
 	if !cmd.Flags().Changed("skill-ids") {
 		return fmt.Errorf("--skill-ids is required (comma-separated skill IDs; use --skill-ids '' to clear all)")
 	}
-	skillIDs, _ := cmd.Flags().GetStringSlice("skill-ids")
-	// Allow passing empty string to clear all skills.
-	cleanIDs := make([]string, 0, len(skillIDs))
-	for _, id := range skillIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			cleanIDs = append(cleanIDs, id)
-		}
-	}
-
+	cleanIDs := cleanSkillIDsFlag(cmd)
 	body := map[string]any{
 		"skill_ids": cleanIDs,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var result json.RawMessage
@@ -830,6 +811,50 @@ func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("set agent skills: %w", err)
 	}
 
+	return printAgentSkillsMutationResult(cmd, args[0], result)
+}
+
+func runAgentSkillsAdd(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	if !cmd.Flags().Changed("skill-ids") {
+		return fmt.Errorf("--skill-ids is required (comma-separated skill IDs)")
+	}
+	cleanIDs := cleanSkillIDsFlag(cmd)
+	if len(cleanIDs) == 0 {
+		return fmt.Errorf("--skill-ids must include at least one skill ID")
+	}
+	body := map[string]any{
+		"skill_ids": cleanIDs,
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result json.RawMessage
+	if err := client.PostJSON(ctx, "/api/agents/"+args[0]+"/skills/add", body, &result); err != nil {
+		return fmt.Errorf("add agent skills: %w", err)
+	}
+
+	return printAgentSkillsMutationResult(cmd, args[0], result)
+}
+
+func cleanSkillIDsFlag(cmd *cobra.Command) []string {
+	skillIDs, _ := cmd.Flags().GetStringSlice("skill-ids")
+	cleanIDs := make([]string, 0, len(skillIDs))
+	for _, id := range skillIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIDs = append(cleanIDs, id)
+		}
+	}
+	return cleanIDs
+}
+
+func printAgentSkillsMutationResult(cmd *cobra.Command, agentID string, result json.RawMessage) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		var pretty any
@@ -837,7 +862,24 @@ func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, pretty)
 	}
 
-	fmt.Printf("Skills updated for agent %s\n", args[0])
+	var skills []map[string]any
+	if err := json.Unmarshal(result, &skills); err != nil {
+		return fmt.Errorf("decode agent skills response: %w", err)
+	}
+	if len(skills) == 0 {
+		fmt.Printf("No skills assigned to agent %s\n", agentID)
+		return nil
+	}
+	headers := []string{"ID", "NAME", "DESCRIPTION"}
+	rows := make([][]string, 0, len(skills))
+	for _, s := range skills {
+		rows = append(rows, []string{
+			strVal(s, "id"),
+			strVal(s, "name"),
+			strVal(s, "description"),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }
 
@@ -855,7 +897,7 @@ func runAgentEnvGet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var resp map[string]any
@@ -900,7 +942,7 @@ func runAgentEnvSet(cmd *cobra.Command, args []string) error {
 
 	body := map[string]any{"custom_env": ce}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var result map[string]any
@@ -1026,6 +1068,106 @@ func resolveCustomEnv(cmd *cobra.Command) (map[string]string, bool, error) {
 		return nil, false, err
 	}
 	return ce, true, nil
+}
+
+// parseMcpConfig validates the --mcp-config value and returns the raw JSON to
+// send. It accepts a JSON object (the MCP config, e.g. {"mcpServers": {…}}) or
+// the literal `null` to clear the agent's config. A top-level array or
+// primitive is rejected because it can never be a valid MCP config — this
+// mirrors the agent-settings UI (mcp-config-tab.tsx). Empty/whitespace input
+// is rejected rather than treated as a clear: for the stdin/file channels it
+// almost always signals an upstream failure (missing file, unset pipe) rather
+// than a deliberate clear, and silently wiping a secret-bearing field is the
+// wrong default — pass an explicit `null` to clear.
+//
+// The payload is treated as secret material (MCP entries routinely carry API
+// tokens), so parse errors never wrap the underlying json error, which can
+// echo short fragments of malformed input.
+func parseMcpConfig(raw string) (json.RawMessage, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, fmt.Errorf("--mcp-config: empty input; pass 'null' to clear or a JSON object to set")
+	}
+	var probe any
+	if err := json.Unmarshal([]byte(trimmed), &probe); err != nil {
+		return nil, fmt.Errorf("--mcp-config must be a valid JSON object, or 'null' to clear")
+	}
+	// null → clear (NULL column server-side; on create it is a no-op).
+	if probe == nil {
+		return json.RawMessage("null"), nil
+	}
+	if _, ok := probe.(map[string]any); !ok {
+		return nil, fmt.Errorf("--mcp-config must be a JSON object, or 'null' to clear")
+	}
+	return json.RawMessage(trimmed), nil
+}
+
+// resolveMcpConfig collects the --mcp-config, --mcp-config-stdin, and
+// --mcp-config-file flags and returns the raw JSON value to send, a bool
+// indicating whether the caller supplied any of them, and any error. The
+// three input channels are mutually exclusive so callers can't accidentally
+// provide a secret twice. Stdin and file inputs exist to keep mcp_config —
+// which routinely embeds API tokens — out of shell history and 'ps'. Mirrors
+// resolveCustomEnv; the only behavioural difference is the clear sentinel
+// (`null` here vs `{}` for custom_env), because mcp_config distinguishes an
+// explicit empty object from an absent config server-side.
+func resolveMcpConfig(cmd *cobra.Command) (json.RawMessage, bool, error) {
+	inline := cmd.Flags().Changed("mcp-config")
+	fromStdin, _ := cmd.Flags().GetBool("mcp-config-stdin")
+	filePath, _ := cmd.Flags().GetString("mcp-config-file")
+	fromFile := cmd.Flags().Changed("mcp-config-file")
+
+	count := 0
+	if inline {
+		count++
+	}
+	if fromStdin {
+		count++
+	}
+	if fromFile {
+		count++
+	}
+	switch {
+	case count == 0:
+		return nil, false, nil
+	case count > 1:
+		return nil, false, fmt.Errorf("--mcp-config, --mcp-config-stdin, and --mcp-config-file are mutually exclusive; pick one")
+	}
+
+	var raw string
+	switch {
+	case inline:
+		raw, _ = cmd.Flags().GetString("mcp-config")
+	case fromStdin:
+		buf, err := io.ReadAll(cmd.InOrStdin())
+		if err != nil {
+			return nil, false, fmt.Errorf("read --mcp-config-stdin: %w", err)
+		}
+		raw = string(buf)
+		if strings.TrimSpace(raw) == "" {
+			return nil, false, fmt.Errorf("--mcp-config-stdin: empty input; pass 'null' to clear")
+		}
+	case fromFile:
+		if filePath == "" {
+			return nil, false, fmt.Errorf("--mcp-config-file: path must not be empty")
+		}
+		buf, err := os.ReadFile(filePath)
+		if err != nil {
+			// Filesystem errors may include the path but not the contents —
+			// safe to surface via %w.
+			return nil, false, fmt.Errorf("read --mcp-config-file: %w", err)
+		}
+		raw = string(buf)
+		if strings.TrimSpace(raw) == "" {
+			return nil, false, fmt.Errorf("--mcp-config-file %q: empty contents; pass 'null' to clear", filePath)
+		}
+	}
+
+	mc, err := parseMcpConfig(raw)
+	if err != nil {
+		return nil, false, err
+	}
+	return mc, true, nil
 }
 
 func strVal(m map[string]any, key string) string {

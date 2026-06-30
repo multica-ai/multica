@@ -5,12 +5,17 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -343,6 +348,14 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// channel_chat_session_binding used to carry a chat_session FK with
+	// ON DELETE CASCADE; MUL-3515 §4 dropped every channel_* foreign key, so
+	// prune the binding here in the same tx that deletes its chat_session.
+	if err := qtx.DeleteChannelChatSessionBindingBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session binding")
+		return
+	}
+
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,
 		WorkspaceID: session.WorkspaceID,
@@ -381,6 +394,16 @@ type SendChatMessageRequest struct {
 type SendChatMessageResponse struct {
 	MessageID string `json:"message_id"`
 	TaskID    string `json:"task_id"`
+	// AttachmentIDs are the attachment rows actually bound to this message by
+	// the server. The client diffs these against the ids it requested so it
+	// can warn the user when an attachment silently failed to bind — no extra
+	// round-trip needed. No `omitempty`: a send that requested attachments but
+	// bound none must serialize `[]` (not be omitted), otherwise the client
+	// can't tell "all binds failed" from "older server without this field" and
+	// would silently skip the very warning this exists for. When no
+	// attachments were requested the value is nil → `null`, which the client's
+	// guard short-circuits on the requested-ids check.
+	AttachmentIDs []string `json:"attachment_ids"`
 	// CreatedAt anchors the chat StatusPill timer the instant the user
 	// hits send. Without it the front-end falls back to its local clock
 	// and the timer "snaps backwards" later when WS events deliver the
@@ -444,27 +467,53 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Back-fill chat_message_id on attachments that were uploaded against
-	// this session while the user was composing. The query only touches rows
-	// where chat_session_id matches AND chat_message_id IS NULL, so it cannot
-	// rebind an attachment that already belongs to an earlier message.
+	// Back-fill chat_message_id on attachments the sender uploaded while
+	// composing. New clients upload workspace-scoped unattached rows and bind
+	// them here; older clients may still upload against the chat_session_id.
+	// The query accepts both shapes, but only for this workspace, this actor,
+	// and rows that are not already linked to an issue/comment/message.
+	var boundAttachmentIDs []string
 	if len(attachmentIDs) > 0 {
-		if err := h.Queries.LinkAttachmentsToChatMessage(r.Context(), db.LinkAttachmentsToChatMessageParams{
+		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		bound, err := h.Queries.LinkAttachmentsToChatMessage(r.Context(), db.LinkAttachmentsToChatMessageParams{
 			ChatMessageID: msg.ID,
 			ChatSessionID: session.ID,
-			Column3:       attachmentIDs,
-		}); err != nil {
+			WorkspaceID:   session.WorkspaceID,
+			UploaderType:  actorType,
+			UploaderID:    parseUUID(actorID),
+			AttachmentIds: attachmentIDs,
+		})
+		if err != nil {
 			// Don't fail the send — the message content is already saved and
 			// the attachments remain on the session (still downloadable).
 			slog.Warn("link chat attachments failed", "error", err, "message_id", uuidToString(msg.ID))
 		}
+		boundAttachmentIDs = make([]string, 0, len(bound))
+		for _, id := range bound {
+			boundAttachmentIDs = append(boundAttachmentIDs, uuidToString(id))
+		}
 	}
 
-	// Enqueue a chat task after the message exists.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session)
+	// Enqueue a chat task after the message exists. For web chat the sender is
+	// the authenticated request user (sessions are creator-only), so they are
+	// the task initiator — surfaced to the agent under `## Task Initiator`.
+	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID), false)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
 		return
+	}
+	if err := h.Queries.LinkChatMessageToTask(r.Context(), db.LinkChatMessageToTaskParams{
+		ID:     msg.ID,
+		TaskID: task.ID,
+	}); err != nil {
+		// Don't fail the send: the task already exists and the user message
+		// is persisted. The link is only needed for precise empty-cancel
+		// cleanup; older/unlinked rows simply keep the historical behavior.
+		slog.Warn("link user chat message to task failed",
+			"message_id", uuidToString(msg.ID),
+			"task_id", uuidToString(task.ID),
+			"error", err,
+		)
 	}
 
 	// Touch session updated_at.
@@ -472,7 +521,8 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("failed to touch chat session", "session_id", sessionID, "error", err)
 	}
 	taskContext := h.TaskService.AnalyticsContextForTask(r.Context(), task)
-	h.Analytics.Capture(analytics.ChatMessageSent(
+	platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.ChatMessageSent(
 		userID,
 		workspaceID,
 		uuidToString(session.ID),
@@ -480,6 +530,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		uuidToString(session.AgentID),
 		taskContext.RuntimeMode,
 		taskContext.Provider,
+		platform,
 	))
 
 	// Broadcast the user message.
@@ -494,10 +545,52 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
-		MessageID: uuidToString(msg.ID),
-		TaskID:    uuidToString(task.ID),
-		CreatedAt: timestampToString(task.CreatedAt),
+		MessageID:     uuidToString(msg.ID),
+		TaskID:        uuidToString(task.ID),
+		CreatedAt:     timestampToString(task.CreatedAt),
+		AttachmentIDs: boundAttachmentIDs,
 	})
+}
+
+type ChatMessagesCursorResponse struct {
+	CreatedAt string `json:"created_at"`
+	ID        string `json:"id"`
+}
+
+type ChatMessagesPageResponse struct {
+	Messages   []ChatMessageResponse       `json:"messages"`
+	Limit      int                         `json:"limit"`
+	HasMore    bool                        `json:"has_more"`
+	NextCursor *ChatMessagesCursorResponse `json:"next_cursor,omitempty"`
+}
+
+func parseChatMessagesPageParams(r *http.Request) (int, pgtype.Timestamptz, pgtype.UUID, error) {
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			return 0, pgtype.Timestamptz{}, pgtype.UUID{}, errors.New("invalid limit")
+		}
+		limit = parsed
+	}
+
+	rawBeforeCreatedAt := r.URL.Query().Get("before_created_at")
+	rawBeforeID := r.URL.Query().Get("before_id")
+	if rawBeforeCreatedAt == "" && rawBeforeID == "" {
+		return limit, pgtype.Timestamptz{}, pgtype.UUID{}, nil
+	}
+	if rawBeforeCreatedAt == "" || rawBeforeID == "" {
+		return 0, pgtype.Timestamptz{}, pgtype.UUID{}, errors.New("invalid cursor")
+	}
+	beforeTime, err := time.Parse(time.RFC3339Nano, rawBeforeCreatedAt)
+	if err != nil {
+		return 0, pgtype.Timestamptz{}, pgtype.UUID{}, errors.New("invalid cursor")
+	}
+	beforeID, err := util.ParseUUID(rawBeforeID)
+	if err != nil {
+		return 0, pgtype.Timestamptz{}, pgtype.UUID{}, errors.New("invalid cursor")
+	}
+	return limit, pgtype.Timestamptz{Time: beforeTime, Valid: true}, beforeID, nil
 }
 
 func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
@@ -530,6 +623,72 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+
+	limit, beforeCreatedAt, beforeID, err := parseChatMessagesPageParams(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	messages, err := h.Queries.ListChatMessagesPage(r.Context(), db.ListChatMessagesPageParams{
+		ChatSessionID:   session.ID,
+		Limit:           int32(limit + 1),
+		BeforeCreatedAt: beforeCreatedAt,
+		BeforeID:        beforeID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list chat messages")
+		return
+	}
+	hasMore := len(messages) > limit
+	if hasMore {
+		messages = messages[:limit]
+	}
+	var nextCursor *ChatMessagesCursorResponse
+	if hasMore && len(messages) > 0 {
+		oldest := messages[len(messages)-1]
+		nextCursor = &ChatMessagesCursorResponse{
+			CreatedAt: oldest.CreatedAt.Time.Format(time.RFC3339Nano),
+			ID:        uuidToString(oldest.ID),
+		}
+	}
+	// SQL fetches newest windows first so the empty cursor opens at the recent
+	// tail. Reverse each cursor page before serializing to keep message order
+	// chronological within the viewport.
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+
+	messageIDs := make([]pgtype.UUID, len(messages))
+	for i, m := range messages {
+		messageIDs[i] = m.ID
+	}
+	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messageIDs)
+
+	resp := make([]ChatMessageResponse, len(messages))
+	for i, m := range messages {
+		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
+	}
+	writeJSON(w, http.StatusOK, ChatMessagesPageResponse{
+		Messages:   resp,
+		Limit:      limit,
+		HasMore:    hasMore,
+		NextCursor: nextCursor,
+	})
 }
 
 // PendingChatTaskResponse is returned by GetPendingChatTask — either the
@@ -582,6 +741,19 @@ type PendingChatTaskItem struct {
 	TaskID        string `json:"task_id"`
 	Status        string `json:"status"`
 	ChatSessionID string `json:"chat_session_id"`
+}
+
+type CancelledChatMessageResponse struct {
+	ChatSessionID  string               `json:"chat_session_id"`
+	MessageID      string               `json:"message_id"`
+	Content        string               `json:"content"`
+	RestoreToInput bool                 `json:"restore_to_input"`
+	Attachments    []AttachmentResponse `json:"attachments,omitempty"`
+}
+
+type CancelTaskByUserResponse struct {
+	AgentTaskResponse
+	CancelledChatMessage *CancelledChatMessageResponse `json:"cancelled_chat_message,omitempty"`
 }
 
 // ListPendingChatTasks returns every in-flight chat task owned by the current
@@ -684,32 +856,57 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 // Task cancellation (user-facing, with ownership check)
 // ---------------------------------------------------------------------------
 
-// CancelTaskByUser cancels a task after verifying the requesting user owns
-// the associated chat session or issue within the current workspace.
+// CancelTaskByUser cancels a task the caller is allowed to act on within the
+// current workspace.
+//
+// Tenancy is enforced uniformly through the task's owning agent: every
+// agent_task_queue row carries a NOT NULL agent_id (ON DELETE CASCADE, so the
+// agent always exists), and agents are workspace-scoped. GetAgentTaskInWorkspace
+// is therefore the single tenant guard that works regardless of which optional
+// source FK (issue / chat_session / autopilot_run) is set — which is what makes
+// run_only autopilot tasks and quick_create tasks (whose issue does not exist
+// yet) cancellable at all. Keying cancellation off issue_id / chat_session_id
+// alone is exactly what 404'd these tasks before (MUL-2827).
+//
+// On top of tenancy, two privacy models layer on:
+//   - a chat task is private to the member who started the conversation, so
+//     only that creator may cancel it;
+//   - every other task surfaces on the agent Activity tab and the workspace
+//     task snapshot, both of which hide private agents from members without
+//     access. Cancellation mirrors that gate via canAccessPrivateAgent so the
+//     id-only endpoint is never more permissive than the surface that exposes
+//     the task.
 func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
 	taskID := chi.URLParam(r, "taskId")
 	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task id")
 	if !ok {
 		return
 	}
 
-	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
+	task, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{
+		ID:          taskUUID,
+		WorkspaceID: wsUUID,
+	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
 
-	// Verify ownership: for chat tasks, check workspace + creator;
-	// for issue tasks, verify the issue belongs to the current workspace.
 	if task.ChatSessionID.Valid {
+		// Chat privacy: only the member who opened the conversation may
+		// cancel its task, even though the workspace is shared.
 		cs, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{
 			ID:          task.ChatSessionID,
-			WorkspaceID: parseUUID(workspaceID),
+			WorkspaceID: wsUUID,
 		})
 		if err != nil {
 			writeError(w, http.StatusNotFound, "task not found")
@@ -719,24 +916,49 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "not your task")
 			return
 		}
-	} else if task.IssueID.Valid {
-		issue, err := h.Queries.GetIssue(r.Context(), task.IssueID)
-		if err != nil || uuidToString(issue.WorkspaceID) != workspaceID {
+	} else {
+		// Issue / autopilot / quick_create tasks are all visible on the
+		// agent Activity tab + workspace snapshot, which gate private
+		// agents. Mirror that gate here.
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          task.AgentID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
 			writeError(w, http.StatusNotFound, "task not found")
 			return
 		}
-	} else {
-		writeError(w, http.StatusNotFound, "task not found")
-		return
+		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+			writeError(w, http.StatusForbidden, "you do not have access to this agent")
+			return
+		}
 	}
 
-	cancelled, err := h.TaskService.CancelTask(r.Context(), taskUUID)
+	cancelled, err := h.TaskService.CancelTaskWithResult(r.Context(), taskUUID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, taskToResponse(*cancelled))
+	resp := CancelTaskByUserResponse{
+		AgentTaskResponse: taskToResponse(cancelled.Task, workspaceID),
+	}
+	if cancelled.CancelledChatMessage != nil {
+		attachments := make([]AttachmentResponse, 0, len(cancelled.CancelledChatMessage.Attachments))
+		for _, a := range cancelled.CancelledChatMessage.Attachments {
+			attachments = append(attachments, h.attachmentToResponse(a))
+		}
+		resp.CancelledChatMessage = &CancelledChatMessageResponse{
+			ChatSessionID:  cancelled.CancelledChatMessage.ChatSessionID,
+			MessageID:      cancelled.CancelledChatMessage.MessageID,
+			Content:        cancelled.CancelledChatMessage.Content,
+			RestoreToInput: cancelled.CancelledChatMessage.RestoreToInput,
+			Attachments:    attachments,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ---------------------------------------------------------------------------

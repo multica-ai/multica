@@ -125,7 +125,7 @@ func (q *Queries) GetRuntimeUsageByHour(ctx context.Context, arg GetRuntimeUsage
 const listRuntimeUsage = `-- name: ListRuntimeUsage :many
 SELECT
     DATE(bucket_hour AT TIME ZONE $2::text) AS date,
-    provider,
+    LOWER(provider) AS provider,
     model,
     SUM(input_tokens)::bigint        AS input_tokens,
     SUM(output_tokens)::bigint       AS output_tokens,
@@ -134,8 +134,8 @@ SELECT
 FROM task_usage_hourly
 WHERE runtime_id = $1
   AND bucket_hour >= $3::timestamptz
-GROUP BY DATE(bucket_hour AT TIME ZONE $2::text), provider, model
-ORDER BY DATE(bucket_hour AT TIME ZONE $2::text) DESC, provider, model
+GROUP BY DATE(bucket_hour AT TIME ZONE $2::text), LOWER(provider), model
+ORDER BY DATE(bucket_hour AT TIME ZONE $2::text) DESC, LOWER(provider), model
 `
 
 type ListRuntimeUsageParams struct {
@@ -162,6 +162,9 @@ type ListRuntimeUsageRow struct {
 // @tz is required, even if the caller intends "UTC", so the bucket
 // cast is unambiguous — `bucket_hour` is UTC and the caller picks the
 // calendar boundary per request.
+//
+// provider is LOWER()-normalized so mixed-case historical rows merge
+// (same reason as ListRuntimeUsageByAgent below).
 func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsageParams) ([]ListRuntimeUsageRow, error) {
 	rows, err := q.db.Query(ctx, listRuntimeUsage, arg.RuntimeID, arg.Tz, arg.Since)
 	if err != nil {
@@ -193,6 +196,7 @@ func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsagePara
 const listRuntimeUsageByAgent = `-- name: ListRuntimeUsageByAgent :many
 SELECT
     atq.agent_id,
+    LOWER(tu.provider) AS provider,
     tu.model,
     SUM(tu.input_tokens)::bigint AS input_tokens,
     SUM(tu.output_tokens)::bigint AS output_tokens,
@@ -203,8 +207,8 @@ FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.runtime_id = $1
   AND tu.created_at >= $2::timestamptz
-GROUP BY atq.agent_id, tu.model
-ORDER BY atq.agent_id, tu.model
+GROUP BY atq.agent_id, LOWER(tu.provider), tu.model
+ORDER BY atq.agent_id, LOWER(tu.provider), tu.model
 `
 
 type ListRuntimeUsageByAgentParams struct {
@@ -214,6 +218,7 @@ type ListRuntimeUsageByAgentParams struct {
 
 type ListRuntimeUsageByAgentRow struct {
 	AgentID          pgtype.UUID `json:"agent_id"`
+	Provider         string      `json:"provider"`
 	Model            string      `json:"model"`
 	InputTokens      int64       `json:"input_tokens"`
 	OutputTokens     int64       `json:"output_tokens"`
@@ -222,7 +227,7 @@ type ListRuntimeUsageByAgentRow struct {
 	TaskCount        int32       `json:"task_count"`
 }
 
-// Per-(agent, model) token aggregates for a runtime since a cutoff. Powers
+// Per-(agent, provider, model) token aggregates for a runtime since a cutoff. Powers
 // the runtime-detail "Cost by agent" tab. task_usage only carries task_id,
 // so we join the queue to expose agent_id. The model dimension is kept on
 // purpose: cost is computed client-side from a per-model pricing table, so
@@ -231,6 +236,8 @@ type ListRuntimeUsageByAgentRow struct {
 //
 // This view doesn't bucket by date, so it doesn't need @tz; only the
 // @since cutoff is provided in runtime-local terms (computed in Go).
+// provider is LOWER()-normalized so mixed-case historical rows merge with
+// new rows (see ListDashboardUsageDaily in task_usage.sql).
 func (q *Queries) ListRuntimeUsageByAgent(ctx context.Context, arg ListRuntimeUsageByAgentParams) ([]ListRuntimeUsageByAgentRow, error) {
 	rows, err := q.db.Query(ctx, listRuntimeUsageByAgent, arg.RuntimeID, arg.Since)
 	if err != nil {
@@ -242,6 +249,7 @@ func (q *Queries) ListRuntimeUsageByAgent(ctx context.Context, arg ListRuntimeUs
 		var i ListRuntimeUsageByAgentRow
 		if err := rows.Scan(
 			&i.AgentID,
+			&i.Provider,
 			&i.Model,
 			&i.InputTokens,
 			&i.OutputTokens,

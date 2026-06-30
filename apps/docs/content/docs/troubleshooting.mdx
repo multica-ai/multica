@@ -89,6 +89,20 @@ On the server side (self-host), grep for `"no_tasks"` / `"no_capacity"` to see t
 
 **Symptom**: after submitting an email during sign-in or invite acceptance, neither the inbox nor the spam folder has the verification code.
 
+**First, confirm which provider the server thinks is active.** At startup the backend prints one of:
+
+- `EmailService: SMTP relay <host>:<port> from=<addr>` — using SMTP (`SMTP_HOST` non-empty wins over Resend)
+- `EmailService: Resend API from=<addr>` — using Resend
+- `EmailService: DEV mode — codes printed to stdout …` — no provider configured
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs backend | grep "EmailService:"
+```
+
+If the line you expected isn't there, the environment didn't reach the process — check `.env` and `docker compose -f docker-compose.selfhost.yml exec backend env | grep -E 'RESEND_|SMTP_'`. Credentials are never logged on this startup line.
+
+### When Resend is the active provider
+
 **Likely causes**:
 
 1. **`RESEND_API_KEY` not set** — the server silently falls back and **writes the code to its own stdout** without error. Easy to trip over in production
@@ -107,6 +121,34 @@ On the server side (self-host), grep for `"no_tasks"` / `"no_capacity"` to see t
 - Missing API key → follow [Sign-in and signup configuration → How email works](/auth-setup#how-email--verification-code-sign-in-works) to configure and restart the server
 - Domain not verified → run the DNS verification flow in the Resend console (add SPF / DKIM records)
 - In an emergency (internal testing) → copy the code printed under `[DEV]` from the server logs
+
+### When SMTP is the active provider
+
+The SMTP path wraps every failure with the stage it failed at, so the server logs already tell you where the relay rejected the session. Grep for `"failed to send verification email"` / `"failed to send invitation email"` and check the wrapped error:
+
+| Logged error | What it means | How to fix |
+|---|---|---|
+| `smtp dial <host>:<port>: dial tcp …: connect: connection refused` / `i/o timeout` | The backend container can't reach the relay — wrong host, wrong port, firewall, or the relay isn't listening | Verify `SMTP_HOST` / `SMTP_PORT` resolve from inside the container (`docker compose -f docker-compose.selfhost.yml exec backend nslookup <host>` and `nc -vz <host> <port>`); open the firewall from the host running Multica to the relay |
+| `smtp starttls: x509: certificate signed by unknown authority` (or `certificate is not valid for any names`) | The relay uses a private CA / self-signed cert and the container's trust store rejects it | Either install the CA into the container, or set `SMTP_TLS_INSECURE=true` only after confirming the relay is reachable on a trusted segment |
+| `smtp auth: 535 5.7.8 Authentication credentials invalid` (or `534`/`530`) | `SMTP_USERNAME` / `SMTP_PASSWORD` are wrong, or the relay requires a different auth mechanism than `PLAIN` | Re-confirm the service-account credentials with your mail admin; for Exchange anonymous internal relay leave both empty (`SMTP_USERNAME=`, `SMTP_PASSWORD=`) |
+| `smtp MAIL FROM: 550 5.7.1 Client does not have permissions to send as this sender` | The relay won't accept `RESEND_FROM_EMAIL` as the envelope sender — typical Exchange "anonymous users not allowed" or DMARC alignment issue | Set `RESEND_FROM_EMAIL` to a domain the relay accepts; on Exchange, grant the source IP `ms-Exch-SMTP-Accept-Any-Sender` on the receive connector |
+| `smtp RCPT TO <addr>: 550 5.7.1 Unable to relay` | The relay's receive connector doesn't allow your subnet to relay to external recipients (most common for anonymous internal relays talking to outside domains) | Either restrict invites to internal recipients, or add the Multica host's subnet to the Exchange "Anonymous Users → Relay" permission list |
+| `smtp DATA` / `smtp write body` / `smtp end data` | Session was accepted but the relay dropped the body — usually message-size limits, content filtering, or a connection reset mid-stream | Check the relay's logs for the same `Message-ID` (logged as `<unixnano>@<host>`); raise the message size limit if needed |
+
+`MAIL FROM`, `RCPT TO`, and `DATA` errors are always logged with the relay's response code so you can match them against Exchange / Postfix logs on the other side. Verification codes and invite tokens are **never** included in the wrapped error.
+
+**How to diagnose**:
+
+- Grep `"EmailService: SMTP relay"` once at startup, then `"failed to send"` for runtime failures
+- From inside the backend container, sanity-check connectivity: `docker compose -f docker-compose.selfhost.yml exec backend sh -c 'nc -vz $SMTP_HOST $SMTP_PORT'`
+- Confirm the env reached the process: `docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP_` (password will be in the output — only run on a trusted shell)
+
+**How to fix**:
+
+- Wrong host / port → adjust `SMTP_HOST` / `SMTP_PORT` and restart the backend; for the supported relay modes see [Auth setup → Option B: SMTP relay](/auth-setup)
+- Cert mismatch → install the relay's CA into the container, or temporarily `SMTP_TLS_INSECURE=true` on a trusted segment
+- Auth failure → re-check credentials; for anonymous internal relay leave `SMTP_USERNAME` and `SMTP_PASSWORD` empty
+- `Unable to relay` → either restrict to internal recipients or grant the Multica host's IP relay permission on the Exchange receive connector
 
 ## Fixed local test code doesn't work
 
@@ -138,9 +180,9 @@ Check your inbox (including spam) for the real verification code.
 
 **Likely causes**:
 
-1. **`rollup_task_usage_hourly()` is never scheduled** — the Usage / Runtime dashboards read from the derived `task_usage_hourly` table, which is populated by that function. The bundled `pgvector/pgvector:pg17` image does not include `pg_cron`, and the backend does not run the rollup in-process either. On a fresh self-host install with no external scheduler, this is the default state.
-2. **`pg_cron` is installed but pointing at the wrong database** — `pg_cron.database_name` defaults to `postgres`; if your Multica database has a different name, the scheduled job never sees `rollup_task_usage_hourly()`.
-3. **The scheduler is running but the rollup is silently erroring** — e.g. wrong DB role / search_path inside the cron entry.
+1. **`rollup_task_usage_hourly()` is never being claimed** — the Usage / Runtime dashboards read from the derived `task_usage_hourly` table, populated by that function. Since MUL-2957 the backend runs the rollup in-process via the DB-backed scheduler (`sys_cron_executions`); a stale build, a missing migration `113`, or a sustained backend outage with no replicas left running can leave the table without a recent SUCCESS row.
+2. **`pg_cron` is configured for compatibility but pointing at the wrong database** — `pg_cron.database_name` defaults to `postgres`; if your Multica database has a different name, the scheduled job never sees `rollup_task_usage_hourly()`. The in-process scheduler does not depend on this, but if you removed the in-process scheduler and rely on `pg_cron`, the DB name must match.
+3. **The handler is being claimed but silently erroring** — e.g. the SQL function is missing because migrations were partially applied, or DB role / search_path is misconfigured. Check the FAILED audit rows in `sys_cron_executions`.
 
 **How to diagnose**:
 
@@ -149,24 +191,30 @@ Check your inbox (including spam) for the real verification code.
 SELECT count(*) AS raw_rows FROM task_usage;
 SELECT count(*) AS hourly_rows FROM task_usage_hourly;
 
--- Confirm pg_cron is (or isn't) available.
-SELECT * FROM pg_available_extensions WHERE name = 'pg_cron';
-SHOW shared_preload_libraries;
-
--- If pg_cron is installed, check the schedule + last run.
-SELECT jobname, schedule, database, active FROM cron.job;
-SELECT jobname, status, return_message, start_time, end_time
-  FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10;
+-- Inspect the in-process scheduler's audit log.
+SELECT plan_time, status, attempt, runner_id,
+       error_code, error_msg, started_at, finished_at
+  FROM sys_cron_executions
+ WHERE job_name = 'rollup_task_usage_hourly'
+ ORDER BY plan_time DESC
+ LIMIT 20;
 
 -- Watermark — if this is 1970-01-01, the rollup has never run.
 SELECT watermark_at FROM task_usage_hourly_rollup_state;
+
+-- Compatibility path: if you previously registered pg_cron, confirm
+-- it is (or isn't) available and pointing at the right database.
+SELECT * FROM pg_available_extensions WHERE name = 'pg_cron';
+SHOW shared_preload_libraries;
+SELECT jobname, schedule, database, active FROM cron.job;
 ```
 
 **How to fix**:
 
-- Call the rollup once by hand to confirm it works: `SELECT rollup_task_usage_hourly();` — refresh the dashboard; if numbers appear, the only missing piece is a scheduler.
-- Pick one of the supported paths from [Self-host quickstart → Schedule the usage rollup](/self-host-quickstart#7-schedule-the-usage-rollup-required-for-the-usage-dashboard): external cron / systemd-timer / Kubernetes CronJob, or swap Postgres for an image with `pg_cron`.
-- If you already have history that pre-dates the schedule, run `backfill_task_usage_hourly` inside the backend container to seed buckets before the watermark.
+- Confirm the scheduler is actually running on at least one backend replica — every 30 seconds it should add a SUCCESS row to `sys_cron_executions` for `rollup_task_usage_hourly`.
+- Call the rollup once by hand to verify the SQL path: `SELECT rollup_task_usage_hourly();` — refresh the dashboard; if numbers appear, the SQL function is fine and the issue is on the scheduler claim path.
+- If migration `113_sys_cron_executions` has not applied yet, restart the backend so migrations run, or invoke `migrate up` manually.
+- If you have legacy `pg_cron` history that pre-dates the in-process scheduler, the SQL function still holds advisory lock 4246 internally and the two paths cannot double-write — see [Self-host quickstart → Usage rollup](/self-host-quickstart#7-usage-rollup-no-operator-action-required) for the optional `cron.unschedule` cleanup.
 
 ## Migration `103` fails with `refusing to drop legacy daily rollups`
 
@@ -182,9 +230,11 @@ ERROR: refusing to drop legacy daily rollups:
 
 **Likely cause**: this is migration `103`'s fail-closed guard. It refuses to drop the legacy daily rollups until `task_usage_hourly` has caught up with raw `task_usage`. The guard fires whenever existing rows are present and the rollup watermark still sits at the epoch — i.e. nothing has rolled history into the hourly table yet.
 
+Since MUL-2957 the migrate command runs an idempotent monthly-slice backfill (under advisory lock 4246) automatically immediately before applying migration `103`, so v0.3.4 → v0.3.5+ direct upgrades complete in a single `migrate up` invocation. If you are still seeing this error you are either on a pre-MUL-2957 binary or the hook itself failed — check the migrate logs for an earlier `task_usage hourly rollup hook` line.
+
 **How to fix**:
 
-1. Run the backfill against the same database (idempotent, safe to interrupt, safe to re-run):
+1. If you are on a pre-MUL-2957 binary and cannot upgrade the binary first, run the standalone backfill against the same database (idempotent, safe to interrupt, safe to re-run):
 
    ```bash
    # Docker Compose
@@ -197,7 +247,7 @@ ERROR: refusing to drop legacy daily rollups:
    ```
 
 2. Re-run the upgrade — restarting the backend container is enough, migrations run on startup. The guard now sees a current watermark and lets `103` apply.
-3. Set up an ongoing rollup schedule (cron / `pg_cron`) so the watermark keeps advancing — see [Self-host quickstart → Schedule the usage rollup](/self-host-quickstart#7-schedule-the-usage-rollup-required-for-the-usage-dashboard).
+3. The in-process scheduler then keeps the watermark advancing — see [Self-host quickstart → Usage rollup](/self-host-quickstart#7-usage-rollup-no-operator-action-required).
 
 `--sleep-between-slices=2s` is a polite default on production databases with years of history. Use `--months-back N --force-partial` if you only want to keep the last N months and are willing to permanently abandon older buckets.
 

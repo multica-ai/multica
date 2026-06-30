@@ -40,7 +40,6 @@ interface ReactionBarProps {
   onToggle: (emoji: string) => void;
   getActorName: (type: string, id: string) => string;
   className?: string;
-  hideAddButton?: boolean;
 }
 
 function ReactionBar({
@@ -49,7 +48,6 @@ function ReactionBar({
   onToggle,
   getActorName,
   className,
-  hideAddButton,
 }: ReactionBarProps) {
   const grouped = groupReactions(reactions, currentUserId);
 
@@ -78,7 +76,7 @@ function ReactionBar({
           </TooltipContent>
         </Tooltip>
       ))}
-      {!hideAddButton && <QuickEmojiPicker onSelect={onToggle} />}
+      <QuickEmojiPicker onSelect={onToggle} />
     </div>
   );
 }

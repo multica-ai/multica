@@ -13,6 +13,9 @@
 // backend returns an empty key and this module stays inert.
 
 import posthog from "posthog-js";
+import { redactExceptionProperties } from "./redact-exception";
+import { shouldDropException } from "./exception-dedupe";
+import { isBenignException } from "./benign-exceptions";
 
 export const EVENT_SCHEMA_VERSION = 2;
 
@@ -43,6 +46,12 @@ let analyticsEnvironment = "dev";
 // config fetch resolves. We keep the first pending pageview so that step
 // doesn't silently drop.
 let pendingPageview: string | undefined | null = null;
+// Last $pageview path actually emitted (already section-normalized). Used to
+// collapse consecutive views of the same section so navigating between
+// resources under one section doesn't fire a billed event per resource. See
+// capturePageview / normalizePageviewPath. Cleared on reset so a fresh
+// session re-emits its first pageview.
+let lastCapturedPath: string | null = null;
 // Frontend-emitted events (captureEvent) and person-property updates
 // (setPersonProperties) can also arrive before init — same config-race as
 // identify/pageview. We replay them in order once init succeeds. These
@@ -50,7 +59,8 @@ let pendingPageview: string | undefined | null = null;
 // buffer stays small (~one step-transition worth).
 type PendingOp =
   | { kind: "event"; name: string; props?: Record<string, unknown> }
-  | { kind: "set"; props: Record<string, unknown> };
+  | { kind: "set"; props: Record<string, unknown> }
+  | { kind: "exception"; error: unknown; props?: Record<string, unknown> };
 const pendingOps: PendingOp[] = [];
 // Cached super-properties so resetAnalytics() can re-register them after
 // posthog.reset() wipes the persisted set. Without this, logout / account
@@ -136,7 +146,37 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     autocapture: false,
     capture_heatmaps: false,
     capture_dead_clicks: false,
-    capture_exceptions: false,
+    // Exception autocapture IS on: posthog-js attaches window.onerror +
+    // unhandledrejection handlers and sends `$exception` events with the
+    // error's stack. Unlike the click/heatmap autocapture above, this is
+    // explicit failure signal (not behavioral noise) and is the one PostHog
+    // surface that natively handles thrown JS errors — see the failure-tier
+    // split in packages/core/diagnostics. (Production builds are minified;
+    // upload source maps to PostHog to de-minify the stacks.)
+    //
+    // Error messages can interpolate user input (a validation error with the
+    // typed value, a URL with a token), so `before_send` scrubs the message
+    // and `$exception_list[].value` before the event leaves the client. Stack
+    // frames (code locations) are kept. See redact-exception.ts.
+    //
+    // After scrubbing, a session-level fuse drops repeats of the same error so
+    // a render loop or a polling fetch that keeps throwing can't emit 100+
+    // identical `$exception` events per session (MUL-3331). The fingerprint is
+    // built only from the already-redacted fields, so no PII reaches storage.
+    // Order matters: redact first, then fingerprint the redacted shape.
+    capture_exceptions: true,
+    before_send: (event) => {
+      if (event && event.event === "$exception") {
+        // Drop known-benign browser noise (e.g. ResizeObserver loop) entirely
+        // — checked on the raw message before redaction. These dominate the
+        // stream and carry no signal, so they skip both redaction and the
+        // dedupe fuse. See benign-exceptions.ts.
+        if (isBenignException(event.properties)) return null;
+        redactExceptionProperties(event.properties);
+        if (shouldDropException(event.properties)) return null;
+      }
+      return event;
+    },
     disable_session_recording: true,
     disable_surveys: true,
   });
@@ -167,6 +207,7 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
   // And any first pageview we captured while config was loading.
   if (pendingPageview !== null) {
     posthog.capture("$pageview", pendingPageview ? { $current_url: pendingPageview } : undefined);
+    lastCapturedPath = pendingPageview ?? null;
     pendingPageview = null;
   }
   // Replay buffered events / person-property updates in their original
@@ -177,6 +218,8 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     const op = pendingOps.shift()!;
     if (op.kind === "event") {
       posthog.capture(op.name, withClientEventProperties(op.props));
+    } else if (op.kind === "exception") {
+      posthog.captureException(op.error, withClientEventProperties(op.props));
     } else {
       capturePersonSet(op.props);
     }
@@ -210,6 +253,7 @@ export function resetAnalytics(): void {
   currentUserId = null;
   pendingIdentify = null;
   pendingPageview = null;
+  lastCapturedPath = null;
   pendingOps.length = 0;
   if (!initialized) return;
   posthog.reset();
@@ -240,6 +284,31 @@ export function captureEvent(
     return;
   }
   posthog.capture(name, withClientEventProperties(props));
+}
+
+/**
+ * Report a caught exception that never reached `window.onerror` — a React
+ * render-phase error swallowed by an error boundary. Global uncaught errors
+ * and unhandled rejections are already captured automatically by posthog-js
+ * (`capture_exceptions: true`); this wrapper is for the boundary case those
+ * handlers can't see.
+ *
+ * Currently called by the web route-level `global-error`. Section-level
+ * `@multica/ui` ErrorBoundary can opt in by passing `onError={captureException}`
+ * at its call sites; it is not wired app-wide (those failures already degrade
+ * gracefully with fallback UI).
+ *
+ * Calls before initAnalytics() buffer in order, same as captureEvent.
+ */
+export function captureException(
+  error: unknown,
+  props?: Record<string, unknown>,
+): void {
+  if (!initialized) {
+    pendingOps.push({ kind: "exception", error, props });
+    return;
+  }
+  posthog.captureException(error, withClientEventProperties(props));
 }
 
 /**
@@ -304,11 +373,43 @@ function normalizeEnvironment(value: string | undefined): string {
   }
 }
 
+// A UUID or an issue key (e.g. MUL-123) appearing as a path segment
+// identifies a single resource. Resource-level granularity carries no
+// aggregate funnel signal and explodes $pageview volume — every distinct
+// issue / agent / project navigated to would fire its own billed event.
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ISSUE_KEY_SEGMENT = /^[A-Z][A-Z0-9]*-\d+$/;
+
+/**
+ * Normalize a raw path to its section route for $pageview reporting:
+ * `/acme/issues/8d5c…` and `/acme/issues/MUL-12` both collapse to
+ * `/acme/issues`. We strip the query string / hash (volatile filter / sort /
+ * search state, and occasionally OAuth `code` / `state`) and drop any
+ * resource-id segment after the first. The leading segment — the workspace
+ * slug or a top-level route word like `login` — is always kept, so a slug
+ * that happens to look like an id (`team-1`) is never dropped.
+ *
+ * Exported for unit testing; callers should go through capturePageview.
+ */
+export function normalizePageviewPath(path?: string): string | undefined {
+  if (!path) return path ?? undefined;
+  const clean = path.split(/[?#]/)[0] ?? "";
+  const segments = clean.split("/").filter((s) => s.length > 0);
+  const kept = segments.filter(
+    (seg, i) => i === 0 || !(UUID_SEGMENT.test(seg) || ISSUE_KEY_SEGMENT.test(seg)),
+  );
+  return "/" + kept.join("/");
+}
+
 /**
  * Capture a page view. Call once per client-side navigation. We disable
  * posthog's automatic pageview tracking in init() so this module owns the
- * event shape — that makes it trivial to add properties (e.g. workspace
- * slug) without fighting the SDK.
+ * event shape.
+ *
+ * The path is normalized to its section route (see normalizePageviewPath) and
+ * consecutive views of the same section are collapsed — both keep PostHog at
+ * section granularity instead of paying for a billed event per resource and
+ * per query-string change. Callers can therefore pass the raw path freely.
  *
  * Calls before initAnalytics() buffer the most-recent path so the first
  * pageview isn't dropped on slow /api/config fetches. Subsequent pre-init
@@ -316,11 +417,14 @@ function normalizeEnvironment(value: string | undefined): string {
  * captures synchronously as expected.
  */
 export function capturePageview(path?: string): void {
+  const normalized = normalizePageviewPath(path);
   if (!initialized) {
-    pendingPageview = path ?? "";
+    pendingPageview = normalized ?? "";
     return;
   }
-  posthog.capture("$pageview", path ? { $current_url: path } : undefined);
+  if (normalized && normalized === lastCapturedPath) return;
+  lastCapturedPath = normalized ?? null;
+  posthog.capture("$pageview", normalized ? { $current_url: normalized } : undefined);
 }
 
 /**

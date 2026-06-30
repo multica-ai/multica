@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -41,6 +43,7 @@ type WorkspaceResponse struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix string  `json:"issue_prefix"`
+	AvatarURL   *string `json:"avatar_url"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 }
@@ -69,6 +72,7 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Settings:    settings,
 		Repos:       repos,
 		IssuePrefix: w.IssuePrefix,
+		AvatarURL:   textToPtr(w.AvatarUrl),
 		CreatedAt:   timestampToString(w.CreatedAt),
 		UpdatedAt:   timestampToString(w.UpdatedAt),
 	}
@@ -138,6 +142,16 @@ type CreateWorkspaceRequest struct {
 func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
+		return
+	}
+
+	// Self-host gate (#3433): when the operator has set
+	// DISABLE_WORKSPACE_CREATION=true, no caller — including existing
+	// workspace owners — may create additional workspaces. The frontend
+	// hides every "Create workspace" affordance via /api/config, but the
+	// 403 here is the only authoritative check.
+	if h.cfg.DisableWorkspaceCreation {
+		writeError(w, http.StatusForbidden, "workspace creation is disabled for this instance")
 		return
 	}
 
@@ -220,7 +234,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// at whether they have a prior workspace_created event, not stamped at
 	// emit time. Stamping here would race under concurrent creates without
 	// a schema change, and the event stream answers the question exactly.
-	h.Analytics.Capture(analytics.WorkspaceCreated(userID, wsID))
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.WorkspaceCreated(userID, wsID))
 
 	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", wsID, "name", ws.Name, "slug", ws.Slug)...)
 	writeJSON(w, http.StatusCreated, workspaceToResponse(ws))
@@ -233,6 +247,48 @@ type UpdateWorkspaceRequest struct {
 	Settings    any     `json:"settings"`
 	Repos       any     `json:"repos"`
 	IssuePrefix *string `json:"issue_prefix"`
+	AvatarURL   *string `json:"avatar_url"`
+}
+
+type workspaceRepoRef struct {
+	URL         string `json:"url"`
+	Description string `json:"description,omitempty"`
+}
+
+func validateAndNormalizeWorkspaceRepos(value any) ([]byte, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+
+	var repos []workspaceRepoRef
+	if err := json.Unmarshal(raw, &repos); err != nil {
+		return nil, fmt.Errorf("repos must be an array of repository objects: %w", err)
+	}
+
+	normalized := make([]workspaceRepoRef, 0, len(repos))
+	seen := make(map[string]struct{}, len(repos))
+	for i, repo := range repos {
+		repo.URL = strings.TrimSpace(repo.URL)
+		repo.Description = strings.TrimSpace(repo.Description)
+		if repo.URL == "" {
+			return nil, fmt.Errorf("repos[%d]: url is required", i)
+		}
+		if !isValidGitRepoURL(repo.URL) {
+			return nil, fmt.Errorf("repos[%d]: url must be a valid http(s) or ssh git URL", i)
+		}
+		if _, ok := seen[repo.URL]; ok {
+			continue
+		}
+		seen[repo.URL] = struct{}{}
+		normalized = append(normalized, repo)
+	}
+
+	out, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -270,7 +326,11 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Settings = s
 	}
 	if req.Repos != nil {
-		reposJSON, _ := json.Marshal(req.Repos)
+		reposJSON, err := validateAndNormalizeWorkspaceRepos(req.Repos)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		params.Repos = reposJSON
 	}
 	if req.IssuePrefix != nil {
@@ -278,6 +338,9 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		if prefix != "" {
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
 		}
+	}
+	if req.AvatarURL != nil {
+		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
 	}
 
 	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { Virtuoso } from "react-virtuoso";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -18,15 +19,15 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { useAutoScroll } from "@multica/ui/hooks/use-auto-scroll";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
-import { copyMarkdown } from "../../editor";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { AttachmentList } from "../../issues/components/comment-card";
 import type { AgentAvailability } from "@multica/core/agents";
-import type { ChatMessage, ChatPendingTask, TaskMessagePayload, TaskFailureReason } from "@multica/core/types";
+import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
@@ -43,16 +44,30 @@ interface ChatMessageListProps {
   pendingTask: ChatPendingTask | null | undefined;
   /** Resolved presence; pass `undefined` while loading to keep the pill copy neutral. */
   availability: AgentAvailability | undefined;
+  firstItemIndex?: number;
+  hasOlderMessages?: boolean;
+  isFetchingOlderMessages?: boolean;
+  onLoadOlderMessages?: () => void;
 }
 
 export function ChatMessageList({
   messages,
   pendingTask,
   availability,
+  firstItemIndex = 0,
+  hasOlderMessages = false,
+  isFetchingOlderMessages = false,
+  onLoadOlderMessages,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    setScrollContainerEl(node);
+  }, []);
   const fadeStyle = useScrollFade(scrollRef);
-  useAutoScroll(scrollRef);
+  const { t } = useT("chat");
 
   const pendingTaskId = pendingTask?.task_id ?? null;
 
@@ -72,42 +87,74 @@ export function ChatMessageList({
     ...taskMessagesOptions(pendingTaskId ?? ""),
     enabled: canFetchLiveTimeline,
   });
-  const liveTimeline: ChatTimelineItem[] = (liveTaskMessages ?? []).map(toTimelineItem);
+  const liveTimeline: ChatTimelineItem[] = buildTimeline(liveTaskMessages ?? []);
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
   const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
 
+  const totalCount = messages.length + (hasLive || showStatusPill ? 1 : 0);
+  const firstIndex = totalCount > 0 ? firstItemIndex : 0;
+
   return (
     <div
-      ref={scrollRef}
+      ref={setScrollContainerRef}
       data-tab-scroll-root
       style={fadeStyle}
       className="flex-1 overflow-y-auto"
     >
-      {/* Inner container matches issue / project detail width convention
-       *  (max-w-4xl + mx-auto) so switching between chat and content
-       *  views doesn't jolt the reading width. px-5 is a touch tighter
-       *  than issue-detail's px-8 because the chat window can be narrow. */}
-      <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
-          />
-        ))}
-        {hasLive && (
-          <div className="w-full space-y-1.5">
-            <TimelineView items={liveTimeline} isStreaming />
+      {!scrollContainerEl ? (
+        <div className="mx-auto w-full max-w-4xl px-5 pt-4 space-y-3">
+          <ChatMessageSkeleton />
+        </div>
+      ) : (
+      <Virtuoso
+        customScrollParent={scrollContainerEl}
+        data={messages}
+        firstItemIndex={firstIndex}
+        increaseViewportBy={{ top: 400, bottom: 600 }}
+        atBottomThreshold={120}
+        atBottomStateChange={setIsNearBottom}
+        followOutput={() => (!isFetchingOlderMessages && isNearBottom ? "smooth" : false)}
+        startReached={() => {
+          if (hasOlderMessages && !isFetchingOlderMessages) {
+            onLoadOlderMessages?.();
+          }
+        }}
+        computeItemKey={(_, msg) => msg.id}
+        components={{
+          Header: () => (
+            <div className="mx-auto w-full max-w-4xl px-5 pt-4">
+              {isFetchingOlderMessages && (
+                <div className="text-center text-xs text-muted-foreground">{t(($) => $.message_list.loading_older)}</div>
+              )}
+            </div>
+          ),
+          Footer: () => (
+            <div className="mx-auto w-full max-w-4xl px-5 pb-4 space-y-4">
+              {hasLive && (
+                <div className="w-full space-y-1.5">
+                  <TimelineView items={liveTimeline} isStreaming />
+                </div>
+              )}
+              {showStatusPill && pendingTask && (
+                <TaskStatusPill
+                  pendingTask={pendingTask}
+                  taskMessages={liveTaskMessages ?? []}
+                  availability={availability}
+                />
+              )}
+            </div>
+          ),
+        }}
+        itemContent={(_, msg) => (
+          <div className="mx-auto w-full max-w-4xl px-5 py-2">
+            <MessageBubble
+              message={msg}
+              isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
+            />
           </div>
         )}
-        {showStatusPill && pendingTask && (
-          <TaskStatusPill
-            pendingTask={pendingTask}
-            taskMessages={liveTaskMessages ?? []}
-            availability={availability}
-          />
-        )}
-      </div>
+      />
+      )}
     </div>
   );
 }
@@ -137,17 +184,6 @@ export function ChatMessageSkeleton() {
       </div>
     </div>
   );
-}
-
-function toTimelineItem(m: TaskMessagePayload): ChatTimelineItem {
-  return {
-    seq: m.seq,
-    type: m.type,
-    tool: m.tool,
-    content: m.content,
-    input: m.input,
-    output: m.output,
-  };
 }
 
 // ─── Message bubbles ─────────────────────────────────────────────────────
@@ -195,7 +231,7 @@ function AssistantMessage({
     enabled: canFetchTaskMessages,
   });
 
-  const timeline: ChatTimelineItem[] = (taskMessages ?? []).map(toTimelineItem);
+  const timeline: ChatTimelineItem[] = buildTimeline(taskMessages ?? []);
 
   // Failure bubble path: when the server's FailTask wrote a failure
   // chat_message (failure_reason set), render a destructive bubble with the
@@ -269,10 +305,9 @@ function MessageCopyButton({
 }) {
   const { t } = useT("chat");
   const handleCopy = async () => {
-    try {
-      await copyMarkdown(extractCopyText(message, timeline));
+    if (await copyText(extractCopyText(message, timeline))) {
       toast.success(t(($) => $.message_list.copied_toast));
-    } catch {
+    } else {
       toast.error(t(($) => $.message_list.copy_failed_toast));
     }
   };

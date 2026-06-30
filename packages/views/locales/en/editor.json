@@ -4,8 +4,10 @@
     "italic": "Italic",
     "strikethrough": "Strikethrough",
     "code": "Code",
+    "highlight": "Highlight",
     "link": "Link",
     "list": "List",
+    "task_list": "Task list",
     "quote": "Quote",
     "url_aria_label": "URL",
     "heading_dropdown": {
@@ -17,7 +19,8 @@
     },
     "list_dropdown": {
       "bullet_list": "Bullet List",
-      "ordered_list": "Ordered List"
+      "ordered_list": "Ordered List",
+      "task_list": "Task List"
     },
     "sub_issue": {
       "tooltip": "Create sub-issue from selection",
@@ -55,7 +58,17 @@
     "group_issues": "Issues",
     "all_members": "All members",
     "searching": "Searching...",
-    "no_results": "No results"
+    "no_results": "No results",
+    "group_current": "Current page",
+    "group_recent": "Recently viewed",
+    "group_search": "Search results"
+  },
+  "slash_command": {
+    "no_skills_configured": "No skills configured",
+    "no_results": "No matching skills",
+    "commands": {
+      "note": "Add a note — won't trigger any agents"
+    }
   },
   "code_block": {
     "copy_code": "Copy code",

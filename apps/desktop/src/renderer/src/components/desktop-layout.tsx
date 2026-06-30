@@ -1,5 +1,6 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { motion } from "motion/react";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabHistory } from "@/hooks/use-tab-history";
 import { useActiveTitleSync } from "@/hooks/use-tab-sync";
@@ -14,6 +15,7 @@ import { AppSidebar } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { ChatFab, ChatWindow } from "@multica/views/chat";
 import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core/paths";
+import { useNavigation } from "@multica/views/navigation";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
 import { DesktopNavigationProvider } from "@/platform/navigation";
@@ -21,39 +23,67 @@ import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
 import { WindowOverlay } from "./window-overlay";
 
-function SidebarTopBar() {
+const TOP_BAR_HEIGHT_CLASS = "h-12";
+const WINDOW_TOOLBAR_CLEARANCE = 184;
+const toolbarMotion = {
+  type: "spring",
+  stiffness: 420,
+  damping: 38,
+  mass: 0.8,
+} as const;
+
+function WindowToolbar() {
   const { canGoBack, canGoForward, goBack, goForward } = useTabHistory();
+  const navButtonClassName =
+    "flex size-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-30";
 
   return (
     <div
-      className="h-12 shrink-0 flex items-center justify-end px-2"
+      className={cn(
+        "fixed left-0 top-0 z-30 flex w-[184px] shrink-0 items-center px-3",
+        TOP_BAR_HEIGHT_CLASS,
+      )}
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
     >
       <div
-        className="flex items-center gap-0.5"
+        className="flex items-center gap-1 pl-[70px]"
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
-        <button
-          type="button"
-          onClick={goBack}
-          disabled={!canGoBack}
-          aria-label="Go back"
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
-        >
-          <ChevronLeft className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={goForward}
-          disabled={!canGoForward}
-          aria-label="Go forward"
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
-        >
-          <ChevronRight className="size-4" />
-        </button>
+        <SidebarTrigger
+          className="size-7 text-muted-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+        />
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={goBack}
+            disabled={!canGoBack}
+            aria-label="Go back"
+            title="Go back"
+            className={navButtonClassName}
+            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={goForward}
+            disabled={!canGoForward}
+            aria-label="Go forward"
+            title="Go forward"
+            className={navButtonClassName}
+            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+          >
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
       </div>
     </div>
   );
+}
+
+function SidebarTopSpacer() {
+  return <div className={cn("shrink-0", TOP_BAR_HEIGHT_CLASS)} />;
 }
 
 function useNativeNavigationGestures() {
@@ -71,30 +101,31 @@ function useNativeNavigationGestures() {
 }
 
 // The main area's top bar doubles as a window drag region. When the sidebar
-// is not occupying main-flow width — either user-collapsed (offcanvas) or
-// auto-hidden in mobile mode (<768px, becomes a sheet drawer) — we pad the
-// left side so tabs don't land under the macOS traffic lights (which live at
-// roughly x=16..68 and always hit-test above HTML), and surface a trigger so
-// the sidebar can be brought back without keyboard shortcut.
+// is not occupying main-flow width, leave room for the fixed window toolbar
+// so tabs do not land beneath the traffic lights / navigation controls.
 function MainTopBar() {
   const { state, isMobile } = useSidebar();
   const sidebarHidden = state === "collapsed" || isMobile;
 
   return (
-    <header
-      className={cn(
-        "h-12 shrink-0 flex items-center gap-2",
-        sidebarHidden && "pl-20",
-      )}
-      style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+    <motion.header
+      animate={{ paddingLeft: sidebarHidden ? WINDOW_TOOLBAR_CLEARANCE : 0 }}
+      className={cn("relative shrink-0 flex items-center gap-2", TOP_BAR_HEIGHT_CLASS)}
+      initial={false}
+      transition={toolbarMotion}
     >
-      {sidebarHidden && (
-        <SidebarTrigger
-          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-        />
-      )}
-      <TabBar />
-    </header>
+      <motion.div
+        aria-hidden
+        animate={{ left: sidebarHidden ? WINDOW_TOOLBAR_CLEARANCE : 0 }}
+        className="absolute inset-y-0 right-0"
+        initial={false}
+        transition={toolbarMotion}
+        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      />
+      <div className="relative z-10 flex h-full items-center">
+        <TabBar />
+      </div>
+    </motion.header>
   );
 }
 
@@ -127,18 +158,30 @@ function useInternalLinkHandler() {
  *      inbox even if the user has since switched to workspace B. Marking
  *      the row read is handled by InboxPage's selected-item effect, which
  *      covers both click-to-select and URL-param-select paths.
+ *
+ * The click routes through `useNavigation().push` — NOT the
+ * `multica:navigate` event, whose handler `openTab`s into the ACTIVE
+ * workspace's tab group. The navigation adapter detects a cross-workspace
+ * path and translates it into `switchWorkspace(slug, path)`, so clicking a
+ * workspace-A notification while B is active performs a real workspace
+ * switch instead of mounting A's inbox inside B's tab group (#3766).
  */
 function DesktopInboxBridge() {
   const workspace = useCurrentWorkspace();
   useDesktopUnreadBadge(workspace?.id ?? null);
+  const { push } = useNavigation();
+  // The adapter identity changes with the active tab's location; the ref
+  // keeps the main-process subscription stable across navigations.
+  const pushRef = useRef(push);
+  useEffect(() => {
+    pushRef.current = push;
+  }, [push]);
 
   useEffect(() => {
     return window.desktopAPI.onInboxOpen(({ slug, issueKey }) => {
       if (!slug) return;
       const inboxPath = `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(issueKey)}`;
-      window.dispatchEvent(
-        new CustomEvent("multica:navigate", { detail: { path: inboxPath } }),
-      );
+      pushRef.current(inboxPath);
     });
   }, []);
 
@@ -170,9 +213,10 @@ export function DesktopShell() {
         <DesktopInboxBridge />
         <div className="flex h-screen">
           <SidebarProvider className="flex-1">
-            {slug && <AppSidebar topSlot={<SidebarTopBar />} searchSlot={<SearchTrigger />} />}
+            {slug && <WindowToolbar />}
+            {slug && <AppSidebar topSlot={<SidebarTopSpacer />} searchSlot={<SearchTrigger />} />}
             {/* Right side: header + content container */}
-            <div className="flex flex-1 min-w-0 flex-col">
+            <motion.div layout transition={toolbarMotion} className="flex flex-1 min-w-0 flex-col">
               <MainTopBar />
               {/* Content area with inset styling — relative so ChatWindow/ChatFab are constrained here */}
               <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background">
@@ -180,7 +224,7 @@ export function DesktopShell() {
                 {slug && <ChatWindow />}
                 {slug && <ChatFab />}
               </div>
-            </div>
+            </motion.div>
           </SidebarProvider>
         </div>
         {slug && <ModalRegistry />}

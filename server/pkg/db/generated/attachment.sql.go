@@ -84,6 +84,54 @@ func (q *Queries) DeleteAttachment(ctx context.Context, arg DeleteAttachmentPara
 	return err
 }
 
+const detachAttachmentsFromUserChatMessageByTask = `-- name: DetachAttachmentsFromUserChatMessageByTask :many
+UPDATE attachment
+SET chat_message_id = NULL
+WHERE chat_message_id IN (
+  SELECT id FROM chat_message WHERE task_id = $1 AND role = 'user'
+)
+RETURNING id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id
+`
+
+// When an empty chat task is cancelled, its user message is deleted. The
+// attachment FK is ON DELETE CASCADE, so without this the bound rows would be
+// destroyed and a restored draft could never re-bind them. Detach first
+// (chat_message_id -> NULL, keep chat_session_id) so the rows survive as
+// workspace/session-scoped unattached attachments and re-send can re-link them.
+func (q *Queries) DetachAttachmentsFromUserChatMessageByTask(ctx context.Context, taskID pgtype.UUID) ([]Attachment, error) {
+	rows, err := q.db.Query(ctx, detachAttachmentsFromUserChatMessageByTask, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Attachment{}
+	for rows.Next() {
+		var i Attachment
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.CommentID,
+			&i.UploaderType,
+			&i.UploaderID,
+			&i.Filename,
+			&i.Url,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.CreatedAt,
+			&i.ChatSessionID,
+			&i.ChatMessageID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAttachment = `-- name: GetAttachment :one
 SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM attachment
 WHERE id = $1 AND workspace_id = $2
@@ -115,23 +163,90 @@ func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (A
 	return i, err
 }
 
-const linkAttachmentsToChatMessage = `-- name: LinkAttachmentsToChatMessage :exec
+const getAttachmentByIDOnly = `-- name: GetAttachmentByIDOnly :one
+SELECT id, workspace_id, issue_id, comment_id, uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at, chat_session_id, chat_message_id FROM attachment
+WHERE id = $1
+`
+
+// Used by the download endpoint, which derives workspace context from the
+// attachment row itself rather than from request headers/query params. The
+// caller still has to verify the requester is a member of the returned
+// workspace_id before serving the bytes — this query is access-neutral on
+// purpose so a self-contained URL like /api/attachments/{id}/download can
+// work as a native <img>/<video> resource load (no header attachment).
+func (q *Queries) GetAttachmentByIDOnly(ctx context.Context, id pgtype.UUID) (Attachment, error) {
+	row := q.db.QueryRow(ctx, getAttachmentByIDOnly, id)
+	var i Attachment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.CommentID,
+		&i.UploaderType,
+		&i.UploaderID,
+		&i.Filename,
+		&i.Url,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.CreatedAt,
+		&i.ChatSessionID,
+		&i.ChatMessageID,
+	)
+	return i, err
+}
+
+const linkAttachmentsToChatMessage = `-- name: LinkAttachmentsToChatMessage :many
 UPDATE attachment
-SET chat_message_id = $1
-WHERE chat_session_id = $2
+SET chat_message_id = $1,
+    chat_session_id = $2
+WHERE workspace_id = $3
+  AND issue_id IS NULL
+  AND comment_id IS NULL
   AND chat_message_id IS NULL
-  AND id = ANY($3::uuid[])
+  AND (
+    chat_session_id IS NULL
+    OR chat_session_id = $2
+  )
+  AND uploader_type = $4
+  AND uploader_id = $5
+  AND id = ANY($6::uuid[])
+RETURNING id
 `
 
 type LinkAttachmentsToChatMessageParams struct {
 	ChatMessageID pgtype.UUID   `json:"chat_message_id"`
 	ChatSessionID pgtype.UUID   `json:"chat_session_id"`
-	Column3       []pgtype.UUID `json:"column_3"`
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	UploaderType  string        `json:"uploader_type"`
+	UploaderID    pgtype.UUID   `json:"uploader_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
 }
 
-func (q *Queries) LinkAttachmentsToChatMessage(ctx context.Context, arg LinkAttachmentsToChatMessageParams) error {
-	_, err := q.db.Exec(ctx, linkAttachmentsToChatMessage, arg.ChatMessageID, arg.ChatSessionID, arg.Column3)
-	return err
+func (q *Queries) LinkAttachmentsToChatMessage(ctx context.Context, arg LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, linkAttachmentsToChatMessage,
+		arg.ChatMessageID,
+		arg.ChatSessionID,
+		arg.WorkspaceID,
+		arg.UploaderType,
+		arg.UploaderID,
+		arg.AttachmentIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const linkAttachmentsToComment = `-- name: LinkAttachmentsToComment :exec

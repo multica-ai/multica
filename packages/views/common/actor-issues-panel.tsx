@@ -216,7 +216,7 @@ export function ActorIssuesPanel({
             />
           </div>
         )}
-        <BatchActionToolbar />
+        <BatchActionToolbar issues={issues} />
       </div>
     </ViewStoreProvider>
   );

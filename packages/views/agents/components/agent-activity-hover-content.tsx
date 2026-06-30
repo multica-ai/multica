@@ -61,7 +61,11 @@ export function AgentActivityHoverContent({
   return (
     <div className="flex flex-col gap-2">
       <div className="text-xs font-medium text-muted-foreground">
-        {t(($) => $.agent_activity.hover_header, { count: tasks.length })}
+        {/* One row per task, so count tasks — not agents. A single agent can
+            run several tasks at once, so an agent-worded header here would
+            disagree with the workspace chip's unique-agent count (e.g. chip
+            "2 working" but header "3 agents working"). */}
+        {t(($) => $.agent_activity.hover_header_tasks, { count: tasks.length })}
       </div>
       <div className="flex flex-col gap-1.5">
         {tasks.map((task) => {
@@ -136,7 +140,10 @@ function runtimeFrom<T extends { id: string }>(
 // Capped at hours — anything over a day for a running task is a sign of a
 // stuck runtime, but the hover card is not the place to relitigate that;
 // the row will read as `26h 12m` and the user can act.
-function formatDuration(fromIso: string, nowMs: number): string {
+//
+// Exported so the issue-detail header live chip formats its collapsed
+// single-agent elapsed with the same `2m 14s` / `1h 03m` rule used here.
+export function formatDuration(fromIso: string, nowMs: number): string {
   const start = new Date(fromIso).getTime();
   if (!Number.isFinite(start)) return "";
   const sec = Math.max(0, Math.round((nowMs - start) / 1000));

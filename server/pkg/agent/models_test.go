@@ -2,13 +2,16 @@ package agent
 
 import (
 	"context"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 func TestListModelsStaticProviders(t *testing.T) {
 	ctx := context.Background()
-	for _, provider := range []string{"claude", "codex", "gemini", "cursor"} {
+	for _, provider := range []string{"claude", "codex", "cursor"} {
 		got, err := ListModels(ctx, provider, "")
 		if err != nil {
 			t.Fatalf("ListModels(%q) error: %v", provider, err)
@@ -54,34 +57,26 @@ func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	}
 }
 
-func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
-	// Gemini CLI has no `models list` subcommand, so we expose the
-	// CLI's own aliases (auto / pro / flash / flash-lite) plus
-	// explicit version pins including Gemini 3. Regression guard
-	// for multica-ai/multica#1503 — Gemini 3 must be selectable.
-	models := geminiStaticModels()
+func TestClaudeStaticModelsExposesFable5(t *testing.T) {
+	models := claudeStaticModels()
 	ids := map[string]Model{}
+	defaults := 0
 	for _, m := range models {
 		ids[m.ID] = m
-	}
-	for _, want := range []string{
-		"auto", "auto-gemini-2.5",
-		"pro", "flash", "flash-lite",
-		"gemini-3-pro-preview", "gemini-3-flash-preview",
-		"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
-	} {
-		if _, ok := ids[want]; !ok {
-			t.Errorf("missing expected Gemini model %q in: %+v", want, models)
+		if m.Default {
+			defaults++
 		}
 	}
-	auto, ok := ids["auto"]
-	if !ok || !auto.Default {
-		t.Errorf("expected `auto` to be the default Gemini entry, got %+v", auto)
+
+	fable, ok := ids["claude-fable-5"]
+	if !ok {
+		t.Fatalf("missing Claude Fable 5 in: %+v", models)
 	}
-	for _, m := range models {
-		if m.Provider != "google" {
-			t.Errorf("all Gemini entries must carry Provider=google, got %+v", m)
-		}
+	if fable.Label != "Claude Fable 5" || fable.Provider != "anthropic" || fable.Default {
+		t.Errorf("unexpected Fable entry: %+v", fable)
+	}
+	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
+		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
 	}
 }
 
@@ -120,6 +115,78 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 	}
 	if defaults != 1 {
 		t.Errorf("expected exactly one default Codex entry, got %d", defaults)
+	}
+}
+
+func TestModelKnownIncompatibleWithProvider(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		model    string
+		want     bool
+	}{
+		{
+			name:     "claude model is incompatible with codex",
+			provider: "codex",
+			model:    "claude-sonnet-4-6",
+			want:     true,
+		},
+		{
+			name:     "codex model is compatible with codex",
+			provider: "codex",
+			model:    "gpt-5.5",
+			want:     false,
+		},
+		{
+			name:     "codex model is incompatible with claude",
+			provider: "claude",
+			model:    "o3",
+			want:     true,
+		},
+		{
+			name:     "exact claude model is compatible with claude",
+			provider: "claude",
+			model:    "claude-opus-4-7",
+			want:     false,
+		},
+		{
+			name:     "provider-prefixed openai model is incompatible with codex",
+			provider: "codex",
+			model:    "openai/gpt-4o",
+			want:     true,
+		},
+		{
+			name:     "provider-prefixed anthropic model is incompatible with claude",
+			provider: "claude",
+			model:    "anthropic/claude-opus-4.7",
+			want:     true,
+		},
+		{
+			name:     "known openai-looking model outside codex catalog is incompatible",
+			provider: "codex",
+			model:    "gpt-99",
+			want:     true,
+		},
+		{
+			name:     "unknown custom model is not classified",
+			provider: "codex",
+			model:    "private-lab-model",
+			want:     false,
+		},
+		{
+			name:     "unknown target provider does not clear",
+			provider: "opencode",
+			model:    "claude-sonnet-4-6",
+			want:     false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ModelKnownIncompatibleWithProvider(tc.provider, tc.model); got != tc.want {
+				t.Fatalf("ModelKnownIncompatibleWithProvider(%q, %q) = %v, want %v", tc.provider, tc.model, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -233,6 +300,21 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	}
 }
 
+func TestListModelsQoderWithoutBinary(t *testing.T) {
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "qoder")
+	modelCacheMu.Unlock()
+
+	got, err := ListModels(ctx, "qoder", "/nonexistent/qodercli")
+	if err != nil {
+		t.Fatalf("ListModels(qoder) error: %v", err)
+	}
+	if got == nil {
+		t.Error("expected non-nil slice even when binary is missing")
+	}
+}
+
 func TestListModelsUnknownProvider(t *testing.T) {
 	ctx := context.Background()
 	_, err := ListModels(ctx, "nonexistent", "")
@@ -248,7 +330,6 @@ func TestStaticCatalogsHaveAtMostOneDefault(t *testing.T) {
 	catalogs := map[string][]Model{
 		"claude":  claudeStaticModels(),
 		"codex":   codexStaticModels(),
-		"gemini":  geminiStaticModels(),
 		"cursor":  cursorStaticModels(),
 		"copilot": copilotStaticModels(),
 	}
@@ -281,6 +362,177 @@ nonprefixed-line
 	}
 	if models[1].ID != "anthropic/claude-sonnet-4-6" || models[1].Provider != "anthropic" {
 		t.Errorf("unexpected second model: %+v", models[1])
+	}
+}
+
+func TestParseOpenCodeModelsVerboseVariants(t *testing.T) {
+	input := `openai/gpt-5
+{
+  "id": "gpt-5",
+  "name": "GPT-5",
+  "reasoning": true,
+  "variants": {
+    "high": { "reasoningEffort": "high" },
+    "low": { "reasoningEffort": "low" },
+    "xhigh": { "reasoningEffort": "xhigh" },
+    "fast-mode": { "reasoningEffort": "low" },
+    "disabled": { "disabled": true }
+  }
+}
+anthropic/claude-sonnet-4-6
+{
+  "id": "claude-sonnet-4-6",
+  "reasoning": true,
+  "variants": {
+    "max": { "thinking": { "type": "enabled", "budgetTokens": 32000 } },
+    "high": { "thinking": { "type": "enabled", "budgetTokens": 16000 } }
+  }
+}
+`
+	models := parseOpenCodeModels(input)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(models), models)
+	}
+	if models[0].Thinking == nil {
+		t.Fatalf("expected first model to expose thinking variants")
+	}
+	got := make([]string, 0, len(models[0].Thinking.SupportedLevels))
+	for _, lvl := range models[0].Thinking.SupportedLevels {
+		got = append(got, lvl.Value)
+		if lvl.Value == "xhigh" && lvl.Label != "Extra high" {
+			t.Errorf("xhigh label: got %q, want Extra high", lvl.Label)
+		}
+		if lvl.Value == "fast-mode" && lvl.Label != "Fast Mode" {
+			t.Errorf("custom variant label: got %q, want Fast Mode", lvl.Label)
+		}
+	}
+	want := []string{"low", "high", "xhigh", "fast-mode"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("variant order/values: got %v, want %v", got, want)
+	}
+	if models[1].Thinking == nil || len(models[1].Thinking.SupportedLevels) != 2 {
+		t.Fatalf("expected second model variants, got %+v", models[1].Thinking)
+	}
+}
+
+func TestParseOpenCodeModelsMalformedVerboseBlockKeepsFollowingModels(t *testing.T) {
+	input := `openai/gpt-5
+{
+  "id": "gpt-5",
+  "reasoning": true,
+  "variants": {
+    "high": {}
+  }
+anthropic/claude-sonnet-4-6
+{
+  "id": "claude-sonnet-4-6",
+  "reasoning": true,
+  "variants": {
+    "high": {},
+    "max": {}
+  }
+}
+`
+	models := parseOpenCodeModels(input)
+	if len(models) != 2 {
+		t.Fatalf("expected both model rows to survive malformed JSON, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "openai/gpt-5" {
+		t.Fatalf("unexpected first model: %+v", models[0])
+	}
+	if models[0].Thinking != nil {
+		t.Fatalf("malformed first JSON block should not annotate thinking: %+v", models[0].Thinking)
+	}
+	if models[1].ID != "anthropic/claude-sonnet-4-6" {
+		t.Fatalf("unexpected second model: %+v", models[1])
+	}
+	if models[1].Thinking == nil || len(models[1].Thinking.SupportedLevels) != 2 {
+		t.Fatalf("valid following JSON block should still annotate thinking: %+v", models[1].Thinking)
+	}
+}
+
+func TestDiscoverOpenCodeModelsFallsBackWhenVerboseFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "opencode")
+	script := `#!/bin/sh
+if [ "$1" = "models" ] && [ "$2" = "--verbose" ]; then
+  exit 2
+fi
+if [ "$1" = "models" ]; then
+  cat <<'EOF'
+PROVIDER/MODEL                     CONTEXT  MAX_OUT
+openai/gpt-4o                      128000   16384
+EOF
+  exit 0
+fi
+exit 1
+`
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverOpenCodeModels(context.Background(), fake)
+	if err != nil {
+		t.Fatalf("discoverOpenCodeModels: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected fallback non-verbose model, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "openai/gpt-4o" || models[0].Thinking != nil {
+		t.Fatalf("unexpected fallback model: %+v", models[0])
+	}
+}
+
+// TestCachedDiscoveryDoesNotCacheEmpty verifies that an empty discovery result
+// is not cached, so a transient failure (e.g. a `pi --list-models` timeout)
+// doesn't keep the model picker blank for the full TTL. A non-empty result is
+// still cached. See #3729.
+func TestCachedDiscoveryDoesNotCacheEmpty(t *testing.T) {
+	const emptyKey, nonEmptyKey = "test-cache-empty", "test-cache-nonempty"
+	// modelCache is a package-level global; clear our keys up front and on
+	// cleanup so the test stays hermetic under `go test -count=N` (a leftover
+	// non-empty entry from a prior run would otherwise skip the callback).
+	resetCache := func() {
+		modelCacheMu.Lock()
+		delete(modelCache, emptyKey)
+		delete(modelCache, nonEmptyKey)
+		modelCacheMu.Unlock()
+	}
+	resetCache()
+	t.Cleanup(resetCache)
+
+	emptyCalls := 0
+	empty := func() ([]Model, error) {
+		emptyCalls++
+		return []Model{}, nil
+	}
+	for i := 0; i < 2; i++ {
+		got, err := cachedDiscovery(emptyKey, empty)
+		if err != nil {
+			t.Fatalf("cachedDiscovery: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("expected empty result, got %+v", got)
+		}
+	}
+	if emptyCalls != 2 {
+		t.Fatalf("empty result must not be cached: expected fn called 2x, got %d", emptyCalls)
+	}
+
+	nonEmptyCalls := 0
+	nonEmpty := func() ([]Model, error) {
+		nonEmptyCalls++
+		return []Model{{ID: "provider/model"}}, nil
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := cachedDiscovery(nonEmptyKey, nonEmpty); err != nil {
+			t.Fatalf("cachedDiscovery: %v", err)
+		}
+	}
+	if nonEmptyCalls != 1 {
+		t.Fatalf("non-empty result must be cached: expected fn called 1x, got %d", nonEmptyCalls)
 	}
 }
 
@@ -325,6 +577,106 @@ bareword-only-line
 	// the legacy `provider:model` form gets colon→slash normalization.
 	if models[3].ID != "opencode/claude-sonnet-4-6:exp" || models[3].Provider != "opencode" {
 		t.Errorf("expected ':' inside table-format model name to be preserved: %+v", models[3])
+	}
+}
+
+// TestDiscoverPiModelsNonZeroExit verifies that discoverPiModels still returns
+// the resolvable catalog when `pi --list-models` exits non-zero. Pi exits
+// non-zero (and warns) when an agent config references stale provider/model
+// patterns that no longer match the local catalog. Before the fix the daemon
+// discarded the populated output on any non-zero exit and returned an empty
+// list, so the UI model picker was blank even though the runtime was online and
+// agents ran fine. See GitHub #3729.
+func TestDiscoverPiModelsNonZeroExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake pi binary is a /bin/sh script")
+	}
+
+	const table = "provider         model        context  max-out  thinking  images\n" +
+		"glm-coding-plan  glm-4.7      202.8K   16.4K    no        no"
+	// The unmatched-pattern warning, with and without the `Warning:` prefix —
+	// the prefix is not guaranteed across pi versions, and the bare form is
+	// what slips past a naive guard into a bogus `No/models` model.
+	const prefixed = `Warning: No models match pattern "opencode-go/mimo-v2-omni"`
+	const bare = `No models match pattern "opencode-go/mimo-v2-pro"`
+
+	cases := []struct {
+		name   string
+		script string
+	}{
+		{
+			// Newer pi prints the catalog to stdout; the stale-pattern
+			// warning goes to stderr and the process exits non-zero.
+			name: "catalog on stdout",
+			script: "#!/bin/sh\n" +
+				"cat <<'EOF'\n" + table + "\nEOF\n" +
+				"echo " + strconv.Quote(prefixed) + " >&2\n" +
+				"exit 1\n",
+		},
+		{
+			// Older pi prints the catalog (and the warning) to stderr; same
+			// non-zero exit. The stderr fallback must still parse the catalog.
+			name: "catalog and prefixed warning on stderr",
+			script: "#!/bin/sh\n" +
+				"cat >&2 <<'EOF'\n" + table + "\n" + prefixed + "\nEOF\n" +
+				"exit 1\n",
+		},
+		{
+			// Same, but the warning has no `Warning:` prefix — must not leak in
+			// as a `No/models` row.
+			name: "catalog and bare warning on stderr",
+			script: "#!/bin/sh\n" +
+				"cat >&2 <<'EOF'\n" + table + "\n" + bare + "\nEOF\n" +
+				"exit 1\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fakePath := filepath.Join(t.TempDir(), "pi")
+			writeTestExecutable(t, fakePath, []byte(tc.script))
+
+			models, err := discoverPiModels(context.Background(), fakePath)
+			if err != nil {
+				t.Fatalf("discoverPiModels: %v", err)
+			}
+			// Exactly the resolvable model — no warning line coined into a
+			// bogus entry, no header row.
+			if len(models) != 1 || models[0].ID != "glm-coding-plan/glm-4.7" {
+				t.Fatalf("expected exactly [glm-coding-plan/glm-4.7] despite non-zero exit, got %+v", models)
+			}
+		})
+	}
+}
+
+// TestDiscoverOpenCodeModelsFallsBackOnVerboseNoise verifies that a non-zero
+// `opencode models --verbose` whose stdout is unparseable noise still falls
+// back to the plain `opencode models` command instead of returning empty. The
+// earlier fix skipped the fallback whenever verbose printed any bytes, which
+// regressed this case. Mirrors the pi hardening in #3729.
+func TestDiscoverOpenCodeModelsFallsBackOnVerboseNoise(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake opencode binary is a /bin/sh script")
+	}
+
+	// `opencode models --verbose` => $2 == "--verbose": emit noise + exit 1.
+	// `opencode models`           => no $2: print the plain catalog.
+	script := "#!/bin/sh\n" +
+		"if [ \"$2\" = \"--verbose\" ]; then\n" +
+		"  echo 'panic: catalog sync failed'\n" +
+		"  exit 1\n" +
+		"fi\n" +
+		"echo 'openai/gpt-4o'\n"
+
+	fakePath := filepath.Join(t.TempDir(), "opencode")
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	models, err := discoverOpenCodeModels(context.Background(), fakePath)
+	if err != nil {
+		t.Fatalf("discoverOpenCodeModels: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "openai/gpt-4o" {
+		t.Fatalf("expected fallback to plain `opencode models` to yield [openai/gpt-4o], got %+v", models)
 	}
 }
 
@@ -511,6 +863,31 @@ func TestParseHermesSessionNewModels(t *testing.T) {
 	}
 }
 
+func TestParseHermesSessionNewModelsPreservesCustomModelIDsWithColons(t *testing.T) {
+	raw := []byte(`{
+      "sessionId": "ses_123",
+      "models": {
+        "availableModels": [
+          {"modelId": "custom:lfm2.5:8b", "name": "lfm2.5:8b", "description": "Provider: Custom"}
+        ],
+        "currentModelId": "custom:lfm2.5:8b"
+      }
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "custom:lfm2.5:8b" {
+		t.Errorf("model id must be preserved verbatim, got %+v", models[0])
+	}
+	if models[0].Provider != "custom" {
+		t.Errorf("provider should be derived from the first colon only, got %+v", models[0])
+	}
+	if !models[0].Default {
+		t.Errorf("current custom model should be marked default: %+v", models[0])
+	}
+}
+
 func TestParseHermesSessionNewModelsSnakeCaseAndUnknownNames(t *testing.T) {
 	raw := []byte(`{
       "session_id": "ses_123",
@@ -559,6 +936,57 @@ func TestHermesModelSelectionSupported(t *testing.T) {
 	// not be disabled for it.
 	if !ModelSelectionSupported("hermes") {
 		t.Error("hermes should be model-selection-supported now that set_session_model is wired")
+	}
+}
+
+// TestAntigravityModelSelectionSupported pins that the antigravity provider
+// now reports model selection as supported: agy 1.0.6 added a `--model` flag
+// (MUL-3125) and buildAntigravityArgs wires opts.Model through, so the UI
+// must render the live picker rather than a disabled "Managed by runtime"
+// label.
+func TestAntigravityModelSelectionSupported(t *testing.T) {
+	if !ModelSelectionSupported("antigravity") {
+		t.Error("antigravity should be model-selection-supported now that agy 1.0.6 has --model")
+	}
+}
+
+// TestParseAntigravityModels covers the `agy models` line-per-name format:
+// each non-blank line becomes a Model whose ID and Label are the verbatim
+// display string `--model` expects, duplicates collapse, and blanks drop.
+func TestParseAntigravityModels(t *testing.T) {
+	t.Parallel()
+
+	out := strings.Join([]string{
+		"Gemini 3.5 Flash (Medium)",
+		"Claude Opus 4.6 (Thinking)",
+		"", // blank line — skipped
+		"GPT-OSS 120B (Medium)",
+		"Claude Opus 4.6 (Thinking)", // duplicate — collapsed
+	}, "\n")
+
+	got := parseAntigravityModels(out)
+	want := []Model{
+		{ID: "Gemini 3.5 Flash (Medium)", Label: "Gemini 3.5 Flash (Medium)", Provider: "antigravity"},
+		{ID: "Claude Opus 4.6 (Thinking)", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
+		{ID: "GPT-OSS 120B (Medium)", Label: "GPT-OSS 120B (Medium)", Provider: "antigravity"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parseAntigravityModels len = %d, want %d (%+v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("model[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestParseAntigravityModelsEmpty pins that empty / whitespace-only output
+// yields no models (so cachedDiscovery treats it as a transient miss and
+// retries rather than caching a blank catalog).
+func TestParseAntigravityModelsEmpty(t *testing.T) {
+	t.Parallel()
+	if got := parseAntigravityModels("   \n\t\n"); len(got) != 0 {
+		t.Errorf("expected no models for blank output, got %+v", got)
 	}
 }
 

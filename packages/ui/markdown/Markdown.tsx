@@ -8,7 +8,8 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { FileText, Download } from 'lucide-react'
 import { cn } from '@multica/ui/lib/utils'
-import { CodeBlock, CODE_LIGATURE_CLASS, InlineCode } from './CodeBlock'
+import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
+import { CodeBlock, InlineCode } from './CodeBlock'
 import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
 import { preprocessMentionShortcodes } from './mentions'
@@ -77,12 +78,12 @@ export interface MarkdownProps {
 }
 
 // Sanitization schema — extends GitHub defaults to allow code highlighting classes
-// and the mention:// protocol used for @mentions.
+// and Multica's internal mention/slash protocols.
 const sanitizeSchema = {
   ...defaultSchema,
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), 'mention'],
+    href: [...(defaultSchema.protocols?.href ?? []), 'mention', 'slash'],
   },
   attributes: {
     ...defaultSchema.attributes,
@@ -106,11 +107,12 @@ const sanitizeSchema = {
 }
 
 /**
- * Custom URL transform that allows mention:// protocol (used for @mentions)
- * while keeping the default security for all other URLs.
+ * Custom URL transform that allows Multica internal protocols while keeping
+ * the default security for all other URLs.
  */
 function urlTransform(url: string): string {
   if (url.startsWith('mention://')) return url
+  if (url.startsWith('slash://skill/')) return url
   return defaultUrlTransform(url)
 }
 
@@ -177,9 +179,9 @@ function createComponents(
     },
     // Links: Make clickable with callbacks, or render as mention
     a: ({ href, children }) => {
-      // Mention links: mention://member/id, mention://agent/id, mention://issue/id, mention://all/all
+      // Mention links: mention://member/id, mention://agent/id, mention://issue/id, mention://project/id, mention://all/all
       if (href?.startsWith('mention://')) {
-        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|all)\/(.+)$/)
+        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/)
         if (mentionMatch?.[1] && mentionMatch[2]) {
           const type = mentionMatch[1]
           const id = mentionMatch[2]
@@ -201,6 +203,14 @@ function createComponents(
         }
         return (
           <span className="text-primary font-semibold mx-0.5">
+            {children}
+          </span>
+        )
+      }
+
+      if (href?.startsWith('slash://skill/')) {
+        return (
+          <span className="slash-command text-primary font-semibold mx-0.5">
             {children}
           </span>
         )
@@ -435,7 +445,11 @@ export function Markdown({
   return (
     <div className={cn('markdown-content break-words', className)}>
       <ReactMarkdown
-        remarkPlugins={[remarkMath, remarkBreaks, [remarkGfm, { singleTilde: false }]]}
+        remarkPlugins={[
+          [remarkMath, { singleDollarTextMath: false }],
+          remarkBreaks,
+          [remarkGfm, { singleTilde: false }],
+        ]}
         rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
         urlTransform={urlTransform}
         components={components}

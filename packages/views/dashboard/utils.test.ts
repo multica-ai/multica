@@ -4,7 +4,9 @@ import {
   aggregateDailyCost,
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
+  bucketUnknownAgentRows,
   computeDailyTotals,
+  DELETED_AGENTS_ROW_ID,
   formatDuration,
   mergeAgentDashboardRows,
 } from "./utils";
@@ -14,6 +16,7 @@ describe("aggregateDailyCost", () => {
     const result = aggregateDailyCost([
       {
         date: "2026-05-10",
+        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 1_000_000,
         output_tokens: 500_000,
@@ -23,6 +26,7 @@ describe("aggregateDailyCost", () => {
       },
       {
         date: "2026-05-09",
+        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 1_000_000,
         output_tokens: 0,
@@ -45,6 +49,7 @@ describe("aggregateDailyCost", () => {
     const result = aggregateDailyCost([
       {
         date: "2026-05-10",
+        provider: "claude",
         model: "made-up-model",
         input_tokens: 999_999_999,
         output_tokens: 0,
@@ -62,6 +67,7 @@ describe("aggregateAgentTokens", () => {
     const rows = aggregateAgentTokens([
       {
         agent_id: "small-spender",
+        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 100_000,
         output_tokens: 0,
@@ -71,6 +77,7 @@ describe("aggregateAgentTokens", () => {
       },
       {
         agent_id: "big-spender",
+        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 5_000_000,
         output_tokens: 0,
@@ -80,6 +87,7 @@ describe("aggregateAgentTokens", () => {
       },
       {
         agent_id: "big-spender",
+        provider: "claude",
         model: "claude-haiku-4-5",
         input_tokens: 1_000_000,
         output_tokens: 0,
@@ -101,6 +109,7 @@ describe("computeDailyTotals", () => {
     const totals = computeDailyTotals([
       {
         date: "2026-05-10",
+        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 1_000_000,
         output_tokens: 0,
@@ -110,6 +119,7 @@ describe("computeDailyTotals", () => {
       },
       {
         date: "2026-05-09",
+        provider: "claude",
         model: "claude-sonnet-4-6",
         input_tokens: 2_000_000,
         output_tokens: 0,
@@ -190,6 +200,84 @@ describe("mergeAgentDashboardRows", () => {
       ],
     );
     expect(merged.map((r) => r.agentId)).toEqual(["high", "low", "zero-cost-long"]);
+  });
+});
+
+describe("bucketUnknownAgentRows", () => {
+  const live = { agentId: "live", tokens: 100, cost: 1, seconds: 10, taskCount: 1 };
+  const archived = {
+    agentId: "archived",
+    tokens: 80,
+    cost: 0.8,
+    seconds: 8,
+    taskCount: 2,
+  };
+  const deletedA = {
+    agentId: "deleted-a",
+    tokens: 50,
+    cost: 0.5,
+    seconds: 5,
+    taskCount: 1,
+  };
+  const deletedB = {
+    agentId: "deleted-b",
+    tokens: 30,
+    cost: 0.25,
+    seconds: 3,
+    taskCount: 4,
+  };
+
+  it("folds every hard-deleted agent into one aggregated bucket row", () => {
+    // "deleted-a" / "deleted-b" are absent from the known set — they'd otherwise
+    // render as bare UUIDs. They collapse into a single sentinel row.
+    const out = bucketUnknownAgentRows(
+      [live, deletedA, deletedB],
+      new Set(["live"]),
+    );
+    expect(out.map((r) => r.agentId)).toEqual(["live", DELETED_AGENTS_ROW_ID]);
+    const bucket = out.find((r) => r.agentId === DELETED_AGENTS_ROW_ID)!;
+    expect(bucket.tokens).toBe(80);
+    expect(bucket.cost).toBeCloseTo(0.75);
+    // Time/Tasks never attach to the bucket — the run-time rollup inner-joins
+    // `agent`, so deleted agents contribute nothing to those columns.
+    expect(bucket.seconds).toBe(0);
+    expect(bucket.taskCount).toBe(0);
+  });
+
+  it("keeps the bucket total reconciled with the top-line spend", () => {
+    // The KPI total counts deleted-agent spend; sum(visible rows) must match it
+    // so the breakdown reconciles (MUL-3776).
+    const out = bucketUnknownAgentRows(
+      [live, deletedA, deletedB],
+      new Set(["live"]),
+    );
+    const visibleCost = out.reduce((s, r) => s + r.cost, 0);
+    const kpiCost = [live, deletedA, deletedB].reduce((s, r) => s + r.cost, 0);
+    expect(visibleCost).toBeCloseTo(kpiCost);
+  });
+
+  it("keeps archived agents as themselves, never in the bucket", () => {
+    // The agent list is fetched with archived included, so archived agents are
+    // in the known set and stay on the board under their own id.
+    const out = bucketUnknownAgentRows(
+      [live, archived, deletedA],
+      new Set(["live", "archived"]),
+    );
+    expect(out.map((r) => r.agentId)).toEqual([
+      "live",
+      "archived",
+      DELETED_AGENTS_ROW_ID,
+    ]);
+  });
+
+  it("adds no bucket row when every agent is known", () => {
+    const out = bucketUnknownAgentRows([live, archived], new Set(["live", "archived"]));
+    expect(out.map((r) => r.agentId)).toEqual(["live", "archived"]);
+  });
+
+  it("keeps every row untouched while the agent list is still loading (null set)", () => {
+    const out = bucketUnknownAgentRows([live, deletedA], null);
+    expect(out.map((r) => r.agentId)).toEqual(["live", "deleted-a"]);
   });
 });
 

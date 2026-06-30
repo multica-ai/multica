@@ -4,8 +4,10 @@
     "italic": "斜体",
     "strikethrough": "删除线",
     "code": "代码",
+    "highlight": "高亮",
     "link": "链接",
     "list": "列表",
+    "task_list": "任务列表",
     "quote": "引用",
     "url_aria_label": "URL",
     "heading_dropdown": {
@@ -17,7 +19,8 @@
     },
     "list_dropdown": {
       "bullet_list": "无序列表",
-      "ordered_list": "有序列表"
+      "ordered_list": "有序列表",
+      "task_list": "任务列表"
     },
     "sub_issue": {
       "tooltip": "用选中内容创建子 issue",
@@ -55,7 +58,17 @@
     "group_issues": "Issues",
     "all_members": "所有成员",
     "searching": "搜索中...",
-    "no_results": "无结果"
+    "no_results": "无结果",
+    "group_current": "当前页面",
+    "group_recent": "最近浏览",
+    "group_search": "搜索结果"
+  },
+  "slash_command": {
+    "no_skills_configured": "暂无配置的技能",
+    "no_results": "没有匹配的技能",
+    "commands": {
+      "note": "添加备注 — 不触发任何 Agent"
+    }
   },
   "code_block": {
     "copy_code": "复制代码",

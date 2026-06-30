@@ -32,7 +32,10 @@ type AgentRuntimeResponse struct {
 	// Visibility is "private" (default — only the owner / workspace admins
 	// can bind agents) or "public" (any workspace member can). See migration
 	// 083 and canUseRuntimeForAgent.
-	Visibility string  `json:"visibility"`
+	Visibility string `json:"visibility"`
+	// ProfileID is set when this runtime is an instance of a custom
+	// runtime_profile (MUL-3284); null for built-in runtimes.
+	ProfileID  *string `json:"profile_id"`
 	LastSeenAt *string `json:"last_seen_at"`
 	CreatedAt  string  `json:"created_at"`
 	UpdatedAt  string  `json:"updated_at"`
@@ -60,6 +63,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Metadata:     metadata,
 		OwnerID:      uuidToPtr(rt.OwnerID),
 		Visibility:   rt.Visibility,
+		ProfileID:    uuidToPtr(rt.ProfileID),
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
@@ -184,12 +188,14 @@ func (h *Handler) GetRuntimeTaskActivity(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// RuntimeUsageByAgentResponse is one (agent, model) row of "Cost by agent".
-// Model stays on the wire because cost is computed client-side from a model
-// pricing table, intentionally not stored server-side so pricing changes
-// don't require a back-fill. The client groups by agent_id and sums.
+// RuntimeUsageByAgentResponse is one (agent, provider, model) row of "Cost by
+// agent". provider + model stay on the wire because cost is computed
+// client-side from a model pricing table (intentionally not stored server-side
+// so pricing changes don't require a back-fill); provider disambiguates bare
+// model ids that collide across providers. The client groups by agent_id and sums.
 type RuntimeUsageByAgentResponse struct {
 	AgentID          string `json:"agent_id"`
+	Provider         string `json:"provider"`
 	Model            string `json:"model"`
 	InputTokens      int64  `json:"input_tokens"`
 	OutputTokens     int64  `json:"output_tokens"`
@@ -235,6 +241,7 @@ func (h *Handler) GetRuntimeUsageByAgent(w http.ResponseWriter, r *http.Request)
 	for i, row := range rows {
 		resp[i] = RuntimeUsageByAgentResponse{
 			AgentID:          uuidToString(row.AgentID),
+			Provider:         row.Provider,
 			Model:            row.Model,
 			InputTokens:      row.InputTokens,
 			OutputTokens:     row.OutputTokens,
@@ -561,6 +568,14 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := uuidToString(member.UserID)
 
+	if rt.ProfileID.Valid {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "cannot delete a custom runtime instance directly; delete its runtime profile instead.",
+			"code":  "runtime_profile_instance_delete_unsupported",
+		})
+		return
+	}
+
 	// Check if any active (non-archived) agents are bound to this runtime.
 	// Surface them on the 409 so the dialog can render the cascade plan
 	// directly from this response — saves a second round-trip when the
@@ -575,32 +590,66 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Refuse before any teardown-side effects if the runtime still has active
+	// squads whose leader is already archived on this runtime.
+	activeSquadCount, err := h.Queries.CountActiveSquadsWithArchivedLeadersByRuntime(r.Context(), rt.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check runtime squad dependencies")
+		return
+	}
+	if activeSquadCount > 0 {
+		writeError(w, http.StatusConflict, "cannot delete runtime: it has active squads led by archived agents. Archive those squads or assign them a new leader first.")
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
 	// Pause autopilots pointing at the archived agents BEFORE we delete
 	// them. Migration 096 dropped the autopilot.assignee_id agent FK, so a
 	// hard-delete here would otherwise leave dangling rows that subsequent
 	// scheduler ticks would skip with "assignee agent no longer exists" —
 	// quiet, but burning a run record every tick until an operator notices.
 	// Pausing makes the breakage visible in the autopilot list so the owner
-	// can re-point or delete the row instead.
-	archivedAgentIDs, err := h.Queries.ListArchivedAgentIDsByRuntime(r.Context(), rt.ID)
+	// can re-point or delete the row instead. This runs inside the teardown
+	// transaction so a pause that lands but is followed by a failed delete
+	// rolls back with everything else, matching ArchiveAgentsAndDeleteRuntime.
+	archivedAgentIDs, err := qtx.ListArchivedAgentIDsByRuntime(r.Context(), rt.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enumerate archived agents")
 		return
 	}
 	if len(archivedAgentIDs) > 0 {
-		if err := h.Queries.PauseAutopilotsByAgentAssignees(r.Context(), archivedAgentIDs); err != nil {
-			slog.Warn("pause autopilots for archived agents failed",
-				"runtime_id", uuidToString(rt.ID), "error", err)
+		if err := qtx.PauseAutopilotsByAgentAssignees(r.Context(), archivedAgentIDs); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to pause autopilots")
+			return
 		}
 	}
 
+	// Remove archived squads whose leader is an archived agent on this runtime
+	// so the RESTRICT FK on squad.leader_id won't block the subsequent agent
+	// deletion. Active squads are handled by the 409 guard above instead.
+	if err := qtx.DeleteSquadsByArchivedAgentsOnRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up squads referencing archived agents")
+		return
+	}
+
 	// Remove archived agents so the FK constraint (ON DELETE RESTRICT) won't block deletion.
-	if err := h.Queries.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
+	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 		return
 	}
 
-	if err := h.Queries.DeleteAgentRuntime(r.Context(), rt.ID); err != nil {
+	if err := qtx.DeleteAgentRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
 		return
 	}
@@ -704,6 +753,14 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 		return
 	}
 	userID := uuidToString(member.UserID)
+
+	if rt.ProfileID.Valid {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "cannot delete a custom runtime instance directly; delete its runtime profile instead.",
+			"code":  "runtime_profile_instance_delete_unsupported",
+		})
+		return
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {

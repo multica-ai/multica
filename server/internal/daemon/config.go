@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/exec"
@@ -12,26 +13,44 @@ import (
 	"time"
 
 	"github.com/mattn/go-shellwords"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 const (
-	DefaultServerURL                      = "ws://localhost:8080/ws"
-	DefaultPollInterval                   = 30 * time.Second
-	DefaultHeartbeatInterval              = 15 * time.Second
-	DefaultAgentTimeout                   = 2 * time.Hour
+	DefaultServerURL         = "ws://localhost:8080/ws"
+	DefaultPollInterval      = 30 * time.Second
+	DefaultHeartbeatInterval = 15 * time.Second
+	// DefaultAgentTimeout is the optional absolute wall-clock cap on a single
+	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdogs
+	// (DefaultAgentIdleWatchdog / DefaultAgentToolWatchdog), so a session that keeps emitting events is
+	// never killed merely for running long (MUL-3064). Operators who want a
+	// hard ceiling for cost/resource control can set MULTICA_AGENT_TIMEOUT.
+	DefaultAgentTimeout                   = 0
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
 	// message queue is empty. Backends like Claude Code can hang indefinitely
 	// on a stuck child process (e.g. `docker ps` against a frozen dockerd),
-	// in which case `cmd.Wait()` never returns and the task sits at "running"
-	// for its full DefaultAgentTimeout (2 h). The previous 5 min default
+	// in which case `cmd.Wait()` never returns. With no wall-clock cap
+	// (DefaultAgentTimeout = 0) such a run would otherwise sit at "running"
+	// forever, so this watchdog is its sole liveness net. The previous 5 min default
 	// killed legitimate long assistant outputs (e.g. RFC-length writeups)
 	// where the model streams a single message for many minutes without any
 	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for
 	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
 	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable.
-	DefaultAgentIdleWatchdog       = 30 * time.Minute
+	DefaultAgentIdleWatchdog = 30 * time.Minute
+	// DefaultAgentToolWatchdog bounds how long a single tool call may stay in
+	// flight (tool_use emitted, no tool_result and no other message) before the
+	// idle watchdog force-stops the run. The idle watchdog ignores its normal
+	// window while a tool is in flight, because a real build/install/test
+	// legitimately runs silently for many minutes — but with no wall-clock cap
+	// (DefaultAgentTimeout = 0) a backend that emits tool_use and never the
+	// matching tool_result would otherwise run forever. This is the backstop for
+	// that stuck-tool case (MUL-3064). Set MULTICA_AGENT_TOOL_WATCHDOG=0 to
+	// disable, in which case an in-flight tool never force-stops the run.
+	DefaultAgentToolWatchdog       = 2 * time.Hour
 	DefaultRuntimeName             = "Local Agent"
 	DefaultWorkspaceSyncInterval   = 30 * time.Second
 	DefaultHealthPort              = 19514
@@ -61,7 +80,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -79,18 +98,30 @@ type Config struct {
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
+	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
 	ClaudeArgs                     []string
 	CodexArgs                      []string
+	CodebuddyArgs                  []string
+
+	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
+	// executable path to use for that profile on THIS machine (MUL-3284).
+	// Sourced from the local CLI config (cli.CLIConfig.ProfileCommandOverrides),
+	// written by `multica runtime profile set-path`. appendProfileRuntimes
+	// prefers a matching, executable override over resolving the profile's
+	// command_name on PATH. nil/empty means "always resolve via PATH".
+	ProfileCommandOverrides map[string]string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
 // Zero values are ignored and the env/default value is used instead.
 type Overrides struct {
-	ServerURL                      string
-	WorkspacesRoot                 string
-	PollInterval                   time.Duration
-	HeartbeatInterval              time.Duration
-	AgentTimeout                   time.Duration
+	ServerURL         string
+	WorkspacesRoot    string
+	PollInterval      time.Duration
+	HeartbeatInterval time.Duration
+	// AgentTimeout is a pointer so an explicit `--agent-timeout 0` (no cap) is
+	// distinguishable from "flag not passed". nil = use env/default.
+	AgentTimeout                   *time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	MaxConcurrentTasks             int
 	DaemonID                       string
@@ -116,6 +147,52 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	serverBaseURL, err := NormalizeServerBaseURL(rawServerURL)
 	if err != nil {
 		return Config{}, err
+	}
+
+	// Apply backend overrides from the CLI config file (issue #3875).
+	//
+	// CLIConfig.Backends.OpenClaw lets users record "which OpenClaw on this
+	// machine, and where its state lives" in a versioned, UI-editable file
+	// instead of a launchctl env hack. We translate those fields into the
+	// same env vars the rest of LoadConfig already honors:
+	//
+	//   - MULTICA_OPENCLAW_PATH: read by probe() via envOrDefault for the
+	//     binary lookup; pre-existing path.
+	//   - OPENCLAW_STATE_DIR:    OpenClaw's own env var; the daemon already
+	//     forwards it to spawned children via mergeEnv (server/pkg/agent/...).
+	//
+	// Precedence is "env wins over config wins over default" — same shape
+	// users already get with MULTICA_OPENCLAW_PATH today. We achieve it with
+	// LookupEnv guards: if the user already exported the env var (in their
+	// shell, via launchctl, or via the systemd unit), we leave it alone;
+	// otherwise we Setenv from the config file. This keeps every downstream
+	// consumer (probe, buildEnv, child processes) on the existing code path
+	// without inventing a new plumbing channel.
+	//
+	// Errors loading CLIConfig are non-fatal: a missing or malformed config
+	// file should not prevent daemon startup, since the daemon can still run
+	// purely from env-var configuration. We log a warning and proceed with
+	// no overrides.
+	var profileCommandOverrides map[string]string
+	if cliCfg, err := cli.LoadCLIConfigForProfile(overrides.Profile); err != nil {
+		slog.Warn("could not load CLI config for backend overrides; proceeding without",
+			"profile", overrides.Profile, "err", err)
+	} else {
+		if oc := openclawOverrideFrom(cliCfg); oc != nil {
+			applyOpenclawOverride(oc)
+		}
+		// Per-machine custom-runtime command path overrides (MUL-3284).
+		// Copy into our own map so later mutation of the loaded config can't
+		// alias daemon state, and so an empty map normalizes to nil.
+		if len(cliCfg.ProfileCommandOverrides) > 0 {
+			profileCommandOverrides = make(map[string]string, len(cliCfg.ProfileCommandOverrides))
+			for id, path := range cliCfg.ProfileCommandOverrides {
+				if id == "" || strings.TrimSpace(path) == "" {
+					continue
+				}
+				profileCommandOverrides[id] = path
+			}
+		}
 	}
 
 	// Probe available agent CLIs. exec.LookPath is the primary path, but on
@@ -195,9 +272,6 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_HERMES_PATH", "hermes", "MULTICA_HERMES_MODEL"); ok {
 		agents["hermes"] = e
 	}
-	if e, ok := probe("MULTICA_GEMINI_PATH", "gemini", "MULTICA_GEMINI_MODEL"); ok {
-		agents["gemini"] = e
-	}
 	if e, ok := probe("MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL"); ok {
 		agents["pi"] = e
 	}
@@ -213,8 +287,25 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
+	if e, ok := probe("MULTICA_CODEBUDDY_PATH", "codebuddy", "MULTICA_CODEBUDDY_MODEL"); ok {
+		agents["codebuddy"] = e
+	}
+	// agy 1.0.6 added a `--model` flag (MUL-3125), so Antigravity now takes a
+	// model env like every other backend. MULTICA_ANTIGRAVITY_MODEL seeds the
+	// daemon-wide default; its value is the exact `agy models` display string
+	// (e.g. "Claude Opus 4.6 (Thinking)"), not a provider/model slug.
+	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
+		agents["antigravity"] = e
+	}
+	qoderPath := envOrDefault("MULTICA_QODER_PATH", "qodercli")
+	if _, err := exec.LookPath(qoderPath); err == nil {
+		agents["qoder"] = AgentEntry{
+			Path:  qoderPath,
+			Model: strings.TrimSpace(os.Getenv("MULTICA_QODER_MODEL")),
+		}
+	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, or kiro-cli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, or qodercli and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -222,6 +313,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 	codexArgs, err := shellArgsFromEnv("MULTICA_CODEX_ARGS")
+	if err != nil {
+		return Config{}, err
+	}
+	codebuddyArgs, err := shellArgsFromEnv("MULTICA_CODEBUDDY_ARGS")
 	if err != nil {
 		return Config{}, err
 	}
@@ -253,8 +348,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	if overrides.AgentTimeout > 0 {
-		agentTimeout = overrides.AgentTimeout
+	if overrides.AgentTimeout != nil {
+		agentTimeout = *overrides.AgentTimeout
 	}
 
 	codexSemanticInactivityTimeout, err := durationFromEnv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", DefaultCodexSemanticInactivityTimeout)
@@ -269,6 +364,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// route 0 through durationFromEnv so the operator can opt out without
 	// patching the binary; any positive duration overrides DefaultAgentIdleWatchdog.
 	agentIdleWatchdog, err := durationFromEnv("MULTICA_AGENT_IDLE_WATCHDOG", DefaultAgentIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+
+	// MULTICA_AGENT_TOOL_WATCHDOG=0 disables the in-flight-tool backstop; any
+	// positive duration overrides DefaultAgentToolWatchdog.
+	agentToolWatchdog, err := durationFromEnv("MULTICA_AGENT_TOOL_WATCHDOG", DefaultAgentToolWatchdog)
 	if err != nil {
 		return Config{}, err
 	}
@@ -421,8 +523,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		AgentIdleWatchdog:              agentIdleWatchdog,
+		AgentToolWatchdog:              agentToolWatchdog,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
+		CodebuddyArgs:                  codebuddyArgs,
+		ProfileCommandOverrides:        profileCommandOverrides,
 	}, nil
 }
 
@@ -549,7 +654,7 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
 	"claude", "codex", "opencode", "openclaw", "hermes",
-	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
+	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy",
 }
 
 var codexDesktopAppBundlePaths = func() []string {
@@ -748,4 +853,47 @@ func isSafeAgentName(s string) bool {
 		}
 	}
 	return true
+}
+
+// openclawOverrideFrom returns the OpenClaw override block from a loaded
+// CLIConfig, or nil when no override is configured. Centralized here so
+// the LoadConfig path and tests share one navigation predicate over the
+// nullable-pointer chain.
+func openclawOverrideFrom(cfg cli.CLIConfig) *cli.OpenClawOverride {
+	if cfg.Backends == nil {
+		return nil
+	}
+	return cfg.Backends.OpenClaw
+}
+
+// applyOpenclawOverride translates the config-file overrides into process
+// env vars, which the existing probe() / buildEnv code paths already honor.
+// Env-set-by-user wins over config-set-by-file: we only Setenv when the var
+// is not already present, preserving the back-compat contract documented
+// on cli.OpenClawOverride.
+//
+// Side-effecting on os.Setenv is intentional and scoped:
+//
+//   - The two vars touched (MULTICA_OPENCLAW_PATH, OPENCLAW_STATE_DIR) are
+//     OpenClaw-specific. Other backends do not read them; setting them in the
+//     daemon process has no observable effect on, e.g., Claude Code or Codex
+//     spawn behavior.
+//   - LoadConfig runs once during daemon startup, before any backend Execute.
+//     Concurrent reads of os.Environ() in spawned children see a stable view.
+//   - We deliberately do not unset on later reload: the daemon's lifecycle is
+//     "exit and respawn" (cmd_daemon.go), not in-process reconfigure.
+func applyOpenclawOverride(oc *cli.OpenClawOverride) {
+	if oc == nil {
+		return
+	}
+	if oc.BinaryPath != "" {
+		if _, set := os.LookupEnv("MULTICA_OPENCLAW_PATH"); !set {
+			_ = os.Setenv("MULTICA_OPENCLAW_PATH", oc.BinaryPath)
+		}
+	}
+	if oc.StateDir != "" {
+		if _, set := os.LookupEnv("OPENCLAW_STATE_DIR"); !set {
+			_ = os.Setenv("OPENCLAW_STATE_DIR", oc.StateDir)
+		}
+	}
 }

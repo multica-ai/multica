@@ -129,7 +129,7 @@ vi.mock("../../editor", () => ({
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, placeholder }: any,
+    { defaultValue, onUpdate, placeholder, flushPendingOnUnmount }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
@@ -150,6 +150,7 @@ vi.mock("../../editor", () => ({
         }}
         placeholder={placeholder}
         data-testid="rich-text-editor"
+        data-flush-on-unmount={flushPendingOnUnmount ? "true" : undefined}
       />
     );
   }),
@@ -207,6 +208,7 @@ const mockApiObj = vi.hoisted(() => ({
   unsubscribeFromIssue: vi.fn().mockResolvedValue(undefined),
   getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
   listTasksByIssue: vi.fn().mockResolvedValue([]),
+  rerunIssue: vi.fn(),
   listTaskMessages: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
   listIssues: vi.fn().mockResolvedValue({ issues: [], total: 0 }),
@@ -303,11 +305,14 @@ vi.mock("@multica/core/issues/stores", () => ({
 // compute a 0-height viewport and render nothing. The mock renders every item
 // inline so id="comment-..." nodes are always present in the DOM — this
 // matches the production cold-path where `initialItemCount` force-mounts
-// items[0..targetIdx], giving the native scrollIntoView a real target.
+// items[0..targetIdx], giving the deep-link effect a real target node.
 //
-// scrollIntoViewSpy: we spy on Element.prototype.scrollIntoView (jsdom no-ops
-// it by default) so tests can assert the deep-link effect dispatched a
-// native scroll on the target node.
+// scrollIntoViewSpy: the deep-link effect no longer calls native
+// scrollIntoView (it drives the timeline container's scrollTop directly to
+// avoid scrolling ancestor overflow:hidden boxes — see issue-detail.tsx). We
+// keep a no-op stub on the prototype so any stray scrollIntoView call from
+// other components doesn't throw; deep-link tests assert the highlight ring
+// instead, which is mechanism-independent and observable without layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("react-virtuoso", () => ({
@@ -317,7 +322,8 @@ vi.mock("react-virtuoso", () => ({
   ) {
     useImperativeHandle(ref, () => ({
       // Real Virtuoso ref methods are not exercised by tests in this file
-      // since the cold-path uses native scrollIntoView on the DOM node.
+      // since the deep-link cold-path drives the container's scrollTop on the
+      // real DOM node, not Virtuoso's imperative API.
       scrollIntoView: vi.fn(),
       scrollToIndex: vi.fn(),
     }));
@@ -398,6 +404,7 @@ const mockIssue: Issue = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  stage: null,
   start_date: null,
   due_date: "2026-06-01T00:00:00Z",
   metadata: {},
@@ -434,7 +441,7 @@ const mockTimeline: TimelineEntry[] = [
 // Import component under test (after mocks)
 // ---------------------------------------------------------------------------
 
-import { IssueDetail } from "./issue-detail";
+import { IssueDetail, groupSubIssuesByStage } from "./issue-detail";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -502,6 +509,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.rerunIssue.mockResolvedValue({ id: "task-rerun" });
     mockApiObj.listMembers.mockResolvedValue([
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
@@ -531,30 +539,39 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
   });
 
-  it("renders workspace name as breadcrumb link", async () => {
+  it("opts the description editor into the unmount flush", async () => {
+    // Closing the issue modal must save the description the user last saw —
+    // ContentEditor drops pending debounced updates on unmount by default
+    // (so cancelled comment drafts aren't resurrected), and only this
+    // explicit opt-in keeps a paste-then-close from losing the image
+    // markdown and its attachment_ids bind (MUL-3254). The flush behavior
+    // itself is covered in content-editor.test.tsx; this pins the wiring.
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByText("Test WS")).toBeInTheDocument();
-    });
+    const description = await screen.findByDisplayValue("Add JWT auth to the backend");
+    expect(description).toHaveAttribute("data-flush-on-unmount", "true");
+  });
 
-    const wsLink = screen.getByText("Test WS");
-    // After the URL-driven workspace refactor, issue paths are scoped under
-    // /<workspaceSlug>/issues.
-    expect(wsLink.closest("a")).toHaveAttribute("href", "/test/issues");
+  it("renders the issue title leaf as a link to the issue detail page", async () => {
+    renderIssueDetail();
+
+    // The breadcrumb leaf is the whole "identifier + title" string wrapped in a
+    // single link to the issue's own detail route (used to open the full page
+    // from the inline Inbox pane). A bare issue has no ancestor crumbs.
+    const leaf = await screen.findByText("TES-1 Implement authentication");
+    expect(leaf.closest("a")).toHaveAttribute("href", "/test/issues/issue-1");
   });
 
   it("omits the project breadcrumb segment when the issue has no project_id", async () => {
     // Default fixture has project_id: null.
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByText("Test WS")).toBeInTheDocument();
-    });
+    // Leaf renders once loaded; a bare issue has no ancestor crumbs at all.
+    await screen.findByText("TES-1 Implement authentication");
 
-    // Project should not have been fetched.
+    // Project is never fetched and no project crumb appears.
     expect(mockApiObj.getProject).not.toHaveBeenCalled();
-    expect(screen.queryByText("Unknown project")).not.toBeInTheDocument();
+    expect(screen.queryByText("Marketing site refresh")).not.toBeInTheDocument();
   });
 
   it("renders the project breadcrumb segment when the issue belongs to a project", async () => {
@@ -582,20 +599,6 @@ describe("IssueDetail (shared)", () => {
     // The whole project segment is a single AppLink pointing at the project
     // detail route under the active workspace slug.
     expect(projectLink.closest("a")).toHaveAttribute("href", "/test/projects/p-1");
-  });
-
-  it("shows an Unknown project placeholder when the project query fails", async () => {
-    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-missing" });
-    mockApiObj.getProject.mockRejectedValue(new Error("not found"));
-
-    renderIssueDetail();
-
-    await waitFor(() => {
-      expect(screen.getByText("Unknown project")).toBeInTheDocument();
-    });
-    // Placeholder is non-interactive — no link wraps the text.
-    const placeholder = screen.getByText("Unknown project");
-    expect(placeholder.closest("a")).toBeNull();
   });
 
   it("renders properties sidebar with all core rows plus set optional rows", async () => {
@@ -777,6 +780,100 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
   });
 
+  it("reruns the source task from an agent failure comment", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      ...mockTimeline,
+      {
+        type: "comment",
+        id: "comment-failed-task",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        content: "API Error: 500 Internal server error",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "system",
+        source_task_id: "task-failed",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await screen.findByText("API Error: 500 Internal server error");
+    fireEvent.click(screen.getByRole("button", { name: "Retry task" }));
+
+    await waitFor(() => {
+      expect(mockApiObj.rerunIssue).toHaveBeenCalledWith("issue-1", "task-failed");
+    });
+  });
+
+  it("does not show retry for child-done system comments", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      ...mockTimeline,
+      {
+        type: "comment",
+        id: "comment-child-done",
+        actor_type: "system",
+        actor_id: "00000000-0000-0000-0000-000000000000",
+        content: "Sub-issue MUL-123 is done.",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "system",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await screen.findByText("Sub-issue MUL-123 is done.");
+    expect(screen.queryByRole("button", { name: "Retry task" })).not.toBeInTheDocument();
+  });
+
+  it("does not show retry for successful agent task comments", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      ...mockTimeline,
+      {
+        type: "comment",
+        id: "comment-successful-task",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        content: "Finished the requested work.",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "comment",
+        source_task_id: "task-success",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await screen.findByText("Finished the requested work.");
+    expect(screen.queryByRole("button", { name: "Retry task" })).not.toBeInTheDocument();
+  });
+
+  it("does not show retry for agent system comments without a source task", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      ...mockTimeline,
+      {
+        type: "comment",
+        id: "comment-agent-system",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        content: "System coordination update.",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "system",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await screen.findByText("System coordination update.");
+    expect(screen.queryByRole("button", { name: "Retry task" })).not.toBeInTheDocument();
+  });
+
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {
     // Timeline shape:
     //   [activities: status_changed, priority_changed] ← block A (older)
@@ -842,6 +939,26 @@ describe("IssueDetail (shared)", () => {
       expect(screen.getByText(/changed status/i)).toBeInTheDocument();
     });
     expect(screen.getByText(/changed priority/i)).toBeInTheDocument();
+  });
+
+  it("renders activity rows with unknown status values without crashing", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-unknown-status",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "todo", to: "mystery_status" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText(/from Todo to mystery_status/i)).toBeInTheDocument();
+    });
   });
 
   it("truncates the trailing activity block to the most recent 8 entries with a show-more toggle", async () => {
@@ -992,22 +1109,23 @@ describe("IssueDetail (shared)", () => {
         ).not.toBeNull();
       });
 
-      // The deep-link useLayoutEffect calls native scrollIntoView on the
-      // target node ({block: 'center'}).
+      // The deep-link effect lands on AND highlights the target comment: it
+      // drives the timeline container's scrollTop directly (jsdom has no
+      // layout, so the scroll itself isn't observable here) and applies the
+      // brand highlight ring. Assert the user-facing highlight.
       await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalled();
+        expect(
+          document.getElementById("comment-comment-2")?.querySelector(".ring-2"),
+        ).not.toBeNull();
       });
-      expect(scrollIntoViewSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ block: "center" }),
-      );
     });
 
     it("still scrolls when the timeline is ready before the issue (regression for inbox click)", async () => {
       // Reproduces the inbox-click race: timeline data is in the cache
       // before the issue resolves. While loading is true, IssueDetail
-      // renders the loading skeleton (Virtuoso never mounts), so no
-      // scroll can fire. After the issue resolves, Virtuoso mounts and
-      // the useLayoutEffect dispatches the native scroll.
+      // renders the loading skeleton (the timeline never mounts), so no
+      // scroll/highlight can fire. After the issue resolves, the timeline
+      // mounts and the deep-link effect lands on + highlights the comment.
       let resolveIssue: (value: Issue) => void = () => {};
       const issuePromise = new Promise<Issue>((resolve) => {
         resolveIssue = resolve;
@@ -1019,7 +1137,8 @@ describe("IssueDetail (shared)", () => {
       expect(
         document.getElementById("comment-comment-2"),
       ).toBeNull();
-      expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+      // Nothing highlighted while the loading skeleton is up.
+      expect(document.querySelector(".ring-2")).toBeNull();
 
       resolveIssue(mockIssue);
 
@@ -1029,9 +1148,9 @@ describe("IssueDetail (shared)", () => {
         ).not.toBeNull();
       });
       await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ block: "center" }),
-        );
+        expect(
+          document.getElementById("comment-comment-2")?.querySelector(".ring-2"),
+        ).not.toBeNull();
       });
     });
 
@@ -1079,16 +1198,18 @@ describe("IssueDetail (shared)", () => {
       );
 
       // After expansion, the reply must appear in the DOM (inside the now
-      // -unfolded CommentCard) and the deep-link effect must scroll to it.
+      // -unfolded CommentCard) and the deep-link effect must land on + highlight
+      // it. The reply highlight renders as a computed bg tint on its row (see
+      // CommentCard's reply branch), so assert the row carries the brand tint.
       await waitFor(() => {
         expect(
           document.getElementById("comment-reply-1"),
         ).not.toBeNull();
       });
       await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ block: "center" }),
-        );
+        expect(
+          document.getElementById("comment-reply-1")?.className,
+        ).toContain("bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]");
       });
     });
   });
@@ -1109,5 +1230,38 @@ describe("IssueDetail (shared)", () => {
         expect.objectContaining({ description: "" }),
       );
     });
+  });
+});
+
+describe("groupSubIssuesByStage", () => {
+  const child = (id: string, stage: number | null): Issue => ({
+    ...mockIssue,
+    id,
+    parent_issue_id: "parent-1",
+    stage,
+  });
+
+  it("returns a single null-stage group when nothing is staged", () => {
+    const groups = groupSubIssuesByStage([child("a", null), child("b", null)]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.stage).toBeNull();
+    expect(groups[0]?.items.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+
+  it("orders staged groups ascending with the unstaged group last", () => {
+    const groups = groupSubIssuesByStage([
+      child("s2", 2),
+      child("u", null),
+      child("s1a", 1),
+      child("s1b", 1),
+    ]);
+    expect(groups.map((g) => g.stage)).toEqual([1, 2, null]);
+    expect(groups[0]?.items.map((i) => i.id)).toEqual(["s1a", "s1b"]);
+    expect(groups[2]?.items.map((i) => i.id)).toEqual(["u"]);
+  });
+
+  it("omits the unstaged group when every child is staged", () => {
+    const groups = groupSubIssuesByStage([child("s1", 1), child("s2", 2)]);
+    expect(groups.map((g) => g.stage)).toEqual([1, 2]);
   });
 });
