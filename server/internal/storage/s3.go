@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -18,11 +19,12 @@ import (
 )
 
 type S3Storage struct {
-	client      *s3.Client
-	bucket      string
-	region      string // used to construct virtual-hosted-style public URLs when no CDN/endpoint is set
-	cdnDomain   string // if set, returned URLs use this instead of bucket name
-	endpointURL string // if set, use path-style URLs (e.g. MinIO)
+	client       *s3.Client
+	bucket       string
+	region       string // used to construct virtual-hosted-style public URLs when no CDN/endpoint is set
+	cdnDomain    string // if set, returned URLs use this instead of bucket name
+	endpointURL  string // custom S3-compatible endpoint (e.g. MinIO)
+	usePathStyle bool   // controls path-style S3 addressing
 }
 
 // NewS3StorageFromEnv creates an S3Storage from environment variables.
@@ -32,6 +34,8 @@ type S3Storage struct {
 //   - S3_BUCKET (required)
 //   - S3_REGION (default: us-west-2)
 //   - AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (optional; falls back to default credential chain)
+//   - AWS_ENDPOINT_URL (optional S3-compatible endpoint)
+//   - S3_USE_PATH_STYLE (optional; defaults to true when AWS_ENDPOINT_URL is set)
 func NewS3StorageFromEnv() *S3Storage {
 	bucket := os.Getenv("S3_BUCKET")
 	if bucket == "" {
@@ -71,21 +75,25 @@ func NewS3StorageFromEnv() *S3Storage {
 	cdnDomain := os.Getenv("CLOUDFRONT_DOMAIN")
 
 	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
+	usePathStyle := s3UsePathStyleFromEnv(endpointURL)
 	s3Opts := []func(*s3.Options){}
-	if endpointURL != "" {
+	if endpointURL != "" || usePathStyle {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
-			o.BaseEndpoint = aws.String(endpointURL)
-			o.UsePathStyle = true
+			if endpointURL != "" {
+				o.BaseEndpoint = aws.String(endpointURL)
+			}
+			o.UsePathStyle = usePathStyle
 		})
 	}
 
-	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL)
+	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL, "use_path_style", usePathStyle)
 	return &S3Storage{
-		client:      s3.NewFromConfig(cfg, s3Opts...),
-		bucket:      bucket,
-		region:      region,
-		cdnDomain:   cdnDomain,
-		endpointURL: endpointURL,
+		client:       s3.NewFromConfig(cfg, s3Opts...),
+		bucket:       bucket,
+		region:       region,
+		cdnDomain:    cdnDomain,
+		endpointURL:  endpointURL,
+		usePathStyle: usePathStyle,
 	}
 }
 
@@ -100,6 +108,31 @@ func (s *S3Storage) CdnDomain() string {
 // "<bucket>.s3.<region>.amazonaws.com" into S3_BUCKET.
 func looksLikeS3Hostname(bucket string) bool {
 	return strings.Contains(bucket, "amazonaws.com")
+}
+
+func s3UsePathStyleFromEnv(endpointURL string) bool {
+	defaultValue := endpointURL != ""
+	raw, ok := os.LookupEnv("S3_USE_PATH_STYLE")
+	if !ok || strings.TrimSpace(raw) == "" {
+		return defaultValue
+	}
+	parsed, err := parseBoolEnv(raw)
+	if err != nil {
+		slog.Warn("invalid S3_USE_PATH_STYLE value, using default", "value", raw, "default", defaultValue)
+		return defaultValue
+	}
+	return parsed
+}
+
+func parseBoolEnv(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "t", "true", "y", "yes", "on":
+		return true, nil
+	case "0", "f", "false", "n", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid bool %q", raw)
+	}
 }
 
 // storageClass returns the appropriate S3 storage class.
@@ -117,9 +150,13 @@ func (s *S3Storage) storageClass() types.StorageClass {
 //	"https://my-bucket.s3.us-east-1.amazonaws.com/uploads/x/y.png" → "uploads/x/y.png"
 func (s *S3Storage) KeyFromURL(rawURL string) string {
 	if s.endpointURL != "" {
-		prefix := strings.TrimRight(s.endpointURL, "/") + "/" + s.bucket + "/"
-		if strings.HasPrefix(rawURL, prefix) {
-			return strings.TrimPrefix(rawURL, prefix)
+		for _, prefix := range []string{
+			customEndpointObjectPrefix(s.endpointURL, s.bucket, true),
+			customEndpointObjectPrefix(s.endpointURL, s.bucket, false),
+		} {
+			if strings.HasPrefix(rawURL, prefix) {
+				return strings.TrimPrefix(rawURL, prefix)
+			}
 		}
 	}
 
@@ -254,10 +291,32 @@ func (s *S3Storage) uploadedURL(key string) string {
 		return fmt.Sprintf("https://%s/%s", s.cdnDomain, key)
 	}
 	if s.endpointURL != "" {
-		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
+		return customEndpointObjectURL(s.endpointURL, s.bucket, key, s.usePathStyle)
 	}
-	if strings.Contains(s.bucket, ".") {
+	if s.usePathStyle || strings.Contains(s.bucket, ".") {
 		return fmt.Sprintf("https://s3.%s.amazonaws.com/%s/%s", s.region, s.bucket, key)
 	}
 	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.region, key)
+}
+
+func customEndpointObjectURL(endpointURL, bucket, key string, usePathStyle bool) string {
+	return customEndpointObjectPrefix(endpointURL, bucket, usePathStyle) + key
+}
+
+func customEndpointObjectPrefix(endpointURL, bucket string, usePathStyle bool) string {
+	trimmed := strings.TrimRight(endpointURL, "/")
+	if usePathStyle {
+		return trimmed + "/" + bucket + "/"
+	}
+
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return trimmed + "/"
+	}
+	u.Host = bucket + "." + u.Host
+	u.Path = strings.TrimRight(u.Path, "/") + "/"
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
