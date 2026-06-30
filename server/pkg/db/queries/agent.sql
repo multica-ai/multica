@@ -20,11 +20,23 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, thinking_level
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    instructions, custom_env, custom_args, mcp_config, model, thinking_level,
+    composio_toolkit_allowlist
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16,
+    sqlc.narg('composio_toolkit_allowlist')::text[]
+)
 RETURNING *;
 
 -- name: UpdateAgent :one
+-- composio_toolkit_allowlist is set wholesale: the API layer is responsible
+-- for normalising the request payload to either (a) the new slug list — sent
+-- here verbatim — or (b) an empty array to explicitly disable Composio.
+-- Distinguish "field omitted" (preserve) from "explicit clear" via
+-- ClearAgentComposioToolkitAllowlist below, mirroring the
+-- thinking_level / mcp_config two-query pattern: COALESCE can't restore NULL.
 UPDATE agent SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
@@ -41,7 +53,19 @@ UPDATE agent SET
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
+    composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentComposioToolkitAllowlist :one
+-- Explicit NULL-clear for composio_toolkit_allowlist. The COALESCE-based
+-- UpdateAgent cannot set the column back to NULL — sending an empty array
+-- through there would persist `{}` (still a non-NULL, equivalent to "no
+-- toolkits" but distinct from "field never configured"). The API uses this
+-- dedicated query when the agent owner removes every toolkit; subsequent
+-- dispatch decisions treat NULL identically to `{}` (both -> no overlay).
+UPDATE agent SET composio_toolkit_allowlist = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -137,7 +161,7 @@ ORDER BY created_at DESC;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id
+    squad_id, originator_user_id
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -145,7 +169,8 @@ VALUES (
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(handoff_note),
-    sqlc.narg(squad_id)
+    sqlc.narg(squad_id),
+    sqlc.narg(originator_user_id)
 )
 RETURNING *;
 
@@ -153,8 +178,10 @@ RETURNING *;
 -- Quick-create tasks have no issue / chat / autopilot link; the entire job
 -- description (prompt, requester, workspace) lives in context JSONB. The
 -- daemon detects this variant via context.type == "quick_create".
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, context, originator_user_id
+)
+VALUES ($1, $2, NULL, 'queued', $3, $4, sqlc.narg(originator_user_id))
 RETURNING *;
 
 -- name: LinkTaskToIssue :exec
@@ -191,12 +218,17 @@ WHERE id = $1 AND status = 'queued';
 -- parent and the self-trigger guard in shouldEnqueueSquadLeaderOnComment
 -- continues to recognise it as a leader task. Inheriting squad_id also keeps
 -- the squad-leader briefing injection working across retries.
+--
+-- originator_user_id is inherited so the Composio overlay decision sees the
+-- same top-of-chain human across the retry: the user behind the original
+-- run has not changed, and the dispatch hook in TaskService can keep gating
+-- on (originator == agent.owner_id) without a separate parent lookup.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id
+    squad_id, originator_user_id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -206,7 +238,8 @@ SELECT
     p.attempt + 1, p.max_attempts, p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
-    p.squad_id
+    p.squad_id,
+    p.originator_user_id
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
