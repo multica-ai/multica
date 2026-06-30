@@ -7,6 +7,8 @@ import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
 import {
   Archive,
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
   Calendar,
   CalendarClock,
   CalendarDays,
@@ -74,7 +76,10 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import {
+  useIssueCommentOrderStore,
+  useRecentIssuesStore,
+} from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -910,6 +915,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
+  const commentOrder = useIssueCommentOrderStore((s) => s.order);
+  const setCommentOrder = useIssueCommentOrderStore((s) => s.setOrder);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -1015,8 +1022,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    return { threadReplies, groups };
-  }, [timeline]);
+    return {
+      threadReplies,
+      groups: commentOrder === "newest_first" ? [...groups].reverse() : groups,
+    };
+  }, [timeline, commentOrder]);
 
   // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
   // changes (timeline events) or expandedResolved flips (user toggles a
@@ -1027,13 +1037,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [timelineView.groups, expandedResolved],
   );
 
-  // ID of the trailing activity block — the only one expanded by default.
-  const lastActivityGroupId = useMemo(() => {
-    for (let i = timelineView.groups.length - 1; i >= 0; i--) {
-      const g = timelineView.groups[i]!;
-      if (g.type === "activities") return g.entries[0]!.id;
+  // ID of the newest activity block — the only one expanded by default.
+  const defaultActivityGroupId = useMemo(() => {
+    let newest: { id: string; time: number } | null = null;
+    for (const group of timelineView.groups) {
+      if (group.type !== "activities") continue;
+      const time = Math.max(
+        ...group.entries.map((entry) => new Date(entry.created_at).getTime()),
+      );
+      if (!newest || time > newest.time) {
+        newest = { id: group.entries[0]!.id, time };
+      }
     }
-    return null;
+    return newest?.id ?? null;
   }, [timelineView.groups]);
 
   // Map of reply-comment id → root-comment id, so a deep-link to a reply
@@ -1754,8 +1770,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       ? true
       : collapsedActivityIds.has(item.id)
         ? false
-        : item.id === lastActivityGroupId;
-    const truncateOlder = item.id === lastActivityGroupId;
+        : item.id === defaultActivityGroupId;
+    const truncateOlder = item.id === defaultActivityGroupId;
     const showOlder = showOlderActivityIds.has(item.id);
     return (
       <ActivityBlock
@@ -1771,6 +1787,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       />
     );
   };
+
+  const mainCommentInput = (
+    <div className={cn("mt-4", commentOrder === "newest_first" && "mb-4")}>
+      {/* key={id}: web's /issues/[id] route doesn't remount on
+          issueId change, so without an explicit key the editor
+          keeps the previous issue's in-memory content and the
+          next keystroke would flush it into the new issue's
+          draft key. */}
+      <CommentInput key={id} issueId={id} onSubmit={submitComment} />
+    </div>
+  );
 
   // Breadcrumb shows the single most-direct container, never a fabricated chain.
   // project_id and parent_issue_id are orthogonal (a sub-issue can live in a
@@ -2101,6 +2128,42 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <h2 className="text-base font-semibold">{t(($) => $.detail.activity_section)}</h2>
               </div>
               <div className="flex items-center gap-2">
+                <div
+                  role="group"
+                  aria-label={t(($) => $.detail.comment_order.label)}
+                  className="inline-flex items-center rounded border bg-muted/40 p-0.5 text-xs"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={commentOrder === "oldest_first"}
+                    title={t(($) => $.detail.comment_order.oldest_first)}
+                    onClick={() => setCommentOrder("oldest_first")}
+                    className={cn(
+                      "flex h-6 items-center gap-1 rounded px-1.5 transition-colors",
+                      commentOrder === "oldest_first"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <ArrowDownNarrowWide className="h-3 w-3" />
+                    <span>{t(($) => $.detail.comment_order.oldest_first)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={commentOrder === "newest_first"}
+                    title={t(($) => $.detail.comment_order.newest_first)}
+                    onClick={() => setCommentOrder("newest_first")}
+                    className={cn(
+                      "flex h-6 items-center gap-1 rounded px-1.5 transition-colors",
+                      commentOrder === "newest_first"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <ArrowUpNarrowWide className="h-3 w-3" />
+                    <span>{t(($) => $.detail.comment_order.newest_first)}</span>
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={handleToggleSubscribe}
@@ -2149,6 +2212,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 doesn't compete with sticky banners in this content column.
                 The per-task timeline + past runs live in the right panel
                 via ExecutionLogSection. */}
+
+            {commentOrder === "newest_first" && mainCommentInput}
 
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment
@@ -2213,15 +2278,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               )
             )}
 
-            {/* Bottom comment input — no avatar, full width */}
-            <div className="mt-4">
-              {/* key={id}: web's /issues/[id] route doesn't remount on
-                  issueId change, so without an explicit key the editor
-                  keeps the previous issue's in-memory content and the
-                  next keystroke would flush it into the new issue's
-                  draft key. */}
-              <CommentInput key={id} issueId={id} onSubmit={submitComment} />
-            </div>
+            {/* Main comment input — no avatar, full width */}
+            {commentOrder === "oldest_first" && mainCommentInput}
           </div>
         </div>
         </div>
