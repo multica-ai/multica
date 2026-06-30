@@ -43,6 +43,7 @@ oauth_config:
       - im:history
       - mpim:history
       - chat:write
+      - reactions:write
       - users:read
 settings:
   event_subscriptions:
@@ -66,6 +67,7 @@ settings:
 | `app_home.messages_tab_enabled: true` | 멤버가 봇을 열어 **DM**할 수 있게 합니다. 이것이 없으면 봇에게 직접 메시지를 보낼 수 없습니다. |
 | `bot_user` | `@`로 멘션되고 답변을 게시하는 봇 신원을 생성합니다. |
 | `chat:write` | 에이전트의 답변을 Slack으로 다시 게시합니다. |
+| `reactions:write` | 에이전트가 처리하는 동안 메시지에 👀 반응을 추가하고, 답변하면 제거합니다. 이 스코프가 없으면 표시가 조용히 건너뛰어집니다 — 나머지 기능은 모두 정상 동작합니다. |
 | `app_mentions:read` + `app_mention` 이벤트 | 채널에서 `@`-멘션을 받습니다. |
 | `im:history` + `message.im` | 봇에게 보내는 **DM**을 받습니다(모든 DM 메시지를 읽습니다). |
 | `channels:history` / `groups:history` / `mpim:history` + 대응하는 `message.*` 이벤트 | 공개 채널, 비공개 채널, 그룹 DM의 메시지를 받습니다. 이런 곳에서 봇은 자신을 **@로 멘션한** 메시지에만 반응합니다. |
@@ -74,6 +76,10 @@ settings:
 | `interactivity.is_enabled: false` | Multica의 안내는 버튼이 아니라 일반 링크라서, interactivity가 필요 없습니다. |
 
 **OAuth redirect URL은 없습니다.** BYO는 OAuth를 사용하지 않기 때문입니다.
+
+<Callout type="warning">
+이전 매니페스트로 이미 앱을 만들었나요? **OAuth & Permissions → Bot Token Scopes**에서 **`reactions:write`** 스코프를 추가한 뒤, 새 스코프가 적용되도록 **앱을 워크스페이스에 다시 설치**하세요. 그 전까지 에이전트는 정상적으로 답변하며 — 👀 "처리 중" 반응만 건너뜁니다.
+</Callout>
 
 <Callout type="info">
 Slack에서 특정 이름을 쓰고 싶나요? 생성하기 전에 `display_information.name`과 `features.bot_user.display_name`을 (예: 에이전트 이름으로) 변경하거나, 나중에 **App Home**에서 편집하세요. Slack은 봇을 **bot display name**으로 표시하며, 이는 앱 이름과 다를 수 있습니다.

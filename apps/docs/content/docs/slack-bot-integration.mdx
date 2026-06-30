@@ -43,6 +43,7 @@ oauth_config:
       - im:history
       - mpim:history
       - chat:write
+      - reactions:write
       - users:read
 settings:
   event_subscriptions:
@@ -66,6 +67,7 @@ This manifest configures everything Multica needs, so you don't set anything by 
 | `app_home.messages_tab_enabled: true` | Lets members open the bot and **DM** it. Without it, the bot can't be messaged directly. |
 | `bot_user` | Creates the bot identity that gets @-mentioned and posts replies. |
 | `chat:write` | Post the agent's replies back into Slack. |
+| `reactions:write` | Add a 👀 reaction to your message while the agent is working, removed when it replies. Without this scope the indicator is silently skipped — everything else still works. |
 | `app_mentions:read` + `app_mention` event | Receive @-mentions in channels. |
 | `im:history` + `message.im` | Receive **DMs** to the bot (every DM message is read). |
 | `channels:history` / `groups:history` / `mpim:history` + the matching `message.*` events | Receive messages in public channels, private channels, and group DMs. In these, the bot only acts on messages that **@-mention** it. |
@@ -74,6 +76,10 @@ This manifest configures everything Multica needs, so you don't set anything by 
 | `interactivity.is_enabled: false` | Multica's prompts are plain links, not buttons, so interactivity isn't needed. |
 
 There is **no OAuth redirect URL**, because BYO doesn't use OAuth.
+
+<Callout type="warning">
+Already created your app with an earlier manifest? Add the **`reactions:write`** scope under **OAuth & Permissions → Bot Token Scopes**, then **reinstall the app to your workspace** so the new scope takes effect. Until you do, the agent still replies normally — only the 👀 "processing" reaction is skipped.
+</Callout>
 
 <Callout type="info">
 Want a specific name in Slack? Change `display_information.name` and `features.bot_user.display_name` (e.g. to your agent's name) before creating, or edit it later under **App Home**. Slack shows the bot by its **bot display name**, which can differ from the app name.

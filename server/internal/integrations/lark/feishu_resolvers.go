@@ -253,3 +253,11 @@ func (r *feishuTypingNotifier) OnIngested(ctx context.Context, inst engine.Resol
 	lm, _ := larkMsgFromRaw(msg)
 	r.mgr.Add(ctx, larkInst, sessionID, msg.MessageID, lm.CreateTime)
 }
+
+// OnSettled clears the reaction when the run trigger enqueued no task (agent
+// offline / archived, or an enqueue failure) — the Patcher's bus-driven clear on
+// chat-done / task-failed never fires for those, so without this the Typing
+// reaction sticks.
+func (r *feishuTypingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID) {
+	r.mgr.Clear(ctx, sessionID)
+}

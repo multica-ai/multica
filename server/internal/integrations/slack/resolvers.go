@@ -29,9 +29,10 @@ const originSlackChat = "slack_chat"
 // the outbound binding-prompt / status / issue-created notices; pass a nil
 // engine.OutboundReplier to disable them (the inbound pipeline — route,
 // identity, dedup, session, /issue, run trigger — is fully functional without
-// it). Typing is left nil. (MUL-3666 wired the replier; stage 3 had it nil.)
-func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier) engine.ResolverSet {
-	return engine.ResolverSet{
+// it). typing shows the "processing" reaction on ingest; pass nil to disable it
+// (MUL-3874). (MUL-3666 wired the replier; stage 3 had both nil.)
+func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, typing *TypingIndicatorManager) engine.ResolverSet {
+	set := engine.ResolverSet{
 		Installation: &installationResolver{q: q},
 		Identity:     &identityResolver{q: q},
 		Dedup:        &deduper{q: q},
@@ -44,6 +45,12 @@ func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.Outb
 		Replier:    replier,
 		OriginType: originSlackChat,
 	}
+	// Guard against assigning a nil *TypingIndicatorManager into the interface
+	// field (which would make set.Typing a non-nil typed-nil); mirrors Feishu.
+	if typing != nil {
+		set.Typing = &slackTypingNotifier{mgr: typing}
+	}
+	return set
 }
 
 var (
@@ -52,6 +59,7 @@ var (
 	_ engine.Deduper              = (*deduper)(nil)
 	_ engine.SessionBinder        = (*sessionBinder)(nil)
 	_ engine.Auditor              = (*auditor)(nil)
+	_ engine.TypingNotifier       = (*slackTypingNotifier)(nil)
 )
 
 // slackBindingConfig is the opaque outbound routing persisted on the chat
@@ -269,4 +277,28 @@ func (r *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channe
 		ChannelEventID:   nullText(msg.EventID),
 		ChannelMessageID: nullText(msg.MessageID),
 	})
+}
+
+// ---- typing indicator ----
+
+type slackTypingNotifier struct{ mgr *TypingIndicatorManager }
+
+// OnIngested fires when a Slack message is successfully ingested. It reacts to
+// the user's message (channel = Source.ChatID, ts = MessageID) so the user sees
+// the bot is processing it. The resolved installation carries the bot token in
+// its Config blob — the InstallationResolver stashed the db.ChannelInstallation
+// row in Platform, the documented adapter boundary the core never reads.
+func (n *slackTypingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+	ci, ok := inst.Platform.(db.ChannelInstallation)
+	if !ok {
+		return
+	}
+	n.mgr.Add(ctx, ci, sessionID, msg.Source.ChatID, msg.MessageID)
+}
+
+// OnSettled clears the reaction when the run trigger enqueued no task (agent
+// offline / archived, or an enqueue failure) — the bus-driven clear on
+// chat-done / task-failed never fires for those, so without this the 👀 sticks.
+func (n *slackTypingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID) {
+	n.mgr.Clear(ctx, sessionID)
 }
