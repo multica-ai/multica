@@ -227,6 +227,67 @@ func TestPreviewCommentTriggers_PlainReplyToMemberRootMentionRoutesToMentionedAg
 	}
 }
 
+func TestPreviewCommentTriggers_PlainReplyToMultiAgentRootRoutesAllOwners(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	assigneeID := createHandlerTestAgent(t, "Preview Multi Root Assignee", nil)
+	agentAID := createHandlerTestAgent(t, "Preview Multi Root A", nil)
+	agentBID := createHandlerTestAgent(t, "Preview Multi Root B", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "multi-agent root owner reply", "agent", assigneeID)
+
+	rootContent := fmt.Sprintf(
+		"[@A](mention://agent/%s) [@B](mention://agent/%s) can you both inspect this?",
+		agentAID,
+		agentBID,
+	)
+	rootID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{"content": rootContent})
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentAID); got != 1 {
+		t.Fatalf("root mention queued agent A tasks = %d, want 1", got)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentBID); got != 1 {
+		t.Fatalf("root mention queued agent B tasks = %d, want 1", got)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 0 {
+		t.Fatalf("root mention queued assignee tasks = %d, want 0", got)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue SET status = 'completed'
+		WHERE issue_id = $1 AND agent_id IN ($2, $3) AND status = 'queued'
+	`, issueID, agentAID, agentBID); err != nil {
+		t.Fatalf("complete root owner tasks: %v", err)
+	}
+
+	replyContent := "plain reply with no mention"
+	replyParentID := rootID
+	replyPreview := previewCommentTriggersForTest(t, issueID, CommentTriggerPreviewRequest{
+		Content:  replyContent,
+		ParentID: &replyParentID,
+	})
+	requirePreviewAgents(t, replyPreview, agentAID, agentBID)
+	for _, agent := range replyPreview.Agents {
+		if agent.Source != string(commentTriggerSourceConversation) {
+			t.Fatalf("reply preview source for %s = %q, want %q", agent.ID, agent.Source, commentTriggerSourceConversation)
+		}
+	}
+
+	postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+		"content":   replyContent,
+		"parent_id": rootID,
+	})
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentAID); got != 1 {
+		t.Fatalf("plain reply queued agent A tasks = %d, want 1", got)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentBID); got != 1 {
+		t.Fatalf("plain reply queued agent B tasks = %d, want 1", got)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, assigneeID); got != 0 {
+		t.Fatalf("plain reply queued assignee tasks = %d, want 0", got)
+	}
+}
+
 // TestPreviewCommentTriggers_SquadAssigneePlainReplyKeepsRootMentionOwner is the
 // cascade replacement for the old MUL-3744 inherited-mention scenario:
 //

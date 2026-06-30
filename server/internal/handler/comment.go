@@ -1474,19 +1474,21 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	}
 
 	if parentComment != nil {
-		trigger, handled, ok := h.routeThreadRootOwner(ctx, issue, parentComment, actorID, opts)
+		triggers, handled := h.routeThreadRootOwners(ctx, issue, parentComment, actorID, opts)
 		if handled {
-			if !ok {
+			if len(triggers) == 0 {
 				return nil
 			}
-			if fallback, ok := h.routeAssigneeFallback(ctx, issue, actorType, actorID, opts); ok &&
-				uuidToString(fallback.Agent.ID) != uuidToString(trigger.Agent.ID) {
-				trigger.EscalationFallback = &commentEscalationFallback{
-					Agent: fallback.Agent,
-					Squad: fallback.Squad,
+			if len(triggers) == 1 {
+				if fallback, ok := h.routeAssigneeFallback(ctx, issue, actorType, actorID, opts); ok &&
+					uuidToString(fallback.Agent.ID) != uuidToString(triggers[0].Agent.ID) {
+					triggers[0].EscalationFallback = &commentEscalationFallback{
+						Agent: fallback.Agent,
+						Squad: fallback.Squad,
+					}
 				}
 			}
-			return []commentAgentTrigger{trigger}
+			return triggers
 		}
 	}
 
@@ -1537,41 +1539,32 @@ func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, 
 
 type conversationRoutedAgentInfo struct {
 	SquadID pgtype.UUID
-	Active  bool
 }
 
-func (h *Handler) routeThreadRootOwner(ctx context.Context, issue db.Issue, parent *db.Comment, memberID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool, bool) {
+func (h *Handler) routeThreadRootOwners(ctx context.Context, issue db.Issue, parent *db.Comment, memberID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, bool) {
 	if parent == nil || !parent.ID.Valid {
-		return commentAgentTrigger{}, false, false
+		return nil, false
 	}
 	root, err := h.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
 		CommentID:   parent.ID,
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil || !root.ID.Valid || root.AuthorType != "member" {
-		return commentAgentTrigger{}, false, false
+		return nil, false
 	}
-	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		Limit:       commentHardCap,
-	})
-	if err != nil {
-		return commentAgentTrigger{}, false, false
-	}
-	return h.routeConversationOwnerForRoot(ctx, issue, root, comments, memberID, opts)
+	return h.routeConversationOwnersForRoot(ctx, issue, root, memberID, opts)
 }
 
-func (h *Handler) routeConversationOwnerForRoot(ctx context.Context, issue db.Issue, root db.Comment, comments []db.Comment, memberID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool, bool) {
+func (h *Handler) routeConversationOwnersForRoot(ctx context.Context, issue db.Issue, root db.Comment, memberID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, bool) {
 	if !root.ID.Valid || root.AuthorType != "member" {
-		return commentAgentTrigger{}, false, false
+		return nil, false
 	}
 	rootID := uuidToString(root.ID)
 	excludedID := uuidToString(opts.ExcludeTriggerCommentID)
 
 	tasks, err := h.Queries.ListTasksByIssue(ctx, issue.ID)
 	if err != nil {
-		return commentAgentTrigger{}, false, false
+		return nil, false
 	}
 	routedAgents := make(map[string]conversationRoutedAgentInfo)
 	for _, task := range tasks {
@@ -1589,70 +1582,20 @@ func (h *Handler) routeConversationOwnerForRoot(ctx context.Context, issue db.Is
 		if !info.SquadID.Valid {
 			info.SquadID = task.SquadID
 		}
-		info.Active = info.Active || isActiveConversationTaskStatus(task.Status)
 		routedAgents[agentID] = info
 	}
 	if len(routedAgents) == 0 {
-		return commentAgentTrigger{}, false, false
+		return nil, false
 	}
 
-	rootByComment := make(map[string]string, len(comments))
-	var latestReply db.Comment
-	latestReplyValid := false
-	for _, comment := range comments {
-		commentID := uuidToString(comment.ID)
-		if excludedID != "" && commentID == excludedID {
-			continue
-		}
-
-		commentRootID := commentID
-		if comment.ParentID.Valid {
-			parentRoot, ok := rootByComment[uuidToString(comment.ParentID)]
-			if !ok {
-				continue
-			}
-			commentRootID = parentRoot
-		}
-		rootByComment[commentID] = commentRootID
-		if commentRootID != rootID {
-			continue
-		}
-
-		if comment.AuthorType != "agent" || !comment.ParentID.Valid || !comment.AuthorID.Valid {
-			continue
-		}
-		if _, routed := routedAgents[uuidToString(comment.AuthorID)]; routed {
-			latestReply = comment
-			latestReplyValid = true
+	triggers := make([]commentAgentTrigger, 0, len(routedAgents))
+	for agentID, info := range routedAgents {
+		trigger, ok := h.routeConversationContinuationToAgent(ctx, issue, parseUUID(agentID), info.SquadID, memberID, opts)
+		if ok {
+			triggers = append(triggers, trigger)
 		}
 	}
-
-	if latestReplyValid {
-		trigger, ok := h.routeConversationContinuationToAgent(ctx, issue, latestReply.AuthorID, routedAgents[uuidToString(latestReply.AuthorID)].SquadID, memberID, opts)
-		return trigger, true, ok
-	}
-
-	if len(routedAgents) == 1 {
-		for agentID, info := range routedAgents {
-			trigger, ok := h.routeConversationContinuationToAgent(ctx, issue, parseUUID(agentID), info.SquadID, memberID, opts)
-			return trigger, true, ok
-		}
-	}
-	for _, info := range routedAgents {
-		if info.Active {
-			return commentAgentTrigger{}, true, false
-		}
-	}
-	return commentAgentTrigger{}, false, false
-}
-
-func isActiveConversationTaskStatus(status string) bool {
-	switch status {
-	case "queued", "dispatched", "running", "waiting_local_directory", "deferred":
-		return true
-	default:
-		return false
-	}
+	return triggers, true
 }
 
 func (h *Handler) routeConversationContinuationToAgent(ctx context.Context, issue db.Issue, agentID, squadID pgtype.UUID, memberID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
