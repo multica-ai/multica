@@ -100,6 +100,9 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 
 	// Locate the skill root: the directory of the shallowest SKILL.md. This
 	// accepts both a root-level SKILL.md and the common single-wrapper layout.
+	// The candidate path is validated up front (absolute / traversal entries are
+	// rejected) so a malicious archive cannot smuggle an unsafe path in as the
+	// primary content — keeping every accepted entry zip-slip-safe.
 	var skillMd *zip.File
 	rootPrefix := ""
 	for _, f := range zr.File {
@@ -108,6 +111,9 @@ func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 		}
 		clean := path.Clean(f.Name)
 		if !strings.EqualFold(path.Base(clean), skillpkg.ContentFilename) {
+			continue
+		}
+		if !validateFilePath(clean) {
 			continue
 		}
 		prefix := archiveEntryPrefix(clean)

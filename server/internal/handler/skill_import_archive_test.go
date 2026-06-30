@@ -134,6 +134,17 @@ func TestParseSkillArchive_InvalidZip(t *testing.T) {
 	}
 }
 
+func TestParseSkillArchive_RejectsUnsafeSkillMdPath(t *testing.T) {
+	// A SKILL.md whose only candidate path is absolute or traversal must not be
+	// accepted as the primary content; the archive is treated as having none.
+	for _, name := range []string{"../escape/SKILL.md", "/abs/SKILL.md"} {
+		data := buildTestZip(t, map[string]string{name: testSkillMd})
+		if _, err := parseSkillArchive(data, "x.skill"); err == nil {
+			t.Errorf("expected rejection for unsafe SKILL.md path %q", name)
+		}
+	}
+}
+
 func TestParseSkillArchive_DropsTraversalAndJunk(t *testing.T) {
 	data := buildTestZip(t, map[string]string{
 		"s/SKILL.md":     testSkillMd,
