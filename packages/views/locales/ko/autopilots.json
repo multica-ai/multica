@@ -70,7 +70,6 @@
     "pause_aria": "오토파일럿 일시 중지",
     "activate_aria": "오토파일럿 활성화",
     "edit": "수정",
-    "manage_access": "접근 권한 관리",
     "run_now": "지금 실행",
     "running": "실행 중...",
     "toast_triggered": "오토파일럿을 실행했습니다",
@@ -103,9 +102,7 @@
     }
   },
   "access": {
-    "title": "접근 권한 관리",
     "description": "추가한 멤버는 이 오토파일럿을 수정·실행하고 트리거와 webhook을 관리할 수 있습니다.",
-    "current_label": "접근 가능",
     "add": "멤버 추가",
     "search_placeholder": "멤버 검색…",
     "no_results": "멤버를 찾을 수 없습니다",
@@ -273,6 +270,7 @@
     "no_project": "프로젝트 없음",
     "section_subscribers": "구독자",
     "subscribers_hint": "이 오토파일럿이 만드는 모든 이슈를 자동으로 구독합니다",
+    "section_access": "접근 권한",
     "subscribers_empty": "구독자가 없습니다. 팀원을 추가하면 매번 알림을 받습니다",
     "subscribers_add": "구독자 추가",
     "subscribers_search_placeholder": "이름으로 멤버 검색…",

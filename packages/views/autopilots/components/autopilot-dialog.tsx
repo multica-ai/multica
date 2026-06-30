@@ -51,6 +51,7 @@ import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
 import { api } from "@multica/core/api";
 import type {
   AutopilotAssigneeType,
+  AutopilotCollaborator,
   AutopilotExecutionMode,
   AutopilotTrigger,
 } from "@multica/core/types";
@@ -60,6 +61,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import { SubscriberMultiSelect } from "./subscriber-multi-select";
+import { AutopilotAccessManager } from "./autopilot-access-manager";
 import {
   getDefaultTriggerConfig,
   getLocalTimezone,
@@ -102,6 +104,8 @@ export type AutopilotDialogProps =
       autopilotId: string;
       initial: AutopilotInitial;
       triggers: AutopilotTrigger[];
+      collaborators: AutopilotCollaborator[];
+      canManageAccess: boolean;
     };
 
 // ---------------------------------------------------------------------------
@@ -665,6 +669,13 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               />
             )}
 
+            {!isCreate && props.canManageAccess && (
+              <AccessSection
+                autopilotId={props.autopilotId}
+                collaborators={props.collaborators}
+              />
+            )}
+
             {isCreate && (
               <TriggerKindSection kind={triggerKind} onChange={setTriggerKind} />
             )}
@@ -907,6 +918,28 @@ function SubscribersSection({
       <SubscriberMultiSelect
         selectedIds={selectedUserIds}
         onChange={onChange}
+      />
+    </div>
+  );
+}
+
+function AccessSection({
+  autopilotId,
+  collaborators,
+}: {
+  autopilotId: string;
+  collaborators: AutopilotCollaborator[];
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_access)}</SectionLabel>
+      <p className="mb-2 text-[11px] text-muted-foreground">
+        {t(($) => $.access.description)}
+      </p>
+      <AutopilotAccessManager
+        autopilotId={autopilotId}
+        collaborators={collaborators}
       />
     </div>
   );

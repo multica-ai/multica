@@ -70,7 +70,6 @@
     "pause_aria": "オートパイロットを一時停止",
     "activate_aria": "オートパイロットを有効化",
     "edit": "編集",
-    "manage_access": "アクセス管理",
     "run_now": "今すぐ実行",
     "running": "実行中...",
     "toast_triggered": "オートパイロットを実行しました",
@@ -103,9 +102,7 @@
     }
   },
   "access": {
-    "title": "アクセス管理",
     "description": "追加したメンバーは、このオートパイロットの編集・実行や、トリガー・Webhook の管理ができます。",
-    "current_label": "アクセス権あり",
     "add": "メンバーを追加",
     "search_placeholder": "メンバーを検索…",
     "no_results": "メンバーが見つかりません",
@@ -273,6 +270,7 @@
     "no_project": "プロジェクトなし",
     "section_subscribers": "購読者",
     "subscribers_hint": "このオートパイロットが作成するすべてのイシューを自動で購読します",
+    "section_access": "アクセス",
     "subscribers_empty": "購読者はいません。チームメイトを追加すると、毎回通知されます",
     "subscribers_add": "購読者を追加",
     "subscribers_search_placeholder": "名前でメンバーを検索…",

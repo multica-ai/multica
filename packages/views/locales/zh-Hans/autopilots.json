@@ -70,7 +70,6 @@
     "pause_aria": "暂停自动化",
     "activate_aria": "启用自动化",
     "edit": "编辑",
-    "manage_access": "管理访问",
     "run_now": "立即运行",
     "running": "运行中...",
     "toast_triggered": "已触发自动化",
@@ -103,9 +102,7 @@
     }
   },
   "access": {
-    "title": "管理访问",
     "description": "你添加的成员可以编辑、运行并管理这个自动化的触发器和 webhook。",
-    "current_label": "已授权",
     "add": "添加成员",
     "search_placeholder": "搜索成员…",
     "no_results": "未找到成员",
@@ -274,6 +271,7 @@
     "section_output_mode": "输出模式",
     "section_subscribers": "订阅者",
     "subscribers_hint": "每次跑出来的 issue 默认订阅",
+    "section_access": "访问权限",
     "subscribers_empty": "暂无订阅者——添加成员后，每次触发都会通知到他",
     "subscribers_add": "添加订阅者",
     "subscribers_search_placeholder": "按名称搜索成员……",

@@ -70,7 +70,6 @@
     "pause_aria": "Pause autopilot",
     "activate_aria": "Activate autopilot",
     "edit": "Edit",
-    "manage_access": "Manage access",
     "run_now": "Run now",
     "running": "Running...",
     "toast_triggered": "Autopilot triggered",
@@ -103,9 +102,7 @@
     }
   },
   "access": {
-    "title": "Manage access",
     "description": "Members you add can edit, run, and manage this autopilot's triggers and webhooks.",
-    "current_label": "With access",
     "add": "Add member",
     "search_placeholder": "Search members…",
     "no_results": "No members found",
@@ -274,6 +271,7 @@
     "section_output_mode": "Output mode",
     "section_subscribers": "Subscribers",
     "subscribers_hint": "Auto-subscribed to every issue this autopilot creates",
+    "section_access": "Access",
     "subscribers_empty": "No subscribers — add a teammate to notify them on every run",
     "subscribers_add": "Add subscriber",
     "subscribers_search_placeholder": "Search members by name…",

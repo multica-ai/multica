@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight,
-  Webhook, Copy, Check, RotateCw, Users,
+  Webhook, Copy, Check, RotateCw,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
@@ -62,7 +62,6 @@ import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
-import { ManageAccessDialog } from "./manage-access-dialog";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -635,7 +634,6 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [accessDialogOpen, setAccessDialogOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -760,12 +758,6 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         actions={
           canWrite ? (
             <>
-              {canManageAccess && (
-                <Button size="sm" variant="outline" onClick={() => setAccessDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.manage_access)}>
-                  <Users className="h-3.5 w-3.5 sm:mr-1" />
-                  <span className="hidden sm:inline">{t(($) => $.detail.manage_access)}</span>
-                </Button>
-              )}
               <Button size="sm" variant="outline" onClick={() => setEditDialogOpen(true)} className="px-2 sm:px-2.5" aria-label={t(($) => $.detail.edit)}>
                 <Pencil className="h-3.5 w-3.5 sm:mr-1" />
                 <span className="hidden sm:inline">{t(($) => $.detail.edit)}</span>
@@ -980,14 +972,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                 .map((s) => s.user_id) ?? [],
           }}
           triggers={triggers}
-        />
-      )}
-      {accessDialogOpen && (
-        <ManageAccessDialog
-          open={accessDialogOpen}
-          onOpenChange={setAccessDialogOpen}
-          autopilotId={autopilot.id}
           collaborators={collaborators}
+          canManageAccess={canManageAccess}
         />
       )}
       <AlertDialog
