@@ -1,0 +1,33 @@
+{
+  "_sample": "sanitized normal staging order payload; replace field mapping in order_client.py if your API differs",
+  "tradeId": "900000000001",
+  "shopId": "shop_staging_001",
+  "tradeStatus": "WAIT_SELLER_SEND_GOODS",
+  "paidFee": "199.00",
+  "receiver": {
+    "name": "测试收件人",
+    "mobile": "13800000000",
+    "province": "浙江省",
+    "city": "杭州市",
+    "district": "西湖区",
+    "address": "测试街道1号"
+  },
+  "subOrders": [
+    {
+      "orderId": "900000000001-1",
+      "skuId": "sku_staging_001",
+      "outerSkuId": "ERP_SKU_STAGING_001",
+      "title": "测试商品A",
+      "spec": "颜色:黑色;尺码:L",
+      "quantity": 1,
+      "price": "199.00",
+      "paidFee": "199.00",
+      "refundStatus": "NO_REFUND",
+      "inventoryStatus": "RESERVED"
+    }
+  ],
+  "buyerMessage": "请尽快发货",
+  "sellerMemo": "测试备注",
+  "createdAt": "2026-06-30T10:00:00+08:00",
+  "updatedAt": "2026-06-30T10:12:00+08:00"
+}

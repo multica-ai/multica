@@ -1,0 +1,24 @@
+{
+  "_sample": "sanitized closed order payload",
+  "tradeId": "900000000005",
+  "shopId": "shop_staging_001",
+  "tradeStatus": "TRADE_CLOSED",
+  "receiver": {
+    "name": "测试收件人",
+    "mobile": "13800000000",
+    "province": "浙江省",
+    "city": "杭州市",
+    "district": "西湖区",
+    "address": "测试街道5号"
+  },
+  "subOrders": [
+    {
+      "orderId": "900000000005-1",
+      "skuId": "sku_staging_005",
+      "title": "测试商品E",
+      "quantity": 1,
+      "refundStatus": "NO_REFUND",
+      "inventoryStatus": "RESERVED"
+    }
+  ]
+}
