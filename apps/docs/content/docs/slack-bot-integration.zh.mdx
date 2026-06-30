@@ -77,10 +77,6 @@ settings:
 
 这里**没有 OAuth 重定向 URL**，因为 BYO 不使用 OAuth。
 
-<Callout type="warning">
-已经用旧版 manifest 创建过 app？在 **OAuth & Permissions → Bot Token Scopes** 里加上 **`reactions:write`** 权限，然后**把 app 重新安装到工作区**让新权限生效。在此之前智能体仍然正常回复——只是会跳过 👀「处理中」表情。
-</Callout>
-
 <Callout type="info">
 想在 Slack 里用一个特定的名字？在创建之前改 `display_information.name` 和 `features.bot_user.display_name`（比如改成你智能体的名字），或者之后在 **App Home** 里编辑。Slack 是按 Bot 的**显示名（bot display name）**来展示它的，这个名字可以和 app 名不一样。
 </Callout>
