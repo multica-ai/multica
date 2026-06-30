@@ -105,6 +105,14 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	d.logger.Info("task wakeup websocket connected", "runtimes", len(runtimeIDs))
 	signalTaskWakeup(taskWakeups, "")
 
+	// Immediately re-validate any tasks the daemon was running when the WS
+	// dropped. During the disconnect window the server may have moved them to
+	// a terminal state (cancelled/completed/failed); without this sync the
+	// daemon would keep the agent running until watchTaskCancellation's next
+	// poll tick (up to 5s). Runs in a goroutine so the HTTP calls don't
+	// block the WS read-pump startup below.
+	go d.syncActiveTasks(ctx)
+
 	// Serialize all writes through a single channel: the gorilla/websocket
 	// Conn does not allow concurrent WriteMessage calls, and the heartbeat
 	// sender now coexists with future server-initiated writes. The buffer

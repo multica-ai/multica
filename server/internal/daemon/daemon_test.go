@@ -896,6 +896,65 @@ func TestWatchTaskCancellation_RunningTaskNotInterrupted(t *testing.T) {
 	}
 }
 
+func TestSyncActiveTasks_CancelsTerminalTasks(t *testing.T) {
+	t.Parallel()
+
+	// Mock server: task-cancelled returns "cancelled", task-running returns "running",
+	// task-deleted returns 404.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "task-cancelled/status"):
+			_, _ = w.Write([]byte(`{"status":"cancelled"}`))
+		case strings.HasSuffix(r.URL.Path, "task-running/status"):
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+		case strings.HasSuffix(r.URL.Path, "task-deleted/status"):
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"task not found"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx := context.Background()
+	cancelled1, cancelled2, notCancelled := false, false, false
+
+	d := &Daemon{
+		client:            NewClient(srv.URL),
+		logger:            slog.Default(),
+		activeTaskCancels: make(map[string]context.CancelFunc),
+	}
+	d.activeTaskCancels["task-cancelled"] = func() { cancelled1 = true }
+	d.activeTaskCancels["task-running"] = func() { notCancelled = true }
+	d.activeTaskCancels["task-deleted"] = func() { cancelled2 = true }
+
+	d.syncActiveTasks(ctx)
+
+	if !cancelled1 {
+		t.Error("expected task-cancelled to be cancelled")
+	}
+	if !cancelled2 {
+		t.Error("expected task-deleted to be cancelled")
+	}
+	if notCancelled {
+		t.Error("expected task-running to NOT be cancelled")
+	}
+}
+
+func TestSyncActiveTasks_NoActiveTasks(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{
+		client:            NewClient("http://localhost:0"),
+		logger:            slog.Default(),
+		activeTaskCancels: make(map[string]context.CancelFunc),
+	}
+
+	// Should not panic or make any HTTP calls when there are no active tasks.
+	d.syncActiveTasks(context.Background())
+}
+
 func TestMergeUsage(t *testing.T) {
 	t.Parallel()
 

@@ -192,6 +192,12 @@ type Daemon struct {
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
 	ready         atomic.Bool        // false until preflight completes; gates /health status (starting -> running)
 
+	// activeTaskCancels tracks running task IDs and their cancel functions so
+	// syncActiveTasks can immediately check status after a WS reconnect instead
+	// of waiting for the next watchTaskCancellation poll tick.
+	activeTaskCancelsMu sync.Mutex
+	activeTaskCancels   map[string]context.CancelFunc
+
 	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
 	// microseconds it takes to make a decision; ClaimTask itself runs without
 	// the lock so a slow per-runtime claim cannot stall auto-update or any
@@ -259,6 +265,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
+		activeTaskCancels:         make(map[string]context.CancelFunc),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
@@ -2763,6 +2770,37 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 	return cancelled
 }
 
+// syncActiveTasks checks the server-side status of every running task and
+// cancels the local agent for any that have reached a terminal state. This
+// closes the gap after a WebSocket reconnect where watchTaskCancellation's
+// periodic poll may not yet have detected a cancellation that happened
+// during the disconnect window.
+func (d *Daemon) syncActiveTasks(ctx context.Context) {
+	d.activeTaskCancelsMu.Lock()
+	tasks := make(map[string]context.CancelFunc, len(d.activeTaskCancels))
+	for k, v := range d.activeTaskCancels {
+		tasks[k] = v
+	}
+	d.activeTaskCancelsMu.Unlock()
+
+	if len(tasks) == 0 {
+		return
+	}
+
+	d.logger.Info("syncing active tasks after reconnect", "count", len(tasks))
+	for taskID, cancel := range tasks {
+		status, err := d.client.GetTaskStatus(ctx, taskID)
+		if shouldInterruptAgent(status, err) {
+			if err != nil {
+				d.logger.Info("sync: task gone server-side, cancelling agent", "task", shortID(taskID), "error", err)
+			} else {
+				d.logger.Info("sync: task reached terminal state, cancelling agent", "task", shortID(taskID), "status", status)
+			}
+			cancel()
+		}
+	}
+}
+
 func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.mu.Lock()
 	rt := d.runtimeIndex[task.RuntimeID]
@@ -2838,6 +2876,20 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// deleted (404).
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
+
+	// Register so syncActiveTasks (called on WS reconnect) can cancel this
+	// task immediately if the server reports a terminal state.
+	d.activeTaskCancelsMu.Lock()
+	if d.activeTaskCancels == nil {
+		d.activeTaskCancels = make(map[string]context.CancelFunc)
+	}
+	d.activeTaskCancels[task.ID] = runCancel
+	d.activeTaskCancelsMu.Unlock()
+	defer func() {
+		d.activeTaskCancelsMu.Lock()
+		delete(d.activeTaskCancels, task.ID)
+		d.activeTaskCancelsMu.Unlock()
+	}()
 
 	// Poll interval is d.cancelPollInterval (5s in production, reduced in tests
 	// via direct field override). Guard against zero so a misconfigured daemon
