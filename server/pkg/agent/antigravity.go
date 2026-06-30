@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,6 +23,15 @@ import (
 // will run X" lines and the final reply, all interleaved). The backend
 // therefore streams stdout line-by-line as `MessageText` events and accumulates
 // the same text as the final `Result.Output`.
+//
+// agy 1.0.14's print mode regressed this stdout contract: a turn can run tools
+// and produce a final reply while emitting ZERO bytes to stdout (the log shows
+// "PlannerResponse without ModifiedResponse encountered"). Exit code is 0 and
+// no error is logged, so a blank-but-"completed" run reaches the daemon and the
+// user sees an empty result even though the work happened (MUL-3726, #4595).
+// When stdout comes back empty on an otherwise-completed turn, the backend
+// therefore recovers the assistant text agy durably wrote to its per-
+// conversation transcript (see readAntigravityTranscriptOutput).
 //
 // Session resumption uses `--conversation <id>`. The conversation id is not
 // emitted on stdout; we capture it by routing `--log-file` to a temp file and
@@ -170,11 +180,24 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			finalError = withAgentStderr(finalError, "agy", stderrBuf.Tail())
 		}
 
+		finalOutput := output.String()
+		if finalStatus == "completed" && strings.TrimSpace(finalOutput) == "" {
+			// agy 1.0.14 print mode can finish a turn (tools executed, reply
+			// produced) without writing anything to stdout, leaving a blank but
+			// "completed" run none of the guards above catch (MUL-3726). Recover
+			// the assistant text agy persisted to its conversation transcript so
+			// the user sees the actual answer instead of an empty result.
+			if recovered := readAntigravityTranscriptOutput(logPath, sessionID); recovered != "" {
+				finalOutput = recovered
+				b.cfg.Logger.Info("agy recovered empty stdout from transcript", "bytes", len(recovered))
+			}
+		}
+
 		b.cfg.Logger.Info("agy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		resCh <- Result{
 			Status:     finalStatus,
-			Output:     output.String(),
+			Output:     finalOutput,
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  sessionID,
@@ -263,6 +286,118 @@ func readAntigravityConversationID(logPath string) string {
 	// in the file resolves to the same conversation, so the last match wins
 	// — that's what `--conversation` should be pinned to next turn.
 	return string(matches[len(matches)-1][1])
+}
+
+// antigravityAppDataDirRe matches the glog line agy writes at startup naming its
+// CLI app data directory — the root under which per-conversation transcripts
+// live. Reading the path from the log (which the daemon owns via --log-file)
+// is more robust than guessing $HOME, and follows agy through a custom data dir.
+//
+// Example: `I0630 14:19:40.582492 88197 common.go:156] CLI app data directory:
+// /Users/me/.gemini/antigravity-cli`
+var antigravityAppDataDirRe = regexp.MustCompile(`CLI app data directory:\s*(.+)`)
+
+// antigravityTranscriptRecord is the minimal shape of one line in agy's
+// per-conversation transcript.jsonl. A turn opens with a USER_INPUT record; the
+// assistant's replies are PLANNER_RESPONSE records with source=MODEL and (once
+// settled) status=DONE. Content holds the text, or JSON null for a tool-only
+// step — it is RawMessage so a null or non-string value is skipped rather than
+// failing the whole line.
+type antigravityTranscriptRecord struct {
+	Type    string          `json:"type"`
+	Source  string          `json:"source"`
+	Status  string          `json:"status"`
+	Content json.RawMessage `json:"content"`
+}
+
+// readAntigravityTranscriptOutput recovers the assistant's text from agy's
+// per-conversation transcript when stdout carried nothing. agy 1.0.14's print
+// mode can finish a turn (tools executed, final reply produced) while emitting
+// zero bytes to stdout, leaving the daemon with a blank but "completed" run
+// (MUL-3726, #4595). The full reply is still durably written to:
+//
+//	<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl
+//
+// as PLANNER_RESPONSE / source=MODEL records.
+//
+// The transcript is per-conversation and ACCUMULATES across resumed turns
+// (daemon reuses the conversation via --conversation / ResumeSessionID), so we
+// must return only the CURRENT turn's reply — otherwise a later empty-stdout
+// turn would re-emit prior turns' answers. Each turn opens with a USER_INPUT
+// record, so we reset on every USER_INPUT and keep only the model text that
+// follows the last one. We also require status=DONE to skip any future
+// streaming/partial planner records. The remaining text is joined in order
+// (intermediate narration + final reply), mirroring what stdout would have
+// streamed for this turn. Best-effort: returns "" if the app data dir or
+// conversation id is unknown, the transcript is missing, or it holds no model
+// text for the current turn.
+func readAntigravityTranscriptOutput(logPath, conversationID string) string {
+	if logPath == "" || conversationID == "" {
+		return ""
+	}
+	appDataDir := readAntigravityAppDataDir(logPath)
+	if appDataDir == "" {
+		return ""
+	}
+	transcriptPath := filepath.Join(
+		appDataDir, "brain", conversationID, ".system_generated", "logs", "transcript.jsonl",
+	)
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	var parts []string
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var rec antigravityTranscriptRecord
+		if err := json.Unmarshal(line, &rec); err != nil {
+			continue
+		}
+		if rec.Type == "USER_INPUT" {
+			// New turn boundary: drop anything collected for prior turns so a
+			// resumed conversation yields only the current turn's reply.
+			parts = parts[:0]
+			continue
+		}
+		if rec.Type != "PLANNER_RESPONSE" || rec.Source != "MODEL" || rec.Status != "DONE" {
+			continue
+		}
+		var text string
+		// Content is JSON null for tool-only steps; unmarshal leaves text "".
+		// A non-string value (object) errors and is skipped.
+		if err := json.Unmarshal(rec.Content, &text); err != nil {
+			continue
+		}
+		if strings.TrimSpace(text) != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// readAntigravityAppDataDir extracts agy's CLI app data directory from the
+// per-run log. Best-effort: returns "" if the log is missing or the marker
+// format changes upstream.
+func readAntigravityAppDataDir(logPath string) string {
+	if logPath == "" {
+		return ""
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return ""
+	}
+	m := antigravityAppDataDirRe.FindSubmatch(data)
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(string(m[1]))
 }
 
 // antigravityBlockedArgs are flags hardcoded by the daemon that must not be
