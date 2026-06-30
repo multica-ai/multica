@@ -324,6 +324,7 @@
   },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体正在工作",
+    "hover_header_tasks_other": "{{count}} 个 task 工作中",
     "hover_header_queued_other": "{{count}} 个智能体排队中",
     "status_running": "正在工作",
     "status_queued": "排队中",
