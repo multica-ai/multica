@@ -26,6 +26,7 @@
     "./workspace/hooks": "./workspace/hooks.ts",
     "./workspace/workspace-url": "./workspace/workspace-url.ts",
     "./workspace/avatar-url": "./workspace/avatar-url.ts",
+    "./jira": "./jira/index.ts",
     "./issues": "./issues/index.ts",
     "./issues/batch": "./issues/batch.ts",
     "./issues/queries": "./issues/queries.ts",
