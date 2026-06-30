@@ -1,5 +1,7 @@
 export type SupportedLocale = "en" | "zh-Hans";
 
+export type I18nVariables = Record<string, string>;
+
 export const SUPPORTED_LOCALES: SupportedLocale[] = ["en", "zh-Hans"];
 export const DEFAULT_LOCALE: SupportedLocale = "en";
 

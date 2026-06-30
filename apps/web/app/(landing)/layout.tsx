@@ -3,6 +3,7 @@ import { Instrument_Serif, Noto_Serif_SC } from "next/font/google";
 import { LOCALE_COOKIE } from "@multica/core/i18n";
 import { LocaleProvider } from "@/features/landing/i18n";
 import type { Locale } from "@/features/landing/i18n";
+import { WEB_BRAND_NAME } from "@/lib/brand";
 
 const instrumentSerif = Instrument_Serif({
   subsets: ["latin"],
@@ -21,13 +22,13 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "Organization",
-      name: "Multica",
+      name: WEB_BRAND_NAME,
       url: "https://www.multica.ai",
       sameAs: ["https://github.com/multica-ai/multica"],
     },
     {
       "@type": "SoftwareApplication",
-      name: "Multica",
+      name: WEB_BRAND_NAME,
       applicationCategory: "ProjectManagement",
       operatingSystem: "Web",
       description:

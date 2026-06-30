@@ -3,7 +3,7 @@
     "step_of": "第 {{current}} 步 / 共 {{total}} 步"
   },
   "welcome": {
-    "wordmark": "欢迎使用 Multica",
+    "wordmark": "欢迎使用 {{productName}}",
     "headline_line1": "你的 AI 队友，",
     "headline_line2": "在",
     "headline_emphasis": "同一个工作区。",
@@ -45,7 +45,7 @@
   "questions": {
     "eyebrow_about_you": "关于你",
     "source": {
-      "question": "你是从哪里了解到 Multica 的？",
+      "question": "你是从哪里了解到 {{productName}} 的？",
       "friends_colleagues": "朋友或同事",
       "search": "Google / 搜索",
       "social_x": "X / Twitter",
@@ -75,7 +75,7 @@
       "other_placeholder": "例如：教师、支持负责人"
     },
     "use_case": {
-      "question": "你打算用 Multica 做什么？",
+      "question": "你打算用 {{productName}} 做什么？",
       "ship_code": "让 AI agent 帮我写代码",
       "manage_team": "给团队做任务管理",
       "personal_tasks": "管理我自己的任务",
@@ -188,24 +188,24 @@
     "error_close": "关闭",
     "user_context_heading": "关于我",
     "user_context_role_label": "角色",
-    "user_context_use_case_label": "想用 Multica 做",
+    "user_context_use_case_label": "想用 {{productName}} 做",
     "runtime": {
-      "greeting": "Hi，欢迎来到 Multica",
+      "greeting": "Hi，欢迎来到 {{productName}}",
       "subtitle": "我是你的第一个 Agent 助手。",
-      "capabilities": "你可以问我任何关于 Multica 的使用，也可以让我帮你在工作区完成任务 —— 建 issue、定时任务、再建一个 agent……",
+      "capabilities": "你可以问我任何关于 {{productName}} 的使用，也可以让我帮你在工作区完成任务 —— 建 issue、定时任务、再建一个 agent……",
       "section_label": "选一个或多个任务,让我开始干活：",
       "assign_empty": "选一个或多个",
       "assign_count": "分配 {{count}} 个任务给我 →",
       "assign_count_plural": "分配 {{count}} 个任务给我 →",
       "cards": {
         "intro": {
-          "subtitle": "让我用 1-2 段话讲清楚 Multica 是什么、能干嘛。"
+          "subtitle": "让我用 1-2 段话讲清楚 {{productName}} 是什么、能干嘛。"
         },
         "tour": {
           "subtitle": "陪你走一遍 issue、agent、squad、autopilot 怎么配合。"
         },
         "welcome_page": {
-          "subtitle": "给你写一个小 HTML 页面，庆祝上手 Multica。"
+          "subtitle": "给你写一个小 HTML 页面，庆祝上手 {{productName}}。"
         }
       },
       "success": {
@@ -218,7 +218,7 @@
     },
     "skip": {
       "loading": "正在为你准备工作区……",
-      "title": "欢迎来到 Multica！",
+      "title": "欢迎来到 {{productName}}！",
       "subtitle": "我们为你创建了两个任务，帮助你进行下一步操作。",
       "got_it": "知道了",
       "status_in_progress": "进行中",
@@ -331,7 +331,7 @@
   "step_platform": {
     "eyebrow": "连接一台电脑",
     "headline": "连接一台电脑来运行你的智能体。",
-    "lede": "你的智能体运行在你连接到 Multica 的一台真实电脑上。选一种你想要的连接方式。",
+    "lede": "你的智能体运行在你连接到 {{productName}} 的一台真实电脑上。选一种你想要的连接方式。",
     "hint_default": "在上方选一种方式 —— 或先跳过，之后再连接电脑。",
     "hint_downloaded": "在下载页完成安装，然后回到此标签页。",
     "download_title": "使用这台电脑",

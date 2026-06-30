@@ -1,8 +1,8 @@
 {
   "fab": {
-    "running": "Multica 正在工作...",
+    "running": "{{productName}} 正在工作...",
     "unread_other": "{{count}} 条未读对话",
-    "default": "问 Multica"
+    "default": "问 {{productName}}"
   },
   "input": {
     "placeholder_no_agent": "创建一个智能体后才能开始对话",
@@ -68,7 +68,7 @@
     "first_time_pillars_suffix": "。",
     "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
     "returning_title_named": "你好，我是 {{name}}",
-    "returning_title_default": "欢迎使用 Multica",
+    "returning_title_default": "欢迎使用 {{productName}}",
     "returning_subtitle": "试试问"
   },
   "starter_prompts": {
@@ -77,15 +77,15 @@
     "plan_next": "规划接下来该做什么"
   },
   "context_anchor": {
-    "tooltip_disabled": "当前页面没有可以共享给 Multica 的内容",
-    "tooltip_off": "让 Multica 知道你正在看的内容",
-    "tooltip_on_issue": "Multica 知道你正在看 {{label}}，点击关闭",
-    "tooltip_on_project": "Multica 知道你正在看项目 \"{{label}}\"，点击关闭",
-    "card_tooltip_issue_with_subtitle": "Multica 知道你正在看 {{label}} —— {{subtitle}}",
-    "card_tooltip_issue": "Multica 知道你正在看 {{label}}",
-    "card_tooltip_project": "Multica 知道你正在看项目 \"{{label}}\"",
+    "tooltip_disabled": "当前页面没有可以共享给 {{productName}} 的内容",
+    "tooltip_off": "让 {{productName}} 知道你正在看的内容",
+    "tooltip_on_issue": "{{productName}} 知道你正在看 {{label}}，点击关闭",
+    "tooltip_on_project": "{{productName}} 知道你正在看项目 \"{{label}}\"，点击关闭",
+    "card_tooltip_issue_with_subtitle": "{{productName}} 知道你正在看 {{label}} —— {{subtitle}}",
+    "card_tooltip_issue": "{{productName}} 知道你正在看 {{label}}",
+    "card_tooltip_project": "{{productName}} 知道你正在看项目 \"{{label}}\"",
     "aria_stop": "停止共享当前页面",
-    "aria_start": "把当前页面共享给 Multica"
+    "aria_start": "把当前页面共享给 {{productName}}"
   },
   "no_agent_banner": "需要先有一个智能体才能开始对话。",
   "offline_banner": {
