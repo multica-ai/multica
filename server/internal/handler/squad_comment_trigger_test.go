@@ -200,12 +200,12 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 			description: "@squad routes the issue to that squad's leader — current leader stays out",
 		},
 		{
-			name:        "agent comment with @agent does not implicitly trigger leader",
+			name:        "agent comment with @agent does not also trigger leader",
 			content:     "delegating to [@Other](mention://agent/" + fx.OtherID + ")",
 			authorType:  "agent",
 			authorID:    fx.OtherID,
 			want:        false,
-			description: "agent→agent routing now requires explicit mentions only; assignee fallback is member-authored only",
+			description: "explicit @agent routes only to the mentioned target; the assigned squad-leader fallback must not also fire (no double-enqueue)",
 		},
 	}
 
@@ -220,10 +220,13 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 	}
 }
 
-// TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredCommentsDoNotFallback
-// pins the cascade loop guard: agent-authored comments never reach the assignee
-// fallback branch. Agent→agent work handoff must be explicit @mention.
-func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredCommentsDoNotFallback(t *testing.T) {
+// TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader
+// pins the MUL-3879 restored behavior in the new MUL-3794 cascade: an
+// agent-authored worker-result comment on a squad-assigned issue wakes the
+// assigned squad leader so the leader→worker→leader coordination loop stays
+// closed, while the leader's own self-trigger loop stays suppressed via
+// lastTaskWasLeader.
+func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -240,7 +243,11 @@ func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredCommentsDoNotFallback(t 
 			t.Fatalf("clear tasks: %v", err)
 		}
 	}
-	insertTask := func(isLeader bool, status string) {
+	// insertLeaderTask seeds a task for the leader agent so the
+	// lastTaskWasLeader guard can read the agent's most recent role on the
+	// issue. Separate Exec calls get distinct created_at values, so the last
+	// inserted row is the "latest" task.
+	insertLeaderTask := func(isLeader bool, status string) {
 		t.Helper()
 		var runtimeID string
 		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
@@ -254,35 +261,47 @@ func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredCommentsDoNotFallback(t 
 		}
 	}
 
-	t.Run("no prior task still does not fallback", func(t *testing.T) {
+	// Case 1: a worker agent (not the leader) posts a result comment on the
+	// squad-assigned issue — the assigned leader must wake to coordinate.
+	t.Run("worker agent comment wakes squad leader", func(t *testing.T) {
 		clearTasks()
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "noted", "agent", fx.LeaderID); got {
-			t.Fatalf("no prior task: expected no implicit leader fallback, got enqueue")
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "pushed the fix, PR is up", "agent", fx.OtherID); !got {
+			t.Fatalf("worker agent comment: expected leader to wake, got skip")
 		}
 	})
 
-	t.Run("prior leader task still does not fallback", func(t *testing.T) {
+	// Case 2: a dual-role agent (leader of the squad, also runs worker tasks)
+	// posts while its latest task on the issue was a worker task — the leader
+	// role must still wake because the comment is a worker result, not a
+	// leader self-trigger.
+	t.Run("dual-role worker comment wakes leader when latest task is worker", func(t *testing.T) {
 		clearTasks()
-		insertTask(true, "completed")
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "noted", "agent", fx.LeaderID); got {
-			t.Fatalf("after leader task: expected no implicit leader fallback, got enqueue")
+		insertLeaderTask(true, "completed")  // older leader task
+		insertLeaderTask(false, "completed") // newer worker task → latest role is worker
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "done with my worker slice", "agent", fx.LeaderID); !got {
+			t.Fatalf("dual-role worker comment: expected leader to wake, got skip")
 		}
 	})
 
-	t.Run("prior worker task still does not fallback", func(t *testing.T) {
+	// Case 3: the leader posts while its latest task was a leader task — this
+	// is a self-trigger loop and must stay suppressed.
+	t.Run("leader comment from latest leader task does not self-trigger", func(t *testing.T) {
 		clearTasks()
-		insertTask(false, "completed")
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "result", "agent", fx.LeaderID); got {
-			t.Fatalf("after worker task: expected no implicit leader fallback, got enqueue")
+		insertLeaderTask(false, "completed") // older worker task
+		insertLeaderTask(true, "completed")  // newer leader task → latest role is leader
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "coordinating next steps", "agent", fx.LeaderID); got {
+			t.Fatalf("leader self-trigger: expected skip, got wake")
 		}
 	})
 
-	t.Run("most recent task does not change agent-authored fallback guard", func(t *testing.T) {
+	// Case 4: an agent-authored comment carrying an explicit @agent mention
+	// routes only to the mentioned target — the assigned squad leader must NOT
+	// also be enqueued via the fallback path (no double-enqueue).
+	t.Run("explicit mention does not double-enqueue assigned leader", func(t *testing.T) {
 		clearTasks()
-		insertTask(true, "completed")  // older leader task
-		insertTask(false, "completed") // newer worker task
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "result", "agent", fx.LeaderID); got {
-			t.Fatalf("latest task is worker: expected no implicit leader fallback, got enqueue")
+		content := "handing to [@Other](mention://agent/" + fx.OtherID + ")"
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, content, "agent", fx.LeaderID); got {
+			t.Fatalf("explicit mention: expected no assigned-leader fallback, got wake")
 		}
 	})
 }
@@ -370,15 +389,16 @@ func TestCreateComment_SquadPlainReplyToMemberParentKeepsRootMentionOwner(t *tes
 	}
 }
 
-// TestCreateComment_DualRoleAgentWorkerCommentDoesNotImplicitlyWakeLeader pins
-// the cascade's agent-authored loop guard. Scenario:
+// TestCreateComment_DualRoleAgentWorkerCommentWakesLeader pins the MUL-3879
+// restored coordination loop at the full-handler level. Scenario:
 //
-//   - Agent L is the leader of squad S and also a worker assigned tasks on
-//     issues belonging to S.
-//   - L is woken in its worker role (is_leader_task=false) and posts a comment.
-//   - No leader fallback is enqueued; agent→agent handoff requires explicit
-//     mention under the routing cascade.
-func TestCreateComment_DualRoleAgentWorkerCommentDoesNotImplicitlyWakeLeader(t *testing.T) {
+//   - Agent L is the leader of squad S and also runs worker tasks on issues
+//     belonging to S.
+//   - L is woken in its worker role (is_leader_task=false) and posts a result
+//     comment.
+//   - A leader-role task IS enqueued so the squad leader can coordinate the
+//     next step — the worker result must not silently strand the issue.
+func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -423,7 +443,7 @@ func TestCreateComment_DualRoleAgentWorkerCommentDoesNotImplicitlyWakeLeader(t *
 		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// No new leader-role task is enqueued implicitly.
+	// A new leader-role task is enqueued so the leader coordinates next steps.
 	var leaderTasks int
 	if err := testPool.QueryRow(ctx, `
 		SELECT count(*) FROM agent_task_queue
@@ -431,8 +451,8 @@ func TestCreateComment_DualRoleAgentWorkerCommentDoesNotImplicitlyWakeLeader(t *
 	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
 		t.Fatalf("count leader tasks: %v", err)
 	}
-	if leaderTasks != 0 {
-		t.Fatalf("after worker comment from dual-role agent: expected 0 queued leader tasks, got %d", leaderTasks)
+	if leaderTasks != 1 {
+		t.Fatalf("after worker comment from dual-role agent: expected 1 queued leader task, got %d", leaderTasks)
 	}
 }
 
