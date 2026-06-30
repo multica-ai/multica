@@ -82,9 +82,25 @@ jobs:
         env:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
-          if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
+          # Publish the Homebrew formula only when the tap token is present AND
+          # actually has write access to firtal-group/homebrew-tap. A present
+          # but expired/under-scoped token used to fail the WHOLE release on a
+          # 403 ("Resource not accessible by personal access token") from the
+          # GoReleaser brews step — which then skipped the desktop / helm /
+          # tap-mirror jobs that depend on this one, so e.g. the macOS app never
+          # shipped (FIR-2286). Treat "can't write the tap" exactly like "no
+          # token": skip only the formula, still ship binaries + downstream jobs.
+          skip_homebrew=1
+          if [ -n "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
+            if GH_TOKEN="$HOMEBREW_TAP_GITHUB_TOKEN" gh api repos/firtal-group/homebrew-tap \
+                 --jq '[.permissions.push, .permissions.admin, .permissions.maintain] | any' 2>/dev/null \
+               | grep -qx true; then
+              skip_homebrew=0
+            fi
+          fi
+          if [ "$skip_homebrew" = "1" ]; then
             echo "args=release --clean --skip=homebrew" >> "$GITHUB_OUTPUT"
-            echo "::notice::HOMEBREW_TAP_GITHUB_TOKEN not set — skipping Homebrew formula publish; binaries still ship to the GitHub Release."
+            echo "::warning::HOMEBREW_TAP_GITHUB_TOKEN missing or lacks write access to firtal-group/homebrew-tap — skipping Homebrew formula publish; binaries still ship to the GitHub Release. Fix the token to restore brew + 'multica update' self-update (FIR-2107)."
           else
             echo "args=release --clean" >> "$GITHUB_OUTPUT"
           fi
@@ -120,11 +136,21 @@ jobs:
         env:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
-          if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::HOMEBREW_TAP_GITHUB_TOKEN not set — skipping public-tap binary mirror. Local runtimes will NOT self-update past the last hand-mirrored release until this secret is configured (FIR-2107)."
-          else
-            echo "present=true" >> "$GITHUB_OUTPUT"
+          # "present" means the token exists AND can write firtal-group/homebrew-tap.
+          # An expired/under-scoped token would 403 on the upload below; gate on
+          # real write access so the mirror skips gracefully instead of failing
+          # the job (same intent as the absent-token path).
+          present=false
+          if [ -n "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
+            if GH_TOKEN="$HOMEBREW_TAP_GITHUB_TOKEN" gh api repos/firtal-group/homebrew-tap \
+                 --jq '[.permissions.push, .permissions.admin, .permissions.maintain] | any' 2>/dev/null \
+               | grep -qx true; then
+              present=true
+            fi
+          fi
+          echo "present=$present" >> "$GITHUB_OUTPUT"
+          if [ "$present" != "true" ]; then
+            echo "::warning::HOMEBREW_TAP_GITHUB_TOKEN missing or lacks write access — skipping public-tap binary mirror. Local runtimes will NOT self-update past the last hand-mirrored release until this secret is fixed (FIR-2107)."
           fi
 
       - name: Download CLI assets from this repo's release
