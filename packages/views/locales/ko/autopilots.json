@@ -382,7 +382,6 @@
   "toolbar": {
     "result_count_title": "일치하는 자동화 / 전체 자동화",
     "filter_label": "필터",
-    "filter_active_count_one": "필터 {{count}}개",
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 지우기",
     "section_assignee": "담당",
@@ -400,12 +399,10 @@
     "pause": "일시중지",
     "resume": "재개",
     "delete": "삭제",
-    "selected_one": "{{count}}개 선택됨",
     "selected_other": "{{count}}개 선택됨",
     "clear_selection": "선택 해제",
     "delete_dialog": {
       "title": "자동화를 삭제할까요?",
-      "description_one": "\"{{name}}\" 및 실행 기록이 영구 삭제됩니다.",
       "description_other": "자동화 {{count}}개와 실행 기록이 영구 삭제됩니다.",
       "warning": "이 작업은 되돌릴 수 없습니다.",
       "cancel": "취소",

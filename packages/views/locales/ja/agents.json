@@ -71,7 +71,6 @@
     "fallback_runtime_cloud": "クラウド",
     "fallback_runtime_local": "ローカル",
     "actions_aria": "行の操作",
-    "task_count_one": "{{count}} 件のタスク",
     "task_count_other": "{{count}} 件のタスク"
   },
   "activity_tooltip": {
@@ -480,14 +479,12 @@
   },
   "last_active": {
     "today": "今日",
-    "days_ago_one": "{{count}} 日前",
     "days_ago_other": "{{count}} 日前",
     "none": "30 日間アクティビティなし"
   },
   "toolbar": {
     "result_count_title": "該当エージェント / スコープ内全体",
     "filter_label": "フィルター",
-    "filter_active_count_one": "{{count}} 件のフィルター",
     "filter_active_count_other": "{{count}} 件のフィルター",
     "clear_filters": "フィルターをクリア",
     "section_availability": "可用性",
@@ -501,7 +498,6 @@
     "section_model": "モデル"
   },
   "actions": {
-    "selected_one": "{{count}} 件選択中",
     "selected_other": "{{count}} 件選択中",
     "clear_selection": "選択を解除"
   }

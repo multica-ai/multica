@@ -382,7 +382,6 @@
   "toolbar": {
     "result_count_title": "該当する自動化 / すべての自動化",
     "filter_label": "フィルター",
-    "filter_active_count_one": "{{count}} 件のフィルター",
     "filter_active_count_other": "{{count}} 件のフィルター",
     "clear_filters": "フィルターをクリア",
     "section_assignee": "担当",
@@ -400,12 +399,10 @@
     "pause": "一時停止",
     "resume": "再開",
     "delete": "削除",
-    "selected_one": "{{count}} 件選択中",
     "selected_other": "{{count}} 件選択中",
     "clear_selection": "選択を解除",
     "delete_dialog": {
       "title": "自動化を削除しますか？",
-      "description_one": "「{{name}}」とその実行履歴を完全に削除します。",
       "description_other": "{{count}} 件の自動化とその実行履歴を完全に削除します。",
       "warning": "この操作は取り消せません。",
       "cancel": "キャンセル",

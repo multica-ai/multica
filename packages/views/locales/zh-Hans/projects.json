@@ -15,7 +15,6 @@
     "unpin": "取消钉选",
     "delete": "删除",
     "no_matches": "没有匹配的项目",
-    "selected_one": "已选 {{count}} 项",
     "selected_other": "已选 {{count}} 项",
     "clear_selection": "清除选择"
   },
@@ -132,7 +131,6 @@
   "toolbar": {
     "result_count_title": "当前结果 / 全部项目",
     "filter_label": "筛选",
-    "filter_active_count_one": "{{count}} 项筛选",
     "filter_active_count_other": "{{count}} 项筛选",
     "clear_filters": "清除筛选",
     "section_status": "状态",
