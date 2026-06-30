@@ -281,6 +281,7 @@ export function MermaidDiagram({ chart }: { chart: string }) {
           theme: "base",
           themeVariables: getMermaidThemeVariables(containerRef.current),
         });
+        await mermaid.parse(chart);
         const { svg: renderedSvg } = await mermaid.render(diagramId, chart);
         if (!cancelled) {
           const measured = getMermaidLayout(renderedSvg);

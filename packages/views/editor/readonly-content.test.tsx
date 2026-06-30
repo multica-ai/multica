@@ -48,6 +48,7 @@ vi.mock("./utils/link-handler", () => ({
 vi.mock("mermaid", () => ({
   default: {
     initialize: vi.fn(),
+    parse: vi.fn().mockResolvedValue(true),
     render: vi.fn().mockResolvedValue({
       svg: '<svg viewBox="0 0 123 45"><g><text>mock diagram</text></g></svg>',
     }),
@@ -393,6 +394,27 @@ describe("ReadonlyContent Mermaid rendering", () => {
     await waitFor(() => {
       expect(document.querySelector(".mermaid-diagram-lightbox")).toBeNull();
     });
+  });
+
+  it("shows the compact error state instead of embedding Mermaid's parser error SVG", async () => {
+    vi.mocked(mermaid.parse).mockRejectedValueOnce(
+      new Error("Syntax error in text"),
+    );
+
+    const chart = "graph LR\n  A -->";
+    const { container } = render(
+      <ReadonlyContent content={["```mermaid", chart, "```"].join("\n")} />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector(".mermaid-diagram-error")).not.toBeNull();
+    });
+
+    expect(container.querySelector(".mermaid-diagram-frame")).toBeNull();
+    expect(container.querySelector(".mermaid-diagram-error code")?.textContent).toBe(
+      chart,
+    );
+    expect(mermaid.render).not.toHaveBeenCalled();
   });
 });
 
