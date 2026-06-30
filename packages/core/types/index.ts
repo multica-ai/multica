@@ -120,12 +120,20 @@ export type {
   RedeemLarkBindingTokenResponse,
 } from "./lark";
 export type {
+  SlackInstallation,
+  ListSlackInstallationsResponse,
+  RegisterSlackBYORequest,
+  RedeemSlackBindingTokenResponse,
+} from "./slack";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
   AutopilotAssigneeType,
   AutopilotSubscriber,
   AutopilotSubscriberInput,
+  AutopilotCollaborator,
+  AutopilotCollaboratorsResponse,
   AutopilotTrigger,
   AutopilotTriggerKind,
   AutopilotRun,

@@ -70,6 +70,7 @@
     "pause_aria": "오토파일럿 일시 중지",
     "activate_aria": "오토파일럿 활성화",
     "edit": "수정",
+    "manage_access": "접근 권한 관리",
     "run_now": "지금 실행",
     "running": "실행 중...",
     "toast_triggered": "오토파일럿을 실행했습니다",
@@ -100,6 +101,20 @@
       "confirm": "삭제",
       "deleting": "삭제하는 중..."
     }
+  },
+  "access": {
+    "title": "접근 권한 관리",
+    "description": "추가한 멤버는 이 오토파일럿을 수정·실행하고 트리거와 webhook을 관리할 수 있습니다.",
+    "current_label": "접근 가능",
+    "add": "멤버 추가",
+    "search_placeholder": "멤버 검색…",
+    "no_results": "멤버를 찾을 수 없습니다",
+    "remove_tooltip": "접근 권한 제거",
+    "empty": "아직 아무에게도 접근 권한을 부여하지 않았습니다.",
+    "toast_granted": "접근 권한을 부여했습니다",
+    "toast_revoked": "접근 권한을 제거했습니다",
+    "toast_failed": "접근 권한을 업데이트하지 못했습니다",
+    "owner_note": "작성자와 워크스페이스 관리자는 항상 접근할 수 있습니다."
   },
   "run_status": {
     "issue_created": "이슈 생성됨",
@@ -367,7 +382,6 @@
   "toolbar": {
     "result_count_title": "일치하는 자동화 / 전체 자동화",
     "filter_label": "필터",
-    "filter_active_count_one": "필터 {{count}}개",
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 지우기",
     "section_assignee": "담당",
@@ -385,12 +399,10 @@
     "pause": "일시중지",
     "resume": "재개",
     "delete": "삭제",
-    "selected_one": "{{count}}개 선택됨",
     "selected_other": "{{count}}개 선택됨",
     "clear_selection": "선택 해제",
     "delete_dialog": {
       "title": "자동화를 삭제할까요?",
-      "description_one": "\"{{name}}\" 및 실행 기록이 영구 삭제됩니다.",
       "description_other": "자동화 {{count}}개와 실행 기록이 영구 삭제됩니다.",
       "warning": "이 작업은 되돌릴 수 없습니다.",
       "cancel": "취소",

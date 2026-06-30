@@ -25,7 +25,7 @@ type outboundQueries interface {
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 }
 
-// replySender posts one reply. Satisfied by *slackChannel, so the outbound path
+// replySender posts one reply. Satisfied by *slackSender, so the outbound path
 // reuses Send's Markdown->mrkdwn conversion, chunking, and threading.
 type replySender interface {
 	Send(ctx context.Context, out channel.OutboundMessage) (channel.SendResult, error)
@@ -52,9 +52,9 @@ func NewOutbound(q outboundQueries, decrypt Decrypter, logger *slog.Logger) *Out
 	}
 	o := &Outbound{q: q, decrypt: decrypt, logger: logger}
 	o.newSender = func(c credentials) replySender {
-		// Only the bot token is needed to post; the app token is a Socket Mode
-		// (inbound) credential.
-		return newSlackChannel(c, slack.New(c.BotToken), nil, logger)
+		// Only the bot token is needed to post; inbound Socket Mode uses the
+		// installation's separate app-level token (see slack_channel.go).
+		return newSlackSender(c, slack.New(c.BotToken), logger)
 	}
 	return o
 }

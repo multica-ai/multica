@@ -4,8 +4,9 @@ import {
   aggregateDailyCost,
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
+  bucketUnknownAgentRows,
   computeDailyTotals,
-  filterKnownAgentRows,
+  DELETED_AGENTS_ROW_ID,
   formatDuration,
   mergeAgentDashboardRows,
 } from "./utils";
@@ -202,26 +203,81 @@ describe("mergeAgentDashboardRows", () => {
   });
 });
 
-describe("filterKnownAgentRows", () => {
-  const rows = [
-    { agentId: "live", tokens: 100, cost: 1, seconds: 10, taskCount: 1 },
-    { agentId: "deleted", tokens: 50, cost: 0.5, seconds: 5, taskCount: 1 },
-  ];
+describe("bucketUnknownAgentRows", () => {
+  const live = { agentId: "live", tokens: 100, cost: 1, seconds: 10, taskCount: 1 };
+  const archived = {
+    agentId: "archived",
+    tokens: 80,
+    cost: 0.8,
+    seconds: 8,
+    taskCount: 2,
+  };
+  const deletedA = {
+    agentId: "deleted-a",
+    tokens: 50,
+    cost: 0.5,
+    seconds: 5,
+    taskCount: 1,
+  };
+  const deletedB = {
+    agentId: "deleted-b",
+    tokens: 30,
+    cost: 0.25,
+    seconds: 3,
+    taskCount: 4,
+  };
 
-  it("drops rows whose agent is no longer in the workspace", () => {
-    // "deleted" is absent from the known set — it's a hard-deleted agent whose
-    // legacy rollup row would otherwise render as a bare UUID.
-    const out = filterKnownAgentRows(rows, new Set(["live"]));
-    expect(out.map((r) => r.agentId)).toEqual(["live"]);
+  it("folds every hard-deleted agent into one aggregated bucket row", () => {
+    // "deleted-a" / "deleted-b" are absent from the known set — they'd otherwise
+    // render as bare UUIDs. They collapse into a single sentinel row.
+    const out = bucketUnknownAgentRows(
+      [live, deletedA, deletedB],
+      new Set(["live"]),
+    );
+    expect(out.map((r) => r.agentId)).toEqual(["live", DELETED_AGENTS_ROW_ID]);
+    const bucket = out.find((r) => r.agentId === DELETED_AGENTS_ROW_ID)!;
+    expect(bucket.tokens).toBe(80);
+    expect(bucket.cost).toBeCloseTo(0.75);
+    // Time/Tasks never attach to the bucket — the run-time rollup inner-joins
+    // `agent`, so deleted agents contribute nothing to those columns.
+    expect(bucket.seconds).toBe(0);
+    expect(bucket.taskCount).toBe(0);
   });
 
-  it("keeps every row while the agent list is still loading (null set)", () => {
-    const out = filterKnownAgentRows(rows, null);
-    expect(out.map((r) => r.agentId)).toEqual(["live", "deleted"]);
+  it("keeps the bucket total reconciled with the top-line spend", () => {
+    // The KPI total counts deleted-agent spend; sum(visible rows) must match it
+    // so the breakdown reconciles (MUL-3776).
+    const out = bucketUnknownAgentRows(
+      [live, deletedA, deletedB],
+      new Set(["live"]),
+    );
+    const visibleCost = out.reduce((s, r) => s + r.cost, 0);
+    const kpiCost = [live, deletedA, deletedB].reduce((s, r) => s + r.cost, 0);
+    expect(visibleCost).toBeCloseTo(kpiCost);
   });
 
-  it("drops every row when the known set is empty", () => {
-    expect(filterKnownAgentRows(rows, new Set())).toEqual([]);
+  it("keeps archived agents as themselves, never in the bucket", () => {
+    // The agent list is fetched with archived included, so archived agents are
+    // in the known set and stay on the board under their own id.
+    const out = bucketUnknownAgentRows(
+      [live, archived, deletedA],
+      new Set(["live", "archived"]),
+    );
+    expect(out.map((r) => r.agentId)).toEqual([
+      "live",
+      "archived",
+      DELETED_AGENTS_ROW_ID,
+    ]);
+  });
+
+  it("adds no bucket row when every agent is known", () => {
+    const out = bucketUnknownAgentRows([live, archived], new Set(["live", "archived"]));
+    expect(out.map((r) => r.agentId)).toEqual(["live", "archived"]);
+  });
+
+  it("keeps every row untouched while the agent list is still loading (null set)", () => {
+    const out = bucketUnknownAgentRows([live, deletedA], null);
+    expect(out.map((r) => r.agentId)).toEqual(["live", "deleted-a"]);
   });
 });
 

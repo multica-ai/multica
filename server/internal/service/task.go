@@ -512,6 +512,12 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "")
 }
 
+// EnqueueTaskForThreadParent creates a queued task for the agent who authored
+// the direct parent comment a member replied to.
+func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "")
+}
+
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
 // The resulting task carries is_leader_task=true so that downstream
 // self-trigger guards can distinguish a comment posted while the agent was
@@ -570,6 +576,50 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
+// EnqueueDeferredAssigneeFallback creates an inert task that becomes claimable
+// only after PromoteDueDeferredTasksForRuntime flips it from deferred to queued.
+func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue db.Issue, agentID, squadID pgtype.UUID, escalationForTaskID pgtype.UUID, triggerCommentID pgtype.UUID, fireAt time.Time) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		slog.Error("deferred fallback enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		slog.Debug("deferred fallback enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		slog.Error("deferred fallback enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	isLeader := squadID.Valid
+	task, err := s.Queries.CreateDeferredAgentTask(ctx, db.CreateDeferredAgentTaskParams{
+		AgentID:             agentID,
+		RuntimeID:           agent.RuntimeID,
+		IssueID:             issue.ID,
+		Priority:            priorityToInt(issue.Priority),
+		TriggerCommentID:    triggerCommentID,
+		TriggerSummary:      s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		IsLeaderTask:        pgtype.Bool{Bool: isLeader, Valid: isLeader},
+		SquadID:             squadID,
+		EscalationForTaskID: escalationForTaskID,
+		FireAt:              pgtype.Timestamptz{Time: fireAt, Valid: true},
+	})
+	if err != nil {
+		slog.Error("deferred fallback enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("create deferred task: %w", err)
+	}
+
+	slog.Info("deferred fallback task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(issue.ID),
+		"agent_id", util.UUIDToString(agentID),
+		"fire_at", fireAt.UTC().Format(time.RFC3339),
+	)
 	return task, nil
 }
 
@@ -1085,6 +1135,11 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}()
 
 	runtimeKey := util.UUIDToString(runtimeID)
+	if err := s.PromoteDueDeferredTasksForRuntime(ctx, runtimeID); err != nil {
+		outcome = "error_promote_deferred"
+		return nil, err
+	}
+
 	// Check this before EmptyClaim: a lost claim response moves the task out of
 	// `queued`, so the empty-queued cache cannot represent recoverability.
 	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
@@ -1166,6 +1221,23 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	return claimed, nil
 }
 
+func (s *TaskService) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+	tasks, err := s.Queries.PromoteDueDeferredTasksForRuntime(ctx, runtimeID)
+	if err != nil {
+		return fmt.Errorf("promote due deferred tasks: %w", err)
+	}
+	for _, task := range tasks {
+		slog.Info("deferred fallback task promoted",
+			"task_id", util.UUIDToString(task.ID),
+			"runtime_id", util.UUIDToString(runtimeID),
+			"agent_id", util.UUIDToString(task.AgentID),
+		)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+		s.NotifyTaskEnqueued(ctx, task)
+	}
+	return nil
+}
+
 // maybeLogClaimSlow emits one structured log per ClaimTask call when its total
 // latency exceeds 300ms, so the prod tail can be diagnosed without flooding
 // logs at normal poll rates. Called via defer so it captures the full path
@@ -1195,6 +1267,7 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
 	}
+	s.cancelDeferredEscalationsForTask(ctx, task.ID)
 
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskStarted(ctx, task)
@@ -1206,6 +1279,43 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	// on the transition users care about most.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskRunning, task)
 	return &task, nil
+}
+
+func (s *TaskService) cancelDeferredEscalationsForTask(ctx context.Context, taskID pgtype.UUID) {
+	cancelled, err := s.Queries.CancelDeferredEscalationsForTask(ctx, taskID)
+	if err != nil {
+		slog.Warn("cancel deferred escalations for task failed", "task_id", util.UUIDToString(taskID), "error", err)
+		return
+	}
+	for _, task := range cancelled {
+		slog.Info("deferred fallback task cancelled",
+			"task_id", util.UUIDToString(task.ID),
+			"primary_task_id", util.UUIDToString(taskID),
+			"reason", "primary_acknowledged",
+		)
+	}
+}
+
+func (s *TaskService) CancelDeferredEscalationsForIssueAgent(ctx context.Context, issueID, agentID pgtype.UUID) {
+	cancelled, err := s.Queries.CancelDeferredEscalationsForIssueAgent(ctx, db.CancelDeferredEscalationsForIssueAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	if err != nil {
+		slog.Warn("cancel deferred escalations for issue agent failed",
+			"issue_id", util.UUIDToString(issueID),
+			"agent_id", util.UUIDToString(agentID),
+			"error", err)
+		return
+	}
+	for _, task := range cancelled {
+		slog.Info("deferred fallback task cancelled",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(issueID),
+			"agent_id", util.UUIDToString(agentID),
+			"reason", "agent_comment_acknowledged",
+		)
+	}
 }
 
 // ExtendTaskPrepareLease keeps a claimed-but-not-started task protected while
@@ -2340,6 +2450,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	if err != nil {
 		return
 	}
+	s.CancelDeferredEscalationsForIssueAgent(ctx, issueID, agentID)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventCommentCreated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),

@@ -55,7 +55,6 @@ func slackInstallConfigJSON() []byte {
 		"app_id":              "T1",
 		"bot_user_id":         "UBOT",
 		"bot_token_encrypted": base64.StdEncoding.EncodeToString([]byte("xoxb-test")),
-		"app_token_encrypted": base64.StdEncoding.EncodeToString([]byte("xapp-test")),
 	})
 	return b
 }

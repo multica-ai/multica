@@ -192,7 +192,6 @@
     "pull_request_card_status_ready": "可以合入",
     "pull_request_card_status_unknown": "暂无检查信息",
     "pull_request_card_draft_prefix": "Draft · {{status}}",
-    "pull_request_card_files_count_one": "{{count}} 个文件",
     "pull_request_card_files_count_other": "{{count}} 个文件",
     "pull_request_card_show_more": "展开剩余 {{count}} 个",
     "pull_request_card_show_less": "收起",
@@ -251,9 +250,7 @@
     "due_date_removed": "移除了截止日期",
     "title_renamed": "把这个 issue 从\"{{from}}\"重命名为\"{{to}}\"",
     "description_updated": "更新了描述",
-    "task_completed_one": "完成了 task",
     "task_completed_other": "完成了 task（{{count}} 次）",
-    "task_failed_one": "task 失败",
     "task_failed_other": "task 失败（{{count}} 次）",
     "squad_leader_evaluated": "评估了小队触发",
     "squad_leader_action": "已评估并采取了操作",
@@ -263,9 +260,7 @@
     "squad_leader_failed": "评估失败",
     "squad_leader_failed_reason": "评估失败：{{reason}}",
     "coalesced_badge": "×{{count}}",
-    "activity_count_one": "{{count}} 条动态",
     "activity_count_other": "{{count}} 条动态",
-    "show_more_activities_one": "展开更早 {{count}} 条动态",
     "show_more_activities_other": "展开更早 {{count}} 条动态"
   },
   "comment": {
@@ -324,6 +319,7 @@
   },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体正在工作",
+    "hover_header_tasks_other": "{{count}} 个 task 工作中",
     "hover_header_queued_other": "{{count}} 个智能体排队中",
     "status_running": "正在工作",
     "status_queued": "排队中",

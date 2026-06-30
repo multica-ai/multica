@@ -175,6 +175,12 @@ type Daemon struct {
 	wsHBMu      sync.RWMutex         // guards wsHBLastAck
 	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 
+	// reconcile fans out a "re-check server state now" signal to subscribers
+	// (watchTaskCancellation, workspaceSyncLoop) so the WS connect/reconnect
+	// path can shrink the 5s / 30s reconciliation gap to sub-second. See
+	// reconcile.go and runTaskWakeupConnection.
+	reconcile *reconcileBroadcaster
+
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
 	// handlers converge on a single recovery path when they each detect that a
@@ -264,6 +270,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
+		reconcile:                 newReconcileBroadcaster(),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
@@ -1684,19 +1691,35 @@ func (d *Daemon) tryRenewToken(ctx context.Context) {
 }
 
 // workspaceSyncLoop periodically fetches the user's workspaces from the API
-// and registers runtimes for any new ones.
+// and registers runtimes for any new ones. A WS connect/reconnect broadcast
+// triggers an immediate sync so runtime/repo changes the server applied during
+// the WS gap are picked up sub-second instead of after the next 30s tick.
 func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 	ticker := time.NewTicker(DefaultWorkspaceSyncInterval)
 	defer ticker.Stop()
+
+	var reconcileCh <-chan struct{}
+	if d.reconcile != nil {
+		reconcileCh = d.reconcile.notify()
+	}
+
+	sync := func() {
+		if err := d.syncWorkspacesFromAPI(ctx); err != nil {
+			d.logger.Debug("workspace sync failed", "error", err)
+		}
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			if err := d.syncWorkspacesFromAPI(ctx); err != nil {
-				d.logger.Debug("workspace sync failed", "error", err)
+		case <-reconcileCh:
+			if d.reconcile != nil {
+				reconcileCh = d.reconcile.notify()
 			}
+			sync()
+		case <-ticker.C:
+			sync()
 		}
 	}
 }
@@ -1905,7 +1928,19 @@ func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
 		}
 	}
 
-	d.runHeartbeatTick(ctx, rid)
+	consecutiveTransientFailures := 0
+	tick := func() {
+		if d.runHeartbeatTick(ctx, rid) {
+			consecutiveTransientFailures++
+			if consecutiveTransientFailures == 2 {
+				d.client.CloseIdleConnections()
+			}
+			return
+		}
+		consecutiveTransientFailures = 0
+	}
+
+	tick()
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -1914,12 +1949,14 @@ func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			d.runHeartbeatTick(ctx, rid)
+			tick()
 		}
 	}
 }
 
-func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
+// runHeartbeatTick returns true when the HTTP heartbeat hit a transient
+// failure that should count toward stale idle-connection cleanup.
+func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	// Skip HTTP heartbeat for runtimes that successfully acked a recent
 	// WebSocket heartbeat. The WS path keeps last_seen_at fresh and delivers
 	// actions, so the HTTP write would be a duplicate DB update. If the WS
@@ -1928,7 +1965,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	// relies on.
 	if d.wsHeartbeatRecentlyAcked(rid) {
 		d.logger.Debug("heartbeat: skipping HTTP tick, WS recently acked", "runtime_id", rid)
-		return
+		return false
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
 	resp, err := d.client.SendHeartbeat(ctx, rid)
@@ -1941,20 +1978,21 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 				// the daemon root context so notifyRuntimeSetChanged
 				// tearing down this heartbeat goroutine cannot abort it.
 				go d.handleRuntimeGone(rid)
-				return
+				return false
 			}
 			d.logger.Warn("heartbeat failed", "runtime_id", rid, "error", err)
 		}
-		return
+		return ctx.Err() == nil && isTransientError(err)
 	}
 	if resp != nil && resp.RuntimeGone {
 		// The WS path returns a successful ack with RuntimeGone=true for the
 		// same scenario; treat it the same way here in case HTTP starts
 		// surfacing this signal too.
 		go d.handleRuntimeGone(rid)
-		return
+		return false
 	}
 	d.handleHeartbeatActions(ctx, rid, resp)
+	return false
 }
 
 // handleHeartbeatActions dispatches the pending-action set returned by either
@@ -2738,25 +2776,48 @@ func shouldInterruptAgent(status string, err error) bool {
 // so callers should pass the runCtx that was set up around the agent run.
 func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollInterval time.Duration, taskLog *slog.Logger) <-chan struct{} {
 	cancelled := make(chan struct{})
+	// Subscribe to the reconcile broadcaster before launching the inner
+	// goroutine. A WS reconnect that fires between the goroutine starting
+	// and its first notify() call would otherwise be dropped; the ticker
+	// still bounds the worst case, but the whole point of the broadcast is
+	// to avoid waiting on that ticker.
+	var reconcileCh <-chan struct{}
+	if d.reconcile != nil {
+		reconcileCh = d.reconcile.notify()
+	}
 	go func() {
 		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
+		check := func() bool {
+			status, err := d.client.GetTaskStatus(ctx, taskID)
+			if !shouldInterruptAgent(status, err) {
+				return false
+			}
+			if err != nil {
+				taskLog.Info("task gone server-side, interrupting agent", "error", err)
+			} else {
+				taskLog.Info("task reached terminal state server-side, interrupting agent", "status", status)
+			}
+			close(cancelled)
+			return true
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-reconcileCh:
+				// Refresh the subscription before issuing the request so a
+				// second broadcast that overlaps GetTaskStatus is not lost.
+				if d.reconcile != nil {
+					reconcileCh = d.reconcile.notify()
+				}
+				if check() {
+					return
+				}
 			case <-ticker.C:
-				status, err := d.client.GetTaskStatus(ctx, taskID)
-				if !shouldInterruptAgent(status, err) {
-					continue
+				if check() {
+					return
 				}
-				if err != nil {
-					taskLog.Info("task gone server-side, interrupting agent", "error", err)
-				} else {
-					taskLog.Info("task reached terminal state server-side, interrupting agent", "status", status)
-				}
-				close(cancelled)
-				return
 			}
 		}
 	}()

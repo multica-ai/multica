@@ -42,112 +42,28 @@ func TestCommentMentionsAnyone(t *testing.T) {
 	}
 }
 
-// TestCommentRoutesViaMention covers the parent-aware variant that drives the
-// squad-leader skip rule on REPLY (MUL-3744). It is a pure helper test that
-// runs without a database connection.
-func TestCommentRoutesViaMention(t *testing.T) {
-	memberRoot := func(body string) *db.Comment {
-		return &db.Comment{AuthorType: "member", Content: body}
-	}
-	agentRoot := func(body string) *db.Comment {
-		return &db.Comment{AuthorType: "agent", Content: body}
-	}
-
-	cases := []struct {
-		name       string
-		content    string
-		parent     *db.Comment
-		authorType string
-		want       bool
-	}{
-		{
-			name:       "own agent mention counts",
-			content:    "[@A](mention://agent/11111111-1111-1111-1111-111111111111) please",
-			parent:     nil,
-			authorType: "member",
-			want:       true,
-		},
-		{
-			name:       "plain top-level comment does not route",
-			content:    "please take a look",
-			parent:     nil,
-			authorType: "member",
-			want:       false,
-		},
-		{
-			name:       "plain reply to member parent with @agent inherits",
-			content:    "any update?",
-			parent:     memberRoot("[@A](mention://agent/11111111-1111-1111-1111-111111111111) handle this"),
-			authorType: "member",
-			want:       true,
-		},
-		{
-			name:       "plain reply to member parent with no routing mention does not inherit",
-			content:    "any update?",
-			parent:     memberRoot("see [MUL-1](mention://issue/33333333-3333-3333-3333-333333333333)"),
-			authorType: "member",
-			want:       false,
-		},
-		{
-			name:       "plain reply to agent parent does not inherit",
-			content:    "any update?",
-			parent:     agentRoot("[@A](mention://agent/11111111-1111-1111-1111-111111111111) handle this"),
-			authorType: "member",
-			want:       false,
-		},
-		{
-			name:       "agent reply never inherits",
-			content:    "noted",
-			parent:     memberRoot("[@A](mention://agent/11111111-1111-1111-1111-111111111111) handle this"),
-			authorType: "agent",
-			want:       false,
-		},
-		{
-			name:       "reply with own mention does not inherit",
-			content:    "[@B](mention://agent/22222222-2222-2222-2222-222222222222) over to you",
-			parent:     memberRoot("[@A](mention://agent/11111111-1111-1111-1111-111111111111) handle this"),
-			authorType: "member",
-			want:       true,
-		},
-		{
-			name:       "plain reply to member parent with @all inherits",
-			content:    "any update?",
-			parent:     memberRoot("[@all](mention://all/all) heads up"),
-			authorType: "member",
-			want:       true,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := commentRoutesViaMention(tc.content, tc.parent, tc.authorType); got != tc.want {
-				t.Fatalf("commentRoutesViaMention(%q, parent=%+v, %s) = %v, want %v",
-					tc.content, tc.parent, tc.authorType, got, tc.want)
-			}
-		})
-	}
-}
-
-// shouldEnqueueSquadLeaderOnCommentForTest reports whether the shared comment
-// trigger computation would wake the issue's assigned squad leader — the
-// boolean view these integration tests assert on. Use
-// shouldEnqueueSquadLeaderOnReplyForTest when the scenario is a reply that
-// might inherit parent mentions.
+// shouldEnqueueSquadLeaderOnCommentForTest reports whether the shared cascade
+// would wake the issue's assigned squad leader.
 func shouldEnqueueSquadLeaderOnCommentForTest(ctx context.Context, issue db.Issue, content, authorType, authorID string) bool {
-	_, ok := testHandler.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, nil, authorType, authorID, commentTriggerComputeOptions{})
-	return ok
+	return triggersContainIssueAssigneeSquadLeader(testHandler.computeCommentAgentTriggers(ctx, issue, content, nil, authorType, authorID, commentTriggerComputeOptions{}))
 }
 
-// shouldEnqueueSquadLeaderOnReplyForTest is the reply variant: it threads the
-// parent comment into computeAssignedSquadLeaderCommentTrigger so the helper
-// can see inherited routing mentions (MUL-3744).
 func shouldEnqueueSquadLeaderOnReplyForTest(ctx context.Context, issue db.Issue, content string, parent *db.Comment, authorType, authorID string) bool {
-	_, ok := testHandler.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, parent, authorType, authorID, commentTriggerComputeOptions{})
-	return ok
+	return triggersContainIssueAssigneeSquadLeader(testHandler.computeCommentAgentTriggers(ctx, issue, content, parent, authorType, authorID, commentTriggerComputeOptions{}))
+}
+
+func triggersContainIssueAssigneeSquadLeader(triggers []commentAgentTrigger) bool {
+	for _, trigger := range triggers {
+		if trigger.Source == commentTriggerSourceIssueAssignee && trigger.Squad != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // squadCommentTriggerFixture wires a squad assigned to a fresh issue and
 // returns the loaded db.Issue plus the leader agent UUID for use in
-// computeAssignedSquadLeaderCommentTrigger integration tests.
+// cascade integration tests.
 type squadCommentTriggerFixture struct {
 	Issue    db.Issue
 	SquadID  string
@@ -208,11 +124,10 @@ func newSquadCommentTriggerFixture(t *testing.T) squadCommentTriggerFixture {
 	}
 }
 
-// TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone
-// encodes Bohan's rule (MUL-2170): a member comment that explicitly @mentions
-// anyone — agent, member, squad, or @all — must NOT wake the squad leader.
-// Issue cross-references are not routing and do not suppress the leader.
-// Agent-authored comments are exempt: the leader still coordinates threads.
+// TestShouldEnqueueSquadLeaderOnComment_SkipsWhenCommentRoutesElsewhere
+// pins the cascade: explicit participant mentions do not also wake the assigned
+// squad leader. Issue cross-references are not routing and do not suppress the
+// leader.
 func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -285,12 +200,12 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 			description: "@squad routes the issue to that squad's leader — current leader stays out",
 		},
 		{
-			name:        "agent comment with @agent still triggers leader",
+			name:        "agent comment with @agent does not also trigger leader",
 			content:     "delegating to [@Other](mention://agent/" + fx.OtherID + ")",
 			authorType:  "agent",
 			authorID:    fx.OtherID,
-			want:        true,
-			description: "agent-authored replies always reach leader so it can coordinate next step",
+			want:        false,
+			description: "explicit @agent routes only to the mentioned target; the assigned squad-leader fallback must not also fire (no double-enqueue)",
 		},
 	}
 
@@ -305,13 +220,13 @@ func TestShouldEnqueueSquadLeaderOnComment_SkipsWhenMemberMentionsAnyone(t *test
 	}
 }
 
-// TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole covers the
-// role-aware self-trigger guard added for MUL-2218. The leader agent itself
-// should be skipped only when its last activity on the issue was a leader
-// task — never just because the comment author equals the leader ID. This
-// matters for dual-role agents (leader + worker of the same squad): a
-// comment posted from the worker task must still wake the leader.
-func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T) {
+// TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader
+// pins the MUL-3879 restored behavior in the new MUL-3794 cascade: an
+// agent-authored worker-result comment on a squad-assigned issue wakes the
+// assigned squad leader so the leader→worker→leader coordination loop stays
+// closed, while the leader's own self-trigger loop stays suppressed via
+// lastTaskWasLeader.
+func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -328,7 +243,11 @@ func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T)
 			t.Fatalf("clear tasks: %v", err)
 		}
 	}
-	insertTask := func(isLeader bool, status string) {
+	// insertLeaderTask seeds a task for the leader agent so the
+	// lastTaskWasLeader guard can read the agent's most recent role on the
+	// issue. Separate Exec calls get distinct created_at values, so the last
+	// inserted row is the "latest" task.
+	insertLeaderTask := func(isLeader bool, status string) {
 		t.Helper()
 		var runtimeID string
 		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&runtimeID); err != nil {
@@ -342,69 +261,59 @@ func TestShouldEnqueueSquadLeaderOnComment_LeaderSelfTriggerByRole(t *testing.T)
 		}
 	}
 
-	t.Run("no prior task wakes leader (fresh external trigger)", func(t *testing.T) {
+	// Case 1: a worker agent (not the leader) posts a result comment on the
+	// squad-assigned issue — the assigned leader must wake to coordinate.
+	t.Run("worker agent comment wakes squad leader", func(t *testing.T) {
 		clearTasks()
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "noted", "agent", fx.LeaderID); !got {
-			t.Fatalf("no prior task: expected leader to be enqueued, got skip")
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "pushed the fix, PR is up", "agent", fx.OtherID); !got {
+			t.Fatalf("worker agent comment: expected leader to wake, got skip")
 		}
 	})
 
-	t.Run("prior leader task suppresses self-trigger", func(t *testing.T) {
+	// Case 2: a dual-role agent (leader of the squad, also runs worker tasks)
+	// posts while its latest task on the issue was a worker task — the leader
+	// role must still wake because the comment is a worker result, not a
+	// leader self-trigger.
+	t.Run("dual-role worker comment wakes leader when latest task is worker", func(t *testing.T) {
 		clearTasks()
-		insertTask(true, "completed")
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "noted", "agent", fx.LeaderID); got {
-			t.Fatalf("after leader task: expected skip (anti-loop), got enqueue")
+		insertLeaderTask(true, "completed")  // older leader task
+		insertLeaderTask(false, "completed") // newer worker task → latest role is worker
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "done with my worker slice", "agent", fx.LeaderID); !got {
+			t.Fatalf("dual-role worker comment: expected leader to wake, got skip")
 		}
 	})
 
-	t.Run("prior worker task still wakes leader (dual-role agent)", func(t *testing.T) {
+	// Case 3: the leader posts while its latest task was a leader task — this
+	// is a self-trigger loop and must stay suppressed.
+	t.Run("leader comment from latest leader task does not self-trigger", func(t *testing.T) {
 		clearTasks()
-		insertTask(false, "completed")
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "result", "agent", fx.LeaderID); !got {
-			t.Fatalf("after worker task: expected leader to be enqueued (MUL-2218), got skip")
+		insertLeaderTask(false, "completed") // older worker task
+		insertLeaderTask(true, "completed")  // newer leader task → latest role is leader
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "coordinating next steps", "agent", fx.LeaderID); got {
+			t.Fatalf("leader self-trigger: expected skip, got wake")
 		}
 	})
 
-	t.Run("most recent task is the one that matters", func(t *testing.T) {
+	// Case 4: an agent-authored comment carrying an explicit @agent mention
+	// routes only to the mentioned target — the assigned squad leader must NOT
+	// also be enqueued via the fallback path (no double-enqueue).
+	t.Run("explicit mention does not double-enqueue assigned leader", func(t *testing.T) {
 		clearTasks()
-		insertTask(true, "completed")  // older leader task
-		insertTask(false, "completed") // newer worker task
-		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, "result", "agent", fx.LeaderID); !got {
-			t.Fatalf("latest task is worker: expected leader to be enqueued, got skip")
+		content := "handing to [@Other](mention://agent/" + fx.OtherID + ")"
+		if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, content, "agent", fx.LeaderID); got {
+			t.Fatalf("explicit mention: expected no assigned-leader fallback, got wake")
 		}
 	})
 }
 
-// TestCreateComment_SquadLeaderSkipOnlyInspectsCurrentMention drives the
-// full CreateComment handler to lock the call-site wiring (comment.go) for
-// the squad-leader-skip rule. Specifically it proves that:
+// TestCreateComment_SquadPlainReplyToMemberParentKeepsRootMentionOwner drives the
+// full CreateComment handler to lock the cascade's reply behavior:
 //
 //   - A member top-level comment that @mentions another agent does NOT
 //     enqueue the squad leader (the mentioned agent owns the next step).
-//   - A subsequent member REPLY in the same thread, containing no mentions
-//     of its own, DOES enqueue the squad leader — i.e. the parent's
-//     @agent mention is not inherited into the leader-skip decision.
-//
-// The matching unit test above exercises the helper in isolation; this
-// test catches a class of regression where someone refactors comment.go
-// to pass the parent's content (or the merged thread content) by mistake.
-// TestCreateComment_SquadLeaderSkipHonorsInheritedMention drives the full
-// CreateComment handler to lock the call-site wiring (comment.go) for the
-// squad-leader-skip rule across the reply path. Specifically it proves that:
-//
-//   - A member top-level comment that @mentions another agent does NOT
-//     enqueue the squad leader (the mentioned agent owns the next step).
-//   - A subsequent member REPLY in the same thread that has no mentions of
-//     its own does NOT re-wake the squad leader either, because the
-//     @mention path inherits the parent's mention and routes the reply to
-//     the originally mentioned agent. Without this rule the reply
-//     double-triggers — leader via this branch AND the mentioned agent via
-//     parent-mention inheritance (MUL-3744).
-//
-// The matching unit test above exercises the helper in isolation; this
-// test catches a class of regression where someone refactors comment.go
-// to drop the parent-aware leader-skip check.
-func TestCreateComment_SquadLeaderSkipHonorsInheritedMention(t *testing.T) {
+//   - A subsequent member reply to that member-authored root with no explicit
+//     agent mention continues to the root owner instead of the assignee.
+func TestCreateComment_SquadPlainReplyToMemberParentKeepsRootMentionOwner(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -456,9 +365,8 @@ func TestCreateComment_SquadLeaderSkipHonorsInheritedMention(t *testing.T) {
 		t.Fatalf("after parent (@OtherAgent): expected 1 OtherAgent task (mention path), got %d", got)
 	}
 
-	// 2. Mark OtherAgent's parent task done so the @mention dedup
-	//    (HasPendingTaskForIssueAndAgent) does not mask whether the reply
-	//    re-fires the mention path via inheritance.
+	// 2. Mark OtherAgent's parent task done so queued-task counts below only
+	//    reflect what the plain reply does.
 	if _, err := testPool.Exec(ctx, `
 		UPDATE agent_task_queue SET status = 'completed'
 		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
@@ -467,34 +375,29 @@ func TestCreateComment_SquadLeaderSkipHonorsInheritedMention(t *testing.T) {
 	}
 
 	// 3. Member posts a reply in the same thread with NO mentions.
-	//    The leader-skip helper must see that the parent's @OtherAgent
-	//    mention is inherited into the @mention path, and stay out of the
-	//    way. Result:
-	//      - leader: still 0 queued tasks (no double-trigger)
-	//      - OtherAgent: re-queued via inherited mention (one new task)
+	//    The root's @OtherAgent mention owns the thread, so the reply returns
+	//    to OtherAgent instead of falling back to the assigned squad leader.
 	postMemberComment(map[string]any{
 		"content":   "any update?",
 		"parent_id": parent.ID,
 	})
 	if got := countQueued(fx.LeaderID); got != 0 {
-		t.Fatalf("after plain reply: expected 0 leader tasks (inherited mention routes), got %d (MUL-3744)", got)
+		t.Fatalf("after plain reply: expected 0 leader tasks, got %d", got)
 	}
 	if got := countQueued(fx.OtherID); got != 1 {
-		t.Fatalf("after plain reply: expected 1 OtherAgent task (inherited mention path), got %d", got)
+		t.Fatalf("after plain reply: expected 1 OtherAgent task, got %d", got)
 	}
 }
 
-// TestCreateComment_DualRoleAgentWorkerCommentWakesLeader is the full-stack
-// regression test for MUL-2218. Scenario:
+// TestCreateComment_DualRoleAgentWorkerCommentWakesLeader pins the MUL-3879
+// restored coordination loop at the full-handler level. Scenario:
 //
-//   - Agent L is the leader of squad S and also a worker assigned tasks on
-//     issues belonging to S.
-//   - L is woken in its worker role (is_leader_task=false) and posts a comment.
-//   - The squad-leader self-trigger guard MUST still wake L in its leader role
-//     so it can react to the worker output (e.g. delegate the next step).
-//
-// Before the fix the role-blind authorID == leaderID check skipped the
-// leader, leaving the issue stalled.
+//   - Agent L is the leader of squad S and also runs worker tasks on issues
+//     belonging to S.
+//   - L is woken in its worker role (is_leader_task=false) and posts a result
+//     comment.
+//   - A leader-role task IS enqueued so the squad leader can coordinate the
+//     next step — the worker result must not silently strand the issue.
 func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -540,8 +443,7 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// A NEW leader-role task must be enqueued for L on this issue so the
-	// leader role can react to its own worker output.
+	// A new leader-role task is enqueued so the leader coordinates next steps.
 	var leaderTasks int
 	if err := testPool.QueryRow(ctx, `
 		SELECT count(*) FROM agent_task_queue
@@ -557,9 +459,8 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 // TestCreateRetryTask_InheritsIsLeaderTask locks the retry-clone contract for
 // MUL-2218: auto-retry of a leader-role task must produce a child task that is
 // also is_leader_task=true. Without this, MaybeRetryFailedTask silently
-// demotes a retried leader task to a worker task, and the self-trigger guard
-// in computeAssignedSquadLeaderCommentTrigger / comment.go stops recognising the
-// retried leader's own comments — re-opening the bug this issue fixes.
+// demotes a retried leader task to a worker task, and role-specific claim-time
+// briefing/self-mention guards lose the leader provenance.
 func TestCreateRetryTask_InheritsIsLeaderTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

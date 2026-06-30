@@ -93,11 +93,52 @@ func TestSlackThreadIsolation(t *testing.T) {
 }
 
 func TestNewSlackResolverSet(t *testing.T) {
-	set := NewSlackResolverSet(nil, nil)
+	set := NewSlackResolverSet(nil, nil, nil, nil)
 	if set.Installation == nil || set.Identity == nil || set.Dedup == nil || set.Session == nil || set.Audit == nil {
 		t.Error("resolver set must populate all required resolvers")
 	}
 	if set.OriginType != "slack_chat" {
 		t.Errorf("OriginType = %q, want slack_chat", set.OriginType)
+	}
+	if set.Replier != nil {
+		t.Error("a nil replier arg must leave Replier nil (not a typed-nil interface)")
+	}
+	if set.Typing != nil {
+		t.Error("a nil typing arg must leave Typing nil (not a typed-nil interface)")
+	}
+
+	// A real replier + typing manager thread through.
+	set = NewSlackResolverSet(nil, nil, NewOutboundReplier(OutboundReplierConfig{}), NewTypingIndicatorManager(nil, nil, nil))
+	if set.Replier == nil {
+		t.Error("a non-nil replier must populate ResolverSet.Replier")
+	}
+	if set.Typing == nil {
+		t.Error("a non-nil typing manager must populate ResolverSet.Typing")
+	}
+}
+
+func TestInstallationServesTeam(t *testing.T) {
+	cfg := func(team string) json.RawMessage {
+		b, _ := json.Marshal(installConfig{AppID: "A0BCXGVCS7R", TeamID: team})
+		return b
+	}
+	cases := []struct {
+		name      string
+		cfgTeam   string
+		eventTeam string
+		want      bool
+	}{
+		{"matching team", "T999", "T999", true},
+		// api_app_id alone is not enough: the same app installed into another Slack
+		// workspace emits the same app id but a different team — must not route here.
+		{"different team", "T999", "TOTHER", false},
+		{"empty event team", "T999", "", false},
+		{"legacy row without a team is permissive", "", "TANY", true},
+	}
+	for _, c := range cases {
+		if got := installationServesTeam(cfg(c.cfgTeam), c.eventTeam); got != c.want {
+			t.Errorf("%s: installationServesTeam(cfg=%q, event=%q) = %v, want %v",
+				c.name, c.cfgTeam, c.eventTeam, got, c.want)
+		}
 	}
 }

@@ -319,6 +319,7 @@
   },
   "agent_activity": {
     "hover_header_other": "作業中のエージェント {{count}} 件",
+    "hover_header_tasks_other": "作業中のタスク {{count}} 件",
     "hover_header_queued_other": "待機中のエージェント {{count}} 件",
     "status_running": "作業中",
     "status_queued": "待機中",

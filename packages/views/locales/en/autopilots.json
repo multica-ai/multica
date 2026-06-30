@@ -70,6 +70,7 @@
     "pause_aria": "Pause autopilot",
     "activate_aria": "Activate autopilot",
     "edit": "Edit",
+    "manage_access": "Manage access",
     "run_now": "Run now",
     "running": "Running...",
     "toast_triggered": "Autopilot triggered",
@@ -100,6 +101,20 @@
       "confirm": "Delete",
       "deleting": "Deleting..."
     }
+  },
+  "access": {
+    "title": "Manage access",
+    "description": "Members you add can edit, run, and manage this autopilot's triggers and webhooks.",
+    "current_label": "With access",
+    "add": "Add member",
+    "search_placeholder": "Search members…",
+    "no_results": "No members found",
+    "remove_tooltip": "Remove access",
+    "empty": "No one has been granted access yet.",
+    "toast_granted": "Access granted",
+    "toast_revoked": "Access removed",
+    "toast_failed": "Couldn't update access",
+    "owner_note": "The creator and workspace admins always have access."
   },
   "run_status": {
     "issue_created": "Issue Created",

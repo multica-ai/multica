@@ -23,6 +23,7 @@ import {
 } from "../agents/queries";
 import { githubKeys } from "../github/queries";
 import { larkKeys } from "../lark/queries";
+import { slackKeys } from "../slack/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -339,6 +340,14 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
   qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
   qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+  // Per-chat-session caches are also keyed without wsId, so the
+  // chatKeys.all(wsId) prefix above only reaches session lists / aggregates.
+  // Message streams rely on WS invalidation with staleTime: Infinity; recover
+  // sessions that missed chat/task events while the socket was disconnected.
+  qc.invalidateQueries({ queryKey: chatKeys.messagesAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.messagesPageAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.pendingTaskAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.taskMessagesAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
@@ -483,6 +492,10 @@ export function useRealtimeSync(
       lark_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
+      },
+      slack_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: slackKeys.installations(wsId) });
       },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all

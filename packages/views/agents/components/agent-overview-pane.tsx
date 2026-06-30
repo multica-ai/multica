@@ -17,6 +17,7 @@ import type { Agent, AgentRuntime } from "@multica/core/types";
 import { providerSupportsMcpConfig } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
+import { slackInstallationsOptions } from "@multica/core/slack";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -141,16 +142,24 @@ export function AgentOverviewPane({
     enabled: !!wsId,
   });
   const larkConfigured = larkListing?.configured === true;
+  const { data: slackListing } = useQuery({
+    ...slackInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
+  const slackConfigured = slackListing?.configured === true;
+  // The Integrations tab appears once EITHER channel is wired on the
+  // deployment, so a Slack-only deployment (no Lark) still surfaces it.
+  const integrationsConfigured = larkConfigured || slackConfigured;
 
   // The MCP tab is only shown when the agent's runtime backend actually
   // consumes mcp_config — see providerSupportsMcpConfig. We default to
   // showing it when the runtime row hasn't loaded yet so a slow fetch
   // can't transiently flicker the tab off and then on.
   //
-  // The Integrations tab only appears once the deployment has Lark wired
+  // The Integrations tab appears once the deployment has Lark OR Slack wired
   // (configured). Unlike MCP we default to HIDING while the listing loads:
-  // deployments without Lark are the common case, so flashing the tab on
-  // then off would be the worse flicker.
+  // deployments without either channel are the common case, so flashing the
+  // tab on then off would be the worse flicker.
   //
   // The Runtime Config tab is openclaw-only today (gateway mode lives there,
   // issue #3260). Other providers' runtime_config is freeform JSONB that no
@@ -161,11 +170,11 @@ export function AgentOverviewPane({
     const showRuntimeConfig = runtime ? runtime.provider === "openclaw" : false;
     return detailTabs.filter((tab) => {
       if (tab.id === "mcp_config") return showMcp;
-      if (tab.id === "integrations") return larkConfigured;
+      if (tab.id === "integrations") return integrationsConfigured;
       if (tab.id === "runtime_config") return showRuntimeConfig;
       return true;
     });
-  }, [runtime, larkConfigured]);
+  }, [runtime, integrationsConfigured]);
 
   // If the active tab disappears (e.g. user just switched the agent's
   // runtime to one that doesn't read mcp_config), fall back to Activity

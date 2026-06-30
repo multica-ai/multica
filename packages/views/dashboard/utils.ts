@@ -227,21 +227,54 @@ export function mergeAgentDashboardRows(
   });
 }
 
-// Drop usage rows whose agent no longer exists in the workspace. The agent
-// list is fetched with `include_archived: true`, so archived agents keep
-// their names and stay on the leaderboard; only hard-deleted agents fall out
-// of `knownAgentIds`. Those are legacy rollup rows that would otherwise
-// render as a bare UUID (MUL-3771).
+// Synthetic agentId for the row that aggregates all hard-deleted agents.
+// Sentinel (not a real UUID) so the component can detect it and render a
+// placeholder instead of looking the id up in the agent list.
+export const DELETED_AGENTS_ROW_ID = "__deleted_agents__";
+
+// Fold usage rows whose agent no longer exists in the workspace into a single
+// aggregated "Deleted agents" row instead of dropping them. The agent list is
+// fetched with `include_archived: true`, so archived agents keep their names
+// and stay on the leaderboard as themselves; only hard-deleted agents fall out
+// of `knownAgentIds` and collapse into the bucket.
 //
-// `knownAgentIds` is empty while the agent list is still loading; callers
+// MUL-3771 (PR #4637) originally *dropped* these rows so they'd stop rendering
+// as a bare UUID — but the top-line Cost/Tokens KPIs still count their spend
+// (those totals aggregate `task_usage_hourly` without joining `agent`), so the
+// per-agent breakdown no longer reconciled with the totals (MUL-3776, #4640).
+// Aggregating instead of dropping keeps `sum(visible rows) == KPI total` while
+// still never exposing a UUID. The bucket carries tokens + cost only; seconds
+// and taskCount stay 0 because the run-time rollups inner-join `agent`, so
+// deleted agents already contribute nothing to the Time/Tasks KPIs — the
+// component renders those two columns as "—" for this row.
+//
+// `knownAgentIds` is `null` while the agent list is still loading; callers
 // pass `null` in that case so the rows pass through untouched instead of the
-// whole leaderboard blanking on a slow fetch.
-export function filterKnownAgentRows(
+// whole leaderboard collapsing into one bucket on a slow fetch.
+export function bucketUnknownAgentRows(
   rows: AgentDashboardRow[],
   knownAgentIds: ReadonlySet<string> | null,
 ): AgentDashboardRow[] {
   if (!knownAgentIds) return rows;
-  return rows.filter((r) => knownAgentIds.has(r.agentId));
+  const known: AgentDashboardRow[] = [];
+  const bucket: AgentDashboardRow = {
+    agentId: DELETED_AGENTS_ROW_ID,
+    tokens: 0,
+    cost: 0,
+    seconds: 0,
+    taskCount: 0,
+  };
+  let hasDeleted = false;
+  for (const r of rows) {
+    if (knownAgentIds.has(r.agentId)) {
+      known.push(r);
+      continue;
+    }
+    hasDeleted = true;
+    bucket.tokens += r.tokens;
+    bucket.cost += r.cost;
+  }
+  return hasDeleted ? [...known, bucket] : known;
 }
 
 // ---------------------------------------------------------------------------

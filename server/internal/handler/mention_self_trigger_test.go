@@ -9,18 +9,17 @@ import (
 )
 
 // enqueueMentionedAgentTasksForTest mirrors the production comment path for
-// @mention triggers: compute the mention trigger set, then enqueue it. Kept as
-// a test helper so these integration tests keep asserting enqueue side effects
-// without preserving a production wrapper that nothing else calls.
+// @mention triggers: compute the cascade trigger set, then enqueue it. Kept as a
+// test helper so these integration tests keep asserting enqueue side effects.
 func enqueueMentionedAgentTasksForTest(t *testing.T, ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
 	t.Helper()
-	triggers := testHandler.computeMentionedAgentCommentTriggers(ctx, issue, comment.Content, parentComment, authorType, authorID, commentTriggerComputeOptions{})
+	triggers := testHandler.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, authorType, authorID, commentTriggerComputeOptions{})
 	testHandler.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 }
 
 // selfMentionFixture wires the seeded "Handler Test Agent" as J plus two
 // fresh issues so we can exercise the agent-self-mention path on the @mention
-// branch of computeMentionedAgentCommentTriggers. The three tests below cover
+// branch of computeCommentAgentTriggers. The three tests below cover
 // the behavior we want post-MUL-2338:
 //
 //   - cross-issue self-mention enqueues (child→parent handoff between issues
