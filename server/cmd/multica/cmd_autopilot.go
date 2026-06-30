@@ -67,6 +67,13 @@ var autopilotRunsCmd = &cobra.Command{
 	RunE:  runAutopilotRuns,
 }
 
+var autopilotRunsCancelCmd = &cobra.Command{
+	Use:   "cancel <run-id>",
+	Short: "Cancel an autopilot run",
+	Args:  exactArgs(1),
+	RunE:  runAutopilotRunCancel,
+}
+
 var autopilotTriggerAddCmd = &cobra.Command{
 	Use:   "trigger-add <autopilot-id>",
 	Short: "Add a schedule or webhook trigger to an autopilot",
@@ -103,6 +110,7 @@ func init() {
 	autopilotCmd.AddCommand(autopilotDeleteCmd)
 	autopilotCmd.AddCommand(autopilotTriggerCmd)
 	autopilotCmd.AddCommand(autopilotRunsCmd)
+	autopilotRunsCmd.AddCommand(autopilotRunsCancelCmd)
 	autopilotCmd.AddCommand(autopilotTriggerAddCmd)
 	autopilotCmd.AddCommand(autopilotTriggerUpdateCmd)
 	autopilotCmd.AddCommand(autopilotTriggerDeleteCmd)
@@ -150,6 +158,7 @@ func init() {
 	autopilotRunsCmd.Flags().Int("limit", 20, "Max number of runs to return")
 	autopilotRunsCmd.Flags().Int("offset", 0, "Pagination offset")
 	autopilotRunsCmd.Flags().String("output", "table", "Output format: table or json")
+	autopilotRunsCancelCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// trigger-add — supports schedule and webhook
 	autopilotTriggerAddCmd.Flags().String("kind", "schedule", "Trigger kind: schedule or webhook")
@@ -531,6 +540,32 @@ func runAutopilotRuns(cmd *cobra.Command, args []string) error {
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runAutopilotRunCancel(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	if _, err := requireWorkspaceID(cmd); err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var resp map[string]any
+	if err := client.PostJSON(ctx, "/api/autopilot-runs/"+args[0]+"/cancel", nil, &resp); err != nil {
+		return fmt.Errorf("cancel autopilot run: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, resp)
+	}
+	run, _ := resp["run"].(map[string]any)
+	fmt.Printf("Autopilot run %s status: %s\n", strVal(run, "id"), strVal(run, "status"))
 	return nil
 }
 

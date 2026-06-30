@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -121,6 +123,13 @@ type AutopilotRunResponse struct {
 	TriggerPayload any     `json:"trigger_payload"`
 	Result         any     `json:"result"`
 	CreatedAt      string  `json:"created_at"`
+}
+
+type CancelAutopilotRunResponse struct {
+	Run             AutopilotRunResponse `json:"run"`
+	Cancelled       bool                 `json:"cancelled"`
+	AlreadyTerminal bool                 `json:"already_terminal"`
+	CancelledTasks  int                  `json:"cancelled_tasks"`
 }
 
 // ── Converters ──────────────────────────────────────────────────────────────
@@ -1493,6 +1502,138 @@ func (h *Handler) GetAutopilotRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, runToResponse(run))
+}
+
+func (h *Handler) CancelAutopilotRun(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	runID := chi.URLParam(r, "runId")
+	runUUID, ok := parseUUIDOrBadRequest(w, runID, "run id")
+	if !ok {
+		return
+	}
+
+	run, err := h.Queries.GetAutopilotRun(r.Context(), runUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	autopilot, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
+		ID:          run.AutopilotID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	if !h.canCancelAutopilotRun(r, autopilot, userID, workspaceID) {
+		writeError(w, http.StatusForbidden, "you do not have access to this autopilot run")
+		return
+	}
+	if autopilotRunStatusTerminal(run.Status) {
+		writeJSON(w, http.StatusOK, CancelAutopilotRunResponse{
+			Run:             runToResponse(run),
+			Cancelled:       false,
+			AlreadyTerminal: true,
+			CancelledTasks:  0,
+		})
+		return
+	}
+
+	cancelledTasks := 0
+	if run.TaskID.Valid {
+		cancelled, err := h.TaskService.CancelTaskWithResult(r.Context(), run.TaskID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if cancelled.Task.Status == "cancelled" {
+			cancelledTasks++
+		}
+	}
+	if run.IssueID.Valid {
+		cancelled, err := h.Queries.CancelAgentTasksByIssue(r.Context(), run.IssueID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		h.TaskService.BroadcastCancelledTasks(r.Context(), cancelled)
+		cancelledTasks += len(cancelled)
+	}
+
+	updated, err := h.Queries.CancelAutopilotRun(r.Context(), db.CancelAutopilotRunParams{
+		ID:            run.ID,
+		FailureReason: strToText("cancelled by user"),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		current, getErr := h.Queries.GetAutopilotRun(r.Context(), run.ID)
+		if getErr == nil && autopilotRunStatusTerminal(current.Status) {
+			writeJSON(w, http.StatusOK, CancelAutopilotRunResponse{
+				Run:             runToResponse(current),
+				Cancelled:       false,
+				AlreadyTerminal: true,
+				CancelledTasks:  0,
+			})
+			return
+		}
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to cancel run")
+		return
+	}
+
+	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
+		"autopilot_id": uuidToString(autopilot.ID),
+		"run":          runToResponse(updated),
+	})
+	writeJSON(w, http.StatusOK, CancelAutopilotRunResponse{
+		Run:             runToResponse(updated),
+		Cancelled:       true,
+		AlreadyTerminal: false,
+		CancelledTasks:  cancelledTasks,
+	})
+}
+
+func (h *Handler) canCancelAutopilotRun(r *http.Request, autopilot db.Autopilot, userID, workspaceID string) bool {
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	assigneeType := autopilot.AssigneeType
+	if assigneeType == "" || assigneeType == "agent" {
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          autopilot.AssigneeID,
+			WorkspaceID: autopilot.WorkspaceID,
+		})
+		if err != nil {
+			return false
+		}
+		return h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID)
+	}
+	if assigneeType == "squad" {
+		squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+			ID:          autopilot.AssigneeID,
+			WorkspaceID: autopilot.WorkspaceID,
+		})
+		if err != nil {
+			return false
+		}
+		return h.canEnqueueSquadLeader(r.Context(), squad.LeaderID, actorType, actorID, workspaceID)
+	}
+	return false
+}
+
+func autopilotRunStatusTerminal(status string) bool {
+	switch status {
+	case "completed", "failed", "skipped", "cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 // ── Manual trigger ──────────────────────────────────────────────────────────
