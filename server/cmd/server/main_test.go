@@ -53,6 +53,19 @@ func TestNewNamedRedisClient_DisableClientName(t *testing.T) {
 	}
 }
 
+func TestNewNamedRedisClient_DisableClientName_ClearsPreExistingName(t *testing.T) {
+	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "true")
+	// Simulate REDIS_URL with ?client_name=foo — ParseURL sets ClientName.
+	base := &redis.Options{Addr: "localhost:6379", ClientName: "foo"}
+	client := newNamedRedisClient(base, "store")
+	defer client.Close()
+
+	opts := client.Options()
+	if opts.ClientName != "" {
+		t.Errorf("ClientName = %q, want empty: REDIS_DISABLE_CLIENT_NAME must clear pre-existing name from URL", opts.ClientName)
+	}
+}
+
 func TestNewNamedRedisClient_DisableClientName_InvalidValue(t *testing.T) {
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "not-a-bool")
 	base := &redis.Options{Addr: "localhost:6379"}

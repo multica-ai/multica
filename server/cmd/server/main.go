@@ -34,7 +34,9 @@ var (
 
 func newNamedRedisClient(base *redis.Options, suffix string) *redis.Client {
 	opts := *base
-	if !envBool("REDIS_DISABLE_CLIENT_NAME", false) {
+	if envBool("REDIS_DISABLE_CLIENT_NAME", false) {
+		opts.ClientName = ""
+	} else {
 		opts.ClientName = redisClientName(opts.ClientName, suffix)
 	}
 	return redis.NewClient(&opts)
