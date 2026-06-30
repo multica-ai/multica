@@ -21,13 +21,6 @@ export function DesktopLoginPage() {
       `${webUrl}/login?platform=desktop`,
     );
   };
-  const handleGitLabLogin = () => {
-    // Open the GitLab OAuth entry point in the default browser.
-    // The server callback sets an auth cookie and redirects to the web app;
-    // the user can then open the desktop app separately (same pattern as Google).
-    window.desktopAPI.openExternal(`${webUrl}/auth/gitlab`);
-  };
-
   return (
     <div className="flex h-screen flex-col">
       <DragStrip />
@@ -38,7 +31,6 @@ export function DesktopLoginPage() {
           // Initial workspace navigation happens in routes.tsx via IndexRedirect.
         }}
         onGoogleLogin={handleGoogleLogin}
-        onGitLabLogin={handleGitLabLogin}
       />
     </div>
   );
