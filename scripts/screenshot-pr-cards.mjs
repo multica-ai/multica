@@ -10,7 +10,7 @@ import pg from "pg";
 import { mkdirSync } from "node:fs";
 
 const FRONTEND = process.env.FRONTEND_ORIGIN || "http://localhost:13101";
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:18181";
+const API = process.env.API_BASE_URL || "http://localhost:18181";
 const DB = process.env.DATABASE_URL || "postgres://multica:multica@localhost:5432/multica_multica_101?sslmode=disable";
 const EMAIL = "dev@localhost";
 const SLUG = "dev";

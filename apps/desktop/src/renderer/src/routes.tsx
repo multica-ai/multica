@@ -13,6 +13,7 @@ import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
+import { TaobaoWorkflowPage } from "./pages/taobao-workflow-page";
 import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
@@ -156,6 +157,11 @@ export const appRoutes: RouteObject[] = [
             path: "runtimes",
             element: <DesktopRuntimesPage />,
             handle: { title: "Runtimes" },
+          },
+          {
+            path: "taobao-workflow",
+            element: <TaobaoWorkflowPage />,
+            handle: { title: "淘宝工作流" },
           },
           {
             path: "runtimes/:id",

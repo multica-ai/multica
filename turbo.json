@@ -3,10 +3,7 @@
   "globalEnv": [
     "DATABASE_URL",
     "PORT",
-    "FRONTEND_PORT",
     "FRONTEND_ORIGIN",
-    "NEXT_PUBLIC_API_URL",
-    "NEXT_PUBLIC_WS_URL",
     "MULTICA_SERVER_URL",
     "DOCS_URL",
     "COMPOSE_PROJECT_NAME",

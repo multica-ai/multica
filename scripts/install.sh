@@ -77,10 +77,6 @@ selfhost_backend_port() {
   printf "8080"
 }
 
-selfhost_frontend_port() {
-  env_file_value "${1:-.env}" "FRONTEND_PORT" "3000"
-}
-
 detect_os() {
   case "$(uname -s)" in
     Darwin) OS="darwin" ;;
@@ -450,10 +446,8 @@ run_with_server() {
   printf "${BOLD}${GREEN}  ✓ Multica server is running and CLI is ready!${RESET}\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
   printf "\n"
-  local frontend_port backend_port
-  frontend_port="$(selfhost_frontend_port "$INSTALL_DIR/.env")"
+  local backend_port
   backend_port="$(selfhost_backend_port "$INSTALL_DIR/.env")"
-  printf "  ${BOLD}Frontend:${RESET}  http://localhost:%s\n" "$frontend_port"
   printf "  ${BOLD}Backend:${RESET}   http://localhost:%s\n" "$backend_port"
   printf "  ${BOLD}Server at:${RESET} %s\n" "$INSTALL_DIR"
   printf "\n"

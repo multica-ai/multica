@@ -2,6 +2,22 @@ packages:
   - "apps/*"
   - "packages/*"
 
+allowBuilds:
+  core-js: true
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  msw: true
+  protobufjs: true
+  sharp: true
+  unicode-animations: true
+  unrs-resolver: true
+
+overrides:
+  "@types/react": "catalog:"
+  "@types/react-dom": "catalog:"
+  "@xmldom/xmldom": "^0.8.13"
+
 catalog:
   # Core React
   react: "19.2.3"

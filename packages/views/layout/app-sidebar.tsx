@@ -35,6 +35,7 @@ import {
   X,
   Zap,
   Users,
+  ShoppingBag,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -116,6 +117,7 @@ type NavKey =
   | "squads"
   | "usage"
   | "runtimes"
+  | "taobaoWorkflow"
   | "skills"
   | "settings";
 
@@ -130,6 +132,7 @@ type NavLabelKey =
   | "squads"
   | "usage"
   | "runtimes"
+  | "taobao_workflow"
   | "skills"
   | "settings";
 
@@ -149,6 +152,7 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "runtimes", labelKey: "runtimes", icon: Monitor },
+  { key: "taobaoWorkflow", labelKey: "taobao_workflow", icon: ShoppingBag },
   { key: "skills", labelKey: "skills", icon: BookOpenText },
   { key: "settings", labelKey: "settings", icon: Settings },
 ];

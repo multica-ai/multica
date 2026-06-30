@@ -79,10 +79,6 @@ function Get-SelfHostBackendPort {
     return "8080"
 }
 
-function Get-SelfHostFrontendPort {
-    return Get-EnvFileValue -Path (Join-Path $InstallDir ".env") -Name "FRONTEND_PORT" -Default "3000"
-}
-
 function Get-LatestVersion {
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
@@ -510,9 +506,7 @@ function Start-LocalInstall {
     Write-Host "  [OK] Multica server is running and CLI is ready!" -ForegroundColor Green
     Write-Host "  ============================================" -ForegroundColor Green
     Write-Host ""
-    $frontendPort = Get-SelfHostFrontendPort
     $backendPort = Get-SelfHostBackendPort
-    Write-Host "  Frontend:  http://localhost:$frontendPort"
     Write-Host "  Backend:   http://localhost:$backendPort"
     Write-Host "  Server at: $InstallDir"
     Write-Host ""

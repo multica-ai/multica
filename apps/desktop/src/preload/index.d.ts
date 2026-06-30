@@ -3,6 +3,13 @@ import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
+import type {
+  TaobaoBridgeAgentEnvironment,
+  TaobaoBridgeConfigInput,
+  TaobaoBridgePublicConfig,
+  TaobaoBridgeStatus,
+  TaobaoWorkflowAssetInstallResult,
+} from "../shared/taobao-bridge-types";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -153,12 +160,25 @@ interface UpdaterAPI {
   >;
 }
 
+interface TaobaoBridgeAPI {
+  getStatus: () => Promise<TaobaoBridgeStatus>;
+  getConfig: () => Promise<TaobaoBridgePublicConfig>;
+  saveConfig: (input: TaobaoBridgeConfigInput) => Promise<TaobaoBridgePublicConfig>;
+  start: () => Promise<TaobaoBridgeStatus>;
+  stop: () => Promise<TaobaoBridgeStatus>;
+  restart: () => Promise<TaobaoBridgeStatus>;
+  openLogFile: () => Promise<{ success: boolean; error?: string }>;
+  installWorkflowAssets: () => Promise<TaobaoWorkflowAssetInstallResult>;
+  getAgentEnvironment: () => Promise<TaobaoBridgeAgentEnvironment>;
+}
+
 declare global {
   interface Window {
     electron: ElectronAPI;
     desktopAPI: DesktopAPI;
     daemonAPI: DaemonAPI;
     updater: UpdaterAPI;
+    taobaoBridgeAPI: TaobaoBridgeAPI;
   }
 }
 

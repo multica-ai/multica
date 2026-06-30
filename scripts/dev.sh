@@ -59,10 +59,10 @@ echo "==> Running migrations..."
 echo ""
 echo "✓ Ready. Starting services..."
 echo "  Backend:  http://localhost:${PORT:-8080}"
-echo "  Frontend: http://localhost:${FRONTEND_PORT:-3000}"
+echo "  Desktop:  pnpm dev:desktop"
 echo ""
 
 trap 'kill 0' EXIT
 (cd server && go run ./cmd/server) &
-pnpm dev:web &
+pnpm dev:desktop &
 wait

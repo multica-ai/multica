@@ -21,7 +21,7 @@
     "brand-dev-electron": "node scripts/brand-dev-electron.mjs",
     "dev": "node scripts/dev.mjs",
     "dev:staging": "node scripts/dev.mjs --mode staging",
-    "build": "pnpm run bundle-cli && electron-vite build",
+    "build": "node scripts/bundle-cli.mjs && electron-vite build",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",

@@ -20,8 +20,7 @@ offset=$((hash_value % 1000))
 postgres_db="multica_${slug}_${offset}"
 postgres_port=5432
 backend_port=$((18080 + offset))
-frontend_port=$((13000 + offset))
-frontend_origin="http://localhost:${frontend_port}"
+frontend_origin="${FRONTEND_ORIGIN:-http://localhost:3000}"
 
 cat > "$ENV_FILE" <<EOF
 POSTGRES_DB=${postgres_db}
@@ -40,17 +39,14 @@ GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REDIRECT_URI=${frontend_origin}/auth/callback
 
-FRONTEND_PORT=${frontend_port}
 FRONTEND_ORIGIN=${frontend_origin}
-NEXT_PUBLIC_API_URL=http://localhost:${backend_port}
-NEXT_PUBLIC_WS_URL=ws://localhost:${backend_port}/ws
 EOF
 
 echo "Generated $ENV_FILE for worktree '$worktree_name'"
 echo "  Shared Postgres: localhost:${postgres_port}"
 echo "  Database: ${postgres_db}"
 echo "  Backend:  http://localhost:${backend_port}"
-echo "  Frontend: ${frontend_origin}"
+echo "  Desktop:  pnpm dev:desktop"
 echo ""
 echo "Next steps:"
 echo "  make setup-worktree"

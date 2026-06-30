@@ -11,6 +11,13 @@ import {
   NAVIGATION_GESTURE_CHANNEL,
   type NavigationGesture,
 } from "../shared/navigation-gestures";
+import type {
+  TaobaoBridgeAgentEnvironment,
+  TaobaoBridgeConfigInput,
+  TaobaoBridgePublicConfig,
+  TaobaoBridgeStatus,
+  TaobaoWorkflowAssetInstallResult,
+} from "../shared/taobao-bridge-types";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -293,11 +300,33 @@ const updaterAPI = {
   > => ipcRenderer.invoke("updater:check"),
 };
 
+const taobaoBridgeAPI = {
+  getStatus: (): Promise<TaobaoBridgeStatus> =>
+    ipcRenderer.invoke("taobao-bridge:get-status"),
+  getConfig: (): Promise<TaobaoBridgePublicConfig> =>
+    ipcRenderer.invoke("taobao-bridge:get-config"),
+  saveConfig: (input: TaobaoBridgeConfigInput): Promise<TaobaoBridgePublicConfig> =>
+    ipcRenderer.invoke("taobao-bridge:save-config", input),
+  start: (): Promise<TaobaoBridgeStatus> =>
+    ipcRenderer.invoke("taobao-bridge:start"),
+  stop: (): Promise<TaobaoBridgeStatus> =>
+    ipcRenderer.invoke("taobao-bridge:stop"),
+  restart: (): Promise<TaobaoBridgeStatus> =>
+    ipcRenderer.invoke("taobao-bridge:restart"),
+  openLogFile: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("taobao-bridge:open-log-file"),
+  installWorkflowAssets: (): Promise<TaobaoWorkflowAssetInstallResult> =>
+    ipcRenderer.invoke("taobao-bridge:install-assets"),
+  getAgentEnvironment: (): Promise<TaobaoBridgeAgentEnvironment> =>
+    ipcRenderer.invoke("taobao-bridge:get-agent-environment"),
+};
+
 if (process.contextIsolated) {
   contextBridge.exposeInMainWorld("electron", electronAPI);
   contextBridge.exposeInMainWorld("desktopAPI", desktopAPI);
   contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);
   contextBridge.exposeInMainWorld("updater", updaterAPI);
+  contextBridge.exposeInMainWorld("taobaoBridgeAPI", taobaoBridgeAPI);
 } else {
   // @ts-expect-error - fallback for non-isolated context
   window.electron = electronAPI;
@@ -307,4 +336,6 @@ if (process.contextIsolated) {
   window.daemonAPI = daemonAPI;
   // @ts-expect-error - fallback for non-isolated context
   window.updater = updaterAPI;
+  // @ts-expect-error - fallback for non-isolated context
+  window.taobaoBridgeAPI = taobaoBridgeAPI;
 }
