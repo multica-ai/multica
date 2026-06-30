@@ -452,7 +452,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				AppURL: appURLFromEnv(),
 				Logger: slog.Default(),
 			})
-			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier))
+			// Typing indicator (MUL-3874): a 👀 reaction on the user's message
+			// while the agent works, cleared when the run finishes or fails.
+			// Best-effort; failures are logged only. Registered before the
+			// outbound reply subscriber so, on EventChatDone, the reaction clears
+			// ahead of the reply (bus delivery is synchronous, in subscription
+			// order). Subscribing here is also the only path that clears the
+			// reaction on a failed run, which the outbound replier does not handle.
+			slackTyping := slack.NewTypingIndicatorManager(queries, box.Open, slog.Default())
+			slackTyping.Register(bus)
+			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping))
 			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)
 
 			// Per-installation inbound: the Supervisor builds + supervises one
