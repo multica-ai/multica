@@ -23,6 +23,13 @@ receive a fresh, capped `IssueSnapshot` in the new user message and still resume
 the old Claude Code session via `--resume`. The resumed provider session carries
 Claude's previous conversation/cache outside Multica's snapshot cap.
 
+The `## Available Commands` block also carries a **dynamic, per-permission tools
+section** (FIR-2312): beyond the static `multica` CLI list, the agent sees the
+MCP tools and connections it is actually allowed to use right now, resolved from
+the tool-policy chain at claim time and rendered by `cerebroToolsBrief`. That is
+the canonical path for surfacing any tool to an agent — see
+[agent-tool-brief.md](./agent-tool-brief.md).
+
 ## Execution Flow
 
 1. The server claim endpoint builds an `AgentTaskResponse` for the daemon.

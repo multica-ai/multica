@@ -119,6 +119,14 @@ type TaskContextForEnv struct {
 	InitiatorID    string
 	InitiatorName  string
 	InitiatorEmail string
+	// EffectiveTools is the per-agent set of non-CLI tools (MCP tools,
+	// connection tools) the server resolved from the tool-policy chain at
+	// claim time, already filtered to those actually exposed to this agent.
+	// Rendered into `## Available Commands` by cerebroToolsBrief so the agent
+	// sees exactly the connections/MCP tools it may use right now. Empty for
+	// runtimes that ship no resolved set — those get no extra section. See
+	// FIR-2312.
+	EffectiveTools []ToolBriefEntry // CEREBRO-PATCH(cerebro-tools-brief-ctx): FIR-2312 resolved per-permission tools for the brief
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
