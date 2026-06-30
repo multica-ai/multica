@@ -90,6 +90,11 @@ func slackSessionRouting(msg channel.InboundMessage) (bindingKey string, config 
 	if msg.Source.ChatType == channel.ChatTypeP2P {
 		return chatID, cfg, msg.Source.ThreadID
 	}
+	// The thread root is the inbound thread_ts when the @mention is a reply
+	// inside an existing thread, else the message's own ts (a top-level mention
+	// becomes the root the bot threads its reply under). Either way the root is
+	// recoverable later from the binding (channel_chat_id suffix / last_thread_id),
+	// which is what the history reader uses to read the thread.
 	threadRoot := msg.Source.ThreadID
 	if threadRoot == "" {
 		threadRoot = msg.MessageID

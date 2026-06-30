@@ -286,6 +286,11 @@ func TestBuildChatPromptSlashSkills(t *testing.T) {
 		if !strings.Contains(out, "User message:\nplease [/deploy](slash://skill/abc-123) this") {
 			t.Fatalf("expected raw user message preserved, got:\n%s", out)
 		}
+		// Every chat prompt points the agent at the on-demand channel-history
+		// pull so it can recover Slack thread/channel context (MUL-3871).
+		if !strings.Contains(out, "multica chat history") {
+			t.Fatalf("expected channel-history nudge, got:\n%s", out)
+		}
 	})
 
 	t.Run("ignores skills not belonging to agent", func(t *testing.T) {
