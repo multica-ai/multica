@@ -17,7 +17,7 @@
   "new_page": {
     "back": "返回",
     "log_out": "退出登录",
-    "title": "欢迎使用 Multica",
+    "title": "欢迎使用 {{productName}}",
     "description": "一个工作区，让你和 AI 队友并肩协作——一起处理 issue、留下评论、共享同一份上下文。",
     "invite_hint": "工作区创建后可邀请队友加入。"
   },

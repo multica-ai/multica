@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { fetchLatestRelease } from "@/features/landing/utils/github-release";
+import { WEB_BRAND_NAME } from "@/lib/brand";
 import { DownloadClient } from "./download-client";
 
 // Vercel ISR: the server fetch inside fetchLatestRelease carries
@@ -9,13 +10,13 @@ import { DownloadClient } from "./download-client";
 export const revalidate = 300;
 
 export const metadata: Metadata = {
-  title: "Download Multica",
+  title: `Download Desktop for ${WEB_BRAND_NAME}`,
   description:
-    "Download Multica for macOS, Windows, or Linux — or install the CLI for servers and remote dev boxes.",
+    `${WEB_BRAND_NAME} currently uses the Multica Desktop client and CLI. Download for macOS, Windows, or Linux.`,
   openGraph: {
-    title: "Download Multica",
+    title: `Download Desktop for ${WEB_BRAND_NAME}`,
     description:
-      "Get the Multica desktop app with a bundled daemon, or install the CLI for servers and remote dev boxes.",
+      `${WEB_BRAND_NAME} currently uses the Multica Desktop client with a bundled daemon, plus the Multica CLI for servers and remote dev boxes.`,
     url: "/download",
   },
   alternates: {

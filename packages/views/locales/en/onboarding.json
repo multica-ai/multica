@@ -3,7 +3,7 @@
     "step_of": "Step {{current}} of {{total}}"
   },
   "welcome": {
-    "wordmark": "Welcome to Multica",
+    "wordmark": "Welcome to {{productName}}",
     "headline_line1": "Your AI teammates,",
     "headline_line2": "in",
     "headline_emphasis": "one workspace.",
@@ -45,7 +45,7 @@
   "questions": {
     "eyebrow_about_you": "About you",
     "source": {
-      "question": "How did you hear about Multica?",
+      "question": "How did you hear about {{productName}}?",
       "friends_colleagues": "Friends or colleagues",
       "search": "Google / search",
       "social_x": "X / Twitter",
@@ -75,7 +75,7 @@
       "other_placeholder": "e.g. teacher, support lead"
     },
     "use_case": {
-      "question": "What do you want to use Multica for?",
+      "question": "What do you want to use {{productName}} for?",
       "ship_code": "Ship code with AI agents",
       "manage_team": "Manage tasks for my team",
       "personal_tasks": "Organize my own tasks",
@@ -188,18 +188,18 @@
     "error_close": "Close",
     "user_context_heading": "About me",
     "user_context_role_label": "Role",
-    "user_context_use_case_label": "What I want to do with Multica",
+    "user_context_use_case_label": "What I want to do with {{productName}}",
     "runtime": {
-      "greeting": "Hi, welcome to Multica",
+      "greeting": "Hi, welcome to {{productName}}",
       "subtitle": "I'm your first Agent assistant.",
-      "capabilities": "Ask me anything about how to use Multica. You can also have me get things done in your workspace — create issues, set up cron tasks, build new agents…",
+      "capabilities": "Ask me anything about how to use {{productName}}. You can also have me get things done in your workspace — create issues, set up cron tasks, build new agents…",
       "section_label": "Pick one or more tasks to start with:",
       "assign_empty": "Pick one or more",
       "assign_count": "Assign {{count}} task to me →",
       "assign_count_plural": "Assign {{count}} tasks to me →",
       "cards": {
         "intro": {
-          "subtitle": "Let me explain in 1–2 paragraphs what Multica is and what it can do."
+          "subtitle": "Let me explain in 1–2 paragraphs what {{productName}} is and what it can do."
         },
         "tour": {
           "subtitle": "I'll walk you through how issue, agent, squad, autopilot fit together."
@@ -218,7 +218,7 @@
     },
     "skip": {
       "loading": "Setting up your workspace…",
-      "title": "Welcome to Multica!",
+      "title": "Welcome to {{productName}}!",
       "subtitle": "We've added two tasks to help you with the next step.",
       "got_it": "Got it",
       "status_in_progress": "In progress",
@@ -230,7 +230,7 @@
         },
         "create_agent": {
           "title": "Create your first agent",
-          "subtitle": "Once a runtime is online, build your first Multica agent."
+          "subtitle": "Once a runtime is online, build your first {{productName}} agent."
         }
       }
     }
@@ -332,7 +332,7 @@
   "step_platform": {
     "eyebrow": "Connect a computer",
     "headline": "Connect a computer to run your agent.",
-    "lede": "Your agent runs on a real computer that you connect to Multica. Pick how you want to connect one.",
+    "lede": "Your agent runs on a real computer that you connect to {{productName}}. Pick how you want to connect one.",
     "hint_default": "Pick a way to connect — or skip and connect a computer later.",
     "hint_downloaded": "Finish setup on the download page, then come back to this tab.",
     "download_title": "Use this computer",

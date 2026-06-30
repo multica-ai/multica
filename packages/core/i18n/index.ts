@@ -11,6 +11,7 @@
 // "@multica/core/i18n/browser" — they read document.cookie / navigator.languages
 // at construction time and would crash in any non-DOM context.
 export type {
+  I18nVariables,
   LocaleAdapter,
   LocaleResources,
   SupportedLocale,
