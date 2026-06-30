@@ -332,6 +332,8 @@
   "agent_activity": {
     "hover_header_one": "{{count}} agent working",
     "hover_header_other": "{{count}} agents working",
+    "hover_header_tasks_one": "{{count}} task working",
+    "hover_header_tasks_other": "{{count}} tasks working",
     "hover_header_queued_one": "{{count}} agent queued",
     "hover_header_queued_other": "{{count}} agents queued",
     "status_running": "Working",

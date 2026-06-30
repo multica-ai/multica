@@ -331,6 +331,8 @@
   "agent_activity": {
     "hover_header_one": "작업 중인 에이전트 {{count}}개",
     "hover_header_other": "작업 중인 에이전트 {{count}}개",
+    "hover_header_tasks_one": "작업 중인 태스크 {{count}}개",
+    "hover_header_tasks_other": "작업 중인 태스크 {{count}}개",
     "hover_header_queued_one": "대기 중인 에이전트 {{count}}개",
     "hover_header_queued_other": "대기 중인 에이전트 {{count}}개",
     "status_running": "작업 중",
