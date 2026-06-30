@@ -1,6 +1,17 @@
 import { useId } from "react";
 import { Monitor } from "lucide-react";
 
+// xAI Grok Build — the xAI house "slash" mark. Rendered monochrome via
+// currentColor so it sits cleanly on light/dark runtime rows; swap in the
+// official brand asset here if/when one is vendored alongside the others.
+function GrokLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M6.5 3H3l8.4 11.2L3 21h3.5l6.65-5.3L17.1 21H21l-8.6-11.5L20.5 3H17l-6.2 4.95L6.5 3Z" />
+    </svg>
+  );
+}
+
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)
 function ClaudeLogo({ className }: { className: string }) {
   return (
@@ -281,6 +292,8 @@ export function ProviderLogo({
       return <QoderLogo className={className} />;
     case "antigravity":
       return <AntigravityLogo className={className} />;
+    case "grok":
+      return <GrokLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

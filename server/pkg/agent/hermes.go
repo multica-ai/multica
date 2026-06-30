@@ -466,6 +466,15 @@ type hermesClient struct {
 	// handlers that mutate client state such as usage or pending tool calls.
 	acceptNotification func(updateType string) bool
 
+	// permissionOptionID, when non-nil, chooses which optionId to return for an
+	// ACP session/request_permission request by inspecting the request's own
+	// options. Grok sets this because its option IDs (e.g. "allow-edits-session")
+	// differ from the legacy "approve_for_session" the other ACP runtimes accept;
+	// replying with an id the agent didn't offer means the action is never
+	// approved and the turn ends as stopReason=cancelled. Nil keeps the legacy
+	// hardcoded reply.
+	permissionOptionID func(params json.RawMessage) string
+
 	// pendingTools buffers the args for tool calls whose input streams in
 	// across multiple ACP tool_call_update messages (kimi does this —
 	// tokens from the LLM arrive one at a time, and each update carries
@@ -599,17 +608,29 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
+		// Auto-approve. The optionId must be one the agent actually offered in
+		// this request's `options` — runtimes use different IDs (Grok offers
+		// "allow-edits-session"/"allow-once", others "approve_for_session"). A
+		// picker (set per-backend) reads the offered options; when none is set
+		// or it finds nothing usable, fall back to the legacy id so the four
+		// runtimes that accept it are unchanged.
+		optionID := "approve_for_session"
+		if c.permissionOptionID != nil {
+			if id := c.permissionOptionID(raw["params"]); id != "" {
+				optionID = id
+			}
+		}
 		resp = map[string]any{
 			"jsonrpc": "2.0",
 			"id":      json.RawMessage(rawID),
 			"result": map[string]any{
 				"outcome": map[string]any{
 					"outcome":  "selected",
-					"optionId": "approve_for_session",
+					"optionId": optionID,
 				},
 			},
 		}
-		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method)
+		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method, "option_id", optionID)
 	default:
 		// Unknown agent→client method — reply with standard "method
 		// not found" so the agent doesn't block waiting for us. Better
@@ -1216,6 +1237,50 @@ func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 }
 
 // ── Helpers ──
+
+// selectACPApprovalOptionID picks which optionId to auto-approve from an ACP
+// session/request_permission request's `options` list. ACP options carry a
+// `kind` (allow_once | allow_always | reject_once | reject_always); we prefer a
+// session-scoped allow ("allow_always") so repeated same-kind actions don't
+// re-prompt, then a one-shot allow ("allow_once"), then any other allow-kind
+// option. Reject options are never selected. Returns "" when the request has no
+// usable allow option so the caller can fall back to its legacy reply.
+func selectACPApprovalOptionID(params json.RawMessage) string {
+	if len(params) == 0 {
+		return ""
+	}
+	var p struct {
+		Options []struct {
+			OptionID string `json:"optionId"`
+			Kind     string `json:"kind"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return ""
+	}
+	var allowOnce, allowAny string
+	for _, o := range p.Options {
+		if o.OptionID == "" {
+			continue
+		}
+		switch {
+		case o.Kind == "allow_always":
+			return o.OptionID
+		case o.Kind == "allow_once":
+			if allowOnce == "" {
+				allowOnce = o.OptionID
+			}
+		case strings.HasPrefix(o.Kind, "allow"):
+			if allowAny == "" {
+				allowAny = o.OptionID
+			}
+		}
+	}
+	if allowOnce != "" {
+		return allowOnce
+	}
+	return allowAny
+}
 
 // extractACPSessionID pulls `sessionId` out of a session/new or
 // session/resume response. Shared by all ACP backends (hermes, kimi, kiro,

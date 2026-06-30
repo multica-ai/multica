@@ -136,6 +136,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
 		})
+	case "grok":
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
+			return discoverGrokModels(ctx, executablePath)
+		})
 	case "pi":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverPiModels(ctx, executablePath)
@@ -604,6 +608,75 @@ func openCodeThinkingLevelsFromVariants(variants map[string]opencodeModelVariant
 		levels = append(levels, ThinkingLevel{Value: value, Label: label})
 	}
 	return levels
+}
+
+// discoverGrokModels runs `grok models` and parses its output. Grok prints a
+// short preamble followed by a bulleted catalog:
+//
+//	You are logged in with grok.com.
+//
+//	Default model: grok-build
+//
+//	Available models:
+//	  * grok-build (default)
+//	  - grok-composer-2.5-fast
+//
+// The `*` bullet (and the trailing `(default)` tag) marks the runtime's own
+// default. On any failure (CLI missing, parse error, timeout) we return an
+// empty list so the creatable model picker still works via manual entry.
+func discoverGrokModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "grok"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return []Model{}, nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "models")
+	hideAgentWindow(cmd)
+	// Parse whatever was printed even on a non-zero exit, mirroring the other
+	// discovery paths — a transient warning shouldn't blank the catalog.
+	out, _ := cmd.Output()
+	return parseGrokModels(string(out)), nil
+}
+
+// parseGrokModels extracts model IDs from `grok models` output. Only bulleted
+// rows (`* id ...` / `- id ...`) are treated as catalog entries, which skips
+// the "You are logged in…" and "Default model:" preamble lines. The first
+// whitespace-separated token on each row is the id; a `(default)` tag marks
+// the runtime default. Provider is tagged `xai` for UI grouping.
+func parseGrokModels(output string) []Model {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var models []Model
+	seen := map[string]bool{}
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "*") && !strings.HasPrefix(line, "-") {
+			continue
+		}
+		line = strings.TrimSpace(line[1:])
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		id := fields[0]
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		models = append(models, Model{
+			ID:       id,
+			Label:    id,
+			Provider: "xai",
+			Default:  strings.Contains(strings.ToLower(line), "(default)"),
+		})
+	}
+	return models
 }
 
 // discoverPiModels runs `pi --list-models` and parses its output.
