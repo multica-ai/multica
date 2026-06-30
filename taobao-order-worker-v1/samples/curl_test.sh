@@ -3,6 +3,8 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8090}"
 SECRET="${TAOBAO_EVENT_SECRET:-dev-secret}"
+TOKEN="${ORDER_BRIDGE_API_TOKEN:-dev-bridge-token}"
+BRIDGE_AUTH=(-H "X-Order-Bridge-Token: $TOKEN")
 
 echo "== health =="
 curl -s "$BASE_URL/health" | python -m json.tool
@@ -14,15 +16,17 @@ curl -s -X POST "$BASE_URL/taobao/order-event" \
   --data-binary @samples/taobao_event_wait_seller_send_goods.json | python -m json.tool
 
 echo "== get order plain =="
-curl -s "$BASE_URL/api/orders/1234567890?plain=true" | python -m json.tool
+curl -s "${BRIDGE_AUTH[@]}" "$BASE_URL/api/orders/1234567890?plain=true" | python -m json.tool
 
 echo "== check fulfillment normal =="
 curl -s -X POST "$BASE_URL/api/orders/1234567890/check-fulfillment" \
+  "${BRIDGE_AUTH[@]}" \
   -H "Content-Type: application/json" \
   -d '{"plain": true}' | python -m json.tool
 
 echo "== create shipping draft =="
 curl -s -X POST "$BASE_URL/api/orders/1234567890/create-shipping-draft" \
+  "${BRIDGE_AUTH[@]}" \
   -H "Content-Type: application/json" \
   -d '{
     "idempotency_key": "taobao:shop_001:1234567890:create_shipping_draft:v1",
@@ -34,13 +38,16 @@ curl -s -X POST "$BASE_URL/api/orders/1234567890/create-shipping-draft" \
 
 echo "== check refund order =="
 curl -s -X POST "$BASE_URL/api/orders/1234567890refund/check-fulfillment" \
+  "${BRIDGE_AUTH[@]}" \
   -H "Content-Type: application/json" \
   -d '{"plain": true}' | python -m json.tool
 
 echo "== check address abnormal order =="
 curl -s -X POST "$BASE_URL/api/orders/1234567890address/check-fulfillment" \
+  "${BRIDGE_AUTH[@]}" \
   -H "Content-Type: application/json" \
   -d '{"plain": true}' | python -m json.tool
 
 echo "== high-risk ship denied =="
-curl -s -X POST "$BASE_URL/api/orders/1234567890/ship" | python -m json.tool
+curl -s -X POST "$BASE_URL/api/orders/1234567890/ship" \
+  "${BRIDGE_AUTH[@]}" | python -m json.tool

@@ -50,6 +50,7 @@ description: Taobao order operations worker for plaintext order processing. Use 
 - 可以使用买家留言和卖家备注判断是否需要加急、指定快递、赠品、拆单、合单。
 - 不要把明文信息用于订单处理以外的目的。
 - Issue 评论中只输出必要的处理结论。
+- 接口返回中的 `summary` 和 `safe_summary` 都是不含完整明文地址的安全摘要，Issue 评论优先使用 `safe_summary`。
 - 除非任务明确要求生成发货面单信息，不要无关复制完整地址。
 
 ## 可调用接口
@@ -58,6 +59,12 @@ description: Taobao order operations worker for plaintext order processing. Use 
 
 ```text
 ORDER_BRIDGE_BASE_URL=http://localhost:8090
+```
+
+所有 `/api/orders/*` 调用必须携带运行环境提供的 Bridge token：
+
+```text
+X-Order-Bridge-Token: ${ORDER_BRIDGE_API_TOKEN}
 ```
 
 可调用接口：
