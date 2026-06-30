@@ -108,7 +108,9 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var output strings.Builder
 	var streamingCurrentTurn atomic.Bool
 	var sawCompletedGoalComplete atomic.Bool
+	var sawCompletedIssueComment atomic.Bool
 	var goalCompleteCallIDs sync.Map
+	var issueCommentCallIDs sync.Map
 
 	promptDone := make(chan hermesPromptResult, 1)
 
@@ -129,10 +131,16 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				if msg.Tool == "goal_complete" && msg.CallID != "" {
 					goalCompleteCallIDs.Store(msg.CallID, struct{}{})
 				}
+				if msg.CallID != "" && isKiroIssueCommentAddTool(msg) {
+					issueCommentCallIDs.Store(msg.CallID, struct{}{})
+				}
 			}
 			if msg.Type == MessageToolResult {
 				if _, ok := goalCompleteCallIDs.LoadAndDelete(msg.CallID); ok {
 					sawCompletedGoalComplete.Store(msg.Status == "completed")
+				}
+				if _, ok := issueCommentCallIDs.LoadAndDelete(msg.CallID); ok {
+					sawCompletedIssueComment.Store(msg.Status == "completed")
 				}
 			}
 			if msg.Type == MessageText {
@@ -318,8 +326,8 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kiro session/prompt failed: %v", err)
-				if sawCompletedGoalComplete.Load() && isKiroGoalCompleteCloseError(err) {
-					b.cfg.Logger.Warn("kiro session/prompt failed after goal_complete; preserving completed task status", "error", err)
+				if (sawCompletedGoalComplete.Load() || sawCompletedIssueComment.Load()) && isKiroGoalCompleteCloseError(err) {
+					b.cfg.Logger.Warn("kiro session/prompt failed after completed task result; preserving completed task status", "error", err)
 					finalStatus = "completed"
 					finalError = ""
 				} else if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
@@ -412,6 +420,26 @@ func isKiroGoalCompleteCloseError(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(rpcErr.Data), "failed to generate a response")
+}
+
+func isKiroIssueCommentAddTool(msg Message) bool {
+	if msg.Tool != "terminal" {
+		return false
+	}
+	command, _ := msg.Input["command"].(string)
+	return isKiroIssueCommentAddCommand(command)
+}
+
+func isKiroIssueCommentAddCommand(command string) bool {
+	parts := strings.Fields(command)
+	if len(parts) < 4 {
+		return false
+	}
+	executable := strings.TrimPrefix(parts[0], "./")
+	if executable != "multica" && !strings.HasSuffix(executable, "/multica") {
+		return false
+	}
+	return parts[1] == "issue" && parts[2] == "comment" && parts[3] == "add"
 }
 
 func kiroToolNameFromTitle(title string) string {
