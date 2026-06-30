@@ -10,6 +10,8 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.workflow_id, i.workflow_run_id, i.stage_id, i.metadata
 FROM multica_issue i
 WHERE i.workspace_id = $1
+  AND (sqlc.narg('exclude_workflow_origin')::bool IS NULL
+       OR i.origin_type IS DISTINCT FROM 'workflow')
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
@@ -154,6 +156,8 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 FROM multica_issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
+  AND (sqlc.narg('exclude_workflow_origin')::bool IS NULL
+       OR i.origin_type IS DISTINCT FROM 'workflow')
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
@@ -198,6 +202,8 @@ ORDER BY i.position ASC, i.created_at DESC;
 -- See ListIssues for the semantics of involves_user_id.
 SELECT count(*) FROM multica_issue i
 WHERE i.workspace_id = $1
+  AND (sqlc.narg('exclude_workflow_origin')::bool IS NULL
+       OR i.origin_type IS DISTINCT FROM 'workflow')
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))

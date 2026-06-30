@@ -1,23 +1,27 @@
 "use client";
 
 import { useMemo } from "react";
-import type { WorkflowStage, WorkflowNode, Agent } from "@multica/core/types";
+import type { WorkflowStage, WorkflowNode, Agent, WorkflowNodeRun } from "@multica/core/types";
 import { workerTypeToActorType } from "@multica/core/types";
 import type { BuiltinPlugin } from "@multica/core/api/schemas";
 import { cn } from "@multica/ui/lib/utils";
 import { CompactNodeCard } from "./compact-node-card";
 import { CriticBadge } from "./critic-badge";
+import { RuntimeNodeCard } from "../../../issues/components/execution/runtime-node-card";
 
 export interface StageLaneProps {
   stage: WorkflowStage;
   nodeIds: WorkflowNode[];
-  getActorName: (type: string, id: string) => string;
+  getActorName: (type: string, id: string) => string | null;
   agentLookup: Map<string, Agent | null>;
   pluginLookup: Map<string, BuiltinPlugin | null>;
   onCardClick: (nodeId: string, focus: "worker" | "critic") => void;
   selectedCard?: { nodeId: string; focus: "worker" | "critic" } | null;
   nodeElementRefs: Map<string, (el: HTMLButtonElement | null) => void>;
   criticElementRefs: Map<string, (el: HTMLButtonElement | null) => void>;
+  mode?: "template" | "runtime";
+  nodeRuns?: Map<string, WorkflowNodeRun>;
+  onNodeClick?: (nodeId: string) => void;
 }
 
 const STAGE_BG_COLORS = [
@@ -48,6 +52,9 @@ export function StageLane({
   selectedCard = null,
   nodeElementRefs,
   criticElementRefs,
+  mode = "template",
+  nodeRuns,
+  onNodeClick,
 }: StageLaneProps) {
   const colorIndex = Math.abs(stage.sort_order) % STAGE_BG_COLORS.length;
   const stageBg = STAGE_BG_COLORS[colorIndex] ?? STAGE_BG_COLORS[0];
@@ -96,6 +103,28 @@ export function StageLane({
               className="flex w-full min-w-[960px] flex-nowrap items-start justify-evenly gap-8 px-4"
             >
               {sortedNodes.map((node) => {
+                if (mode === "runtime") {
+                  const nodeRun = nodeRuns?.get(node.id) ?? null;
+                  const workerName = node.worker_id
+                    ? getActorName(workerTypeToActorType(node.worker_type), node.worker_id)
+                    : null;
+                  const criticName = node.critic_id
+                    ? getActorName(node.critic_type ?? "agent", node.critic_id)
+                    : null;
+
+                  return (
+                    <RuntimeNodeCard
+                      key={node.id}
+                      node={node}
+                      nodeRun={nodeRun}
+                      workerName={workerName}
+                      criticName={criticName}
+                      onClick={(id) => onNodeClick?.(id)}
+                      elementRef={nodeElementRefs.get(node.id)}
+                    />
+                  );
+                }
+
                 const workerName = node.worker_id
                   ? getActorName(workerTypeToActorType(node.worker_type), node.worker_id)
                   : null;

@@ -780,6 +780,15 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// include_workflow_origin defaults to false — auto-generated child issues
+	// (origin_type = 'workflow') are excluded from the list by default.
+	excludeWorkflowOrigin := pgtype.Bool{Bool: true, Valid: true}
+	if r.URL.Query().Get("include_workflow_origin") == "true" {
+		// Setting Valid: false sends SQL NULL, which causes the query's
+		// `$N::bool IS NULL` check to short-circuit and skip the filter.
+		excludeWorkflowOrigin = pgtype.Bool{Valid: false}
+	}
+
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
@@ -791,6 +800,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			ProjectID:      projectFilter,
 			InvolvesUserID: involvesUserFilter,
 			MetadataFilter: metadataFilter,
+			ExcludeWorkflowOrigin: excludeWorkflowOrigin,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -859,6 +869,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		InvolvesUserID: involvesUserFilter,
 		Scheduled:      scheduledFilter,
 		MetadataFilter: metadataFilter,
+		ExcludeWorkflowOrigin: excludeWorkflowOrigin,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -877,6 +888,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		InvolvesUserID: involvesUserFilter,
 		Scheduled:      scheduledFilter,
 		MetadataFilter: metadataFilter,
+		ExcludeWorkflowOrigin: excludeWorkflowOrigin,
 	})
 	if err != nil {
 		total = int64(len(issues))

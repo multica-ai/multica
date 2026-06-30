@@ -14,6 +14,8 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  Maximize2,
+  Minimize2,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -49,7 +51,7 @@ import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
-import { WorkflowDagViewer } from "./workflow-dag-viewer";
+import { ExecutionPanoramaPage } from "./execution";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
@@ -832,6 +834,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     },
   });
 
+  // Fullscreen mode for workflow issues — default to fullscreen so the
+  // execution panorama fills the available space. Toggle to detail mode
+  // reveals description, sub-issues, and activity.
+  const hasWorkflow = issue?.assignee_type === "workflow" && !!issue?.assignee_id;
+  const [isFullscreen, setIsFullscreen] = useState(hasWorkflow);
+  useEffect(() => {
+    setIsFullscreen(hasWorkflow);
+  }, [hasWorkflow]);
+
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
   useEffect(() => {
@@ -840,8 +851,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
   }, [issue?.id, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Track workflow run state from the DAG viewer (source of truth for running status).
-  const [isWorkflowRunning, setIsWorkflowRunning] = useState(false);
+  // Track workflow run state from node runs data.
+  // refetchInterval is set to false here because ExecutionPanoramaPage
+  // maintains its own observer with the same queryKey that handles polling.
+  // Two observers on the same key with refetchInterval would double-poll.
+  const { data: workflowNodeRuns } = useQuery({
+    ...workflowNodeRunsOptions(wsId, issue?.assignee_id ?? "", issue?.workflow_run_id ?? ""),
+    enabled: issue?.assignee_type === "workflow" && !!issue?.assignee_id && !!issue?.workflow_run_id,
+    refetchInterval: false,
+  });
+  const isWorkflowRunning = useMemo(() => {
+    if (!workflowNodeRuns) return false;
+    const terminal = new Set(["completed", "critic_approved", "failed", "blocked", "skipped", "cancelled"]);
+    return !workflowNodeRuns.every((nr) => terminal.has(nr.status));
+  }, [workflowNodeRuns]);
 
   // Fire `onDelete` once when the issue transitions from loaded to missing.
   // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
@@ -1799,6 +1822,25 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 </Button>
               }
             />
+            {hasWorkflow && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      onClick={() => setIsFullscreen((v) => !v)}
+                    >
+                      {isFullscreen ? <Minimize2 /> : <Maximize2 />}
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">
+                  {isFullscreen ? t(($) => $.detail.detail_mode) : t(($) => $.detail.fullscreen_mode)}
+                </TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -1821,109 +1863,117 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           ref={setScrollContainerEl}
           className="relative flex-1 overflow-y-auto"
         >
-        <div className="mx-auto w-full max-w-4xl px-8 py-8">
-          <TitleEditor
-            key={`title-${id}`}
-            defaultValue={issue.title}
-            placeholder={t(($) => $.detail.title_placeholder)}
-            className="w-full text-2xl font-bold leading-snug tracking-tight"
-            onBlur={(value) => {
-              const trimmed = value.trim();
-              if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
-            }}
-          />
-
-          {parentIssue && (
-            renderParentIssueLink(
-              "mt-2 inline-flex max-w-full items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground transition-colors group/parent",
-              <>
-                <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
-                <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-                <span className="tabular-nums shrink-0">{parentIssue.identifier}</span>
-                <span className="truncate group-hover/parent:text-foreground">
-                  {parentIssue.title}
-                </span>
-                {parentChildIssues.length > 0 && (() => {
-                  const done = parentChildIssues.filter((c) => c.status === "done").length;
-                  return (
-                    <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
-                      <ProgressRing done={done} total={parentChildIssues.length} size={11} />
-                      <span className="tabular-nums text-[10.5px] font-medium">
-                        {done}/{parentChildIssues.length}
-                      </span>
-                    </span>
-                  );
-                })()}
-              </>,
-            )
-          )}
-
-          {originNodeRun && (
-            <div className="mt-3 flex items-center gap-3 rounded-lg border bg-card/50 px-3 py-2">
-              <span className="text-xs text-muted-foreground">
-                {t(($) => $.detail.workflow_node_label)}
-              </span>
-              <NodeRunControlActions
-                nodeRun={originNodeRun}
-                workflowId={issue?.workflow_id ?? undefined}
-                runId={issue?.workflow_run_id ?? undefined}
-                wsId={wsId}
-                size="sm"
-                alwaysShow
-              />
-            </div>
-          )}
-
-          <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
-            <ContentEditor
-              ref={descEditorRef}
-              key={id}
-              defaultValue={issue.description || ""}
-              placeholder={t(($) => $.detail.desc_placeholder)}
-              onUpdate={(md) => {
-                // Bind any pending uploads still referenced in the markdown
-                // so they appear in `issueAttachments` after refresh and the
-                // editor's text/code preview keeps working past reload.
-                const ids = descPendingAttachments
-                  .filter((a) => md.includes(a.url))
-                  .map((a) => a.id);
-                handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
+          {/* TitleEditor, parent link, originNodeRun, Description, ReactionBar */}
+          {!isFullscreen && (
+          <div className="w-full max-w-5xl px-8 pt-8">
+            <TitleEditor
+              key={`title-${id}`}
+              defaultValue={issue.title}
+              placeholder={t(($) => $.detail.title_placeholder)}
+              className="w-full text-2xl font-bold leading-snug tracking-tight"
+              onBlur={(value) => {
+                const trimmed = value.trim();
+                if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
               }}
-              onUploadFile={handleDescriptionUpload}
-              debounceMs={1500}
-              currentIssueId={id}
-              attachments={descEditorAttachments}
             />
 
-            <div className="flex items-center gap-1 mt-3">
-              <ReactionBar
-                reactions={issueReactions}
-                currentUserId={user?.id}
-                onToggle={handleToggleIssueReaction}
-                getActorName={getActorName}
-              />
-              <FileUploadButton
-                size="sm"
-                onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-              />
-            </div>
-            {descDragOver && <FileDropOverlay />}
-          </div>
+            {parentIssue && (
+              renderParentIssueLink(
+                "mt-2 inline-flex max-w-full items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground transition-colors group/parent",
+                <>
+                  <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
+                  <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                  <span className="tabular-nums shrink-0">{parentIssue.identifier}</span>
+                  <span className="truncate group-hover/parent:text-foreground">
+                    {parentIssue.title}
+                  </span>
+                  {parentChildIssues.length > 0 && (() => {
+                    const done = parentChildIssues.filter((c) => c.status === "done").length;
+                    return (
+                      <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
+                        <ProgressRing done={done} total={parentChildIssues.length} size={11} />
+                        <span className="tabular-nums text-[10.5px] font-medium">
+                          {done}/{parentChildIssues.length}
+                        </span>
+                      </span>
+                    );
+                  })()}
+                </>,
+              )
+            )}
 
-          {/* Workflow DAG — shown when the issue is assigned to a workflow */}
-          {issue.assignee_type === "workflow" && issue.assignee_id && (
-            <div className="mt-10">
-              <WorkflowDagViewer
-                workflowId={issue.assignee_id}
-                runId={issue.workflow_run_id}
-                wsId={wsId}
-                parentIssueId={issue.id}
-                onRunningChange={setIsWorkflowRunning}
+            {originNodeRun && (
+              <div className="mt-3 flex items-center gap-3 rounded-lg border bg-card/50 px-3 py-2">
+                <span className="text-xs text-muted-foreground">
+                  {t(($) => $.detail.workflow_node_label)}
+                </span>
+                <NodeRunControlActions
+                  nodeRun={originNodeRun}
+                  workflowId={issue?.workflow_id ?? undefined}
+                  runId={issue?.workflow_run_id ?? undefined}
+                  wsId={wsId}
+                  size="sm"
+                  alwaysShow
+                />
+              </div>
+            )}
+
+            <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
+              <ContentEditor
+                ref={descEditorRef}
+                key={id}
+                defaultValue={issue.description || ""}
+                placeholder={t(($) => $.detail.desc_placeholder)}
+                onUpdate={(md) => {
+                  // Bind any pending uploads still referenced in the markdown
+                  // so they appear in `issueAttachments` after refresh and the
+                  // editor's text/code preview keeps working past reload.
+                  const ids = descPendingAttachments
+                    .filter((a) => md.includes(a.url))
+                    .map((a) => a.id);
+                  handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
+                }}
+                onUploadFile={handleDescriptionUpload}
+                debounceMs={1500}
+                currentIssueId={id}
+                attachments={descEditorAttachments}
               />
+
+              <div className="flex items-center gap-1 mt-3">
+                <ReactionBar
+                  reactions={issueReactions}
+                  currentUserId={user?.id}
+                  onToggle={handleToggleIssueReaction}
+                  getActorName={getActorName}
+                />
+                <FileUploadButton
+                  size="sm"
+                  onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                />
+              </div>
+              {descDragOver && <FileDropOverlay />}
+            </div>
+          </div>
+          )}
+          {/* Full-width Workflow Panorama (replaces old WorkflowDagViewer position) */}
+          {issue.assignee_type === "workflow" && issue.assignee_id && (
+            <div className={
+              isFullscreen
+                ? "flex-1 min-h-0 flex flex-col"
+                : "border-y bg-muted/20 py-6"
+            }>
+              <div className={isFullscreen ? "flex-1 min-h-0 py-6" : "px-6"}>
+                <ExecutionPanoramaPage
+                  workflowId={effectiveWorkflowId ?? ""}
+                  runId={effectiveWorkflowRunId ?? null}
+                  wsId={wsId}
+                />
+              </div>
             </div>
           )}
-
-          {/* Sub-issues — Linear-style */}
+          {!isFullscreen && (
+          <div className="w-full max-w-5xl px-8 pb-8">
+              {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (
             <div className="mt-6">
               <button
@@ -2142,11 +2192,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   draft key. */}
               <CommentInput key={id} issueId={id} onSubmit={submitComment} />
             </div>
-          </div>
+            </div>
+        </div>
+          )}
         </div>
         </div>
-      </div>
-  );
+    );
 
   if (isMobile) {
     return (
@@ -2157,6 +2208,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {sidebarContent}
           </SheetContent>
         </Sheet>
+      </div>
+    );
+  }
+
+  // Fullscreen mode: no sidebar, header + panorama fill the viewport
+  if (isFullscreen) {
+    return (
+      <div className="flex flex-1 min-h-0">
+        {detailContent}
       </div>
     );
   }

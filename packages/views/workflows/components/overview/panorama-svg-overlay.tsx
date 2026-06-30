@@ -41,6 +41,16 @@ export function computeEdgePaths(
   const arcLaneCounts = new Map<string, number>();
   const crossLaneCounts = new Map<string, number>();
 
+  // Derive adjacency from node order within each stage, since sort_order may
+  // be 0 (unset) for all nodes. The input `nodes` array is already ordered by
+  // stage then left-to-right as rendered in StageLane.
+  const stageNodeOrder = new Map<string, string[]>();
+  for (const node of nodes) {
+    const key = node.stage_id ?? "__none__";
+    if (!stageNodeOrder.has(key)) stageNodeOrder.set(key, []);
+    stageNodeOrder.get(key)!.push(node.id);
+  }
+
   for (const edge of edges) {
     const sourceNode = nodeMap.get(edge.source_node_id);
     const targetNode = nodeMap.get(edge.target_node_id);
@@ -52,18 +62,20 @@ export function computeEdgePaths(
 
     const colorIndex = stageColorIndex(sourceNode, stageMap);
     const isSameStage = sourceNode.stage_id === targetNode.stage_id;
-    const isAdjacent = Math.abs(sourceNode.sort_order - targetNode.sort_order) === 1;
+
+    const stageNodeIds = stageNodeOrder.get(sourceNode.stage_id ?? "__none__") ?? [];
+    const sourceIdx = stageNodeIds.indexOf(edge.source_node_id);
+    const targetIdx = stageNodeIds.indexOf(edge.target_node_id);
+    const isAdjacent = sourceIdx !== -1 && targetIdx !== -1 && Math.abs(sourceIdx - targetIdx) === 1;
 
     if (isSameStage && isAdjacent) {
-      // Horizontal: source right edge center -> target left edge center
+      // Horizontal: source right edge center -> target left edge center (direct line)
       const x1 = sourceRect.right;
       const y1 = sourceRect.top + sourceRect.height / 2;
       const x2 = targetRect.left;
-      const y2 = y1;
-      const midX = Math.round((x1 + x2) / 2);
       results.push({
         edgeId: edge.id,
-        d: `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`,
+        d: `M ${x1} ${y1} L ${x2} ${y1}`,
         type: "horizontal",
         dashed: false,
         colorIndex,

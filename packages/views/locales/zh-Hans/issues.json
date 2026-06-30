@@ -166,6 +166,7 @@
     "back_to_issues": "返回 issue 列表",
     "title_placeholder": "issue 标题",
     "desc_placeholder": "添加描述...",
+    "desc_label": "描述",
     "sub_issues_label": "子 issue",
     "sub_issue_of": "属于父 issue",
     "workflow_node_label": "工作流任务",
@@ -240,6 +241,8 @@
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "sidebar_tooltip": "切换侧边栏",
+    "fullscreen_mode": "全屏模式",
+    "detail_mode": "详情模式",
     "cmdf_toast_title": "页面内查找仅覆盖可见区",
     "cmdf_toast_description": "评论列表已虚拟滚动,⌘F 找不到视口外的评论。完整应用内搜索即将推出。",
     "update_failed": "更新 issue 失败",
@@ -475,6 +478,41 @@
     "create_failed": "创建标签失败",
     "update_failed": "更新标签失败",
     "delete_failed": "删除标签失败"
+  },
+  "execution": {
+    "panorama": {
+      "not_started": "未启动",
+      "no_worker": "未配置 Worker",
+      "no_run": "Workflow 尚未启动",
+      "empty_stage": "此阶段暂无节点",
+      "unassigned": "未分组"
+    },
+    "card": {
+      "worker_label": "Worker",
+      "critic_label": "Critic",
+      "artifacts_label": "产物"
+    },
+    "detail_panel": {
+      "title": "节点详情",
+      "status_path": "状态路径",
+      "worker": "Worker",
+      "critic": "Critic",
+      "worker_output": "Worker 输出",
+      "critic_output": "Critic 输出",
+      "attachments": "附件",
+      "not_configured": "未配置",
+      "no_output": "暂无输出",
+      "review_comment": "审核意见",
+      "metadata": "元数据",
+      "started_at": "开始时间",
+      "completed_at": "完成时间",
+      "duration": "耗时",
+      "retry_count": "重试次数",
+      "error": "错误",
+      "view_full_issue": "查看完整 Issue",
+      "unblock": "解除阻塞",
+      "retry": "重试"
+    }
   },
   "backlog_hint": {
     "title": "智能体在 backlog 状态下暂停",

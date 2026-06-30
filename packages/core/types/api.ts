@@ -72,6 +72,8 @@ export interface ListIssuesParams {
    * majority on the client.
    */
   scheduled?: boolean;
+  /** Include child issues created by workflow stages in the result. Defaults to false on server. */
+  include_workflow_origin?: boolean;
 }
 
 export interface IssueActorRef {
