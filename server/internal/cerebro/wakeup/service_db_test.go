@@ -302,6 +302,60 @@ func TestCreateRecordsWakeupScheduledActivity(t *testing.T) {
 	}
 }
 
+// TestCreateMinIntervalFromWorkspaceSetting proves the from-now floor follows
+// the workspace setting (wakeup_min_interval_minutes), not a hardcoded constant:
+// with the setting lowered to 1, a wakeup 2 minutes out — well under the old
+// 15-minute floor — is accepted, while one under the configured minute is
+// rejected. The sanity floor (minWakeupIntervalFloor) keeps it from going lower.
+func TestCreateMinIntervalFromWorkspaceSetting(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	svc := wkService()
+	if _, err := wkPool.Exec(ctx, `DELETE FROM cerebro_agent_wakeup WHERE issue_id = $1 AND agent_id = $2`, wkIssueID, wkAgentID); err != nil {
+		t.Fatalf("clear wakeups: %v", err)
+	}
+	// Lower the workspace min-interval to 1 minute, then restore the default
+	// (no row) so other tests see the unset state.
+	if err := svc.Cerebro.UpsertCerebroWorkspaceWakeupLimits(ctx, cerebrodb.UpsertCerebroWorkspaceWakeupLimitsParams{
+		WorkspaceID:              wkWorkspaceID,
+		WakeupMaxSelfPerIssue:    defaultMaxSelfWakeupsPerIssue,
+		WakeupMinIntervalMinutes: 1,
+		UpdatedBy:                wkUserID,
+	}); err != nil {
+		t.Fatalf("set wakeup settings: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = wkPool.Exec(context.Background(), `DELETE FROM cerebro_workspace_settings WHERE workspace_id = $1`, wkWorkspaceID)
+		_, _ = wkPool.Exec(context.Background(), `DELETE FROM cerebro_agent_wakeup WHERE issue_id = $1 AND agent_id = $2`, wkIssueID, wkAgentID)
+	})
+
+	// 2 minutes out is below the old 15-minute floor but above the 1-minute
+	// setting -> accepted.
+	if _, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
+		AgentID:     wkAgentID,
+		IssueID:     wkIssueID,
+		Prompt:      "fast loop check",
+		TriggerType: TriggerTime,
+		FireAt:      pgtype.Timestamptz{Time: time.Now().Add(2 * time.Minute), Valid: true},
+	}); err != nil {
+		t.Fatalf("expected wakeup 2 min out to be accepted with min-interval 1, got: %v", err)
+	}
+
+	// 20 seconds out is below the configured 1-minute floor -> rejected.
+	_, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
+		AgentID:     wkAgentID,
+		IssueID:     wkOtherIssue,
+		Prompt:      "too soon",
+		TriggerType: TriggerTime,
+		FireAt:      pgtype.Timestamptz{Time: time.Now().Add(20 * time.Second), Valid: true},
+	})
+	if err == nil {
+		t.Fatal("expected wakeup 20s out to be rejected under 1-minute floor")
+	}
+}
+
 func TestResolveOriginComment_FallsBackToLatestMemberComment(t *testing.T) {
 	if wkPool == nil {
 		t.Skip("no test DB")

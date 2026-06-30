@@ -41,10 +41,11 @@ const (
 	// fire because the issue had an active task or the agent runtime was offline.
 	postponeDelay = 5 * time.Minute
 
-	// WakeupMinIntervalMinutes is the minimum allowed gap between wakeup
-	// creations for the same agent+issue (enforced at creation time).
-	// Also used as the delay before re-scheduling after a postpone notification.
-	WakeupMinIntervalMinutes = 15
+	// minWakeupIntervalFloor is a hard sanity floor for the time-wakeup
+	// min-interval. The effective gap comes from the workspace setting
+	// (wakeup_min_interval_minutes), but a misconfigured value (e.g. 0) must
+	// never let a wakeup fire faster than the dispatch sweeper runs (~30s).
+	minWakeupIntervalFloor = time.Minute
 
 	// WakeupMaxConsecutivePostpones is the number of consecutive postpones
 	// (offline / missing-runtime parks) allowed before an inbox notification is
@@ -107,24 +108,33 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 		if !req.FireAt.Valid {
 			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("fire_at is required for time wakeups")
 		}
+		// The from-now floor comes from the workspace setting
+		// (wakeup_min_interval_minutes), not a hardcoded constant, so a
+		// workspace can let a fast loop check more often. minWakeupIntervalFloor
+		// keeps it above the sweeper cadence.
+		_, minInterval := s.selfWakeupLimits(ctx, workspaceID)
+		if minInterval < minWakeupIntervalFloor {
+			minInterval = minWakeupIntervalFloor
+		}
+		minIntervalMin := int32(minInterval.Minutes())
 		// Enforce minimum interval: reject if fire_at is too soon.
-		minAllowed := time.Now().Add(time.Duration(WakeupMinIntervalMinutes) * time.Minute)
+		minAllowed := time.Now().Add(minInterval)
 		if req.FireAt.Time.Before(minAllowed) {
 			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf(
 				"fire_at must be at least %d minutes from now (got %s)",
-				WakeupMinIntervalMinutes, req.FireAt.Time.Format(time.RFC3339),
+				minIntervalMin, req.FireAt.Time.Format(time.RFC3339),
 			)
 		}
 		// Enforce min interval: reject if there is already a pending wakeup
-		// for this agent+issue created within the last WakeupMinIntervalMinutes.
+		// for this agent+issue created within the last minInterval.
 		if recent, err := s.Cerebro.HasRecentPendingWakeupForAgentIssue(ctx, cerebrodb.HasRecentPendingWakeupForAgentIssueParams{
 			AgentID:            req.AgentID,
 			IssueID:            req.IssueID,
-			MinIntervalMinutes: WakeupMinIntervalMinutes,
+			MinIntervalMinutes: minIntervalMin,
 		}); err == nil && recent {
 			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf(
 				"a wakeup for this agent+issue was already created within the last %d minutes; wait before creating another",
-				WakeupMinIntervalMinutes,
+				minIntervalMin,
 			)
 		}
 	case TriggerIssueStatus:
