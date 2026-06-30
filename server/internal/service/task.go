@@ -39,10 +39,32 @@ type TaskService struct {
 	// goes through the DB. Wired in router.go from the shared Redis
 	// client.
 	EmptyClaim *EmptyClaimCache
+	// Composio computes the per-task MCP overlay (Stage 3 of the Composio
+	// epic, MUL-3721) — the integration's "current user's connected apps
+	// → MCP session URL" hook called from each Enqueue* path. Optional: a
+	// nil ComposioOverlayBuilder turns the overlay step into a no-op so
+	// every Multica deployment that hasn't enabled Composio behaves
+	// exactly as before. Wired in router.go after composiointeg.NewService
+	// succeeds; the concrete type is *composio.Service.
+	Composio ComposioOverlayBuilder
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
+}
+
+// ComposioOverlayBuilder is the seam TaskService uses to build the per-task
+// MCP overlay at enqueue time. Implemented by
+// internal/integrations/composio.Service.BuildTaskOverlay; tests provide an
+// inline fake so they don't have to spin a fake Composio SDK.
+//
+// Contract: (nil, nil) means "user has no active connections, do not write
+// any overlay onto the task". Any non-nil JSON is the exact value to store
+// in agent_task_queue.runtime_mcp_overlay; non-nil error is surfaced to the
+// caller but treated as best-effort — failed overlay computation must not
+// fail the enqueue.
+type ComposioOverlayBuilder interface {
+	BuildTaskOverlay(ctx context.Context, userID pgtype.UUID) (json.RawMessage, error)
 }
 
 type TaskWakeupNotifier interface {
@@ -142,6 +164,83 @@ func (s *TaskService) captureTaskQueued(ctx context.Context, task db.AgentTaskQu
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskEnqueued(source, runtimeMode)
 	}
+}
+
+// applyRuntimeMCPOverlay computes the per-task Composio MCP overlay for the
+// task's initiator user and writes it to agent_task_queue.runtime_mcp_overlay.
+// Called by every Enqueue* path AFTER the task row is inserted and BEFORE
+// the daemon is notified, so by the time the claim handler reads the row
+// the overlay is in place (or has been deterministically skipped).
+//
+// Best-effort: any failure here is logged and swallowed. The agent must
+// still run with its base agent.mcp_config — losing third-party tools is a
+// degraded UX, refusing to enqueue is a worse one.
+//
+// No-op when:
+//   - s.Composio is nil — Composio integration not configured (the common
+//     case for any deployment that hasn't set COMPOSIO_API_KEY).
+//   - initiatorUserID is not a valid UUID — the task has no attributable
+//     human initiator (autopilot, system-driven, etc.), so there is no
+//     "current user's connected apps" to reflect.
+//   - BuildTaskOverlay returns (nil, nil) — the initiator user has zero
+//     active connections.
+func (s *TaskService) applyRuntimeMCPOverlay(ctx context.Context, taskID, initiatorUserID pgtype.UUID) {
+	if s == nil || s.Composio == nil {
+		return
+	}
+	if !initiatorUserID.Valid {
+		return
+	}
+	if !taskID.Valid {
+		return
+	}
+	overlay, err := s.Composio.BuildTaskOverlay(ctx, initiatorUserID)
+	if err != nil {
+		slog.Warn("runtime mcp overlay: BuildTaskOverlay failed; task will run without composio overlay",
+			"task_id", util.UUIDToString(taskID),
+			"initiator_user_id", util.UUIDToString(initiatorUserID),
+			"error", err,
+		)
+		return
+	}
+	if len(overlay) == 0 {
+		return
+	}
+	if err := s.Queries.SetAgentTaskRuntimeMCPOverlay(ctx, db.SetAgentTaskRuntimeMCPOverlayParams{
+		ID:                taskID,
+		RuntimeMcpOverlay: overlay,
+	}); err != nil {
+		slog.Warn("runtime mcp overlay: SetAgentTaskRuntimeMCPOverlay failed; task will run without composio overlay",
+			"task_id", util.UUIDToString(taskID),
+			"error", err,
+		)
+		return
+	}
+	slog.Debug("runtime mcp overlay: attached composio session",
+		"task_id", util.UUIDToString(taskID),
+		"initiator_user_id", util.UUIDToString(initiatorUserID),
+	)
+}
+
+// resolveInitiatorFromTriggerComment returns the comment author's user UUID
+// when the trigger comment was authored by a member, otherwise an invalid
+// pgtype.UUID. Used by the issue and mention enqueue paths to feed the
+// per-task overlay builder. Agent-authored trigger comments — e.g. a squad
+// leader fan-out — are intentionally NOT treated as initiators here: their
+// "user-connected apps" view is empty by construction and we want to avoid
+// spending a Composio session for a guaranteed-empty overlay.
+func (s *TaskService) resolveInitiatorFromTriggerComment(ctx context.Context, commentID pgtype.UUID) pgtype.UUID {
+	if !commentID.Valid {
+		return pgtype.UUID{}
+	}
+	comment, err := s.Queries.GetComment(ctx, commentID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	if comment.AuthorType != "member" {
+		return pgtype.UUID{}
+	}
+	return comment.AuthorID
 }
 
 func (s *TaskService) captureTaskDispatched(ctx context.Context, task db.AgentTaskQueue) {
@@ -500,6 +599,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 	// queued broadcast afterwards risks the dispatch event reaching clients
 	// before the queued one (rare but unsafe-by-construction). Publishing
 	// in the desired observe-order makes correctness independent of timing.
+	s.applyRuntimeMCPOverlay(ctx, task.ID, s.resolveInitiatorFromTriggerComment(ctx, triggerCommentID))
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
@@ -568,6 +668,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
 	// See EnqueueTaskForIssue for ordering rationale.
+	s.applyRuntimeMCPOverlay(ctx, task.ID, s.resolveInitiatorFromTriggerComment(ctx, triggerCommentID))
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
@@ -692,6 +793,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	// cycle. Without this the user perceives "quick create never
 	// triggered" because the modal closes immediately and the task
 	// sits in 'queued' until the next sleepWithContextOrWakeup tick.
+	s.applyRuntimeMCPOverlay(ctx, task.ID, requesterID)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
 }
@@ -768,6 +870,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 
 	slog.Info("chat task enqueued", "task_id", util.UUIDToString(task.ID), "chat_session_id", util.UUIDToString(chatSession.ID), "agent_id", util.UUIDToString(chatSession.AgentID))
 	// See EnqueueTaskForIssue for ordering rationale.
+	s.applyRuntimeMCPOverlay(ctx, task.ID, initiatorUserID)
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
@@ -1649,6 +1752,16 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// Retry creates a fresh queued row, same status transition (∅ → queued)
 	// as EnqueueTaskFor*. Broadcast queued first, then notify the daemon —
 	// see EnqueueTaskForIssue for ordering rationale.
+	//
+	// The parent task's initiator_user_id is the canonical reference here:
+	// the user behind the original run has not changed and the new row
+	// inherits the same attribution at the DB layer (see
+	// agent.sql / CreateRetryTask). NOTE: CreateRetryTask currently does
+	// NOT copy initiator_user_id forward to the child, so on retry we read
+	// the parent's value directly to keep the overlay attached. If a future
+	// schema change starts copying it, this still works (parent vs child
+	// carry the same value).
+	s.applyRuntimeMCPOverlay(ctx, child.ID, parent.InitiatorUserID)
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
 	s.NotifyTaskEnqueued(ctx, child)
 	return &child, nil

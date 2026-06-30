@@ -471,6 +471,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					slog.Error("composio: service init failed; composio integration disabled", "error", serr)
 				} else {
 					h.Composio = svc
+					// Stage 3 (MUL-3721) hook: feed the per-task MCP
+					// overlay builder into TaskService so every Enqueue*
+					// path attaches the initiator user's Composio session
+					// URL to the task row before the daemon claims it.
+					// taskSvc already exists by this point — it was
+					// constructed inside NewHandler — and exposes its
+					// Composio field for exactly this kind of late wiring,
+					// so no Handler-level mutation is needed.
+					if h.TaskService != nil {
+						h.TaskService.Composio = svc
+					}
 					slog.Info("composio integration enabled")
 				}
 			}
