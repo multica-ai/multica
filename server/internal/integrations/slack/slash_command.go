@@ -3,7 +3,6 @@ package slack
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	"github.com/slack-go/slack"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
-	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -25,21 +23,29 @@ import (
 // slash command in the app manifest is what makes it reach us — as an
 // `EventTypeSlashCommand` over the same Socket Mode connection.
 //
-// Unlike the message path (chat session + dedup + debounced chat run), a slash
-// command creates no channel message and starts no chat session / chat run: it
-// is a one-shot issue creation with a PRIVATE (ephemeral) confirmation back to
-// the invoker via the command's response_url. It reuses the same installation
-// routing, identity + membership checks, and the shared IssueService, so a
-// slash-command issue shares the counter, dup guard, project boundary,
-// broadcast, analytics and agent-enqueue with every other create path — i.e. a
-// `todo` issue assigned to the agent still triggers the agent through the normal
-// issue-assignment path (maybeEnqueueOnAssign), exactly like the message /issue.
+// The command is a QUICK-CREATE entry point: it does NOT create the issue
+// itself. It takes the invoker's natural-language description as a prompt and
+// enqueues a quick-create task against the installation's agent — the very same
+// pipeline as the web "quick create" modal (TaskService.EnqueueQuickCreateTask).
+// The agent turns the prompt into a well-formed `multica issue create` in the
+// background, so the issue gets a proper title + structured description instead
+// of the raw one-liner the user typed. Because creation is asynchronous, the
+// command replies with a PRIVATE (ephemeral) acknowledgement via the command's
+// response_url — there is no issue number to hand back yet — and the agent's
+// completion surfaces to the invoker as a Multica inbox notification through the
+// shared quick-create completion path. It starts no chat session / chat run.
+//
+// The installation routing and identity + membership checks mirror the message
+// path (resolvers.go) so a slash-command quick-create respects the same
+// workspace boundary and account binding as every other Slack entry point; they
+// are kept local so the proven inbound pipeline is untouched.
 
 const issueSlashCommand = "/issue"
 
 // User-facing ephemeral replies. Kept terse; only the invoker sees them.
 const (
-	slashUsageText           = "Please give the issue a title, e.g. `/issue Fix the login redirect`."
+	slashUsageText           = "Tell me what to file, e.g. `/issue the login button does nothing on Safari`."
+	slashQueuedText          = "✅ On it — I'm turning that into an issue. You'll get a Multica notification when it's ready."
 	slashNotMemberText       = "You're not a member of this Multica workspace, so I can't file an issue for you."
 	slashLinkAccountFallback = "Link your Slack account to Multica first, then try `/issue` again."
 	slashInternalErrorText   = "⚠️ Something went wrong creating the issue. Please try again."
@@ -54,13 +60,19 @@ type slashQueries interface {
 	GetChannelInstallationByAppID(ctx context.Context, arg db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error)
 	GetChannelUserBindingByUserID(ctx context.Context, arg db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error)
 	GetMemberByUserAndWorkspace(ctx context.Context, arg db.GetMemberByUserAndWorkspaceParams) (db.Member, error)
-	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+}
+
+// quickCreateEnqueuer is the narrow slice of *service.TaskService the slash
+// command needs to hand the invoker's prompt to the agent. *service.TaskService
+// satisfies it; tests supply a fake.
+type quickCreateEnqueuer interface {
+	EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error)
 }
 
 // SlashCommandProcessor handles the Slack `/issue` slash command end to end.
 type SlashCommandProcessor struct {
 	q           slashQueries
-	issues      engine.IssueCreator
+	tasks       quickCreateEnqueuer
 	binding     bindingMinter
 	appURL      string
 	bindingPath string
@@ -72,11 +84,11 @@ type SlashCommandProcessor struct {
 
 // SlashCommandConfig configures the processor. Binding + AppURL are required for
 // the unbound-user "link your account" reply; without them that case falls back
-// to a plain instruction. Issues + Queries are required for the command to do
+// to a plain instruction. Tasks + Queries are required for the command to do
 // anything.
 type SlashCommandConfig struct {
 	Queries     *db.Queries
-	Issues      engine.IssueCreator
+	Tasks       quickCreateEnqueuer
 	Binding     bindingMinter
 	AppURL      string
 	BindingPath string // default "/slack/bind"
@@ -100,7 +112,7 @@ func NewSlashCommandProcessor(cfg SlashCommandConfig) *SlashCommandProcessor {
 	}
 	p := &SlashCommandProcessor{
 		q:           cfg.Queries,
-		issues:      cfg.Issues,
+		tasks:       cfg.Tasks,
 		binding:     cfg.Binding,
 		appURL:      strings.TrimRight(cfg.AppURL, "/"),
 		bindingPath: bindingPath,
@@ -135,8 +147,8 @@ func (p *SlashCommandProcessor) Handle(ctx context.Context, cmd slack.SlashComma
 
 // process runs the command and returns the ephemeral text to reply with.
 func (p *SlashCommandProcessor) process(ctx context.Context, cmd slack.SlashCommand) string {
-	title, description := splitIssueText(cmd.Text)
-	if title == "" {
+	prompt := strings.TrimSpace(cmd.Text)
+	if prompt == "" {
 		return slashUsageText
 	}
 
@@ -167,25 +179,27 @@ func (p *SlashCommandProcessor) process(ctx context.Context, cmd slack.SlashComm
 		}
 	}
 
-	res, err := p.issues.Create(ctx, service.IssueCreateParams{
-		WorkspaceID:  inst.WorkspaceID,
-		Title:        title,
-		Description:  pgtype.Text{String: description, Valid: description != ""},
-		Status:       "todo",
-		Priority:     "none",
-		AssigneeType: pgtype.Text{String: "agent", Valid: true},
-		AssigneeID:   inst.AgentID,
-		CreatorType:  "member",
-		CreatorID:    userID,
-		OriginType:   pgtype.Text{String: originSlackChat, Valid: true},
-		// No chat session backs a slash command, so OriginID stays NULL.
-	}, service.IssueCreateOpts{})
-	if err != nil {
-		p.logger.WarnContext(ctx, "slack slash command: create issue failed",
+	// Hand the raw natural-language prompt to the installation's agent as a
+	// quick-create task; the agent authors the well-formed issue in the
+	// background and attributes it to the bound member. No project / parent /
+	// attachments and no squad routing — the slash command targets the
+	// installation's own agent directly.
+	if _, err := p.tasks.EnqueueQuickCreateTask(
+		ctx,
+		inst.WorkspaceID,
+		userID,
+		inst.AgentID,
+		pgtype.UUID{}, // no squad — dispatch straight to the installation agent
+		prompt,
+		pgtype.UUID{}, // no project
+		pgtype.UUID{}, // no parent issue
+		nil,           // no attachments
+	); err != nil {
+		p.logger.WarnContext(ctx, "slack slash command: enqueue quick-create failed",
 			"app_id", cmd.APIAppID, "error", err)
 		return slashInternalErrorText
 	}
-	return p.issueCreatedText(ctx, inst.WorkspaceID, res.Issue)
+	return slashQueuedText
 }
 
 // resolveInstallation maps the command's api_app_id (+ event team) to its
@@ -258,41 +272,4 @@ func (p *SlashCommandProcessor) bindingText(ctx context.Context, inst engine.Res
 	// are not mangled by mrkdwn (same reasoning as the replier).
 	return "👋 To file issues, link your Slack account to Multica: <" +
 		bindURL + "|link your account>\n(This link expires in 15 minutes.)"
-}
-
-// issueCreatedText renders the success confirmation with the workspace-prefixed
-// identifier (falling back to #<number> when no prefix is set).
-func (p *SlashCommandProcessor) issueCreatedText(ctx context.Context, workspaceID pgtype.UUID, issue db.Issue) string {
-	identifier := fmt.Sprintf("#%d", issue.Number)
-	if ws, err := p.q.GetWorkspace(ctx, workspaceID); err == nil && ws.IssuePrefix != "" {
-		identifier = fmt.Sprintf("%s-%d", ws.IssuePrefix, issue.Number)
-	}
-	title := strings.TrimSpace(issue.Title)
-	if title == "" {
-		return "✅ Created " + identifier
-	}
-	return "✅ Created " + identifier + " — " + title
-}
-
-// splitIssueText splits the slash-command argument string into a title (first
-// non-empty line) and an optional description (the remaining lines). Slack
-// slash-command input is normally single-line, so the description is usually
-// empty.
-func splitIssueText(text string) (title, description string) {
-	lines := strings.Split(text, "\n")
-	first := -1
-	for i, l := range lines {
-		if strings.TrimSpace(l) != "" {
-			first = i
-			break
-		}
-	}
-	if first == -1 {
-		return "", ""
-	}
-	title = strings.TrimSpace(lines[first])
-	if first+1 < len(lines) {
-		description = strings.TrimRight(strings.Join(lines[first+1:], "\n"), " \t\n")
-	}
-	return title, description
 }

@@ -125,7 +125,7 @@ App-level token 用来授权 Socket Mode 连接。它只能在控制台里创建
 | **智能体 → Integrations** | 所有者和管理员能看到 **Connect Slack**；连接后它会变成一个 **Connected to Slack** 徽标，并带一个 **Disconnect** 操作。 |
 | **私聊 Bot** | 工作区成员直接给 Bot 发消息。这段对话会成为该智能体的一个 Multica [chat](/chat) 会话；每一条私聊消息都会被读取。 |
 | **频道里 @ 它** | 把 Bot 邀请进来（`/invite @your-bot`）再 @ 它。只有 @ 它的那条消息会被读取——Bot 不会监听整个频道。每个 @bot 的 **thread** 都是它自己的会话。 |
-| **`/issue` 斜杠命令** | 输入 `/issue <标题>`（在频道或私聊里）会在工作区创建一个新的 Multica issue，记在你名下。它会私下回一条确认——不需要 @ Bot。 |
+| **`/issue` 斜杠命令** | 输入 `/issue <描述>`（在频道或私聊里），智能体会把你的自然语言描述整理成一个规整的 Multica issue，记在你名下。它会私下先回一条「收到」——issue 创建好后你会收到一条 Multica 通知。不需要 @ Bot。 |
 | **回复** | 智能体的答复会被发回同一段私聊或 thread 里。 |
 
 ## 使用 Bot（成员）
@@ -144,7 +144,7 @@ App-level token 用来授权 Socket Mode 连接。它只能在控制台里创建
 
 - **在频道里** —— Bot 不会自动加入。先运行一次 `/invite @your-bot`，然后 `@your-bot <你的消息>`。每次追问都要重新 @ 它一下（Bot 只读取 @ 了它的消息）。
 - **在私聊里** —— 从 Slack 侧栏的 **Apps** 区块打开 Bot 并直接给它发消息；不用 @。
-- **创建 issue** —— 使用 `/issue` 斜杠命令，比如 `/issue Fix the login redirect`。在频道或私聊里都能用（不用 @ Bot），会私下回一条确认。第一次使用的人会先收到一个一次性的账号绑定链接。
+- **创建 issue** —— 使用 `/issue` 斜杠命令，比如 `/issue 登录跳转在 Safari 上坏了`。用自然语言描述就行，智能体会替你写好标题和结构化描述再建 issue。在频道或私聊里都能用（不用 @ Bot），会私下先回一条「收到」——issue 创建好后你会收到一条 Multica 通知。第一次使用的人会先收到一个一次性的账号绑定链接。
 
 ## 管理与断开
 

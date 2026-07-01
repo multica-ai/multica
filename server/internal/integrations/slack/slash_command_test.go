@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -10,8 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/slack-go/slack"
 
-	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
-	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -23,8 +22,6 @@ type fakeSlashQueries struct {
 	binding   db.ChannelUserBinding
 	bindErr   error
 	memberErr error
-	ws        db.Workspace
-	wsErr     error
 	gotAppID  string
 }
 
@@ -41,21 +38,28 @@ func (f *fakeSlashQueries) GetMemberByUserAndWorkspace(_ context.Context, _ db.G
 	return db.Member{}, f.memberErr
 }
 
-func (f *fakeSlashQueries) GetWorkspace(_ context.Context, _ pgtype.UUID) (db.Workspace, error) {
-	return f.ws, f.wsErr
+// fakeQuickCreate records the last EnqueueQuickCreateTask call so tests can
+// assert the prompt is passed through verbatim and attributed correctly.
+type fakeQuickCreate struct {
+	task  db.AgentTaskQueue
+	err   error
+	calls int
+
+	workspaceID pgtype.UUID
+	requesterID pgtype.UUID
+	agentID     pgtype.UUID
+	squadID     pgtype.UUID
+	prompt      string
 }
 
-type fakeIssueCreator struct {
-	result service.IssueCreateResult
-	err    error
-	calls  int
-	params service.IssueCreateParams
-}
-
-func (f *fakeIssueCreator) Create(_ context.Context, p service.IssueCreateParams, _ service.IssueCreateOpts) (service.IssueCreateResult, error) {
+func (f *fakeQuickCreate) EnqueueQuickCreateTask(_ context.Context, workspaceID, requesterID, agentID, squadID pgtype.UUID, prompt string, _, _ pgtype.UUID, _ []pgtype.UUID) (db.AgentTaskQueue, error) {
 	f.calls++
-	f.params = p
-	return f.result, f.err
+	f.workspaceID = workspaceID
+	f.requesterID = requesterID
+	f.agentID = agentID
+	f.squadID = squadID
+	f.prompt = prompt
+	return f.task, f.err
 }
 
 func slashTestUUID(b byte) pgtype.UUID {
@@ -69,12 +73,12 @@ func slashTestUUID(b byte) pgtype.UUID {
 
 // newTestSlashProcessor builds a processor over fakes and returns it plus a
 // pointer to the last ephemeral reply text and the reply count.
-func newTestSlashProcessor(q slashQueries, issues engine.IssueCreator, binding bindingMinter) (*SlashCommandProcessor, *string, *int) {
+func newTestSlashProcessor(q slashQueries, tasks quickCreateEnqueuer, binding bindingMinter) (*SlashCommandProcessor, *string, *int) {
 	captured := new(string)
 	count := new(int)
 	p := &SlashCommandProcessor{
 		q:           q,
-		issues:      issues,
+		tasks:       tasks,
 		binding:     binding,
 		appURL:      "https://app.example",
 		bindingPath: "/slack/bind",
@@ -113,74 +117,74 @@ func issueSlashCmd() slack.SlashCommand {
 
 // ---- tests ----
 
-func TestSlashHandle_CreatesIssueAndConfirms(t *testing.T) {
+func TestSlashHandle_EnqueuesQuickCreateAndAcks(t *testing.T) {
 	q := &fakeSlashQueries{
 		inst:    activeSlashInstallation(),
 		binding: db.ChannelUserBinding{MulticaUserID: slashTestUUID(9)},
-		ws:      db.Workspace{IssuePrefix: "MUL"},
 	}
-	issues := &fakeIssueCreator{result: service.IssueCreateResult{Issue: db.Issue{Number: 7, Title: "Fix login"}}}
-	p, captured, count := newTestSlashProcessor(q, issues, &fakeBindingMinter{})
+	tasks := &fakeQuickCreate{}
+	p, captured, count := newTestSlashProcessor(q, tasks, &fakeBindingMinter{})
 
 	p.Handle(context.Background(), issueSlashCmd())
 
-	if issues.calls != 1 {
-		t.Fatalf("expected 1 issue create, got %d", issues.calls)
+	if tasks.calls != 1 {
+		t.Fatalf("expected 1 quick-create enqueue, got %d", tasks.calls)
 	}
 	if *count != 1 {
 		t.Fatalf("expected 1 ephemeral reply, got %d", *count)
 	}
-	if !strings.Contains(*captured, "MUL-7") || !strings.Contains(*captured, "Fix login") {
-		t.Fatalf("confirmation missing identifier/title: %q", *captured)
+	if *captured != slashQueuedText {
+		t.Fatalf("expected queued ack, got %q", *captured)
 	}
 	if q.gotAppID != "A1" {
 		t.Errorf("installation lookup used app id %q, want A1", q.gotAppID)
 	}
-	if issues.params.Title != "Fix login" {
-		t.Errorf("issue title = %q, want Fix login", issues.params.Title)
+	if tasks.prompt != "Fix login" {
+		t.Errorf("quick-create prompt = %q, want Fix login", tasks.prompt)
 	}
-	if issues.params.AssigneeID != slashTestUUID(3) {
-		t.Errorf("issue not assigned to the installation agent")
+	if tasks.workspaceID != slashTestUUID(2) {
+		t.Errorf("quick-create workspace is not the installation workspace")
 	}
-	if issues.params.CreatorID != slashTestUUID(9) {
-		t.Errorf("issue creator is not the bound member")
+	if tasks.agentID != slashTestUUID(3) {
+		t.Errorf("quick-create not dispatched to the installation agent")
 	}
-	if issues.params.OriginID.Valid {
-		t.Errorf("slash-command issue must have no origin session id")
+	if tasks.requesterID != slashTestUUID(9) {
+		t.Errorf("quick-create requester is not the bound member")
+	}
+	if tasks.squadID.Valid {
+		t.Errorf("slash-command quick-create must not carry a squad id")
 	}
 }
 
-func TestSlashHandle_TitleAndDescription(t *testing.T) {
+func TestSlashHandle_MultilinePromptPassedThrough(t *testing.T) {
 	q := &fakeSlashQueries{
 		inst:    activeSlashInstallation(),
 		binding: db.ChannelUserBinding{MulticaUserID: slashTestUUID(9)},
-		ws:      db.Workspace{IssuePrefix: "MUL"},
 	}
-	issues := &fakeIssueCreator{result: service.IssueCreateResult{Issue: db.Issue{Number: 1, Title: "Title"}}}
-	p, _, _ := newTestSlashProcessor(q, issues, &fakeBindingMinter{})
+	tasks := &fakeQuickCreate{}
+	p, _, _ := newTestSlashProcessor(q, tasks, &fakeBindingMinter{})
 
 	cmd := issueSlashCmd()
-	cmd.Text = "Title\nline one\nline two"
+	cmd.Text = "  Title\nline one\nline two  "
 	p.Handle(context.Background(), cmd)
 
-	if issues.params.Title != "Title" {
-		t.Errorf("title = %q, want Title", issues.params.Title)
-	}
-	if got := issues.params.Description.String; got != "line one\nline two" {
-		t.Errorf("description = %q, want two body lines", got)
+	// The whole (trimmed) natural-language text is the prompt — no title/body
+	// split; the agent authors the well-formed issue from it.
+	if tasks.prompt != "Title\nline one\nline two" {
+		t.Errorf("prompt = %q, want the full trimmed text", tasks.prompt)
 	}
 }
 
-func TestSlashHandle_EmptyTitleIsUsage(t *testing.T) {
-	issues := &fakeIssueCreator{}
-	p, captured, count := newTestSlashProcessor(&fakeSlashQueries{inst: activeSlashInstallation()}, issues, &fakeBindingMinter{})
+func TestSlashHandle_EmptyPromptIsUsage(t *testing.T) {
+	tasks := &fakeQuickCreate{}
+	p, captured, count := newTestSlashProcessor(&fakeSlashQueries{inst: activeSlashInstallation()}, tasks, &fakeBindingMinter{})
 
 	cmd := issueSlashCmd()
 	cmd.Text = "   "
 	p.Handle(context.Background(), cmd)
 
-	if issues.calls != 0 {
-		t.Fatalf("empty title must not create an issue")
+	if tasks.calls != 0 {
+		t.Fatalf("empty prompt must not enqueue a task")
 	}
 	if *count != 1 || *captured != slashUsageText {
 		t.Fatalf("expected usage reply, got %q", *captured)
@@ -189,14 +193,14 @@ func TestSlashHandle_EmptyTitleIsUsage(t *testing.T) {
 
 func TestSlashHandle_UnboundUserGetsLink(t *testing.T) {
 	q := &fakeSlashQueries{inst: activeSlashInstallation(), bindErr: pgx.ErrNoRows}
-	issues := &fakeIssueCreator{}
+	tasks := &fakeQuickCreate{}
 	bind := &fakeBindingMinter{raw: "TOKEN123"}
-	p, captured, _ := newTestSlashProcessor(q, issues, bind)
+	p, captured, _ := newTestSlashProcessor(q, tasks, bind)
 
 	p.Handle(context.Background(), issueSlashCmd())
 
-	if issues.calls != 0 {
-		t.Fatalf("unbound user must not create an issue")
+	if tasks.calls != 0 {
+		t.Fatalf("unbound user must not enqueue a task")
 	}
 	if bind.calls != 1 {
 		t.Fatalf("expected a binding token to be minted, got %d", bind.calls)
@@ -212,13 +216,13 @@ func TestSlashHandle_NonMemberDropped(t *testing.T) {
 		binding:   db.ChannelUserBinding{MulticaUserID: slashTestUUID(9)},
 		memberErr: pgx.ErrNoRows,
 	}
-	issues := &fakeIssueCreator{}
-	p, captured, _ := newTestSlashProcessor(q, issues, &fakeBindingMinter{})
+	tasks := &fakeQuickCreate{}
+	p, captured, _ := newTestSlashProcessor(q, tasks, &fakeBindingMinter{})
 
 	p.Handle(context.Background(), issueSlashCmd())
 
-	if issues.calls != 0 {
-		t.Fatalf("non-member must not create an issue")
+	if tasks.calls != 0 {
+		t.Fatalf("non-member must not enqueue a task")
 	}
 	if *captured != slashNotMemberText {
 		t.Fatalf("expected not-member reply, got %q", *captured)
@@ -228,57 +232,56 @@ func TestSlashHandle_NonMemberDropped(t *testing.T) {
 func TestSlashHandle_InactiveInstallation(t *testing.T) {
 	inst := activeSlashInstallation()
 	inst.Status = "revoked"
-	issues := &fakeIssueCreator{}
-	p, captured, _ := newTestSlashProcessor(&fakeSlashQueries{inst: inst}, issues, &fakeBindingMinter{})
+	tasks := &fakeQuickCreate{}
+	p, captured, _ := newTestSlashProcessor(&fakeSlashQueries{inst: inst}, tasks, &fakeBindingMinter{})
 
 	p.Handle(context.Background(), issueSlashCmd())
 
-	if issues.calls != 0 || *captured != slashDisabledText {
-		t.Fatalf("inactive install: calls=%d reply=%q", issues.calls, *captured)
+	if tasks.calls != 0 || *captured != slashDisabledText {
+		t.Fatalf("inactive install: calls=%d reply=%q", tasks.calls, *captured)
 	}
 }
 
 func TestSlashHandle_TeamMismatchTreatedAsDisconnected(t *testing.T) {
-	issues := &fakeIssueCreator{}
-	p, captured, _ := newTestSlashProcessor(&fakeSlashQueries{inst: activeSlashInstallation()}, issues, &fakeBindingMinter{})
+	tasks := &fakeQuickCreate{}
+	p, captured, _ := newTestSlashProcessor(&fakeSlashQueries{inst: activeSlashInstallation()}, tasks, &fakeBindingMinter{})
 
 	cmd := issueSlashCmd()
 	cmd.TeamID = "T2" // config team is T1
 	p.Handle(context.Background(), cmd)
 
-	if issues.calls != 0 || *captured != slashDisabledText {
-		t.Fatalf("team mismatch: calls=%d reply=%q", issues.calls, *captured)
+	if tasks.calls != 0 || *captured != slashDisabledText {
+		t.Fatalf("team mismatch: calls=%d reply=%q", tasks.calls, *captured)
+	}
+}
+
+func TestSlashHandle_EnqueueFailureIsInternalError(t *testing.T) {
+	q := &fakeSlashQueries{
+		inst:    activeSlashInstallation(),
+		binding: db.ChannelUserBinding{MulticaUserID: slashTestUUID(9)},
+	}
+	tasks := &fakeQuickCreate{err: errors.New("agent has no runtime")}
+	p, captured, _ := newTestSlashProcessor(q, tasks, &fakeBindingMinter{})
+
+	p.Handle(context.Background(), issueSlashCmd())
+
+	if tasks.calls != 1 {
+		t.Fatalf("expected the enqueue to be attempted once, got %d", tasks.calls)
+	}
+	if *captured != slashInternalErrorText {
+		t.Fatalf("expected internal-error reply, got %q", *captured)
 	}
 }
 
 func TestSlashHandle_IgnoresOtherCommands(t *testing.T) {
-	issues := &fakeIssueCreator{}
-	p, _, count := newTestSlashProcessor(&fakeSlashQueries{inst: activeSlashInstallation()}, issues, &fakeBindingMinter{})
+	tasks := &fakeQuickCreate{}
+	p, _, count := newTestSlashProcessor(&fakeSlashQueries{inst: activeSlashInstallation()}, tasks, &fakeBindingMinter{})
 
 	cmd := issueSlashCmd()
 	cmd.Command = "/other"
 	p.Handle(context.Background(), cmd)
 
-	if issues.calls != 0 || *count != 0 {
-		t.Fatalf("non-/issue command must be ignored: calls=%d replies=%d", issues.calls, *count)
-	}
-}
-
-func TestSplitIssueText(t *testing.T) {
-	cases := []struct {
-		in, title, desc string
-	}{
-		{"Fix login", "Fix login", ""},
-		{"  Fix login  ", "Fix login", ""},
-		{"Title\nbody one\nbody two", "Title", "body one\nbody two"},
-		{"", "", ""},
-		{"   \n  ", "", ""},
-		{"\n\nTitle\nbody", "Title", "body"},
-	}
-	for _, c := range cases {
-		gotTitle, gotDesc := splitIssueText(c.in)
-		if gotTitle != c.title || gotDesc != c.desc {
-			t.Errorf("splitIssueText(%q) = (%q,%q), want (%q,%q)", c.in, gotTitle, gotDesc, c.title, c.desc)
-		}
+	if tasks.calls != 0 || *count != 0 {
+		t.Fatalf("non-/issue command must be ignored: calls=%d replies=%d", tasks.calls, *count)
 	}
 }

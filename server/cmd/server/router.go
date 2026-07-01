@@ -479,13 +479,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			h.SlackHistory = slack.NewHistory(queries, box.Open, slog.Default())
 
 			// `/issue` slash command (MUL-3908): a real Slack slash command,
-			// delivered over the same Socket Mode connection. It is a one-shot
-			// issue creation (no chat session or chat run; a todo issue assigned to
-			// the agent still triggers it via normal issue-assignment) with a private
-			// ephemeral confirmation, reusing the shared IssueService + binding service.
+			// delivered over the same Socket Mode connection. It is a quick-create
+			// entry point — the invoker's natural-language description is enqueued as
+			// a quick-create task (no chat session or chat run) and the agent authors
+			// the well-formed issue in the background — reusing the shared TaskService
+			// + binding service. The invoker gets a private ephemeral acknowledgement
+			// and a Multica notification when the issue lands.
 			slackSlash := slack.NewSlashCommandProcessor(slack.SlashCommandConfig{
 				Queries: queries,
-				Issues:  h.IssueService,
+				Tasks:   h.TaskService,
 				Binding: slackBindingSvc,
 				AppURL:  appURLFromEnv(),
 				Logger:  slog.Default(),

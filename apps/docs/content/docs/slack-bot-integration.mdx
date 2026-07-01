@@ -125,7 +125,7 @@ Setting this up for **multiple agents**? Repeat the whole flow once per agent �
 | **Agent → Integrations** | Owners and admins see **Connect Slack**; once connected it flips to a **Connected to Slack** badge with a **Disconnect** control. |
 | **DM the bot** | A workspace member messages the bot directly. The conversation becomes a Multica [chat](/chat) session with the agent; every DM message is read. |
 | **@-mention in a channel** | Invite the bot (`/invite @your-bot`) and @-mention it. Only the mentioning message is read — the bot does not listen to the whole channel. Each @bot **thread** is its own session. |
-| **`/issue` slash command** | Type `/issue <title>` (in a channel or a DM) to create a Multica issue in the workspace, attributed to you. It replies privately with a confirmation — no @-mention needed. |
+| **`/issue` slash command** | Type `/issue <description>` (in a channel or a DM) and the agent turns your plain-language description into a well-formed Multica issue, attributed to you. It replies privately to acknowledge — you get a Multica notification when the issue is ready. No @-mention needed. |
 | **Reply** | The agent's answer is posted back into the same DM or thread. |
 
 ## Use the bot (members)
@@ -144,7 +144,7 @@ Only **members of the workspace** can use the bot. If you aren't a member, or yo
 
 - **In a channel** — the bot isn't auto-joined. Run `/invite @your-bot` once, then `@your-bot <your message>`. Re-mention it for each follow-up (the bot only reads messages that mention it).
 - **In a DM** — open the bot from the Slack sidebar's **Apps** section and message it directly; no mention needed.
-- **File an issue** — use the `/issue` slash command, e.g. `/issue Fix the login redirect`. It works in a channel or a DM (no @-mention needed) and replies with a private confirmation. First-time users get a one-time link to connect their account.
+- **File an issue** — use the `/issue` slash command, e.g. `/issue the login redirect is broken on Safari`. Describe it in plain language; the agent writes a proper title and structured description for you and files the issue. It works in a channel or a DM (no @-mention needed) and replies privately to acknowledge — you'll get a Multica notification when the issue is created. First-time users get a one-time link to connect their account.
 
 ## Manage and disconnect
 
