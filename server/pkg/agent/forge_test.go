@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"log/slog"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -366,5 +367,205 @@ func TestForgeConversationDumpParse(t *testing.T) {
 	}
 	if msgs[1].Tool.Output.Values[0].Text != "hello" {
 		t.Errorf("msg[1] output text = %q, want hello", msgs[1].Tool.Output.Values[0].Text)
+	}
+}
+
+// TestReplayFromDumpResumedSession verifies that on a resumed conversation the
+// caller-supplied slice causes replayFromDump to forward only the NEW turn's
+// messages, not the entire history. `forge conversation dump <cid>` returns
+// the whole conversation, so Execute captures a pre-run baseline message count
+// and passes msgs[baseline:] to replayFromDump. This test models that contract
+// directly: build N historical messages + M new messages, slice off the
+// baseline, and assert only the M new ones are forwarded.
+func TestReplayFromDumpResumedSession(t *testing.T) {
+	// Historical turn 1 (assistant prose) — must NOT be replayed.
+	historical := forgeDumpMessage{
+		Text: &forgeDumpText{Role: "Assistant", Content: "old answer from a prior turn"},
+	}
+	// New turn: a tool call + its result + the final prose.
+	newTurn := []forgeDumpMessage{
+		{
+			Text: &forgeDumpText{
+				Role: "Assistant",
+				ToolCalls: []forgeDumpToolCall{
+					{Name: "shell", CallID: "call_new", Arguments: map[string]any{"cmd": "pwd"}},
+				},
+			},
+		},
+		{
+			Tool: &forgeDumpTool{
+				Name:   "shell",
+				CallID: "call_new",
+				Output: forgeDumpOutput{Values: []forgeDumpToolValue{{Text: "/tmp/work"}}},
+			},
+		},
+		{Text: &forgeDumpText{Role: "Assistant", Content: "new answer for this turn"}},
+	}
+
+	full := append([]forgeDumpMessage{historical}, newTurn...)
+	baseline := 1 // simulate the pre-run dump returning 1 message
+
+	ch := make(chan Message, 16)
+	b := &forgeBackend{cfg: Config{Logger: slog.Default()}}
+	// The caller slices off the baseline, mirroring Execute.
+	output := b.replayFromDump(full[baseline:], ch)
+	close(ch)
+
+	var got []Message
+	for msg := range ch {
+		got = append(got, msg)
+	}
+
+	// Only the new turn's messages: tool-use, tool-result, text.
+	wantTypes := []MessageType{MessageToolUse, MessageToolResult, MessageText}
+	if len(got) != len(wantTypes) {
+		t.Fatalf("expected %d messages (new turn only), got %d: %+v", len(wantTypes), len(got), got)
+	}
+	for i, want := range wantTypes {
+		if got[i].Type != want {
+			t.Errorf("msg[%d].Type = %v, want %v", i, got[i].Type, want)
+		}
+	}
+	// The historical prose must not leak into the output.
+	if strings.Contains(output, "old answer from a prior turn") {
+		t.Errorf("output leaked historical turn: %q", output)
+	}
+	if output != "new answer for this turn" {
+		t.Errorf("output = %q, want only the new turn's prose", output)
+	}
+	// The tool-use must carry the new call id, not any historical one.
+	if got[0].CallID != "call_new" {
+		t.Errorf("tool-use CallID = %q, want call_new", got[0].CallID)
+	}
+}
+
+// TestReplayFromDumpBaselineClampsOverflow verifies that an out-of-range
+// baseline (e.g. the conversation shrank between the pre-run and post-run
+// dumps) does not panic and replays nothing rather than crashing.
+func TestReplayFromDumpBaselineClampsOverflow(t *testing.T) {
+	msgs := []forgeDumpMessage{
+		{Text: &forgeDumpText{Role: "Assistant", Content: "only message"}},
+	}
+	baseline := 5 // larger than len(msgs)
+	// Simulate Execute's clamp: if baseline > len(msgs), baseline = len(msgs).
+	if baseline > len(msgs) {
+		baseline = len(msgs)
+	}
+
+	ch := make(chan Message, 16)
+	b := &forgeBackend{cfg: Config{Logger: slog.Default()}}
+	output := b.replayFromDump(msgs[baseline:], ch)
+	close(ch)
+
+	var count int
+	for range ch {
+		count++
+	}
+	if count != 0 {
+		t.Errorf("expected 0 messages after overflow baseline, got %d", count)
+	}
+	if output != "" {
+		t.Errorf("expected empty output after overflow baseline, got %q", output)
+	}
+}
+
+// envMap converts a KEY=VALUE slice into a map for easier assertions. Later
+// entries for the same key win (matching os.Environ semantics).
+func envMap(env []string) map[string]string {
+	m := make(map[string]string, len(env))
+	for _, e := range env {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
+}
+
+// sortedKeys returns the sorted env keys for deterministic comparison.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// TestBuildForgeEnvParity verifies the env built by buildForgeEnv is identical
+// regardless of whether it will be used for the main `forge -p` process or the
+// post-run `forge conversation dump` subprocess — both must read from the same
+// config root and carry the same FORGE_SESSION__* vars, otherwise the dump
+// silently fails and the backend falls back to unstructured stdout.
+func TestBuildForgeEnvParity(t *testing.T) {
+	b := &forgeBackend{cfg: Config{
+		Env:    map[string]string{"FORGE_AUTH_TOKEN": "secret", "CUSTOM_VAR": "x"},
+		Logger: slog.Default(),
+	}}
+
+	env1 := b.buildForgeEnv("/tmp/work", "anthropic/claude-sonnet-4")
+	env2 := b.buildForgeEnv("/tmp/work", "anthropic/claude-sonnet-4")
+
+	m1 := envMap(env1)
+	m2 := envMap(env2)
+
+	// Same key set.
+	k1, k2 := sortedKeys(m1), sortedKeys(m2)
+	if len(k1) != len(k2) {
+		t.Fatalf("key counts differ: %d vs %d", len(k1), len(k2))
+	}
+	for i := range k1 {
+		if k1[i] != k2[i] {
+			t.Fatalf("key sets differ at %d: %q vs %q", i, k1[i], k2[i])
+		}
+	}
+	// Same values for the keys we care about.
+	for _, key := range []string{"PWD", "FORGE_AUTH_TOKEN", "CUSTOM_VAR", "FORGE_SESSION__PROVIDER_ID", "FORGE_SESSION__MODEL_ID"} {
+		if m1[key] != m2[key] {
+			t.Errorf("env %q differs: %q vs %q", key, m1[key], m2[key])
+		}
+	}
+}
+
+// TestBuildForgeEnvContents verifies the specific keys/values buildForgeEnv
+// injects: the agent's custom env, the PWD override, and the split
+// FORGE_SESSION__* vars from a "provider/model" value.
+func TestBuildForgeEnvContents(t *testing.T) {
+	b := &forgeBackend{cfg: Config{
+		Env:    map[string]string{"FORGE_AUTH_TOKEN": "secret"},
+		Logger: slog.Default(),
+	}}
+
+	env := b.buildForgeEnv("/tmp/work", "anthropic/claude-sonnet-4")
+	m := envMap(env)
+
+	if m["PWD"] != "/tmp/work" {
+		t.Errorf("PWD = %q, want /tmp/work", m["PWD"])
+	}
+	if m["FORGE_AUTH_TOKEN"] != "secret" {
+		t.Errorf("FORGE_AUTH_TOKEN = %q, want secret (agent custom env must propagate)", m["FORGE_AUTH_TOKEN"])
+	}
+	if m["FORGE_SESSION__PROVIDER_ID"] != "anthropic" {
+		t.Errorf("FORGE_SESSION__PROVIDER_ID = %q, want anthropic", m["FORGE_SESSION__PROVIDER_ID"])
+	}
+	if m["FORGE_SESSION__MODEL_ID"] != "claude-sonnet-4" {
+		t.Errorf("FORGE_SESSION__MODEL_ID = %q, want claude-sonnet-4", m["FORGE_SESSION__MODEL_ID"])
+	}
+}
+
+// TestBuildForgeEnvNoModel verifies that when no model is supplied, the
+// FORGE_SESSION__* vars are not injected (model selection falls back to
+// .forge.toml).
+func TestBuildForgeEnvNoModel(t *testing.T) {
+	b := &forgeBackend{cfg: Config{Logger: slog.Default()}}
+	env := b.buildForgeEnv("/tmp/work", "")
+	m := envMap(env)
+	if _, ok := m["FORGE_SESSION__PROVIDER_ID"]; ok {
+		t.Errorf("FORGE_SESSION__PROVIDER_ID should be absent without a model")
+	}
+	if _, ok := m["FORGE_SESSION__MODEL_ID"]; ok {
+		t.Errorf("FORGE_SESSION__MODEL_ID should be absent without a model")
+	}
+	if m["PWD"] != "/tmp/work" {
+		t.Errorf("PWD = %q, want /tmp/work", m["PWD"])
 	}
 }

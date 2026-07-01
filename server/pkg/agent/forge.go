@@ -102,24 +102,7 @@ func (b *forgeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		cmd.Dir = opts.Cwd
 	}
 
-	env := buildEnv(b.cfg.Env)
-	if opts.Cwd != "" {
-		// Override PWD so the child process's discovery root matches the
-		// task workdir, mirroring the OpenCode backend's reasoning.
-		env = append(env, "PWD="+opts.Cwd)
-	}
-	// ForgeCode selects the model from FORGE_SESSION__PROVIDER_ID /
-	// FORGE_SESSION__MODEL_ID. The Model value (from MULTICA_FORGE_MODEL or
-	// the per-agent override) is expected in "provider/model" form.
-	if modelVal := strings.TrimSpace(opts.Model); modelVal != "" {
-		if provider, model, ok := splitForgeModel(modelVal); ok {
-			env = append(env, "FORGE_SESSION__PROVIDER_ID="+provider)
-			env = append(env, "FORGE_SESSION__MODEL_ID="+model)
-		} else {
-			b.cfg.Logger.Warn("forge model value is not provider/model; leaving model to .forge.toml", "model", modelVal)
-		}
-	}
-	cmd.Env = env
+	cmd.Env = b.buildForgeEnv(opts.Cwd, opts.Model)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -127,6 +110,30 @@ func (b *forgeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		return nil, fmt.Errorf("forge stdout pipe: %w", err)
 	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[forge:stderr] ")
+
+	// Capture a baseline message count before the run so resumed
+	// conversations replay only the new turn. ForgeCode resumes a prior
+	// conversation by reusing its conversation id, and `forge conversation
+	// dump <cid>` returns the ENTIRE conversation — without a baseline,
+	// replayFromDump would re-emit every prior assistant message, tool call,
+	// tool result, and reasoning block on every resumed turn, and
+	// Result.Output would accumulate every prior prose turn.
+	//
+	// On a fresh conversation (no ResumeSessionID) the baseline is 0 and the
+	// dump call is skipped. On a resume, one extra dump call before the run
+	// records how many messages already exist; after the run only the suffix
+	// beyond that count is replayed. A dump failure here is non-fatal — we
+	// fall back to baseline 0, which on a resume means the prior turns are
+	// re-emitted (the pre-fix behaviour), not a run failure.
+	baseline := 0
+	if opts.ResumeSessionID != "" {
+		if baseDump, derr := b.readConversationDump(execPath, convID, opts.Cwd, opts.Model); derr == nil {
+			baseline = len(baseDump.Conversation.Context.Messages)
+			b.cfg.Logger.Debug("forge resume baseline", "conversation_id", convID, "baseline_messages", baseline)
+		} else {
+			b.cfg.Logger.Debug("forge resume baseline dump unavailable; replaying full conversation", "conversation_id", convID, "error", derr)
+		}
+	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -185,9 +192,15 @@ func (b *forgeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		var usage map[string]TokenUsage
 
 		if status == "completed" {
-			if dump, derr := b.readConversationDump(execPath, convID, opts.Cwd); derr == nil {
-				output = b.replayFromDump(dump.Conversation.Context.Messages, msgCh)
-				if u := forgeUsageFromMessages(dump.Conversation.Context.Messages); u != nil {
+			if dump, derr := b.readConversationDump(execPath, convID, opts.Cwd, opts.Model); derr == nil {
+				msgs := dump.Conversation.Context.Messages
+				// On a resumed run, replay only the suffix beyond the
+				// pre-run baseline so prior turns are not re-emitted.
+				if baseline > len(msgs) {
+					baseline = len(msgs)
+				}
+				output = b.replayFromDump(msgs[baseline:], msgCh)
+				if u := forgeUsageFromMessages(msgs); u != nil {
 					key := strings.TrimSpace(opts.Model)
 					if key == "" {
 						key = "unknown"
@@ -217,6 +230,38 @@ func (b *forgeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// buildForgeEnv constructs the environment for a ForgeCode child process
+// (both the main `forge -p` run and the post-run `forge conversation dump`
+// subprocess). It is shared so the dump reads from the same config root and
+// auth state as the run that produced it — otherwise the dump silently fails
+// (non-zero exit) and the backend falls back to unstructured stdout, which
+// defeats the structured-replay design.
+//
+// The env is the daemon base (b.cfg.Env merged over the filtered os.Environ),
+// plus a PWD override so ForgeCode resolves .forge.toml / auth relative to the
+// task workdir, plus FORGE_SESSION__PROVIDER_ID / FORGE_SESSION__MODEL_ID when
+// Model is a "provider/model" value (ForgeCode has no --model flag).
+func (b *forgeBackend) buildForgeEnv(cwd, model string) []string {
+	env := buildEnv(b.cfg.Env)
+	if cwd != "" {
+		// Override PWD so the child process's discovery root matches the
+		// task workdir, mirroring the OpenCode backend's reasoning.
+		env = append(env, "PWD="+cwd)
+	}
+	// ForgeCode selects the model from FORGE_SESSION__PROVIDER_ID /
+	// FORGE_SESSION__MODEL_ID. The Model value (from MULTICA_FORGE_MODEL or
+	// the per-agent override) is expected in "provider/model" form.
+	if modelVal := strings.TrimSpace(model); modelVal != "" {
+		if provider, modelID, ok := splitForgeModel(modelVal); ok {
+			env = append(env, "FORGE_SESSION__PROVIDER_ID="+provider)
+			env = append(env, "FORGE_SESSION__MODEL_ID="+modelID)
+		} else {
+			b.cfg.Logger.Warn("forge model value is not provider/model; leaving model to .forge.toml", "model", modelVal)
+		}
+	}
+	return env
 }
 
 // forgeStreamResult accumulates state from the stdout scan.
@@ -290,7 +335,18 @@ func (b *forgeBackend) processStream(r io.Reader, ch chan<- Message, convID stri
 // removed after reading. Returns an error when the dump is unavailable or
 // unparseable — the caller treats this as "use the fallback path" rather
 // than a run failure.
-func (b *forgeBackend) readConversationDump(execPath, convID, cwd string) (*forgeConversationDump, error) {
+//
+// model is forwarded to buildForgeEnv so the dump subprocess inherits the same
+// FORGE_SESSION__* vars as the main run; while the dump is read-only, keeping
+// the env consistent avoids config-root / auth mismatches.
+//
+// NOTE: this snapshot-and-diff assumes only one `forge conversation dump` is
+// producing *-dump.json files in cwd at a time. Multica per-task workdirs make
+// this safe in the common case, but agents bound to a shared local_directory
+// resource could run concurrent ForgeCode tasks in the same cwd, in which case
+// the diff could pick the wrong file. If ForgeCode gains a --output / -C-style
+// target for `conversation dump`, point it at a per-run temp subdir instead.
+func (b *forgeBackend) readConversationDump(execPath, convID, cwd, model string) (*forgeConversationDump, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -310,7 +366,7 @@ func (b *forgeBackend) readConversationDump(execPath, convID, cwd string) (*forg
 
 	cmd := exec.CommandContext(ctx, execPath, "conversation", "dump", convID)
 	cmd.Dir = cwd
-	cmd.Env = os.Environ()
+	cmd.Env = b.buildForgeEnv(cwd, model)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -355,6 +411,12 @@ func (b *forgeBackend) readConversationDump(execPath, convID, cwd string) (*forg
 //
 // System and user turns are skipped (they are the daemon-authored prompt,
 // not agent output). Returns the accumulated assistant text for Result.Output.
+//
+// The caller is responsible for slicing msgs to the new turn on a resumed
+// conversation: `forge conversation dump <cid>` returns the ENTIRE
+// conversation, so Execute captures a pre-run baseline message count and
+// passes msgs[baseline:] here. replayFromDump itself has no notion of
+// turn boundaries.
 func (b *forgeBackend) replayFromDump(msgs []forgeDumpMessage, ch chan<- Message) string {
 	var output strings.Builder
 	for _, m := range msgs {
