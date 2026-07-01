@@ -224,6 +224,7 @@
     "agents_group": "Agents",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
+    "open_jira_tooltip": "Open in Jira",
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
     "sidebar_tooltip": "Toggle sidebar",

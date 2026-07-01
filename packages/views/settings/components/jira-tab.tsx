@@ -33,10 +33,12 @@ const EMPTY_FORM: JiraFormState = {
 export function JiraTab() {
   const { t } = useT("settings");
   const isDesktop = !!getJiraBridge();
-  const { syncNow, running, lastResult, error } = useJiraSync();
+  const { syncNow, clearSynced, running, clearing, lastResult, clearedCount, error } =
+    useJiraSync();
   const [form, setForm] = useState<JiraFormState>(EMPTY_FORM);
   const [hasToken, setHasToken] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   useEffect(() => {
     const bridge = getJiraBridge();
@@ -166,12 +168,35 @@ export function JiraTab() {
           <Button variant="outline" onClick={() => void onSave()}>
             {t(($) => $.jira.save)}
           </Button>
-          <Button onClick={() => void syncNow()} disabled={running}>
+          <Button onClick={() => void syncNow()} disabled={running || clearing}>
             {running ? t(($) => $.jira.syncing) : t(($) => $.jira.sync_now)}
+          </Button>
+          <Button
+            variant={confirmClear ? "destructive" : "outline"}
+            disabled={running || clearing}
+            onClick={() => {
+              if (!confirmClear) {
+                setConfirmClear(true);
+                return;
+              }
+              setConfirmClear(false);
+              void clearSynced();
+            }}
+          >
+            {clearing
+              ? t(($) => $.jira.clearing)
+              : confirmClear
+                ? t(($) => $.jira.clear_confirm)
+                : t(($) => $.jira.clear_synced)}
           </Button>
         </div>
 
         {saveMessage && <p className="text-sm text-muted-foreground">{saveMessage}</p>}
+        {clearedCount !== null && (
+          <p className="text-sm text-muted-foreground">
+            {t(($) => $.jira.cleared, { deleted: clearedCount })}
+          </p>
+        )}
         {error && <p className="text-sm text-destructive">{error}</p>}
         {lastResult && (
           <p className="text-sm text-muted-foreground">

@@ -440,6 +440,12 @@
     "status_map_invalid": "状态映射必须是合法 JSON。",
     "saved": "已保存。",
     "last_sync": "上次同步:新建 {{created}},更新 {{updated}},{{comments}} 条评论。",
-    "last_sync_with_errors": "上次同步:新建 {{created}},更新 {{updated}},{{comments}} 条评论,{{errors}} 个错误。"
+    "last_sync_with_errors": "上次同步:新建 {{created}},更新 {{updated}},{{comments}} 条评论,{{errors}} 个错误。",
+    "clear_synced": "清空已同步",
+    "clear_confirm": "确认清空?",
+    "clearing": "清空中…",
+    "cleared": "已清空 {{deleted}} 条同步的 issue。",
+    "clear_confirm_description": "将永久删除本工作区所有从 Jira 同步来的 issue(含子任务)。你自己创建的 issue 不受影响。",
+    "clear_cancel": "取消"
   }
 }

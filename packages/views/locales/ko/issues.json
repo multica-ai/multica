@@ -224,6 +224,7 @@
     "agents_group": "에이전트",
     "mark_done_tooltip": "완료로 표시",
     "archive_tooltip": "보관",
+    "open_jira_tooltip": "Jira에서 열기",
     "pin_tooltip": "사이드바에 고정",
     "unpin_tooltip": "사이드바 고정 해제",
     "sidebar_tooltip": "사이드바 열기/닫기",

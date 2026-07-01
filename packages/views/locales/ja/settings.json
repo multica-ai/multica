@@ -440,6 +440,12 @@
     "status_map_invalid": "ステータスマッピングは有効な JSON である必要があります。",
     "saved": "保存しました。",
     "last_sync": "前回の同期: 作成 {{created}}、更新 {{updated}}、コメント {{comments}} 件。",
-    "last_sync_with_errors": "前回の同期: 作成 {{created}}、更新 {{updated}}、コメント {{comments}} 件、エラー {{errors}} 件。"
+    "last_sync_with_errors": "前回の同期: 作成 {{created}}、更新 {{updated}}、コメント {{comments}} 件、エラー {{errors}} 件。",
+    "clear_synced": "同期済みをクリア",
+    "clear_confirm": "クリアを確認?",
+    "clearing": "クリア中…",
+    "cleared": "{{deleted}} 件の同期済み issue をクリアしました。",
+    "clear_confirm_description": "このワークスペースで Jira から同期したすべての issue(サブタスクを含む)を完全に削除します。自分で作成した issue は影響を受けません。",
+    "clear_cancel": "キャンセル"
   }
 }

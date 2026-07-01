@@ -7,6 +7,8 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
+const openExternalMock = vi.hoisted(() => vi.fn());
+
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
@@ -108,6 +110,14 @@ vi.mock("../../navigation", () => ({
   }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
+
+vi.mock("../../platform", async () => {
+  const actual = await vi.importActual<typeof import("../../platform")>("../../platform");
+  return {
+    ...actual,
+    openExternal: openExternalMock,
+  };
+});
 
 // Mock editor components (Tiptap requires real DOM)
 vi.mock("../../editor", () => ({
@@ -572,6 +582,25 @@ describe("IssueDetail (shared)", () => {
     // Project is never fetched and no project crumb appears.
     expect(mockApiObj.getProject).not.toHaveBeenCalled();
     expect(screen.queryByText("Marketing site refresh")).not.toBeInTheDocument();
+  });
+
+  it("shows a header action that opens the source Jira issue externally", async () => {
+    const jiraUrl = "https://jira.example.com/browse/PROJ-123";
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      metadata: {
+        source: "jira",
+        jira_key: "PROJ-123",
+        jira_url: jiraUrl,
+      },
+    });
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", { name: "Open in Jira" });
+    fireEvent.click(button);
+
+    expect(openExternalMock).toHaveBeenCalledWith(jiraUrl);
   });
 
   it("renders the project breadcrumb segment when the issue belongs to a project", async () => {

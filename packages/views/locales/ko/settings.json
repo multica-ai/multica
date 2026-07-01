@@ -440,6 +440,12 @@
     "status_map_invalid": "상태 매핑은 유효한 JSON이어야 합니다.",
     "saved": "저장되었습니다.",
     "last_sync": "마지막 동기화: 생성 {{created}}, 업데이트 {{updated}}, 댓글 {{comments}}개.",
-    "last_sync_with_errors": "마지막 동기화: 생성 {{created}}, 업데이트 {{updated}}, 댓글 {{comments}}개, 오류 {{errors}}개."
+    "last_sync_with_errors": "마지막 동기화: 생성 {{created}}, 업데이트 {{updated}}, 댓글 {{comments}}개, 오류 {{errors}}개.",
+    "clear_synced": "동기화 항목 삭제",
+    "clear_confirm": "삭제 확인?",
+    "clearing": "삭제 중…",
+    "cleared": "동기화된 이슈 {{deleted}}개를 삭제했습니다.",
+    "clear_confirm_description": "이 워크스페이스에서 Jira로부터 동기화된 모든 이슈(하위 작업 포함)를 영구적으로 삭제합니다. 직접 생성한 이슈는 영향을 받지 않습니다.",
+    "clear_cancel": "취소"
   }
 }

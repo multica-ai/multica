@@ -3,6 +3,7 @@ import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import {
   syncJiraIssues,
+  clearSyncedJiraIssues,
   type JiraConfig,
   type JiraTransport,
   type SyncResult,
@@ -46,7 +47,9 @@ export function getJiraBridge(): JiraDesktopBridge | undefined {
 export function useJiraSync() {
   const user = useAuthStore((s) => s.user);
   const [running, setRunning] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [lastResult, setLastResult] = useState<SyncResult | null>(null);
+  const [clearedCount, setClearedCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const syncNow = useCallback(async (): Promise<SyncResult | null> => {
@@ -87,5 +90,28 @@ export function useJiraSync() {
     }
   }, [user]);
 
-  return { syncNow, running, lastResult, error };
+  /** Delete all previously synced Jira issues so the next sync starts clean.
+   *  Returns the number deleted, or null on error / when not on desktop. */
+  const clearSynced = useCallback(async (): Promise<{ deleted: number } | null> => {
+    const bridge = getJiraBridge();
+    if (!bridge) {
+      setError("Jira sync is only available in the desktop app.");
+      return null;
+    }
+    setClearing(true);
+    setError(null);
+    setClearedCount(null);
+    try {
+      const result = await clearSyncedJiraIssues(api);
+      setClearedCount(result.deleted);
+      return result;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return null;
+    } finally {
+      setClearing(false);
+    }
+  }, []);
+
+  return { syncNow, clearSynced, running, clearing, lastResult, clearedCount, error };
 }

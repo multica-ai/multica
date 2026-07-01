@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  ExternalLink,
   Milestone,
   MoreHorizontal,
   PanelRight,
@@ -55,6 +56,7 @@ import { maxSiblingStage } from "./pickers/stage-picker";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
+import { openExternal } from "../../platform";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -1353,6 +1355,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     });
   }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
 
+  const jiraUrl = issue?.metadata?.source === "jira" && typeof issue.metadata.jira_url === "string"
+    ? issue.metadata.jira_url.trim()
+    : "";
+
+  const openJiraIssue = useCallback(() => {
+    if (!jiraUrl) return;
+    openExternal(jiraUrl);
+  }, [jiraUrl]);
+
   useIssueDetailScrollRestore({
     restoreKey: `${wsId}:${id}`,
     scrollContainerEl,
@@ -1625,6 +1636,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
         </button>
         {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+          {issue.metadata?.source === "jira" &&
+            typeof issue.metadata.jira_url === "string" &&
+            issue.metadata.jira_url && (
+              <PropRow label="Jira">
+                <a
+                  href={issue.metadata.jira_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={issue.metadata.jira_url}
+                  className="inline-flex items-center gap-1 truncate text-muted-foreground hover:text-foreground hover:underline"
+                >
+                  <span className="truncate">
+                    {typeof issue.metadata.jira_key === "string" && issue.metadata.jira_key
+                      ? issue.metadata.jira_key
+                      : issue.metadata.jira_url}
+                  </span>
+                  <ExternalLink className="size-3 shrink-0" />
+                </a>
+              </PropRow>
+            )}
           <PropRow label={t(($) => $.detail.prop_created_by)}>
             <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} enableHoverCard />
             <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
@@ -1847,6 +1878,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   }
                 />
                 <TooltipContent side="bottom">{t(($) => $.detail.archive_tooltip)}</TooltipContent>
+              </Tooltip>
+            )}
+            {jiraUrl && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground"
+                      aria-label={t(($) => $.detail.open_jira_tooltip)}
+                      onClick={openJiraIssue}
+                    >
+                      <ExternalLink />
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">{t(($) => $.detail.open_jira_tooltip)}</TooltipContent>
               </Tooltip>
             )}
             <Tooltip>

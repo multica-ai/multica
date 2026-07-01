@@ -222,6 +222,7 @@
     "agents_group": "智能体",
     "mark_done_tooltip": "标记为已完成",
     "archive_tooltip": "归档",
+    "open_jira_tooltip": "在 Jira 中打开",
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "sidebar_tooltip": "切换侧边栏",

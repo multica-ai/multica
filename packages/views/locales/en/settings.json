@@ -440,6 +440,12 @@
     "status_map_invalid": "Status mapping must be valid JSON.",
     "saved": "Saved.",
     "last_sync": "Last sync: {{created}} created, {{updated}} updated, {{comments}} comments.",
-    "last_sync_with_errors": "Last sync: {{created}} created, {{updated}} updated, {{comments}} comments, {{errors}} errors."
+    "last_sync_with_errors": "Last sync: {{created}} created, {{updated}} updated, {{comments}} comments, {{errors}} errors.",
+    "clear_synced": "Clear synced",
+    "clear_confirm": "Confirm clear?",
+    "clearing": "Clearing…",
+    "cleared": "Cleared {{deleted}} synced issues.",
+    "clear_confirm_description": "This permanently deletes every issue synced from Jira in this workspace (including subtasks). Issues you created yourself are not affected.",
+    "clear_cancel": "Cancel"
   }
 }

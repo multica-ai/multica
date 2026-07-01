@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { syncJiraIssues } from "./sync-engine";
+import { syncJiraIssues, clearSyncedJiraIssues } from "./sync-engine";
 import type { JiraConfig } from "./types";
 
 const config: JiraConfig = {
@@ -249,5 +249,41 @@ describe("syncJiraIssues — subtasks and comments", () => {
     expect(api.createComment).toHaveBeenCalledTimes(1);
     expect(api.createComment.mock.calls[0][1]).toContain("new");
     expect(result.commentsAdded).toBe(1);
+  });
+});
+
+describe("clearSyncedJiraIssues", () => {
+  it("deletes only issues marked with the jira source", async () => {
+    const api: any = {
+      listIssues: vi.fn().mockResolvedValue({
+        issues: [
+          { id: "i1", metadata: { source: "jira", jira_key: "PROJ-1" } },
+          { id: "i2", metadata: { source: "jira", jira_key: "PROJ-2" } },
+        ],
+        total: 2,
+      }),
+      batchDeleteIssues: vi.fn().mockResolvedValue({ deleted: 2 }),
+    };
+
+    const result = await clearSyncedJiraIssues(api);
+
+    expect(api.listIssues).toHaveBeenCalledWith({
+      metadata: { source: "jira" },
+      limit: 1000,
+    });
+    expect(api.batchDeleteIssues).toHaveBeenCalledWith(["i1", "i2"]);
+    expect(result.deleted).toBe(2);
+  });
+
+  it("does not call batch delete when there is nothing synced", async () => {
+    const api: any = {
+      listIssues: vi.fn().mockResolvedValue({ issues: [], total: 0 }),
+      batchDeleteIssues: vi.fn(),
+    };
+
+    const result = await clearSyncedJiraIssues(api);
+
+    expect(api.batchDeleteIssues).not.toHaveBeenCalled();
+    expect(result.deleted).toBe(0);
   });
 });

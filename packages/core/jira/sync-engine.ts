@@ -33,6 +33,30 @@ export async function syncJiraIssues(deps: SyncDeps): Promise<SyncResult> {
   return result;
 }
 
+/** Delete every Multica issue created by the Jira sync (metadata
+ *  source = "jira"), so the next sync repopulates from a clean slate under a
+ *  new JQL. User-created issues (no jira source marker) are never touched.
+ *  Returns how many issues were deleted. */
+export async function clearSyncedJiraIssues(
+  api: SyncDeps["api"],
+): Promise<{ deleted: number }> {
+  const { issues } = await api.listIssues({
+    metadata: { [JIRA_METADATA_KEYS.source]: JIRA_SOURCE_VALUE },
+    limit: 1000,
+  });
+  const ids = issues
+    .filter(
+      (i) =>
+        (i as { metadata?: Record<string, unknown> }).metadata?.[
+          JIRA_METADATA_KEYS.source
+        ] === JIRA_SOURCE_VALUE,
+    )
+    .map((i) => i.id);
+  if (ids.length === 0) return { deleted: 0 };
+  await api.batchDeleteIssues(ids);
+  return { deleted: ids.length };
+}
+
 async function syncOne(
   deps: SyncDeps,
   issue: JiraIssue,
@@ -151,7 +175,11 @@ async function syncSubtasks(
 }
 
 function searchPath(jql: string): string {
-  return `/rest/api/3/search?jql=${encodeURIComponent(jql)}&fields=summary,description,status,priority,duedate,updated,subtasks,comment&maxResults=100`;
+  // Atlassian removed the legacy /rest/api/3/search endpoint (CHANGE-2046);
+  // the enhanced search lives at /rest/api/3/search/jql. It returns
+  // { issues, nextPageToken, isLast } with no `total` field — our schema
+  // defaults total to 0, so parsing is unaffected.
+  return `/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&fields=summary,description,status,priority,duedate,updated,subtasks,comment&maxResults=100`;
 }
 
 function issuePath(key: string): string {

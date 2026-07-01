@@ -221,6 +221,7 @@
     "agents_group": "エージェント",
     "mark_done_tooltip": "完了にする",
     "archive_tooltip": "アーカイブ",
+    "open_jira_tooltip": "Jira で開く",
     "pin_tooltip": "サイドバーにピン留め",
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "sidebar_tooltip": "サイドバーの開閉",

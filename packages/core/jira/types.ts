@@ -18,7 +18,15 @@ export const JiraIssueFieldsSchema = z.object({
   description: z.unknown().nullable().default(null),
   duedate: z.string().nullable().default(null),
   updated: z.string().default(""),
-  status: z.object({ name: z.string().default("") }).default({ name: "" }),
+  // statusCategory.key is language-independent ("new" | "indeterminate" |
+  // "done"), unlike the localized status.name — used as the mapping fallback
+  // so non-English Jira instances still land in the right Multica status.
+  status: z
+    .object({
+      name: z.string().default(""),
+      statusCategory: z.object({ key: z.string().default("") }).default({ key: "" }),
+    })
+    .default({ name: "", statusCategory: { key: "" } }),
   priority: z.object({ name: z.string() }).nullable().default(null),
   subtasks: z.array(z.object({ key: z.string() })).default([]),
   comment: z

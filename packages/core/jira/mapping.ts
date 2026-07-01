@@ -10,9 +10,19 @@ const DEFAULT_STATUS_MAP: Record<string, IssueStatus> = {
   open: "todo",
   "in progress": "in_progress",
   "in review": "in_review",
+  "挂起": "backlog",
   done: "done",
   closed: "done",
   resolved: "done",
+};
+
+/** Language-independent fallback: Jira's statusCategory.key is always one of
+ *  these three regardless of instance language, so it maps non-English status
+ *  names (e.g. "待修复") that DEFAULT_STATUS_MAP can't match. */
+const CATEGORY_MAP: Record<string, IssueStatus> = {
+  new: "todo",
+  indeterminate: "in_progress",
+  done: "done",
 };
 
 const DEFAULT_PRIORITY_MAP: Record<string, IssuePriority> = {
@@ -23,9 +33,20 @@ const DEFAULT_PRIORITY_MAP: Record<string, IssuePriority> = {
   lowest: "low",
 };
 
-export function mapStatus(jiraStatus: string, overrides: Record<string, IssueStatus>): IssueStatus {
+/** Resolve a Multica status from a Jira status. Precedence: user override by
+ *  status name → built-in name map → statusCategory.key fallback → backlog. */
+export function mapStatus(
+  jiraStatus: string,
+  categoryKey: string,
+  overrides: Record<string, IssueStatus>,
+): IssueStatus {
   const key = jiraStatus.trim().toLowerCase();
-  return overrides[key] ?? DEFAULT_STATUS_MAP[key] ?? "backlog";
+  return (
+    overrides[key] ??
+    DEFAULT_STATUS_MAP[key] ??
+    CATEGORY_MAP[categoryKey.trim().toLowerCase()] ??
+    "backlog"
+  );
 }
 
 export function mapPriority(jiraPriority: string | null | undefined): IssuePriority {
@@ -42,7 +63,7 @@ export function jiraIssueToCreateRequest(
   return {
     title: f.summary,
     description: adfToText(f.description),
-    status: mapStatus(f.status.name, statusOverrides),
+    status: mapStatus(f.status.name, f.status.statusCategory.key, statusOverrides),
     priority: mapPriority(f.priority?.name),
     ...(f.duedate ? { due_date: f.duedate } : {}),
     assignee_type: "member",
@@ -58,7 +79,7 @@ export function jiraIssueToUpdateRequest(
   return {
     title: f.summary,
     description: adfToText(f.description),
-    status: mapStatus(f.status.name, statusOverrides),
+    status: mapStatus(f.status.name, f.status.statusCategory.key, statusOverrides),
     priority: mapPriority(f.priority?.name),
     due_date: f.duedate ?? null,
   };

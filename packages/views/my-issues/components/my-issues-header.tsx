@@ -17,8 +17,9 @@ import { myIssuesViewStore, type MyIssuesScope } from "@multica/core/issues/stor
 import { useT } from "../../i18n";
 import { WorkspaceAgentWorkingChip } from "../../issues/components/workspace-agent-working-chip";
 import { IssueDisplayControls } from "../../issues/components/issues-header";
+import { JiraSyncActions } from "./jira-sync-actions";
 
-export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
+export function MyIssuesHeader({ allIssues, wsId }: { allIssues: Issue[]; wsId: string }) {
   const { t } = useT("my-issues");
   const { t: tIssues } = useT("issues");
   const SCOPES: { value: MyIssuesScope; label: string; description: string }[] = [
@@ -101,6 +102,7 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
             onToggle={act.toggleAgentRunningFilter}
             scopedIssueIds={scopedIssueIds}
           />
+          <JiraSyncActions wsId={wsId} />
           <IssueDisplayControls scopedIssues={allIssues} />
         </div>
       </div>

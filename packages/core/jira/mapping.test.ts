@@ -9,7 +9,7 @@ const issue: JiraIssue = {
     description: "broken",
     duedate: "2026-07-01",
     updated: "2026-06-30T10:00:00.000+0000",
-    status: { name: "In Progress" },
+    status: { name: "In Progress", statusCategory: { key: "indeterminate" } },
     priority: { name: "High" },
     subtasks: [],
     comment: { comments: [] },
@@ -18,14 +18,25 @@ const issue: JiraIssue = {
 
 describe("mapStatus", () => {
   it("uses the built-in default map case-insensitively", () => {
-    expect(mapStatus("In Progress", {})).toBe("in_progress");
-    expect(mapStatus("done", {})).toBe("done");
+    expect(mapStatus("In Progress", "indeterminate", {})).toBe("in_progress");
+    expect(mapStatus("done", "done", {})).toBe("done");
   });
   it("prefers the user override over the default", () => {
-    expect(mapStatus("In Progress", { "in progress": "in_review" })).toBe("in_review");
+    expect(mapStatus("In Progress", "indeterminate", { "in progress": "in_review" })).toBe(
+      "in_review",
+    );
   });
-  it("falls back to backlog for unknown statuses", () => {
-    expect(mapStatus("Waiting for customer", {})).toBe("backlog");
+  it("falls back to the statusCategory key for non-English status names", () => {
+    // Chinese Jira: name "待修复" isn't in the name map, but its category is "new".
+    expect(mapStatus("待修复", "new", {})).toBe("todo");
+    expect(mapStatus("進行中", "indeterminate", {})).toBe("in_progress");
+    expect(mapStatus("已完成", "done", {})).toBe("done");
+  });
+  it("maps suspended Chinese Jira status to backlog instead of the indeterminate category", () => {
+    expect(mapStatus("挂起", "indeterminate", {})).toBe("backlog");
+  });
+  it("falls back to backlog when neither name nor category matches", () => {
+    expect(mapStatus("Waiting for customer", "", {})).toBe("backlog");
   });
 });
 
