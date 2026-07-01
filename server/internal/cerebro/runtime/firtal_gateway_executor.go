@@ -548,7 +548,8 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 		if err != nil {
 			return taskPlan{}, fmt.Errorf("failed to load issue comments: %w", err)
 		}
-		attachments := e.loadCommentAttachments(ctx, issue.WorkspaceID, comments)
+		commentAttachments := e.loadCommentAttachments(ctx, issue.WorkspaceID, comments)
+		issueAttachments := e.loadIssueAttachments(ctx, issue.WorkspaceID, issue.ID)
 		var triggerComment *db.Comment
 		if task.TriggerCommentID.Valid {
 			c, err := e.queries.GetComment(ctx, task.TriggerCommentID)
@@ -584,7 +585,7 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			workspaceID:      issue.WorkspaceID,
 			workspaceContext: wsCtx,
 			messagesWithLimit: func(limit int) []GatewayMessage {
-				return buildGatewayIssueMessages(agent, wsCtx, issue, comments, triggerComment, task.StartedAt, limit, attachments)
+				return buildGatewayIssueMessages(agent, wsCtx, issue, comments, triggerComment, task.StartedAt, limit, commentAttachments, issueAttachments)
 			},
 			emptyMessageError:   "issue task has no user message to answer",
 			inlinedContextReads: inlinedReads,
@@ -1902,12 +1903,13 @@ func buildGatewayIssueSystemPrompt(agent db.Agent, workspaceContext string) stri
 // so the model treats it as the message to answer rather than reacting to
 // older history. limit caps the transcript at the most recent N entries
 // (preserving the opening issue message + the trigger comment when set).
-func buildGatewayIssueMessages(agent db.Agent, workspaceContext string, issue db.Issue, comments []db.Comment, triggerComment *db.Comment, startedAt pgtype.Timestamptz, limit int, attachments map[pgtype.UUID][]AnthropicContentBlock) []GatewayMessage {
+func buildGatewayIssueMessages(agent db.Agent, workspaceContext string, issue db.Issue, comments []db.Comment, triggerComment *db.Comment, startedAt pgtype.Timestamptz, limit int, attachments map[pgtype.UUID][]AnthropicContentBlock, issueAttachments []AnthropicContentBlock) []GatewayMessage {
 	if limit <= 0 {
 		limit = defaultFirtalGatewayHistoryLimit
 	}
 	out := []GatewayMessage{{Role: "system", Content: buildGatewayIssueSystemPrompt(agent, workspaceContext)}}
-	out = append(out, GatewayMessage{Role: "user", Content: formatIssueOpening(issue)})
+	issueOpening := formatIssueOpening(issue)
+	out = append(out, GatewayMessage{Role: "user", Content: issueOpening, ContentBlocks: contentBlocksForMessage(issueOpening, issueAttachments)})
 
 	transcript := make([]GatewayMessage, 0, len(comments))
 	for _, c := range comments {

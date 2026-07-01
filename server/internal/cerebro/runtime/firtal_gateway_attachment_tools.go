@@ -116,7 +116,11 @@ func (t *FirtalReadAttachmentTool) Call(ctx context.Context, args map[string]any
 	if t.queries == nil {
 		return "", fmt.Errorf("database is not configured")
 	}
-	if t.tctx.Storage == nil {
+	store := t.tctx.Storage
+	if store == nil {
+		store = FirtalGatewayAttachmentStorage()
+	}
+	if store == nil {
 		return "", fmt.Errorf("attachment storage is not configured")
 	}
 	attachmentID := strings.TrimSpace(attachmentStringArg(args, "attachment_id"))
@@ -131,7 +135,7 @@ func (t *FirtalReadAttachmentTool) Call(ctx context.Context, args map[string]any
 	if err != nil {
 		return "", err
 	}
-	blocks, err := gatewayAttachmentBlocks(ctx, t.tctx.Storage, att)
+	blocks, err := gatewayAttachmentBlocks(ctx, store, att)
 	if err != nil {
 		return "", err
 	}

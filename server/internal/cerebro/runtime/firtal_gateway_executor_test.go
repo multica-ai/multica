@@ -148,7 +148,7 @@ func TestBuildGatewayIssueMessagesIncludesIssueOpeningAndDistinguishesAuthors(t 
 		ID:           agentID,
 		Name:         "Sara",
 		Instructions: "Be concise.",
-	}, "", issue, comments, trigger, ts(started), 50, nil)
+	}, "", issue, comments, trigger, ts(started), 50, nil, nil)
 
 	if messages[0].Role != "system" {
 		t.Fatalf("expected system first, got %+v", messages[0])
@@ -193,7 +193,7 @@ func TestBuildGatewayIssueMessagesAppliesLimitButKeepsTriggerComment(t *testing.
 	}
 	trigger := &db.Comment{ID: uuid(13), AuthorType: "member", AuthorID: memberID, Content: "trigger"}
 
-	messages := buildGatewayIssueMessages(db.Agent{ID: agentID, Name: "Sara"}, "", issue, comments, trigger, ts(started), 2, nil)
+	messages := buildGatewayIssueMessages(db.Agent{ID: agentID, Name: "Sara"}, "", issue, comments, trigger, ts(started), 2, nil, nil)
 
 	// Expect: system + issue opening + last 2 transcript entries + trigger.
 	if len(messages) != 5 {
@@ -204,6 +204,33 @@ func TestBuildGatewayIssueMessagesAppliesLimitButKeepsTriggerComment(t *testing.
 	}
 	if messages[4].Content != "trigger" {
 		t.Fatalf("trigger comment dropped: %+v", messages[4])
+	}
+}
+
+func TestBuildGatewayIssueMessagesAddsIssueAttachmentBlocks(t *testing.T) {
+	started := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
+	issue := db.Issue{
+		Title:       "Read CSV",
+		Description: pgtype.Text{String: "Use the attached file.", Valid: true},
+	}
+	issueAttachments := []AnthropicContentBlock{{Type: "text", Text: "Attachment \"rows.csv\" contents:\nsku,qty\nTEST-ATTACHMENT-2398,13"}}
+
+	messages := buildGatewayIssueMessages(db.Agent{Name: "Sara"}, "", issue, nil, nil, ts(started), 10, nil, issueAttachments)
+
+	if len(messages) < 2 {
+		t.Fatalf("messages = %+v", messages)
+	}
+	if messages[1].Content != formatIssueOpening(issue) {
+		t.Fatalf("issue opening content = %q", messages[1].Content)
+	}
+	if len(messages[1].ContentBlocks) != 2 {
+		t.Fatalf("issue opening blocks = %+v", messages[1].ContentBlocks)
+	}
+	if messages[1].ContentBlocks[0].Type != "text" || !strings.Contains(messages[1].ContentBlocks[0].Text, "Read CSV") {
+		t.Fatalf("opening text block missing: %+v", messages[1].ContentBlocks)
+	}
+	if messages[1].ContentBlocks[1].Type != "text" || !strings.Contains(messages[1].ContentBlocks[1].Text, "TEST-ATTACHMENT-2398") {
+		t.Fatalf("attachment text block missing: %+v", messages[1].ContentBlocks)
 	}
 }
 

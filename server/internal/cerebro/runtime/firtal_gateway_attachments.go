@@ -81,6 +81,33 @@ func (e *FirtalGatewayExecutor) loadCommentAttachments(ctx context.Context, work
 	return e.attachmentBlocksByOwner(ctx, attachments, func(a db.Attachment) pgtype.UUID { return a.CommentID })
 }
 
+func (e *FirtalGatewayExecutor) loadIssueAttachments(ctx context.Context, workspaceID pgtype.UUID, issueID pgtype.UUID) []AnthropicContentBlock {
+	if e.queries == nil || e.attachmentStorage == nil || !issueID.Valid {
+		return nil
+	}
+	attachments, err := e.queries.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
+		IssueID:     issueID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		e.attachmentLogger().Warn("firtal gateway issue attachment lookup failed", "error", err)
+		return nil
+	}
+	var out []AnthropicContentBlock
+	for _, att := range attachments {
+		if !att.IssueID.Valid || att.CommentID.Valid || att.ChatMessageID.Valid {
+			continue
+		}
+		blocks, err := gatewayAttachmentBlocks(ctx, e.attachmentStorage, att)
+		if err != nil {
+			e.attachmentLogger().Warn("firtal gateway issue attachment skipped", "filename", att.Filename, "content_type", att.ContentType, "error", err)
+			continue
+		}
+		out = append(out, blocks...)
+	}
+	return out
+}
+
 func (e *FirtalGatewayExecutor) attachmentBlocksByOwner(ctx context.Context, attachments []db.Attachment, owner func(db.Attachment) pgtype.UUID) map[pgtype.UUID][]AnthropicContentBlock {
 	out := make(map[pgtype.UUID][]AnthropicContentBlock)
 	for _, att := range attachments {
