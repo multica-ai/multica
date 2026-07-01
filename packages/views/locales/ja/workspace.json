@@ -4,10 +4,13 @@
     "name_placeholder": "マイワークスペース",
     "url_label": "ワークスペースURL",
     "url_placeholder": "my-workspace",
+    "team_key_label": "チームキー / イシュー接頭辞",
+    "team_key_hint": "1-7 文字の大文字英字または数字。先頭は英字です。",
     "submit": "ワークスペースを作成",
     "submitting": "作成中...",
     "errors": {
       "slug_format": "小文字、数字、ハイフンのみ使用できます",
+      "team_key_format": "1-7 文字の大文字英字または数字を使用し、先頭は英字にしてください",
       "slug_taken": "このワークスペースURLはすでに使用されています。",
       "slug_reserved": "このワークスペースURLは予約されているため使用できません。",
       "slug_conflict_toast": "別のワークスペースURLを選択してください",

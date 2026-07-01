@@ -4,10 +4,13 @@
     "name_placeholder": "我的工作区",
     "url_label": "工作区 URL",
     "url_placeholder": "my-workspace",
+    "team_key_label": "Team key / issue 前缀",
+    "team_key_hint": "1-7 位大写字母或数字，必须以字母开头。",
     "submit": "创建工作区",
     "submitting": "创建中...",
     "errors": {
       "slug_format": "只能包含小写字母、数字和连字符",
+      "team_key_format": "使用 1-7 位大写字母或数字，且必须以字母开头",
       "slug_taken": "该工作区 URL 已被占用。",
       "slug_reserved": "该工作区 URL 是系统保留的，无法使用。",
       "slug_conflict_toast": "请换一个工作区 URL",

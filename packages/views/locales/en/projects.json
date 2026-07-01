@@ -25,6 +25,7 @@
     "status": "Status",
     "progress": "Progress",
     "lead": "Lead",
+    "teams": "Teams",
     "created": "Created",
     "issues": "Issues"
   },

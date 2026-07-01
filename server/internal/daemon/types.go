@@ -71,6 +71,9 @@ type Task struct {
 	Agent                    *AgentData            `json:"agent,omitempty"`
 	ConnectedApps            []ConnectedAppData    `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
 	Repos                    []RepoData            `json:"repos,omitempty"`
+	TeamID                   string                `json:"team_id,omitempty"`                     // issue/autopilot/quick-create Team, when known
+	TeamKey                  string                `json:"team_key,omitempty"`                    // Team issue namespace key, e.g. MUL
+	TeamName                 string                `json:"team_name,omitempty"`                   // human-readable Team name
 	ProjectID                string                `json:"project_id,omitempty"`                  // issue's project, when present
 	ProjectTitle             string                `json:"project_title,omitempty"`               // human-readable project title for context injection
 	ProjectDescription       string                `json:"project_description,omitempty"`         // durable project-level context injected into the brief

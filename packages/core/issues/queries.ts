@@ -20,6 +20,7 @@ export interface IssueSortParam {
    *  Lives in the sort/window bag so every list surface, query key, and
    *  load-more page carries it automatically. */
   properties?: ListIssuesParams["properties"];
+  team_id?: ListIssuesParams["team_id"];
 }
 
 export const issueKeys = {
@@ -126,6 +127,7 @@ export type MyIssuesFilter = Pick<
   | "assignee_ids"
   | "assignee_types"
   | "creator_id"
+  | "team_id"
   | "project_id"
   | "involves_user_id"
 >;

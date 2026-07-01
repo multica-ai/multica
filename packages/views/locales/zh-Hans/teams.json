@@ -1,0 +1,54 @@
+{
+  "page": {
+    "title": "Teams",
+    "new_team": "新建 Team",
+    "loading": "正在加载 Teams...",
+    "empty_title": "还没有 Team",
+    "create_first": "创建第一个 Team"
+  },
+  "table": {
+    "key": "Key",
+    "name": "名称",
+    "issues": "Issues",
+    "state": "状态",
+    "actions": "操作"
+  },
+  "state": {
+    "default": "默认",
+    "active": "启用",
+    "archived": "已归档"
+  },
+  "actions": {
+    "edit": "编辑 Team",
+    "archive": "归档 Team",
+    "cancel": "取消",
+    "save": "保存",
+    "saving": "保存中..."
+  },
+  "dialog": {
+    "create_title": "创建 Team",
+    "edit_title": "编辑 Team",
+    "description": "Team 拥有 issue 编号命名空间和稳定工作域。v1 中成员关系仅用于展示。"
+  },
+  "form": {
+    "name": "名称",
+    "name_placeholder": "Engineering",
+    "key": "Key",
+    "key_hint": "1-7 位大写字母或数字，必须以字母开头。",
+    "key_locked": "已有 issue 创建后，Key 会被锁定。",
+    "icon": "图标",
+    "description": "描述",
+    "description_placeholder": "这个 Team 负责哪些工作？"
+  },
+  "picker": {
+    "placeholder": "Team",
+    "clear": "清除 Team",
+    "empty": "没有启用的 Team",
+    "selected_count_other": "已选 {{count}} 个 Team"
+  },
+  "toast_created": "Team 已创建",
+  "toast_updated": "Team 已更新",
+  "toast_archived": "Team 已归档",
+  "toast_archive_failed": "归档 Team 失败",
+  "toast_save_failed": "保存 Team 失败"
+}

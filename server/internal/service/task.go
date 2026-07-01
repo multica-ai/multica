@@ -1224,6 +1224,9 @@ type QuickCreateContext struct {
 	RequesterID   string   `json:"requester_id"`
 	WorkspaceID   string   `json:"workspace_id"`
 	ProjectID     string   `json:"project_id,omitempty"`
+	TeamID        string   `json:"team_id,omitempty"`
+	TeamKey       string   `json:"team_key,omitempty"`
+	TeamName      string   `json:"team_name,omitempty"`
 	SquadID       string   `json:"squad_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// ParentIssueID is the optional UUID of the parent issue the new issue
@@ -1257,7 +1260,7 @@ const QuickCreateContextType = "quick_create"
 // parentIssueID is optional (zero-valued pgtype.UUID when the user didn't
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID, teamID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -1277,6 +1280,16 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 	if projectID.Valid {
 		payload.ProjectID = util.UUIDToString(projectID)
+	}
+	if teamID.Valid {
+		payload.TeamID = util.UUIDToString(teamID)
+		if team, err := s.Queries.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
+			ID:          teamID,
+			WorkspaceID: workspaceID,
+		}); err == nil {
+			payload.TeamKey = team.Key
+			payload.TeamName = team.Name
+		}
 	}
 	if squadID.Valid {
 		payload.SquadID = util.UUIDToString(squadID)
@@ -3887,7 +3900,7 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // realtime-staleness fix (#4648 / MUL-3782); folding those side effects in
 // would mean unifying the payload type and is left as a follow-up.
 func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
-	prefix := s.getIssuePrefix(issue.WorkspaceID)
+	prefix := s.getIssuePrefixForIssue(issue)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
@@ -3901,7 +3914,24 @@ func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 	})
 }
 
+func (s *TaskService) getIssuePrefixForIssue(issue db.Issue) string {
+	if issue.TeamID.Valid {
+		team, err := s.Queries.GetWorkspaceTeam(context.Background(), db.GetWorkspaceTeamParams{
+			ID:          issue.TeamID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err == nil && team.Key != "" {
+			return team.Key
+		}
+	}
+	return s.getIssuePrefix(issue.WorkspaceID)
+}
+
 func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
+	team, err := s.Queries.GetDefaultWorkspaceTeam(context.Background(), workspaceID)
+	if err == nil && team.Key != "" {
+		return team.Key
+	}
 	ws, err := s.Queries.GetWorkspace(context.Background(), workspaceID)
 	if err != nil {
 		return ""
@@ -4011,6 +4041,8 @@ func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
 	return map[string]any{
 		"id":              util.UUIDToString(issue.ID),
 		"workspace_id":    util.UUIDToString(issue.WorkspaceID),
+		"team_id":         util.UUIDToPtr(issue.TeamID),
+		"team_key":        issuePrefix,
 		"number":          issue.Number,
 		"identifier":      issuePrefix + "-" + strconv.Itoa(int(issue.Number)),
 		"title":           issue.Title,
@@ -4135,7 +4167,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 			},
 		})
 	}
-	prefix := s.getIssuePrefix(workspaceID)
+	prefix := s.getIssuePrefixForIssue(issue)
 	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
 	details, _ := json.Marshal(map[string]any{
 		"task_id":         util.UUIDToString(task.ID),

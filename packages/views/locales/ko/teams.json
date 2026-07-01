@@ -1,0 +1,54 @@
+{
+  "page": {
+    "title": "팀",
+    "new_team": "새 팀",
+    "loading": "팀을 불러오는 중...",
+    "empty_title": "아직 팀이 없습니다",
+    "create_first": "첫 팀 만들기"
+  },
+  "table": {
+    "key": "키",
+    "name": "이름",
+    "issues": "이슈",
+    "state": "상태",
+    "actions": "작업"
+  },
+  "state": {
+    "default": "기본",
+    "active": "활성",
+    "archived": "보관됨"
+  },
+  "actions": {
+    "edit": "팀 편집",
+    "archive": "팀 보관",
+    "cancel": "취소",
+    "save": "저장",
+    "saving": "저장 중..."
+  },
+  "dialog": {
+    "create_title": "팀 만들기",
+    "edit_title": "팀 편집",
+    "description": "팀은 이슈 식별자와 안정적인 작업 영역을 소유합니다. v1의 멤버십은 표시용입니다."
+  },
+  "form": {
+    "name": "이름",
+    "name_placeholder": "Engineering",
+    "key": "키",
+    "key_hint": "1-7자의 대문자 또는 숫자이며, 첫 글자는 문자여야 합니다.",
+    "key_locked": "이미 이슈가 생성되어 이 키는 잠겨 있습니다.",
+    "icon": "아이콘",
+    "description": "설명",
+    "description_placeholder": "이 팀이 담당하는 작업은 무엇인가요?"
+  },
+  "picker": {
+    "placeholder": "팀",
+    "clear": "팀 지우기",
+    "empty": "활성 팀이 없습니다",
+    "selected_count_other": "{{count}}개 팀"
+  },
+  "toast_created": "팀을 만들었습니다",
+  "toast_updated": "팀을 업데이트했습니다",
+  "toast_archived": "팀을 보관했습니다",
+  "toast_archive_failed": "팀을 보관하지 못했습니다",
+  "toast_save_failed": "팀을 저장하지 못했습니다"
+}

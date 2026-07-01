@@ -21,6 +21,7 @@ export interface Project {
   issue_count: number;
   done_count: number;
   resource_count: number;
+  team_ids?: string[];
 }
 
 export interface CreateProjectRequest {
@@ -33,6 +34,7 @@ export interface CreateProjectRequest {
   lead_id?: string;
   start_date?: string;
   due_date?: string;
+  team_ids?: string[];
   // Resources to attach in the same transaction as the project. Server returns
   // 4xx (and rolls back) if any one is invalid or duplicate.
   resources?: CreateProjectResourceRequest[];
@@ -49,6 +51,7 @@ export interface UpdateProjectRequest {
   // Omit the key to leave the date untouched; send null (or "") to clear it.
   start_date?: string | null;
   due_date?: string | null;
+  team_ids?: string[];
 }
 
 export interface ListProjectsResponse {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, Maximize2, Minimize2, MoreHorizontal, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
@@ -30,6 +30,7 @@ import {
   PROJECT_PRIORITY_ORDER,
 } from "@multica/core/projects/config";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { activeTeamListOptions } from "@multica/core/teams/queries";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -50,6 +51,7 @@ import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
 import { PriorityIcon } from "../issues/components/priority-icon";
 import { ActorAvatar } from "../common/actor-avatar";
+import { TeamMultiPicker } from "../teams/components/team-picker";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
@@ -102,6 +104,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
   const { getActorName } = useActorName();
   const projectStatusLabels = useProjectStatusLabels();
   const projectPriorityLabels = useProjectPriorityLabels();
@@ -116,6 +119,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [priority, setPriority] = useState<ProjectPriority>(draft.priority);
   const [leadType, setLeadType] = useState<"member" | "agent" | undefined>(draft.leadType);
   const [leadId, setLeadId] = useState<string | undefined>(draft.leadId);
+  const [teamIds, setTeamIds] = useState<string[]>([]);
   const [icon, setIcon] = useState<string | undefined>(draft.icon);
   const [startDate, setStartDate] = useState<string>(draft.startDate ?? "");
   const [dueDate, setDueDate] = useState<string>(draft.dueDate ?? "");
@@ -213,6 +217,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     (a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)),
   );
 
+  useEffect(() => {
+    if (teamIds.length > 0 || teams.length === 0) return;
+    const defaultTeam = teams.find((team) => team.is_default) ?? teams[0];
+    if (defaultTeam) setTeamIds([defaultTeam.id]);
+  }, [teamIds.length, teams]);
+
   const leadLabel =
     leadType && leadId ? getActorName(leadType, leadId) : t(($) => $.create_project.lead);
 
@@ -220,6 +230,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
+    if (teams.length > 0 && teamIds.length === 0) {
+      toast.error(t(($) => $.create_project.team_required));
+      return;
+    }
     // `sourceMode` decides which side's stash gets persisted — the other
     // side is silently dropped, so repos picked then abandoned for local
     // mode don't leak into the project.
@@ -259,6 +273,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         lead_id: leadId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
+        team_ids: teamIds.length > 0 ? teamIds : undefined,
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -554,6 +569,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               onOpenChange={setDueDatePickerOpen}
             />
           )}
+
+          <TeamMultiPicker
+            teamIds={teamIds}
+            onChange={setTeamIds}
+            triggerRender={<PillButton />}
+            align="start"
+          />
 
           <Popover
             open={repoPopoverOpen}

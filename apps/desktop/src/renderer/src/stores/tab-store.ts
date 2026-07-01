@@ -219,6 +219,7 @@ const ROUTE_ICONS: Record<string, string> = {
   inbox: "Inbox",
   "my-issues": "CircleUser",
   issues: "ListTodo",
+  teams: "Users",
   projects: "FolderKanban",
   autopilots: "ListTodo",
   agents: "Bot",

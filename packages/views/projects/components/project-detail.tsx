@@ -28,6 +28,7 @@ import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
 import { IssueSurface } from "../../issues/surface/issue-surface";
+import { TeamMultiPicker } from "../../teams/components/team-picker";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
@@ -405,6 +406,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_due_date)}>
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
+          </PropRow>
+          <PropRow label={t(($) => $.table.teams)}>
+            <TeamMultiPicker
+              teamIds={project.team_ids ?? []}
+              onChange={(teamIds) => handleUpdateField({ team_ids: teamIds })}
+              align="start"
+            />
           </PropRow>
         </div>}
       </div>

@@ -120,6 +120,7 @@ type NavKey =
   | "chat"
   | "myIssues"
   | "issues"
+  | "teams"
   | "projects"
   | "autopilots"
   | "agents"
@@ -135,6 +136,7 @@ type NavLabelKey =
   | "chat"
   | "my_issues"
   | "issues"
+  | "teams"
   | "projects"
   | "autopilots"
   | "agents"
@@ -152,6 +154,7 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
 
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "issues", labelKey: "issues", icon: ListTodo },
+  { key: "teams", labelKey: "teams", icon: Users },
   { key: "projects", labelKey: "projects", icon: FolderKanban },
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },

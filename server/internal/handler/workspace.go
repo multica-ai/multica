@@ -19,6 +19,7 @@ import (
 
 var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+var teamKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,6}$`)
 
 // generateIssuePrefix produces a 2-5 char uppercase prefix from a workspace name.
 // Examples: "Jiayuan's Workspace" → "JIA", "My Team" → "MYT", "AB" → "AB".
@@ -32,6 +33,26 @@ func generateIssuePrefix(name string) string {
 		letters = letters[:3]
 	}
 	return letters
+}
+
+func defaultTeamKeyFromSlug(slug string) string {
+	letters := nonAlpha.ReplaceAllString(slug, "")
+	if len(letters) == 0 {
+		return "T"
+	}
+	letters = strings.ToUpper(letters)
+	if len(letters) > 3 {
+		letters = letters[:3]
+	}
+	return letters
+}
+
+func normalizeTeamKey(raw string) string {
+	return strings.ToUpper(strings.TrimSpace(raw))
+}
+
+func validTeamKey(key string) bool {
+	return teamKeyPattern.MatchString(key)
 }
 
 type WorkspaceResponse struct {
@@ -132,11 +153,12 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateWorkspaceRequest struct {
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	IssuePrefix *string `json:"issue_prefix"`
+	Name           string  `json:"name"`
+	Slug           string  `json:"slug"`
+	Description    *string `json:"description"`
+	Context        *string `json:"context"`
+	DefaultTeamKey *string `json:"default_team_key"`
+	IssuePrefix    *string `json:"issue_prefix"`
 }
 
 func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -183,9 +205,16 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
-	issuePrefix := generateIssuePrefix(req.Name)
+	defaultTeamKey := defaultTeamKeyFromSlug(req.Slug)
 	if req.IssuePrefix != nil && strings.TrimSpace(*req.IssuePrefix) != "" {
-		issuePrefix = strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
+		defaultTeamKey = normalizeTeamKey(*req.IssuePrefix)
+	}
+	if req.DefaultTeamKey != nil && strings.TrimSpace(*req.DefaultTeamKey) != "" {
+		defaultTeamKey = normalizeTeamKey(*req.DefaultTeamKey)
+	}
+	if !validTeamKey(defaultTeamKey) {
+		writeError(w, http.StatusBadRequest, "default_team_key must match ^[A-Z][A-Z0-9]{0,6}$")
+		return
 	}
 
 	qtx := h.Queries.WithTx(tx)
@@ -194,7 +223,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Slug:        req.Slug,
 		Description: ptrToText(req.Description),
 		Context:     ptrToText(req.Context),
-		IssuePrefix: issuePrefix,
+		IssuePrefix: defaultTeamKey,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -212,6 +241,29 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to add owner: "+err.Error())
+		return
+	}
+
+	team, err := qtx.CreateWorkspaceTeam(r.Context(), db.CreateWorkspaceTeamParams{
+		WorkspaceID: ws.ID,
+		Name:        "Default",
+		Key:         defaultTeamKey,
+		IsDefault:   true,
+		Description: pgtype.Text{},
+		Icon:        pgtype.Text{},
+		CreatedBy:   parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create default team: "+err.Error())
+		return
+	}
+	if err := qtx.AddWorkspaceTeamMember(r.Context(), db.AddWorkspaceTeamMemberParams{
+		WorkspaceID: ws.ID,
+		TeamID:      team.ID,
+		UserID:      parseUUID(userID),
+		Role:        "lead",
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to add default team member: "+err.Error())
 		return
 	}
 
@@ -335,8 +387,29 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Repos = reposJSON
 	}
 	if req.IssuePrefix != nil {
-		prefix := strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
+		prefix := normalizeTeamKey(*req.IssuePrefix)
 		if prefix != "" {
+			if !validTeamKey(prefix) {
+				writeError(w, http.StatusBadRequest, "issue_prefix must match ^[A-Z][A-Z0-9]{0,6}$")
+				return
+			}
+			defaultTeam, err := h.Queries.GetDefaultWorkspaceTeam(r.Context(), idUUID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "default team not found")
+				return
+			}
+			if defaultTeam.IssueCounter > 0 {
+				writeError(w, http.StatusConflict, "team key cannot be changed after issues have been created")
+				return
+			}
+			if _, err := h.Queries.UpdateWorkspaceTeam(r.Context(), db.UpdateWorkspaceTeamParams{
+				ID:          defaultTeam.ID,
+				WorkspaceID: idUUID,
+				Key:         pgtype.Text{String: prefix, Valid: true},
+			}); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update default team key")
+				return
+			}
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
 		}
 	}

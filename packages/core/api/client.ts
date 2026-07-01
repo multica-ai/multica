@@ -77,6 +77,10 @@ import type {
   HasPendingChatTasksResponse,
   SendChatMessageResponse,
   CancelTaskResponse,
+  Team,
+  CreateTeamRequest,
+  UpdateTeamRequest,
+  ListTeamsResponse,
   Project,
   CreateProjectRequest,
   UpdateProjectRequest,
@@ -185,6 +189,7 @@ import {
   EMPTY_AGENT_BUILDER_SESSION,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_LIST_TEAMS_RESPONSE,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_SQUAD,
@@ -202,6 +207,7 @@ import {
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
   ListIssuesResponseSchema,
+  ListTeamsResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -559,6 +565,7 @@ export class ApiClient {
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
+    if (params?.team_id) search.set("team_id", params.team_id);
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params?.metadata && Object.keys(params.metadata).length > 0) {
@@ -592,6 +599,7 @@ export class ApiClient {
     if (params.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params.creator_id) search.set("creator_id", params.creator_id);
+    if (params.team_id) search.set("team_id", params.team_id);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params.metadata && Object.keys(params.metadata).length > 0) {
@@ -666,6 +674,7 @@ export class ApiClient {
     agent_id?: string;
     squad_id?: string;
     prompt: string;
+    team_id?: string | null;
     project_id?: string | null;
     parent_issue_id?: string | null;
     attachment_ids?: string[];
@@ -1645,7 +1654,7 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`);
   }
 
-  async createWorkspace(data: { name: string; slug: string; description?: string; context?: string }): Promise<Workspace> {
+  async createWorkspace(data: { name: string; slug: string; description?: string; context?: string; default_team_key?: string; issue_prefix?: string }): Promise<Workspace> {
     return this.fetch("/api/workspaces", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1657,6 +1666,32 @@ export class ApiClient {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+  }
+
+  // Teams
+  async listTeams(): Promise<ListTeamsResponse> {
+    const raw = await this.fetch<unknown>("/api/teams");
+    return parseWithFallback(raw, ListTeamsResponseSchema, EMPTY_LIST_TEAMS_RESPONSE, {
+      endpoint: "GET /api/teams",
+    });
+  }
+
+  async createTeam(data: CreateTeamRequest): Promise<Team> {
+    return this.fetch("/api/teams", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateTeam(id: string, data: UpdateTeamRequest): Promise<Team> {
+    return this.fetch(`/api/teams/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async archiveTeam(id: string): Promise<Team> {
+    return this.fetch(`/api/teams/${id}`, { method: "DELETE" });
   }
 
   // Members
@@ -2064,9 +2099,10 @@ export class ApiClient {
   }
 
   // Projects
-  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+  async listProjects(params?: { status?: string; team_id?: string }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.team_id) search.set("team_id", params.team_id);
     return this.fetch(`/api/projects?${search}`);
   }
 
@@ -2376,9 +2412,10 @@ export class ApiClient {
   }
 
   // Autopilots
-  async listAutopilots(params?: { status?: string }): Promise<ListAutopilotsResponse> {
+  async listAutopilots(params?: { status?: string; team_id?: string }): Promise<ListAutopilotsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.team_id) search.set("team_id", params.team_id);
     const raw = await this.fetch<unknown>(`/api/autopilots?${search}`);
     return parseWithFallback(
       raw,
