@@ -75,14 +75,12 @@ export default function TabsLayout() {
         }}
       >
         <Tabs.Screen
-          name="inbox"
+          name="projects"
           options={{
-            title: "Inbox",
-            tabBarBadge: inboxBadge,
-            tabBarBadgeStyle: BADGE_STYLE,
+            title: "Projects",
             tabBarIcon: ({ color, size, focused }) => (
               <Image
-                source={focused ? "sf:tray.fill" : "sf:tray"}
+                source={focused ? "sf:square.stack.fill" : "sf:square.stack"}
                 tintColor={color}
                 style={{ width: size, height: size }}
               />
@@ -90,12 +88,25 @@ export default function TabsLayout() {
           }}
         />
         <Tabs.Screen
-          name="my-issues"
+          name="issues"
           options={{
-            title: "My Issues",
+            title: "Issues",
+            tabBarIcon: ({ color, size }) => (
+              <Image
+                source="sf:list.bullet"
+                tintColor={color}
+                style={{ width: size, height: size }}
+              />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="pins"
+          options={{
+            title: "Pins",
             tabBarIcon: ({ color, size, focused }) => (
               <Image
-                source={focused ? "sf:checklist" : "sf:checklist.unchecked"}
+                source={focused ? "sf:pin.fill" : "sf:pin"}
                 tintColor={color}
                 style={{ width: size, height: size }}
               />
@@ -121,6 +132,8 @@ export default function TabsLayout() {
           name="more"
           options={{
             title: "More",
+            tabBarBadge: inboxBadge,
+            tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size }) => (
               <Image
                 source="sf:ellipsis"

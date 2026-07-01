@@ -74,9 +74,8 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: "Pinned", icon: "pin", path: "/more/pins" },
-  { label: "Issues", icon: "list.bullet", path: "/more/issues" },
-  { label: "Projects", icon: "square.stack", path: "/more/projects" },
+  { label: "Inbox", icon: "tray", path: "/more/inbox" },
+  { label: "My Issues", icon: "checklist", path: "/more/my-issues" },
 ];
 
 export function MoreTabDropdownAnchor({
@@ -105,7 +104,7 @@ export function MoreTabDropdownAnchor({
         position: "absolute",
         right: 0,
         bottom: insets.bottom,
-        width: "25%",
+        width: "20%",
         height: TAB_BAR_HEIGHT,
       }}
     >
