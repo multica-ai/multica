@@ -49,6 +49,7 @@ export default function IssuesFilterRoute() {
 
   const statusFilters = useScopedFilters(resolvedScope, "status");
   const priorityFilters = useScopedFilters(resolvedScope, "priority");
+  const sortByLastEdited = useScopedSort(resolvedScope);
 
   const onToggleStatus = (s: IssueStatus) => {
     if (resolvedScope === "all") {
@@ -62,6 +63,13 @@ export default function IssuesFilterRoute() {
       useIssuesViewStore.getState().togglePriorityFilter(p);
     } else {
       useMyIssuesViewStore.getState().togglePriorityFilter(p);
+    }
+  };
+  const onToggleSortByLastEdited = () => {
+    if (resolvedScope === "all") {
+      useIssuesViewStore.getState().toggleSortByLastEdited();
+    } else {
+      useMyIssuesViewStore.getState().toggleSortByLastEdited();
     }
   };
   const onClearFilters = () => {
@@ -89,6 +97,18 @@ export default function IssuesFilterRoute() {
         ) : null}
       </View>
       <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+        <SectionLabel>Sort</SectionLabel>
+        <Pressable
+          onPress={onToggleSortByLastEdited}
+          className={cn(
+            "flex-row items-center gap-3 px-4 py-2.5 active:bg-secondary",
+            sortByLastEdited && "bg-secondary/60",
+          )}
+        >
+          <Text className="flex-1 text-sm text-foreground">Last edited</Text>
+          <CheckMark checked={sortByLastEdited} />
+        </Pressable>
+
         <SectionLabel>Status</SectionLabel>
         {ALL_STATUSES.map((status) => {
           const checked = statusFilters.includes(status);
@@ -155,6 +175,12 @@ function useScopedFilters(
     return kind === "status" ? allStatus : allPriority;
   }
   return kind === "status" ? myStatus : myPriority;
+}
+
+function useScopedSort(scope: Scope): boolean {
+  const allSort = useIssuesViewStore((s) => s.sortByLastEdited);
+  const mySort = useMyIssuesViewStore((s) => s.sortByLastEdited);
+  return scope === "all" ? allSort : mySort;
 }
 
 function SectionLabel({ children }: { children: string }) {

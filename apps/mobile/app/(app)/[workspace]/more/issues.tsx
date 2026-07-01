@@ -72,6 +72,7 @@ export default function IssuesPage() {
   const setScope = useIssuesViewStore((s) => s.setScope);
   const statusFilters = useIssuesViewStore((s) => s.statusFilters);
   const priorityFilters = useIssuesViewStore((s) => s.priorityFilters);
+  const sortByLastEdited = useIssuesViewStore((s) => s.sortByLastEdited);
 
   const openFilter = () => {
     if (!wsSlug) return;
@@ -106,10 +107,11 @@ export default function IssuesPage() {
     return allIssues;
   }, [allIssues, scope]);
 
-  const filtered = useMemo(
-    () => filterIssues(scopedIssues, statusFilters, priorityFilters),
-    [scopedIssues, statusFilters, priorityFilters],
-  );
+  const filtered = useMemo(() => {
+    const f = filterIssues(scopedIssues, statusFilters, priorityFilters);
+    if (!sortByLastEdited) return f;
+    return [...f].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }, [scopedIssues, statusFilters, priorityFilters, sortByLastEdited]);
 
   // Section grouping uses BOARD_STATUSES (cancelled excluded) — matches web
   // `issues-page.tsx:117-125`.
@@ -131,7 +133,7 @@ export default function IssuesPage() {
   }, [filtered, statusFilters]);
 
   const hasActiveFilters =
-    statusFilters.length > 0 || priorityFilters.length > 0;
+    statusFilters.length > 0 || priorityFilters.length > 0 || sortByLastEdited;
 
   const showEmptyState = !isLoading && !error && filtered.length === 0;
 

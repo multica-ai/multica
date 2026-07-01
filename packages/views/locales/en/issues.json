@@ -82,6 +82,7 @@
     "sort_start_date": "Start date",
     "sort_due_date": "Due date",
     "sort_created": "Created date",
+    "sort_last_edited": "Last edited",
     "sort_title": "Title",
     "card_priority": "Priority",
     "card_description": "Description",

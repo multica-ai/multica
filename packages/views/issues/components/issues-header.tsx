@@ -820,12 +820,13 @@ export function IssueDisplayControls({
   });
   const hasActiveFilters = activeFilterCount > 0;
 
-  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_title"> = {
+  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_last_edited" | "sort_title"> = {
     position: "sort_manual",
     priority: "sort_priority",
     start_date: "sort_start_date",
     due_date: "sort_due_date",
     created_at: "sort_created",
+    updated_at: "sort_last_edited",
     title: "sort_title",
   };
   const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee"> = {

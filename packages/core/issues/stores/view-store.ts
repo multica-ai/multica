@@ -13,7 +13,7 @@ export type ViewMode = "board" | "list" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
 export type IssueGrouping = "status" | "assignee";
 export type SwimlaneGrouping = "parent" | "project" | "assignee";
-export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
+export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "updated_at" | "title";
 export type SortDirection = "asc" | "desc";
 export type IssueDateField = "created_at" | "updated_at";
 
@@ -47,6 +47,7 @@ export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "start_date", label: "Start date" },
   { value: "due_date", label: "Due date" },
   { value: "created_at", label: "Created date" },
+  { value: "updated_at", label: "Last edited" },
   { value: "title", label: "Title" },
 ];
 

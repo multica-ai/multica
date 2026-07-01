@@ -111,7 +111,7 @@ export interface ListIssuesParams {
   date_field?: "created_at" | "updated_at";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_by?: "position" | "priority" | "title" | "created_at" | "updated_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
 }
 
@@ -147,7 +147,7 @@ export interface ListGroupedIssuesParams {
   date_field?: "created_at" | "updated_at";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_by?: "position" | "priority" | "title" | "created_at" | "updated_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
 }
 
