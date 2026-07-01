@@ -230,6 +230,13 @@ func skillsDirPath(workDir, provider string) string {
 		// workspace skill layout; see https://antigravity.google/docs/gcli-migration
 		// under "Workspace skills".
 		return filepath.Join(workDir, ".agents", "skills")
+	case "forge":
+		// ForgeCode discovers project-level skills from .forge/skills/<name>/SKILL.md
+		// in the workdir. The CLI walks the discovery root (anchored at the
+		// task workdir via `forge -C <workDir>`) and also scans ~/.forge/skills/
+		// and ~/.agents/skills/ for user-level skills. See the ForgeCode docs
+		// on skill discovery.
+		return filepath.Join(workDir, ".forge", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		return filepath.Join(workDir, ".agent_context", "skills")
