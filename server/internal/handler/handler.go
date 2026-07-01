@@ -422,7 +422,8 @@ func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (act
 	}
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {
-		return "member", userID
+		// No agent context: optionally honor an act-as-member override.
+		return h.resolveMemberActor(r, userID, workspaceID)
 	}
 	taskID := r.Header.Get("X-Task-ID")
 	if taskID == "" {
@@ -501,6 +502,42 @@ func (h *Handler) workspaceMember(w http.ResponseWriter, r *http.Request, worksp
 		return m, true
 	}
 	return h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
+}
+
+// resolveMemberActor honors an X-On-Behalf-Of override that lets a privileged
+// (owner/admin) caller attribute an action to another workspace member. Any
+// failure falls back to the authenticated token owner. The auth middleware
+// derives userID from the token, so this header can only redirect attribution,
+// never escalate it.
+func (h *Handler) resolveMemberActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
+	onBehalfOf := r.Header.Get("X-On-Behalf-Of")
+	if onBehalfOf == "" || onBehalfOf == userID {
+		return "member", userID
+	}
+
+	caller, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	if err != nil {
+		if !isNotFound(err) {
+			slog.Warn("resolveActor: caller member lookup failed, falling back to token owner", "user_id", userID, "workspace_id", workspaceID, "error", err)
+		}
+		return "member", userID
+	}
+	if !roleAllowed(caller.Role, "owner", "admin") {
+		slog.Debug("resolveActor: X-On-Behalf-Of ignored, caller not owner/admin", "user_id", userID, "workspace_id", workspaceID)
+		return "member", userID
+	}
+
+	if _, err := h.getWorkspaceMember(r.Context(), onBehalfOf, workspaceID); err != nil {
+		if !isNotFound(err) {
+			slog.Warn("resolveActor: target member lookup failed, falling back to token owner", "target_id", onBehalfOf, "workspace_id", workspaceID, "error", err)
+		} else {
+			slog.Debug("resolveActor: X-On-Behalf-Of ignored, target not a workspace member", "target_id", onBehalfOf, "workspace_id", workspaceID)
+		}
+		return "member", userID
+	}
+
+	slog.Info("resolveActor: attributing on behalf of member", "caller", userID, "on_behalf_of", onBehalfOf, "workspace_id", workspaceID)
+	return "member", onBehalfOf
 }
 
 func roleAllowed(role string, roles ...string) bool {

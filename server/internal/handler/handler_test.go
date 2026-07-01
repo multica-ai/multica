@@ -3995,3 +3995,74 @@ func TestUpsertSkillFileRejectsSkillMd(t *testing.T) {
 		t.Fatalf("expected error message about reserved SKILL.md, got: %s", upsertRec.Body.String())
 	}
 }
+
+func TestResolveActorActAsMember(t *testing.T) {
+	ctx := context.Background()
+
+	const (
+		targetUserID  = "11111111-1111-1111-1111-111111111111"
+		nonPrivUserID = "22222222-2222-2222-2222-222222222222"
+		nonMemberID   = "33333333-3333-3333-3333-333333333333"
+		adminUserID   = "44444444-4444-4444-4444-444444444444"
+	)
+
+	// member.user_id has a FK to "user"(id), so the referenced users must exist
+	// before they can be added to the workspace. nonMemberID is created as a
+	// real user but deliberately NOT added to member, exercising the
+	// "target is a user but not a workspace member" path.
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO "user" (id, name, email) VALUES
+			($1, 'act-as target', 'act-as-target@e2e.test'),
+			($2, 'act-as nonpriv', 'act-as-nonpriv@e2e.test'),
+			($3, 'act-as nonmember', 'act-as-nonmember@e2e.test'),
+			($4, 'act-as admin', 'act-as-admin@e2e.test')
+		ON CONFLICT (id) DO NOTHING`,
+		targetUserID, nonPrivUserID, nonMemberID, adminUserID,
+	); err != nil {
+		t.Fatalf("failed to seed users: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member'), ($1, $3, 'member'), ($1, $4, 'admin')`,
+		testWorkspaceID, targetUserID, nonPrivUserID, adminUserID,
+	); err != nil {
+		t.Fatalf("failed to seed members: %v", err)
+	}
+	t.Cleanup(func() {
+		// Delete members first (they FK-reference the users), then the users.
+		testPool.Exec(ctx, `DELETE FROM member WHERE workspace_id = $1 AND user_id = ANY($2)`,
+			testWorkspaceID, []string{targetUserID, nonPrivUserID, adminUserID})
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = ANY($1)`,
+			[]string{targetUserID, nonPrivUserID, nonMemberID, adminUserID})
+	})
+
+	tests := []struct {
+		name        string
+		caller      string
+		onBehalfOf  string
+		wantActorID string
+	}{
+		{"owner impersonates member", testUserID, targetUserID, targetUserID},
+		{"admin impersonates member", adminUserID, targetUserID, targetUserID},
+		{"self on-behalf is no-op", testUserID, testUserID, testUserID},
+		{"non-privileged cannot forge", nonPrivUserID, targetUserID, nonPrivUserID},
+		{"non-member target ignored", testUserID, nonMemberID, testUserID},
+		{"absent header keeps caller", testUserID, "", testUserID},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := newRequest("GET", "/test", nil)
+			if tt.onBehalfOf != "" {
+				req.Header.Set("X-On-Behalf-Of", tt.onBehalfOf)
+			}
+			actorType, actorID := testHandler.resolveActor(req, tt.caller, testWorkspaceID)
+			if actorType != "member" {
+				t.Errorf("actorType = %q, want member", actorType)
+			}
+			if actorID != tt.wantActorID {
+				t.Errorf("actorID = %q, want %q", actorID, tt.wantActorID)
+			}
+		})
+	}
+}
