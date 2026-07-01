@@ -10,7 +10,7 @@ import { useIssueViewStore, useClearFiltersOnWorkspaceChange, type IssueDateFilt
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import { filterIssues } from "../utils/filter";
+import { filterIssues, filterAssigneeGroups } from "../utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
@@ -67,6 +67,7 @@ export function IssuesPage() {
   const sortBy = useIssueViewStore((s) => s.sortBy);
   const sortDirection = useIssueViewStore((s) => s.sortDirection);
   const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
+  const showSubIssues = useIssueViewStore((s) => s.showSubIssues);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
   const sort = useMemo(
@@ -133,6 +134,17 @@ export function IssuesPage() {
     () => assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [],
     [assigneeGroupsQuery.data],
   );
+  // Assignee-grouped board renders from `groups`, bypassing the flat
+  // `filterIssues` output, so re-apply the client-only "Show sub-issues"
+  // toggle here (see filterAssigneeGroups).
+  const filteredAssigneeGroups = useMemo(
+    () => filterAssigneeGroups(assigneeGroupsQuery.data?.groups, { showSubIssues }),
+    [assigneeGroupsQuery.data, showSubIssues],
+  );
+  const filteredAssigneeIssues = useMemo(
+    () => filteredAssigneeGroups?.flatMap((group) => group.issues) ?? [],
+    [filteredAssigneeGroups],
+  );
   const loading = usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading
     : statusIssuesQuery.isLoading;
@@ -156,15 +168,15 @@ export function IssuesPage() {
   const headerIssues = usesAssigneeBoard ? assigneeIssues : scopedIssues;
 
   const issues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showSubIssues }),
+    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showSubIssues],
   );
 
   // Status-unfiltered companion for Swimlane — same narrowing as `issues`
   // minus the status filter.
   const swimlaneIssues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showSubIssues }),
+    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showSubIssues],
   );
 
   const activeFilters = useMemo(() => ({
@@ -176,6 +188,7 @@ export function IssuesPage() {
     includeNoProject,
     labelFilters,
     agentRunningFilter,
+    showSubIssues,
   }), [
     priorityFilters,
     assigneeFilters,
@@ -185,6 +198,7 @@ export function IssuesPage() {
     includeNoProject,
     labelFilters,
     agentRunningFilter,
+    showSubIssues,
   ]);
 
   // Fetch sub-issue progress from the backend so counts are accurate
@@ -262,8 +276,8 @@ export function IssuesPage() {
           <div className="flex flex-col flex-1 min-h-0">
             {viewMode === "board" ? (
               <BoardView
-                issues={usesAssigneeBoard ? assigneeIssues : issues}
-                assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+                issues={usesAssigneeBoard ? filteredAssigneeIssues : issues}
+                assigneeGroups={usesAssigneeBoard ? filteredAssigneeGroups : undefined}
                 assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
                 assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
                 visibleStatuses={visibleStatuses}

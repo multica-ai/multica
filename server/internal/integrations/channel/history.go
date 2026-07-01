@@ -1,13 +1,13 @@
 package channel
 
 // This file defines the channel-agnostic vocabulary for ON-DEMAND history
-// reads. Unlike the inbound push path (InboundMessage), history is PULLED by
-// the agent through a single unified CLI (`multica chat history`): the agent
-// asks for "the history of the conversation I'm in" and never sees a
-// per-platform API. The server resolves the session's binding to a channel
-// type and dispatches to that platform's reader, which returns these
-// normalized shapes — so adding a platform is "implement a reader", and the
-// agent-facing contract never changes (MUL-3871).
+// reads. History is PULLED by the agent through two unified CLI commands —
+// `multica chat history` (the channel OVERVIEW: top-level messages + thread
+// metadata, not thread contents) and `multica chat thread [id]` (one thread's
+// messages). The agent never sees a per-platform API: the server resolves the
+// session's binding to a channel type and dispatches to that platform's reader,
+// which returns these normalized shapes. Adding a platform is "implement a
+// reader"; the agent-facing contract never changes (MUL-3871).
 
 // HistoryRole is the normalized author kind of a fetched message, mirroring the
 // chat_message.role domain the agent already reasons about.
@@ -22,30 +22,9 @@ const (
 	HistoryRoleAssistant HistoryRole = "assistant"
 )
 
-// HistoryScope selects which slice of a conversation to read. A chat platform
-// has two nested histories: the surrounding CHANNEL and the agent's own THREAD
-// within it (on Slack the bot's first reply opens a thread on the @mention, so
-// every engaged conversation has one). The agent's primary read on a follow-up
-// is its thread; the wider channel is pulled only when needed. On the first
-// turn there is no thread yet, so the channel is the relevant context.
-type HistoryScope string
-
-const (
-	// HistoryScopeAuto lets the server pick: the channel on the first turn (no
-	// thread exists yet), the thread on follow-ups. This is the default.
-	HistoryScopeAuto HistoryScope = "auto"
-	// HistoryScopeThread reads the agent's own thread (Slack
-	// conversations.replies). Falls back to the channel where the platform /
-	// conversation has no threads (e.g. a DM).
-	HistoryScopeThread HistoryScope = "thread"
-	// HistoryScopeChannel reads the surrounding channel (Slack
-	// conversations.history).
-	HistoryScopeChannel HistoryScope = "channel"
-)
-
-// HistoryMessage is one normalized message from a conversation's history. It is
-// the same shape regardless of platform so the agent reads a uniform list,
-// exactly like `multica issue comment list --output json`.
+// HistoryMessage is one normalized message. It is the same shape regardless of
+// platform so the agent reads a uniform list, like `multica issue comment list
+// --output json`.
 type HistoryMessage struct {
 	// ID is the platform message identifier (Slack ts, Feishu message_id).
 	ID string `json:"id"`
@@ -62,19 +41,29 @@ type HistoryMessage struct {
 	// TS is the platform timestamp string, sortable lexicographically within a
 	// platform (Slack "1700000000.000100"). It doubles as the paging cursor.
 	TS string `json:"ts"`
+
+	// The following are set only on a CHANNEL-OVERVIEW row that heads a thread,
+	// so the agent can `multica chat thread <thread_id>` to read its contents.
+	// They are absent on a plain message and on thread-read rows.
+
+	// ThreadID is the identifier to pass to `multica chat thread <id>` to read
+	// this thread's messages. Set only when this overview row has a thread.
+	ThreadID string `json:"thread_id,omitempty"`
+	// ReplyCount is how many replies the thread has (0/omitted when none).
+	ReplyCount int `json:"reply_count,omitempty"`
+	// LatestReply is the platform timestamp of the most recent reply, when known.
+	LatestReply string `json:"latest_reply,omitempty"`
 }
 
-// HistoryPage is one normalized page of history plus a cursor for paging
-// further back. Messages are ordered OLDEST-FIRST so the transcript reads
-// top-to-bottom like the chat does.
+// HistoryPage is one normalized page. Messages are ordered OLDEST-FIRST so the
+// transcript reads top-to-bottom like the chat does.
 type HistoryPage struct {
 	// ChannelType is the platform the history came from ("slack"). Empty when
 	// the session is not bound to any channel (a web-only chat session).
 	ChannelType string `json:"channel_type,omitempty"`
-	// Scope is the scope actually read ("thread" or "channel") after resolving
-	// "auto" and any platform fallback (e.g. a DM has no thread). It lets the
-	// agent know what it got and decide whether to also pull the other scope.
-	Scope HistoryScope `json:"scope,omitempty"`
+	// ThreadID is set on a THREAD read: which thread these messages belong to.
+	// Empty on a channel overview.
+	ThreadID string `json:"thread_id,omitempty"`
 	// Messages are the fetched messages, oldest-first.
 	Messages []HistoryMessage `json:"messages"`
 	// NextCursor, when non-empty, is an opaque cursor to pass as Before to
@@ -82,14 +71,9 @@ type HistoryPage struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-// HistoryOptions tune a history read. They are platform-neutral; each reader
-// maps them onto its own API's paging primitives.
+// HistoryOptions tune a read. They are platform-neutral; each reader maps them
+// onto its own API's paging primitives.
 type HistoryOptions struct {
-	// Scope selects thread vs channel. The handler resolves "auto" to a
-	// concrete scope before calling the reader (it knows whether this is a
-	// first turn or a follow-up); the reader still degrades "thread" to channel
-	// where the conversation has no thread. An empty value reads the channel.
-	Scope HistoryScope
 	// Limit caps how many messages to return. A reader clamps it to its
 	// platform's per-page maximum and applies a sane default for <= 0.
 	Limit int

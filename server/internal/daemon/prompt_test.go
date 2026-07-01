@@ -271,16 +271,30 @@ func TestBuildChatPromptAttachmentIDsCanBeBoundToCreatedIssues(t *testing.T) {
 }
 
 func TestBuildChatPromptChannelAwareness(t *testing.T) {
-	t.Run("slack-backed session tells the agent it is in slack", func(t *testing.T) {
+	t.Run("slack-backed prompt teaches both read commands", func(t *testing.T) {
 		out := buildChatPrompt(Task{
 			ChatSessionID:   "sess-1",
 			ChatChannelType: "slack",
 			ChatMessage:     "你刚刚和 xxx 聊了什么",
 		})
-		for _, want := range []string{"Slack", "multica chat history", "NOT in Multica"} {
+		for _, want := range []string{"Slack", "NOT in Multica", "multica chat history", "multica chat thread", "Do NOT narrate"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("slack-backed prompt missing %q\n--- output ---\n%s", want, out)
 			}
+		}
+	})
+
+	t.Run("top-level mention starts with history", func(t *testing.T) {
+		out := buildChatPrompt(Task{ChatSessionID: "s", ChatChannelType: "slack", ChatInThread: false, ChatMessage: "hi"})
+		if !strings.Contains(out, "top level: start with `multica chat history`") {
+			t.Fatalf("expected top-level guidance, got:\n%s", out)
+		}
+	})
+
+	t.Run("in-thread mention starts with thread", func(t *testing.T) {
+		out := buildChatPrompt(Task{ChatSessionID: "s", ChatChannelType: "slack", ChatInThread: true, ChatMessage: "hi"})
+		if !strings.Contains(out, "inside a thread: start with `multica chat thread`") {
+			t.Fatalf("expected in-thread guidance, got:\n%s", out)
 		}
 	})
 

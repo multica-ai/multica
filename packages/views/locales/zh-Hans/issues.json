@@ -88,7 +88,8 @@
     "card_due_date": "截止日期",
     "card_project": "项目",
     "card_labels": "标签",
-    "card_child_progress": "子 issue 进度"
+    "card_child_progress": "子 issue 进度",
+    "show_sub_issues": "显示子 issue"
   },
   "view": {
     "tooltip_board": "看板视图",

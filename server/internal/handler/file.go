@@ -722,6 +722,24 @@ func shouldProxyAttachmentURL(rawURL string) bool {
 	return false
 }
 
+// ServeLocalUpload serves a local-disk object from the public /uploads/*
+// route. It carries the same preview security headers as the authenticated
+// download endpoint so self-hosted deployments — same-origin or split
+// frontend/backend origins — can inline-render images and iframe-preview
+// documents (PDF/HTML) fetched straight from the static route. Without these
+// headers the global "frame-ancestors 'none'" policy blocks those previews.
+// See MUL-3821 / #4477.
+func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
+	local, ok := h.Storage.(*storage.LocalStorage)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	h.setAttachmentPreviewSecurityHeaders(w)
+	key := strings.TrimPrefix(r.URL.Path, "/uploads/")
+	local.ServeFile(w, r, key)
+}
+
 func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string) {
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {

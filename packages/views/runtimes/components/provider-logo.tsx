@@ -247,6 +247,17 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// Trae (ByteDance) — official mark, recreated from the official Trae icon and
+// recolored to brand green on transparent. Embedded as a data URI (same
+// approach as the Hermes logo) so the exact official artwork is used rather
+// than a hand-drawn approximation.
+const TRAE_ICON =
+  "data:image/png;base64,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";
+
+function TraeLogo({ className }: { className: string }) {
+  return <img src={TRAE_ICON} alt="Trae" className={className} />;
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -281,6 +292,8 @@ export function ProviderLogo({
       return <QoderLogo className={className} />;
     case "antigravity":
       return <AntigravityLogo className={className} />;
+    case "traecli":
+      return <TraeLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

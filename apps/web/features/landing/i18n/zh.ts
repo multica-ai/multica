@@ -294,6 +294,33 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.34",
+        date: "2026-07-01",
+        title: "Slack /issue 斜杠命令、字节跳动 TRAE CLI 智能体运行时、接入 Claude Sonnet 5",
+        changes: [],
+        features: [
+          "Slack 里可以直接用原生 /issue 斜杠命令创建 Multica Issue，机器人只会向你私发一条包含 Issue 链接的确认消息。",
+          "同一 Slack 工作区里已经和某个 Multica 机器人绑定过的用户，遇到新加入的第二个机器人时无需再走一次绑定流程。",
+          "Slack 频道场景的上下文阅读拆成两条命令：一条查看频道概览，一条精读单个线程。",
+          "字节跳动 TRAE CLI（traecli）通过标准 ACP 协议接入为内置智能体运行时之一。",
+          "Anthropic 模型清单接入 Claude Sonnet 5，并已挂上介绍期价格。",
+          "每次任务运行都会在用量日志里记录本次的 prompt cache 命中率。",
+        ],
+        improvements: [
+          "Autopilot 的「管理访问」入口从独立按钮改为编辑弹窗里的一个轻量气泡。",
+          "Issue 与评论编辑器升级到 Tiptap 3.27.1，修复了输入行内 `code` 快捷方式时误吃前一个字符的问题。",
+        ],
+        fixes: [
+          "Slack 聊天智能体不再逐句解说自己在读历史，改为静默阅读、直接给出正式回复。",
+          "自托管的本地磁盘部署中，附件预览（PDF / HTML）恢复正常显示。（社区反馈）",
+          "修复了 Cursor 与 Kiro 运行时结束时任务结果不入库的问题，最终回复不再丢失。",
+          "自托管的 docker-compose.selfhost.yml 现在会把 MULTICA_SLACK_SECRET_KEY 透传到后端容器。（社区反馈）",
+          "Issue 面板顶部「N 个 Issue 正在处理中」的胶囊改为按 Issue 数去重。",
+          "自托管匿名来源统计的上报地址恢复到正式的 Multica API。",
+          "评论的定位高亮改为纯背景色，根评论和回复的行为保持一致。",
+        ],
+      },
+      {
         version: "0.3.33",
         date: "2026-06-30",
         title: "Autopilot 协作权限、Slack 历史回灌、技能包归档导入",

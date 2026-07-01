@@ -469,11 +469,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// agent asks, instead of force-assembling it on every inbound.
 			h.SlackHistory = slack.NewHistory(queries, box.Open, slog.Default())
 
+			// `/issue` slash command (MUL-3908): a real Slack slash command,
+			// delivered over the same Socket Mode connection. It is a quick-create
+			// entry point — the invoker's natural-language description is enqueued as
+			// a quick-create task (no chat session or chat run) and the agent authors
+			// the well-formed issue in the background — reusing the shared TaskService
+			// + binding service. The invoker gets a private ephemeral acknowledgement
+			// and a Multica notification when the issue lands.
+			slackSlash := slack.NewSlashCommandProcessor(slack.SlashCommandConfig{
+				Queries: queries,
+				Tasks:   h.TaskService,
+				Binding: slackBindingSvc,
+				AppURL:  appURLFromEnv(),
+				Logger:  slog.Default(),
+			})
+
 			// Per-installation inbound: the Supervisor builds + supervises one
 			// Socket Mode connection per active Slack installation, authenticated
 			// with that installation's OWN app-level token (xapp-, pasted at BYO
 			// install) — no deployment-level app token, no single connection.
-			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{Decrypt: box.Open, Logger: slog.Default()})
+			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{Decrypt: box.Open, Logger: slog.Default(), Slash: slackSlash})
 
 			// BYO self-serve install (paste bot token + app-level token). The
 			// InstallService needs only the at-rest encryption key — there is no
@@ -596,12 +611,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
 	})
 
-	// Local file serving (when using local storage)
-	if local, ok := store.(*storage.LocalStorage); ok {
-		r.Get("/uploads/*", func(w http.ResponseWriter, r *http.Request) {
-			file := strings.TrimPrefix(r.URL.Path, "/uploads/")
-			local.ServeFile(w, r, file)
-		})
+	// Local file serving (when using local storage). Served through the
+	// handler so /uploads/* carries the same preview security headers as the
+	// /api/attachments download endpoint; self-hosted split-origin/same-origin
+	// clients can then iframe-preview PDFs/HTML fetched straight from the
+	// static route instead of hitting the global frame-ancestors 'none' CSP.
+	// See MUL-3821 / #4477.
+	if _, ok := store.(*storage.LocalStorage); ok {
+		r.Get("/uploads/*", h.ServeLocalUpload)
 	}
 
 	// Auth (public) — per-IP rate limiting.
@@ -1174,12 +1191,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 
-			// Agent-facing unified history read: `multica chat history` resolves
-			// the caller's task-scoped token to its own chat session and returns
-			// the bound channel's prior messages (MUL-3871). No session id is
-			// passed — the token IS the scope, so an agent can only read its own
-			// conversation.
+			// Agent-facing channel reads (MUL-3871). The caller's task-scoped token
+			// resolves to its own chat session; no session/channel id is passed, so
+			// an agent can only read its own conversation. `history` is the channel
+			// overview (top-level messages + thread metadata); `thread` reads one
+			// thread (?id for a specific one, else the thread the session is in).
 			r.Get("/api/chat/history", h.GetChatChannelHistory)
+			r.Get("/api/chat/thread", h.GetChatThread)
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {

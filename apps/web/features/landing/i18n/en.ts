@@ -294,6 +294,33 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.34",
+        date: "2026-07-01",
+        title: "Slack /issue slash command, ByteDance TRAE CLI runtime, and Claude Sonnet 5",
+        changes: [],
+        features: [
+          "Slack's native /issue slash command creates a Multica Issue and replies to you privately with the link.",
+          "A Slack user who already linked their account to one Multica bot no longer re-links when the same Slack workspace connects a second bot.",
+          "Slack channel context is now driven by two focused reads: a channel overview and a per-thread read.",
+          "ByteDance TRAE CLI (traecli) joins the built-in agent runtimes over the standard ACP transport.",
+          "Claude Sonnet 5 is now available in the Anthropic model catalog with introductory pricing.",
+          "Each task run records a prompt-cache hit ratio in the usage log.",
+        ],
+        improvements: [
+          "Autopilot access management now lives in the Edit dialog as a compact popover instead of a standalone header button.",
+          "The Issue and comment editor upgrades Tiptap to 3.27.1, fixing an inline `code` shortcut that could drop the character before it.",
+        ],
+        fixes: [
+          "The Slack chat agent no longer narrates its channel-history reads — it reads silently and replies with the answer.",
+          "Attachment previews again open on self-hosted local-disk deployments. (Community-reported.)",
+          "Cursor and Kiro runtime completion transcripts are recovered so the final result no longer goes missing.",
+          "Self-host: MULTICA_SLACK_SECRET_KEY is now passed through to the backend container in docker-compose.selfhost.yml. (Community-reported.)",
+          "The Issues board \"N working\" chip counts distinct Issues instead of distinct agents.",
+          "Anonymous self-host source-channel reports go back to the official Multica API endpoint.",
+          "Comment deep-link highlights are now background-only and consistent between root comments and replies.",
+        ],
+      },
+      {
         version: "0.3.33",
         date: "2026-06-30",
         title: "Autopilot access controls, Slack history backfill, and skill-archive imports",

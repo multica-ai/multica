@@ -58,6 +58,8 @@
     "my_agents": "自分のエージェント",
     "other_agents": "その他のエージェント",
     "no_agents": "利用可能なエージェントがありません",
+    "search_placeholder": "エージェントを検索…",
+    "no_agents_match": "一致するエージェントがありません。",
     "has_partial": "{{owned}}/{{total}} 追加済み",
     "added_toast": "{{name}} に追加しました",
     "add_failed_toast": "スキルの追加に失敗しました",

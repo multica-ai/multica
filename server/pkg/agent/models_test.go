@@ -80,6 +80,29 @@ func TestClaudeStaticModelsExposesFable5(t *testing.T) {
 	}
 }
 
+func TestClaudeStaticModelsExposesSonnet5(t *testing.T) {
+	models := claudeStaticModels()
+	ids := map[string]Model{}
+	defaults := 0
+	for _, m := range models {
+		ids[m.ID] = m
+		if m.Default {
+			defaults++
+		}
+	}
+
+	sonnet, ok := ids["claude-sonnet-5"]
+	if !ok {
+		t.Fatalf("missing Claude Sonnet 5 in: %+v", models)
+	}
+	if sonnet.Label != "Claude Sonnet 5" || sonnet.Provider != "anthropic" || sonnet.Default {
+		t.Errorf("unexpected Sonnet 5 entry: %+v", sonnet)
+	}
+	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
+		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
+	}
+}
+
 func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 	// Codex CLI has no `models list` subcommand so the catalog is
 	// hand-maintained. Regression guard for multica-ai/multica#2009 —
