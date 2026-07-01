@@ -57,17 +57,49 @@ import (
 // It mirrors APIConnectionIdentity but is the type all four consumers will pass
 // post-Flip.
 //
-// OwnerID is the single user ceiling fed to the tool-policy user layer. Lone #3
-// (on_behalf_of) requires this to be the INTERSECTION (most restrictive) of the
-// agent owner and the work initiator, so delegation can never widen access. The
-// caller computes that intersection and passes the result here; modelling
-// on_behalf_of as its own policy layer is a separate later slice (Fase 3). Until
-// then the field carries the owner, exactly like APIConnectionIdentity.
+// Two user fields feed Lone #3 (on_behalf_of): OwnerID is the agent's owner and
+// InitiatorID is the human the work is performed for. The user layer of the tool
+// policy is gated on the INTERSECTION (most restrictive) of the two, computed
+// once by userCeiling() below and used identically by BOTH sub-resolvers
+// (apiIdentity for the api half, tableQuery for the mcp_http half). Because the
+// intersection lives on the identity — not at each callsite — every consumer the
+// Flip points here (agent-brief, cloud call-time, local call-time, runtime-scan)
+// gets the SAME fail-closed rule by construction and cannot re-implement it as
+// "most permissive" and leak a grant between the owner and the initiator.
+//
+// InitiatorID is optional: when it is not set (Valid == false) there is no
+// delegation in play and the ceiling is simply OwnerID, exactly like the api-only
+// APIConnectionIdentity — so nothing changes for the non-delegated path. When it
+// IS set and differs from OwnerID, the intersection of two distinct single-user
+// sets is empty, so the user layer is emptied (invalid UUID → no user-scoped
+// grant matches). That is the fail-closed choice: delegation can only ever
+// narrow access, never widen it. Modelling on_behalf_of as its own policy layer
+// (so a rule can name the initiator explicitly) is a later slice.
 type ConnectionIdentity struct {
 	WorkspaceID pgtype.UUID
 	RuntimeID   pgtype.UUID
 	AgentID     pgtype.UUID
 	OwnerID     pgtype.UUID
+	// InitiatorID is the human the work is performed for (on_behalf_of). Zero
+	// (Valid == false) means no delegation — the ceiling is OwnerID.
+	InitiatorID pgtype.UUID
+}
+
+// userCeiling is the single user identity the tool-policy user layer is gated on:
+// the fail-closed intersection of the agent owner and the work initiator (Lone
+// #3). No initiator → the owner. Owner == initiator → that user. Owner and
+// initiator both set but different → an invalid UUID, which matches no user-layer
+// row, so a personal grant on either party never leaks to the other.
+func (id ConnectionIdentity) userCeiling() pgtype.UUID {
+	if !id.InitiatorID.Valid {
+		return id.OwnerID
+	}
+	if id.OwnerID.Valid && id.OwnerID.Bytes == id.InitiatorID.Bytes {
+		return id.OwnerID
+	}
+	// Owner != initiator (or owner unset): the intersection is empty. Return the
+	// zero UUID so the user layer is fail-closed (no user-scoped grant applies).
+	return pgtype.UUID{}
 }
 
 func (id ConnectionIdentity) apiIdentity() APIConnectionIdentity {
@@ -75,7 +107,7 @@ func (id ConnectionIdentity) apiIdentity() APIConnectionIdentity {
 		WorkspaceID: id.WorkspaceID,
 		RuntimeID:   id.RuntimeID,
 		AgentID:     id.AgentID,
-		OwnerID:     id.OwnerID,
+		OwnerID:     id.userCeiling(),
 	}
 }
 
@@ -84,7 +116,7 @@ func (id ConnectionIdentity) tableQuery() toolpolicy.TableQuery {
 		WorkspaceID: id.WorkspaceID,
 		RuntimeID:   id.RuntimeID,
 		AgentID:     id.AgentID,
-		UserID:      id.OwnerID,
+		UserID:      id.userCeiling(),
 	}
 }
 

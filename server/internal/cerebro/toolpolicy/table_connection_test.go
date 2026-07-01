@@ -630,4 +630,23 @@ func TestConnectionEndpointEffective(t *testing.T) {
 	} else if got != SettingDeny {
 		t.Fatalf("workspace-deny: got %s want deny (deny must win over a grant)", got)
 	}
+
+	// Lone #2 (FIR-2441): the conflict rule is Deny > Allow > Ask > default_access
+	// evaluated across the WHOLE scope stack, NOT "most-specific scope wins". On a
+	// secrets connection (default deny) the agent has an explicit agent-layer Allow
+	// on GET /secrets (seeded above) — so it is admitted today. A workspace-layer
+	// Deny on that same endpoint must CAP the agent-Allow: a builder who mistakes
+	// the rule for "agent is the most specific scope, so agent-Allow wins" would
+	// re-open the secrets box. This asserts the workspace-Deny wins.
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, agent, zero, conn, "GET", "/secrets"); err != nil {
+		t.Fatalf("agent-allow baseline: %v", err)
+	} else if got != SettingAllow {
+		t.Fatalf("agent-allow baseline: got %s want allow (agent-layer grant should admit before the cap)", got)
+	}
+	mustSet(LayerWorkspace, tpTestWorkspaceID, "GET /secrets", SettingDeny)
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, agent, zero, conn, "GET", "/secrets"); err != nil {
+		t.Fatalf("workspace-deny beats agent-allow: %v", err)
+	} else if got != SettingDeny {
+		t.Fatalf("workspace-deny beats agent-allow: got %s want deny (workspace-Deny must cap an agent-Allow on a secrets connection)", got)
+	}
 }

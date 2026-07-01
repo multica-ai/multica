@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
@@ -197,6 +199,56 @@ func TestConnectionToolResolverFlagOffReturnsEmpty(t *testing.T) {
 	got := r.Resolve(context.Background(), mixedIdent())
 	if len(got.Tools) != 0 || got.MCPServers != nil || len(got.Deny) != 0 || len(got.Evaluations) != 0 {
 		t.Errorf("flag off must yield the zero value, got %+v", got)
+	}
+}
+
+// Lone #3 (on_behalf_of): the user layer both sub-resolvers gate on is the
+// fail-closed intersection of the agent owner and the work initiator. This
+// intersection lives on ConnectionIdentity, so the api half (apiIdentity) and the
+// mcp_http half (tableQuery) can never drift — they read the SAME userCeiling.
+//   - no initiator            → ceiling is the owner (non-delegated path unchanged)
+//   - owner == initiator      → ceiling is that shared user (self-delegation)
+//   - owner != initiator      → ceiling is empty (a personal grant on either party
+//                               never leaks to the other; delegation only narrows)
+func TestConnectionIdentityOnBehalfOfIntersection(t *testing.T) {
+	owner := gateTestUUID(10)
+	initiator := gateTestUUID(11)
+	var empty pgtype.UUID
+
+	cases := []struct {
+		name        string
+		owner       pgtype.UUID
+		initiator   pgtype.UUID
+		wantCeiling pgtype.UUID
+	}{
+		{"no initiator falls back to owner", owner, empty, owner},
+		{"self-delegation keeps the shared user", owner, owner, owner},
+		{"owner != initiator fails closed to empty", owner, initiator, empty},
+		{"unset owner with initiator fails closed", empty, initiator, empty},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			id := ConnectionIdentity{
+				WorkspaceID: gateTestUUID(1),
+				RuntimeID:   gateTestUUID(2),
+				AgentID:     gateTestUUID(3),
+				OwnerID:     c.owner,
+				InitiatorID: c.initiator,
+			}
+			// Both sub-resolvers must gate on the identical ceiling — this is the
+			// "applied identically" guarantee for agent-brief + cloud + local.
+			if got := id.apiIdentity().OwnerID; got != c.wantCeiling {
+				t.Errorf("api half OwnerID = %v, want %v", got, c.wantCeiling)
+			}
+			if got := id.tableQuery().UserID; got != c.wantCeiling {
+				t.Errorf("mcp half UserID = %v, want %v", got, c.wantCeiling)
+			}
+			// When it fails closed, the ceiling must be an INVALID uuid (no row
+			// matches), not merely a different-but-valid user.
+			if c.wantCeiling == empty && id.userCeiling().Valid {
+				t.Errorf("expected fail-closed invalid ceiling, got a valid uuid")
+			}
+		})
 	}
 }
 
