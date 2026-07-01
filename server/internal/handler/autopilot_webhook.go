@@ -635,6 +635,29 @@ func validateWebhookEventFilters(filters []WebhookEventFilter) error {
 	return nil
 }
 
+// normalizeWebhookEventFilters trims surrounding whitespace from every event
+// and action and drops actions that are empty after trimming. The matcher
+// compares exact strings, so a stored `" workflow_run "` would pass write
+// validation (which only trims for the emptiness check) yet never match a
+// real envelope. Normalizing at marshal time means whatever lands in the
+// column is exactly what the matcher can compare against.
+func normalizeWebhookEventFilters(filters []WebhookEventFilter) []WebhookEventFilter {
+	if filters == nil {
+		return nil
+	}
+	normalized := make([]WebhookEventFilter, 0, len(filters))
+	for _, f := range filters {
+		nf := WebhookEventFilter{Event: strings.TrimSpace(f.Event)}
+		for _, a := range f.Actions {
+			if trimmed := strings.TrimSpace(a); trimmed != "" {
+				nf.Actions = append(nf.Actions, trimmed)
+			}
+		}
+		normalized = append(normalized, nf)
+	}
+	return normalized
+}
+
 // encodeWebhookEventFilters returns the JSONB bytes to persist for a CREATE.
 // nil/empty input maps to nil bytes (column stays NULL → matcher allows
 // every event), so we never write an explicit `[]` on create.
@@ -642,7 +665,7 @@ func encodeWebhookEventFilters(filters []WebhookEventFilter) ([]byte, error) {
 	if len(filters) == 0 {
 		return nil, nil
 	}
-	return json.Marshal(filters)
+	return json.Marshal(normalizeWebhookEventFilters(filters))
 }
 
 // encodeWebhookEventFiltersAlways always returns non-nil bytes, even for an
@@ -654,7 +677,7 @@ func encodeWebhookEventFiltersAlways(filters []WebhookEventFilter) ([]byte, erro
 	if filters == nil {
 		filters = []WebhookEventFilter{}
 	}
-	return json.Marshal(filters)
+	return json.Marshal(normalizeWebhookEventFilters(filters))
 }
 
 // webhookEventAllowedByTriggerScope returns true when the trigger has no
