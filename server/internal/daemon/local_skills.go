@@ -89,7 +89,11 @@ const (
 //   - Pi: https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/skills.md
 //   - Cursor: official forum guidance referencing the built-in /create-skill flow
 //     (https://forum.cursor.com/t/cursor-doesnt-know-new-skills-arens-saved/158507)
+//   - Hermes: ~/.hermes/skills is Hermes Agent's primary skill directory
+//     (https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)
+//   - Kimi: ~/.kimi/skills mirrors Kimi CLI's project-level .kimi/skills layout
 //   - Kiro: project and user-level .kiro/skills directories discovered by Kiro CLI
+//   - Qoder: ~/.qoder/skills mirrors Qoder CLI's project-level .qoder/skills layout
 //   - Antigravity: ~/.gemini/antigravity-cli/skills user-level skill root
 //     (https://antigravity.google/docs/gcli-migration "Global skills")
 //
@@ -126,8 +130,14 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		providerRoot = filepath.Join(home, ".pi", "agent", "skills")
 	case "cursor":
 		providerRoot = filepath.Join(home, ".cursor", "skills")
+	case "hermes":
+		providerRoot = filepath.Join(home, ".hermes", "skills")
+	case "kimi":
+		providerRoot = filepath.Join(home, ".kimi", "skills")
 	case "kiro":
 		providerRoot = filepath.Join(home, ".kiro", "skills")
+	case "qoder":
+		providerRoot = filepath.Join(home, ".qoder", "skills")
 	case "traecli":
 		// Official TRAE CLI global skills live in ~/.traecli/skills.
 		// See https://docs.trae.cn/cli_skills
