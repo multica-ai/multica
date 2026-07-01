@@ -14,7 +14,51 @@ function restoreEnv(key: string, value: string | undefined) {
   else process.env[key] = value;
 }
 
+function withoutRuntimeUpstreams(run: () => void) {
+  const previousRemoteApiUrl = process.env.REMOTE_API_URL;
+  const previousDocsUrl = process.env.DOCS_URL;
+  const previousPublicApiUrl = process.env.NEXT_PUBLIC_API_URL;
+  const previousPort = process.env.PORT;
+  delete process.env.REMOTE_API_URL;
+  delete process.env.DOCS_URL;
+  delete process.env.NEXT_PUBLIC_API_URL;
+  process.env.PORT = "3000";
+
+  try {
+    run();
+  } finally {
+    restoreEnv("REMOTE_API_URL", previousRemoteApiUrl);
+    restoreEnv("DOCS_URL", previousDocsUrl);
+    restoreEnv("NEXT_PUBLIC_API_URL", previousPublicApiUrl);
+    restoreEnv("PORT", previousPort);
+  }
+}
+
 describe("proxy", () => {
+  it("does not rewrite API requests when no runtime API origin is configured", () => {
+    withoutRuntimeUpstreams(() => {
+      const res = proxy(request("/api/config?x=1"));
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+      expect(
+        res.headers.get(`x-middleware-request-${MULTICA_LOCALE_HEADER}`),
+      ).toBe("en");
+    });
+  });
+
+  it("does not rewrite docs requests when no runtime docs origin is configured", () => {
+    withoutRuntimeUpstreams(() => {
+      const res = proxy(request("/docs/zh"));
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+      expect(
+        res.headers.get(`x-middleware-request-${MULTICA_LOCALE_HEADER}`),
+      ).toBe("en");
+    });
+  });
+
   it("rewrites API requests to the runtime API origin", () => {
     const previous = process.env.REMOTE_API_URL;
     process.env.REMOTE_API_URL = "http://backend:8080";

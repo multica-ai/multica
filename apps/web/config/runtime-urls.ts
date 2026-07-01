@@ -6,29 +6,35 @@ function cleanUrl(raw: string | undefined): string | undefined {
   return value.replace(/\/+$/, "");
 }
 
+function cleanHttpUrl(raw: string | undefined): string | undefined {
+  const value = cleanUrl(raw);
+  if (!value) return undefined;
+
+  try {
+    const url = new URL(value);
+    if (url.protocol === "http:" || url.protocol === "https:") return value;
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
 function appendPath(baseUrl: string, path: string): string {
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-export function resolveRemoteApiUrl(env: RuntimeEnv): string {
-  const explicitRemote = cleanUrl(env.REMOTE_API_URL);
+export function resolveRemoteApiUrl(env: RuntimeEnv): string | undefined {
+  const explicitRemote = cleanHttpUrl(env.REMOTE_API_URL);
   if (explicitRemote) return explicitRemote;
 
-  const publicApi = cleanUrl(env.NEXT_PUBLIC_API_URL);
+  const publicApi = cleanHttpUrl(env.NEXT_PUBLIC_API_URL);
   if (publicApi) return publicApi;
-
-  const port =
-    env.BACKEND_PORT?.trim() ||
-    env.API_PORT?.trim() ||
-    env.SERVER_PORT?.trim() ||
-    env.PORT?.trim();
-  if (port) return `http://localhost:${port}`;
-
-  return "http://localhost:8080";
+  return undefined;
 }
 
-export function resolveDocsUrl(env: RuntimeEnv): string {
-  return cleanUrl(env.DOCS_URL) || "http://localhost:4000";
+export function resolveDocsUrl(env: RuntimeEnv): string | undefined {
+  return cleanHttpUrl(env.DOCS_URL);
 }
 
 export function resolveBrowserApiBaseUrl(env: RuntimeEnv): string | undefined {
@@ -47,23 +53,28 @@ export function runtimeRewriteDestination(
   pathname: string,
   env: RuntimeEnv,
 ): string | undefined {
+  const docsUrl = resolveDocsUrl(env);
   if (pathname === "/docs") {
-    return appendPath(resolveDocsUrl(env), "/docs");
+    return docsUrl ? appendPath(docsUrl, "/docs") : undefined;
   }
   if (pathname.startsWith("/docs/")) {
-    return appendPath(resolveDocsUrl(env), pathname);
+    return docsUrl ? appendPath(docsUrl, pathname) : undefined;
   }
+
+  const remoteApiUrl = resolveRemoteApiUrl(env);
+  if (!remoteApiUrl) return undefined;
+
   if (pathname === "/api" || pathname.startsWith("/api/")) {
-    return appendPath(resolveRemoteApiUrl(env), pathname);
+    return appendPath(remoteApiUrl, pathname);
   }
   if (pathname === "/uploads" || pathname.startsWith("/uploads/")) {
-    return appendPath(resolveRemoteApiUrl(env), pathname);
+    return appendPath(remoteApiUrl, pathname);
   }
   if (pathname === "/ws") {
-    return appendPath(resolveRemoteApiUrl(env), "/ws");
+    return appendPath(remoteApiUrl, "/ws");
   }
   if (isBackendAuthPath(pathname)) {
-    return appendPath(resolveRemoteApiUrl(env), pathname);
+    return appendPath(remoteApiUrl, pathname);
   }
 
   return undefined;
