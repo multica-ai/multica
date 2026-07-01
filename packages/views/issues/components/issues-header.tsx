@@ -13,6 +13,7 @@ import {
   FolderKanban,
   FolderMinus,
   List,
+  ListTree,
   SignalHigh,
   SlidersHorizontal,
   X,
@@ -102,6 +103,7 @@ function getActiveFilterCount(state: {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  parentOnlyFilter?: boolean;
   dateFilter?: IssueDateFilter | null;
 }) {
   let count = 0;
@@ -111,6 +113,7 @@ function getActiveFilterCount(state: {
   if (state.creatorFilters.length > 0) count++;
   if (state.projectFilters.length > 0 || state.includeNoProject) count++;
   if (state.labelFilters.length > 0) count++;
+  if (state.parentOnlyFilter) count++;
   if (state.dateFilter) count++;
   return count;
 }
@@ -765,6 +768,7 @@ export function IssueDisplayControls({
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const parentOnlyFilter = useViewStore((s) => s.parentOnlyFilter);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
@@ -784,6 +788,7 @@ export function IssueDisplayControls({
     projectFilters,
     includeNoProject,
     labelFilters,
+    parentOnlyFilter,
     dateFilter: showDateFilter ? dateFilter : null,
   });
   const hasActiveFilters = activeFilterCount > 0;
@@ -878,6 +883,28 @@ export function IssueDisplayControls({
             <TooltipContent side="bottom">{t(($) => $.filters.tooltip)}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-auto">
+            {/* Hierarchy */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <ListTree className="size-3.5" />
+                <span className="flex-1">{t(($) => $.filters.section_hierarchy)}</span>
+                {parentOnlyFilter && (
+                  <span className="text-xs text-primary font-medium">1</span>
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-auto min-w-48">
+                <DropdownMenuCheckboxItem
+                  checked={parentOnlyFilter}
+                  onCheckedChange={() => act.toggleParentOnlyFilter()}
+                  className={FILTER_ITEM_CLASS}
+                >
+                  <HoverCheck checked={parentOnlyFilter} />
+                  <ListTree className="size-3.5" />
+                  {t(($) => $.filters.parent_only)}
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
             {/* Status */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>

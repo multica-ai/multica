@@ -16,6 +16,7 @@ export interface IssueSortParam {
   date_field?: ListIssuesParams["date_field"];
   date_start?: ListIssuesParams["date_start"];
   date_end?: ListIssuesParams["date_end"];
+  parent_only?: ListIssuesParams["parent_only"];
 }
 
 export const issueKeys = {
@@ -115,7 +116,7 @@ export const issueKeys = {
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
-  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id"
+  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id" | "parent_only"
 >;
 
 export type AssigneeGroupedIssuesFilter = Omit<

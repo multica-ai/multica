@@ -89,6 +89,17 @@ describe("ApiClient schema fallback", () => {
       const res = await client.listIssues();
       expect(res).toEqual({ issues: [], total: 0 });
     });
+
+    it("sends parent_only when requested", async () => {
+      stubFetchJson({ issues: [], total: 0 });
+      const client = new ApiClient("https://api.example.test");
+
+      await client.listIssues({ parent_only: true });
+
+      const url = new URL(String(vi.mocked(fetch).mock.calls[0]?.[0]));
+      expect(url.pathname).toBe("/api/issues");
+      expect(url.searchParams.get("parent_only")).toBe("true");
+    });
   });
 
   describe("searchIssues", () => {
@@ -194,6 +205,18 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listGroupedIssues({ group_by: "assignee" });
       expect(res).toEqual({ groups: [] });
+    });
+
+    it("sends parent_only when requested", async () => {
+      stubFetchJson({ groups: [] });
+      const client = new ApiClient("https://api.example.test");
+
+      await client.listGroupedIssues({ group_by: "assignee", parent_only: true });
+
+      const url = new URL(String(vi.mocked(fetch).mock.calls[0]?.[0]));
+      expect(url.pathname).toBe("/api/issues/grouped");
+      expect(url.searchParams.get("group_by")).toBe("assignee");
+      expect(url.searchParams.get("parent_only")).toBe("true");
     });
   });
 

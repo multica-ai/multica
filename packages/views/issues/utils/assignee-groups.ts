@@ -1,15 +1,17 @@
 import type { IssueAssigneeGroup } from "@multica/core/types";
+import { filterIssues, type IssueFilters } from "./filter";
 
-export function filterRunningAssigneeGroups(
+export function filterAssigneeGroups(
   groups: IssueAssigneeGroup[] | undefined,
-  agentRunningFilter: boolean,
-  runningIssueIds: Set<string>,
+  filters: IssueFilters,
 ): IssueAssigneeGroup[] | undefined {
-  if (!groups || !agentRunningFilter) return groups;
+  if (!groups) return groups;
+  const hasClientSideFilter = filters.agentRunningFilter === true;
+  if (!hasClientSideFilter) return groups;
 
   return groups
     .map((group) => {
-      const issues = group.issues.filter((issue) => runningIssueIds.has(issue.id));
+      const issues = filterIssues(group.issues, filters);
       return {
         ...group,
         issues,

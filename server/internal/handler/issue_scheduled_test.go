@@ -102,3 +102,82 @@ func TestListIssues_ScheduledFilter(t *testing.T) {
 		t.Fatalf("scheduled total: want 3, got %d", scheduledTotal)
 	}
 }
+
+func TestListIssues_ParentOnlyFilter(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("Parent Only %d", suffix)).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+
+	insertIssue := func(title string, parentID any, position float64) string {
+		t.Helper()
+		var number int
+		if err := testPool.QueryRow(ctx, `
+			UPDATE workspace
+			SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+			WHERE id = $1 RETURNING issue_counter
+		`, testWorkspaceID).Scan(&number); err != nil {
+			t.Fatalf("next issue number: %v", err)
+		}
+
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id, parent_issue_id)
+			VALUES ($1, $2, 'todo', 'none', 'member', $3, $4, $5, $6, $7) RETURNING id
+		`, testWorkspaceID, title, testUserID, position, number, projectID, parentID).Scan(&id); err != nil {
+			t.Fatalf("create issue %q: %v", title, err)
+		}
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id) })
+		return id
+	}
+
+	parentID := insertIssue(fmt.Sprintf("parent-only parent %d", suffix), nil, 2)
+	childID := insertIssue(fmt.Sprintf("parent-only child %d", suffix), parentID, 1)
+
+	list := func(query string) (ids []string, total int64) {
+		t.Helper()
+		path := fmt.Sprintf("/api/issues?workspace_id=%s&project_id=%s&limit=500%s",
+			testWorkspaceID, projectID, query)
+		w := httptest.NewRecorder()
+		testHandler.ListIssues(w, newRequest("GET", path, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Issues []IssueResponse `json:"issues"`
+			Total  int64           `json:"total"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode list response: %v", err)
+		}
+		for _, issue := range resp.Issues {
+			ids = append(ids, issue.ID)
+		}
+		return ids, resp.Total
+	}
+
+	allIDs, allTotal := list("")
+	if !containsIssueID(allIDs, parentID) || !containsIssueID(allIDs, childID) {
+		t.Fatalf("baseline list missing seeded issues: got %v", allIDs)
+	}
+	if allTotal != 2 {
+		t.Fatalf("baseline total: want 2, got %d", allTotal)
+	}
+
+	parentIDs, parentTotal := list("&parent_only=true")
+	if !containsIssueID(parentIDs, parentID) {
+		t.Fatalf("parent-only list missing parent %s: got %v", parentID, parentIDs)
+	}
+	if containsIssueID(parentIDs, childID) {
+		t.Fatalf("parent-only list unexpectedly includes child %s", childID)
+	}
+	if parentTotal != 1 {
+		t.Fatalf("parent-only total: want 1, got %d", parentTotal)
+	}
+}

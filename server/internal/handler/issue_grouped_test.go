@@ -154,3 +154,82 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 		t.Fatalf("unexpected next-page issue: %#v", nextResp.Groups[0].Issues[0])
 	}
 }
+
+func TestListGroupedIssuesParentOnlyFiltersBeforePagination(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("Grouped Parent Only %d", suffix)).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+
+	createIssue := func(title string, parentID any, position float64) string {
+		t.Helper()
+		var number int32
+		if err := testPool.QueryRow(ctx, `
+			UPDATE workspace
+			SET issue_counter = GREATEST(
+				issue_counter,
+				(SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)
+			) + 1
+			WHERE id = $1
+			RETURNING issue_counter
+		`, testWorkspaceID).Scan(&number); err != nil {
+			t.Fatalf("next issue number: %v", err)
+		}
+
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (
+				workspace_id, title, description, status, priority,
+				assignee_type, assignee_id, creator_type, creator_id,
+				position, number, project_id, parent_issue_id
+			)
+			VALUES ($1, $2, NULL, 'todo', 'none', 'member', $3, 'member', $3, $4, $5, $6, $7)
+			RETURNING id
+		`, testWorkspaceID, title, testUserID, position, number, projectID, parentID).Scan(&id); err != nil {
+			t.Fatalf("create issue %q: %v", title, err)
+		}
+		t.Cleanup(func() {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id)
+		})
+		return id
+	}
+
+	parentID := createIssue(fmt.Sprintf("grouped parent-only parent %d", suffix), nil, 2)
+	childID := createIssue(fmt.Sprintf("grouped parent-only child %d", suffix), parentID, 1)
+
+	path := fmt.Sprintf(
+		"/api/issues/grouped?workspace_id=%s&project_id=%s&group_by=assignee&statuses=todo&limit=1&parent_only=true",
+		testWorkspaceID,
+		projectID,
+	)
+	w := httptest.NewRecorder()
+	testHandler.ListGroupedIssues(w, newRequest("GET", path, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListGroupedIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp GroupedIssuesResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode grouped response: %v", err)
+	}
+
+	if len(resp.Groups) != 1 {
+		t.Fatalf("expected one assignee group, got %#v", resp.Groups)
+	}
+	group := resp.Groups[0]
+	if group.Total != 1 || len(group.Issues) != 1 {
+		t.Fatalf("group total/page mismatch: total=%d len=%d group=%#v", group.Total, len(group.Issues), group)
+	}
+	if group.Issues[0].ID != parentID {
+		t.Fatalf("expected parent issue %s, got %#v", parentID, group.Issues[0])
+	}
+	if group.Issues[0].ID == childID {
+		t.Fatalf("parent-only grouped list unexpectedly returned child %s", childID)
+	}
+}

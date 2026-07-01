@@ -41,6 +41,8 @@
     "no_labels": "아직 라벨이 없습니다",
     "no_assignee": "담당자 없음",
     "no_project": "프로젝트 없음",
+    "parent_only": "상위 이슈만",
+    "section_hierarchy": "계층",
     "section_status": "상태",
     "section_priority": "우선순위",
     "section_assignee": "담당자",

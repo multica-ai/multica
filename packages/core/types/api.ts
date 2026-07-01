@@ -102,6 +102,7 @@ export interface ListIssuesParams {
    * majority on the client.
    */
   scheduled?: boolean;
+  parent_only?: boolean;
   date_field?: "created_at" | "updated_at";
   date_start?: string;
   date_end?: string;
@@ -136,6 +137,7 @@ export interface ListGroupedIssuesParams {
   project_ids?: string[];
   include_no_project?: boolean;
   label_ids?: string[];
+  parent_only?: boolean;
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
   date_field?: "created_at" | "updated_at";

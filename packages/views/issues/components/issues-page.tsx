@@ -23,6 +23,7 @@ import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
 import { SwimLaneView } from "./swimlane-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
+import { filterAssigneeGroups } from "../utils/assignee-groups";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 
@@ -66,6 +67,7 @@ export function IssuesPage() {
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
   const sortBy = useIssueViewStore((s) => s.sortBy);
   const sortDirection = useIssueViewStore((s) => s.sortDirection);
+  const parentOnlyFilter = useIssueViewStore((s) => s.parentOnlyFilter);
   const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
@@ -81,8 +83,8 @@ export function IssuesPage() {
     [dateFilter],
   );
   const queryParams = useMemo(
-    () => ({ ...sort, ...dateParams }),
-    [dateParams, sort],
+    () => ({ ...sort, ...dateParams, parent_only: parentOnlyFilter || undefined }),
+    [dateParams, parentOnlyFilter, sort],
   );
 
   // Derive the set of issue ids that currently have at least one
@@ -110,11 +112,12 @@ export function IssuesPage() {
       project_ids: projectFilters,
       include_no_project: includeNoProject,
       label_ids: labelFilters,
+      parent_only: parentOnlyFilter || undefined,
     };
     if (scope === "members") filter.assignee_types = ["member"];
     if (scope === "agents") filter.assignee_types = ["agent", "squad"];
     return filter;
-  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, scope, statusFilters]);
+  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, parentOnlyFilter, priorityFilters, projectFilters, scope, statusFilters]);
 
   const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, queryParams);
   const statusIssuesQuery = useQuery({
@@ -129,9 +132,42 @@ export function IssuesPage() {
     () => statusIssuesQuery.data ?? [],
     [statusIssuesQuery.data],
   );
-  const assigneeIssues = useMemo(
+  const rawAssigneeIssues = useMemo(
     () => assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [],
     [assigneeGroupsQuery.data],
+  );
+  const issueFilters = useMemo(() => ({
+    statusFilters,
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    projectFilters,
+    includeNoProject,
+    labelFilters,
+    parentOnlyFilter,
+    agentRunningFilter,
+    runningIssueIds,
+  }), [
+    statusFilters,
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    projectFilters,
+    includeNoProject,
+    labelFilters,
+    parentOnlyFilter,
+    agentRunningFilter,
+    runningIssueIds,
+  ]);
+  const filteredAssigneeGroups = useMemo(
+    () => filterAssigneeGroups(assigneeGroupsQuery.data?.groups, issueFilters),
+    [assigneeGroupsQuery.data?.groups, issueFilters],
+  );
+  const assigneeIssues = useMemo(
+    () => filteredAssigneeGroups?.flatMap((group) => group.issues) ?? [],
+    [filteredAssigneeGroups],
   );
   const loading = usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading
@@ -153,18 +189,18 @@ export function IssuesPage() {
     return allIssues;
   }, [allIssues, scope]);
 
-  const headerIssues = usesAssigneeBoard ? assigneeIssues : scopedIssues;
+  const headerIssues = usesAssigneeBoard ? rawAssigneeIssues : scopedIssues;
 
   const issues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(scopedIssues, issueFilters),
+    [scopedIssues, issueFilters],
   );
 
   // Status-unfiltered companion for Swimlane — same narrowing as `issues`
   // minus the status filter.
   const swimlaneIssues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(scopedIssues, { ...issueFilters, statusFilters: [] }),
+    [scopedIssues, issueFilters],
   );
 
   const activeFilters = useMemo(() => ({
@@ -175,6 +211,7 @@ export function IssuesPage() {
     projectFilters,
     includeNoProject,
     labelFilters,
+    parentOnlyFilter,
     agentRunningFilter,
   }), [
     priorityFilters,
@@ -184,6 +221,7 @@ export function IssuesPage() {
     projectFilters,
     includeNoProject,
     labelFilters,
+    parentOnlyFilter,
     agentRunningFilter,
   ]);
 
@@ -263,7 +301,7 @@ export function IssuesPage() {
             {viewMode === "board" ? (
               <BoardView
                 issues={usesAssigneeBoard ? assigneeIssues : issues}
-                assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+                assigneeGroups={usesAssigneeBoard ? filteredAssigneeGroups : undefined}
                 assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
                 assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
                 visibleStatuses={visibleStatuses}

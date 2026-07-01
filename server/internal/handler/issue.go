@@ -926,6 +926,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
 	}
+	if r.URL.Query().Get("parent_only") == "true" {
+		where = append(where, "i.parent_issue_id IS NULL")
+	}
 	if metadataFilter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
 	}
@@ -1402,6 +1405,10 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 			"EXISTS (SELECT 1 FROM issue_to_label itl WHERE itl.issue_id = i.id AND itl.label_id = ANY(%s::uuid[]))",
 			addArg(labelIDs),
 		))
+	}
+
+	if r.URL.Query().Get("parent_only") == "true" {
+		where = append(where, "i.parent_issue_id IS NULL")
 	}
 
 	dateFilter, ok := parseIssueDateFilter(w, r.URL.Query())
