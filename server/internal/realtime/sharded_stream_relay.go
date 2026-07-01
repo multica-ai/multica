@@ -18,6 +18,7 @@ const (
 	defaultShardedRelayStreamMaxLen = 100000
 	defaultShardedRelayReadCount    = 128
 	defaultShardedRelayReadBlock    = 5 * time.Second
+	shardedRelayReplayStartID       = "0-0"
 )
 
 // ShardedStreamKey returns the Redis Stream key used by a fixed relay shard.
@@ -195,43 +196,52 @@ func (r *ShardedStreamRelay) shardFor(scopeType, scopeID string) int {
 
 func (r *ShardedStreamRelay) readShard(ctx context.Context, shard int) {
 	stream := ShardedStreamKey(shard)
-	lastID := "$"
+	// Start at the beginning of the retained stream on reader startup. Stream
+	// retention bounds replay volume, and event-id dedup keeps repeat delivery
+	// idempotent for clients that already saw a message through another path.
+	lastID := shardedRelayReplayStartID
 	for {
 		if ctx.Err() != nil || r.isStopping() {
 			return
 		}
-
-		readCtx, cancel := context.WithTimeout(ctx, r.config.ReadBlock+time.Second)
-		res, err := r.readRDB.XRead(readCtx, &redis.XReadArgs{
-			Streams: []string{stream, lastID},
-			Count:   r.config.ReadCount,
-			Block:   r.config.ReadBlock,
-		}).Result()
-		cancel()
-
-		if errors.Is(err, redis.Nil) || (err != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled))) {
-			continue
-		}
-		if err != nil {
-			M.RedisXReadErrors.Add(1)
-			M.SetRedisLastError(err.Error())
-			slog.Warn("realtime/sharded-redis: XREAD failed", "error", err, "shard", shard, "stream", stream)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Second):
-			}
-			continue
-		}
-
-		for _, s := range res {
-			for _, msg := range s.Messages {
-				lastID = msg.ID
-				M.RedisXReadTotal.Add(1)
-				r.deliverMessage(msg)
-			}
+		if !r.readShardOnce(ctx, shard, stream, &lastID) {
+			return
 		}
 	}
+}
+
+func (r *ShardedStreamRelay) readShardOnce(ctx context.Context, shard int, stream string, lastID *string) bool {
+	readCtx, cancel := context.WithTimeout(ctx, r.config.ReadBlock+time.Second)
+	res, err := r.readRDB.XRead(readCtx, &redis.XReadArgs{
+		Streams: []string{stream, *lastID},
+		Count:   r.config.ReadCount,
+		Block:   r.config.ReadBlock,
+	}).Result()
+	cancel()
+
+	if errors.Is(err, redis.Nil) || (err != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled))) {
+		return true
+	}
+	if err != nil {
+		M.RedisXReadErrors.Add(1)
+		M.SetRedisLastError(err.Error())
+		slog.Warn("realtime/sharded-redis: XREAD failed", "error", err, "shard", shard, "stream", stream)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(time.Second):
+		}
+		return true
+	}
+
+	for _, s := range res {
+		for _, msg := range s.Messages {
+			*lastID = msg.ID
+			M.RedisXReadTotal.Add(1)
+			r.deliverMessage(msg)
+		}
+	}
+	return true
 }
 
 func (r *ShardedStreamRelay) deliverMessage(msg redis.XMessage) {
