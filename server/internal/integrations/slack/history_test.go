@@ -247,6 +247,128 @@ func TestChannelOverviewLimitClamp(t *testing.T) {
 	}
 }
 
+// TestThreadRecoversBotAttachmentText covers alerting/webhook bots (Grafana
+// cards, incoming webhooks): the body lives in attachments with an empty
+// top-level Text. The root must be recovered, not dropped (MUL-3931 / #4803).
+func TestThreadRecoversBotAttachmentText(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("50.000000"), inst: activeSlackInstall()}
+	root := slack.Message{Msg: slack.Msg{
+		Username:  "Grafana",
+		BotID:     "B1",
+		Timestamp: "50.000000",
+		Attachments: []slack.Attachment{{
+			Fallback: "[FIRING:1] HighLatency prod",
+			Title:    "HighLatency",
+			Text:     "p99 over threshold",
+		}},
+	}}
+	fc := &fakeHistoryClient{repliesMsgs: []slack.Message{
+		msg("U1", "@bot what's this alert?", "51.000000"),
+		root,
+	}}
+	h := newTestHistory(q, fc)
+
+	page, err := h.Thread(context.Background(), uid(9), "", channel.HistoryOptions{})
+	if err != nil {
+		t.Fatalf("Thread: %v", err)
+	}
+	if len(page.Messages) != 2 {
+		t.Fatalf("expected root + reply, got %d: %+v", len(page.Messages), page.Messages)
+	}
+	got := findByTS(page.Messages, "50.000000")
+	if got == nil {
+		t.Fatalf("bot root message was dropped: %+v", page.Messages)
+	}
+	if got.Text != "[FIRING:1] HighLatency prod" {
+		t.Errorf("root text = %q, want the attachment fallback", got.Text)
+	}
+	if got.Author != "Grafana" {
+		t.Errorf("root author = %q, want Grafana", got.Author)
+	}
+}
+
+// TestThreadRecoversBlocksText: a message with no Text and no attachment
+// fallback is flattened from its Block Kit blocks.
+func TestThreadRecoversBlocksText(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("50.000000"), inst: activeSlackInstall()}
+	root := slack.Message{Msg: slack.Msg{
+		Username:  "Webhook",
+		BotID:     "B2",
+		Timestamp: "50.000000",
+		Blocks: slack.Blocks{BlockSet: []slack.Block{
+			slack.NewHeaderBlock(slack.NewTextBlockObject(slack.PlainTextType, "Deploy failed", false, false)),
+			slack.NewSectionBlock(slack.NewTextBlockObject(slack.MarkdownType, "service *api* rolled back", false, false), nil, nil),
+		}},
+	}}
+	fc := &fakeHistoryClient{repliesMsgs: []slack.Message{root}}
+	h := newTestHistory(q, fc)
+
+	page, err := h.Thread(context.Background(), uid(9), "", channel.HistoryOptions{})
+	if err != nil {
+		t.Fatalf("Thread: %v", err)
+	}
+	got := findByTS(page.Messages, "50.000000")
+	if got == nil {
+		t.Fatalf("blocks-only message was dropped: %+v", page.Messages)
+	}
+	if got.Text != "Deploy failed\nservice *api* rolled back" {
+		t.Errorf("root text = %q, want the flattened blocks", got.Text)
+	}
+}
+
+// TestThreadRecoversRichTextBlock: a message whose only body is a Block Kit
+// rich_text block (the shape Slack's rich text input produces) is flattened.
+func TestThreadRecoversRichTextBlock(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("50.000000"), inst: activeSlackInstall()}
+	root := slack.Message{Msg: slack.Msg{
+		Username:  "Webhook",
+		BotID:     "B3",
+		Timestamp: "50.000000",
+		Blocks: slack.Blocks{BlockSet: []slack.Block{
+			slack.NewRichTextBlock("blk",
+				slack.NewRichTextSection(
+					slack.NewRichTextSectionTextElement("incident opened: ", nil),
+					slack.NewRichTextSectionLinkElement("https://ex.co/i/1", "INC-1", nil),
+				),
+			),
+		}},
+	}}
+	fc := &fakeHistoryClient{repliesMsgs: []slack.Message{root}}
+	h := newTestHistory(q, fc)
+
+	page, err := h.Thread(context.Background(), uid(9), "", channel.HistoryOptions{})
+	if err != nil {
+		t.Fatalf("Thread: %v", err)
+	}
+	got := findByTS(page.Messages, "50.000000")
+	if got == nil {
+		t.Fatalf("rich_text-only message was dropped: %+v", page.Messages)
+	}
+	if got.Text != "incident opened: INC-1" {
+		t.Errorf("root text = %q, want the flattened rich_text", got.Text)
+	}
+}
+
+// TestThreadDropsEmptySystemMarker: a message with no readable body anywhere
+// (a join/leave/system marker) is still dropped — the fallback must not
+// resurrect content-less markers.
+func TestThreadDropsEmptySystemMarker(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("50.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{repliesMsgs: []slack.Message{
+		{Msg: slack.Msg{SubType: "channel_join", User: "U1", Timestamp: "50.000000"}},
+		msg("U2", "real reply", "51.000000"),
+	}}
+	h := newTestHistory(q, fc)
+
+	page, err := h.Thread(context.Background(), uid(9), "", channel.HistoryOptions{})
+	if err != nil {
+		t.Fatalf("Thread: %v", err)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].TS != "51.000000" {
+		t.Fatalf("expected only the real reply, got %+v", page.Messages)
+	}
+}
+
 // TestHistoryTargetDerivesRoot pins channel + thread-root recovery from a binding.
 func TestHistoryTargetDerivesRoot(t *testing.T) {
 	if ch, root := historyTarget(groupBinding("50.0")); ch != "C1" || root != "50.0" {

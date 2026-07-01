@@ -238,8 +238,9 @@ func normalizePage(ctx context.Context, client historyClient, logger *slog.Logge
 	out := make([]channel.HistoryMessage, 0, len(raw))
 	for i := range raw {
 		m := raw[i]
-		if m.Text == "" {
-			continue // join/system/edit markers carry no readable body
+		text := flattenSlackText(m)
+		if text == "" {
+			continue // genuine join/system/edit marker: no readable body
 		}
 		own := m.User != "" && m.User == botUserID
 		role := channel.HistoryRoleUser
@@ -251,7 +252,7 @@ func normalizePage(ctx context.Context, client historyClient, logger *slog.Logge
 			Author:   labeler.label(m, own),
 			AuthorID: m.User,
 			Role:     role,
-			Text:     m.Text,
+			Text:     text,
 			TS:       m.Timestamp,
 		}
 		if overview && m.ReplyCount > 0 {
@@ -269,6 +270,158 @@ func normalizePage(ctx context.Context, client historyClient, logger *slog.Logge
 		page.NextCursor = out[0].TS
 	}
 	return page
+}
+
+// maxDerivedTextLen caps text recovered from attachments/blocks so a verbose
+// alert card cannot flood the agent's context. It applies only to the fallback
+// path; a normal top-level message body is passed through untouched.
+const maxDerivedTextLen = 4000
+
+// flattenSlackText renders a Slack message to the plain-text body the history
+// contract promises (channel.HistoryMessage.Text). Alerting/webhook bots
+// (Grafana cards, incoming webhooks) carry their whole body in attachments or
+// Block Kit blocks and leave the top-level Text empty; without this fallback
+// such a message is indistinguishable from a join/system marker and gets
+// dropped (MUL-3931 / #4803). Order: top-level text, then each attachment's
+// built-in Fallback / title+text/fields, then a best-effort blocks flatten.
+// Returns "" only when nothing renderable exists — a real system marker.
+func flattenSlackText(m slack.Message) string {
+	if t := strings.TrimSpace(m.Text); t != "" {
+		return t
+	}
+	parts := make([]string, 0, len(m.Attachments)+1)
+	for i := range m.Attachments {
+		if t := attachmentText(m.Attachments[i]); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	if len(parts) == 0 {
+		if t := flattenBlocks(m.Blocks); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	return truncateRunes(strings.TrimSpace(strings.Join(parts, "\n")), maxDerivedTextLen)
+}
+
+// attachmentText summarizes one attachment, preferring Slack's built-in
+// Fallback (the plain-text rendering Slack ships for exactly this purpose),
+// then a pretext/title/text/fields composite, then the attachment's own blocks.
+func attachmentText(a slack.Attachment) string {
+	if t := strings.TrimSpace(a.Fallback); t != "" {
+		return t
+	}
+	parts := make([]string, 0, 3+len(a.Fields))
+	for _, s := range []string{a.Pretext, a.Title, a.Text} {
+		if s = strings.TrimSpace(s); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	for _, f := range a.Fields {
+		if s := strings.TrimSpace(f.Title + " " + f.Value); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, "\n")
+	}
+	return flattenBlocks(a.Blocks)
+}
+
+// flattenBlocks renders Block Kit blocks to plain text, best-effort: it walks
+// the common text-bearing blocks (section, header, context, markdown, and
+// rich_text) and skips interactive/media blocks.
+func flattenBlocks(blocks slack.Blocks) string {
+	parts := make([]string, 0, len(blocks.BlockSet))
+	add := func(s string) {
+		if s = strings.TrimSpace(s); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	for _, b := range blocks.BlockSet {
+		switch v := b.(type) {
+		case *slack.SectionBlock:
+			if v.Text != nil {
+				add(v.Text.Text)
+			}
+			for _, f := range v.Fields {
+				if f != nil {
+					add(f.Text)
+				}
+			}
+		case *slack.HeaderBlock:
+			if v.Text != nil {
+				add(v.Text.Text)
+			}
+		case *slack.MarkdownBlock:
+			add(v.Text)
+		case *slack.ContextBlock:
+			for _, el := range v.ContextElements.Elements {
+				if tb, ok := el.(*slack.TextBlockObject); ok {
+					add(tb.Text)
+				}
+			}
+		case *slack.RichTextBlock:
+			add(richTextBlockText(v))
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// richTextBlockText flattens a rich_text block to plain text, best-effort: it
+// walks sections, lists, quotes, and preformatted runs and concatenates their
+// text and link runs (one line per section). Mentions, emoji, and other inline
+// decorations are skipped — this is the plain body an agent needs, not a
+// faithful re-render. A rich_text-only body is the standard shape for messages
+// composed in Slack's own rich text input, so a bot that posts one with an
+// empty top-level Text would otherwise be dropped.
+func richTextBlockText(b *slack.RichTextBlock) string {
+	var lines []string
+	var writeElement func(el slack.RichTextElement)
+	writeSection := func(els []slack.RichTextSectionElement) {
+		var sb strings.Builder
+		for _, e := range els {
+			switch v := e.(type) {
+			case *slack.RichTextSectionTextElement:
+				sb.WriteString(v.Text)
+			case *slack.RichTextSectionLinkElement:
+				if v.Text != "" {
+					sb.WriteString(v.Text)
+				} else {
+					sb.WriteString(v.URL)
+				}
+			}
+		}
+		if s := strings.TrimSpace(sb.String()); s != "" {
+			lines = append(lines, s)
+		}
+	}
+	writeElement = func(el slack.RichTextElement) {
+		switch v := el.(type) {
+		case *slack.RichTextSection:
+			writeSection(v.Elements)
+		case *slack.RichTextQuote:
+			writeSection(v.Elements)
+		case *slack.RichTextPreformatted:
+			writeSection(v.Elements)
+		case *slack.RichTextList:
+			for _, item := range v.Elements {
+				writeElement(item)
+			}
+		}
+	}
+	for _, el := range b.Elements {
+		writeElement(el)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// truncateRunes trims s to at most max runes, appending an ellipsis when cut.
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 // resolveUserNames batch-resolves human senders' display names, best-effort. A
