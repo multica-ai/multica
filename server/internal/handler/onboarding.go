@@ -299,28 +299,9 @@ func (h *Handler) reportSelfHostSourceChannelIfNeeded(r *http.Request, userID st
 
 	questionnaireJustCompleted := after.complete() && !before.complete()
 	backfillSubmitted := beforeOnboarded && len(before.Source) == 0 && !before.SourceSkipped && len(after.Source) > 0
-	sourceChangedAfterCompletion := before.complete() && after.complete() && sourceAttributionChanged(before, after)
-	if questionnaireJustCompleted || backfillSubmitted || sourceChangedAfterCompletion {
+	if questionnaireJustCompleted || backfillSubmitted {
 		h.SourceChannelReporter.ReportSelfHostSourceChannel(userID, channel, after.SourceOther, sourcechannel.ReportingAPIBaseURL(r), after.SourceDomainConsent)
 	}
-}
-
-func sourceAttributionChanged(before, after questionnaireAnswers) bool {
-	if sourceChanged(before.Source, after.Source) {
-		return true
-	}
-	if len(after.Source) == 0 || strings.TrimSpace(after.Source[0]) != "other" {
-		return before.SourceDomainConsent != after.SourceDomainConsent
-	}
-	return strings.TrimSpace(before.SourceOther) != strings.TrimSpace(after.SourceOther) ||
-		before.SourceDomainConsent != after.SourceDomainConsent
-}
-
-func sourceChanged(before, after stringOrSlice) bool {
-	if len(before) == 0 || len(after) == 0 {
-		return len(before) != len(after)
-	}
-	return before[0] != after[0]
 }
 
 type joinCloudWaitlistRequest struct {

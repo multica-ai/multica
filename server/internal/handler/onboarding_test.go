@@ -147,33 +147,6 @@ func TestPatchOnboardingReportsSelfHostSourceWhenQuestionnaireCompletes(t *testi
 	if len(recorder.calls) != 1 {
 		t.Fatalf("unchanged complete patch should not report again, got %+v", recorder.calls)
 	}
-
-	w = httptest.NewRecorder()
-	testHandler.PatchOnboarding(w, newPatchOnboardingRequest(userID, `{
-		"source": ["social_github"],
-		"source_other": null,
-		"source_skipped": false,
-			"source_domain_consent": true,
-		"role": "engineer",
-		"role_other": null,
-		"role_skipped": false,
-		"use_case": ["ship_code"],
-		"use_case_other": null,
-		"use_case_skipped": false,
-		"version": 2
-	}`))
-	if w.Code != http.StatusOK {
-		t.Fatalf("changed complete patch: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if len(recorder.calls) != 2 {
-		t.Fatalf("changed complete patch should report updated source, got %+v", recorder.calls)
-	}
-	if recorder.calls[1].userID != userID || recorder.calls[1].channel != "social_github" {
-		t.Fatalf("unexpected updated report: %+v", recorder.calls[1])
-	}
-	if !recorder.calls[1].includeDomain {
-		t.Fatalf("expected updated report to keep plaintext domain consent")
-	}
 }
 
 func TestPatchOnboardingReportsSelfHostSourceWithoutPlaintextDomain(t *testing.T) {
@@ -230,55 +203,6 @@ func TestPatchOnboardingReportsSelfHostSourceOtherText(t *testing.T) {
 		t.Fatalf("complete other patch should report once, got %+v", recorder.calls)
 	}
 	if recorder.calls[0].userID != userID || recorder.calls[0].channel != "other" || recorder.calls[0].sourceOther != "a podcast" {
-		t.Fatalf("unexpected report: %+v", recorder.calls[0])
-	}
-}
-
-func TestPatchOnboardingReportsSelfHostSourceOtherTextChange(t *testing.T) {
-	userID := newWaitlistTestUser(t, "source-other-change@multica.ai")
-	if _, err := testPool.Exec(context.Background(), `
-		UPDATE "user"
-		   SET onboarded_at = now(),
-		       onboarding_questionnaire = $2::jsonb
-		 WHERE id = $1
-	`, userID, `{
-		"source": ["other"],
-		"source_other": "old podcast",
-		"source_skipped": false,
-			"source_domain_consent": true,
-		"role": "engineer",
-		"role_other": null,
-		"role_skipped": false,
-		"use_case": ["ship_code"],
-		"use_case_other": null,
-		"use_case_skipped": false,
-		"version": 2
-	}`); err != nil {
-		t.Fatalf("seed onboarded user: %v", err)
-	}
-	recorder := installRecordingSourceChannelReporter(t)
-
-	w := httptest.NewRecorder()
-	testHandler.PatchOnboarding(w, newPatchOnboardingRequest(userID, `{
-		"source": ["other"],
-		"source_other": "new podcast",
-		"source_skipped": false,
-			"source_domain_consent": true,
-		"role": "engineer",
-		"role_other": null,
-		"role_skipped": false,
-		"use_case": ["ship_code"],
-		"use_case_other": null,
-		"use_case_skipped": false,
-		"version": 2
-	}`))
-	if w.Code != http.StatusOK {
-		t.Fatalf("other text change patch: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if len(recorder.calls) != 1 {
-		t.Fatalf("other text change patch should report once, got %+v", recorder.calls)
-	}
-	if recorder.calls[0].userID != userID || recorder.calls[0].channel != "other" || recorder.calls[0].sourceOther != "new podcast" {
 		t.Fatalf("unexpected report: %+v", recorder.calls[0])
 	}
 }
