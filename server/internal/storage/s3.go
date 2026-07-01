@@ -18,11 +18,12 @@ import (
 )
 
 type S3Storage struct {
-	client      *s3.Client
-	bucket      string
-	region      string // used to construct virtual-hosted-style public URLs when no CDN/endpoint is set
-	cdnDomain   string // if set, returned URLs use this instead of bucket name
-	endpointURL string // if set, use path-style URLs (e.g. MinIO)
+	client       *s3.Client
+	bucket       string
+	region       string // used to construct virtual-hosted-style public URLs when no CDN/endpoint is set
+	cdnDomain    string // if set, returned URLs use this instead of bucket name
+	endpointURL  string // if set, points at an S3-compatible store (Aliyun OSS, R2, MinIO, ...)
+	usePathStyle bool   // mirrors s3.Options.UsePathStyle — must match SDK to get URLs the bucket actually serves
 }
 
 // NewS3StorageFromEnv creates an S3Storage from environment variables.
@@ -71,6 +72,10 @@ func NewS3StorageFromEnv() *S3Storage {
 	cdnDomain := os.Getenv("CLOUDFRONT_DOMAIN")
 
 	endpointURL := os.Getenv("AWS_ENDPOINT_URL")
+	// Aliyun OSS / Cloudflare R2 / Backblaze B2 require virtual-hosted style;
+	// MinIO and a few other S3-compatible stores need path style.
+	// Default to virtual-hosted (false). Set S3_FORCE_PATH_STYLE=true to opt in.
+	usePathStyle := os.Getenv("S3_FORCE_PATH_STYLE") == "true"
 	s3Opts := []func(*s3.Options){}
 	if endpointURL != "" {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
@@ -79,13 +84,14 @@ func NewS3StorageFromEnv() *S3Storage {
 		})
 	}
 
-	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL)
+	slog.Info("S3 storage initialized", "bucket", bucket, "region", region, "cdn_domain", cdnDomain, "endpoint_url", endpointURL, "use_path_style", usePathStyle)
 	return &S3Storage{
-		client:      s3.NewFromConfig(cfg, s3Opts...),
-		bucket:      bucket,
-		region:      region,
-		cdnDomain:   cdnDomain,
-		endpointURL: endpointURL,
+		client:       s3.NewFromConfig(cfg, s3Opts...),
+		bucket:       bucket,
+		region:       region,
+		cdnDomain:    cdnDomain,
+		endpointURL:  endpointURL,
+		usePathStyle: usePathStyle,
 	}
 }
 
@@ -117,9 +123,16 @@ func (s *S3Storage) storageClass() types.StorageClass {
 //	"https://my-bucket.s3.us-east-1.amazonaws.com/uploads/x/y.png" → "uploads/x/y.png"
 func (s *S3Storage) KeyFromURL(rawURL string) string {
 	if s.endpointURL != "" {
-		prefix := strings.TrimRight(s.endpointURL, "/") + "/" + s.bucket + "/"
-		if strings.HasPrefix(rawURL, prefix) {
-			return strings.TrimPrefix(rawURL, prefix)
+		// path-style: https://<host>/<bucket>/<key>
+		pathPrefix := strings.TrimRight(s.endpointURL, "/") + "/" + s.bucket + "/"
+		if strings.HasPrefix(rawURL, pathPrefix) {
+			return strings.TrimPrefix(rawURL, pathPrefix)
+		}
+		// virtual-hosted style: https://<bucket>.<host>/<key>
+		scheme, host := splitEndpointHost(s.endpointURL)
+		vhostPrefix := scheme + "://" + s.bucket + "." + host + "/"
+		if strings.HasPrefix(rawURL, vhostPrefix) {
+			return strings.TrimPrefix(rawURL, vhostPrefix)
 		}
 	}
 
@@ -254,10 +267,34 @@ func (s *S3Storage) uploadedURL(key string) string {
 		return fmt.Sprintf("https://%s/%s", s.cdnDomain, key)
 	}
 	if s.endpointURL != "" {
-		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
+		// Match the addressing style used by the SDK. Aliyun OSS public access
+		// REQUIRES virtual-hosted style (`<bucket>.<host>`); the path-style
+		// form returns SecondLevelDomainForbidden. MinIO-style stores opt into
+		// path style via S3_FORCE_PATH_STYLE=true.
+		if s.usePathStyle {
+			return fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.endpointURL, "/"), s.bucket, key)
+		}
+		scheme, host := splitEndpointHost(s.endpointURL)
+		return fmt.Sprintf("%s://%s.%s/%s", scheme, s.bucket, host, key)
 	}
 	if strings.Contains(s.bucket, ".") {
 		return fmt.Sprintf("https://s3.%s.amazonaws.com/%s/%s", s.region, s.bucket, key)
 	}
 	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.region, key)
+}
+
+// splitEndpointHost splits an endpoint URL like "https://oss-us-west-1.aliyuncs.com"
+// into ("https", "oss-us-west-1.aliyuncs.com"). Trailing slashes and any path are
+// dropped; missing scheme defaults to https.
+func splitEndpointHost(endpoint string) (scheme, host string) {
+	rest := strings.TrimRight(endpoint, "/")
+	scheme = "https"
+	if i := strings.Index(rest, "://"); i >= 0 {
+		scheme = rest[:i]
+		rest = rest[i+3:]
+	}
+	if i := strings.Index(rest, "/"); i >= 0 {
+		rest = rest[:i]
+	}
+	return scheme, rest
 }

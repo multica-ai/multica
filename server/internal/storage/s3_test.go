@@ -12,10 +12,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-func TestS3StorageKeyFromURL_CustomEndpointPreservesNestedKey(t *testing.T) {
+func TestS3StorageKeyFromURL_CustomEndpointPathStylePreservesNestedKey(t *testing.T) {
 	s := &S3Storage{
-		bucket:      "test-bucket",
-		endpointURL: "http://localhost:9000",
+		bucket:       "test-bucket",
+		endpointURL:  "http://localhost:9000",
+		usePathStyle: true,
 	}
 
 	rawURL := "http://localhost:9000/test-bucket/uploads/abc/file.png"
@@ -81,14 +82,28 @@ func TestS3StoragePresignGetWithContentDisposition(t *testing.T) {
 
 func TestS3StorageKeyFromURL_CustomEndpointWithTrailingSlash(t *testing.T) {
 	s := &S3Storage{
-		bucket:      "test-bucket",
-		endpointURL: "http://localhost:9000/",
+		bucket:       "test-bucket",
+		endpointURL:  "http://localhost:9000/",
+		usePathStyle: true,
 	}
 
 	rawURL := "http://localhost:9000/test-bucket/uploads/abc/file.png"
 
 	if got := s.KeyFromURL(rawURL); got != "uploads/abc/file.png" {
 		t.Fatalf("KeyFromURL(%q) = %q, want %q", rawURL, got, "uploads/abc/file.png")
+	}
+}
+
+func TestS3StorageKeyFromURL_CustomEndpointVirtualHostedPreservesNestedKey(t *testing.T) {
+	s := &S3Storage{
+		bucket:      "multica-uploads-prod",
+		endpointURL: "https://oss-us-west-1.aliyuncs.com",
+	}
+
+	rawURL := "https://multica-uploads-prod.oss-us-west-1.aliyuncs.com/workspaces/abc/file.png"
+
+	if got := s.KeyFromURL(rawURL); got != "workspaces/abc/file.png" {
+		t.Fatalf("KeyFromURL(%q) = %q, want %q", rawURL, got, "workspaces/abc/file.png")
 	}
 }
 
@@ -159,12 +174,13 @@ func TestS3StorageUploadedURL(t *testing.T) {
 	const key = "uploads/abc/file.png"
 
 	cases := []struct {
-		name        string
-		bucket      string
-		region      string
-		cdnDomain   string
-		endpointURL string
-		want        string
+		name         string
+		bucket       string
+		region       string
+		cdnDomain    string
+		endpointURL  string
+		usePathStyle bool
+		want         string
 	}{
 		{
 			name:   "default aws virtual hosted style",
@@ -186,18 +202,34 @@ func TestS3StorageUploadedURL(t *testing.T) {
 			want:      "https://cdn.example.com/uploads/abc/file.png",
 		},
 		{
-			name:        "endpoint only",
-			bucket:      "test-bucket",
-			region:      "us-east-1",
-			endpointURL: "http://localhost:9000",
-			want:        "http://localhost:9000/test-bucket/uploads/abc/file.png",
+			name:         "endpoint with explicit path style (MinIO)",
+			bucket:       "test-bucket",
+			region:       "us-east-1",
+			endpointURL:  "http://localhost:9000",
+			usePathStyle: true,
+			want:         "http://localhost:9000/test-bucket/uploads/abc/file.png",
 		},
 		{
-			name:        "endpoint with trailing slash",
-			bucket:      "test-bucket",
-			region:      "us-east-1",
-			endpointURL: "http://localhost:9000/",
-			want:        "http://localhost:9000/test-bucket/uploads/abc/file.png",
+			name:         "endpoint with trailing slash, path style",
+			bucket:       "test-bucket",
+			region:       "us-east-1",
+			endpointURL:  "http://localhost:9000/",
+			usePathStyle: true,
+			want:         "http://localhost:9000/test-bucket/uploads/abc/file.png",
+		},
+		{
+			name:        "aliyun oss virtual hosted style by default",
+			bucket:      "multica-uploads-prod",
+			region:      "oss-us-west-1",
+			endpointURL: "https://oss-us-west-1.aliyuncs.com",
+			want:        "https://multica-uploads-prod.oss-us-west-1.aliyuncs.com/uploads/abc/file.png",
+		},
+		{
+			name:        "aliyun oss virtual hosted with trailing slash",
+			bucket:      "multica-uploads-prod",
+			region:      "oss-us-west-1",
+			endpointURL: "https://oss-us-west-1.aliyuncs.com/",
+			want:        "https://multica-uploads-prod.oss-us-west-1.aliyuncs.com/uploads/abc/file.png",
 		},
 		{
 			name:        "endpoint and cdn both set prefers cdn",
@@ -212,13 +244,36 @@ func TestS3StorageUploadedURL(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &S3Storage{
-				bucket:      tc.bucket,
-				region:      tc.region,
-				cdnDomain:   tc.cdnDomain,
-				endpointURL: tc.endpointURL,
+				bucket:       tc.bucket,
+				region:       tc.region,
+				cdnDomain:    tc.cdnDomain,
+				endpointURL:  tc.endpointURL,
+				usePathStyle: tc.usePathStyle,
 			}
 			if got := s.uploadedURL(key); got != tc.want {
 				t.Fatalf("uploadedURL() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSplitEndpointHost(t *testing.T) {
+	cases := []struct {
+		endpoint string
+		scheme   string
+		host     string
+	}{
+		{"https://oss-us-west-1.aliyuncs.com", "https", "oss-us-west-1.aliyuncs.com"},
+		{"https://oss-us-west-1.aliyuncs.com/", "https", "oss-us-west-1.aliyuncs.com"},
+		{"http://localhost:9000", "http", "localhost:9000"},
+		{"http://localhost:9000/", "http", "localhost:9000"},
+		{"oss-us-west-1.aliyuncs.com", "https", "oss-us-west-1.aliyuncs.com"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.endpoint, func(t *testing.T) {
+			scheme, host := splitEndpointHost(tc.endpoint)
+			if scheme != tc.scheme || host != tc.host {
+				t.Fatalf("splitEndpointHost(%q) = (%q, %q), want (%q, %q)", tc.endpoint, scheme, host, tc.scheme, tc.host)
 			}
 		})
 	}
