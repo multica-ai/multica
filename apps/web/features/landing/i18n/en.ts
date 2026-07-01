@@ -294,6 +294,34 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.34",
+        date: "2026-07-01",
+        title: "Slack /issue slash command, ByteDance TRAE CLI runtime, and Claude Sonnet 5",
+        changes: [],
+        features: [
+          "File a Multica Issue right from Slack with the native /issue slash command — Slack replies to you privately with the new Issue link and no channel noise.",
+          "A Slack user who has already linked their account to one Multica bot no longer sees a re-link prompt when the same Slack workspace connects a second bot; the existing account link is reused automatically.",
+          "Slack channel context is now driven by two focused reads — a channel overview (top-level messages with thread markers) and a per-thread read — so an agent can jump straight into the exact thread you referred to.",
+          "ByteDance TRAE CLI (traecli) joins the built-in agent runtimes over the standard ACP transport, with its own model catalog.",
+          "Claude Sonnet 5 is now available in the Anthropic model catalog, with introductory pricing wired through the usage layer.",
+          "Self-hosted deployments can now report their anonymous source channel from onboarding or the source backfill dialog, so we can understand where self-hosters heard about Multica.",
+          "Each task run now records a prompt-cache hit ratio in the usage log, giving us a per-run measurement to guide upcoming prompt-caching work.",
+        ],
+        improvements: [
+          "Autopilot access management moved into the Edit dialog: a compact Manage access button in the modal header opens a lightweight popover with the grant/revoke list, replacing the standalone header button.",
+          "The Issue and comment editor upgrades Tiptap to 3.27.1, fixing a rare regression where typing an inline `code` shortcut could drop the character before it.",
+        ],
+        fixes: [
+          "The Slack chat agent no longer narrates its channel-history reads — it now reads silently and replies directly with the answer instead of prefacing every message with what it is about to look up.",
+          "Attachment previews (PDF / HTML) again open on self-hosted local-disk deployments; the /uploads/* static route now uses the same relaxed frame-ancestors policy as the API attachment endpoint. (Community-reported.)",
+          "Cursor and Kiro runtime completion transcripts are recovered: Cursor's terminal result text now streams into the run message log even when it is the first assistant text, and Kiro's known post-completion close error is treated as success once the terminal `multica issue comment add` has landed.",
+          "Self-host: MULTICA_SLACK_SECRET_KEY is now passed through to the backend container in docker-compose.selfhost.yml, so setting it in .env actually enables the Slack integration. (Community-reported.)",
+          "The Issue-board \"N working\" chip counts distinct Issues instead of distinct agents, so two agents on the same Issue no longer inflate the number.",
+          "Anonymous self-host source-channel reports go back to the official Multica API endpoint, replacing a temporary staging URL that slipped in during development.",
+          "Comment deep-link highlights are now background-only and apply uniformly to root comments and replies; the sticky comment header no longer shows a mismatched strip while a highlight is active.",
+        ],
+      },
+      {
         version: "0.3.33",
         date: "2026-06-30",
         title: "Autopilot access controls, Slack history backfill, and skill-archive imports",
