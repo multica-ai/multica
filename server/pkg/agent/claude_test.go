@@ -307,16 +307,19 @@ func TestTrySendDropsWhenFull(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
+func TestBuildClaudeArgsOmitsStrictMCPConfigByDefault(t *testing.T) {
 	t.Parallel()
 
+	// devrushit fork PR #1451: with no per-agent MCP config, --strict-mcp-config
+	// must NOT be present, so the spawned Claude inherits the operator's
+	// account-level MCP connectors (e.g. claude.ai Figma). It is paired with
+	// --mcp-config at the Execute call site for the #1168 isolation contract.
 	args := buildClaudeArgs(ExecOptions{}, slog.Default())
 	expected := []string{
 		"-p",
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 		"--disallowedTools", "AskUserQuestion",
 	}
@@ -327,6 +330,11 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 	for i, want := range expected {
 		if args[i] != want {
 			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
+		}
+	}
+	for _, a := range args {
+		if a == "--strict-mcp-config" {
+			t.Fatalf("--strict-mcp-config must be omitted when no per-agent MCP config is set: %v", args)
 		}
 	}
 }
