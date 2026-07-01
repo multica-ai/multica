@@ -21,7 +21,8 @@
  * groups on mobile vs web. Cancelled is omitted on both clients.
  */
 import { useMemo } from "react";
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Image as ExpoImage } from "expo-image";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import type { Issue, IssueStatus } from "@multica/core/types";
@@ -32,6 +33,9 @@ import { IssueRow } from "@/components/issue/issue-row";
 import { IssuesLoading } from "@/components/issue/issues-loading";
 import { projectIssuesOptions } from "@/data/queries/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useProjectCollapseStore } from "@/data/stores/project-collapse-store";
+import { useColorScheme } from "@/lib/use-color-scheme";
+import { THEME } from "@/lib/theme";
 import { BOARD_STATUSES, STATUS_LABEL } from "@/lib/issue-status";
 
 interface Props {
@@ -44,6 +48,8 @@ export function ProjectRelatedIssues({ projectId }: Props) {
   const { data, isLoading, error, refetch } = useQuery(
     projectIssuesOptions(wsId, projectId),
   );
+  const toggle = useProjectCollapseStore((s) => s.toggle);
+  const isCollapsed = useProjectCollapseStore((s) => s.isCollapsed);
 
   const byStatus = useMemo(() => {
     const m = new Map<IssueStatus, Issue[]>();
@@ -88,16 +94,23 @@ export function ProjectRelatedIssues({ projectId }: Props) {
       {BOARD_STATUSES.map((status) => {
         const issues = byStatus.get(status) ?? [];
         if (issues.length === 0) return null;
+        const collapsed = isCollapsed(projectId, status);
         return (
           <View key={status}>
-            <SectionHeader status={status} count={issues.length} />
-            {issues.map((issue) => (
-              <IssueRow
-                key={issue.id}
-                issue={issue}
-                onPress={() => navigateToIssue(issue.id)}
-              />
-            ))}
+            <SectionHeader
+              status={status}
+              count={issues.length}
+              collapsed={collapsed}
+              onToggle={() => toggle(projectId, status)}
+            />
+            {!collapsed &&
+              issues.map((issue) => (
+                <IssueRow
+                  key={issue.id}
+                  issue={issue}
+                  onPress={() => navigateToIssue(issue.id)}
+                />
+              ))}
           </View>
         );
       })}
@@ -108,17 +121,37 @@ export function ProjectRelatedIssues({ projectId }: Props) {
 function SectionHeader({
   status,
   count,
+  collapsed,
+  onToggle,
 }: {
   status: IssueStatus;
   count: number;
+  collapsed: boolean;
+  onToggle: () => void;
 }) {
+  const { colorScheme } = useColorScheme();
+  const t = THEME[colorScheme];
   return (
-    <View className="flex-row items-center gap-2 px-4 py-2 bg-background">
+    <Pressable
+      onPress={onToggle}
+      className="flex-row items-center gap-2 px-4 py-2 bg-background active:bg-secondary"
+      accessibilityRole="button"
+      accessibilityLabel={`${STATUS_LABEL[status]}, ${count} issues, ${collapsed ? "collapsed" : "expanded"}`}
+    >
       <StatusIcon status={status} size={14} />
-      <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
+      <Text className="flex-1 text-xs uppercase tracking-wider text-muted-foreground font-medium">
         {STATUS_LABEL[status]}
       </Text>
-      <Text className="text-xs text-muted-foreground/60">{count}</Text>
-    </View>
+      <Text className="text-xs text-muted-foreground/60 mr-1">{count}</Text>
+      <ExpoImage
+        source="sf:chevron.right"
+        tintColor={t.mutedForeground}
+        style={{
+          width: 12,
+          height: 12,
+          transform: [{ rotate: collapsed ? "0deg" : "90deg" }],
+        }}
+      />
+    </Pressable>
   );
 }
