@@ -385,6 +385,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		params.Repos = reposJSON
 	}
+	var updateDefaultTeamKey bool
 	if req.IssuePrefix != nil {
 		prefix := normalizeTeamKey(*req.IssuePrefix)
 		if prefix != "" {
@@ -392,31 +393,53 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "issue_prefix must match ^[A-Z][A-Z0-9]{0,6}$")
 				return
 			}
-			defaultTeam, err := h.Queries.GetDefaultWorkspaceTeam(r.Context(), idUUID)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "default team not found")
-				return
-			}
-			if defaultTeam.IssueCounter > 0 {
-				writeError(w, http.StatusConflict, "team key cannot be changed after issues have been created")
-				return
-			}
-			if _, err := h.Queries.UpdateWorkspaceTeam(r.Context(), db.UpdateWorkspaceTeamParams{
-				ID:          defaultTeam.ID,
-				WorkspaceID: idUUID,
-				Key:         pgtype.Text{String: prefix, Valid: true},
-			}); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to update default team key")
-				return
-			}
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
+			updateDefaultTeamKey = true
 		}
 	}
 	if req.AvatarURL != nil {
 		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
 	}
 
-	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)
+	var ws db.Workspace
+	var err error
+	if updateDefaultTeamKey {
+		tx, txErr := h.TxStarter.Begin(r.Context())
+		if txErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to start transaction")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+
+		defaultTeam, teamErr := qtx.GetDefaultWorkspaceTeam(r.Context(), idUUID)
+		if teamErr != nil {
+			writeError(w, http.StatusBadRequest, "default team not found")
+			return
+		}
+		if _, teamErr := updateWorkspaceTeamLocked(r.Context(), qtx, db.UpdateWorkspaceTeamParams{
+			ID:          defaultTeam.ID,
+			WorkspaceID: idUUID,
+			Key:         params.IssuePrefix,
+		}); teamErr != nil {
+			if teamErr == errTeamKeyFrozen {
+				writeError(w, http.StatusConflict, "team key cannot be changed after issues have been created")
+				return
+			}
+			if isUniqueViolation(teamErr) || isCheckViolation(teamErr) {
+				writeError(w, http.StatusBadRequest, "issue_prefix is invalid or already used")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to update default team key")
+			return
+		}
+		ws, err = qtx.UpdateWorkspace(r.Context(), params)
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+	} else {
+		ws, err = h.Queries.UpdateWorkspace(r.Context(), params)
+	}
 	if err != nil {
 		slog.Warn("update workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update workspace: "+err.Error())

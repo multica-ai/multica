@@ -1,15 +1,20 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+var errTeamKeyFrozen = errors.New("team key cannot be changed after issues have been created")
 
 type TeamResponse struct {
 	ID           string  `json:"id"`
@@ -135,22 +140,14 @@ func (h *Handler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	prev, err := h.Queries.GetWorkspaceTeam(r.Context(), db.GetWorkspaceTeamParams{
-		ID:          teamID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "team not found")
-		return
-	}
 	var req UpdateTeamRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	params := db.UpdateWorkspaceTeamParams{
-		ID:          prev.ID,
-		WorkspaceID: prev.WorkspaceID,
+		ID:          teamID,
+		WorkspaceID: wsUUID,
 	}
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
@@ -166,10 +163,6 @@ func (h *Handler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "key must match ^[A-Z][A-Z0-9]{0,6}$")
 			return
 		}
-		if key != prev.Key && prev.IssueCounter > 0 {
-			writeError(w, http.StatusConflict, "team key cannot be changed after issues have been created")
-			return
-		}
 		params.Key = pgtype.Text{String: key, Valid: true}
 	}
 	if req.Description != nil {
@@ -178,19 +171,54 @@ func (h *Handler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 	if req.Icon != nil {
 		params.Icon = pgtype.Text{String: *req.Icon, Valid: true}
 	}
-	team, err := h.Queries.UpdateWorkspaceTeam(r.Context(), params)
+
+	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	team, err := updateWorkspaceTeamLocked(r.Context(), qtx, params)
+	if err != nil {
+		if errors.Is(err, errTeamKeyFrozen) {
+			writeError(w, http.StatusConflict, "team key cannot be changed after issues have been created")
+			return
+		}
 		if isUniqueViolation(err) || isCheckViolation(err) {
 			writeError(w, http.StatusBadRequest, "team key is invalid or already used")
 			return
 		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "team not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to update team")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit team update")
 		return
 	}
 	resp := teamToResponse(team)
 	userID := requestUserID(r)
 	h.publish(protocol.EventWorkspaceUpdated, workspaceID, "member", userID, map[string]any{"team": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func updateWorkspaceTeamLocked(ctx context.Context, qtx *db.Queries, params db.UpdateWorkspaceTeamParams) (db.WorkspaceTeam, error) {
+	locked, err := qtx.LockWorkspaceTeamForKeyUpdate(ctx, db.LockWorkspaceTeamForKeyUpdateParams{
+		ID:          params.ID,
+		WorkspaceID: params.WorkspaceID,
+	})
+	if err != nil {
+		return db.WorkspaceTeam{}, err
+	}
+	if params.Key.Valid && params.Key.String != locked.Key && locked.IssueCounter > 0 {
+		return db.WorkspaceTeam{}, errTeamKeyFrozen
+	}
+	return qtx.UpdateWorkspaceTeam(ctx, params)
 }
 
 func (h *Handler) ArchiveTeam(w http.ResponseWriter, r *http.Request) {

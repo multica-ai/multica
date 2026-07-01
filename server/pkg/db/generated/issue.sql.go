@@ -615,10 +615,12 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 
 const getIssueByTeamKeyAndNumber = `-- name: GetIssueByTeamKeyAndNumber :one
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.team_id FROM issue i
-JOIN workspace_team wt ON wt.id = i.team_id AND wt.workspace_id = i.workspace_id
+LEFT JOIN workspace_team issue_team ON issue_team.id = i.team_id AND issue_team.workspace_id = i.workspace_id
+LEFT JOIN workspace_team default_team ON default_team.workspace_id = i.workspace_id AND default_team.is_default
 WHERE i.workspace_id = $1
-  AND lower(wt.key) = lower($2)
+  AND lower(COALESCE(issue_team.key, default_team.key)) = lower($2)
   AND i.number = $3
+  AND (i.team_id IS NOT NULL OR default_team.id IS NOT NULL)
 `
 
 type GetIssueByTeamKeyAndNumberParams struct {

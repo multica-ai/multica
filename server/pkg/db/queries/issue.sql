@@ -90,10 +90,12 @@ WHERE workspace_id = $1 AND number = $2;
 
 -- name: GetIssueByTeamKeyAndNumber :one
 SELECT i.* FROM issue i
-JOIN workspace_team wt ON wt.id = i.team_id AND wt.workspace_id = i.workspace_id
+LEFT JOIN workspace_team issue_team ON issue_team.id = i.team_id AND issue_team.workspace_id = i.workspace_id
+LEFT JOIN workspace_team default_team ON default_team.workspace_id = i.workspace_id AND default_team.is_default
 WHERE i.workspace_id = $1
-  AND lower(wt.key) = lower($2)
-  AND i.number = $3;
+  AND lower(COALESCE(issue_team.key, default_team.key)) = lower($2)
+  AND i.number = $3
+  AND (i.team_id IS NOT NULL OR default_team.id IS NOT NULL);
 
 -- name: UpdateIssue :one
 UPDATE issue SET

@@ -154,3 +154,97 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 		t.Fatalf("unexpected next-page issue: %#v", nextResp.Groups[0].Issues[0])
 	}
 }
+
+func TestListGroupedIssuesFiltersByTeam(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano() % 1_000_000
+	keyA := fmt.Sprintf("A%06d", suffix)
+	keyB := fmt.Sprintf("B%06d", suffix)
+
+	var workspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, '', $3)
+		RETURNING id
+	`, "Grouped Team Filter", fmt.Sprintf("grouped-team-filter-%d", suffix), keyA).Scan(&workspaceID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	})
+
+	var teamA, teamB string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_team (workspace_id, name, key, is_default)
+		VALUES ($1, 'Team A', $2, true)
+		RETURNING id
+	`, workspaceID, keyA).Scan(&teamA); err != nil {
+		t.Fatalf("create team A: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_team (workspace_id, name, key, is_default)
+		VALUES ($1, 'Team B', $2, false)
+		RETURNING id
+	`, workspaceID, keyB).Scan(&teamB); err != nil {
+		t.Fatalf("create team B: %v", err)
+	}
+
+	createIssue := func(title, teamID string, position float64) {
+		t.Helper()
+		var number int32
+		if err := testPool.QueryRow(ctx, `
+			UPDATE workspace
+			SET issue_counter = issue_counter + 1
+			WHERE id = $1
+			RETURNING issue_counter
+		`, workspaceID).Scan(&number); err != nil {
+			t.Fatalf("next issue number: %v", err)
+		}
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO issue (
+				workspace_id, team_id, title, description, status, priority,
+				assignee_type, assignee_id, creator_type, creator_id,
+				position, number
+			)
+			VALUES ($1, $2, $3, NULL, 'todo', 'none', 'member', $4, 'member', $4, $5, $6)
+		`, workspaceID, teamID, title, testUserID, position, number); err != nil {
+			t.Fatalf("create issue %q: %v", title, err)
+		}
+	}
+
+	createIssue("Team A first", teamA, 1)
+	createIssue("Team A second", teamA, 2)
+	createIssue("Team B hidden", teamB, 3)
+
+	path := fmt.Sprintf(
+		"/api/issues/grouped?workspace_id=%s&group_by=assignee&statuses=todo&team_id=%s&limit=10",
+		workspaceID,
+		teamA,
+	)
+	w := httptest.NewRecorder()
+	req := newRequest("GET", path, nil)
+	req.Header.Set("X-Workspace-ID", workspaceID)
+	testHandler.ListGroupedIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListGroupedIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp GroupedIssuesResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode grouped response: %v", err)
+	}
+	if len(resp.Groups) != 1 {
+		t.Fatalf("expected one assignee group, got %#v", resp.Groups)
+	}
+	if resp.Groups[0].Total != 2 || len(resp.Groups[0].Issues) != 2 {
+		t.Fatalf("expected only Team A issues, total=%d len=%d", resp.Groups[0].Total, len(resp.Groups[0].Issues))
+	}
+	for _, issue := range resp.Groups[0].Issues {
+		if issue.TeamID == nil || *issue.TeamID != teamA {
+			t.Fatalf("grouped team filter leaked wrong team issue: %#v", issue)
+		}
+		if issue.Title == "Team B hidden" {
+			t.Fatalf("grouped team filter leaked Team B issue: %#v", issue)
+		}
+	}
+}

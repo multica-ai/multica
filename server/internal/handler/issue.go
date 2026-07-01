@@ -1362,6 +1362,22 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
 	}
+	if raw := r.URL.Query().Get("team_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "team_id")
+		if !ok {
+			return
+		}
+		where = append(where, fmt.Sprintf("i.team_id = %s::uuid", addArg(id)))
+	}
+	if raw := r.URL.Query().Get("team_ids"); raw != "" {
+		ids, ok := parseUUIDParamList(w, raw, "team_ids")
+		if !ok {
+			return
+		}
+		if len(ids) > 0 {
+			where = append(where, fmt.Sprintf("i.team_id = ANY(%s::uuid[])", addArg(ids)))
+		}
+	}
 	if filter, ok := parseMetadataFilterParam(w, r.URL.Query().Get("metadata")); !ok {
 		return
 	} else if filter != nil {
