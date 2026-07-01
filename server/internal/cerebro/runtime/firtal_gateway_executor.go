@@ -955,24 +955,29 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		// appended to whatever the cascade/policy already enabled and registered in
 		// this task's registry so the registry tool loop dispatches them.
 		//
-		// FIR-2388: the list decision now runs through the SHARED
-		// APIConnectionResolver — the same one the local MCP handler and the claim
-		// brief use — so "listed here" == "callable" == "shown in the brief". The
-		// resolver keeps Allow+Ask and drops Deny AND any endpoint whose verdict
-		// could not be resolved (fail closed). Each listed tool is registered so the
-		// always-on call-time guard (apiEndpointSetting, fail-closed) can re-resolve
-		// it by name; an Ask still pauses for approval at call time like any other
-		// Ask. The endpoint gate keys on the agent's owner as the user layer.
+		// FIR-2441 (the Flip, slice 2): the list decision now runs through the
+		// UNIFIED ConnectionToolResolver.Resolve — the same resolver the claim brief
+		// moved onto in slice 1 (#2000) — reading its api half (out.APITools). The
+		// api sub-component is the reused APIConnectionResolver, so out.APITools is
+		// the same Allow+Ask verdict list ListForAgent returned before (Deny and any
+		// endpoint whose verdict could not be resolved are dropped, fail closed) —
+		// identical callable handles, same default-off flag gate (Resolve yields the
+		// zero value when cerebro_api_connection_tools is off). Each listed tool is
+		// registered so the always-on call-time guard (apiEndpointSetting,
+		// fail-closed) can re-resolve it by name; an Ask still pauses for approval at
+		// call time like any other Ask. The endpoint gate keys on the agent's owner
+		// as the user layer (ConnectionIdentity leaves InitiatorID unset ⇒ ceiling =
+		// OwnerID), matching the prior direct call exactly.
 		if agent, err := e.queries.GetAgent(ctx, agentID); err != nil {
 			e.logger.Warn("firtal gateway: agent lookup for api-connection tools failed",
 				"agent_id", util.UUIDToString(agentID), "error", err)
-		} else if verdicts := e.apiConnectionResolver().ListForAgent(ctx, APIConnectionIdentity{
+		} else if apiTools := e.connectionToolResolver().Resolve(ctx, ConnectionIdentity{
 			WorkspaceID: workspaceID,
 			RuntimeID:   agent.RuntimeID,
 			AgentID:     agentID,
 			OwnerID:     agent.OwnerID,
-		}); len(verdicts) > 0 {
-			for _, v := range verdicts {
+		}).APITools; len(apiTools) > 0 {
+			for _, v := range apiTools {
 				taskRegistry.Register(v.Tool)
 				enabledTools = append(enabledTools, v.Tool)
 			}
