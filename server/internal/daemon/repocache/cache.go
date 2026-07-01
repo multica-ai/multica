@@ -3,6 +3,7 @@
 package repocache
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -14,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 )
 
 // gitEnv returns an environment for git subprocesses that contact remotes.
@@ -477,6 +477,8 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			}
 		}
 
+		runPostCheckoutHook(worktreePath, params.RepoURL, actualBranch, c.logger)
+
 		c.logger.Info("repo checkout: existing worktree updated",
 			"url", params.RepoURL,
 			"path", worktreePath,
@@ -514,6 +516,8 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
 		}
 	}
+
+	runPostCheckoutHook(worktreePath, params.RepoURL, actualBranch, c.logger)
 
 	c.logger.Info("repo checkout: worktree created",
 		"url", params.RepoURL,
@@ -821,6 +825,70 @@ fi
 # Use git interpret-trailers for proper formatting.
 git interpret-trailers --in-place --trailer "$TRAILER" "$COMMIT_MSG_FILE"
 `
+
+// postCheckoutHookTimeout caps how long a user-supplied hook may run before
+// the daemon kills it. 30s is generous enough for a hook to fetch secrets or
+// install a small set of files, while short enough that a hung hook cannot
+// stall task spawning for the agent.
+const postCheckoutHookTimeout = 30 * time.Second
+
+// runPostCheckoutHook executes a user-provided script after a worktree is
+// created or updated. The hook path comes from the MULTICA_POST_CHECKOUT_HOOK
+// environment variable; if unset or empty, this is a no-op.
+//
+// The hook is invoked with the worktree as CWD and the following env vars set
+// so it can act on the worktree without re-deriving them from CWD or git state:
+//
+//   - MULTICA_WORKTREE_PATH: absolute path to the worktree directory
+//   - MULTICA_REPO_URL:      the URL passed to `multica repo checkout`
+//   - MULTICA_REPO_NAME:     basename of the worktree path (the repo dir name)
+//   - MULTICA_BRANCH:        the actual branch name the worktree is on
+//
+// Failures are logged at WARN and never abort the checkout — the agent
+// receives a working worktree regardless. A 30s timeout caps the hook's
+// runtime so a hung hook can't stall task spawning indefinitely.
+//
+// This hook is intentionally fire-and-log: the daemon does not propagate
+// hook stdout/stderr back to the agent. Operators who need richer signaling
+// should have the hook write a file inside MULTICA_WORKTREE_PATH that the
+// agent can read after checkout.
+func runPostCheckoutHook(worktreePath, repoURL, branchName string, logger *slog.Logger) {
+	hookPath := strings.TrimSpace(os.Getenv("MULTICA_POST_CHECKOUT_HOOK"))
+	if hookPath == "" {
+		return
+	}
+	info, err := os.Stat(hookPath)
+	if err != nil {
+		logger.Warn("repo checkout: post-checkout hook stat failed (non-fatal)",
+			"path", hookPath, "error", err)
+		return
+	}
+	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+		logger.Warn("repo checkout: post-checkout hook is not an executable file (non-fatal)",
+			"path", hookPath, "mode", info.Mode().String())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), postCheckoutHookTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, hookPath)
+	cmd.Dir = worktreePath
+	cmd.Env = append(os.Environ(),
+		"MULTICA_WORKTREE_PATH="+worktreePath,
+		"MULTICA_REPO_URL="+repoURL,
+		"MULTICA_REPO_NAME="+filepath.Base(worktreePath),
+		"MULTICA_BRANCH="+branchName,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		logger.Warn("repo checkout: post-checkout hook failed (non-fatal)",
+			"path", hookPath, "worktree", worktreePath,
+			"error", err, "output", strings.TrimSpace(string(out)))
+		return
+	}
+	logger.Info("repo checkout: post-checkout hook ran",
+		"path", hookPath, "worktree", worktreePath, "branch", branchName)
+}
 
 // installCoAuthoredByHook installs a prepare-commit-msg git hook that appends
 // a Co-authored-by trailer for the Multica Agent. The hook is installed in the
