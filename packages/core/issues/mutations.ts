@@ -419,6 +419,7 @@ export function useDeleteIssue() {
 
       pruneDeletedIssueFromListCaches(qc, wsId, id);
       pruneDeletedIssueFromParentChildrenCaches(qc, wsId, id, metadata);
+      useRecentIssuesStore.getState().forgetIssue(wsId, id);
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
       return { id, metadata, prevLists, prevMyLists, prevDetail, prevChildren };
     },
@@ -599,12 +600,14 @@ export function useBatchDeleteIssues() {
         );
       }
 
+      const recentStore = useRecentIssuesStore.getState();
       for (const id of ids) {
         const metadata = metadataById.get(id);
         pruneDeletedIssueFromListCaches(qc, wsId, id);
         if (metadata) {
           pruneDeletedIssueFromParentChildrenCaches(qc, wsId, id, metadata);
         }
+        recentStore.forgetIssue(wsId, id);
       }
       return { prevLists, prevMyLists, prevChildren, parentIssueIds, metadataById };
     },

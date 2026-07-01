@@ -31,7 +31,7 @@ import type {
   SearchIssueResult,
   SearchProjectResult,
 } from "@multica/core/types";
-import { api } from "@multica/core/api";
+import { ApiError, api } from "@multica/core/api";
 import {
   openCreateIssueWithPreference,
   selectRecentIssues,
@@ -166,6 +166,15 @@ export function SearchCommand() {
   const recentDetailQueries = useQueries({
     queries: recentItems.map((item) => issueDetailOptions(wsId, item.id)),
   });
+  useEffect(() => {
+    recentDetailQueries.forEach((q, index) => {
+      if (q.error instanceof ApiError && q.error.status === 404) {
+        const stale = recentItems[index];
+        if (stale) useRecentIssuesStore.getState().forgetIssue(wsId, stale.id);
+      }
+    });
+  }, [recentDetailQueries, recentItems]);
+
   const recentIssues = useMemo(
     () =>
       recentDetailQueries.flatMap((q) => (q.data ? [q.data] : [])),
