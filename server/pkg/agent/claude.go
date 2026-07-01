@@ -20,6 +20,17 @@ type claudeBackend struct {
 	cfg Config
 }
 
+const claudeArgvPromptMaxBytes = 24 * 1024
+
+var claudeStdinWriteTimeout = 10 * time.Second
+
+type claudePromptTransport int
+
+const (
+	claudePromptArgv claudePromptTransport = iota
+	claudePromptStdin
+)
+
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -32,7 +43,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := buildClaudeArgs(opts, b.cfg.Logger)
+	args, promptTransport := buildClaudeArgs(prompt, opts, b.cfg.Logger)
 
 	// If the caller provided an MCP config, write it to a temp file and pass
 	// --mcp-config <path> so the agent uses a controlled set of MCP servers
@@ -58,7 +69,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", claudeArgsForLog(args, promptTransport))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -76,7 +87,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("claude stdin pipe: %w", err)
 	}
 	var closeStdinOnce sync.Once
-	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
+	closeStdin := func() {
+		if stdin != nil {
+			closeStdinOnce.Do(func() { _ = stdin.Close() })
+		}
+	}
 	// Capture stderr into both the daemon log (as before) and a bounded tail
 	// buffer so we can include the last few KB in Result.Error when claude
 	// exits unexpectedly. Without the tail, an exit-code-only failure looks
@@ -99,14 +114,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	// writeClaudeInput runs in its own goroutine so it cannot deadlock
-	// against the stdout reader. With --verbose --output-format stream-json
-	// the CLI emits a startup banner before reading its first stdin frame;
-	// if nothing is draining stdout while we write the prompt, claude blocks
-	// writing stdout, never reads stdin, and our Write blocks until runCtx
-	// fires. The field symptom is "write |1: The pipe has been ended."
-	// surfacing exactly at the per-task timeout when the kill invalidates
-	// the still-blocked pipe.
+	// For resume / large-prompt stdin mode, writeClaudeInput runs in its own
+	// goroutine so it cannot deadlock against the stdout reader. With
+	// --verbose --output-format stream-json the CLI emits a startup banner
+	// before reading its first stdin frame; if nothing is draining stdout
+	// while we write the prompt, claude blocks writing stdout, never reads
+	// stdin, and our Write blocks until runCtx fires. The field symptom is
+	// "write |1: The pipe has been ended." surfacing exactly at the per-task
+	// timeout when the kill invalidates the still-blocked pipe.
 	//
 	// Keep stdin open after the initial user message. Claude's stream-json
 	// protocol can emit control_request events mid-run and expects matching
@@ -114,13 +129,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// leaves the child stuck waiting for a response until its own fallback
 	// timeout.
 	writeDone := make(chan error, 1)
-	go func() {
-		err := writeClaudeInput(stdin, prompt)
-		if err != nil {
-			closeStdin()
-		}
-		writeDone <- err
-	}()
+	if promptTransport == claudePromptStdin {
+		go func() {
+			writeCtx, writeCancel := context.WithTimeout(runCtx, claudeStdinWriteTimeout)
+			err := writeClaudeInputWithContext(writeCtx, stdin, prompt)
+			writeCancel()
+			if err != nil {
+				closeStdin()
+				cancel()
+			}
+			writeDone <- err
+		}()
+	} else {
+		writeDone <- nil
+	}
 
 	go func() {
 		defer cancel()
@@ -212,15 +234,15 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		case runCtx.Err() == context.DeadlineExceeded:
 			finalStatus = "timeout"
 			finalError = fmt.Sprintf("claude timed out after %s", timeout)
-		case runCtx.Err() == context.Canceled:
-			finalStatus = "aborted"
-			finalError = "execution cancelled"
 		case writeErr != nil && finalStatus == "completed" && sessionID == "":
 			// No result event landed and the prompt write failed — claude
 			// died before reading the prompt. Surface the write error; the
 			// stderr tail attached below carries the real reason.
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("write claude input: %v", writeErr)
+		case runCtx.Err() == context.Canceled:
+			finalStatus = "aborted"
+			finalError = "execution cancelled"
 		case exitErr != nil && finalStatus == "completed":
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
@@ -559,11 +581,14 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--effort": blockedWithValue,
 }
 
-func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{
-		"-p",
+func buildClaudeArgs(prompt string, opts ExecOptions, logger *slog.Logger) ([]string, claudePromptTransport) {
+	promptTransport := claudePromptTransportFor(prompt, opts)
+	args := []string{"-p"}
+	if promptTransport == claudePromptArgv {
+		args = append(args, prompt)
+	}
+	args = append(args,
 		"--output-format", "stream-json",
-		"--input-format", "stream-json",
 		"--verbose",
 		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
@@ -574,6 +599,9 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// never sees the question (see GitHub #2588). User-facing
 		// clarification belongs in an issue comment instead.
 		"--disallowedTools", "AskUserQuestion",
+	)
+	if promptTransport == claudePromptStdin {
+		args = append(args, "--input-format", "stream-json")
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -596,7 +624,40 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	}
 	args = append(args, filterCustomArgs(opts.ExtraArgs, claudeBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, claudeBlockedArgs, logger)...)
-	return args
+	return args, promptTransport
+}
+
+func claudePromptTransportFor(prompt string, opts ExecOptions) claudePromptTransport {
+	if opts.ResumeSessionID != "" {
+		return claudePromptStdin
+	}
+	if len([]byte(prompt)) > claudeArgvPromptMaxBytes {
+		return claudePromptStdin
+	}
+	return claudePromptArgv
+}
+
+func claudeArgsForLog(args []string, promptTransport claudePromptTransport) []string {
+	if promptTransport != claudePromptArgv || len(args) < 2 || args[0] != "-p" {
+		return args
+	}
+	logArgs := append([]string(nil), args...)
+	logArgs[1] = fmt.Sprintf("<prompt:%d bytes>", len([]byte(args[1])))
+	return logArgs
+}
+
+func writeClaudeInputWithContext(ctx context.Context, w io.Writer, prompt string) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- writeClaudeInput(w, prompt)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("timed out waiting for claude stdin write: %w", ctx.Err())
+	}
 }
 
 func writeClaudeInput(w io.Writer, prompt string) error {
