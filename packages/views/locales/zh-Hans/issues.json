@@ -80,6 +80,7 @@
     "sort_start_date": "开始日期",
     "sort_due_date": "截止日期",
     "sort_created": "创建时间",
+    "sort_last_edited": "最后编辑",
     "sort_title": "标题",
     "card_priority": "优先级",
     "card_description": "描述",

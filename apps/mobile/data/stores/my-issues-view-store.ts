@@ -22,9 +22,11 @@ interface MyIssuesViewState {
   scope: MyIssuesScope;
   statusFilters: IssueStatus[];
   priorityFilters: IssuePriority[];
+  sortByLastEdited: boolean;
   setScope: (scope: MyIssuesScope) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
+  toggleSortByLastEdited: () => void;
   clearFilters: () => void;
 }
 
@@ -32,6 +34,7 @@ export const useMyIssuesViewStore = create<MyIssuesViewState>((set) => ({
   scope: "assigned",
   statusFilters: [],
   priorityFilters: [],
+  sortByLastEdited: false,
   setScope: (scope) => set({ scope }),
   toggleStatusFilter: (status) =>
     set((state) => ({
@@ -45,5 +48,7 @@ export const useMyIssuesViewStore = create<MyIssuesViewState>((set) => ({
         ? state.priorityFilters.filter((p) => p !== priority)
         : [...state.priorityFilters, priority],
     })),
+  toggleSortByLastEdited: () =>
+    set((state) => ({ sortByLastEdited: !state.sortByLastEdited })),
   clearFilters: () => set({ statusFilters: [], priorityFilters: [] }),
 }));

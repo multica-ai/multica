@@ -68,6 +68,7 @@ export default function MyIssues() {
   const setScope = useMyIssuesViewStore((s) => s.setScope);
   const statusFilters = useMyIssuesViewStore((s) => s.statusFilters);
   const priorityFilters = useMyIssuesViewStore((s) => s.priorityFilters);
+  const sortByLastEdited = useMyIssuesViewStore((s) => s.sortByLastEdited);
 
   const openFilter = () => {
     if (!wsSlug) return;
@@ -94,10 +95,11 @@ export default function MyIssues() {
 
   // Apply client-side status + priority filter. Mirrors the predicate at
   // packages/views/issues/utils/filter.ts:30-34 via filterIssues().
-  const filtered = useMemo(
-    () => filterIssues(data ?? [], statusFilters, priorityFilters),
-    [data, statusFilters, priorityFilters],
-  );
+  const filtered = useMemo(() => {
+    const f = filterIssues(data ?? [], statusFilters, priorityFilters);
+    if (!sortByLastEdited) return f;
+    return [...f].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }, [data, statusFilters, priorityFilters, sortByLastEdited]);
 
   // When statusFilters is non-empty, intersect visible status order with it
   // so hidden statuses don't render an empty section header. Uses
@@ -119,7 +121,7 @@ export default function MyIssues() {
   }, [filtered, statusFilters]);
 
   const hasActiveFilters =
-    statusFilters.length > 0 || priorityFilters.length > 0;
+    statusFilters.length > 0 || priorityFilters.length > 0 || sortByLastEdited;
 
   const showEmptyState =
     !isLoading && !error && filtered.length === 0;

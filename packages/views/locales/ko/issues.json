@@ -80,6 +80,7 @@
     "sort_start_date": "시작일",
     "sort_due_date": "마감일",
     "sort_created": "생성일",
+    "sort_last_edited": "마지막 편집",
     "sort_title": "제목",
     "card_priority": "우선순위",
     "card_description": "설명",

@@ -873,7 +873,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	sortCol := "position"
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
-		case "position", "title", "created_at", "start_date", "due_date":
+		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
 			sortCol = s
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
@@ -1438,7 +1438,7 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	sortCol := "position"
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
-		case "position", "title", "created_at", "start_date", "due_date":
+		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
 			sortCol = s
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
