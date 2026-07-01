@@ -1,0 +1,18 @@
+apiVersion: v2
+name: multica
+description: A Helm chart for Multica - the self-hosted AI agent platform
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/multica-ai/multica
+sources:
+  - https://github.com/multica-ai/multica
+keywords:
+  - ai
+  - agents
+  - multica
+  - llm
+maintainers:
+  - name: Multica
+    url: https://multica.ai
+icon: https://multica.ai/icon.png

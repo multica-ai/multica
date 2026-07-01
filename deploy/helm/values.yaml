@@ -1,0 +1,260 @@
+# Default values for multica.
+# This is a YAML-formatted file.
+
+# -- Global settings applied across all components
+global:
+  # -- Default image tag used when a component does not specify its own.
+  # Override this (or individual image.tag fields) to pin versions for production.
+  imageTag: "latest"
+
+# -----------------------------------------------------------------------------
+# Backend (Go API server)
+# -----------------------------------------------------------------------------
+backend:
+  # -- Number of backend replicas. Increase for HA, but note that migrations run
+  # on startup — a single replica is recommended for first deploy.
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/multica-ai/multica-backend
+    # -- If empty, global.imageTag is used
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  # -- Service port exposed inside the cluster
+  service:
+    type: ClusterIP
+    port: 8080
+
+  # -- Resource requests/limits for the backend pod
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  # -- Persistent storage used for uploads at /app/data/uploads.
+  # Set enabled=false to use an emptyDir instead (data lost on pod restart — test/dev only).
+  storage:
+    enabled: true
+    size: 5Gi
+    # -- Use the cluster default if empty
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
+  # -- Node selectors, tolerations, affinity for backend scheduling
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # -- Extra env vars to inject into the backend container
+  extraEnv: []
+
+  podAnnotations: {}
+
+# -----------------------------------------------------------------------------
+# Frontend (Next.js web app)
+# -----------------------------------------------------------------------------
+frontend:
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/multica-ai/multica-web
+    # -- If empty, global.imageTag is used
+    tag: ""
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 3000
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  extraEnv: []
+
+  podAnnotations: {}
+
+# -----------------------------------------------------------------------------
+# Bundled PostgreSQL (pgvector)
+# -----------------------------------------------------------------------------
+postgresql:
+  # -- Set to false to use an external PostgreSQL. When disabled, you must
+  # provide a DATABASE_URL via config.externalDatabaseUrl or inject it yourself.
+  enabled: true
+
+  image:
+    repository: pgvector/pgvector
+    tag: pg17
+    pullPolicy: IfNotPresent
+
+  auth:
+    # -- Superuser password. CHANGE IN PRODUCTION.
+    postgresPassword: "changeme"
+    # -- Application role username
+    username: multica
+    # -- Application role password. CHANGE IN PRODUCTION.
+    password: "changeme"
+    # -- Application database name
+    database: multica
+
+  service:
+    port: 5432
+
+  storage:
+    size: 10Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Ingress
+# -----------------------------------------------------------------------------
+ingress:
+  # -- Enable Ingress resource. When enabled, ingress.host is required.
+  enabled: false
+  className: nginx
+  # -- Public hostname for Multica (e.g., multica.example.com)
+  host: ""
+  # -- Additional annotations merged into the Ingress. WebSocket-related
+  # annotations for nginx are added automatically.
+  annotations: {}
+  tls:
+    enabled: false
+    # -- Secret name that holds the TLS certificate. Create with cert-manager
+    # or kubectl create secret tls.
+    secretName: ""
+
+# -----------------------------------------------------------------------------
+# Application configuration
+# -----------------------------------------------------------------------------
+config:
+  # -- JWT signing secret. REQUIRED. Generate with: openssl rand -hex 32
+  jwtSecret: ""
+
+  # -- Public URL where Multica is reachable (e.g., https://multica.example.com)
+  # Used for Google OAuth redirects and email links.
+  appUrl: ""
+
+  # -- Value for FRONTEND_ORIGIN. Usually equal to appUrl.
+  frontendOrigin: ""
+
+  # -- CORS origins allowed by the backend (comma-separated). Defaults to appUrl.
+  corsAllowedOrigins: ""
+
+  # -- Whether new users may sign up
+  allowSignup: "true"
+
+  # -- Optional whitelist of individual email addresses (comma-separated)
+  allowedEmails: ""
+
+  # -- Optional whitelist of email domains (comma-separated)
+  allowedEmailDomains: ""
+
+  # -- Optional cookie domain override (e.g., .example.com)
+  cookieDomain: ""
+
+  # -- If you set postgresql.enabled=false, provide an external DATABASE_URL here
+  externalDatabaseUrl: ""
+
+  resend:
+    # -- Resend API key for transactional email (optional)
+    apiKey: ""
+    fromEmail: "noreply@multica.ai"
+
+  google:
+    # -- Google OAuth credentials (optional)
+    clientId: ""
+    clientSecret: ""
+    # -- OAuth redirect URI (e.g., https://multica.example.com/auth/google/callback)
+    redirectUri: ""
+
+  s3:
+    # -- S3 bucket for uploads (optional; falls back to local PVC if empty)
+    bucket: ""
+    region: "us-west-2"
+    accessKeyId: ""
+    secretAccessKey: ""
+    # -- Custom S3-compatible endpoint (e.g., for MinIO/R2)
+    endpointUrl: ""
+
+  cloudfront:
+    # -- CloudFront distribution domain (optional)
+    domain: ""
+    keyPairId: ""
+    # -- PEM-encoded private key for signed URLs (multi-line string)
+    privateKey: ""
+
+# -----------------------------------------------------------------------------
+# Metrics
+# -----------------------------------------------------------------------------
+metrics:
+  # -- Enable Prometheus metrics on the backend
+  enabled: false
+  # -- Address the metrics endpoint binds to. 127.0.0.1 keeps it inside the pod
+  # (scrape via a sidecar); change to 0.0.0.0:9090 to expose cluster-wide.
+  addr: "127.0.0.1:9090"
+
+# -----------------------------------------------------------------------------
+# Horizontal Pod Autoscaler
+# -----------------------------------------------------------------------------
+autoscaling:
+  enabled: false
+  backend:
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 75
+  frontend:
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 75
+
+# -----------------------------------------------------------------------------
+# Service account
+# -----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  # -- If set, use this name; otherwise generated from the release name
+  name: ""
+  annotations: {}
+
+# -----------------------------------------------------------------------------
+# Pod security context (applied to all pods)
+# -----------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# -- Container-level security context (applied to every container)
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+  capabilities:
+    drop:
+      - ALL

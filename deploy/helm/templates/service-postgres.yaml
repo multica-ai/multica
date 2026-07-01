@@ -1,0 +1,17 @@
+{{- if .Values.postgresql.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "multica.postgres.fullname" . }}
+  labels:
+    {{- include "multica.postgres.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: {{ .Values.postgresql.service.port }}
+      targetPort: postgres
+      protocol: TCP
+  selector:
+    {{- include "multica.postgres.selectorLabels" . | nindent 4 }}
+{{- end }}

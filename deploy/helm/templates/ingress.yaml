@@ -1,0 +1,72 @@
+{{- if .Values.ingress.enabled -}}
+{{- $fullName := include "multica.fullname" . -}}
+{{- $backendSvc := include "multica.backend.fullname" . -}}
+{{- $frontendSvc := include "multica.frontend.fullname" . -}}
+{{- $backendPort := .Values.backend.service.port -}}
+{{- $frontendPort := .Values.frontend.service.port -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "multica.labels" . | nindent 4 }}
+  annotations:
+    # WebSocket support for /ws path (nginx-ingress)
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ required "ingress.host is required when ingress.enabled=true" .Values.ingress.host | quote }}
+      secretName: {{ required "ingress.tls.secretName is required when tls is enabled" .Values.ingress.tls.secretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ required "ingress.host is required when ingress.enabled=true" .Values.ingress.host | quote }}
+      http:
+        paths:
+          # WebSocket: route directly to backend (does NOT go through Next.js)
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $backendSvc }}
+                port:
+                  number: {{ $backendPort }}
+          # API + auth + uploads go direct to backend (bypass Next.js for lower latency)
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $backendSvc }}
+                port:
+                  number: {{ $backendPort }}
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $backendSvc }}
+                port:
+                  number: {{ $backendPort }}
+          - path: /uploads
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $backendSvc }}
+                port:
+                  number: {{ $backendPort }}
+          # Everything else -> frontend
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $frontendSvc }}
+                port:
+                  number: {{ $frontendPort }}
+{{- end }}
