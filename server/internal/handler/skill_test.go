@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -631,6 +632,56 @@ func TestDetectImportSource_RecognizesGitHub(t *testing.T) {
 	}
 	if src != sourceGitHub {
 		t.Fatalf("source = %v, want sourceGitHub", src)
+	}
+}
+
+func TestSkillOriginSourceURL(t *testing.T) {
+	raw := []byte(`{"origin":{"type":"github","source_url":"https://github.com/acme/skills/tree/main/foo"}}`)
+	got, ok := skillOriginSourceURL(raw)
+	if !ok || got != "https://github.com/acme/skills/tree/main/foo" {
+		t.Fatalf("skillOriginSourceURL() = (%q, %v), want github URL", got, ok)
+	}
+
+	if got, ok := skillOriginSourceURL([]byte(`{"origin":{"type":"manual"}}`)); ok || got != "" {
+		t.Fatalf("manual origin = (%q, %v), want empty false", got, ok)
+	}
+}
+
+func TestImportedSkillFilesFiltersUnsafePaths(t *testing.T) {
+	got := importedSkillFiles(&importedSkill{
+		files: []importedFile{
+			{path: "templates/review.md", content: "review"},
+			{path: "../secret.md", content: "secret"},
+			{path: "/tmp/absolute.md", content: "absolute"},
+		},
+	})
+	if len(got) != 1 || got[0].Path != "templates/review.md" || got[0].Content != "review" {
+		t.Fatalf("importedSkillFiles() = %+v, want only safe supporting file", got)
+	}
+}
+
+func TestSyncSkillFromOriginRejectsManualSkill(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var skillID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+		VALUES ($1, 'manual-sync-test-skill', '', '# Manual', '{"origin":{"type":"manual"}}'::jsonb, $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&skillID); err != nil {
+		t.Fatalf("create manual skill: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM skill WHERE id = $1`, skillID)
+	})
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/skills/"+skillID+"/sync", nil), "id", skillID)
+	testHandler.SyncSkillFromOrigin(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("SyncSkillFromOrigin manual skill: expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
