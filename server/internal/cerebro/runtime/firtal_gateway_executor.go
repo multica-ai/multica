@@ -417,7 +417,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 		}
 	}
 	var completion GatewayCompletion
-	if e.agentHasCallableTools(runCtx, task.AgentID, plan.workspaceID, task.OriginalUserID) {
+	if e.agentHasCallableTools(runCtx, task.AgentID, plan.workspaceID, task.OriginalUserID, agent.OwnerID) {
 		completion, err = e.runToolLoop(runCtx, cfg, agent, messages, meta, task.AgentID, plan.workspaceID, task.OriginalUserID, pruneOn && !pruneHeldOut)
 	} else {
 		// The no-tools compat path serializes over the OpenAI wire, which
@@ -854,7 +854,7 @@ func (e *FirtalGatewayExecutor) filterConnectionDenied(ctx context.Context, tool
 // the agent is tool-policy scoped (FIR-1512), otherwise the cerebro_runtime_tool
 // cascade with legacy agent_tool_grant fallback — not
 // MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS.
-func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agentID, workspaceID, originalUserID pgtype.UUID) bool {
+func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agentID, workspaceID, originalUserID, ownerID pgtype.UUID) bool {
 	if e.registry == nil {
 		return false
 	}
@@ -864,7 +864,11 @@ func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agent
 	if tools, handled := e.policyEnabledTools(ctx, taskRegistry, agentID, workspaceID); handled {
 		return len(tools) > 0
 	}
-	return len(taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, originalUserID)) > 0
+	cascadeUserID := originalUserID
+	if !cascadeUserID.Valid {
+		cascadeUserID = ownerID
+	}
+	return len(taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, cascadeUserID)) > 0
 }
 
 // runToolLoop runs the model in an Anthropic-native tool-call loop. Up to
@@ -912,6 +916,10 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	if e.registry != nil {
 		taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
 		taskRegistry.db = e.registry.db
+		cascadeUserID := originalUserID
+		if !cascadeUserID.Valid {
+			cascadeUserID = agent.OwnerID
+		}
 		// FIR-1449 step 2: bridge the full Multica CLI/MCP tool surface into this
 		// task's registry BEFORE the permission gating below runs, so bridged
 		// tools are governed by the same cascade/policy as native ones (no-op
@@ -928,7 +936,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		// user/group access rules.
 		enabledTools, policyHandled = e.policyEnabledTools(ctx, taskRegistry, agentID, workspaceID)
 		if !policyHandled {
-			enabledTools = taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, originalUserID)
+			enabledTools = taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, cascadeUserID)
 		}
 		enabledTools = limitFirtalGatewayTools(enabledTools)
 		if len(enabledTools) > 0 {

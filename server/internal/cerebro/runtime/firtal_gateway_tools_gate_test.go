@@ -27,7 +27,7 @@ func TestAgentHasCallableTools_UsesRuntimeGrantsNotCSVAllowlist(t *testing.T) {
 	}
 	_ = cfg // would have enabled tool loop under the old CSV gate
 
-	if !e.agentHasCallableTools(context.Background(), f.agentID, runtimeAccountTestWSID, f.userID) {
+	if !e.agentHasCallableTools(context.Background(), f.agentID, runtimeAccountTestWSID, f.userID, f.userID) {
 		t.Fatal("expected callable tools when runtime grants exist")
 	}
 }
@@ -51,7 +51,22 @@ func TestAgentHasCallableTools_FalseWithoutGrantsEvenOnCSVAllowlist(t *testing.T
 		t.Fatal("test setup: agent should be on deprecated CSV allowlist")
 	}
 
-	if e.agentHasCallableTools(context.Background(), f.agentID, runtimeAccountTestWSID, f.userID) {
+	if e.agentHasCallableTools(context.Background(), f.agentID, runtimeAccountTestWSID, f.userID, f.userID) {
 		t.Fatal("expected chat-only without runtime grants, even when CSV allowlist includes agent")
+	}
+}
+
+func TestAgentHasCallableTools_FallsBackToOwnerWhenOriginalUserMissing(t *testing.T) {
+	f := newCascadeFixture(t)
+	f.addRuntimeTool("get_issue", true)
+	f.addUserGrant("get_issue", f.userID)
+
+	e := &FirtalGatewayExecutor{
+		registry: f.registry,
+		cerebro:  f.cerebro,
+	}
+
+	if !e.agentHasCallableTools(context.Background(), f.agentID, runtimeAccountTestWSID, pgtype.UUID{}, f.userID) {
+		t.Fatal("expected owner grants to enable tools when original user is missing")
 	}
 }
