@@ -595,6 +595,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		cerebroMCPRelay = relayMod
 		h.ConnectionsInjector = relayMod
 	}
+	// CEREBRO-PATCH(cerebro-connection-tool-resolver-claim-flip): FIR-2441 the Flip — claim-time mcp_http config+deny now resolves via the unified ConnectionToolResolver when cerebro_api_connection_tools is on; relay-aware entries for LOCAL runtimes (FIR-1563); flag off ⇒ handled=false ⇒ legacy BuildMCPConfig path (reversible). Built after the relay so the entry builder can rewrite internal URLs.
+	var cerebroClaimMCPEntry func(cerebroconnections.Connection) map[string]any
+	if cerebroMCPRelay != nil {
+		cerebroClaimMCPEntry = func(c cerebroconnections.Connection) map[string]any {
+			return cerebroconnections.MCPServerEntry(c, cerebroMCPRelay)
+		}
+	}
+	h.ConnectionClaimResolver = cerebroruntime.NewConnectionToolResolver(cerebroAPIConnResolver, cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries, cerebroClaimMCPEntry, nil)
 	// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 per-workspace web_fetch policy handler.
 	cerebroWebFetchPolicyHandler := cerebrowebfetchpolicy.NewHandler(cerebroQueries)
 	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool)   // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.

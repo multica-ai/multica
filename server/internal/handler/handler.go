@@ -249,6 +249,8 @@ type Handler struct {
 	ConnectionsInjector WorkspaceConnectionsInjector
 	// CEREBRO-PATCH(handler-connection-tool-deny): TECH-3156 per-tool connection enforcement.
 	ConnectionToolDeny ConnectionToolDenyResolver
+	// CEREBRO-PATCH(handler-connection-claim-resolver): FIR-2441 unified resolver decides claim-time mcp_http config+deny when the flag is on.
+	ConnectionClaimResolver CerebroConnectionClaimResolver
 	// CEREBRO-PATCH(handler-agentvault-broker): TECH-3196 per-agent secret brokering at claim.
 	AgentVaultBroker AgentVaultBroker
 	// CEREBRO-PATCH(handler-capability-card-tools): TECH-3642 capabilities card reuses the tool-policy table.

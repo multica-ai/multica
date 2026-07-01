@@ -82,6 +82,14 @@ func (h *Handler) GetRuntimeMcpConfig(w http.ResponseWriter, r *http.Request) {
 		toolsConfig = json.RawMessage(`{"mcpServers":{}}`)
 	}
 	// CEREBRO-PATCH(runtime-tool-scan-connections): include enabled workspace Connections during scan.
+	// FIR-2441 decision: this callsite deliberately STAYS on BuildMCPConfig and is
+	// NOT flipped onto the unified ConnectionToolResolver. The scan is AGENT-LESS
+	// (per-runtime, no agent in scope) and produces an INVENTORY — the daemon runs
+	// tools/list against every declared server so the admin UI shows what tools
+	// exist. That is not an access decision: it must enumerate every enabled
+	// connection regardless of any agent's grants, whereas Resolve is agent-gated
+	// and Allow-only. Routing the inventory through the resolver would under-report
+	// it. So `grep BuildMCPConfig server/` is expected to still find this line.
 	if h.ConnectionsInjector != nil {
 		connMCP := h.ConnectionsInjector.BuildMCPConfig(r.Context(), rt.WorkspaceID)
 		if len(connMCP) > 0 {

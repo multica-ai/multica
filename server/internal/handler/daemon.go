@@ -20,8 +20,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
-	// CEREBRO-PATCH(daemon-claim-connections-injection): FIR-2341 inject workspace mcp_http connections at claim.
-	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -1376,32 +1374,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
-		// CEREBRO-PATCH(daemon-claim-connections-injection): FIR-2341 inject workspace mcp_http connections at claim.
-		// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 resolve denied MCP connection tools before injecting claim-time connections.
-		var disallowedMCPTools []string
-		if h.ConnectionsInjector != nil {
-			if connMCP := h.ConnectionsInjector.BuildMCPConfig(r.Context(), runtime.WorkspaceID); len(connMCP) > 0 {
-				injectConnections := true
-				if h.ConnectionToolDeny != nil {
-					tokens, err := h.ConnectionToolDeny.DisallowedMCPTools(r.Context(), runtime.WorkspaceID, task.RuntimeID, task.AgentID)
-					if err != nil {
-						injectConnections = false
-						slog.Warn("withholding workspace MCP connections after deny resolution failed",
-							"workspace_id", uuidToString(runtime.WorkspaceID),
-							"runtime_id", uuidToString(task.RuntimeID),
-							"agent_id", uuidToString(task.AgentID),
-							"error", err,
-						)
-					} else {
-						disallowedMCPTools = tokens
-					}
-				}
-				if injectConnections {
-					mcpConfig = daemonmcp.Merge(connMCP, mcpConfig)
-					resp.DisallowedMCPTools = disallowedMCPTools
-				}
-			}
-		}
+		// CEREBRO-PATCH(daemon-claim-connections-injection): FIR-2341 inject workspace mcp_http connections at claim; FIR-2441 routes the decision through the unified ConnectionToolResolver when the flag is on, else the legacy BuildMCPConfig/DisallowedMCPTools path (reversible). See injectClaimConnectionMCP.
+		var connDisallowedMCPTools []string
+		mcpConfig, connDisallowedMCPTools = h.injectClaimConnectionMCP(r.Context(), runtime.WorkspaceID, task.RuntimeID, task.AgentID, agent.OwnerID, mcpConfig)
+		resp.DisallowedMCPTools = connDisallowedMCPTools
 		// runtime_config is stored as JSONB and may legitimately be the
 		// empty object `{}` for agents that haven't opted into any
 		// provider-specific tuning. Forward only non-empty payloads so the

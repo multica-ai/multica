@@ -12,14 +12,36 @@ package runtime
 //     toolpolicy Table() the admin screen and DeniedConnectionTools read
 //     (Category B), so "listed == callable" holds for MCP tools too.
 //
-// Resolve is SHADOW-ONLY for now: it computes ResolvedConnectionTools alongside
-// the live paths (daemon.go BuildMCPConfig + DisallowedMCPTools, the gateway,
-// the runtime-scan) but decides nothing. The old path still grants access. The
-// Flip (Fase 3) points the four consumers at this output; the Contract (Fase 4)
-// deletes the independent BuildMCPConfig / DisallowedMCPTools decisions.
+// The Flip is DONE for every real access consumer — each reads Resolve when the
+// flag is on:
+//
+//   - claim brief          → APIConnectionToolsForBrief (slice 1, #2000)
+//   - cloud executor        → out.APITools (slice 2, #2001)
+//   - local connectiontools → out.APITools (slice 3, #2002)
+//   - claim mcp_http inject → ClaimConnectionMCP → out.MCPServers/out.Deny
+//     (connection_tool_resolver_claim.go)
 //
 // The whole feature stays behind the default-off cerebro_api_connection_tools
-// workspace flag — with the flag off Resolve returns the zero value.
+// workspace flag — with the flag off Resolve returns the zero value and each
+// consumer runs its legacy path, so the wiring is reversible (flag off ⇒ no
+// observable change).
+//
+// Two callsites deliberately KEEP connections.BuildMCPConfig, so
+// `grep BuildMCPConfig server/` is NOT nul after this Flip — by design, not an
+// oversight:
+//
+//   - The claim's LEGACY branch (handler.injectClaimConnectionMCP). The
+//     claim-time mcp_http injection is a LIVE feature (NOT flag-gated), so the
+//     legacy path must remain as the flag-off branch to stay reversible.
+//     Deleting it (⇒ grep nul) makes the resolver's Allow-only rule the DEFAULT
+//     decision — a behavior tightening that needs sign-off and a permanently-on
+//     flag, so it is a separate reviewed step, not part of this Flip.
+//   - The runtime tool-scan (GetRuntimeMcpConfig, runtime_tools_scan_cerebro.go).
+//     It is AGENT-LESS and produces an INVENTORY (the tools/list the admin UI
+//     renders), not an access decision — it must enumerate every enabled
+//     connection regardless of any agent's grants, which the agent-gated,
+//     Allow-only Resolve cannot and must not do. It legitimately stays on
+//     BuildMCPConfig.
 //
 // Two adversarial findings are load-bearing here (see the FIR-2441 adversarial
 // artifact, all five verified TRUE against the code):
