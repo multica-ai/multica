@@ -129,16 +129,16 @@ export function formatTokens(n: number): string {
 //
 //   Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
 //   OpenAI:    https://openai.com/api/pricing
+//   Google:    https://ai.google.dev/gemini-api/docs/pricing
 //   DeepSeek:  https://api-docs.deepseek.com/quick_start/pricing
-//   Moonshot:  https://www.kimi.com/resources/kimi-k2-6-pricing
+//   Moonshot:  https://platform.kimi.ai/docs/pricing/chat
 //   Zhipu:     https://docs.z.ai/guides/overview/pricing
 //
 // Anthropic's cacheWrite reflects the 5-minute cache TTL (1.25× input); the
 // daemon reports cache_creation_input_tokens without TTL metadata, so 5m is
-// the safest / cheapest assumption (matches the API default). OpenAI,
-// DeepSeek, Moonshot and Zhipu do not bill cache writes separately (cached
-// input is just discounted on subsequent reads), so cacheWrite mirrors
-// input there.
+// the safest / cheapest assumption (matches the API default). OpenAI, Google,
+// DeepSeek, Moonshot and Zhipu do not bill cache writes as a separate token
+// class in these public rate sheets, so cacheWrite mirrors input there.
 //
 // The resolver matches exact keys after stripping a trailing date snapshot
 // (see `resolvePricing` below). It deliberately does NOT do startsWith
@@ -203,23 +203,32 @@ const MODEL_PRICING: Record<
   "gpt-4o-mini":        { input: 0.15, output: 0.60, cacheRead: 0.075, cacheWrite: 0.15 },
   "gpt-4o":             { input: 2.50, output: 10,   cacheRead: 1.25,  cacheWrite: 2.50 },
 
+  // -- Google Gemini (ai.google.dev/gemini-api/docs/pricing). Use Standard
+  //    text/image/video rates and the <=200K prompt tier where Google splits
+  //    long-context pricing; aggregated usage rows do not expose per-request
+  //    prompt length, so the lower standard tier is the least-wrong default. --
+  "gemini-3.1-pro-preview":             { input: 2.00, output: 12.00, cacheRead: 0.20,  cacheWrite: 2.00 },
+  "gemini-3.1-pro-preview-customtools": { input: 2.00, output: 12.00, cacheRead: 0.20,  cacheWrite: 2.00 },
+  "gemini-3.1-pro":                     { input: 2.00, output: 12.00, cacheRead: 0.20,  cacheWrite: 2.00 },
+  "gemini-3-flash-preview":             { input: 0.50, output: 3.00,  cacheRead: 0.05,  cacheWrite: 0.50 },
+  "gemini-2.5-pro":                     { input: 1.25, output: 10.00, cacheRead: 0.125, cacheWrite: 1.25 },
+  "gemini-2.5-flash":                   { input: 0.30, output: 2.50,  cacheRead: 0.03,  cacheWrite: 0.30 },
+  "gemini-2.5-flash-lite":              { input: 0.10, output: 0.40,  cacheRead: 0.01,  cacheWrite: 0.10 },
+
   // -- DeepSeek (api-docs.deepseek.com/quick_start/pricing).
   //    The official catalog lists exactly two current SKUs; `deepseek-chat`
-  //    and `deepseek-reasoner` are aliases that route to `deepseek-v4-flash`
-  //    (non-thinking and thinking mode respectively) per the same page.
-  //    `deepseek-v4-pro` is currently under a 75%-off promo that ends
-  //    2026-05-31 15:59 UTC; we price at the post-promo standard rate
-  //    ($1.74/$3.48) so the dashboard does not jump 4× on June 1 — accept
-  //    a brief over-estimate during the promo over a sudden cliff after it. --
+  //    and `deepseek-reasoner` stay compatibility aliases to
+  //    `deepseek-v4-flash` until their documented 2026-07-24 deprecation. --
   "deepseek-v4-flash":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
-  "deepseek-v4-pro":    { input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 1.74 },
+  "deepseek-v4-pro":    { input: 0.435, output: 0.87, cacheRead: 0.003625, cacheWrite: 0.435 },
   "deepseek-chat":      { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
   "deepseek-reasoner":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
 
-  // -- Moonshot Kimi (kimi.com/resources/kimi-k2-6-pricing).
-  //    Only K2.6 is on the official price sheet today; earlier K2 variants
-  //    are intentionally omitted until Moonshot publishes their rates. --
+  // -- Moonshot Kimi (platform.kimi.ai/docs/pricing). --
+  "kimi-k2.7-code":     { input: 0.95, output: 4.00, cacheRead: 0.19,   cacheWrite: 0.95 },
+  "kimi-k2.7-code-highspeed": { input: 1.90, output: 8.00, cacheRead: 0.38, cacheWrite: 1.90 },
   "kimi-k2.6":          { input: 0.95, output: 4.00, cacheRead: 0.16,   cacheWrite: 0.95 },
+  "kimi-k2.5":          { input: 0.60, output: 3.00, cacheRead: 0.10,   cacheWrite: 0.60 },
 
   // -- Zhipu z.ai (docs.z.ai/guides/overview/pricing). Free flash tiers
   //    are priced at 0 so they resolve cleanly instead of falling through
@@ -388,9 +397,13 @@ function canonicalCandidates(model: string): string[] {
   };
   const stripDate = (s: string) =>
     s.replace(/-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$/, "");
+  const isProviderPrefix = (prefix: string) =>
+    prefix
+      .split(":")
+      .every((part) => /^[a-z][a-z0-9_-]*$/i.test(part));
   const stripProvider = (s: string) => {
     const i = s.indexOf("/");
-    return i > 0 && /^[a-z][a-z0-9_-]*$/i.test(s.slice(0, i)) ? s.slice(i + 1) : s;
+    return i > 0 && isProviderPrefix(s.slice(0, i)) ? s.slice(i + 1) : s;
   };
   // Only Anthropic IDs are dot↔dash equivalent. OpenAI separators are
   // semantic, so we leave `gpt-5.4` etc. alone.
