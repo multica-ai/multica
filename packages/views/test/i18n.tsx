@@ -3,10 +3,10 @@ import {
   type RenderOptions,
   type RenderResult,
 } from "@testing-library/react";
+import type { SupportedLocale } from "@multica/core/i18n";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { ReactElement, ReactNode } from "react";
 import { RESOURCES } from "../locales";
-import type { SupportedLocale } from "@multica/core/i18n";
 
 // Single i18n test wrapper for the whole package. Wraps the production
 // `RESOURCES` map (every namespace registered there is available to the

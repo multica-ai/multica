@@ -14,6 +14,7 @@ import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import { createEnDict } from "./en";
 import { createJaDict } from "./ja";
 import { createKoDict } from "./ko";
+import { createTrDict } from "./tr";
 import { createZhDict } from "./zh";
 import {
   toLandingDictionaryLocale,
@@ -30,6 +31,7 @@ const dictionaryFactories: Record<
   ja: createJaDict,
   ko: createKoDict,
   zh: createZhDict,
+  tr: createTrDict,
 };
 
 type LocaleContextValue = {

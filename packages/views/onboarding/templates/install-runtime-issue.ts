@@ -25,6 +25,7 @@ export const INSTALL_RUNTIME_ISSUE_TITLE = {
   zh: "第 1 步 —— 连接运行时,开始使用 agent",
   ko: "1단계 — agent를 사용하려면 runtime 연결하기",
   ja: "ステップ1 — agent を使うために runtime を接続する",
+  tr: "1. adım — Ajanları kullanmaya başlamak için çalışma ortamı bağlayın",
 } as const;
 
 const en = `Welcome to Multica.
@@ -106,6 +107,45 @@ Kimi CLI 官方文档:https://moonshotai.github.io/kimi-cli/zh/guides/getting-st
 
 运行时连上后,你就可以创建 Multica Helper,开始一次有智能体参与的上手引导。`;
 
+const tr = `Multica'ya hoş geldiniz.
+
+Ajanların iş çalıştırabilmesi için önce bir çalışma ortamına ihtiyacı var. Bir çalışma ortamı kurarken Multica'yı hafif bir proje yönetimi çalışma alanı olarak kullanmaya başlayabilirsiniz.
+
+## Önce Multica'yı deneyin
+
+Çalışma ortamı hazır olmadan önce şunları yapabilirsiniz:
+
+1. Mevcut işiniz için bir proje oluşturun.
+2. Birkaç issue oluşturup Bekleyenler, Yapılacak, Devam ediyor ve Tamamlandı durumları arasında taşıyın.
+3. Issue'lara öncelik, etiket, yorum ve abonelik ekleyin.
+4. Atamaları ve mention'ları takip etmek için Gelen Kutusu'nu kullanın.
+
+Böylece önce proje yönetimi katmanını tanımış olursunuz. Çalışma ortamı bağlandığında ajanlar aynı issue'lar üzerinden çalışmaya başlayabilir.
+
+## İlk ajan çalışma ortamınızı kurun
+
+Tam rehber: https://multica.ai/docs/install-agent-runtime
+
+Türkçe kullanıcılar için en hızlı ilk yol Codex'tir:
+
+1. Node.js'in kurulu olduğundan emin olun.
+2. Codex'i kurun:
+   npm i -g @openai/codex
+3. Giriş yapın:
+   codex
+4. Terminalinizin Codex'i bulabildiğini doğrulayın:
+   which codex
+   codex --version
+5. Multica daemon'ı yeniden başlatın:
+   multica daemon restart
+   Desktop uygulamasını kullanıyorsanız uygulamayı yeniden başlatmanız yeterlidir.
+6. Çalışma Ortamları sayfasına dönüp yenileyin. Online bir Codex çalışma ortamı görmelisiniz.
+7. Bu çalışma ortamından ilk ajanınızı oluşturun, sonra bir issue'yu ajana atayıp durumunu Yapılacak yapın.
+
+Codex referansı: https://developers.openai.com/codex/cli
+
+Çalışma ortamı bağlandığında, rehberli ilk kullanım için Multica Helper'ı oluşturabilirsiniz.`;
+
 const ko = `Multica에 오신 것을 환영합니다.
 
 agent가 작업을 실행하려면 먼저 runtime이 필요합니다. runtime을 설치하는 동안에도 Multica를 가벼운 프로젝트 관리 워크스페이스로 먼저 사용할 수 있습니다.
@@ -184,7 +224,7 @@ Codex のリファレンス: https://developers.openai.com/codex/cli
 
 runtime が接続されたら、Multica Helper を作成して、案内付きの最初の実行を始められます。`;
 
-export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh, ko, ja } as const;
+export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh, ko, ja, tr } as const;
 
 /**
  * Prefix sentence for the follow-up comment posted on this issue (the one
@@ -200,4 +240,5 @@ export const FOLLOWUP_COMMENT_PREFIX = {
   zh: "完成后的下一步：",
   ko: "다음 단계:",
   ja: "次のステップ:",
+  tr: "Sıradaki adımınız:",
 } as const;

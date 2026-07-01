@@ -17,8 +17,8 @@ export const STARTER_CARD_IDS = ["intro", "tour", "welcome_page"] as const;
 export type StarterCardId = (typeof STARTER_CARD_IDS)[number];
 
 interface StarterPrompt {
-  title: { en: string; zh: string; ko: string; ja: string };
-  prompt: { en: string; zh: string; ko: string; ja: string };
+  title: { en: string; zh: string; ko: string; ja: string; tr: string };
+  prompt: { en: string; zh: string; ko: string; ja: string; tr: string };
 }
 
 export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
@@ -28,12 +28,14 @@ export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
       zh: "简单介绍一下 Multica",
       ko: "Multica를 간단히 소개해 주세요",
       ja: "Multica を簡単に紹介してください",
+      tr: "Bana Multica'yı tanıt",
     },
     prompt: {
       en: "Introduce Multica to me in 1–2 paragraphs. Cover what it is, the core concepts (workspace / issue / agent / runtime), and how it differs from tools like Linear or Jira.",
       zh: "用 1-2 段话简单介绍 Multica 给我。讲清楚它是什么、核心概念有哪些(workspace / issue / agent / runtime)、和 Linear / Jira 之类的工具核心区别在哪。",
       ko: "Multica를 1-2문단으로 간단히 소개해 주세요. 무엇인지, 핵심 개념(workspace / issue / agent / runtime)이 무엇인지, Linear나 Jira 같은 도구와 핵심적으로 어떻게 다른지 설명해 주세요.",
       ja: "Multica を1〜2段落で簡単に紹介してください。何であるか、中心となる概念(workspace / issue / agent / runtime)、そして Linear や Jira のようなツールと根本的にどう違うのかを説明してください。",
+      tr: "Multica'yı bana 1-2 paragrafta tanıt. Ne olduğunu, temel kavramları (çalışma alanı / issue / ajan / çalışma ortamı) ve Linear ya da Jira gibi araçlardan nasıl ayrıldığını anlat.",
     },
   },
   tour: {
@@ -42,12 +44,14 @@ export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
       zh: "带我熟悉每个功能",
       ko: "핵심 기능을 안내해 주세요",
       ja: "主要な機能を案内してください",
+      tr: "Temel özellikleri birlikte gezelim",
     },
     prompt: {
       en: "Walk me through Multica's core features — issue, agent, squad, autopilot, chat. Pick one realistic scenario I might run into and explain how all these pieces fit together.",
       zh: "陪我熟悉 Multica 的每个核心功能 —— issue、agent、squad、autopilot、chat。挑一个我可能用得上的真实场景,讲讲这几个东西是怎么配合的。",
       ko: "Multica의 핵심 기능인 issue, agent, squad, autopilot, chat을 안내해 주세요. 제가 실제로 겪을 만한 상황 하나를 골라 이 요소들이 어떻게 함께 작동하는지 설명해 주세요.",
       ja: "Multica の主要な機能 — issue、agent、squad、autopilot、chat を案内してください。私が実際に遭遇しそうな現実的なシナリオを1つ選び、これらの要素がどう連携するのかを説明してください。",
+      tr: "Multica'nın temel özelliklerini birlikte gezelim: issue, ajan, ekip, autopilot ve chat. Karşıma çıkabilecek gerçekçi bir senaryo seç ve bu parçaların nasıl birlikte çalıştığını anlat.",
     },
   },
   welcome_page: {
@@ -56,6 +60,7 @@ export const HELPER_STARTER_PROMPTS: Record<StarterCardId, StarterPrompt> = {
       zh: "用 slides 介绍 Multica 能为我做什么",
       ko: "Multica가 저에게 무엇을 해줄 수 있는지 슬라이드로 보여 주세요",
       ja: "Multica が私に何をしてくれるのかをスライドで見せてください",
+      tr: "Multica'nın bana neler katacağını slaytlarla göster",
     },
     prompt: {
       en: `Build me a single-file HTML slide deck that shows what Multica can do for me. Tailor it to my role and use case (see "About me" below). Paste the FULL HTML in a fenced \`\`\`html block in a comment on this issue so I can copy it straight out, save as \`multica-intro.html\`, and double-click to open it in a browser.
@@ -162,6 +167,32 @@ When done, also reply with a one-sentence summary of which scenarios you picked 
 - ArrowLeft / ArrowRight と Space で進む。隅に小さな page indicator を置く。
 
 完成したら、私のためにどのシナリオを選び、なぜ選んだのかを一文で要約してください。`,
+      tr: `Bana Multica'nın ne yapabileceğini gösteren tek dosyalık bir HTML slayt destesi hazırla. Rolüme ve kullanım senaryoma göre özelleştir (aşağıdaki "Hakkımda" bölümüne bak). Tam HTML'i bu issue'ya yorum olarak fenced bir \`\`\`html bloğunda yapıştır; doğrudan kopyalayıp \`multica-intro.html\` olarak kaydedip tarayıcıda açabileyim.
+
+**Format**
+- Tek, self-contained .html dosyası; tüm CSS / JS inline. Sıfır dependency, build tool yok, dış görsel yok (görselleri CSS ile üret: gradient, geometrik şekiller, inline SVG).
+- Toplam 5-8 slayt:
+  1. Başlık — "Multica [rolüm] için ne yapabilir"
+  2. Dört temel kavram — çalışma alanı / issue / ajan / çalışma ortamı, tek slayt
+  3-6. Kullanım senaryoma uyarlanmış 3-4 somut örnek; her biri "X yapmak istediğinde → Multica bunu böyle ele alır" formatında
+  7. Kapanış — tek ve somut bir sonraki adım
+
+**Viewport kuralları (zorunlu)**
+- Her \`.slide\`: \`height: 100vh; height: 100dvh; overflow: hidden;\`
+- Tüm font-size ve spacing değerleri \`clamp(min, preferred, max)\` kullansın; sabit px / rem kullanma.
+- Slayt yoğunluğu: 1 başlık + en fazla 4 bullet YA DA 1 başlık + 2 kısa paragraf. Taşarsa başka slayta böl.
+- \`prefers-reduced-motion: reduce\` değerine saygı göster (animasyonları kapat).
+
+**Estetik (AI slop görüntüsünden kaçın)**
+- Fontshare veya Google Fonts'tan ayırt edici bir font seç. Inter, Roboto, Arial veya sistem fontlarını kullanma.
+- CSS değişkenleriyle tutarlı bir palet kur: bir baskın renk + bir keskin vurgu rengi. Klişe "beyaz zemin üstünde mor gradient" görünümünden kaçın.
+- Arka planlar atmosfer katmalı: katmanlı gradient'ler veya geometrik desenler kullan; düz beyaz bırakma.
+- Animasyon: her slaytta staggered \`animation-delay\` kullanan tek, iyi kurgulanmış giriş animasyonu. Sadece CSS. Dağınık mikro etkileşimler olmasın.
+
+**Navigasyon**
+- ArrowLeft / ArrowRight ve Space ile ilerleme. Köşede küçük bir sayfa göstergesi.
+
+Bittiğinde, benim için hangi senaryoları seçtiğini ve nedenini tek cümleyle özetle.`,
     },
   },
 };
