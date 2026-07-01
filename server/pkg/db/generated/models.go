@@ -850,6 +850,7 @@ type CerebroNoteType struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	NumberingEnabled     bool               `json:"numbering_enabled"`
 	NextNumber           int32              `json:"next_number"`
+	AnchorWeekday        pgtype.Int2        `json:"anchor_weekday"`
 }
 
 type CerebroNoteVersion struct {

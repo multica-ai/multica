@@ -57,7 +57,7 @@ func newNoteTitle(name string, t time.Time, unit string, number int32) string {
 // Returns created=true when a note was created or a running doc was appended,
 // created=false when the period was already materialised (idempotent no-op).
 func Apply(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.CerebroNoteType, now time.Time) (bool, pgtype.UUID, error) {
-	anchor := nt.CreatedAt.Time
+	anchor := periodAnchor(nt)
 	key := PeriodKey(now, nt.CadenceUnit, nt.CadenceCount, anchor)
 
 	if nt.RecurrenceMode == ModeNewNote {

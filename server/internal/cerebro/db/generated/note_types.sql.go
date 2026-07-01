@@ -32,14 +32,14 @@ const createCerebroNoteType = `-- name: CreateCerebroNoteType :one
 INSERT INTO cerebro_note_type (
     workspace_id, name, icon, template_body, recurrence_mode,
     cadence_unit, cadence_count, target_folder_id, enabled, created_by,
-    numbering_enabled, next_number
+    numbering_enabled, next_number, anchor_weekday
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $12, $8, $9,
-    $10, $11
+    $10, $11, $13
 )
-RETURNING id, workspace_id, name, icon, template_body, recurrence_mode, cadence_unit, cadence_count, target_folder_id, running_doc_artifact_id, last_period_key, enabled, created_by, created_at, updated_at, numbering_enabled, next_number
+RETURNING id, workspace_id, name, icon, template_body, recurrence_mode, cadence_unit, cadence_count, target_folder_id, running_doc_artifact_id, last_period_key, enabled, created_by, created_at, updated_at, numbering_enabled, next_number, anchor_weekday
 `
 
 type CreateCerebroNoteTypeParams struct {
@@ -55,6 +55,7 @@ type CreateCerebroNoteTypeParams struct {
 	NumberingEnabled bool        `json:"numbering_enabled"`
 	NextNumber       int32       `json:"next_number"`
 	TargetFolderID   pgtype.UUID `json:"target_folder_id"`
+	AnchorWeekday    pgtype.Int2 `json:"anchor_weekday"`
 }
 
 // TECH-3511: Note types (reusable note templates with recurrence).
@@ -72,6 +73,7 @@ func (q *Queries) CreateCerebroNoteType(ctx context.Context, arg CreateCerebroNo
 		arg.NumberingEnabled,
 		arg.NextNumber,
 		arg.TargetFolderID,
+		arg.AnchorWeekday,
 	)
 	var i CerebroNoteType
 	err := row.Scan(
@@ -92,6 +94,7 @@ func (q *Queries) CreateCerebroNoteType(ctx context.Context, arg CreateCerebroNo
 		&i.UpdatedAt,
 		&i.NumberingEnabled,
 		&i.NextNumber,
+		&i.AnchorWeekday,
 	)
 	return i, err
 }
@@ -181,7 +184,7 @@ func (q *Queries) FindArtifactByNoteTypePeriod(ctx context.Context, arg FindArti
 }
 
 const getCerebroNoteType = `-- name: GetCerebroNoteType :one
-SELECT id, workspace_id, name, icon, template_body, recurrence_mode, cadence_unit, cadence_count, target_folder_id, running_doc_artifact_id, last_period_key, enabled, created_by, created_at, updated_at, numbering_enabled, next_number FROM cerebro_note_type WHERE id = $1
+SELECT id, workspace_id, name, icon, template_body, recurrence_mode, cadence_unit, cadence_count, target_folder_id, running_doc_artifact_id, last_period_key, enabled, created_by, created_at, updated_at, numbering_enabled, next_number, anchor_weekday FROM cerebro_note_type WHERE id = $1
 `
 
 func (q *Queries) GetCerebroNoteType(ctx context.Context, id pgtype.UUID) (CerebroNoteType, error) {
@@ -205,6 +208,7 @@ func (q *Queries) GetCerebroNoteType(ctx context.Context, id pgtype.UUID) (Cereb
 		&i.UpdatedAt,
 		&i.NumberingEnabled,
 		&i.NextNumber,
+		&i.AnchorWeekday,
 	)
 	return i, err
 }
@@ -244,7 +248,7 @@ func (q *Queries) GetNoteTypeArtifactBody(ctx context.Context, id pgtype.UUID) (
 }
 
 const listCerebroNoteTypesByWorkspace = `-- name: ListCerebroNoteTypesByWorkspace :many
-SELECT id, workspace_id, name, icon, template_body, recurrence_mode, cadence_unit, cadence_count, target_folder_id, running_doc_artifact_id, last_period_key, enabled, created_by, created_at, updated_at, numbering_enabled, next_number FROM cerebro_note_type
+SELECT id, workspace_id, name, icon, template_body, recurrence_mode, cadence_unit, cadence_count, target_folder_id, running_doc_artifact_id, last_period_key, enabled, created_by, created_at, updated_at, numbering_enabled, next_number, anchor_weekday FROM cerebro_note_type
 WHERE workspace_id = $1
 ORDER BY created_at DESC
 `
@@ -276,6 +280,7 @@ func (q *Queries) ListCerebroNoteTypesByWorkspace(ctx context.Context, workspace
 			&i.UpdatedAt,
 			&i.NumberingEnabled,
 			&i.NextNumber,
+			&i.AnchorWeekday,
 		); err != nil {
 			return nil, err
 		}
@@ -288,7 +293,7 @@ func (q *Queries) ListCerebroNoteTypesByWorkspace(ctx context.Context, workspace
 }
 
 const listEnabledCerebroNoteTypesForSweep = `-- name: ListEnabledCerebroNoteTypesForSweep :many
-SELECT id, workspace_id, name, icon, template_body, recurrence_mode, cadence_unit, cadence_count, target_folder_id, running_doc_artifact_id, last_period_key, enabled, created_by, created_at, updated_at, numbering_enabled, next_number FROM cerebro_note_type
+SELECT id, workspace_id, name, icon, template_body, recurrence_mode, cadence_unit, cadence_count, target_folder_id, running_doc_artifact_id, last_period_key, enabled, created_by, created_at, updated_at, numbering_enabled, next_number, anchor_weekday FROM cerebro_note_type
 WHERE enabled AND cadence_unit <> 'manual'
 `
 
@@ -319,6 +324,7 @@ func (q *Queries) ListEnabledCerebroNoteTypesForSweep(ctx context.Context) ([]Ce
 			&i.UpdatedAt,
 			&i.NumberingEnabled,
 			&i.NextNumber,
+			&i.AnchorWeekday,
 		); err != nil {
 			return nil, err
 		}
@@ -375,9 +381,10 @@ SET name = $2,
     enabled = $8,
     numbering_enabled = $9,
     next_number = $10,
+    anchor_weekday = $12,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, icon, template_body, recurrence_mode, cadence_unit, cadence_count, target_folder_id, running_doc_artifact_id, last_period_key, enabled, created_by, created_at, updated_at, numbering_enabled, next_number
+RETURNING id, workspace_id, name, icon, template_body, recurrence_mode, cadence_unit, cadence_count, target_folder_id, running_doc_artifact_id, last_period_key, enabled, created_by, created_at, updated_at, numbering_enabled, next_number, anchor_weekday
 `
 
 type UpdateCerebroNoteTypeParams struct {
@@ -392,6 +399,7 @@ type UpdateCerebroNoteTypeParams struct {
 	NumberingEnabled bool        `json:"numbering_enabled"`
 	NextNumber       int32       `json:"next_number"`
 	TargetFolderID   pgtype.UUID `json:"target_folder_id"`
+	AnchorWeekday    pgtype.Int2 `json:"anchor_weekday"`
 }
 
 func (q *Queries) UpdateCerebroNoteType(ctx context.Context, arg UpdateCerebroNoteTypeParams) (CerebroNoteType, error) {
@@ -407,6 +415,7 @@ func (q *Queries) UpdateCerebroNoteType(ctx context.Context, arg UpdateCerebroNo
 		arg.NumberingEnabled,
 		arg.NextNumber,
 		arg.TargetFolderID,
+		arg.AnchorWeekday,
 	)
 	var i CerebroNoteType
 	err := row.Scan(
@@ -427,6 +436,7 @@ func (q *Queries) UpdateCerebroNoteType(ctx context.Context, arg UpdateCerebroNo
 		&i.UpdatedAt,
 		&i.NumberingEnabled,
 		&i.NextNumber,
+		&i.AnchorWeekday,
 	)
 	return i, err
 }

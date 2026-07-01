@@ -64,8 +64,11 @@ func (s *Sweeper) Tick(ctx context.Context) error {
 	now := s.nowFunc()
 	flagCache := map[[16]byte]bool{}
 	for _, nt := range types {
+		if !shouldSweepApply(nt, now) {
+			continue
+		}
 		// Already materialised for this period — nothing to do.
-		if PeriodKey(now, nt.CadenceUnit, nt.CadenceCount, nt.CreatedAt.Time) == nt.LastPeriodKey {
+		if PeriodKey(now, nt.CadenceUnit, nt.CadenceCount, periodAnchor(nt)) == nt.LastPeriodKey {
 			continue
 		}
 		enabled, err := s.isFlagEnabled(ctx, nt.WorkspaceID, flagCache)

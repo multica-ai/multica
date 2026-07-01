@@ -39,16 +39,17 @@ func NewHandler(cerebro *cerebrodb.Queries, pool *pgxpool.Pool) *Handler {
 // ---------------------------------------------------------------------------
 
 type noteTypeRequest struct {
-	Name             string  `json:"name"`
-	Icon             string  `json:"icon"`
-	TemplateBody     string  `json:"template_body"`
-	RecurrenceMode   string  `json:"recurrence_mode"`
-	CadenceUnit      string  `json:"cadence_unit"`
-	CadenceCount     *int32  `json:"cadence_count"`
-	TargetFolderID   *string `json:"target_folder_id"`
-	Enabled          *bool   `json:"enabled"`
-	NumberingEnabled *bool   `json:"numbering_enabled"`
-	NextNumber       *int32  `json:"next_number"`
+	Name             string          `json:"name"`
+	Icon             string          `json:"icon"`
+	TemplateBody     string          `json:"template_body"`
+	RecurrenceMode   string          `json:"recurrence_mode"`
+	CadenceUnit      string          `json:"cadence_unit"`
+	CadenceCount     *int32          `json:"cadence_count"`
+	TargetFolderID   *string         `json:"target_folder_id"`
+	Enabled          *bool           `json:"enabled"`
+	NumberingEnabled *bool           `json:"numbering_enabled"`
+	NextNumber       *int32          `json:"next_number"`
+	AnchorWeekday    json.RawMessage `json:"anchor_weekday,omitempty"`
 }
 
 type noteTypeResponse struct {
@@ -65,6 +66,7 @@ type noteTypeResponse struct {
 	Enabled              bool    `json:"enabled"`
 	NumberingEnabled     bool    `json:"numbering_enabled"`
 	NextNumber           int32   `json:"next_number"`
+	AnchorWeekday        *int16  `json:"anchor_weekday"`
 	CreatedAt            string  `json:"created_at"`
 	UpdatedAt            string  `json:"updated_at"`
 }
@@ -92,6 +94,10 @@ func toResponse(nt cerebrodb.CerebroNoteType) noteTypeResponse {
 	if nt.RunningDocArtifactID.Valid {
 		s := util.UUIDToString(nt.RunningDocArtifactID)
 		resp.RunningDocArtifactID = &s
+	}
+	if nt.AnchorWeekday.Valid {
+		v := nt.AnchorWeekday.Int16
+		resp.AnchorWeekday = &v
 	}
 	return resp
 }
@@ -194,6 +200,7 @@ func (h *Handler) CreateNoteType(w http.ResponseWriter, r *http.Request) {
 		TargetFolderID:   norm.folder,
 		NumberingEnabled: norm.numbering,
 		NextNumber:       norm.nextNumber,
+		AnchorWeekday:    norm.anchorWeekday,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create note type failed")
@@ -230,11 +237,12 @@ func (h *Handler) UpdateNoteType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	norm, problem := h.normalize(req, normalizeDefaults{
-		mode:       existing.RecurrenceMode,
-		cadence:    existing.CadenceUnit,
-		count:      existing.CadenceCount,
-		numbering:  existing.NumberingEnabled,
-		nextNumber: existing.NextNumber,
+		mode:          existing.RecurrenceMode,
+		cadence:       existing.CadenceUnit,
+		count:         existing.CadenceCount,
+		numbering:     existing.NumberingEnabled,
+		nextNumber:    existing.NextNumber,
+		anchorWeekday: existing.AnchorWeekday,
 	}, w, r)
 	if problem {
 		return
@@ -260,6 +268,7 @@ func (h *Handler) UpdateNoteType(w http.ResponseWriter, r *http.Request) {
 		TargetFolderID:   norm.folder,
 		NumberingEnabled: norm.numbering,
 		NextNumber:       norm.nextNumber,
+		AnchorWeekday:    norm.anchorWeekday,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update note type failed")
@@ -345,12 +354,13 @@ func (h *Handler) RunNow(w http.ResponseWriter, r *http.Request) {
 // falling back to the supplied defaults when a field is omitted. Returns
 // problem=true (after writing the 4xx) when validation fails.
 type normalized struct {
-	mode       string
-	cadence    string
-	count      int32
-	folder     pgtype.UUID
-	numbering  bool
-	nextNumber int32
+	mode          string
+	cadence       string
+	count         int32
+	folder        pgtype.UUID
+	numbering     bool
+	nextNumber    int32
+	anchorWeekday pgtype.Int2
 }
 
 func (h *Handler) normalize(req noteTypeRequest, def normalizeDefaults, w http.ResponseWriter, r *http.Request) (normalized, bool) {
@@ -389,6 +399,30 @@ func (h *Handler) normalize(req noteTypeRequest, def normalizeDefaults, w http.R
 	if out.nextNumber < 1 {
 		out.nextNumber = 1
 	}
+	out.anchorWeekday = def.anchorWeekday
+	if req.AnchorWeekday != nil {
+		if string(req.AnchorWeekday) == "null" {
+			out.anchorWeekday = pgtype.Int2{}
+		} else {
+			var anchorWeekday int16
+			if err := json.Unmarshal(req.AnchorWeekday, &anchorWeekday); err != nil {
+				writeError(w, http.StatusBadRequest, "anchor_weekday must be ISO 1..7")
+				return normalized{}, true
+			}
+			if anchorWeekday < 1 || anchorWeekday > 7 {
+				writeError(w, http.StatusBadRequest, "anchor_weekday must be ISO 1..7")
+				return normalized{}, true
+			}
+			out.anchorWeekday = pgtype.Int2{Int16: anchorWeekday, Valid: true}
+		}
+		if out.anchorWeekday.Valid && (out.anchorWeekday.Int16 < 1 || out.anchorWeekday.Int16 > 7) {
+			writeError(w, http.StatusBadRequest, "anchor_weekday must be ISO 1..7")
+			return normalized{}, true
+		}
+	}
+	if out.cadence != CadenceWeek {
+		out.anchorWeekday = pgtype.Int2{}
+	}
 	if req.TargetFolderID != nil && strings.TrimSpace(*req.TargetFolderID) != "" {
 		f, err := util.ParseUUID(strings.TrimSpace(*req.TargetFolderID))
 		if err != nil {
@@ -401,11 +435,12 @@ func (h *Handler) normalize(req noteTypeRequest, def normalizeDefaults, w http.R
 }
 
 type normalizeDefaults struct {
-	mode       string
-	cadence    string
-	count      int32
-	numbering  bool
-	nextNumber int32
+	mode          string
+	cadence       string
+	count         int32
+	numbering     bool
+	nextNumber    int32
+	anchorWeekday pgtype.Int2
 }
 
 // ---------------------------------------------------------------------------

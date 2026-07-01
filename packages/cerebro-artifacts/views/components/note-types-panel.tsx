@@ -73,10 +73,42 @@ const CADENCE_BADGE: Record<CadenceUnit, string> = {
   quarter: "kvartal",
 };
 
-function cadenceBadge(unit: CadenceUnit, count: number): string {
+const WEEKDAY_LABELS: Record<number, string> = {
+  1: "Monday",
+  2: "Tuesday",
+  3: "Wednesday",
+  4: "Thursday",
+  5: "Friday",
+  6: "Saturday",
+  7: "Sunday",
+};
+
+const WEEKDAY_OPTIONS = Object.entries(WEEKDAY_LABELS).map(([value, label]) => ({
+  value: Number(value),
+  label,
+}));
+
+function cadenceBadge(unit: CadenceUnit, count: number, anchorWeekday?: number | null): string {
   if (unit === "manual") return "Manuel";
+  if (unit === "week" && anchorWeekday) {
+    const interval = count <= 1 ? "week" : `${count} weeks`;
+    return `Every ${interval} on ${WEEKDAY_LABELS[anchorWeekday] ?? "selected weekday"}`;
+  }
   if (count <= 1) return `Hver ${CADENCE_BADGE[unit]}`;
   return `Hver ${count}. ${CADENCE_BADGE[unit]}`;
+}
+
+function cadenceHelperText(
+  unit: CadenceUnit,
+  count: number,
+  anchorWeekday?: number | null,
+): string {
+  if (unit === "manual") return "Kører kun når du trykker “Start ny”.";
+  const badge = cadenceBadge(unit, count, anchorWeekday);
+  if (unit === "week" && anchorWeekday) {
+    return `Runs automatically ${badge.charAt(0).toLowerCase()}${badge.slice(1)}.`;
+  }
+  return `Kører automatisk ${badge.toLowerCase()}.`;
 }
 
 interface DraftState {
@@ -91,6 +123,7 @@ interface DraftState {
   enabled: boolean;
   numbering_enabled: boolean;
   next_number: number;
+  anchor_weekday: number | null;
 }
 
 function emptyDraft(): DraftState {
@@ -106,6 +139,7 @@ function emptyDraft(): DraftState {
     enabled: true,
     numbering_enabled: false,
     next_number: 1,
+    anchor_weekday: null,
   };
 }
 
@@ -122,10 +156,12 @@ function draftFrom(nt: NoteType): DraftState {
     enabled: nt.enabled,
     numbering_enabled: nt.numbering_enabled,
     next_number: nt.next_number,
+    anchor_weekday: nt.anchor_weekday,
   };
 }
 
 const NO_FOLDER = "__none__";
+const NO_ANCHOR_WEEKDAY = "__creation_day__";
 
 /**
  * Admin panel for note types (TECH-3511). Lists the workspace's note types and
@@ -209,6 +245,7 @@ export function NoteTypesPanel({
       enabled: draft.enabled,
       numbering_enabled: draft.numbering_enabled,
       next_number: Math.max(1, draft.next_number),
+      anchor_weekday: draft.cadence_unit === "week" ? draft.anchor_weekday : null,
     };
     if (draft.id) {
       await update.mutateAsync({ id: draft.id, data: payload });
@@ -301,9 +338,14 @@ export function NoteTypesPanel({
             />
             <Select
               value={draft.cadence_unit}
-              onValueChange={(v) =>
-                setDraft({ ...draft, cadence_unit: v as CadenceUnit })
-              }
+              onValueChange={(v) => {
+                const cadenceUnit = v as CadenceUnit;
+                setDraft({
+                  ...draft,
+                  cadence_unit: cadenceUnit,
+                  anchor_weekday: cadenceUnit === "week" ? draft.anchor_weekday : null,
+                });
+              }}
             >
               <SelectTrigger className="flex-1">
                 <SelectValue />
@@ -318,11 +360,47 @@ export function NoteTypesPanel({
             </Select>
           </div>
           <p className="text-xs text-muted-foreground">
-            {draft.cadence_unit === "manual"
-              ? "Kører kun når du trykker “Start ny”."
-              : `Kører automatisk ${cadenceBadge(draft.cadence_unit, draft.cadence_count).toLowerCase()}.`}
+            {cadenceHelperText(
+              draft.cadence_unit,
+              draft.cadence_count,
+              draft.anchor_weekday,
+            )}
           </p>
         </div>
+
+        {draft.cadence_unit === "week" && (
+          <div className="flex flex-col gap-1.5">
+            <Label>Anchor weekday</Label>
+            <Select
+              value={draft.anchor_weekday ? String(draft.anchor_weekday) : NO_ANCHOR_WEEKDAY}
+              onValueChange={(v) =>
+                setDraft({
+                  ...draft,
+                  anchor_weekday: v === NO_ANCHOR_WEEKDAY ? null : Number(v),
+                })
+              }
+            >
+              <SelectTrigger>
+                <span>
+                  {draft.anchor_weekday
+                    ? WEEKDAY_LABELS[draft.anchor_weekday]
+                    : "Creation day"}
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_ANCHOR_WEEKDAY}>Creation day</SelectItem>
+                {WEEKDAY_OPTIONS.map((day) => (
+                  <SelectItem key={day.value} value={String(day.value)}>
+                    {day.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Weekly notes stay on this weekday, even if the note type was created on another day.
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-3">
           <div className="flex flex-col gap-1.5">
@@ -463,7 +541,7 @@ export function NoteTypesPanel({
                 {MODE_LABELS[nt.recurrence_mode]}
               </Badge>
               <Badge variant="outline" className="text-[10px] font-normal">
-                {cadenceBadge(nt.cadence_unit, nt.cadence_count)}
+                {cadenceBadge(nt.cadence_unit, nt.cadence_count, nt.anchor_weekday)}
               </Badge>
               {nt.numbering_enabled && (
                 <Badge variant="outline" className="text-[10px] font-normal">

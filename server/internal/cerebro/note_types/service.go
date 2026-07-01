@@ -2,8 +2,11 @@ package notetypes
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
+
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 )
 
 // Recurrence modes.
@@ -72,6 +75,55 @@ func normalizeCount(count int32) int32 {
 // dateOnly drops the clock part so interval maths work on whole days.
 func dateOnly(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func isoWeekday(t time.Time) int {
+	w := int(t.Weekday())
+	if w == 0 {
+		return 7
+	}
+	return w
+}
+
+func periodAnchor(nt cerebrodb.CerebroNoteType) time.Time {
+	anchor := nt.CreatedAt.Time
+	if nt.CadenceUnit != CadenceWeek || !nt.AnchorWeekday.Valid {
+		return anchor
+	}
+	target := int(nt.AnchorWeekday.Int16)
+	if target < 1 || target > 7 {
+		return anchor
+	}
+	day := dateOnly(anchor)
+	for isoWeekday(day) != target {
+		day = day.AddDate(0, 0, -1)
+	}
+	return day
+}
+
+func floorDiv(a, b int) int {
+	if b == 0 {
+		return 0
+	}
+	return int(math.Floor(float64(a) / float64(b)))
+}
+
+func anchoredPeriodStart(anchor, t time.Time, unit string, count int32) time.Time {
+	count = normalizeCount(count)
+	if unit != CadenceWeek {
+		return dateOnly(t)
+	}
+	weeksFromAnchor := intervalIndex(anchor, t, CadenceWeek)
+	window := floorDiv(weeksFromAnchor, int(count))
+	return dateOnly(anchor).AddDate(0, 0, window*int(count)*7)
+}
+
+func shouldSweepApply(nt cerebrodb.CerebroNoteType, now time.Time) bool {
+	if nt.CadenceUnit != CadenceWeek || !nt.AnchorWeekday.Valid {
+		return true
+	}
+	currentStart := anchoredPeriodStart(periodAnchor(nt), now, nt.CadenceUnit, nt.CadenceCount)
+	return currentStart.After(dateOnly(nt.CreatedAt.Time))
 }
 
 // intervalIndex counts how many whole units of `unit` lie between the anchor

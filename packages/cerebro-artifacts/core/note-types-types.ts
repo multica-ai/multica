@@ -20,6 +20,7 @@ export interface NoteType {
   enabled: boolean;
   numbering_enabled: boolean;
   next_number: number;
+  anchor_weekday: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -35,6 +36,7 @@ export interface NoteTypeWriteInput {
   enabled?: boolean;
   numbering_enabled?: boolean;
   next_number?: number;
+  anchor_weekday?: number | null;
 }
 
 export interface NoteTypeRunResult {
