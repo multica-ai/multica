@@ -15,7 +15,6 @@ import {
   deduplicateInboxItems,
   // CEREBRO-PATCH(inbox-reminder-sort-time): merged inbox rows use reminder activation time.
   inboxItemSortTime,
-  useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import {
   useMarkInboxRead,
@@ -59,6 +58,7 @@ import {
   useKnownChannelIds, // CEREBRO-PATCH(inbox-channel-fold-known): FIR-1576 — keep archived DMs recognised as channels across re-surface gap
   GlobalInboxReminderDialog, // CEREBRO-PATCH(dynamic-inbox-create-menu): TECH-3494 — shared reminder dialog reused by dynamic inbox.
   type GlobalInboxReminderDialogLabels,
+  useCerebroInboxUnreadCount, // CEREBRO-PATCH(inbox-badge-thread-aware): FIR-2382 — thread-aware unread count so the header count matches the visible rows.
 } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
@@ -478,7 +478,7 @@ export function InboxPage() {
   });
 
   const isMobile = useIsMobile();
-  const unreadCount = useInboxUnreadCount(wsId);
+  const unreadCount = useCerebroInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
   const archiveMutation = useArchiveInbox();

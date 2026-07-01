@@ -103,7 +103,8 @@ import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@m
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { requestInboxDefaultTab } from "@multica/core/inbox"; // CEREBRO-PATCH(inbox-default-tab-nav): Inbox link resets Dynamic inbox to default tab.
-import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
+// CEREBRO-PATCH(inbox-badge-thread-aware): FIR-2382 — thread-aware unread count so the sidebar "Inbox" badge never exceeds the visible rows.
+import { useCerebroInboxUnreadCount } from "@multica/cerebro-inbox";
 import { notificationsListOptions } from "@multica/cerebro-notifications/core/queries";
 import { useArchiveAllNotifications } from "@multica/cerebro-notifications/core/mutations";
 import { api, ApiError } from "@multica/core/api";
@@ -140,7 +141,6 @@ function isNavActive(pathname: string, href: string): boolean {
 const EMPTY_PINS: PinnedItem[] = [];
 const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
-const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
 const EMPTY_NOTIFICATIONS: Awaited<ReturnType<typeof api.listNotifications>> = [];
 const EMPTY_PROJECT_TREE: ProjectTreeItem[] = [];
 
@@ -465,15 +465,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
 
   const wsId = workspace?.id;
-  const { data: inboxItems = EMPTY_INBOX } = useQuery({
-    queryKey: wsId ? inboxKeys.list(wsId) : ["inbox", "disabled"],
-    queryFn: () => api.listInbox(),
-    enabled: !!wsId,
-  });
-  const unreadCount = React.useMemo(
-    () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
-    [inboxItems],
-  );
+  // CEREBRO-PATCH(inbox-badge-thread-aware): FIR-2382 — count unread conversations thread-aware (thread replies have independent read state) so the badge matches the inbox list.
+  const unreadCount = useCerebroInboxUnreadCount(wsId);
   const { data: notifications = EMPTY_NOTIFICATIONS } = useQuery({
     ...notificationsListOptions(wsId ?? ""),
     enabled: !!wsId,

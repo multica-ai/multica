@@ -1,0 +1,59 @@
+"use client";
+
+// FIR-2382 — the "Inbox" badge must never count more unread than the inbox list
+// can show. The upstream badge counts every unread inbox_item (deduplicated by
+// issue). But with the thread-split feature on (cerebro_inbox_thread_split,
+// default on) a channel/DM reply that lives inside a thread carries
+// details.thread_root_id and is deliberately EXCLUDED from the channel's unread
+// count server-side (cerebroChannelUnreadCount → CountUnreadInboxForChannel-
+// ExcludingThreads) — it surfaces on its own thread row in the dynamic inbox,
+// and not at all in the classic inbox. So an unread thread reply would inflate
+// the badge while producing no visible channel row: badge > visible rows.
+//
+// The badge is a count of unread CONVERSATIONS. A thread reply has independent,
+// Slack-style read state, so it is not part of the conversation-level unread
+// count — exactly mirroring the server's per-channel exclusion. We therefore
+// drop thread replies before deduplicating, but only when the same flag that
+// drives the server-side exclusion is on, so badge and channel row always agree.
+import { useQuery } from "@tanstack/react-query";
+import { deduplicateInboxItems, inboxListOptions } from "@multica/core/inbox/queries";
+import type { InboxItem } from "@multica/core/types";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+
+/**
+ * Count unread inbox conversations the way the inbox list surfaces them.
+ *
+ * Pure + exported so the behaviour is unit-tested without a query client.
+ * When `excludeThreadReplies` is true, inbox items that live inside a thread
+ * (`details.thread_root_id` set) are removed BEFORE deduplication — so a channel
+ * whose only unread is a buried thread reply drops to zero (matching the hidden
+ * classic row), while a channel that also has an unread top-level message still
+ * counts once (its top-level item survives the filter).
+ */
+export function countUnreadInboxConversations(
+  items: InboxItem[],
+  opts: { excludeThreadReplies: boolean },
+): number {
+  const base = opts.excludeThreadReplies
+    ? items.filter((i) => !i.details?.thread_root_id)
+    : items;
+  return deduplicateInboxItems(base).filter((i) => !i.read).length;
+}
+
+/**
+ * Unread inbox count for the sidebar / inbox-header / desktop-dock badge,
+ * aligned with what the inbox list actually renders. Shares the inbox list
+ * query cache, so it adds no extra fetch.
+ */
+export function useCerebroInboxUnreadCount(
+  wsId: string | null | undefined,
+): number {
+  const threadSplit = useFeatureFlag("cerebro_inbox_thread_split");
+  const { data } = useQuery({
+    ...inboxListOptions(wsId ?? ""),
+    enabled: !!wsId,
+    select: (items: InboxItem[]) =>
+      countUnreadInboxConversations(items, { excludeThreadReplies: threadSplit }),
+  });
+  return data ?? 0;
+}

@@ -17,6 +17,12 @@ export {
   ReminderSheet,
 } from "./components/cerebro-inbox-row-actions";
 export { useCerebroInboxStrings } from "./strings";
+// FIR-2382 — thread-aware unread count so the "Inbox" badge never exceeds the
+// number of rows the inbox list can actually show.
+export {
+  useCerebroInboxUnreadCount,
+  countUnreadInboxConversations,
+} from "./use-inbox-unread-count";
 // FIR-1645 — per-row context that adds the "unarchive & mark unread" action to
 // archived rows in the dynamic inbox's Archived block.
 export {
