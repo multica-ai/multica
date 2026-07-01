@@ -165,8 +165,8 @@ See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference
                      ┌──────┴───────┐
                      │ Agent Daemon │  runs on your machine
                      └──────────────┘  (Claude Code, Codex, GitHub Copilot CLI,
-                                        OpenCode, OpenClaw, Hermes, Gemini,
-                                        Pi, Cursor Agent, Kimi, Kiro CLI, Qoder CLI)
+                                        OpenCode, OpenClaw, Hermes, Gemini, Pi,
+                                        Cursor Agent, Kimi, Kiro CLI, Qoder CLI, Trae CLI)
 ```
 
 | Layer | Stack |
@@ -174,7 +174,7 @@ See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference
 | Frontend | Next.js 16 (App Router) |
 | Backend | Go (Chi router, sqlc, gorilla/websocket) |
 | Database | PostgreSQL 17 with pgvector |
-| Agent Runtime | Local daemon executing Claude Code, Codex, GitHub Copilot CLI, OpenClaw, OpenCode, Hermes, Gemini, Pi, Cursor Agent, Kimi, Kiro CLI, or Qoder CLI |
+| Agent Runtime | Local daemon executing Claude Code, Codex, GitHub Copilot CLI, OpenClaw, OpenCode, Hermes, Gemini, Pi, Cursor Agent, Kimi, Kiro CLI, Qoder CLI, or Trae CLI |
 
 ## Development
 
