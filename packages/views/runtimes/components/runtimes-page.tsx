@@ -35,6 +35,7 @@ import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import {
   buildRuntimeMachines,
   filterRuntimeMachines,
+  filterRuntimesByProviders,
   runtimeMachineCounts,
   type RuntimeMachine,
   type RuntimeMachineFilter,
@@ -45,6 +46,8 @@ import { useT } from "../../i18n";
 const MACHINE_FILTERS: RuntimeMachineFilter[] = ["all", "online", "issues"];
 
 interface RuntimesPageProps {
+  /** Restricts the runtimes rendered by this platform. Undefined shows all providers. */
+  visibleProviders?: readonly string[];
   /** Desktop-only daemon id used to mark the row for this Mac. */
   localDaemonId?: string | null;
   /** Desktop-only friendly device name for the local daemon. */
@@ -84,6 +87,7 @@ function useNowTick(intervalMs = 30_000): number {
 }
 
 export function RuntimesPage({
+  visibleProviders,
   localDaemonId,
   localMachineName,
   localMachineActions,
@@ -135,9 +139,14 @@ export function RuntimesPage({
     [agents, snapshot],
   );
 
+  const visibleRuntimes = useMemo(
+    () => filterRuntimesByProviders(runtimes, visibleProviders),
+    [runtimes, visibleProviders],
+  );
+
   const machines = useMemo(
     () =>
-      buildRuntimeMachines(runtimes, {
+      buildRuntimeMachines(visibleRuntimes, {
         now,
         localDaemonId,
         localMachineName,
@@ -145,7 +154,7 @@ export function RuntimesPage({
         ensureLocalMachine: hasLocalMachine,
       }),
     [
-      runtimes,
+      visibleRuntimes,
       now,
       localDaemonId,
       localMachineName,
@@ -185,7 +194,7 @@ export function RuntimesPage({
 
   if (isLoading || fetching) return <RuntimesPageSkeleton />;
 
-  const totalCount = runtimes.length;
+  const totalCount = visibleRuntimes.length;
   // Desktop always has a synthesized local machine row, so the
   // "register a runtime" empty state would hide the Start button.
   const showEmpty = totalCount === 0 && !bootstrapping && !hasLocalMachine;

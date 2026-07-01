@@ -152,6 +152,16 @@ export function filterRuntimeMachines(
   });
 }
 
+export function filterRuntimesByProviders(
+  runtimes: AgentRuntime[],
+  visibleProviders: readonly string[] | undefined,
+): AgentRuntime[] {
+  if (!visibleProviders) return runtimes;
+
+  const providers = new Set(visibleProviders);
+  return runtimes.filter((runtime) => providers.has(runtime.provider));
+}
+
 export function runtimeMachineCounts(machines: RuntimeMachine[]): {
   all: number;
   online: number;

@@ -3,6 +3,7 @@ import type { AgentRuntime } from "@multica/core/types";
 import {
   buildRuntimeMachines,
   filterRuntimeMachines,
+  filterRuntimesByProviders,
   runtimeMachineCounts,
   splitRuntimeName,
 } from "./runtime-machines";
@@ -31,6 +32,19 @@ function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
 }
 
 describe("runtime machine grouping", () => {
+  it("filters runtimes to the providers visible on the current platform", () => {
+    const runtimes = [
+      makeRuntime({ id: "rt-csc", provider: "csc" }),
+      makeRuntime({ id: "rt-claude", provider: "claude" }),
+      makeRuntime({ id: "rt-codex", provider: "codex" }),
+    ];
+
+    expect(filterRuntimesByProviders(runtimes, ["csc"])).toEqual([
+      expect.objectContaining({ id: "rt-csc", provider: "csc" }),
+    ]);
+    expect(filterRuntimesByProviders(runtimes, undefined)).toBe(runtimes);
+  });
+
   it("groups multiple provider runtimes by daemon id", () => {
     const machines = buildRuntimeMachines(
       [
