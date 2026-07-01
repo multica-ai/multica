@@ -120,6 +120,16 @@ func nullText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
 }
 
+// installTeamID reads the real Slack team id from a stored installation config,
+// or "" if absent/undecodable. Unlike decodeCredentials / DecodePublicConfig it
+// does NOT fall back to app_id: team routing and identity reuse must match the
+// actual Slack workspace, and app_id != team_id for BYO apps.
+func installTeamID(installConfigJSON json.RawMessage) string {
+	var cfg installConfig
+	_ = json.Unmarshal(installConfigJSON, &cfg)
+	return cfg.TeamID
+}
+
 // installationServesTeam reports whether an installation (its stored config) may
 // serve events from eventTeamID. Inbound routing keys on api_app_id, which
 // identifies the Slack APP, not the Slack workspace: a BYO app distributed /
@@ -127,12 +137,8 @@ func nullText(s string) pgtype.Text {
 // So we additionally require the event's team to match the team the installed
 // bot belongs to. An installation with no recorded team (legacy) is permissive.
 func installationServesTeam(installConfigJSON json.RawMessage, eventTeamID string) bool {
-	// Read team_id directly (NOT via DecodePublicConfig, which falls back to
-	// app_id when team_id is absent — a hosted-era convenience that would defeat
-	// this check for BYO where app_id != team_id).
-	var cfg installConfig
-	_ = json.Unmarshal(installConfigJSON, &cfg)
-	return cfg.TeamID == "" || cfg.TeamID == eventTeamID
+	teamID := installTeamID(installConfigJSON)
+	return teamID == "" || teamID == eventTeamID
 }
 
 // ---- installation routing ----
@@ -173,30 +179,104 @@ func (r *installationResolver) ResolveInstallation(ctx context.Context, msg chan
 
 // ---- identity ----
 
-type identityResolver struct{ q *db.Queries }
+// identityQueries is the slice of generated queries the identityResolver needs.
+// It is an interface (not *db.Queries) so the cross-installation reuse path is
+// unit-tested with fakes, mirroring slashQueries. *db.Queries satisfies it.
+type identityQueries interface {
+	GetChannelUserBindingByUserID(ctx context.Context, arg db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error)
+	FindReusableChannelUserBinding(ctx context.Context, arg db.FindReusableChannelUserBindingParams) (db.ChannelUserBinding, error)
+	GetMemberByUserAndWorkspace(ctx context.Context, arg db.GetMemberByUserAndWorkspaceParams) (db.Member, error)
+	CreateChannelUserBinding(ctx context.Context, arg db.CreateChannelUserBindingParams) (db.ChannelUserBinding, error)
+}
+
+type identityResolver struct{ q identityQueries }
 
 func (r *identityResolver) ResolveSender(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) (engine.ResolvedIdentity, error) {
+	senderID := msg.Source.SenderID
 	binding, err := r.q.GetChannelUserBindingByUserID(ctx, db.GetChannelUserBindingByUserIDParams{
 		InstallationID: inst.ID,
-		ChannelUserID:  msg.Source.SenderID,
+		ChannelUserID:  senderID,
 	})
+	reused := false
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return engine.ResolvedIdentity{}, err
+		}
+		// Not linked to THIS installation. Before prompting, reuse a link the same
+		// Slack user already made to another installation of the same team in this
+		// workspace (MUL-3911): one link per Slack workspace, not per app.
+		cand, ok, ferr := r.reusableBinding(ctx, inst, senderID)
+		if ferr != nil {
+			return engine.ResolvedIdentity{}, ferr
+		}
+		if !ok {
 			return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
 		}
-		return engine.ResolvedIdentity{}, err
+		binding, reused = cand, true
 	}
-	// Binding existence no longer proves membership (no FK); re-check.
+	// Binding existence no longer proves membership (no FK); re-check. For a
+	// reused link this also gates materialization: we never persist a binding for
+	// a user who has since left the workspace.
 	if _, err := r.q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      binding.MulticaUserID,
 		WorkspaceID: inst.WorkspaceID,
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			if reused {
+				// Same human, no longer a member: prompt a fresh link rather than
+				// surface "not a member" for an app they never linked.
+				return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
+			}
 			return engine.ResolvedIdentity{}, engine.ErrSenderNotMember
 		}
 		return engine.ResolvedIdentity{}, err
 	}
+	if reused {
+		// Materialize the reused link as a binding on THIS installation so later
+		// messages resolve on the fast per-installation path and are pruned with
+		// the member like any other. Idempotent via ON CONFLICT; a concurrent
+		// first message that already wrote it returns the same row.
+		if _, err := r.q.CreateChannelUserBinding(ctx, db.CreateChannelUserBindingParams{
+			WorkspaceID:    inst.WorkspaceID,
+			MulticaUserID:  binding.MulticaUserID,
+			InstallationID: inst.ID,
+			ChannelType:    string(TypeSlack),
+			ChannelUserID:  senderID,
+			Config:         []byte(`{}`),
+		}); err != nil {
+			return engine.ResolvedIdentity{}, fmt.Errorf("materialize reused slack binding: %w", err)
+		}
+	}
 	return engine.ResolvedIdentity{UserID: binding.MulticaUserID}, nil
+}
+
+// reusableBinding looks for a link the same Slack user already made to ANOTHER
+// installation of the SAME workspace + SAME Slack team, so a second app in one
+// Slack workspace need not re-prompt (MUL-3911). ok=false (nil error) means "no
+// reuse — prompt to link": the installation records no team (legacy), its
+// Platform is not a ChannelInstallation, or no matching binding exists.
+func (r *identityResolver) reusableBinding(ctx context.Context, inst engine.ResolvedInstallation, senderID string) (db.ChannelUserBinding, bool, error) {
+	ci, ok := inst.Platform.(db.ChannelInstallation)
+	if !ok {
+		return db.ChannelUserBinding{}, false, nil
+	}
+	teamID := installTeamID(ci.Config)
+	if teamID == "" {
+		return db.ChannelUserBinding{}, false, nil
+	}
+	cand, err := r.q.FindReusableChannelUserBinding(ctx, db.FindReusableChannelUserBindingParams{
+		WorkspaceID:   inst.WorkspaceID,
+		ChannelType:   string(TypeSlack),
+		ChannelUserID: senderID,
+		TeamID:        teamID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.ChannelUserBinding{}, false, nil
+		}
+		return db.ChannelUserBinding{}, false, err
+	}
+	return cand, true, nil
 }
 
 // ---- dedup ----

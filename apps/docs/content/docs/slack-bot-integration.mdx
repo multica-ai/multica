@@ -134,6 +134,8 @@ Setting this up for **multiple agents**? Repeat the whole flow once per agent �
 
 The first time you @-mention or DM the bot, it replies with a **link your account** prompt. Tap the link, sign in to Multica, and your Slack identity is bound to your Multica membership — this is what lets the agent act as you (e.g. `/issue` files under your name). The link is single-use and expires in about 15 minutes; just message the bot again for a fresh one.
 
+You only link **once per Slack workspace**. If the same Multica workspace runs several bots in one Slack workspace (one app per agent), the first bot you link teaches the rest: messaging a second bot reuses that link automatically, no re-prompt. (Linking again is only needed for a bot in a *different* Slack workspace, or a bot connected to a *different* Multica workspace.)
+
 <Callout type="warning">
 Only **members of the workspace** can use the bot. If you aren't a member, or you skip the identity link, the bot won't run — your message is dropped (recorded for audit, without its contents).
 </Callout>

@@ -134,6 +134,8 @@ App-level token 用来授权 Socket Mode 连接。它只能在控制台里创建
 
 第一次 @ 或私聊 Bot 时，它会回一条 **绑定你的账号** 提示。点开链接、登录 Multica，你的 Slack 身份就会绑定到你的 Multica 成员身份——正是这一步让智能体能以你的身份行事（比如 `/issue` 会把 issue 记在你名下）。这个链接是一次性的，大约 15 分钟后过期；再给 Bot 发条消息就能拿到一个新的。
 
+**每个 Slack workspace 只需绑定一次。** 如果同一个 Multica 工作区在同一个 Slack workspace 里跑了多个 Bot（每个智能体一个 App），你在第一个 Bot 上完成绑定后，其余的会自动复用这次绑定，不会再次弹出提示。（只有在*另一个* Slack workspace 里的 Bot、或连到*另一个* Multica 工作区的 Bot，才需要重新绑定。）
+
 <Callout type="warning">
 只有**工作区成员**才能使用 Bot。如果你不是成员，或者跳过了身份绑定，Bot 不会运行——你的消息会被丢弃（仅出于审计目的记录，不保存消息内容）。
 </Callout>
