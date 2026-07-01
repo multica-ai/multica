@@ -73,3 +73,54 @@ func TestAppendRegistryDataSourceRows_RuntimeLayerAuthored(t *testing.T) {
 		t.Fatalf("open row effective = %q, want allow", openRow.Effective.Setting)
 	}
 }
+
+func TestAppendAuthoredRegistryDataSourceRows_AgentLayerOverridesLegacyProjection(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	ctx := context.Background()
+
+	agent := uuidByte(8)
+	const authoredAllow = "ds-orders"
+	const legacyOnly = "ds-finance"
+
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID:     tpTestWorkspaceID,
+		ToolKey:         RegistryToolKey,
+		Layer:           LayerAgent,
+		SubjectID:       agent,
+		ResourcePattern: authoredAllow,
+		Setting:         SettingAllow,
+	}); err != nil {
+		t.Fatalf("author agent-layer allow: %v", err)
+	}
+
+	catalog := []RegistryDataSource{
+		{ID: authoredAllow, Name: "Orders"},
+		{ID: legacyOnly, Name: "Finance"},
+	}
+
+	rows, err := s.AppendAuthoredRegistryDataSourceRows(ctx, TableQuery{
+		WorkspaceID: tpTestWorkspaceID,
+		AgentID:     agent,
+		Base:        SettingAllow,
+	}, catalog, nil)
+	if err != nil {
+		t.Fatalf("append authored rows: %v", err)
+	}
+	rows = AppendRegistryProjection(rows, RegistryProjection{
+		DataSources: catalog,
+		Grant:       RegistryGrant{},
+	}, LayerAgent, SettingAllow)
+
+	if got, ok := rowByPattern(rows, authoredAllow); !ok {
+		t.Fatalf("authored allow source row missing")
+	} else if got.Layers[LayerAgent] != SettingAllow || got.Effective.Setting != SettingAllow {
+		t.Fatalf("authored allow source = layer %q effective %q, want allow/allow", got.Layers[LayerAgent], got.Effective.Setting)
+	}
+
+	if got, ok := rowByPattern(rows, legacyOnly); !ok {
+		t.Fatalf("legacy-only source row missing")
+	} else if got.Layers[LayerAgent] != SettingDeny || got.Effective.Setting != SettingDeny {
+		t.Fatalf("legacy-only source = layer %q effective %q, want deny/deny", got.Layers[LayerAgent], got.Effective.Setting)
+	}
+}

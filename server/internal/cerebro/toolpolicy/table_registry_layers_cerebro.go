@@ -138,3 +138,57 @@ func (s *Store) AppendRegistryDataSourceRows(ctx context.Context, in TableQuery,
 	}
 	return out, nil
 }
+
+// AppendAuthoredRegistryDataSourceRows appends only already-authored
+// firtal_registry per-data-source rows. Agent-scoped views use this before the
+// legacy agent_tool_grant projection, so a newly authored Permissions row wins
+// while un-authored sources still fall back to the legacy allowlist projection.
+func (s *Store) AppendAuthoredRegistryDataSourceRows(ctx context.Context, in TableQuery, dataSources []RegistryDataSource, out []TableRow) ([]TableRow, error) {
+	if len(dataSources) == 0 {
+		return out, nil
+	}
+	groupIDs, err := s.resolveGroupIDs(ctx, in.WorkspaceID, in.UserID, in.GroupIDs)
+	if err != nil {
+		return nil, err
+	}
+	settings, err := s.loadRegistryResourceSettings(ctx, in, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	authored := map[string]bool{}
+	for _, row := range out {
+		if row.ToolKey == RegistryToolKey && row.ResourcePattern != "" {
+			authored[row.ResourcePattern] = true
+		}
+	}
+
+	for _, ds := range dataSources {
+		id := ds.ID
+		cell, ok := settings[id]
+		if id == "" || !ok || authored[id] {
+			continue
+		}
+		row := TableRow{
+			ToolKey:         RegistryToolKey,
+			ResourcePattern: id,
+			Title:           ds.Name,
+			Category:        registryDataSourceCategory,
+			Source:          registryDataSourceSource,
+			Layers:          map[Layer]Setting{},
+			Conditions:      map[Layer]*Condition{},
+		}
+		for l, set := range cell.layers {
+			row.Layers[l] = set
+		}
+		for l, cond := range cell.conditions {
+			row.Conditions[l] = cond
+		}
+		if len(cell.groups) > 0 {
+			row.Layers[LayerGroup] = CombineGroups(cell.groups...)
+		}
+		row.Effective = Resolve(Input{Settings: row.Layers, Base: in.Base})
+		out = append(out, row)
+	}
+	return out, nil
+}

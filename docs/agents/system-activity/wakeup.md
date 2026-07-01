@@ -14,6 +14,8 @@
 
 ```go
 const (
+    defaultMaxSelfWakeupsPerIssue = 8   // fallback hvis workspace settings mangler
+    defaultMinWakeupIntervalMin   = 5   // fallback hvis workspace settings mangler
     WakeupMaxConsecutivePostpones = 3   // maks dispatches i træk → inbox-notifikation
 )
 ```
@@ -23,7 +25,10 @@ const (
 ## Håndhævede regler ved Create
 
 1. `fire_at` skal være mindst `wakeup_min_interval_minutes` (workspace-setting, default 5 min, min 1 min) frem i tid.
-2. Der må ikke allerede eksistere en pending wakeup for samme `agent_id + issue_id` oprettet inden for den samme minimums-interval.
+2. Hvis workspace setting mangler, bruges `defaultMinWakeupIntervalMin = 5`.
+3. En sikkerhedsbund i koden (`minWakeupIntervalFloor`) forhindrer interval under 1 minut, også hvis workspace setting sættes lavere.
+4. Der må ikke allerede eksistere en pending wakeup for samme `agent_id + issue_id` oprettet inden for det aktuelle minimumsinterval.
+5. Én agent kan højst oprette `defaultMaxSelfWakeupsPerIssue = 8` wakeups på samme issue, medmindre workspace settings sætter en anden grænse.
 
 ## Dispatch-flow (Phase 1)
 
@@ -31,7 +36,7 @@ const (
 1. CancelAgentTasksByIssueAndAgent → annuller evt. hængende tasks
 2. CreateComment (type="wakeup") → synlig kommentar i issuet
 3. EnqueueTaskForMention → agent enqueues ny task
-4. MarkWakeupDispatched / RescheduleRecurringWakeup
+4. MarkWakeupDispatched
 5. [goroutine] IncrementWakeupPostpones
    └─ count >= 3 → CreateInboxItem (type="wakeup_loop") + ResetWakeupPostpones
 ```

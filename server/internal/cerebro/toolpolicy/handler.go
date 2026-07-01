@@ -265,8 +265,22 @@ func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("tool-policy registry fold-in skipped", append(logger.RequestAttrs(r), "error", perr)...)
 		} else if ok {
 			if agentID.Valid {
-				// Agent scope: project the per-agent grant (agent_tool_grant) as the
-				// data-source defaults on the agent layer — unchanged behaviour.
+				// Agent scope: authored per-data-source Permissions rows win first;
+				// legacy agent_tool_grant then fills only sources without an authored row.
+				q := TableQuery{
+					WorkspaceID: workspaceID,
+					RuntimeID:   runtimeID,
+					AgentID:     agentID,
+					UserID:      userID,
+					GroupIDs:    groupIDs,
+					SystemID:    systemID,
+					Base:        base,
+				}
+				if folded, ferr := h.Store.AppendAuthoredRegistryDataSourceRows(r.Context(), q, proj.DataSources, rows); ferr != nil {
+					slog.Warn("tool-policy registry authored fold-in skipped", append(logger.RequestAttrs(r), "error", ferr)...)
+				} else {
+					rows = folded
+				}
 				rows = AppendRegistryProjection(rows, proj, LayerAgent, base)
 			} else {
 				// FIR-2269: every other actor layer (workspace, runtime, group, user,
