@@ -25,17 +25,20 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # ── Bundled scripts and templates ────────────────────────────────────────────
-COPY --chmod=755 entrypoint.sh                   /usr/local/bin/entrypoint.sh
-COPY --chmod=755 agentfarm-bootstrap.sh          /usr/local/bin/agentfarm-bootstrap.sh
-COPY --chmod=755 git-credential-platform-bot.sh  /usr/local/bin/git-credential-platform-bot
+COPY --chmod=755 docker/agentrunner-runtime/entrypoint.sh                   /usr/local/bin/entrypoint.sh
+COPY --chmod=755 docker/agentrunner-runtime/agentfarm-bootstrap.sh          /usr/local/bin/agentfarm-bootstrap.sh
+COPY --chmod=755 docker/agentrunner-runtime/git-credential-platform-bot.sh  /usr/local/bin/git-credential-platform-bot
 # Shadows the real gh (/usr/bin/gh) on PATH to inject a fresh token per call.
-COPY --chmod=755 gh-platform-bot-wrapper.sh      /usr/local/bin/gh
+COPY --chmod=755 docker/agentrunner-runtime/gh-platform-bot-wrapper.sh      /usr/local/bin/gh
 
-COPY agent-templates/                     /etc/multica/agent-templates/
+COPY docker/agentrunner-runtime/agent-templates/  /etc/multica/agent-templates/
 RUN chmod -R a+r /etc/multica/agent-templates/
 
-COPY skill-templates/                     /etc/multica/skill-templates/
+COPY docker/agentrunner-runtime/skill-templates/  /etc/multica/skill-templates/
 RUN chmod -R a+r /etc/multica/skill-templates/
+
+# ── Smoke test script (lives in scripts/ alongside other agentfarm scripts) ──
+COPY --chmod=755 scripts/smoke-test-agentrunner.sh /opt/agentfarm/scripts/smoke-test-agentrunner.sh
 
 USER agent
 ENV HOME=/home/agent

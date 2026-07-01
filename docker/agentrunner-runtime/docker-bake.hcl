@@ -13,8 +13,8 @@ variable "BASE_IMAGE"     { default = "ghcr.io/g2crowd/agent-runtime-base" }
 variable "BASE_TAG"       { default = "latest" }
 
 target "default" {
-  context    = "docker/agentrunner-runtime"
-  dockerfile = "Dockerfile"
+  context    = "."
+  dockerfile = "docker/agentrunner-runtime/Dockerfile"
   platforms  = ["linux/amd64", "linux/arm64"]
   tags = ["${APP_IMAGE_BASE}-${ENVIRONMENT}:${IMG_SHA}"]
   args = {

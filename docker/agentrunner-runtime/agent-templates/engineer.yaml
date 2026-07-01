@@ -9,3 +9,4 @@ instructions_file: "engineer.instructions.md"
 skill_dirs:
   - "acli"
   - "multica-repo-workspace"
+  - "smoke"
