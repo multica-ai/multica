@@ -1,0 +1,45 @@
+{
+  "name": "issue_search_synopsis_v0",
+  "description": "Offline-only schema for evaluating canonical issue search synopsis documents.",
+  "privacy": {
+    "allowed": [
+      "synthetic issue identifiers",
+      "synthetic titles and comments",
+      "aggregate child status counts",
+      "synthetic artifact paths"
+    ],
+    "disallowed": [
+      "real workspace snapshots",
+      "real comments",
+      "member IDs",
+      "agent IDs",
+      "workspace IDs",
+      "absolute local paths",
+      "private artifact URLs"
+    ]
+  },
+  "fields": {
+    "identifier": "Synthetic issue key used for regression expectations.",
+    "title": "Issue title.",
+    "status": "Issue lifecycle status.",
+    "assignee_type": "Synthetic assignee class.",
+    "parent_identifier": "Parent issue key when present.",
+    "child_count": "Number of direct child issues in the synthetic graph.",
+    "child_status_counts": "Counts of direct children by status.",
+    "active_children": "Direct children in todo, in_progress, in_review, or blocked.",
+    "artifact_paths": "Synthetic relative artifact paths.",
+    "latest_signal": "Most recent final, consolidation, or decision-bearing signal.",
+    "needs_decision": "True when the issue is waiting on an explicit owner decision.",
+    "true_blocked": "True only for missing resource, permission, or external dependency blockers.",
+    "superseded": "True when the route is replaced by a newer route.",
+    "needs_consolidation": "True when a parent/control-room issue needs a current-state summary.",
+    "search_text": "Compact text intended for search indexing and rerank."
+  },
+  "source_priority": [
+    "structured issue fields",
+    "child status aggregation",
+    "latest final or consolidation signal",
+    "ordinary comments only for explicit artifact/verdict/lifecycle fields"
+  ]
+}
+
