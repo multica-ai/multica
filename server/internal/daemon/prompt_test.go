@@ -277,7 +277,7 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 			ChatChannelType: "slack",
 			ChatMessage:     "你刚刚和 xxx 聊了什么",
 		})
-		for _, want := range []string{"Slack", "NOT in Multica", "multica chat history", "multica chat thread"} {
+		for _, want := range []string{"Slack", "NOT in Multica", "multica chat history", "multica chat thread", "Do NOT narrate"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("slack-backed prompt missing %q\n--- output ---\n%s", want, out)
 			}
