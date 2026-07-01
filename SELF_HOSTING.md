@@ -152,7 +152,7 @@ The chart creates the following resources in the target namespace:
 
 The `multica-secrets` Secret is **not** managed by the chart — you create it once with `kubectl` so real values never need to land in git.
 
-> **One release per namespace:** the prebuilt `multica-web` image bakes `REMOTE_API_URL=http://backend:8080` at build time, so the chart ships an ExternalName Service literally named `backend`. Because that name is unprefixed, you can run only one Multica release per namespace, and `helm install` will fail if a `Service/backend` already exists there (pass `--take-ownership`, or use a dedicated namespace). If you build a web image with a patched `REMOTE_API_URL`, set `frontend.compatibility.backendAlias: false` to drop the alias.
+> **Runtime frontend upstreams:** current `multica-web` images read `REMOTE_API_URL` and `DOCS_URL` when the Next.js server runs, so API/docs upstream changes do not require a web rebuild. The chart defaults `REMOTE_API_URL` to this release's backend Service. `frontend.compatibility.backendAlias` exists only for legacy images that still baked `REMOTE_API_URL=http://backend:8080` at build time.
 
 > **Prerequisites:** `kubectl` and `helm` (v3.13+ for `--take-ownership`, or v4+) configured for the target cluster, an Ingress controller (Traefik / NGINX), and a default StorageClass.
 

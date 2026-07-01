@@ -261,7 +261,7 @@ multica setup self-host \
 
 To pull the latest images without changing the chart, `kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend`. To pin a specific Multica release, set `images.backend.tag` / `images.frontend.tag` in your values file and `helm upgrade`. `helm -n multica uninstall multica` removes the workloads but keeps the PVCs and Secret; `kubectl delete namespace multica` wipes everything.
 
-The full reference — three login modes, the `backend` ExternalName workaround for the build-time-baked `REMOTE_API_URL` in the web image, resource limits, and TLS — lives in the repo's [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative).
+The full reference — three login modes, runtime frontend API/docs upstreams, legacy `backend` ExternalName compatibility, resource limits, and TLS — lives in the repo's [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative).
 
 ## Common issues
 
