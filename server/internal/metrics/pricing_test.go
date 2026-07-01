@@ -8,6 +8,18 @@ func TestPriceForModelAliasAnthropicFableAndOpus48(t *testing.T) {
 		want  ModelPrice
 	}{
 		{
+			model: "claude-sonnet-5",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			model: "anthropic:claude-sonnet-5",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
+			model: "claude-5-sonnet",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 10},
+		},
+		{
 			model: "claude-fable-5",
 			want:  ModelPrice{Provider: "anthropic", Model: "claude-fable-5", InputPerM: 10, CacheReadPerM: 1, CacheWritePerM: 12.5, OutputPerM: 50},
 		},

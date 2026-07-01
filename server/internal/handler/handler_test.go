@@ -3330,11 +3330,10 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 	}
 }
 
-// TestAgentReplyDoesNotInheritParentMentions verifies that agent-authored
-// replies do NOT inherit parent-comment mentions, preventing agent-to-agent
-// re-trigger loops (e.g. "No reply needed" chains). Member-authored replies
-// still inherit parent mentions as expected.
-func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
+// TestRootMentionOwnerRoutesMemberReplyButNotAgentReply verifies that a member
+// root @mention owns later member replies, while agent-authored acknowledgments
+// still do not self-expand the route.
+func TestRootMentionOwnerRoutesMemberReplyButNotAgentReply(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -3418,7 +3417,7 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	}
 
 	// 3. Agent A posts a reply in the same thread with NO mentions.
-	// With the fix, this must NOT inherit the parent mention of Agent B.
+	// Agent-authored comments still do not inherit the root mention of Agent B.
 	// resolveActor requires X-Task-ID paired with X-Agent-ID to trust the
 	// agent identity, so we seed a task that belongs to agent A.
 	agentATask := createHandlerTestTaskForAgent(t, agentA)
@@ -3437,7 +3436,7 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	cancelTasks(agentB)
 
 	// 5. Member posts a reply in the same thread with NO mentions.
-	// This SHOULD inherit the parent mention and re-trigger Agent B.
+	// The member-authored root @mention owns the thread, so this routes to B.
 	w = postComment(issueID, map[string]any{
 		"content":   "Thanks for the review.",
 		"parent_id": parentComment.ID,
@@ -3446,7 +3445,7 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 		t.Fatalf("member reply: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 	if countTasks(agentB) != 1 {
-		t.Fatalf("expected 1 task for Agent B after member reply (parent inheritance allowed), got %d", countTasks(agentB))
+		t.Fatalf("expected 1 task for Agent B after member reply (root owner), got %d", countTasks(agentB))
 	}
 }
 
@@ -3546,10 +3545,10 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 	}
 }
 
-// TestNestedMemberReplyUsesDirectParentForMentionInheritance is the regression
+// TestNestedMemberReplyUsesDirectParentForThreadOwnership is the regression
 // for parent-root write normalization leaking root mentions into plain nested
-// replies. Stored parent_id keeps the direct parent, and trigger logic evaluates
-// that direct parent rather than the thread root.
+// replies. Stored parent_id keeps the direct parent, and trigger logic routes
+// to that direct agent parent rather than the thread root's explicit mention.
 func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -3558,6 +3557,7 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 
 	assigneeAgent := createHandlerTestAgent(t, "Nested Mention Assignee", nil)
 	mentionedAgent := createHandlerTestAgent(t, "Nested Mention Target", nil)
+	parentAgent := createHandlerTestAgent(t, "Nested Direct Parent", nil)
 
 	var number int
 	if err := testPool.QueryRow(ctx, `
@@ -3624,7 +3624,7 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, parent_id)
 		VALUES ($1, $2, 'agent', $3, $4, $5)
 		RETURNING id
-	`, testWorkspaceID, issueID, mentionedAgent, "looks like redirect config", root.ID).Scan(&directParentID); err != nil {
+	`, testWorkspaceID, issueID, parentAgent, "looks like redirect config", root.ID).Scan(&directParentID); err != nil {
 		t.Fatalf("insert direct parent reply: %v", err)
 	}
 
@@ -3638,11 +3638,14 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 	if got := countQueued(mentionedAgent); got != 0 {
 		t.Fatalf("plain nested reply must not inherit root mention from non-direct parent; got %d queued tasks", got)
 	}
+	if got := countQueued(parentAgent); got != 1 {
+		t.Fatalf("plain nested reply should route to direct agent parent; got %d queued tasks", got)
+	}
 }
 
-// TestNestedMemberReplyUsesDirectParentForAssigneeParticipation is the
-// regression for treating any prior agent reply in the root thread as direct
-// participation in a nested human sub-thread.
+// TestNestedMemberReplyWithMemberParentFallsBackToAssignee verifies that a
+// nested reply whose direct parent is human-owned does not route to a sibling
+// agent reply. It falls through to the issue assignee instead.
 func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -3731,8 +3734,8 @@ func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T)
 	if nested.ParentID == nil || *nested.ParentID != humanParentID {
 		t.Fatalf("stored nested reply parent_id should keep direct parent %s, got %v", humanParentID, nested.ParentID)
 	}
-	if got := countAssigneeQueued(); got != 0 {
-		t.Fatalf("plain nested human reply must not wake assignee just because assignee replied elsewhere under root; got %d queued tasks", got)
+	if got := countAssigneeQueued(); got != 1 {
+		t.Fatalf("plain nested human reply should fall back to assignee; got %d queued tasks", got)
 	}
 }
 

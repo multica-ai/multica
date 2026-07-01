@@ -15,7 +15,6 @@
     "unpin": "고정 해제",
     "delete": "삭제",
     "no_matches": "일치하는 프로젝트가 없습니다",
-    "selected_one": "{{count}}개 선택됨",
     "selected_other": "{{count}}개 선택됨",
     "clear_selection": "선택 해제"
   },
@@ -132,7 +131,6 @@
   "toolbar": {
     "result_count_title": "일치하는 프로젝트 / 전체 프로젝트",
     "filter_label": "필터",
-    "filter_active_count_one": "필터 {{count}}개",
     "filter_active_count_other": "필터 {{count}}개",
     "clear_filters": "필터 지우기",
     "section_status": "상태",

@@ -136,14 +136,16 @@ ORDER BY created_at DESC;
 -- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, force_fresh_session, is_leader_task, handoff_note
+    trigger_summary, force_fresh_session, is_leader_task, handoff_note,
+    squad_id
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
-    sqlc.narg(handoff_note)
+    sqlc.narg(handoff_note),
+    sqlc.narg(squad_id)
 )
 RETURNING *;
 
@@ -153,6 +155,25 @@ RETURNING *;
 -- daemon detects this variant via context.type == "quick_create".
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
 VALUES ($1, $2, NULL, 'queued', $3, $4)
+RETURNING *;
+
+-- name: CreateDeferredAgentTask :one
+-- Deferred tasks are inert until PromoteDueDeferredTasksForRuntime flips them
+-- to queued. Used for comment-routing escalation: a thread-owner primary task
+-- gets a delayed assignee fallback without waking both agents at t=0.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    trigger_summary, is_leader_task, squad_id, escalation_for_task_id, fire_at
+)
+VALUES (
+    @agent_id, @runtime_id, @issue_id, 'deferred', @priority,
+    sqlc.narg(trigger_comment_id),
+    sqlc.narg(trigger_summary),
+    COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
+    sqlc.narg(squad_id),
+    @escalation_for_task_id,
+    @fire_at
+)
 RETURNING *;
 
 -- name: LinkTaskToIssue :exec
@@ -172,15 +193,17 @@ WHERE id = $1 AND issue_id IS NULL;
 -- retried as fresh sessions so the child does not inherit a stuck agent
 -- conversation. Keep the CASE WHEN predicates in sync with
 -- resumeUnsafeFailureReason and the resume lookup blacklists. attempt is
--- incremented; max_attempts, trigger_comment_id, and is_leader_task are
--- inherited so the retried task keeps the same squad-role provenance as its
+-- incremented; max_attempts, trigger_comment_id, is_leader_task, and squad_id
+-- are inherited so the retried task keeps the same squad-role provenance as its
 -- parent and the self-trigger guard in shouldEnqueueSquadLeaderOnComment
--- continues to recognise it as a leader task.
+-- continues to recognise it as a leader task. Inheriting squad_id also keeps
+-- the squad-leader briefing injection working across retries.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
-    attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task
+    attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
+    squad_id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -189,7 +212,8 @@ SELECT
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
     p.attempt + 1, p.max_attempts, p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
-    p.is_leader_task
+    p.is_leader_task,
+    p.squad_id
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
@@ -202,7 +226,7 @@ RETURNING *;
 -- status="working" with no self-correction.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CancelAgentTasksByIssueAndAgent :many
@@ -212,7 +236,7 @@ RETURNING *;
 -- still-running @-mention agent on the same issue.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CancelAgentTasksByAgent :many
@@ -223,7 +247,7 @@ RETURNING *;
 -- behave consistently.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CancelAgentTasksByTriggerComment :many
@@ -234,7 +258,7 @@ RETURNING *;
 -- and we'd lose the ability to find the affected tasks.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CancelAgentTasksByChatSession :many
@@ -245,7 +269,7 @@ RETURNING *;
 -- could no longer reach those tasks.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: GetAgentTask :one
@@ -554,7 +578,7 @@ RETURNING t.*;
 -- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
 -- name: CountRunningTasks :one
@@ -625,6 +649,34 @@ ORDER BY priority DESC, created_at ASC;
 SELECT * FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
 ORDER BY priority DESC, created_at ASC;
+
+-- name: PromoteDueDeferredTasksForRuntime :many
+UPDATE agent_task_queue
+SET status = 'queued'
+WHERE runtime_id = @runtime_id
+  AND status = 'deferred'
+  AND fire_at <= now()
+RETURNING *;
+
+-- name: CancelDeferredEscalationsForTask :many
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+WHERE escalation_for_task_id = $1
+  AND status IN ('deferred', 'queued', 'dispatched', 'waiting_local_directory')
+RETURNING *;
+
+-- name: CancelDeferredEscalationsForIssueAgent :many
+WITH cancelled AS (
+    UPDATE agent_task_queue fallback
+    SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+    FROM agent_task_queue primary_task
+    WHERE fallback.escalation_for_task_id = primary_task.id
+      AND fallback.status IN ('deferred', 'queued', 'dispatched', 'waiting_local_directory')
+      AND primary_task.issue_id = @issue_id
+      AND primary_task.agent_id = @agent_id
+    RETURNING fallback.*
+)
+SELECT * FROM cancelled;
 
 -- name: ListActiveTasksByIssue :many
 -- Backs the issue-detail "agent live" banner. Includes 'queued' so the

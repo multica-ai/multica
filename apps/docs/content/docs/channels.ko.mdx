@@ -1,0 +1,93 @@
+---
+title: Chat 연동 (channels)
+description: Multica가 에이전트를 채팅 플랫폼에 어떻게 연결하는지 — 하나의 channel 엔진과 Lark(飞书) 및 Slack을 위한 플랫폼별 어댑터 — 인바운드 파이프라인, 세션, 권한을 다룹니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+**channel**은 Multica [에이전트](/agents)를 채팅 플랫폼에 연결하여, 팀이 이미 대화하고 있는 곳에서 그 에이전트와 함께 일할 수 있게 합니다. 현재 두 개의 channel이 있습니다 — [Lark (飞书)](/lark-bot-integration)와 [Slack](/slack-bot-integration) — 그리고 둘 다 **같은 엔진** 위에서 동작합니다: 플랫폼 중립적인 코어에 얇은 플랫폼별 어댑터가 더해진 구조입니다. 플랫폼을 추가하는 일은 "어댑터를 구현하는 것"이지, "파이프라인을 다시 만드는 것"이 아닙니다.
+
+**installation**은 이 모든 것을 하나로 묶는 단위입니다: 하나의 봇이 하나의 `(workspace, agent)`에 바인딩됩니다. 인바운드 메시지는 installation으로 라우팅된 다음 공유 파이프라인을 거치며, 에이전트의 답변은 동일한 채팅으로 돌아갑니다.
+
+## 아키텍처
+
+<Mermaid chart={`
+flowchart LR
+  subgraph P["채팅 플랫폼"]
+    LK["Lark / 飞书"]
+    SL["Slack"]
+  end
+  subgraph ENG["Channel 엔진 (플랫폼 중립적)"]
+    direction TB
+    SUP["Supervisor<br/>installation당 하나의 활성 연결"]
+    ROU["Router 파이프라인:<br/>route → dedup → auth → session → trigger"]
+  end
+  LK -->|long connection| SUP
+  SL -->|Socket Mode| SUP
+  SUP -->|raw event| ADP["플랫폼별 어댑터<br/>변환 + ResolverSet"]
+  ADP --> ROU
+  ROU -->|agent task| RUN["Daemon이 에이전트를 실행"]
+  RUN -->|reply| OUT["플랫폼별 아웃바운드<br/>(bot token → platform API)"]
+  OUT --> P
+`} />
+
+## 인바운드 파이프라인 (공통)
+
+모든 인바운드 메시지는 — Lark든 Slack이든 — 엔진의 `Router`에서 동일하게 정해진 순서의 단계를 거칩니다. 플랫폼 어댑터는 플랫폼별 조각(`ResolverSet`)만 공급하며, 정책은 엔진 안에 있습니다.
+
+1. **Route to installation** — 이벤트를 `channel_installation`(→ workspace + agent)에 매핑합니다. Lark는 `app_id`로 라우팅하고, Slack은 이벤트에 실린 app id로 라우팅합니다.
+2. **Addressing filter** — 그룹/채널에서는 **봇을 @로 멘션한** 메시지만 계속 진행되며, 한가한 그룹 잡담은 폐기됩니다(읽지 않음).
+3. **Dedup** — 두 단계로 이루어진 `(installation, message_id)` 클레임이 서버 레플리카가 여러 개여도 정확히 한 번만 처리됨을 보장합니다.
+4. **Identity + authorization** — 보낸 사람의 플랫폼 사용자 id를 Multica 사용자([계정 바인딩](#권한))로 해석한 다음, 워크스페이스 멤버십을 다시 확인합니다. 바인딩되지 않은 발신자에게는 "계정을 연결하세요" 안내가 표시되고, 멤버가 아닌 사람은 폐기됩니다.
+5. **Session** — 이 대화에 대한 [chat 세션](/chat)을 찾거나 생성하고 메시지를 추가합니다([세션](#세션과-컨텍스트) 참조).
+6. **Trigger** — 에이전트 [task](/tasks)를 큐에 넣습니다. [daemon](/daemon-runtimes)이 에이전트를 실행하고 그 답변이 채팅으로 돌아갑니다.
+
+## 세션과 컨텍스트
+
+에이전트의 컨텍스트는 **chat 세션 트랜스크립트**입니다 — 시간이 지나며 그 세션에 수집된 메시지들입니다. 이 트랜스크립트 모델은 공통(모든 channel이 공유)입니다. 플랫폼마다 다른 것은 어댑터가 구성하는 **세션 격리 키**입니다:
+
+| 플랫폼 | 격리 키 | 효과 |
+|---|---|---|
+| **Lark / 飞书** | 채팅 id | 채팅/그룹당 하나의 세션 — 같은 채팅에서의 연속된 턴이 하나의 트랜스크립트로 쌓입니다(멀티턴 메모리). |
+| **Slack** | DM: 채널; 채널: `channel + thread root` | 각 DM이 하나의 세션이고, **각 @bot 스레드가 자체 세션**이므로, 한 채널의 두 스레드는 섞이지 않습니다. |
+
+<Callout type="info">
+그룹에서는 **봇을 @로 멘션한** 메시지만 수집됩니다. 어느 channel도 현재 채널의 다른(멘션되지 않은) 메시지나 스크롤백을 읽지 않으므로, 에이전트는 자신이 호출되지 않은 메시지를 보지 못합니다. 주변 기록을 컨텍스트로 가져오는 기능은 향후 개선 사항으로 계획되어 있습니다.
+</Callout>
+
+## 권한
+
+공유 그룹에서 봇을 보호하는 두 개의 독립적인 관문이 있으며 — 둘 다 모든 메시지에 대해 엔진에서, Lark와 Slack에 동일하게 적용됩니다:
+
+- **계정 바인딩(인증)** — 보낸 사람의 플랫폼 사용자 id가 Multica 사용자에 연결되어 있어야 합니다. 누군가 봇에게 처음 메시지를 보내면 **자기 자신의** Multica 계정에 신원을 바인딩하는 일회용 링크를 받으며, 그 전까지는 어떤 에이전트도 실행되지 않습니다.
+- **워크스페이스 멤버십(권한)** — 바인딩된 Multica 사용자는 installation의 워크스페이스 멤버여야 하며, 이는 모든 메시지마다 다시 확인됩니다. 멤버가 아닌 사람은 조용히 폐기됩니다.
+
+따라서 공개 채널에 봇을 추가해도 안전합니다: 신원을 바인딩한 워크스페이스 멤버만 에이전트를 움직일 수 있고, 각 발신자는 독립적으로 확인됩니다. 사용자에게 표시되는 안내는 플랫폼별 페이지를 참고하세요.
+
+## 두 개의 channel
+
+<Callout type="info">
+**Lark (飞书) — 스캔하여 설치.** 워크스페이스 admin이 Lark 앱으로 QR을 스캔하여 에이전트를 바인딩합니다. 개발자 콘솔 작업이 없습니다. 에이전트당 하나의 Bot. [Lark Bot 연동](/lark-bot-integration)을 참고하세요.
+</Callout>
+
+<Callout type="info">
+**Slack — 자체 앱 사용.** 워크스페이스 admin이 Slack 앱을 만들고, 자신의 Slack 워크스페이스에 설치한 다음, bot token과 app-level token을 Multica에 붙여넣습니다. 각 에이전트가 자체 Slack 앱을 갖기 때문에, 하나의 Slack 워크스페이스에서 여러 에이전트가 각각 별개의 봇을 가질 수 있습니다. 매니페스트와 단계별 설정은 [Slack Bot 연동](/slack-bot-integration)을 참고하세요.
+</Callout>
+
+## 자체 호스팅
+
+각 channel은 **at-rest 암호화 키를 설정하기 전까지 꺼져 있습니다**(이 키는 각 봇의 토큰이 데이터베이스에 닿기 전에 암호화합니다):
+
+```dotenv
+MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+Multica Cloud에서는 둘 다 이미 구성되어 있습니다. 전체 참조는 [환경 변수](/environment-variables)를 참고하세요.
+
+## 다음
+
+- [Lark Bot 연동](/lark-bot-integration) — 스캔하여 설치, DM / @-멘션 / `/issue`
+- [Slack Bot 연동](/slack-bot-integration) — 자체 앱 사용 설정(매니페스트 + 토큰), 에이전트별 봇
+- [에이전트](/agents) · [Chat](/chat) · [Tasks](/tasks)

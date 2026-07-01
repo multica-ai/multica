@@ -425,21 +425,36 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   // <Attachment>, which reads the surrounding AttachmentDownloadProvider.
   const components = useMemo(() => buildComponents(), []);
 
+  // Memoize the whole react-markdown subtree on its only real inputs
+  // (`processed` + `components`). Unrelated parent re-renders (e.g. a sibling
+  // agent task streaming over WebSocket fires one every ~100ms) would otherwise
+  // re-run react-markdown, which hands `<code>` a fresh `dangerouslySetInnerHTML`
+  // object each time; React then rewrites the highlighted innerHTML even though
+  // the HTML string is byte-identical, tearing down and rebuilding every hljs
+  // <span> — which collapses any active text selection inside a code block
+  // (MUL-3621). A stable element reference lets React bail out of the subtree.
+  const markdown = useMemo(
+    () => (
+      <ReactMarkdown
+        remarkPlugins={[
+          [remarkMath, { singleDollarTextMath: false }],
+          remarkBreaks,
+          [remarkGfm, { singleTilde: false }],
+        ]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
+        urlTransform={urlTransform}
+        components={components}
+      >
+        {processed}
+      </ReactMarkdown>
+    ),
+    [processed, components],
+  );
+
   return (
     <AttachmentDownloadProvider attachments={attachments}>
       <div ref={wrapperRef} className={cn("rich-text-editor readonly text-sm", className)}>
-        <ReactMarkdown
-          remarkPlugins={[
-            [remarkMath, { singleDollarTextMath: false }],
-            remarkBreaks,
-            [remarkGfm, { singleTilde: false }],
-          ]}
-          rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
-          urlTransform={urlTransform}
-          components={components}
-        >
-          {processed}
-        </ReactMarkdown>
+        {markdown}
         <LinkHoverCard {...hover} />
       </div>
     </AttachmentDownloadProvider>

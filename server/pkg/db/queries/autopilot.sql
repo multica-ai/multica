@@ -301,7 +301,8 @@ RETURNING *;
 -- last_fired_at is read so the planner hook can anchor cold-start
 -- enumeration on the most recent successful fire (set by either the
 -- legacy goroutine before the new scheduler took over, or the new
--- scheduler's own TouchAutopilotTriggerFiredAt call). Without it,
+-- scheduler's own post-dispatch advance — AdvanceTriggerNextRun, falling
+-- back to TouchAutopilotTriggerFiredAt on a cron parse error). Without it,
 -- a trigger that was created days ago and fired by the legacy code
 -- looks like a brand-new trigger to the new scheduler on first tick
 -- and the half-open `(created_at, now]` enumeration replays the most
@@ -411,4 +412,43 @@ ON CONFLICT (autopilot_id, user_type, user_id) DO NOTHING;
 -- Paired with a re-insert loop to implement full-replace PATCH semantics.
 DELETE FROM autopilot_subscriber
 WHERE autopilot_id = $1;
+
+-- =====================
+-- Autopilot Collaborators
+-- =====================
+
+-- name: ListAutopilotCollaborators :many
+-- ORDER BY created_at keeps row rendering stable across refreshes.
+SELECT * FROM autopilot_collaborator
+WHERE autopilot_id = $1
+ORDER BY created_at ASC, user_id ASC;
+
+-- name: AddAutopilotCollaborator :one
+-- Re-granting an existing collaborator is a no-op that refreshes granted_by,
+-- so the call is idempotent from the API boundary.
+INSERT INTO autopilot_collaborator (autopilot_id, user_type, user_id, granted_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (autopilot_id, user_type, user_id)
+    DO UPDATE SET granted_by = EXCLUDED.granted_by
+RETURNING *;
+
+-- name: DeleteAutopilotCollaborator :exec
+DELETE FROM autopilot_collaborator
+WHERE autopilot_id = $1 AND user_type = $2 AND user_id = $3;
+
+-- name: DeleteAutopilotCollaboratorsForAutopilot :exec
+-- Application-layer cleanup run inside the autopilot delete transaction.
+DELETE FROM autopilot_collaborator
+WHERE autopilot_id = $1;
+
+-- name: IsAutopilotCollaborator :one
+SELECT EXISTS (
+    SELECT 1 FROM autopilot_collaborator
+    WHERE autopilot_id = $1 AND user_type = 'member' AND user_id = $2
+) AS is_collaborator;
+
+-- name: ListAutopilotIDsForCollaborator :many
+-- Powers the per-row can_write flag on the list endpoint without an N+1.
+SELECT autopilot_id FROM autopilot_collaborator
+WHERE user_type = 'member' AND user_id = $1;
 

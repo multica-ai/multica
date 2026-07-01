@@ -133,15 +133,15 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "forge".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli", "forge".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
 // runtime_profile.protocol_family CHECK constraint (migration 120): a custom
 // runtime profile may only be based on a backend Multica officially supports.
-// (qoder and forge are built-in providers New can construct, but they are
-// not offered as a custom-profile base, so they are intentionally absent
-// from this list.)
+// (qoder, traecli, and forge are built-in providers New can construct, but
+// they are not offered as a custom-profile base, so they are intentionally
+// absent from this list.)
 var SupportedTypes = []string{
 	"claude",
 	"codebuddy",
@@ -201,10 +201,12 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &antigravityBackend{cfg: cfg}, nil
 	case "qoder":
 		return &qoderBackend{cfg: cfg}, nil
+	case "traecli":
+		return &traecliBackend{cfg: cfg}, nil
 	case "forge":
 		return &forgeBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, forge)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, forge)", agentType)
 	}
 }
 
@@ -220,7 +222,7 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"antigravity": "agy -p (print mode)",
+	"antigravity": "agy -p (non-interactive)",
 	"claude":      "claude (stream-json)",
 	"codebuddy":   "codebuddy (stream-json)",
 	"codex":       "codex app-server",
@@ -233,6 +235,7 @@ var launchHeaders = map[string]string{
 	"opencode":    "opencode run (json)",
 	"pi":          "pi (json mode)",
 	"qoder":       "qodercli --acp",
+	"traecli":     "traecli acp serve",
 	"forge":       "forge -p (one-shot)",
 }
 

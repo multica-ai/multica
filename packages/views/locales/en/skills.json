@@ -58,6 +58,8 @@
     "my_agents": "My agents",
     "other_agents": "Other agents",
     "no_agents": "No agents available",
+    "search_placeholder": "Search agents…",
+    "no_agents_match": "No agents match your search.",
     "has_partial": "{{owned}}/{{total}} added",
     "added_toast": "Added to {{name}}",
     "add_failed_toast": "Failed to add skill",

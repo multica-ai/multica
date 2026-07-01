@@ -68,7 +68,7 @@ func allowAllAgents(db.Agent) bool { return true }
 // omitted, four entry points inconsistent — see MUL-3375).
 //
 // It is intentionally a distinct predicate from the comment trigger
-// (shouldEnqueueOnComment): issue writes park on backlog while comments fire
+// (assignee fallback comment routing): issue writes park on backlog while comments fire
 // in any status. The two only share leaf readiness checks (AgentReadiness,
 // the pending-task dedup), not the top-level decision.
 //

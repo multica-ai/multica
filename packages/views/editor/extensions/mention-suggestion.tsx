@@ -42,7 +42,7 @@ import {
   sortUserItemsByRecency,
 } from "./mention-recency";
 import { matchesPinyin } from "./pinyin-match";
-import { createSuggestionPopupRender } from "./suggestion-popup";
+import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -288,7 +288,9 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
           setSelectedKey(mentionItemKey(orderedItems[next]!));
           return true;
         }
-        if (event.key === "Enter") {
+        // Enter is the canonical accept; plain Tab is an additive alias (see
+        // isPickerAcceptKey). Shift/modifier+Tab fall through to focus nav.
+        if (isPickerAcceptKey(event)) {
           if (orderedItems.length === 0) return true;
           selectItem(orderedItems[selectedIndex]);
           return true;

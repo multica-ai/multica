@@ -265,6 +265,9 @@ func (s *ChannelStore) CreateLarkChatSessionBinding(ctx context.Context, arg Cre
 		ChannelType:    channelTypeFeishu,
 		ChannelChatID:  arg.ChannelChatID,
 		ChatType:       arg.ChatType,
+		// Feishu's channel_chat_id is the real chat id, so the key alone routes
+		// outbound; config stays the empty object (the column is NOT NULL).
+		Config: []byte("{}"),
 	})
 	if err != nil {
 		return ChatSessionBinding{}, err

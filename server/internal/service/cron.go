@@ -60,15 +60,22 @@ func NextOccurrencesUTC(cronExpr, timezone string, after, until time.Time) ([]ti
 	return out, nil
 }
 
-// ComputeNextRun is the legacy wrapper used by the trigger create/update
-// handlers and the failure monitor. It evaluates the cron at the app's
-// local now() — kept for the display-only autopilot_trigger.next_run_at
-// column so we do not have to thread DB time through every UI write
-// path in this same change. Scheduling decisions MUST go through
-// NextOccurrencesUTC against DB time instead.
+// ComputeNextRun evaluates the cron at the app's local now() and backs
+// the display-only autopilot_trigger.next_run_at column for the trigger
+// create/update handlers and the failure monitor. Using the local clock
+// for this display value is deliberate: app/DB clock skew under NTP is far
+// below the column's minute-level granularity, so threading DB time
+// through these UI write paths would buy no user-visible accuracy.
 //
-// MUL-3551: this function is on its way out; new callers should use
-// NextOccurrenceAfterUTC with a db_now() input instead.
+// The scheduler's post-dispatch advance keeps next_run_at on the same
+// local clock but calls NextOccurrenceAfterUTC anchored at
+// max(now, plan_time) rather than this helper, so a lagging app clock can
+// never re-point the column at the slot that just fired (see
+// scheduler.advancedNextRun / autopilotHandler, MUL-3749).
+//
+// Scheduling decisions are a separate concern and MUST go through
+// NextOccurrencesUTC / NextOccurrenceAfterUTC against DB time instead:
+// dispatch correctness across clock-skewed app instances depends on it.
 func ComputeNextRun(cronExpr, timezone string) (time.Time, error) {
 	return NextOccurrenceAfterUTC(cronExpr, timezone, time.Now())
 }

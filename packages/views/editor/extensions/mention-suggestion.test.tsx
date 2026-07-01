@@ -101,6 +101,14 @@ function fakeQc(data: {
   } as unknown as QueryClient;
 }
 
+function itemArgs(query: string) {
+  return {
+    query,
+    editor: {} as never,
+    signal: new AbortController().signal,
+  };
+}
+
 describe("createMentionSuggestion", () => {
   beforeEach(() => {
     searchIssuesMock.mockReset();
@@ -125,7 +133,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "a", editor: {} as never });
+    const result = config.items!(itemArgs("a"));
 
     // Must be synchronous: a plain array, not a Promise.
     expect(Array.isArray(result)).toBe(true);
@@ -206,6 +214,63 @@ describe("createMentionSuggestion", () => {
 
     expect(
       ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Enter" }) }),
+    ).toBe(true);
+  });
+
+  // MUL-3685: plain Tab accepts the highlighted row exactly like Enter.
+  it("accepts the highlighted row on plain Tab, like Enter", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue" },
+      { id: "i-2", label: "MUL-2", type: "issue" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={command} />
+      </I18nWrapper>,
+    );
+
+    const handled = ref.current?.onKeyDown({
+      event: new KeyboardEvent("keydown", { key: "Tab" }),
+    });
+
+    expect(handled).toBe(true);
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-1");
+  });
+
+  // Shift+Tab and any modifier+Tab stay focus navigation — they must NOT
+  // accept, so the picker never traps reverse Tab traversal or OS switching.
+  it("does not accept on Shift+Tab or modifier+Tab", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [{ id: "i-1", label: "MUL-1", type: "issue" }];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={command} />
+      </I18nWrapper>,
+    );
+
+    const press = (init: KeyboardEventInit) =>
+      ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", init) });
+
+    expect(press({ key: "Tab", shiftKey: true })).toBe(false);
+    expect(press({ key: "Tab", metaKey: true })).toBe(false);
+    expect(press({ key: "Tab", ctrlKey: true })).toBe(false);
+    expect(press({ key: "Tab", altKey: true })).toBe(false);
+    expect(command).not.toHaveBeenCalled();
+  });
+
+  it("captures Tab while the popup has no selectable items, like Enter", () => {
+    const ref = createRef<MentionListRef>();
+
+    render(<I18nWrapper><MentionList ref={ref} items={[]} query="协作" command={vi.fn()} /></I18nWrapper>);
+
+    expect(
+      ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Tab" }) }),
     ).toBe(true);
   });
 
@@ -294,7 +359,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "a", editor: {} as never });
+    const result = config.items!(itemArgs("a"));
     const items = result as MentionItem[];
 
     expect(items.some((i) => i.type === "agent" && i.label === "Athena")).toBe(true);
@@ -324,7 +389,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "a", editor: {} as never });
+    const result = config.items!(itemArgs("a"));
     const items = result as MentionItem[];
 
     expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(true);
@@ -340,7 +405,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "bug", editor: {} as never });
+    const result = config.items!(itemArgs("bug"));
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "issue" && i.id === "i1")).toBe(true);
@@ -354,7 +419,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+    const result = config.items!(itemArgs("")) as MentionItem[];
 
     expect(result.some((item) => item.group === "current" || item.group === "recent")).toBe(false);
     expect(result.map((item) => `${item.type}:${item.id}`)).toContain("member:u1");
@@ -377,7 +442,7 @@ describe("createMentionSuggestion", () => {
         { id: "p1", label: "Roadmap", type: "project", description: "Q3", group: "recent" },
       ],
     });
-    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+    const result = config.items!(itemArgs("")) as MentionItem[];
 
     expect(result.map((item) => `${item.type}:${item.id}`)).toEqual(["issue:i1", "project:p1"]);
     expect(result.some((item) => item.type === "member" || item.type === "agent")).toBe(false);
@@ -398,7 +463,7 @@ describe("createMentionSuggestion", () => {
         { id: "p1", label: "Roadmap", type: "project", description: "Q3", group: "recent" },
       ],
     });
-    const result = config.items!({ query: "a", editor: {} as never }) as MentionItem[];
+    const result = config.items!(itemArgs("a")) as MentionItem[];
 
     expect(result.map((item) => `${item.type}:${item.id}`).slice(0, 2)).toEqual(["issue:i1", "project:p1"]);
     expect(result.some((item) => item.type === "member" && item.label === "Alice")).toBe(true);
@@ -437,7 +502,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "", editor: {} as never });
+    const result = config.items!(itemArgs(""));
 
     const items = result as MentionItem[];
     expect(items.filter((i) => i.type === "squad")).toHaveLength(2);
@@ -454,7 +519,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "", editor: {} as never });
+    const result = config.items!(itemArgs(""));
 
     const items = result as MentionItem[];
     expect(items.filter((i) => i.type === "squad")).toHaveLength(0);
@@ -470,7 +535,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "liyunlong", editor: {} as never });
+    const result = config.items!(itemArgs("liyunlong"));
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "member" && i.label === "李云龙")).toBe(true);
@@ -488,7 +553,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "lyl", editor: {} as never });
+    const result = config.items!(itemArgs("lyl"));
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "member" && i.label === "李云龙")).toBe(true);
@@ -505,7 +570,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "whs", editor: {} as never });
+    const result = config.items!(itemArgs("whs"));
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "agent" && i.label === "魏和尚")).toBe(true);

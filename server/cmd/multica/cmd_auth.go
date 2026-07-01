@@ -77,6 +77,15 @@ func resolveToken(cmd *cobra.Command) string {
 	if inAgentExecutionContext() {
 		return ""
 	}
+	// A daemon-managed agent process may lose MULTICA_AGENT_ID /
+	// MULTICA_TASK_ID in child subprocesses (the runtime may not forward
+	// them), but MULTICA_DAEMON_PORT persists. When we detect the daemon
+	// signal we fail closed — never silently fall back to the user-global
+	// config token, because that fallback is how agent operations land as
+	// the wrong actor.
+	if os.Getenv("MULTICA_DAEMON_PORT") != "" {
+		return ""
+	}
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	return cfg.Token

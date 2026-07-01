@@ -317,10 +317,127 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
   it("invalidates myAll when the project changes (Project board membership)", () => {
     qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(issueA));
 
-    // issueA.project_id is null; moving it into a project shifts Project-board membership.
+    // issueA.project_id is null; moving it into a project shifts Project-board
+    // membership. No server flag here — this exercises the legacy cache-diff
+    // fallback that keeps a new frontend working against an older backend.
     onIssueUpdated(qc, WS_ID, { ...issueA, project_id: "project-9" });
 
     expectInvalidated(qc, issueKeys.myAll(WS_ID));
+  });
+
+  it("invalidates myAll on a server project_changed flag even when the cached project_id already matches (local optimistic move)", () => {
+    // Reproduces the post-optimistic-move state behind MUL-3669: onMutate has
+    // already written the NEW project into detail + list, so a cache diff would
+    // compute projectChanged=false and skip the refetch. The authoritative
+    // server flag must still drive it.
+    const moved: Issue = { ...issueA, project_id: "project-9" };
+    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, moved.id), moved);
+    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(moved));
+
+    onIssueUpdated(qc, WS_ID, moved, { projectChanged: true });
+
+    expectInvalidated(qc, issueKeys.myAll(WS_ID));
+  });
+
+  it("does NOT invalidate myAll when the server flag says project_changed=false (flag overrides the legacy diff)", () => {
+    // No detail/list cache for the issue, so the legacy diff would resolve
+    // oldProjectId=null and fire on the non-null incoming project_id. An explicit
+    // false flag from the server is authoritative and must suppress that.
+    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(issueA));
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { ...issueA, project_id: "project-9" },
+      { projectChanged: false },
+    );
+
+    expect(qc.getQueryState(issueKeys.myAll(WS_ID))?.isInvalidated).toBe(false);
+  });
+});
+
+// A board column header shows `byStatus[status].total`. On a status change the
+// surgical patch shifts both bucket totals — but only if it can find the card in
+// a loaded page. A paginated column loads just its first page, so an off-screen
+// issue (very common when an agent flips the status of something the viewer
+// never scrolled to) is absent: patchIssueInBuckets no-ops and the count would
+// silently drift, with no refetch to recover it. The status-changed no-op has to
+// fall back to a single-list refetch.
+describe("onIssueUpdated — off-screen status change reconciles column counts", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("refetches the workspace list when a status-changed issue is not in the loaded page", () => {
+    // First page only: the totals say these columns have items, but the issues
+    // arrays are the loaded window — the moved issue lives beyond it.
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
+      byStatus: {
+        in_review: { issues: [], total: 1 },
+        done: { issues: [], total: 60 },
+      },
+    });
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { id: "off-screen", status: "done" },
+      { statusChanged: true },
+    );
+
+    expectInvalidated(qc, issueKeys.list(WS_ID));
+  });
+
+  it("refetches the filtered myAll list under the same condition", () => {
+    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), {
+      byStatus: { done: { issues: [], total: 60 } },
+    });
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { id: "off-screen", status: "done" },
+      { statusChanged: true },
+    );
+
+    expectInvalidated(qc, issueKeys.myAll(WS_ID));
+  });
+
+  it("does NOT refetch when the status-changed issue is loaded (surgical patch suffices)", () => {
+    const loaded: Issue = { ...baseIssue, id: "loaded", status: "in_review" };
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
+      byStatus: {
+        in_review: { issues: [loaded], total: 1 },
+        done: { issues: [], total: 60 },
+      },
+    });
+
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { ...loaded, status: "done" },
+      { statusChanged: true },
+    );
+
+    const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
+    expect(list?.byStatus.in_review?.total).toBe(0);
+    expect(list?.byStatus.done?.total).toBe(61);
+    // Reconciled in place — the no-flicker fast path from #4415 must hold.
+    expect(qc.getQueryState(issueKeys.list(WS_ID))?.isInvalidated).toBe(false);
+  });
+
+  it("does NOT refetch an absent issue when the status did not change", () => {
+    // A title/label edit of an off-screen issue cannot affect any count, so it
+    // must not trigger a fallback refetch.
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
+      byStatus: { done: { issues: [], total: 60 } },
+    });
+
+    onIssueUpdated(qc, WS_ID, { id: "off-screen", title: "renamed" });
+
+    expect(qc.getQueryState(issueKeys.list(WS_ID))?.isInvalidated).toBe(false);
   });
 });
 

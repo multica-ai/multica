@@ -41,3 +41,12 @@ export function onInboxIssueDeleted(
 export function onInboxInvalidate(qc: QueryClient, wsId: string) {
   qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
 }
+
+// Refresh the cross-workspace unread summary (workspace-switcher dot). The
+// summary spans every workspace, so it is invalidated on ANY inbox event
+// regardless of which workspace the event came from — including read/archive
+// events from a workspace other than the active one, which the workspace-
+// scoped list invalidation cannot reach.
+export function onInboxSummaryInvalidate(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+}

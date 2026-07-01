@@ -509,7 +509,13 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false, "")
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "")
+}
+
+// EnqueueTaskForThreadParent creates a queued task for the agent who authored
+// the direct parent comment a member replied to.
+func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "")
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -518,18 +524,23 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 // acting as the squad's leader (skip) from one posted while it was acting
 // as a worker (do not skip). This matters for agents that are simultaneously
 // the leader and a worker of the same squad — see migration 090.
-func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false, "")
+//
+// squadID is stamped onto the task's squad_id column so the daemon claim
+// handler can locate the squad and inject its briefing regardless of how the
+// leader task was triggered (comment @squad, issue assign, autopilot,
+// sub-issue done callback). See migration 127.
+func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "")
 }
 
 // EnqueueTaskForSquadLeaderWithHandoff is the assign/promote variant carrying a
 // handoff note into the leader run's opening context (MUL-3375). Empty note
 // behaves exactly like EnqueueTaskForSquadLeader.
-func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, handoffNote string) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, false, handoffNote)
+func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, handoffNote string) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote)
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, forceFreshSession bool, handoffNote string) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -554,6 +565,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		IsLeaderTask:      pgtype.Bool{Bool: isLeader, Valid: isLeader},
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:       pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
+		SquadID:           squadID,
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -564,6 +576,50 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
+// EnqueueDeferredAssigneeFallback creates an inert task that becomes claimable
+// only after PromoteDueDeferredTasksForRuntime flips it from deferred to queued.
+func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue db.Issue, agentID, squadID pgtype.UUID, escalationForTaskID pgtype.UUID, triggerCommentID pgtype.UUID, fireAt time.Time) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		slog.Error("deferred fallback enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		slog.Debug("deferred fallback enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		slog.Error("deferred fallback enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	isLeader := squadID.Valid
+	task, err := s.Queries.CreateDeferredAgentTask(ctx, db.CreateDeferredAgentTaskParams{
+		AgentID:             agentID,
+		RuntimeID:           agent.RuntimeID,
+		IssueID:             issue.ID,
+		Priority:            priorityToInt(issue.Priority),
+		TriggerCommentID:    triggerCommentID,
+		TriggerSummary:      s.buildCommentTriggerSummary(ctx, triggerCommentID),
+		IsLeaderTask:        pgtype.Bool{Bool: isLeader, Valid: isLeader},
+		SquadID:             squadID,
+		EscalationForTaskID: escalationForTaskID,
+		FireAt:              pgtype.Timestamptz{Time: fireAt, Valid: true},
+	})
+	if err != nil {
+		slog.Error("deferred fallback enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("create deferred task: %w", err)
+	}
+
+	slog.Info("deferred fallback task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(issue.ID),
+		"agent_id", util.UUIDToString(agentID),
+		"fire_at", fireAt.UTC().Format(time.RFC3339),
+	)
 	return task, nil
 }
 
@@ -1079,6 +1135,11 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}()
 
 	runtimeKey := util.UUIDToString(runtimeID)
+	if err := s.PromoteDueDeferredTasksForRuntime(ctx, runtimeID); err != nil {
+		outcome = "error_promote_deferred"
+		return nil, err
+	}
+
 	// Check this before EmptyClaim: a lost claim response moves the task out of
 	// `queued`, so the empty-queued cache cannot represent recoverability.
 	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
@@ -1160,6 +1221,23 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	return claimed, nil
 }
 
+func (s *TaskService) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+	tasks, err := s.Queries.PromoteDueDeferredTasksForRuntime(ctx, runtimeID)
+	if err != nil {
+		return fmt.Errorf("promote due deferred tasks: %w", err)
+	}
+	for _, task := range tasks {
+		slog.Info("deferred fallback task promoted",
+			"task_id", util.UUIDToString(task.ID),
+			"runtime_id", util.UUIDToString(runtimeID),
+			"agent_id", util.UUIDToString(task.AgentID),
+		)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+		s.NotifyTaskEnqueued(ctx, task)
+	}
+	return nil
+}
+
 // maybeLogClaimSlow emits one structured log per ClaimTask call when its total
 // latency exceeds 300ms, so the prod tail can be diagnosed without flooding
 // logs at normal poll rates. Called via defer so it captures the full path
@@ -1189,6 +1267,7 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
 	}
+	s.cancelDeferredEscalationsForTask(ctx, task.ID)
 
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskStarted(ctx, task)
@@ -1200,6 +1279,43 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	// on the transition users care about most.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskRunning, task)
 	return &task, nil
+}
+
+func (s *TaskService) cancelDeferredEscalationsForTask(ctx context.Context, taskID pgtype.UUID) {
+	cancelled, err := s.Queries.CancelDeferredEscalationsForTask(ctx, taskID)
+	if err != nil {
+		slog.Warn("cancel deferred escalations for task failed", "task_id", util.UUIDToString(taskID), "error", err)
+		return
+	}
+	for _, task := range cancelled {
+		slog.Info("deferred fallback task cancelled",
+			"task_id", util.UUIDToString(task.ID),
+			"primary_task_id", util.UUIDToString(taskID),
+			"reason", "primary_acknowledged",
+		)
+	}
+}
+
+func (s *TaskService) CancelDeferredEscalationsForIssueAgent(ctx context.Context, issueID, agentID pgtype.UUID) {
+	cancelled, err := s.Queries.CancelDeferredEscalationsForIssueAgent(ctx, db.CancelDeferredEscalationsForIssueAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	if err != nil {
+		slog.Warn("cancel deferred escalations for issue agent failed",
+			"issue_id", util.UUIDToString(issueID),
+			"agent_id", util.UUIDToString(agentID),
+			"error", err)
+		return
+	}
+	for _, task := range cancelled {
+		slog.Info("deferred fallback task cancelled",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(issueID),
+			"agent_id", util.UUIDToString(agentID),
+			"reason", "agent_comment_acknowledged",
+		)
+	}
 }
 
 // ExtendTaskPrepareLease keeps a claimed-but-not-started task protected while
@@ -1687,6 +1803,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	var (
 		agentID  pgtype.UUID
 		isLeader bool
+		squadID  pgtype.UUID
 	)
 	if sourceTaskID.Valid {
 		sourceTask, err := s.Queries.GetAgentTask(ctx, sourceTaskID)
@@ -1698,6 +1815,10 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		}
 		agentID = sourceTask.AgentID
 		isLeader = sourceTask.IsLeaderTask
+		// Carry the source task's squad provenance so a rerun of a leader
+		// task still injects the squad briefing at claim time (see migration
+		// 127 / daemon claim handler).
+		squadID = sourceTask.SquadID
 		// Inherit trigger provenance so a per-row rerun of a comment- or
 		// mention-triggered task stays a comment-triggered task. Without
 		// this the daemon's buildCommentPrompt path is skipped (it keys on
@@ -1718,6 +1839,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 			}
 			agentID = squad.LeaderID
 			isLeader = true
+			squadID = issue.AssigneeID
 		default:
 			return nil, fmt.Errorf("issue is not assigned to an agent or squad")
 		}
@@ -1741,7 +1863,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader)
+	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID)
 	if err != nil {
 		return nil, err
 	}
@@ -1762,12 +1884,12 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 // stays in sync; otherwise (squad member, prior assignee that has since been
 // reassigned, mention agent) we use the mention path with the same
 // force_fresh_session=true contract.
-func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
 		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, "")
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, true, "")
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID, true, "")
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of
@@ -1821,15 +1943,23 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							"error", checkErr,
 						)
 					} else if !hasActive {
-						if _, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 							ID:          t.IssueID,
 							Status:      "todo",
 							WorkspaceID: issue.WorkspaceID,
-						}); updateErr != nil {
+						})
+						if updateErr != nil {
 							slog.Warn("handle failed tasks: reset stuck issue failed",
 								"issue_id", issueKey,
 								"error", updateErr,
 							)
+						} else {
+							// This direct reset bypasses the HTTP UpdateIssue
+							// handler that normally emits issue:updated, so emit
+							// it here too. Without it the board / status-filter
+							// caches keep showing the issue as in_progress until
+							// the next write touches it (#4648 / MUL-3782).
+							s.broadcastIssueUpdated(updatedIssue, issue.Status)
 						}
 					}
 				}
@@ -2249,14 +2379,32 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 	})
 }
 
-func (s *TaskService) broadcastIssueUpdated(issue db.Issue) {
+// broadcastIssueUpdated publishes the issue:updated event the frontend's
+// realtime reconcile (onIssueUpdated) relies on to move an issue between status
+// columns / status filters and reconcile their bucket counts. prevStatus is the
+// issue's status before the write so the client can gate that reconcile on
+// status_changed.
+//
+// The `issue` payload is a map (issueToMap), which the workspace WS fanout
+// (listeners.go SubscribeAll) marshals and broadcasts as-is — that is what
+// drives the UI reconcile. Note this does NOT cover the full HTTP UpdateIssue
+// side effects: the activity-log and inbox listeners type-assert `issue` to a
+// handler.IssueResponse and skip a map, so a background status reset does not
+// emit status-change activity / notifications. That is intentional for the
+// realtime-staleness fix (#4648 / MUL-3782); folding those side effects in
+// would mean unifying the payload type and is left as a follow-up.
+func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 	prefix := s.getIssuePrefix(issue.WorkspaceID)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
 		ActorType:   "system",
 		ActorID:     "",
-		Payload:     map[string]any{"issue": issueToMap(issue, prefix)},
+		Payload: map[string]any{
+			"issue":          issueToMap(issue, prefix),
+			"status_changed": prevStatus != issue.Status,
+			"prev_status":    prevStatus,
+		},
 	})
 }
 
@@ -2302,6 +2450,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	if err != nil {
 		return
 	}
+	s.CancelDeferredEscalationsForIssueAgent(ctx, issueID, agentID)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventCommentCreated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),

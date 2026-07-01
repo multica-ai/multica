@@ -146,6 +146,11 @@ export function AutopilotRowActions({ row }: { row: Autopilot }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const setStatus = useSetStatus();
 
+  // The kebab only holds write actions (pause/resume/delete). Hide it entirely
+  // for members without write access; an absent can_write (older server) keeps
+  // the menu visible and lets the backend remain the gate.
+  if (row.can_write === false) return null;
+
   return (
     <span
       onClick={(e) => e.stopPropagation()}

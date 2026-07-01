@@ -65,7 +65,7 @@ export function WorkspaceAgentWorkingChip({
   const wsId = useWorkspaceId();
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
 
-  const { runningTasks, agentIds } = useMemo(() => {
+  const { runningTasks, agentIds, issueIds } = useMemo(() => {
     const running: AgentTask[] = [];
     for (const task of snapshot) {
       if (task.status !== "running") continue;
@@ -75,11 +75,21 @@ export function WorkspaceAgentWorkingChip({
       if (scopedIssueIds && !scopedIssueIds.has(task.issue_id)) continue;
       running.push(task);
     }
-    const unique = [...new Set(running.map((tk) => tk.agent_id))];
-    return { runningTasks: running, agentIds: unique };
+    // The count tracks active *issues*, not active agents: several agents
+    // can work the same issue at once, and the chip answers "how many
+    // issues are agents working on right now?" (its filter narrows the
+    // list to exactly those issues). The avatar stack still shows the
+    // distinct agents behind that work.
+    const uniqueIssues = [...new Set(running.map((tk) => tk.issue_id))];
+    const uniqueAgents = [...new Set(running.map((tk) => tk.agent_id))];
+    return {
+      runningTasks: running,
+      agentIds: uniqueAgents,
+      issueIds: uniqueIssues,
+    };
   }, [snapshot, scopedIssueIds]);
 
-  const hasAgents = agentIds.length > 0;
+  const hasAgents = issueIds.length > 0;
   // Active (brand-filled) class — must explicitly re-pin text and bg in
   // every interactive state. Button's `outline` variant ships
   // `hover:text-foreground` + `aria-expanded:bg-muted aria-expanded:text-foreground`,
@@ -140,7 +150,7 @@ export function WorkspaceAgentWorkingChip({
               max={3}
               opacity="full"
             />
-            <span className="tabular-nums">{agentIds.length}</span>
+            <span className="tabular-nums">{issueIds.length}</span>
             <span className="hidden md:inline">{label}</span>
           </Button>
         }

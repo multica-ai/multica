@@ -36,6 +36,13 @@ type OutcomeReplierQueries interface {
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 }
 
+// BindingTokenMinter is the narrow dependency the outcome replier needs from
+// BindingTokenService. Keeping this as an interface lets tests pin the Lark
+// binding URL without constructing a database-backed token service.
+type BindingTokenMinter interface {
+	Mint(ctx context.Context, workspaceID, installationID pgtype.UUID, openID OpenID) (BindingToken, error)
+}
+
 // noopReplier is the safe default when Lark is wired without an
 // outbound APIClient (stub) or without a BindingTokenService. It
 // logs each outcome that would have produced a reply so an operator
@@ -81,26 +88,28 @@ func NewNoopOutcomeReplier(log *slog.Logger) OutcomeReplier {
 // (the standard implementations are).
 type LarkOutcomeReplier struct {
 	client       APIClient
-	bindingSvc   *BindingTokenService
+	bindingSvc   BindingTokenMinter
 	credentials  CredentialsResolver
 	queries      OutcomeReplierQueries
-	publicURL    string // e.g. https://multica.example, trailing slash trimmed
+	appURL       string // e.g. https://multica.example, trailing slash trimmed
 	bindingPath  string // path component of the binding URL, default "/lark/bind"
 	noticeHeader string // header text used by the offline/archived cards
 	log          *slog.Logger
 }
 
-// OutcomeReplierConfig wires the production replier. PublicURL is the
-// Multica HTTP host the user clicks into to redeem the binding token
-// (e.g. https://multica.example); empty means the binding flow can
-// only log the open_id, not produce a clickable card. The other
-// fields default at construction.
+// OutcomeReplierConfig wires the production replier. AppURL is the Multica web
+// app host the user clicks into to redeem the binding token or open an issue
+// (e.g. https://multica.example). It comes from MULTICA_APP_URL and is
+// intentionally separate from MULTICA_PUBLIC_URL, which is the backend/API
+// public URL used for webhook and daemon-facing endpoints. Empty means the
+// binding flow can only log the open_id, not produce a clickable card. The
+// other fields default at construction.
 type OutcomeReplierConfig struct {
 	APIClient   APIClient
-	BindingSvc  *BindingTokenService
+	BindingSvc  BindingTokenMinter
 	Credentials CredentialsResolver
 	Queries     OutcomeReplierQueries
-	PublicURL   string
+	AppURL      string
 	BindingPath string
 	Logger      *slog.Logger
 }
@@ -120,8 +129,8 @@ func NewLarkOutcomeReplier(cfg OutcomeReplierConfig) OutcomeReplier {
 		log.Warn("lark outcome replier: APIClient.IsConfigured()=false; downgrading to noop replier")
 		return NewNoopOutcomeReplier(log)
 	}
-	if cfg.PublicURL == "" {
-		log.Warn("lark outcome replier: MULTICA_PUBLIC_URL not set; binding prompt CTA will not work")
+	if cfg.AppURL == "" {
+		log.Warn("lark outcome replier: MULTICA_APP_URL not set; binding prompt CTA will not work")
 	}
 	bindingPath := cfg.BindingPath
 	if bindingPath == "" {
@@ -135,7 +144,7 @@ func NewLarkOutcomeReplier(cfg OutcomeReplierConfig) OutcomeReplier {
 		bindingSvc:   cfg.BindingSvc,
 		credentials:  cfg.Credentials,
 		queries:      cfg.Queries,
-		publicURL:    strings.TrimRight(cfg.PublicURL, "/"),
+		appURL:       strings.TrimRight(cfg.AppURL, "/"),
 		bindingPath:  bindingPath,
 		noticeHeader: "Multica",
 		log:          log,
@@ -200,14 +209,14 @@ func (r *LarkOutcomeReplier) sendBindingPrompt(ctx context.Context, inst Install
 	if res.SenderOpenID == "" {
 		return errors.New("missing sender open_id")
 	}
-	if r.publicURL == "" {
-		return errors.New("public_url not configured")
+	if r.appURL == "" {
+		return errors.New("app_url not configured")
 	}
 	token, err := r.bindingSvc.Mint(ctx, inst.WorkspaceID, inst.ID, res.SenderOpenID)
 	if err != nil {
 		return fmt.Errorf("mint binding token: %w", err)
 	}
-	bindURL := r.publicURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
+	bindURL := r.appURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
 	creds, err := r.installationCredentials(inst)
 	if err != nil {
 		return err
@@ -234,7 +243,7 @@ func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst Installa
 	if err != nil {
 		return err
 	}
-	text := issueCreatedText(res, r.publicURL)
+	text := issueCreatedText(res, r.appURL)
 	// Share the Patcher's classified fallback: a thread reply that
 	// fails because the topic cannot receive it (recalled trigger,
 	// topics disabled, aggregated message) falls back to a chat-level
@@ -266,11 +275,10 @@ func inboundReplyTarget(msg InboundMessage) ReplyTarget {
 
 // issueCreatedText composes the user-facing confirmation. Identifier
 // always wins over a bare number — DispatchResult.IssueIdentifier
-// already encodes the workspace prefix when available. PublicURL is
-// optional: when empty (self-host operators who haven't configured
-// MULTICA_PUBLIC_URL) the message still confirms the issue, just
-// without a deep link the user can tap.
-func issueCreatedText(res DispatchResult, publicURL string) string {
+// already encodes the workspace prefix when available. AppURL is optional:
+// when empty (self-host operators who haven't configured MULTICA_APP_URL) the
+// message still confirms the issue, just without a deep link the user can tap.
+func issueCreatedText(res DispatchResult, appURL string) string {
 	identifier := res.IssueIdentifier
 	if identifier == "" {
 		identifier = fmt.Sprintf("#%d", res.IssueNumber)
@@ -282,10 +290,10 @@ func issueCreatedText(res DispatchResult, publicURL string) string {
 	} else {
 		line = fmt.Sprintf("Created %s — %s", identifier, title)
 	}
-	if publicURL == "" {
+	if appURL == "" {
 		return line
 	}
-	return line + "\n" + strings.TrimRight(publicURL, "/") + "/issues/" + identifier
+	return line + "\n" + strings.TrimRight(appURL, "/") + "/issues/" + identifier
 }
 
 func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installation, msg InboundMessage, body string) error {

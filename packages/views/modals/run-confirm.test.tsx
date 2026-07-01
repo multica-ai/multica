@@ -13,6 +13,46 @@ vi.mock("../issues/hooks/use-issue-trigger-preview", () => ({
   useIssueTriggerPreview: () => previewState,
 }));
 
+// --- Warm agent + runtime caches (prefetched in the real app) ----------------
+// The modal resolves a concrete agent assignee → its runtime → cli_version
+// locally, exactly like the quick-create version gate, so the note box never
+// waits on the preview round-trip. Tests drive the local verdict by swapping
+// the runtime's reported cli_version here.
+const cache = {
+  agents: [{ id: "agent-1", runtime_id: "runtime-1" }] as Array<{ id: string; runtime_id: string }>,
+  runtimes: [{ id: "runtime-1", metadata: { cli_version: "0.4.0" } }] as Array<{
+    id: string;
+    metadata: Record<string, unknown>;
+  }>,
+};
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: ({ queryKey }: { queryKey: string[] }) => {
+    if (queryKey[0] === "runtimes") return { data: cache.runtimes };
+    if (queryKey[0] === "workspaces" && queryKey[2] === "agents") return { data: cache.agents };
+    return { data: [] };
+  },
+}));
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-test" }));
+vi.mock("@multica/core/workspace/queries", () => ({
+  agentListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "agents"] }),
+}));
+// Stub the runtimes barrel: the query-options builder would otherwise drag the
+// network layer in, and the deep cli-version module isn't an exported subpath.
+// `handoffSupported`'s real semver/dev-build logic is exhaustively covered in
+// packages/core/runtimes/cli-version.test.ts; here we only need a faithful
+// stand-in for the >= 0.3.28 threshold so the cache → version → verdict wiring
+// is exercised end to end.
+vi.mock("@multica/core/runtimes", () => ({
+  runtimeListOptions: (wsId: string) => ({ queryKey: ["runtimes", wsId, "list"] }),
+  readRuntimeCliVersion: (m?: { cli_version?: unknown }) =>
+    typeof m?.cli_version === "string" ? m.cli_version : "",
+  handoffSupported: (v?: string | null) => {
+    const m = /(\d+)\.(\d+)\.(\d+)/.exec((v ?? "").trim());
+    if (!m) return false;
+    return Number(m[1]) * 1e6 + Number(m[2]) * 1e3 + Number(m[3]) >= 3028; // 0.3.28
+  },
+}));
+
 const mockUpdate = vi.fn().mockResolvedValue(undefined);
 const mockBatch = vi.fn().mockResolvedValue(undefined);
 vi.mock("@multica/core/issues/mutations", () => ({
@@ -32,9 +72,12 @@ vi.mock("../i18n", () => ({
         title_assign: "Assign and start?",
         title_status: "Start working now?",
         will_start_named: "start Walt",
+        will_start_named_squad: "start squad Walt",
         will_start: "start many",
+        will_start_squad: "start squad many",
         nothing_assign: "no run (backlog)",
         nothing_status: "no runs",
+        checking: "Checking…",
         note_label: "Handoff note",
         note_placeholder: "scope...",
         note_unsupported: "runtime too old",
@@ -67,6 +110,9 @@ vi.mock("@multica/ui/components/ui/button", () => ({
 vi.mock("@multica/ui/components/ui/textarea", () => ({
   Textarea: (props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} />,
 }));
+vi.mock("@multica/ui/components/ui/spinner", () => ({
+  Spinner: () => <span data-testid="spinner" />,
+}));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 beforeEach(() => {
@@ -74,7 +120,10 @@ beforeEach(() => {
   mockBatch.mockClear();
   previewState.triggers = [{ issue_id: "issue-1", agent_id: "agent-1", source: "assign", handoff_supported: true }];
   previewState.totalCount = 1;
+  previewState.isLoading = false;
   previewState.handoffSupported = true;
+  cache.agents = [{ id: "agent-1", runtime_id: "runtime-1" }];
+  cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.4.0" } }];
 });
 
 describe("RunConfirmModal", () => {
@@ -112,12 +161,48 @@ describe("RunConfirmModal", () => {
     expect(payload.handoff_note).toBeUndefined();
   });
 
-  it("disables the note box when the runtime can't render a handoff", () => {
-    previewState.handoffSupported = false;
+  it("disables the note box from the local runtime version, before the preview resolves", () => {
+    // Old daemon that can't render handoff notes, and the predicate is still in
+    // flight. The box must already be disabled + warned from the warm runtime
+    // cache — no "checking…" wait, no reliance on the server verdict.
+    previewState.isLoading = true;
+    previewState.totalCount = 0;
+    cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.2.21" } }];
     render(
       <RunConfirmModal
         onClose={vi.fn()}
         data={{ issueIds: ["issue-1"], mode: "assign", assigneeType: "agent", assigneeId: "agent-1" }}
+      />,
+    );
+    expect(screen.getByPlaceholderText("scope...")).toBeDisabled();
+    expect(screen.getByText("runtime too old")).toBeInTheDocument();
+  });
+
+  it("keeps the note box usable while the preview is still loading for a supported agent", () => {
+    // The core of MUL-3706: a concrete agent on a current runtime should never
+    // see a "checking…" gate on the note box — the version is known locally.
+    previewState.isLoading = true;
+    previewState.totalCount = 0;
+    cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.4.0" } }];
+    render(
+      <RunConfirmModal
+        onClose={vi.fn()}
+        data={{ issueIds: ["issue-1"], mode: "assign", assigneeType: "agent", assigneeId: "agent-1" }}
+      />,
+    );
+    expect(screen.getByPlaceholderText("scope...")).not.toBeDisabled();
+    expect(screen.queryByText("runtime too old")).not.toBeInTheDocument();
+  });
+
+  it("squad assignee defers to the server handoff verdict (not locally resolvable)", () => {
+    // A squad routes to its leader agent, picked server-side — the target
+    // runtime isn't knowable client-side, so the box must follow the preview's
+    // handoff_supported, exactly as before.
+    previewState.handoffSupported = false;
+    render(
+      <RunConfirmModal
+        onClose={vi.fn()}
+        data={{ issueIds: ["issue-1"], mode: "assign", assigneeType: "squad", assigneeId: "squad-1" }}
       />,
     );
     expect(screen.getByPlaceholderText("scope...")).toBeDisabled();

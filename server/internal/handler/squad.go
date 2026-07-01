@@ -975,7 +975,7 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 	// triggerCommentID is always empty on the assign/promote path; the handoff
 	// note rides its own task column, never trigger_comment_id.
 	_ = triggerCommentID
-	if _, err := h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, handoffNote); err != nil {
+	if _, err := h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote); err != nil {
 		slog.Warn("enqueue squad leader task failed",
 			"issue_id", uuidToString(issue.ID),
 			"squad_id", uuidToString(squad.ID),

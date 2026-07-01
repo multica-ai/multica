@@ -1,0 +1,186 @@
+---
+title: Slack Bot 接入
+description: 把 Multica 智能体接入你自己的 Slack app——用 manifest 创建 app、安装它、粘贴 bot token 与 app-level token，然后就能在 Slack 里 @ 它、私聊它，或输入 /issue。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+把任意[智能体](/agents)接入一个 Slack Bot，团队就能在 Slack 里直接使用它——私聊 Bot、在频道里 @ 它，或者输入 `/issue` 直接创建一个 [Multica issue](/issues)，不用打开应用。
+
+Slack 走的是**自带应用（bring-your-own-app，BYO）**模式：workspace 管理员创建一个 Slack app，把它安装到自己的 Slack workspace，再把它的 token 粘贴进 Multica。每个智能体都有**它自己的** Slack app——所以多个智能体可以在同一个 Slack workspace 里各自拥有一个独立、可单独 @ 的 Bot。（这一点和 [Lark](/lark-bot-integration) 不同，Lark 的绑定是扫码安装流程。）
+
+整个设置流程在下面，大约五分钟。最后你会得到两个 token 粘贴进 Multica：
+
+- 一个 **Bot token** —— 以 `xoxb-` 开头
+- 一个 **App-level token** —— 以 `xapp-` 开头
+
+## 设置你的 Slack app
+
+### 1. 用 manifest 创建 app
+
+1. 打开 [https://api.slack.com/apps](https://api.slack.com/apps)，点击 **Create New App**。
+2. 选择 **From a manifest**。
+3. 选定要把 app 安装进去的那个 Slack workspace。
+4. 切到 **YAML** tab，粘贴下面的 manifest，检查一遍，然后创建这个 app。
+
+```yaml
+display_information:
+  name: Multica
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Multica
+    always_online: true
+  slash_commands:
+    - command: /issue
+      description: Create a Multica issue
+      usage_hint: "[title]"
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - chat:write
+      - reactions:write
+      - users:read
+      - commands
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+      - message.channels
+      - message.groups
+      - message.mpim
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+```
+
+这个 manifest 已经把 Multica 所需的一切都配好了，所以你不用手动设置任何东西：
+
+| 配置项 | 为什么需要它 |
+|---|---|
+| `app_home.messages_tab_enabled: true` | 让成员能打开 Bot 并**私聊**它。没有它，Bot 就无法被直接发消息。 |
+| `bot_user` | 创建被 @ 和发回复用的那个 Bot 身份。 |
+| `chat:write` | 把智能体的回复发回 Slack。 |
+| `reactions:write` | 智能体处理期间在你的消息上加一个 👀 表情，回复后再移除。没有这个权限时，该提示会被静默跳过——其他功能都不受影响。 |
+| `app_mentions:read` + `app_mention` 事件 | 接收频道里的 @ 提及。 |
+| `im:history` + `message.im` | 接收发给 Bot 的**私聊**（每一条私聊消息都会被读取）。 |
+| `channels:history` / `groups:history` / `mpim:history` + 对应的 `message.*` 事件 | 接收公开频道、私有频道和群组私聊里的消息。在这些场景里，Bot 只对 **@ 了**它的消息做出响应。 |
+| `users:read` | 必需，这样 Multica 才能（通过 `bots.info`）核实你的两个 token 属于同一个 app。 |
+| `commands` | 启用 `/issue` 斜杠命令所需的 bot 权限（和 `features.slash_commands` 搭配）。少了它，即使更新 manifest 并重装，也拿不到这个命令。 |
+| `socket_mode_enabled: true` | Bot 通过 Socket Mode 向外连接——**无需任何公网 URL / request URL**。 |
+| `interactivity.is_enabled: false` | Multica 的提示是纯链接，不是按钮，所以不需要交互性。 |
+| `slash_commands`（`/issue`） | 注册 `/issue` 斜杠命令，让任何人都能从消息框直接创建一个 Multica issue。通过 Socket Mode 下发——无需 request URL。 |
+
+这里**没有 OAuth 重定向 URL**，因为 BYO 不使用 OAuth。
+
+<Callout type="info">
+想在 Slack 里用一个特定的名字？在创建之前改 `display_information.name` 和 `features.bot_user.display_name`（比如改成你智能体的名字），或者之后在 **App Home** 里编辑。Slack 是按 Bot 的**显示名（bot display name）**来展示它的，这个名字可以和 app 名不一样。
+</Callout>
+
+### 2. 安装 app 并复制 Bot token
+
+1. 在 app 的左侧导航里，打开 **Install App**（或 **OAuth & Permissions**）。
+2. 点击 **Install to Workspace** 并批准。
+3. 复制 **Bot User OAuth Token**——它以 `xoxb-` 开头。这就是你的 **Bot token**。
+
+### 3. 创建 App-level token
+
+App-level token 用来授权 Socket Mode 连接。它只能在控制台里创建（它不属于 OAuth）。
+
+1. 打开 **Basic Information → App-Level Tokens**，点击 **Generate Token and Scopes**。
+2. 随便起个名字。
+3. 点击 **Add Scope**，从列表里选 **`connections:write`**（这是一个选择器——选中它，不要手打）。
+4. 点击 **Generate**，然后复制这个 token——它以 `xapp-` 开头。这就是你的 **App-level token**。
+
+### 4. 在 Multica 里连接它
+
+1. 在 **Agents → _你的智能体_** 打开该智能体 → **Integrations** tab（或左侧栏的 **Integrations** 区块）。
+2. 点击 **Connect Slack**。
+3. 粘贴 **Bot token**（`xoxb-`）和 **App-level token**（`xapp-`），然后点击 **Connect**。
+4. 智能体显示 **Connected to Slack**。Bot 现在通过它自己的 Socket Mode 连接在监听了。
+
+<Callout type="warning">
+这两个 token 必须来自**同一个** Slack app，而那个 app 恰好对应**一个**智能体。连接一个已经连到别的智能体或 workspace 的 app 会被拒绝。要把一个 app 挪到另一个智能体，先断开它；用一个**新的** app 重新连接某个智能体，会就地更新那个智能体的 Bot。
+</Callout>
+
+<Callout type="info">
+要给**多个智能体**做这套设置？每个智能体都把整套流程走一遍——每个智能体都有自己的 Slack app 和自己的一对 token，它们会在你的 Slack workspace 里显示成各自独立的 Bot。
+</Callout>
+
+## 这个集成能做什么
+
+| 入口 | 行为 |
+|---|---|
+| **智能体 → Integrations** | 所有者和管理员能看到 **Connect Slack**；连接后它会变成一个 **Connected to Slack** 徽标，并带一个 **Disconnect** 操作。 |
+| **私聊 Bot** | 工作区成员直接给 Bot 发消息。这段对话会成为该智能体的一个 Multica [chat](/chat) 会话；每一条私聊消息都会被读取。 |
+| **频道里 @ 它** | 把 Bot 邀请进来（`/invite @your-bot`）再 @ 它。只有 @ 它的那条消息会被读取——Bot 不会监听整个频道。每个 @bot 的 **thread** 都是它自己的会话。 |
+| **`/issue` 斜杠命令** | 输入 `/issue <描述>`（在频道或私聊里），智能体会把你的自然语言描述整理成一个规整的 Multica issue，记在你名下。它会私下先回一条「收到」——issue 创建好后你会收到一条 Multica 通知。不需要 @ Bot。 |
+| **回复** | 智能体的答复会被发回同一段私聊或 thread 里。 |
+
+## 使用 Bot（成员）
+
+### 第一条消息：绑定你的账号
+
+第一次 @ 或私聊 Bot 时，它会回一条 **绑定你的账号** 提示。点开链接、登录 Multica，你的 Slack 身份就会绑定到你的 Multica 成员身份——正是这一步让智能体能以你的身份行事（比如 `/issue` 会把 issue 记在你名下）。这个链接是一次性的，大约 15 分钟后过期；再给 Bot 发条消息就能拿到一个新的。
+
+**每个 Slack workspace 只需绑定一次。** 如果同一个 Multica 工作区在同一个 Slack workspace 里跑了多个 Bot（每个智能体一个 App），你在第一个 Bot 上完成绑定后，其余的会自动复用这次绑定，不会再次弹出提示。（只有在*另一个* Slack workspace 里的 Bot、或连到*另一个* Multica 工作区的 Bot，才需要重新绑定。）
+
+<Callout type="warning">
+只有**工作区成员**才能使用 Bot。如果你不是成员，或者跳过了身份绑定，Bot 不会运行——你的消息会被丢弃（仅出于审计目的记录，不保存消息内容）。
+</Callout>
+
+### 对话与 `/issue`
+
+- **在频道里** —— Bot 不会自动加入。先运行一次 `/invite @your-bot`，然后 `@your-bot <你的消息>`。每次追问都要重新 @ 它一下（Bot 只读取 @ 了它的消息）。
+- **在私聊里** —— 从 Slack 侧栏的 **Apps** 区块打开 Bot 并直接给它发消息；不用 @。
+- **创建 issue** —— 使用 `/issue` 斜杠命令，比如 `/issue 登录跳转在 Safari 上坏了`。用自然语言描述就行，智能体会替你写好标题和结构化描述再建 issue。在频道或私聊里都能用（不用 @ Bot），会私下先回一条「收到」——issue 创建好后你会收到一条 Multica 通知。第一次使用的人会先收到一个一次性的账号绑定链接。
+
+## 管理与断开
+
+工作区级别的管理在 **Settings → Integrations**：
+
+- **Connected bots** 列出工作区里每个 Bot 以及它各自绑定的智能体（所有成员都能看到）。
+- **Disconnect** 仅限 **所有者 / 管理员**。它会让 Bot 停止接收 Slack 消息并拆掉它的连接；安装记录会保留以便审计，之后你可以重新连接。
+
+## 权限
+
+- **连接 / 断开** 需要工作区**所有者**或**管理员**。
+- **和 Bot 对话** 需要你是工作区成员且已绑定 Slack 身份。其余的人一律被丢弃。
+- 对于被丢弃的消息，绝不保存消息内容——只记录一个丢弃原因，用于审计。
+
+## 自部署配置
+
+在 Multica Cloud 上这个集成已经可用——可跳过本节。
+
+自部署时，**在你设置好静态加密密钥之前，Slack 是关闭的**。这个密钥会在每个 app 的 bot token + app-level token 落库之前对其加密。BYO **不需要** OAuth client id/secret，也**不需要**部署级的 app token——每个安装用的都是管理员粘贴进来的那对 token。
+
+1. 生成一个 32 字节的密钥并设置到 API 服务器：
+
+   ```dotenv
+   MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
+   ```
+
+   例如：`openssl rand -base64 32`。
+
+2. 重启 API。在密钥设置好之前，**Settings → Integrations** 会显示一条「Slack integration not enabled」提示，**Connect Slack** 入口也会保持隐藏。
+
+<Callout type="info">
+这个密钥必须正好解码出 32 字节——`openssl rand -base64 32` 就能做到。把它当成一个长期有效的密钥：轮换或丢失它会让已存储的 token 无法解密，迫使每个 Bot 重新连接。「绑定你的账号」链接是用你的 Web 应用地址（`MULTICA_APP_URL`，未设置时回退到 `FRONTEND_ORIGIN`）拼出来的——正常部署里这个值本来就有，不需要额外配置。
+</Callout>
+
+## 下一步
+
+- [聊天集成](/channels) —— channel 引擎、会话与授权是怎么运作的
+- [智能体](/agents) · [Chat](/chat) · [Issues](/issues)
+- [环境变量](/environment-variables) —— 完整的自部署配置参考

@@ -101,6 +101,9 @@ type AgentTaskQueue struct {
 	InitiatorUserID       pgtype.UUID        `json:"initiator_user_id"`
 	HandoffNote           pgtype.Text        `json:"handoff_note"`
 	PrepareLeaseExpiresAt pgtype.Timestamptz `json:"prepare_lease_expires_at"`
+	SquadID               pgtype.UUID        `json:"squad_id"`
+	EscalationForTaskID   pgtype.UUID        `json:"escalation_for_task_id"`
+	FireAt                pgtype.Timestamptz `json:"fire_at"`
 }
 
 type Attachment struct {
@@ -135,6 +138,14 @@ type Autopilot struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	AssigneeType       string             `json:"assignee_type"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
+}
+
+type AutopilotCollaborator struct {
+	AutopilotID pgtype.UUID        `json:"autopilot_id"`
+	UserType    string             `json:"user_type"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	GrantedBy   pgtype.UUID        `json:"granted_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type AutopilotRun struct {

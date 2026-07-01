@@ -122,8 +122,9 @@ func (f *fakeReplier) calls() []Result {
 }
 
 type fakeTyping struct {
-	mu    sync.Mutex
-	count int
+	mu      sync.Mutex
+	count   int
+	settled int
 }
 
 func (f *fakeTyping) OnIngested(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage, _ pgtype.UUID) {
@@ -131,7 +132,13 @@ func (f *fakeTyping) OnIngested(_ context.Context, _ ResolvedInstallation, _ cha
 	defer f.mu.Unlock()
 	f.count++
 }
-func (f *fakeTyping) calls() int { f.mu.Lock(); defer f.mu.Unlock(); return f.count }
+func (f *fakeTyping) OnSettled(_ context.Context, _ pgtype.UUID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.settled++
+}
+func (f *fakeTyping) calls() int        { f.mu.Lock(); defer f.mu.Unlock(); return f.count }
+func (f *fakeTyping) settledCalls() int { f.mu.Lock(); defer f.mu.Unlock(); return f.settled }
 
 type fakeIssues struct {
 	called bool
@@ -457,6 +464,37 @@ func TestRouter_FlushOffline_RepliesAgentOffline(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("agent-no-runtime must emit an AgentOffline reply")
+	}
+	// The reaction was added on ingest but no task will run, so the bus-driven
+	// clear never fires — the flush must clear the typing indicator itself.
+	if h.typing.settledCalls() != 1 {
+		t.Fatalf("offline flush must clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
+	}
+}
+
+func TestRouter_FlushArchived_ClearsTyping(t *testing.T) {
+	h := newHarness(t)
+	h.tasks.err = service.ErrChatTaskAgentArchived
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if h.typing.settledCalls() != 1 {
+		t.Fatalf("archived flush must clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
+	}
+}
+
+func TestRouter_FlushSuccess_DoesNotClearTyping(t *testing.T) {
+	h := newHarness(t)
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !h.tasks.wasCalled() {
+		t.Fatalf("a healthy session must enqueue a task")
+	}
+	// A successfully enqueued task is cleared by the platform's bus-driven
+	// handler on chat-done / task-failed, NOT by the flush.
+	if h.typing.settledCalls() != 0 {
+		t.Fatalf("successful flush must not clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
 	}
 }
 
