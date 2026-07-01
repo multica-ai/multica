@@ -930,7 +930,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		}
 		d.setAgentVersion(name, version)
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
-		displayName := strings.ToUpper(name[:1]) + name[1:]
+		displayName := providerDisplayName(name)
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
@@ -3218,9 +3218,27 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 	return meta, true
 }
 
+// runtimeDisplayNameOverrides maps a provider key to the human-facing runtime
+// name when simple title-casing would read awkwardly. Providers not listed
+// here fall back to capitalizing the key (claude → "Claude", codex → "Codex").
+var runtimeDisplayNameOverrides = map[string]string{
+	"traecli": "Trae",
+}
+
+// providerDisplayName returns the human-facing runtime name for a provider key.
+func providerDisplayName(name string) string {
+	if name == "" {
+		return name
+	}
+	if friendly, ok := runtimeDisplayNameOverrides[name]; ok {
+		return friendly
+	}
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kiro", "kimi":
+	case "openclaw", "kiro", "kimi", "traecli":
 		return true
 	default:
 		return false
