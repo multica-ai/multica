@@ -83,6 +83,7 @@ import { WebhookEventFilterSection } from "./webhook-event-filter-section";
 import { useT } from "../../i18n";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
 import type { WebhookEventFilter } from "@multica/core/types";
+import { formatInstant } from "../../common/date-format";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -167,44 +168,127 @@ const OUTPUT_MODE_ICONS: Record<AutopilotExecutionMode, typeof FilePlus2> = {
   run_only: Play,
 };
 
+const NEXT_RUN_PREVIEW_FORMAT: Intl.DateTimeFormatOptions = {
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+};
+
 // ---------------------------------------------------------------------------
 // Next-run computation (local approximation — server stores the authoritative value)
 // ---------------------------------------------------------------------------
 
-function computeNextRun(cfg: TriggerConfig, now: Date): Date | null {
+interface LocalParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+}
+
+function safeTimeZone(timezone: string): string {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date(0));
+    return timezone;
+  } catch {
+    return "UTC";
+  }
+}
+
+function getZonedParts(date: Date, timezone: string): LocalParts {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: safeTimeZone(timezone),
+    calendar: "gregory",
+    numberingSystem: "latn",
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)?.value ?? "0");
+  return {
+    year: value("year"),
+    month: value("month"),
+    day: value("day"),
+    hour: value("hour"),
+    minute: value("minute"),
+    second: value("second"),
+  };
+}
+
+function localCalendarDate(
+  parts: LocalParts,
+  dayOffset: number,
+  hour: number,
+  minute: number,
+): Date {
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day + dayOffset, hour, minute, 0));
+}
+
+function zonedTimeToUtc(localDate: Date, timezone: string): Date {
+  const desiredMs = localDate.getTime();
+  const guess = new Date(desiredMs);
+  const actual = getZonedParts(guess, timezone);
+  const actualMs = Date.UTC(
+    actual.year,
+    actual.month - 1,
+    actual.day,
+    actual.hour,
+    actual.minute,
+    actual.second,
+  );
+  return new Date(desiredMs + (desiredMs - actualMs));
+}
+
+export function computeNextRun(cfg: TriggerConfig, now: Date): Date | null {
   const [hStr, mStr] = cfg.time.split(":");
   const hour = parseInt(hStr ?? "9", 10);
   const minute = parseInt(mStr ?? "0", 10);
-  const next = new Date(now);
+  const nowInZone = getZonedParts(now, cfg.timezone);
+  const candidate = (dayOffset: number, h = hour) => {
+    const local = localCalendarDate(nowInZone, dayOffset, h, minute);
+    return {
+      date: zonedTimeToUtc(local, cfg.timezone),
+      dayOfWeek: local.getUTCDay(),
+    };
+  };
 
   switch (cfg.frequency) {
     case "hourly": {
-      next.setMinutes(minute, 0, 0);
-      if (next <= now) next.setHours(next.getHours() + 1);
+      let next = candidate(0, nowInZone.hour).date;
+      if (next <= now) {
+        const local = localCalendarDate(nowInZone, 0, nowInZone.hour + 1, minute);
+        next = zonedTimeToUtc(local, cfg.timezone);
+      }
       return next;
     }
     case "daily": {
-      next.setHours(hour, minute, 0, 0);
-      if (next <= now) next.setDate(next.getDate() + 1);
-      return next;
+      const today = candidate(0).date;
+      return today > now ? today : candidate(1).date;
     }
     case "weekdays": {
-      next.setHours(hour, minute, 0, 0);
       for (let i = 0; i < 8; i++) {
-        const dow = next.getDay();
-        if (next > now && dow >= 1 && dow <= 5) return next;
-        next.setDate(next.getDate() + 1);
-        next.setHours(hour, minute, 0, 0);
+        const next = candidate(i);
+        if (next.date > now && next.dayOfWeek >= 1 && next.dayOfWeek <= 5) {
+          return next.date;
+        }
       }
       return null;
     }
     case "weekly": {
       if (cfg.daysOfWeek.length === 0) return null;
-      next.setHours(hour, minute, 0, 0);
       for (let i = 0; i < 8; i++) {
-        if (next > now && cfg.daysOfWeek.includes(next.getDay())) return next;
-        next.setDate(next.getDate() + 1);
-        next.setHours(hour, minute, 0, 0);
+        const next = candidate(i);
+        if (next.date > now && cfg.daysOfWeek.includes(next.dayOfWeek)) {
+          return next.date;
+        }
       }
       return null;
     }
@@ -228,20 +312,12 @@ function useFormatCountdown(): (target: Date, now: Date) => string {
   };
 }
 
-function formatNextRunAbsolute(date: Date, timezone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    }).format(date);
-  } catch {
-    return date.toLocaleString();
-  }
+function formatNextRunAbsolute(date: Date, timezone: string, locale: string): string {
+  return formatInstant(date, {
+    locale,
+    timeZone: timezone,
+    options: NEXT_RUN_PREVIEW_FORMAT,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -959,7 +1035,7 @@ function ScheduleSection({
   disabled?: boolean;
   disabledReason?: string;
 }) {
-  const { t } = useT("autopilots");
+  const { t, i18n } = useT("autopilots");
   const formatCountdown = useFormatCountdown();
   const now = useNowTicker();
   const next = useMemo(() => computeNextRun(config, now), [config, now]);
@@ -1060,7 +1136,7 @@ function ScheduleSection({
             <span className="truncate">
               {t(($) => $.dialog.next_run_label)}{" "}
               <span className="text-foreground">
-                {formatNextRunAbsolute(next, config.timezone)}
+                {formatNextRunAbsolute(next, config.timezone, i18n.language)}
               </span>
             </span>
             <span className="ml-auto rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium text-foreground shrink-0">

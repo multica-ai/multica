@@ -66,15 +66,7 @@ import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
-
-function formatDate(date: string): string {
-  return new Date(date).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import { COMPACT_INSTANT_FORMAT, useDateFormatter } from "../../common/date-format";
 
 type RunStatus = "issue_created" | "running" | "skipped" | "completed" | "failed";
 
@@ -109,6 +101,7 @@ function WebhookPayloadSlot({ autopilotId, runId }: { autopilotId: string; runId
 
 function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
   const { t } = useT("autopilots");
+  const formatDate = useDateFormatter();
   const wsPaths = useWorkspacePaths();
   const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
   const visual = RUN_VISUAL[status];
@@ -219,6 +212,7 @@ function SkippedRunsGroup({
   agentName: string;
 }) {
   const { t } = useT("autopilots");
+  const formatDate = useDateFormatter();
   const [open, setOpen] = useState(false);
   const latestRun = runs[0];
   const ToggleIcon = open ? ChevronDown : ChevronRight;
@@ -258,6 +252,7 @@ function SkippedRunsGroup({
 
 function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrigger; autopilotId: string; canWrite: boolean }) {
   const { t } = useT("autopilots");
+  const formatDate = useDateFormatter();
   const deleteTrigger = useDeleteAutopilotTrigger();
   const rotateToken = useRotateAutopilotTriggerWebhookToken();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -369,7 +364,9 @@ function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: AutopilotTrig
         )}
         {trigger.next_run_at && (
           <div className="text-xs text-muted-foreground">
-            {t(($) => $.trigger_row.next_label, { date: formatDate(trigger.next_run_at) })}
+            {t(($) => $.trigger_row.next_label, {
+              date: formatDate(trigger.next_run_at, COMPACT_INSTANT_FORMAT),
+            })}
           </div>
         )}
         {showWebhookUrlRow && (
