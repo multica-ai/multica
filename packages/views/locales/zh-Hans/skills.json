@@ -70,6 +70,8 @@
     "my_agents": "我的智能体",
     "other_agents": "其他智能体",
     "no_agents": "暂无可用智能体",
+    "search_placeholder": "搜索智能体…",
+    "no_agents_match": "没有匹配的智能体。",
     "has_partial": "已有 {{owned}}/{{total}}",
     "added_toast": "已添加到 {{name}}",
     "add_failed_toast": "添加 skill 失败",
