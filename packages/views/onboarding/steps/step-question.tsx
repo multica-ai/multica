@@ -55,14 +55,11 @@ export function StepQuestion({
   onSkip,
   onBack,
   multiSelect = false,
-  notice,
-  afterOptions,
 }: {
   step: OnboardingStep;
   number: number;
   eyebrow?: string;
   question: string;
-  notice?: ReactNode;
   options: readonly QuestionOption[];
   selectedSlugs: readonly string[];
   otherValue: string;
@@ -76,7 +73,6 @@ export function StepQuestion({
   onSkip: () => void;
   onBack?: () => void;
   multiSelect?: boolean;
-  afterOptions?: ReactNode;
 }) {
   const { t } = useT("onboarding");
   const [pendingOther, setPendingOther] = useState(false);
@@ -174,12 +170,6 @@ export function StepQuestion({
             {question}
           </h1>
 
-          {notice ? (
-            <p className="mt-3 max-w-[640px] text-sm leading-relaxed text-muted-foreground">
-              {notice}
-            </p>
-          ) : null}
-
           <fieldset
             role={multiSelect ? "group" : "radiogroup"}
             aria-label={question}
@@ -211,12 +201,6 @@ export function StepQuestion({
               ),
             )}
           </fieldset>
-
-          {afterOptions ? (
-            <div className="mt-6">
-              {afterOptions}
-            </div>
-          ) : null}
 
           <div className="mt-8 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
             <span

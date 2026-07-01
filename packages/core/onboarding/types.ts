@@ -84,7 +84,6 @@ export interface QuestionnaireAnswers {
   source: Source[];
   source_other: string | null;
   source_skipped: boolean;
-  source_domain_consent: boolean;
   role: Role | null;
   role_other: string | null;
   role_skipped: boolean;

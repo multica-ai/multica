@@ -416,7 +416,6 @@ describe("AppConfigSchema cdn_signed drift", () => {
     const parsed = AppConfigSchema.parse({ cdn_signed: true });
     expect(parsed.cdn_signed).toBe(true);
   });
-
 });
 
 describe("InboxUnreadSummarySchema", () => {

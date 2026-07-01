@@ -23,7 +23,7 @@ export function mergedQuestionnairePatch(
   stored: Record<string, unknown> | null | undefined,
   sourcePatch: Pick<
     QuestionnaireAnswers,
-    "source" | "source_other" | "source_skipped" | "source_domain_consent"
+    "source" | "source_other" | "source_skipped"
   >,
 ): QuestionnaireAnswers {
   const raw = (stored ?? {}) as Record<string, unknown>;
@@ -31,7 +31,6 @@ export function mergedQuestionnairePatch(
     source: sourcePatch.source,
     source_other: sourcePatch.source_other,
     source_skipped: sourcePatch.source_skipped,
-    source_domain_consent: sourcePatch.source_domain_consent !== false,
     role: coerceRole(raw.role),
     role_other: coerceString(raw.role_other),
     role_skipped: coerceBool(raw.role_skipped),

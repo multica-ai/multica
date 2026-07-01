@@ -9,11 +9,7 @@ import {
   Newspaper,
   Users,
 } from "lucide-react";
-import {
-  shouldShowSourceChannelReporting,
-  type QuestionnaireAnswers,
-  type Source,
-} from "@multica/core/onboarding";
+import type { QuestionnaireAnswers, Source } from "@multica/core/onboarding";
 import {
   GoogleIcon,
   LinkedInIcon,
@@ -22,7 +18,6 @@ import {
   YouTubeIcon,
   GitHubIcon,
 } from "../components/brand-icons";
-import { SourceReportingControls } from "../source-reporting-controls";
 import { StepQuestion, type QuestionOption } from "./step-question";
 import { useT } from "../../i18n";
 
@@ -44,7 +39,6 @@ export function StepSource({
   onBack?: () => void;
 }) {
   const { t } = useT("onboarding");
-  const showSourceReporting = shouldShowSourceChannelReporting();
 
   const options: QuestionOption[] = [
     { slug: "friends_colleagues", icon: <Users className="h-4 w-4" />, label: t(($) => $.questions.source.friends_colleagues) },
@@ -69,7 +63,6 @@ export function StepSource({
   // HDYHAU prompts (Fairing, Recast, HockeyStack) and keeps channel
   // weights clean for analytics.
   const selected: readonly string[] = answers.source?.[0] ? [answers.source[0]] : [];
-  const domainConsent = answers.source_domain_consent !== false;
 
   const pick = (slug: string) => {
     const typed = slug as Source;
@@ -81,7 +74,6 @@ export function StepSource({
       // their input.
       source_other: typed === "other" ? answers.source_other : null,
       source_skipped: false,
-      source_domain_consent: domainConsent,
     });
   };
 
@@ -103,16 +95,6 @@ export function StepSource({
         onSkip();
       }}
       onBack={onBack}
-      afterOptions={
-        showSourceReporting && selected.length > 0 ? (
-          <SourceReportingControls
-            domainConsent={domainConsent}
-            onDomainConsentChange={(enabled) =>
-              onChange({ source_domain_consent: enabled })
-            }
-          />
-        ) : null
-      }
     />
   );
 }

@@ -22,7 +22,7 @@ See [MUL-1122](https://github.com/multica-ai/multica) for the design context.
 
 ## Configuration
 
-PostHog analytics shipping is toggled by environment variables (see `.env.example`):
+All analytics shipping is toggled by environment variables (see `.env.example`):
 
 | Variable | Meaning | Default |
 |---|---|---|
@@ -32,7 +32,7 @@ PostHog analytics shipping is toggled by environment variables (see `.env.exampl
 | `ANALYTICS_DISABLED` | Set to `true`/`1` to force the no-op client even when `POSTHOG_API_KEY` is set. | `""` |
 
 Local dev and self-hosted instances run with `POSTHOG_API_KEY=""`, so **no
-PostHog events leave the process unless the operator explicitly opts in**.
+events leave the process unless the operator explicitly opts in**.
 
 ### Self-hosted instances
 
