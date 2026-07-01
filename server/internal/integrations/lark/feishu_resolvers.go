@@ -171,6 +171,10 @@ func (r *feishuSessionBinder) EnsureSession(ctx context.Context, p engine.Ensure
 		// and channel_chat_id IS the real outbound chat, so no BindingConfig.
 		BindingKey: p.Message.Source.ChatID,
 		ChatType:   p.Message.Source.ChatType,
+		// A /new command rotates the session at INGEST (like DingTalk), so the
+		// engine's bare-reset short-circuit — which skips the empty run on the
+		// premise that EnsureSession already rotated — holds for Feishu too.
+		Fresh: p.Message.ForceFresh,
 	})
 }
 
