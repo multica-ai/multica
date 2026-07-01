@@ -26,7 +26,7 @@
  * 3. PREPROCESSING is minimal: only legacy mention shortcode migration and
  *    URL linkification (preprocessMarkdown). No HTML conversion.
  *
- * Tech: Tiptap v3.22.1 (ProseMirror wrapper), @tiptap/markdown for
+ * Tech: Tiptap v3 (ProseMirror wrapper), @tiptap/markdown for
  * bidirectional Markdown ↔ ProseMirror JSON conversion.
  */
 
@@ -304,7 +304,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
 
     const editor = useEditor({
       immediatelyRender: false,
-      // Note: in v3.22.1 the default is already false/undefined (same behavior).
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
       onCreate: ({ editor: ed }) => {
