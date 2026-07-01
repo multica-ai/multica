@@ -10,6 +10,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	"github.com/multica-ai/multica/server/internal/handler"
 )
 
 // fakeMCPVerdicts satisfies mcpToolVerdictResolver without a DB. verdicts is
@@ -160,6 +161,79 @@ func TestConnectionToolResolverMixedVerdicts(t *testing.T) {
 	}
 	if withheld["alpha"] {
 		t.Error("alpha is Allow-only and must not be withheld from the relay")
+	}
+}
+
+// FIR-2441 (the Flip, slice 1): Resolve carries the CALLABLE *APIConnectionTool
+// handle for every admitted api endpoint in APITools — the shape the three api
+// consumers (executor/handler/brief) need and that ConnectionCapability omits.
+// APITools must mirror what the reused APIConnectionResolver.ListForAgent returns
+// (same tools, same verdicts) so the Flip can point a consumer at this field
+// instead of the resolver directly with no change in behavior.
+func TestConnectionToolResolverAPIToolsCarryCallableHandle(t *testing.T) {
+	ident := mixedIdent()
+	got := newMixedResolver().Resolve(context.Background(), ident)
+
+	if len(got.APITools) == 0 {
+		t.Fatal("APITools is empty: the callable api handle is not carried through Resolve")
+	}
+
+	// Parity: APITools must equal what ListForAgent returns directly (same tool
+	// identity + verdict), proving Resolve reuses the resolver verbatim.
+	direct := newMixedResolver().api.ListForAgent(context.Background(), ident.apiIdentity())
+	if len(got.APITools) != len(direct) {
+		t.Fatalf("APITools count = %d, want %d (parity with ListForAgent)", len(got.APITools), len(direct))
+	}
+	for _, v := range got.APITools {
+		if v.Tool == nil {
+			t.Fatal("APITools carries a nil *APIConnectionTool handle")
+		}
+		if v.Tool.ConnectionName() != "apiconn" {
+			t.Errorf("unexpected api connection %q, want apiconn", v.Tool.ConnectionName())
+		}
+		if v.Verdict != toolpolicy.SettingAllow {
+			t.Errorf("api tool verdict = %q, want allow", v.Verdict)
+		}
+		// The handle must be usable — the brief reads Name()+Description(), the
+		// executor/handler dispatch it. A blank name would be an unusable handle.
+		if v.Tool.Name() == "" {
+			t.Error("callable handle has an empty Name()")
+		}
+	}
+}
+
+// The brief adapter is the first consumer moved onto Resolve. It must map the
+// carried api handles to the handler brief shape, and — like the old direct
+// path — return nil when the flag is off, so the router wiring swap is reversible.
+func TestConnectionToolResolverBriefAdapter(t *testing.T) {
+	ident := handler.CerebroAPIConnectionBriefIdentity{
+		WorkspaceID: gateTestUUID(1),
+		RuntimeID:   gateTestUUID(2),
+		AgentID:     gateTestUUID(3),
+		OwnerID:     gateTestUUID(4),
+	}
+
+	briefs := newMixedResolver().APIConnectionToolsForBrief(context.Background(), ident)
+	if len(briefs) == 0 {
+		t.Fatal("brief adapter returned no api tools with the flag on")
+	}
+	for _, b := range briefs {
+		if b.Name == "" {
+			t.Error("brief tool has an empty Name")
+		}
+		if b.Verdict != string(toolpolicy.SettingAllow) {
+			t.Errorf("brief tool verdict = %q, want allow", b.Verdict)
+		}
+	}
+
+	// Flag off ⇒ nil, identical to the api-only resolver it replaces.
+	conns := fakeConnLister{conns: mixedVerdictConns()}
+	apiOff := NewAPIConnectionResolver(conns,
+		fakeEndpointPolicy{verdicts: map[string]toolpolicy.Setting{"apiconn GET /allow": toolpolicy.SettingAllow}},
+		fakeFlag{on: false}, slog.Default())
+	off := NewConnectionToolResolver(apiOff, conns, fakeMCPVerdicts{}, fakeFlag{on: false}, fakeEntry, slog.Default())
+	if got := off.APIConnectionToolsForBrief(context.Background(), ident); got != nil {
+		t.Errorf("flag off must yield nil brief tools, got %v", got)
 	}
 }
 

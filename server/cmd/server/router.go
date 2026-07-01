@@ -580,7 +580,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
 	// CEREBRO-PATCH(cerebro-api-connection-resolver): FIR-2388 shared api-connection tool resolver — one filter for the local MCP handler and the claim brief (cloud gateway builds its own from the same stores).
 	cerebroAPIConnResolver := cerebroruntime.NewAPIConnectionResolver(cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries, nil)
-	h.APIConnectionBrief = cerebroAPIConnResolver // CEREBRO-PATCH(cerebro-api-connection-brief-wire): FIR-2388 list api-connection tools in the claim brief.
+	// CEREBRO-PATCH(cerebro-connection-tool-resolver-brief-flip): FIR-2441 the Flip (slice 1) — the claim brief now resolves through the unified ConnectionToolResolver (api half via the reused APIConnectionResolver), behind the same default-off cerebro_api_connection_tools flag; reversible (flag off ⇒ identical nil result).
+	cerebroConnToolResolver := cerebroruntime.NewConnectionToolResolver(cerebroAPIConnResolver, cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries, nil, nil)
+	h.APIConnectionBrief = cerebroConnToolResolver
 	// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools handler for the Multica MCP server.
 	cerebroConnectionToolsHandler := cerebroconnectiontools.NewHandler(cerebroconnectiontools.NewQueriesAgentResolver(queries), cerebroAPIConnResolver)
 	// CEREBRO-PATCH(cerebro-mcp-relay-wire): FIR-1563 — when the relay is configured,

@@ -167,7 +167,19 @@ const (
 // ResolvedConnectionTools is the single output every consumer reads post-Flip.
 type ResolvedConnectionTools struct {
 	// Tools is every admitted connection tool (api + mcp_http) with its verdict.
+	// It is the flat verdict view for Observe/"Explain access": a ConnectionCapability
+	// deliberately carries no callable handle, so it cannot feed a consumer that must
+	// dispatch or describe a tool.
 	Tools []ConnectionCapability
+	// APITools is every admitted api-connection endpoint tool with its CALLABLE
+	// *APIConnectionTool handle and verdict — the shape the three api consumers need
+	// but ConnectionCapability omits by design: the cloud executor registers
+	// v.Tool with the task registry, the local handler calls v.Tool.Call, and the
+	// claim brief reads v.Tool.Description(). Populated verbatim from the reused
+	// APIConnectionResolver.ListForAgent (Category A), so the Flip can point each
+	// consumer at this field instead of the resolver directly. Empty when the api
+	// half is unwired or the flag is off.
+	APITools []APIConnectionToolVerdict
 	// MCPServers is a {"mcpServers":{...}} document of the raw relay entries for
 	// the Allow-only mcp_http connections, ready to merge into --mcp-config. Nil
 	// when no connection qualifies. Ask/Deny connections are absent by design.
@@ -256,6 +268,9 @@ func (r *ConnectionToolResolver) Resolve(ctx context.Context, ident ConnectionId
 	// --- Category A: api connections (REUSE APIConnectionResolver verbatim) ---
 	if r.api != nil {
 		for _, v := range r.api.ListForAgent(ctx, ident.apiIdentity()) {
+			// Carry the callable handle for the api consumers (executor/handler/brief)…
+			out.APITools = append(out.APITools, v)
+			// …and mirror it into the flat verdict view for Observe.
 			out.Tools = append(out.Tools, ConnectionCapability{
 				Name:       v.Tool.Name(),
 				Type:       connections.TypeAPI,
