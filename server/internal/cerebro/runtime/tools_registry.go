@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -235,6 +236,7 @@ func (r *Registry) GetToolPolicyEnabledToolsForAgent(ctx context.Context, resolv
 		names = append(names, name)
 	}
 	r.mu.RUnlock()
+	sort.Strings(names)
 
 	out := make([]Tool, 0, len(names))
 	for _, name := range names {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 const (
 	firtalGatewayServerDaemonID  = "server:firtal-gateway"
 	firtalGatewayIssueCommentCap = 200
+	firtalGatewayMaxToolDefs     = 50
 )
 
 type FirtalGatewayExecutor struct {
@@ -928,6 +930,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		if !policyHandled {
 			enabledTools = taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, originalUserID)
 		}
+		enabledTools = limitFirtalGatewayTools(enabledTools)
 		if len(enabledTools) > 0 {
 			// Also register the MCP-backed tools (get_issue, list_comments,
 			// add_comment) that the Registry wraps via its Call method.
@@ -964,6 +967,7 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 				taskRegistry.Register(v.Tool)
 				enabledTools = append(enabledTools, v.Tool)
 			}
+			enabledTools = limitFirtalGatewayTools(enabledTools)
 			anthropicTools = taskRegistry.ToAnthropicTools(enabledTools)
 			activeRegistry = taskRegistry
 			useRegistry = true
@@ -1135,6 +1139,58 @@ func anthropicToolsToGatewayToolDefs(tools []AnthropicTool) []GatewayToolDef {
 				Parameters:  normalizeAnthropicToolSchema(tool.InputSchema),
 			},
 		})
+	}
+	return out
+}
+
+func limitFirtalGatewayTools(tools []Tool) []Tool {
+	if len(tools) <= firtalGatewayMaxToolDefs {
+		return tools
+	}
+
+	lowPriority := map[string]int{
+		"skill_get_observations":   1,
+		"skill_record_observation": 2,
+		"mcp_data_status":          3,
+		"cancel_wakeup":            4,
+		"list_wakeups":             5,
+		"schedule_wakeup":          6,
+		"credential_list":          7,
+	}
+	type candidate struct {
+		index    int
+		priority int
+	}
+	dropCandidates := make([]candidate, 0, len(lowPriority))
+	for i, tool := range tools {
+		if priority, ok := lowPriority[tool.Name()]; ok {
+			dropCandidates = append(dropCandidates, candidate{index: i, priority: priority})
+		}
+	}
+	sort.Slice(dropCandidates, func(i, j int) bool {
+		if dropCandidates[i].priority == dropCandidates[j].priority {
+			return dropCandidates[i].index < dropCandidates[j].index
+		}
+		return dropCandidates[i].priority < dropCandidates[j].priority
+	})
+
+	drop := make(map[int]struct{}, len(tools)-firtalGatewayMaxToolDefs)
+	for _, c := range dropCandidates {
+		if len(tools)-len(drop) <= firtalGatewayMaxToolDefs {
+			break
+		}
+		drop[c.index] = struct{}{}
+	}
+
+	out := make([]Tool, 0, firtalGatewayMaxToolDefs)
+	for i, tool := range tools {
+		if _, shouldDrop := drop[i]; shouldDrop {
+			continue
+		}
+		out = append(out, tool)
+		if len(out) == firtalGatewayMaxToolDefs {
+			break
+		}
 	}
 	return out
 }

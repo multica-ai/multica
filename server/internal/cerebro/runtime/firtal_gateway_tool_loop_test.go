@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -376,6 +377,48 @@ func TestRunToolLoopSendsToolResultsAsRoleToolMessages(t *testing.T) {
 	}
 	if !strings.Contains(last[len(last)-1].Content, "echoed:hej") {
 		t.Fatalf("tool result content = %q", last[len(last)-1].Content)
+	}
+}
+
+type namedTestTool string
+
+func (t namedTestTool) Name() string        { return string(t) }
+func (t namedTestTool) Description() string { return "test tool" }
+func (t namedTestTool) InputSchema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+func (t namedTestTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	return "ok", nil
+}
+
+func TestLimitFirtalGatewayToolsPreservesAttachmentTools(t *testing.T) {
+	tools := []Tool{
+		namedTestTool("skill_get_observations"),
+		namedTestTool("skill_record_observation"),
+		namedTestTool("list_attachments"),
+		namedTestTool("read_attachment"),
+	}
+	for i := 0; i < firtalGatewayMaxToolDefs; i++ {
+		tools = append(tools, namedTestTool(fmt.Sprintf("z_tool_%02d", i)))
+	}
+
+	got := limitFirtalGatewayTools(tools)
+	if len(got) != firtalGatewayMaxToolDefs {
+		t.Fatalf("limited tools = %d, want %d", len(got), firtalGatewayMaxToolDefs)
+	}
+	names := map[string]bool{}
+	for _, tool := range got {
+		names[tool.Name()] = true
+	}
+	for _, want := range []string{"list_attachments", "read_attachment"} {
+		if !names[want] {
+			t.Fatalf("limited tools dropped %s", want)
+		}
+	}
+	for _, dropped := range []string{"skill_get_observations", "skill_record_observation"} {
+		if names[dropped] {
+			t.Fatalf("limited tools kept low-priority tool %s", dropped)
+		}
 	}
 }
 
