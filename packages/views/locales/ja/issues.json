@@ -88,7 +88,8 @@
     "card_due_date": "期限",
     "card_project": "プロジェクト",
     "card_labels": "ラベル",
-    "card_child_progress": "サブイシューの進捗"
+    "card_child_progress": "サブイシューの進捗",
+    "show_sub_issues": "サブイシューを表示"
   },
   "view": {
     "tooltip_board": "ボード表示",

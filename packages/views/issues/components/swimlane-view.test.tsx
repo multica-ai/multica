@@ -1607,4 +1607,90 @@ describe("SwimLaneView", () => {
       expect(screen.queryByText("Non-running Child")).toBeNull();
     });
   });
+
+  it("hides batch-fetched children when 'Show sub-issues' is off", async () => {
+    mockViewState.swimlaneGrouping = "parent";
+
+    const grandparent: Issue = {
+      id: "gp-4",
+      workspace_id: "ws-1",
+      number: 40,
+      identifier: "PROJ-40",
+      title: "Grandparent 4",
+      description: null,
+      status: "todo",
+      priority: "medium",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 10,
+      stage: null,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const parent: Issue = {
+      ...grandparent,
+      id: "p-4",
+      number: 41,
+      identifier: "PROJ-41",
+      title: "Parent 4",
+      parent_issue_id: "gp-4",
+      position: 11,
+    };
+    // Returned only by the batch fetch (not in the initial `issues` set). It is
+    // a sub-issue, so with showSubIssues off it must not be merged back in.
+    const batchOnlyChild: Issue = {
+      ...grandparent,
+      id: "gc-hidden",
+      number: 42,
+      identifier: "PROJ-42",
+      title: "Batch Sub-issue",
+      status: "in_progress",
+      parent_issue_id: "p-4",
+      position: 12,
+    };
+
+    mockListChildrenByParents.mockResolvedValueOnce({ issues: [batchOnlyChild] });
+
+    const childProgressMap = new Map<string, { done: number; total: number }>([
+      ["p-4", { done: 0, total: 1 }],
+    ]);
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={[grandparent, parent]}
+        activeFilters={{
+          priorityFilters: [],
+          assigneeFilters: [],
+          includeNoAssignee: false,
+          creatorFilters: [],
+          projectFilters: [],
+          includeNoProject: false,
+          labelFilters: [],
+          agentRunningFilter: false,
+          showSubIssues: false,
+        }}
+        childProgressMap={childProgressMap}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalled();
+    });
+
+    // Guard against a false pass: the batch request must have targeted p-4.
+    const [calledIds] = mockListChildrenByParents.mock.calls[0] as [string[]];
+    expect(calledIds).toEqual(expect.arrayContaining(["p-4"]));
+
+    // Give the merge effect a chance to run, then assert the sub-issue stays hidden.
+    await act(async () => {});
+    expect(screen.queryByText("Batch Sub-issue")).toBeNull();
+  });
 });

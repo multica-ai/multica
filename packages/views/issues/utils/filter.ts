@@ -1,4 +1,4 @@
-import type { Issue, IssueStatus, IssuePriority } from "@multica/core/types";
+import type { Issue, IssueAssigneeGroup, IssueStatus, IssuePriority } from "@multica/core/types";
 import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
 
 export interface IssueFilters {
@@ -16,6 +16,11 @@ export interface IssueFilters {
   // free of any data-fetching dependency.
   agentRunningFilter?: boolean;
   runningIssueIds?: ReadonlySet<string>;
+  // "Show sub-issues" display toggle. When explicitly `false`, hide issues
+  // that have a parent so only top-level issues remain. Undefined / true keeps
+  // the default behaviour of showing everything, so existing callers that omit
+  // it (and mobile's positional variant) are unaffected.
+  showSubIssues?: boolean;
 }
 
 /**
@@ -28,7 +33,7 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, showSubIssues } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
@@ -39,6 +44,9 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
   return issues.filter((issue) => {
     if (applyAgentRunning && !(runningIssueIds?.has(issue.id) ?? false))
       return false;
+
+    // "Show sub-issues" off → keep only top-level issues.
+    if (showSubIssues === false && issue.parent_issue_id) return false;
 
     if (statusFilters.length > 0 && !statusFilters.includes(issue.status))
       return false;
@@ -91,4 +99,45 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
 
     return true;
   });
+}
+
+/**
+ * Apply the client-only display filters to assignee-grouped board data.
+ *
+ * The assignee-grouped board renders from the server-provided `groups` array
+ * rather than the flat `filterIssues` output, so display toggles that live
+ * purely on the client — "Show sub-issues" and the "agents working" quick
+ * filter — must be re-applied here or they silently bypass the assignee board.
+ * Only these two are handled: everything else (status, priority, label, …) is
+ * already enforced server-side when the groups are fetched, and re-running it
+ * here could double-filter against stale query params.
+ *
+ * Filtered groups get their `total` recomputed and emptied groups dropped. When
+ * neither toggle is active the original array is returned by reference so
+ * callers don't churn renders.
+ */
+export function filterAssigneeGroups(
+  groups: IssueAssigneeGroup[] | undefined,
+  filters: {
+    showSubIssues?: boolean;
+    agentRunningFilter?: boolean;
+    runningIssueIds?: ReadonlySet<string>;
+  },
+): IssueAssigneeGroup[] | undefined {
+  const applyRunning = filters.agentRunningFilter === true;
+  const hideSubIssues = filters.showSubIssues === false;
+  if (!groups || (!applyRunning && !hideSubIssues)) return groups;
+
+  const { runningIssueIds } = filters;
+  return groups
+    .map((group) => {
+      const issues = group.issues.filter((issue) => {
+        if (applyRunning && !(runningIssueIds?.has(issue.id) ?? false))
+          return false;
+        if (hideSubIssues && issue.parent_issue_id) return false;
+        return true;
+      });
+      return { ...group, issues, total: issues.length };
+    })
+    .filter((group) => group.issues.length > 0);
 }

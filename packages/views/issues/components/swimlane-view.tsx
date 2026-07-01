@@ -512,6 +512,10 @@ export function SwimLaneView({
     labelFilters: activeFiltersProp?.labelFilters ?? [],
     agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
     runningIssueIds,
+    // Carry the "Show sub-issues" toggle through to the extra-children merge
+    // path (see `filterIssues(extra, activeFilters)` below); otherwise batch /
+    // per-parent loaded sub-issues get re-added even when the toggle is off.
+    showSubIssues: activeFiltersProp?.showSubIssues ?? true,
   }), [activeFiltersProp, runningIssueIds]);
   const { data: projects = EMPTY_PROJECTS } = useQuery({
     ...projectListOptions(wsId),

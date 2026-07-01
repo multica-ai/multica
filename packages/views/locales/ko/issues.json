@@ -88,7 +88,8 @@
     "card_due_date": "마감일",
     "card_project": "프로젝트",
     "card_labels": "라벨",
-    "card_child_progress": "하위 이슈 진행률"
+    "card_child_progress": "하위 이슈 진행률",
+    "show_sub_issues": "하위 이슈 표시"
   },
   "view": {
     "tooltip_board": "보드 보기",
