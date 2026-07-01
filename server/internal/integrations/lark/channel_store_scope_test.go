@@ -152,3 +152,211 @@ VALUES ($1, $2, 'slack', 'oc_scope_slack', 'om_scope_slack', 'pending')
 		t.Fatalf("GetLarkOutboundCardByTask(slack card): err=%v, want pgx.ErrNoRows (scoped out)", err)
 	}
 }
+
+func TestChannelStore_UpsertLarkInstallationReclaimsDeadAppIDOwners(t *testing.T) {
+	pool := channelScopeTestDB(t)
+	ctx := context.Background()
+	store := NewChannelStore(db.New(pool))
+
+	type staleCase struct {
+		name        string
+		appID       string
+		oldWS       string
+		oldRuntime  string
+		oldAgent    string
+		newWS       string
+		newRuntime  string
+		newAgent    string
+		status      string
+		archived    bool
+		orphanOwner bool
+	}
+
+	cases := []staleCase{
+		{
+			name:       "revoked",
+			appID:      "issue4810-revoked",
+			oldWS:      "48100000-0000-4000-8000-000000000001",
+			oldRuntime: "48100000-0000-4000-8000-000000000002",
+			oldAgent:   "48100000-0000-4000-8000-000000000003",
+			newWS:      "48100000-0000-4000-8000-000000000004",
+			newRuntime: "48100000-0000-4000-8000-000000000005",
+			newAgent:   "48100000-0000-4000-8000-000000000006",
+			status:     "revoked",
+		},
+		{
+			name:       "archived agent",
+			appID:      "issue4810-archived",
+			oldWS:      "48100000-0000-4000-8000-000000000011",
+			oldRuntime: "48100000-0000-4000-8000-000000000012",
+			oldAgent:   "48100000-0000-4000-8000-000000000013",
+			newWS:      "48100000-0000-4000-8000-000000000014",
+			newRuntime: "48100000-0000-4000-8000-000000000015",
+			newAgent:   "48100000-0000-4000-8000-000000000016",
+			status:     "active",
+			archived:   true,
+		},
+		{
+			name:        "orphaned owner",
+			appID:       "issue4810-orphaned",
+			oldWS:       "48100000-0000-4000-8000-000000000021",
+			oldRuntime:  "48100000-0000-4000-8000-000000000022",
+			oldAgent:    "48100000-0000-4000-8000-000000000023",
+			newWS:       "48100000-0000-4000-8000-000000000024",
+			newRuntime:  "48100000-0000-4000-8000-000000000025",
+			newAgent:    "48100000-0000-4000-8000-000000000026",
+			status:      "active",
+			orphanOwner: true,
+		},
+	}
+
+	cleanApps := []string{"issue4810-revoked", "issue4810-archived", "issue4810-orphaned"}
+	cleanWorkspaces := []string{
+		"48100000-0000-4000-8000-000000000001",
+		"48100000-0000-4000-8000-000000000004",
+		"48100000-0000-4000-8000-000000000011",
+		"48100000-0000-4000-8000-000000000014",
+		"48100000-0000-4000-8000-000000000024",
+	}
+	clean := func() {
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM channel_installation WHERE config->>'app_id' = ANY($1)`,
+			cleanApps)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM workspace WHERE id = ANY($1)`, cleanWorkspaces)
+	}
+	clean()
+	t.Cleanup(clean)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !tc.orphanOwner {
+				seedChannelOwner(t, ctx, pool, tc.oldWS, tc.oldRuntime, tc.oldAgent, tc.archived)
+			}
+			seedChannelOwner(t, ctx, pool, tc.newWS, tc.newRuntime, tc.newAgent, false)
+
+			var existingID pgtype.UUID
+			if err := pool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, status, installer_user_id)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text, 'app_secret_encrypted', '', 'bot_open_id', 'old_bot'), $4, $5)
+RETURNING id
+`, tc.oldWS, tc.oldAgent, tc.appID, tc.status, tc.newAgent).Scan(&existingID); err != nil {
+				t.Fatalf("insert existing installation: %v", err)
+			}
+
+			got, err := store.UpsertLarkInstallation(ctx, UpsertInstallationParams{
+				WorkspaceID:        uuidFromString(t, tc.newWS),
+				AgentID:            uuidFromString(t, tc.newAgent),
+				AppID:              tc.appID,
+				AppSecretEncrypted: []byte("new-secret"),
+				BotOpenID:          "new_bot",
+				InstallerUserID:    uuidFromString(t, tc.newAgent),
+				Region:             string(RegionFeishu),
+			})
+			if err != nil {
+				t.Fatalf("UpsertLarkInstallation: %v", err)
+			}
+			if got.ID != existingID {
+				t.Fatalf("expected stale row to be reclaimed in place, got id %s want %s", uuidString(got.ID), uuidString(existingID))
+			}
+			if got.AppID != tc.appID || got.Status != string(InstallationActive) {
+				t.Fatalf("got app=%q status=%q, want app=%q status=%q", got.AppID, got.Status, tc.appID, InstallationActive)
+			}
+			if got.WorkspaceID != uuidFromString(t, tc.newWS) || got.AgentID != uuidFromString(t, tc.newAgent) {
+				t.Fatalf("got owner workspace=%s agent=%s, want workspace=%s agent=%s",
+					uuidString(got.WorkspaceID), uuidString(got.AgentID), tc.newWS, tc.newAgent)
+			}
+		})
+	}
+}
+
+func TestChannelStore_UpsertLarkInstallationRefusesLiveAppIDOwner(t *testing.T) {
+	pool := channelScopeTestDB(t)
+	ctx := context.Background()
+	store := NewChannelStore(db.New(pool))
+
+	const (
+		appID      = "issue4810-live-owner"
+		oldWS      = "48100000-0000-4000-8000-000000000031"
+		oldRuntime = "48100000-0000-4000-8000-000000000032"
+		oldAgent   = "48100000-0000-4000-8000-000000000033"
+		newWS      = "48100000-0000-4000-8000-000000000034"
+		newRuntime = "48100000-0000-4000-8000-000000000035"
+		newAgent   = "48100000-0000-4000-8000-000000000036"
+	)
+
+	clean := func() {
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM channel_installation WHERE config->>'app_id' = $1`, appID)
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM workspace WHERE id = ANY($1)`, []string{oldWS, newWS})
+	}
+	clean()
+	t.Cleanup(clean)
+
+	seedChannelOwner(t, ctx, pool, oldWS, oldRuntime, oldAgent, false)
+	seedChannelOwner(t, ctx, pool, newWS, newRuntime, newAgent, false)
+
+	var existingID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text, 'app_secret_encrypted', '', 'bot_open_id', 'old_bot'), $4)
+RETURNING id
+`, oldWS, oldAgent, appID, oldAgent).Scan(&existingID); err != nil {
+		t.Fatalf("insert existing installation: %v", err)
+	}
+
+	_, err := store.UpsertLarkInstallation(ctx, UpsertInstallationParams{
+		WorkspaceID:        uuidFromString(t, newWS),
+		AgentID:            uuidFromString(t, newAgent),
+		AppID:              appID,
+		AppSecretEncrypted: []byte("new-secret"),
+		BotOpenID:          "new_bot",
+		InstallerUserID:    uuidFromString(t, newAgent),
+		Region:             string(RegionFeishu),
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("UpsertLarkInstallation live owner err=%v, want pgx.ErrNoRows", err)
+	}
+
+	row, err := store.GetLarkInstallation(ctx, existingID)
+	if err != nil {
+		t.Fatalf("GetLarkInstallation existing: %v", err)
+	}
+	if row.WorkspaceID != uuidFromString(t, oldWS) || row.AgentID != uuidFromString(t, oldAgent) || row.BotOpenID != "old_bot" {
+		t.Fatalf("live owner row was modified: workspace=%s agent=%s bot=%q",
+			uuidString(row.WorkspaceID), uuidString(row.AgentID), row.BotOpenID)
+	}
+}
+
+func seedChannelOwner(t *testing.T, ctx context.Context, pool *pgxpool.Pool, workspaceID, runtimeID, agentID string, archived bool) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+INSERT INTO workspace (id, name, slug, description)
+VALUES ($1, $2, $3, '')
+ON CONFLICT (id) DO NOTHING
+`, workspaceID, "issue4810 "+workspaceID, "issue4810-"+workspaceID); err != nil {
+		t.Fatalf("insert workspace %s: %v", workspaceID, err)
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO agent_runtime (id, workspace_id, daemon_id, name, runtime_mode, provider, status)
+VALUES ($1, $2, $3, 'issue4810 runtime', 'local', 'multica_daemon', 'online')
+ON CONFLICT (id) DO NOTHING
+`, runtimeID, workspaceID, "issue4810-"+runtimeID); err != nil {
+		t.Fatalf("insert runtime %s: %v", runtimeID, err)
+	}
+
+	archivedSQL := "NULL"
+	if archived {
+		archivedSQL = "now()"
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO agent (
+    id, workspace_id, name, description, runtime_mode, runtime_config,
+    runtime_id, visibility, max_concurrent_tasks, archived_at
+)
+VALUES ($1, $2, 'issue4810 agent', '', 'local', '{}'::jsonb, $3, 'workspace', 1, `+archivedSQL+`)
+ON CONFLICT (id) DO NOTHING
+`, agentID, workspaceID, runtimeID); err != nil {
+		t.Fatalf("insert agent %s: %v", agentID, err)
+	}
+}

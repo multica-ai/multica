@@ -689,6 +689,7 @@ JOIN workspace w ON w.id = ci.workspace_id
 JOIN agent a ON a.id = ci.agent_id
 WHERE ci.status = 'active'
   AND ci.channel_type = $1
+  AND a.archived_at IS NULL
 ORDER BY ci.created_at ASC
 `
 
@@ -702,8 +703,8 @@ ORDER BY ci.created_at ASC
 // installation can be orphaned when its workspace is deleted or its agent is
 // hard-deleted (e.g. runtime teardown). Without this guard the hub would keep
 // opening a WebSocket for a bot whose workspace/agent is gone. The JOIN matches
-// the old ON DELETE CASCADE semantics: it filters on row existence, not agent
-// archival, so an archived-but-present agent's installation is still listed.
+// the old ON DELETE CASCADE semantics plus archive semantics: archived agents
+// are treated as dead owners for inbound-channel supervision.
 func (q *Queries) ListActiveChannelInstallations(ctx context.Context, channelType string) ([]ChannelInstallation, error) {
 	rows, err := q.db.Query(ctx, listActiveChannelInstallations, channelType)
 	if err != nil {
@@ -742,6 +743,7 @@ SELECT ci.id, ci.workspace_id, ci.agent_id, ci.channel_type, ci.config, ci.statu
 JOIN workspace w ON w.id = ci.workspace_id
 JOIN agent a ON a.id = ci.agent_id
 WHERE ci.status = 'active'
+  AND a.archived_at IS NULL
 ORDER BY ci.created_at ASC
 `
 
@@ -753,7 +755,7 @@ ORDER BY ci.created_at ASC
 // never needs to know which platforms exist. Same orphan guard as the per-type
 // query: the workspace + agent JOINs drop installations whose owning rows are
 // gone (channel_installation has no FK, MUL-3515 §4), matching the old ON
-// DELETE CASCADE semantics (row existence, not agent archival).
+// DELETE CASCADE semantics plus archive semantics.
 func (q *Queries) ListAllActiveChannelInstallations(ctx context.Context) ([]ChannelInstallation, error) {
 	rows, err := q.db.Query(ctx, listAllActiveChannelInstallations)
 	if err != nil {
@@ -1089,27 +1091,81 @@ func (q *Queries) UpdateChannelOutboundCardStatus(ctx context.Context, arg Updat
 const upsertChannelInstallation = `-- name: UpsertChannelInstallation :one
 
 
-INSERT INTO channel_installation (
-    workspace_id, agent_id, channel_type, config, installer_user_id
-) VALUES (
-    $1, $2, $3, $4, $5
+WITH existing_app AS (
+    SELECT
+        ci.id, ci.workspace_id, ci.agent_id, ci.channel_type, ci.config, ci.status, ci.ws_lease_token, ci.ws_lease_expires_at, ci.installer_user_id, ci.installed_at, ci.created_at, ci.updated_at,
+        (w.id IS NOT NULL AND a.id IS NOT NULL AND a.archived_at IS NULL AND ci.status = 'active') AS live_owner
+    FROM channel_installation ci
+    LEFT JOIN workspace w ON w.id = ci.workspace_id
+    LEFT JOIN agent a ON a.id = ci.agent_id
+    WHERE ci.channel_type = $1
+      AND ci.config ->> 'app_id' = $2::text
+    FOR UPDATE OF ci
+),
+reclaimed AS (
+    UPDATE channel_installation ci
+    SET workspace_id       = $3,
+        agent_id           = $4,
+        channel_type       = $1,
+        config             = $5,
+        installer_user_id  = $6,
+        status             = 'active',
+        ws_lease_token     = NULL,
+        ws_lease_expires_at = NULL,
+        installed_at       = now(),
+        updated_at         = now()
+    FROM existing_app e
+    WHERE ci.id = e.id
+      AND (
+          (e.workspace_id = $3 AND e.agent_id = $4)
+          OR NOT e.live_owner
+      )
+    RETURNING ci.id, ci.workspace_id, ci.agent_id, ci.channel_type, ci.config, ci.status, ci.ws_lease_token, ci.ws_lease_expires_at, ci.installer_user_id, ci.installed_at, ci.created_at, ci.updated_at
+),
+upserted AS (
+    INSERT INTO channel_installation (
+        workspace_id, agent_id, channel_type, config, installer_user_id
+    )
+    SELECT
+        $3, $4, $1,
+        $5, $6
+    WHERE NOT EXISTS (SELECT 1 FROM existing_app)
+    ON CONFLICT (workspace_id, agent_id, channel_type) DO UPDATE SET
+        channel_type      = EXCLUDED.channel_type,
+        config            = EXCLUDED.config,
+        installer_user_id = EXCLUDED.installer_user_id,
+        status            = 'active',
+        installed_at      = now(),
+        updated_at        = now()
+    RETURNING id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
 )
-ON CONFLICT (workspace_id, agent_id, channel_type) DO UPDATE SET
-    channel_type      = EXCLUDED.channel_type,
-    config            = EXCLUDED.config,
-    installer_user_id = EXCLUDED.installer_user_id,
-    status            = 'active',
-    installed_at      = now(),
-    updated_at        = now()
-RETURNING id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM reclaimed
+UNION ALL
+SELECT id, workspace_id, agent_id, channel_type, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at FROM upserted
 `
 
 type UpsertChannelInstallationParams struct {
+	ChannelType     string      `json:"channel_type"`
+	AppID           string      `json:"app_id"`
 	WorkspaceID     pgtype.UUID `json:"workspace_id"`
 	AgentID         pgtype.UUID `json:"agent_id"`
-	ChannelType     string      `json:"channel_type"`
 	Config          []byte      `json:"config"`
 	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+}
+
+type UpsertChannelInstallationRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	ChannelType      string             `json:"channel_type"`
+	Config           []byte             `json:"config"`
+	Status           string             `json:"status"`
+	WsLeaseToken     pgtype.Text        `json:"ws_lease_token"`
+	WsLeaseExpiresAt pgtype.Timestamptz `json:"ws_lease_expires_at"`
+	InstallerUserID  pgtype.UUID        `json:"installer_user_id"`
+	InstalledAt      pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 // Platform-agnostic inbound channel queries (MUL-3515). These operate on
@@ -1131,19 +1187,28 @@ type UpsertChannelInstallationParams struct {
 // Go layer assembles (for feishu: app_id, app_secret_encrypted, tenant_key,
 // bot_open_id, bot_union_id, region). Re-installing the same agent on the
 // same channel_type replaces the whole config and forces status back to
-// 'active'. The conflict key is (workspace_id, agent_id, channel_type) so an
-// agent may hold one installation per channel_type (feishu + slack + ...)
-// without one install clobbering another. The WS lease is intentionally NOT
-// reset here — the inbound hub owns lease lifecycle.
-func (q *Queries) UpsertChannelInstallation(ctx context.Context, arg UpsertChannelInstallationParams) (ChannelInstallation, error) {
+// 'active'. The WS lease is intentionally NOT reset here — the inbound hub owns
+// lease lifecycle.
+//
+// The app_id routing key also has to be respected here. channel_installation
+// has no FK (MUL-3515 §4), so rows can survive workspace deletion, hard agent
+// deletion, agent archive, or explicit revocation. Those stale rows should not
+// permanently reserve an IM bot app_id, but a live active owner must still
+// refuse a bind from another agent/workspace. This query first locks any row
+// already carrying app_id. If that row is the same agent or is stale, it is
+// reclaimed in place; if it is owned by a live unarchived agent, no row is
+// returned and callers surface an installation conflict. If no app_id row
+// exists, the normal one-installation-per-agent upsert runs.
+func (q *Queries) UpsertChannelInstallation(ctx context.Context, arg UpsertChannelInstallationParams) (UpsertChannelInstallationRow, error) {
 	row := q.db.QueryRow(ctx, upsertChannelInstallation,
+		arg.ChannelType,
+		arg.AppID,
 		arg.WorkspaceID,
 		arg.AgentID,
-		arg.ChannelType,
 		arg.Config,
 		arg.InstallerUserID,
 	)
-	var i ChannelInstallation
+	var i UpsertChannelInstallationRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

@@ -40,7 +40,7 @@ var (
 // upsert atomically (and so tests can inject a fake without a real DB).
 type installQueries interface {
 	WithTx(tx pgx.Tx) installQueries
-	UpsertChannelInstallation(ctx context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error)
+	UpsertChannelInstallation(ctx context.Context, arg db.UpsertChannelInstallationParams) (db.UpsertChannelInstallationRow, error)
 	ListChannelInstallationsByWorkspace(ctx context.Context, arg db.ListChannelInstallationsByWorkspaceParams) ([]db.ChannelInstallation, error)
 	GetChannelInstallationInWorkspace(ctx context.Context, arg db.GetChannelInstallationInWorkspaceParams) (db.ChannelInstallation, error)
 	SetChannelInstallationStatus(ctx context.Context, arg db.SetChannelInstallationStatusParams) error
@@ -115,6 +115,7 @@ type installPersist struct {
 	wsID        pgtype.UUID
 	agentID     pgtype.UUID
 	installerID pgtype.UUID
+	appIDKey    string
 	// configJSON holds the Slack app id (config->>'app_id') used for inbound
 	// routing; the ROW itself is keyed by (workspace, agent) — one bot per agent.
 	configJSON []byte
@@ -142,14 +143,18 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
-	inst, err := qtx.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
+	row, err := qtx.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
 		WorkspaceID:     p.wsID,
 		AgentID:         p.agentID,
 		ChannelType:     string(TypeSlack),
 		Config:          p.configJSON,
 		InstallerUserID: p.installerID,
+		AppID:           p.appIDKey,
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.ChannelInstallation{}, ErrTeamOwnedByAnotherWorkspace
+		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
 			return db.ChannelInstallation{}, ErrTeamOwnedByAnotherWorkspace
@@ -159,7 +164,24 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 	if err := tx.Commit(ctx); err != nil {
 		return db.ChannelInstallation{}, fmt.Errorf("commit slack install: %w", err)
 	}
-	return inst, nil
+	return upsertRowToChannelInstallation(row), nil
+}
+
+func upsertRowToChannelInstallation(row db.UpsertChannelInstallationRow) db.ChannelInstallation {
+	return db.ChannelInstallation{
+		ID:               row.ID,
+		WorkspaceID:      row.WorkspaceID,
+		AgentID:          row.AgentID,
+		ChannelType:      row.ChannelType,
+		Config:           row.Config,
+		Status:           row.Status,
+		WsLeaseToken:     row.WsLeaseToken,
+		WsLeaseExpiresAt: row.WsLeaseExpiresAt,
+		InstallerUserID:  row.InstallerUserID,
+		InstalledAt:      row.InstalledAt,
+		CreatedAt:        row.CreatedAt,
+		UpdatedAt:        row.UpdatedAt,
+	}
 }
 
 // ListByWorkspace returns every Slack installation in the workspace (active and
