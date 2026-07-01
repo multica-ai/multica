@@ -1,9 +1,18 @@
 <!doctype html>
-<html lang="en" class="h-full">
+<html lang="en" class="h-full" style="background:#111114">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Multica</title>
+    <!-- Blocking theme script: applies .dark before CSS paints to prevent white flash.
+         Mirrors what next-themes injects in Next.js. storageKey matches next-themes default ("theme"). -->
+    <script>
+      (function () {
+        var t = localStorage.getItem('theme') || 'system';
+        if (t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme:dark)').matches))
+          document.documentElement.classList.add('dark');
+      })();
+    </script>
   </head>
   <body class="h-full overflow-hidden antialiased font-sans">
     <div id="root" class="h-full"></div>
