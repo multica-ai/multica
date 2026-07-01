@@ -247,6 +247,27 @@ function KiroLogo({ className }: { className: string }) {
   );
 }
 
+// Oh My Pi (omp CLI) — wordmark mark in a dark rounded tile with a white
+// Greek pi (π) glyph, matching the inline-wordmark style used by KimiLogo.
+function OmpLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#111827" />
+      <text
+        x="12"
+        y="17"
+        textAnchor="middle"
+        fontSize="15"
+        fontWeight="700"
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+        fill="#FFFFFF"
+      >
+        π
+      </text>
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -281,6 +302,8 @@ export function ProviderLogo({
       return <QoderLogo className={className} />;
     case "antigravity":
       return <AntigravityLogo className={className} />;
+    case "omp":
+      return <OmpLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

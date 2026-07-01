@@ -583,10 +583,13 @@ func (c *hermesClient) handleLine(line string) {
 // handleAgentRequest replies to JSON-RPC requests the agent sends
 // us (agent → client direction). The only one we care about today is
 // `session/request_permission`: the daemon is headless and cannot
-// actually prompt a user, so we auto-approve every action. Using
-// `approve_for_session` rather than `approve` means subsequent
-// identical actions (every Shell invocation, every file write) don't
-// round-trip through us — the agent remembers them locally.
+// actually prompt a user, so we auto-approve every action. The option
+// id is selected dynamically from the request's offered options (see
+// selectAllowOption) so each ACP backend's own "allow" wording is
+// honoured — kimi offers `approve_for_session`, omp offers
+// `allow_always`/`allow_once`. Picking a session-scoped allow means
+// subsequent identical actions (every Shell invocation, every file
+// write) don't round-trip through us — the agent remembers them locally.
 func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
@@ -599,17 +602,18 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
+		optionID := selectAllowOption(raw["params"])
 		resp = map[string]any{
 			"jsonrpc": "2.0",
 			"id":      json.RawMessage(rawID),
 			"result": map[string]any{
 				"outcome": map[string]any{
 					"outcome":  "selected",
-					"optionId": "approve_for_session",
+					"optionId": optionID,
 				},
 			},
 		}
-		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method)
+		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method, "option_id", optionID)
 	default:
 		// Unknown agent→client method — reply with standard "method
 		// not found" so the agent doesn't block waiting for us. Better
@@ -634,6 +638,53 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	if err := c.writeLine(data); err != nil {
 		c.cfg.Logger.Warn("write agent-request response", "method", method, "error", err)
 	}
+}
+
+// selectAllowOption picks the option id to reply with for an ACP
+// `session/request_permission` request. The daemon is headless, so it
+// always grants — the only question is *which* allow-flavoured option a
+// given backend offers. ACP-standard backends (omp) advertise
+// `allow_always`/`allow_once`; legacy kimi advertises
+// `approve_for_session`. We prefer a session-scoped grant
+// (kind=="allow_always") so repeat actions don't round-trip, then a
+// one-shot allow (kind=="allow_once"), then any option whose kind or id
+// looks like an allow/approve, and finally fall back to the literal
+// "approve_for_session" when params/options are absent or none match
+// (preserving the original kimi behaviour with zero regression).
+func selectAllowOption(rawParams json.RawMessage) string {
+	const fallback = "approve_for_session"
+	if len(rawParams) == 0 {
+		return fallback
+	}
+	var params struct {
+		Options []struct {
+			OptionID string `json:"optionId"`
+			Name     string `json:"name"`
+			Kind     string `json:"kind"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal(rawParams, &params); err != nil || len(params.Options) == 0 {
+		return fallback
+	}
+	for _, o := range params.Options {
+		if o.Kind == "allow_always" {
+			return o.OptionID
+		}
+	}
+	for _, o := range params.Options {
+		if o.Kind == "allow_once" {
+			return o.OptionID
+		}
+	}
+	for _, o := range params.Options {
+		k := strings.ToLower(o.Kind)
+		id := strings.ToLower(o.OptionID)
+		if strings.Contains(k, "allow") || strings.Contains(k, "approve") ||
+			strings.Contains(id, "allow") || strings.Contains(id, "approve") {
+			return o.OptionID
+		}
+	}
+	return fallback
 }
 
 // acpRPCError is a JSON-RPC error frame returned by the agent process.
