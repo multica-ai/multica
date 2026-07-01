@@ -243,6 +243,62 @@ func stageFakeAgent(t *testing.T) string {
 	return binDir
 }
 
+func TestLoadConfig_SkipsMulticaHooksShadowingAgentBinaries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hooksDir := filepath.Join(home, ".multica", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	realBinDir := t.TempDir()
+
+	for _, name := range []string{"claude", "codex", "hermes"} {
+		hookPath := filepath.Join(hooksDir, name)
+		hookBody := "#!/bin/sh\nexec " + name + " \"$@\"\n"
+		if err := os.WriteFile(hookPath, []byte(hookBody), 0o755); err != nil {
+			t.Fatalf("write hook wrapper %s: %v", name, err)
+		}
+		realPath := filepath.Join(realBinDir, name)
+		if err := os.WriteFile(realPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write real binary %s: %v", name, err)
+		}
+	}
+
+	t.Setenv("PATH", hooksDir+string(os.PathListSeparator)+realBinDir)
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	for provider, binary := range map[string]string{
+		"claude": "claude",
+		"codex":  "codex",
+		"hermes": "hermes",
+	} {
+		got, ok := cfg.Agents[provider]
+		if !ok {
+			t.Fatalf("expected %s agent in config, got %#v", provider, cfg.Agents)
+		}
+		want := canonicalExecutablePath(filepath.Join(realBinDir, binary))
+		if got.Path != want {
+			t.Errorf("%s path = %q, want unshadowed real binary %q", provider, got.Path, want)
+		}
+		if strings.HasPrefix(got.Path, hooksDir) {
+			t.Errorf("%s path still points into hooks dir: %q", provider, got.Path)
+		}
+	}
+}
+
 // TestLoadConfig_AutoUpdateDefault_SelfHostOff is the regression guard for
 // MUL-2381: a daemon pointed at any non-cloud server URL must default
 // AutoUpdateEnabled to false, because self-host operators frequently run a
