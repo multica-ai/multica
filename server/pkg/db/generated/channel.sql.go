@@ -402,6 +402,59 @@ func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context
 	return err
 }
 
+const findReusableChannelUserBinding = `-- name: FindReusableChannelUserBinding :one
+SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.channel_type = $2
+  AND b.channel_user_id = $3
+  AND ci.config ->> 'team_id' = $4::text
+ORDER BY b.bound_at DESC
+LIMIT 1
+`
+
+type FindReusableChannelUserBindingParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	ChannelType   string      `json:"channel_type"`
+	ChannelUserID string      `json:"channel_user_id"`
+	TeamID        string      `json:"team_id"`
+}
+
+// Cross-installation account-link reuse (MUL-3911). When a platform user
+// messages an installation they have NOT linked, but the SAME user id is already
+// bound to ANOTHER installation in the SAME Multica workspace + SAME Slack team,
+// the inbound identity step reuses that link instead of re-prompting. Slack user
+// ids are stable within a team, so an identical channel_user_id denotes the same
+// human across that team's apps. The match is fenced to one workspace AND one
+// team (installation config->>'team_id'): a Slack team can be connected to two
+// different Multica workspaces, and a user may hold different Multica accounts in
+// each, so reuse must cross neither boundary. Most-recently-bound wins. The
+// caller re-checks membership and materializes a fresh per-installation binding.
+//
+// team_id is pinned ::text so sqlc types the arg as a string instead of
+// attributing the bare param to the JSONB config column (mirrors
+// GetChannelInstallationByAppID's app_id cast).
+func (q *Queries) FindReusableChannelUserBinding(ctx context.Context, arg FindReusableChannelUserBindingParams) (ChannelUserBinding, error) {
+	row := q.db.QueryRow(ctx, findReusableChannelUserBinding,
+		arg.WorkspaceID,
+		arg.ChannelType,
+		arg.ChannelUserID,
+		arg.TeamID,
+	)
+	var i ChannelUserBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.Config,
+		&i.BoundAt,
+	)
+	return i, err
+}
+
 const getChannelChatSessionBinding = `-- name: GetChannelChatSessionBinding :one
 SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at FROM channel_chat_session_binding
 WHERE installation_id = $1 AND channel_chat_id = $2
