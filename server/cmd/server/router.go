@@ -478,11 +478,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// agent asks, instead of force-assembling it on every inbound.
 			h.SlackHistory = slack.NewHistory(queries, box.Open, slog.Default())
 
+			// `/issue` slash command (MUL-3908): a real Slack slash command,
+			// delivered over the same Socket Mode connection. It is a one-shot
+			// issue creation (no chat session or chat run; a todo issue assigned to
+			// the agent still triggers it via normal issue-assignment) with a private
+			// ephemeral confirmation, reusing the shared IssueService + binding service.
+			slackSlash := slack.NewSlashCommandProcessor(slack.SlashCommandConfig{
+				Queries: queries,
+				Issues:  h.IssueService,
+				Binding: slackBindingSvc,
+				AppURL:  appURLFromEnv(),
+				Logger:  slog.Default(),
+			})
+
 			// Per-installation inbound: the Supervisor builds + supervises one
 			// Socket Mode connection per active Slack installation, authenticated
 			// with that installation's OWN app-level token (xapp-, pasted at BYO
 			// install) — no deployment-level app token, no single connection.
-			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{Decrypt: box.Open, Logger: slog.Default()})
+			slack.RegisterSlack(channelRegistry, slack.ChannelDeps{Decrypt: box.Open, Logger: slog.Default(), Slash: slackSlash})
 
 			// BYO self-serve install (paste bot token + app-level token). The
 			// InstallService needs only the at-rest encryption key — there is no
