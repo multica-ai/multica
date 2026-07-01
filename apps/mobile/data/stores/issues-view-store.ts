@@ -35,10 +35,12 @@ interface IssuesViewState {
   statusFilters: IssueStatus[];
   priorityFilters: IssuePriority[];
   sortByLastEdited: boolean;
+  collapsedStatuses: IssueStatus[];
   setScope: (scope: IssuesScope) => void;
   toggleStatusFilter: (status: IssueStatus) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
   toggleSortByLastEdited: () => void;
+  toggleStatusCollapse: (status: IssueStatus) => void;
   clearFilters: () => void;
 }
 
@@ -47,6 +49,7 @@ export const useIssuesViewStore = create<IssuesViewState>((set) => ({
   statusFilters: [],
   priorityFilters: [],
   sortByLastEdited: false,
+  collapsedStatuses: [],
   setScope: (scope) => set({ scope }),
   toggleStatusFilter: (status) =>
     set((state) => ({
@@ -62,5 +65,11 @@ export const useIssuesViewStore = create<IssuesViewState>((set) => ({
     })),
   toggleSortByLastEdited: () =>
     set((state) => ({ sortByLastEdited: !state.sortByLastEdited })),
+  toggleStatusCollapse: (status) =>
+    set((state) => ({
+      collapsedStatuses: state.collapsedStatuses.includes(status)
+        ? state.collapsedStatuses.filter((s) => s !== status)
+        : [...state.collapsedStatuses, status],
+    })),
   clearFilters: () => set({ statusFilters: [], priorityFilters: [] }),
 }));

@@ -26,19 +26,29 @@ function key(
   };
 }
 
-describe("handleAppShortcut — reload pass-through", () => {
-  it("passes Cmd+R through to Electron on macOS", () => {
+describe("handleAppShortcut — reload", () => {
+  it('returns "reload" on Cmd+R (macOS)', () => {
     const wc = makeWc();
-    expect(handleAppShortcut(key("r", { meta: true }), wc, "darwin")).toBe(false);
+    expect(handleAppShortcut(key("r", { meta: true }), wc, "darwin")).toBe("reload");
   });
 
-  it("passes Ctrl+R through on Linux/Windows", () => {
+  it('returns "reload" on Ctrl+R (Linux/Windows)', () => {
     const wc = makeWc();
-    expect(handleAppShortcut(key("r", { control: true }), wc, "linux")).toBe(false);
-    expect(handleAppShortcut(key("R", { control: true }), wc, "win32")).toBe(false);
+    expect(handleAppShortcut(key("r", { control: true }), wc, "linux")).toBe("reload");
+    expect(handleAppShortcut(key("R", { control: true }), wc, "win32")).toBe("reload");
   });
 
-  it("passes F5 through", () => {
+  it('returns "force-reload" on Cmd+Shift+R (macOS)', () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("r", { meta: true, shift: true }), wc, "darwin")).toBe("force-reload");
+  });
+
+  it('returns "force-reload" on Ctrl+Shift+R (Linux/Windows)', () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("r", { control: true, shift: true }), wc, "linux")).toBe("force-reload");
+  });
+
+  it("passes F5 through (no modifier)", () => {
     const wc = makeWc();
     expect(handleAppShortcut(key("F5"), wc, "darwin")).toBe(false);
   });

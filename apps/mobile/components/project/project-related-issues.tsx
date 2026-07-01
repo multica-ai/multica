@@ -49,7 +49,7 @@ export function ProjectRelatedIssues({ projectId }: Props) {
     projectIssuesOptions(wsId, projectId),
   );
   const toggle = useProjectCollapseStore((s) => s.toggle);
-  const isCollapsed = useProjectCollapseStore((s) => s.isCollapsed);
+  const collapsedByProject = useProjectCollapseStore((s) => s.collapsedByProject);
 
   const byStatus = useMemo(() => {
     const m = new Map<IssueStatus, Issue[]>();
@@ -94,7 +94,7 @@ export function ProjectRelatedIssues({ projectId }: Props) {
       {BOARD_STATUSES.map((status) => {
         const issues = byStatus.get(status) ?? [];
         if (issues.length === 0) return null;
-        const collapsed = isCollapsed(projectId, status);
+        const collapsed = (collapsedByProject[projectId] ?? []).includes(status);
         return (
           <View key={status}>
             <SectionHeader

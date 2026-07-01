@@ -35,7 +35,7 @@ import { filterIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 
-type IssueSection = { status: IssueStatus; data: Issue[] };
+type IssueSection = { status: IssueStatus; data: Issue[]; count: number };
 
 const SCOPES: { value: IssuesScope; label: string }[] = [
   { value: "all", label: "All" },
@@ -52,6 +52,8 @@ export default function IssuesTab() {
   const statusFilters = useIssuesViewStore((s) => s.statusFilters);
   const priorityFilters = useIssuesViewStore((s) => s.priorityFilters);
   const sortByLastEdited = useIssuesViewStore((s) => s.sortByLastEdited);
+  const collapsedStatuses = useIssuesViewStore((s) => s.collapsedStatuses);
+  const toggleStatusCollapse = useIssuesViewStore((s) => s.toggleStatusCollapse);
 
   const openFilter = () => {
     if (!wsSlug) return;
@@ -103,9 +105,21 @@ export default function IssuesTab() {
         ? BOARD_STATUSES.filter((s) => statusFilters.includes(s))
         : BOARD_STATUSES;
     return visibleStatuses
-      .map((status) => ({ status, data: byStatus.get(status) ?? [] }))
-      .filter((s) => s.data.length > 0);
+      .map((status) => {
+        const data = byStatus.get(status) ?? [];
+        return { status, data, count: data.length };
+      })
+      .filter((s) => s.count > 0);
   }, [filtered, statusFilters]);
+
+  const displaySections = useMemo(
+    () =>
+      sections.map((s) => ({
+        ...s,
+        data: collapsedStatuses.includes(s.status) ? ([] as Issue[]) : s.data,
+      })),
+    [sections, collapsedStatuses],
+  );
 
   const hasActiveFilters =
     statusFilters.length > 0 || priorityFilters.length > 0 || sortByLastEdited;
@@ -156,14 +170,19 @@ export default function IssuesTab() {
         />
       ) : (
         <SectionList
-          sections={sections}
+          sections={displaySections}
           keyExtractor={(item) => item.id}
           stickySectionHeadersEnabled={false}
           ItemSeparatorComponent={() => (
             <View className="h-px bg-border ml-4" />
           )}
           renderSectionHeader={({ section }) => (
-            <SectionHeader status={section.status} count={section.data.length} />
+            <SectionHeader
+              status={section.status}
+              count={section.count}
+              collapsed={collapsedStatuses.includes(section.status)}
+              onToggle={() => toggleStatusCollapse(section.status)}
+            />
           )}
           contentContainerClassName="pb-6"
           renderItem={({ item }) => (
@@ -311,18 +330,34 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
 function SectionHeader({
   status,
   count,
+  collapsed,
+  onToggle,
 }: {
   status: IssueStatus;
   count: number;
+  collapsed: boolean;
+  onToggle: () => void;
 }) {
+  const { colorScheme } = useColorScheme();
+  const t = THEME[colorScheme];
   return (
-    <View className="flex-row items-center gap-2 px-4 py-2 bg-background">
+    <Pressable
+      onPress={onToggle}
+      className="flex-row items-center gap-2 px-4 py-2 bg-background active:bg-secondary"
+      accessibilityRole="button"
+      accessibilityLabel={`${STATUS_LABEL[status]}, ${count} issues, ${collapsed ? "collapsed" : "expanded"}`}
+    >
       <StatusIcon status={status} size={14} />
-      <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
+      <Text className="flex-1 text-xs uppercase tracking-wider text-muted-foreground font-medium">
         {STATUS_LABEL[status]}
       </Text>
-      <Text className="text-xs text-muted-foreground/60">{count}</Text>
-    </View>
+      <Text className="text-xs text-muted-foreground/60 mr-1">{count}</Text>
+      <Ionicons
+        name={collapsed ? "chevron-forward" : "chevron-down"}
+        size={12}
+        color={t.mutedForeground}
+      />
+    </Pressable>
   );
 }
 

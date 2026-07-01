@@ -9,7 +9,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
  *
  *   no user            → /login
  *   user, no slug      → /select-workspace
- *   user, slug         → /[slug]/inbox
+ *   user, slug         → /[slug]/projects
  */
 export default function Index() {
   const user = useAuthStore((s) => s.user);
@@ -26,5 +26,5 @@ export default function Index() {
 
   if (!user) return <Redirect href="/login" />;
   if (!slug) return <Redirect href="/select-workspace" />;
-  return <Redirect href={`/${slug}/inbox`} />;
+  return <Redirect href={`/${slug}/projects`} />;
 }

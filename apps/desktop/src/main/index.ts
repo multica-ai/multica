@@ -162,6 +162,9 @@ function createWindow(): void {
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 17 },
     show: false,
+    // Dark background prevents the white flash between reload and first paint.
+    // Matches --background in dark mode: oklch(0.18 0.005 285.823) ≈ #111114.
+    backgroundColor: "#111114",
     autoHideMenuBar: true,
     // Windows/Linux pick up the window/taskbar icon from this option.
     // On macOS it's ignored (dock comes from app.dock.setIcon below).
@@ -254,6 +257,12 @@ function createWindow(): void {
     } else if (result === "open-settings") {
       event.preventDefault();
       window.webContents.send("navigate:settings");
+    } else if (result === "reload") {
+      event.preventDefault();
+      window.webContents.reload();
+    } else if (result === "force-reload") {
+      event.preventDefault();
+      window.webContents.reloadIgnoringCache();
     } else if (result) {
       event.preventDefault();
     }
