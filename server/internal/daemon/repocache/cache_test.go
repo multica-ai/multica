@@ -1,6 +1,8 @@
 package repocache
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -102,6 +104,16 @@ func TestGitEnvPreservesExistingConfig(t *testing.T) {
 	}
 	if !envHas("GIT_CONFIG_KEY_1=http.extraHeader") {
 		t.Error("existing GIT_CONFIG_KEY_1 was lost")
+	}
+}
+
+func TestRunGitOutputTimesOut(t *testing.T) {
+	_, err := runGitOutputWithTimeout(0, "--version")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("runGitOutputWithTimeout error = %v, want deadline exceeded", err)
+	}
+	if !strings.Contains(err.Error(), "timed out after 0s") {
+		t.Fatalf("runGitOutputWithTimeout error = %v, want timeout context", err)
 	}
 }
 
