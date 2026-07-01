@@ -353,8 +353,15 @@ func TestKiroIssueCommentAddCommand(t *testing.T) {
 		{"multica issue comment add issue-1 --content-file ./reply.md", true},
 		{"./multica issue comment add issue-1 --content-file ./reply.md", true},
 		{"/usr/local/bin/multica issue comment add issue-1 --content-file ./reply.md", true},
+		{"MULTICA_TOKEN=x multica issue comment add issue-1 --content-file ./reply.md", true},
+		{"FOO=1 BAR=2 ./multica issue comment add issue-1", true},
+		{`sh -c "multica issue comment add issue-1 --content-file ./reply.md"`, true},
+		{`bash -c 'multica issue comment add issue-1'`, true},
+		{`/bin/sh -c "multica issue comment add issue-1"`, true},
 		{"multica issue get issue-1", false},
 		{"echo multica issue comment add issue-1", false},
+		{`sh -c "echo multica issue comment add issue-1"`, false},
+		{"FOO=bar", false},
 		{"", false},
 	}
 	for _, tt := range tests {
