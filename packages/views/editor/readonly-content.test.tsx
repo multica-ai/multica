@@ -535,6 +535,31 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
     expect(container.querySelector("iframe")).toBeNull();
     expect(container.querySelector("img")).toBeNull();
   });
+
+  it("resolves a markdown image whose src is the response download_url", () => {
+    const href = "https://cdn.example.test/shot.png?Signature=stale";
+    const fresh = "https://cdn.example.test/shot.png?Signature=fresh";
+    const attachment = {
+      id: "11111111-2222-3333-4444-555555555555",
+      url: "https://cdn.example.test/shot.png",
+      download_url: fresh,
+      markdown_url: "/api/attachments/11111111-2222-3333-4444-555555555555/download",
+      filename: "shot.png",
+      content_type: "image/png",
+      size_bytes: 1024,
+    } as any;
+
+    const { container } = renderWithQuery(
+      <ReadonlyContent
+        content={`![](${href})`}
+        attachments={[attachment]}
+      />,
+    );
+
+    const img = container.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(fresh);
+    expect(img?.getAttribute("alt")).toBe("shot.png");
+  });
 });
 
 describe("ReadonlyContent slash command rendering", () => {
