@@ -333,10 +333,24 @@ export function SearchCommand() {
     results.projects.length > 0 ||
     filteredMembers.length > 0;
 
-  // Global Cmd+K / Ctrl+K shortcut
+  // Global Cmd+K / Ctrl+K shortcut (web + desktop)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        useSearchStore.getState().toggle();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Cmd+F / Ctrl+F on desktop — overrides Electron's native find-in-page
+  useEffect(() => {
+    const w = window as unknown as { desktopAPI?: unknown };
+    if (!w.desktopAPI) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "f" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         useSearchStore.getState().toggle();
       }
