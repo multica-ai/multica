@@ -62,6 +62,66 @@ func TestCerebroEffectiveToolsForBriefMapsAndFilters(t *testing.T) {
 	}
 }
 
+type fakeAPIConnBrief struct {
+	tools    []CerebroAPIConnectionBriefTool
+	gotIdent CerebroAPIConnectionBriefIdentity
+}
+
+func (f *fakeAPIConnBrief) APIConnectionToolsForBrief(_ context.Context, ident CerebroAPIConnectionBriefIdentity) []CerebroAPIConnectionBriefTool {
+	f.gotIdent = ident
+	return f.tools
+}
+
+// FIR-2388: api-type connection endpoint tools resolved by the shared resolver
+// are appended to the brief under "Connections", carrying their Allow/Ask
+// verdict, alongside the tool-policy chain's own tools.
+func TestCerebroEffectiveToolsForBriefIncludesAPIConnectionTools(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	brief := &fakeAPIConnBrief{tools: []CerebroAPIConnectionBriefTool{
+		{Name: "infisical_admin__get_api_v3_secrets_raw", Description: "Read a secret", Verdict: "allow"},
+		{Name: "infisical_admin__post_api_v3_secrets", Description: "Write a secret", Verdict: "ask"},
+	}}
+	h := &Handler{
+		runtimeToolAccess: fakeRuntimeToolAccess{rows: []RuntimeToolEffectiveAccessView{
+			exposedToolView("schedule_wakeup", "platform", "", "Schedule a wakeup", "allow", true),
+		}},
+		APIConnectionBrief: brief,
+	}
+
+	got := h.cerebroEffectiveToolsForBrief(context.Background(), db.AgentRuntime{}, &TaskAgentData{ID: agentID}, "agent", "")
+	byName := map[string]AgentTaskToolEntry{}
+	for _, e := range got {
+		byName[e.Name] = e
+	}
+
+	e, ok := byName["infisical_admin__get_api_v3_secrets_raw"]
+	if !ok || e.Family != "Connections" || e.Verdict != "allow" {
+		t.Fatalf("expected api-connection tool under Connections with allow verdict, got %+v (ok=%v)", e, ok)
+	}
+	if e := byName["infisical_admin__post_api_v3_secrets"]; e.Verdict != "ask" {
+		t.Errorf("expected ask verdict carried through, got %q", e.Verdict)
+	}
+	if _, ok := byName["schedule_wakeup"]; !ok {
+		t.Errorf("tool-policy chain tools must remain alongside api-connection tools")
+	}
+}
+
+// When the tool-policy chain exposes nothing but the agent HAS api-connection
+// tools, the brief still lists them (not nil) — the whole point of FIR-2388.
+func TestCerebroEffectiveToolsForBriefAPIConnectionOnly(t *testing.T) {
+	brief := &fakeAPIConnBrief{tools: []CerebroAPIConnectionBriefTool{
+		{Name: "infisical_admin__get_api_v3_secrets_raw", Description: "Read a secret", Verdict: "allow"},
+	}}
+	h := &Handler{
+		runtimeToolAccess:  fakeRuntimeToolAccess{},
+		APIConnectionBrief: brief,
+	}
+	got := h.cerebroEffectiveToolsForBrief(context.Background(), db.AgentRuntime{}, &TaskAgentData{ID: "11111111-1111-1111-1111-111111111111"}, "agent", "")
+	if len(got) != 1 || got[0].Name != "infisical_admin__get_api_v3_secrets_raw" || got[0].Family != "Connections" {
+		t.Fatalf("expected the api-connection tool listed even with an empty chain, got %+v", got)
+	}
+}
+
 func TestCerebroEffectiveToolsForBriefNilService(t *testing.T) {
 	h := &Handler{}
 	if got := h.cerebroEffectiveToolsForBrief(context.Background(), db.AgentRuntime{}, &TaskAgentData{ID: "x"}, "agent", ""); got != nil {

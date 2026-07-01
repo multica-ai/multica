@@ -33,6 +33,18 @@ toolaccess.ListEffectiveTools  →  AgentTaskResponse.effective_tools  →  cere
    (name prefixed with the server), `source == "mcp"` → `MCP tools`, otherwise
    `Platform tools`.
 
+   **api-type connection endpoints are the one exception (FIR-2388).** They are
+   server-side-dispatched HTTP endpoints, not runtime-inventory tools, so
+   `ListEffectiveTools` does not see them. `cerebroEffectiveToolsForBrief` appends
+   them separately through the injected `CerebroAPIConnectionBriefResolver` — the
+   **same** `runtime.APIConnectionResolver.ListForAgent` the cloud gateway and the
+   local `multica mcp serve` handler use to build and gate these tools. So a listed
+   api-connection tool in the brief is, by construction, one the agent can actually
+   call. They render under `Connections` with the verbatim tool name (e.g.
+   `infisical_admin__get_api_v3_secrets_raw`) and their Allow/Ask verdict. The
+   resolver is injected (not imported) because it lives in the `runtime` package,
+   which imports `handler` — the reverse import would be a cycle.
+
 2. **Ship (claim payload).** The entries ride to the daemon in the claim
    response as `effective_tools`
    ([AgentTaskResponse](../../server/internal/handler/agent.go), mirrored by the
@@ -75,9 +87,10 @@ tool or connection is added). It will then:
 - rendered in the brief grouped under the right family.
 
 Only extend `cerebroEffectiveToolsForBrief` if you introduce a genuinely new
-**family grouping**, and only extend `cerebroToolsBrief` if you change how a
-family renders. Keep both deterministic (the brief must be byte-stable across
-identical inputs).
+**family grouping** or a tool family that does not flow through the runtime tool
+inventory (as api-type connection endpoints do — see the FIR-2388 note above), and
+only extend `cerebroToolsBrief` if you change how a family renders. Keep both
+deterministic (the brief must be byte-stable across identical inputs).
 
 ## Tests
 

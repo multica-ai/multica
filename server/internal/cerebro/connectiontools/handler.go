@@ -31,26 +31,13 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/multica-ai/multica/server/internal/cerebro/connections"
-	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
-
-// flagAPIConnectionTools mirrors runtime.flagAPIConnectionTools — the workspace
-// feature flag that exposes api-type connection endpoints as agent tools.
-// Default OFF: a missing override resolves to false, so no workspace is affected
-// until an admin turns it on.
-const flagAPIConnectionTools = "cerebro_api_connection_tools"
-
-// dispatchTimeout caps a single server-side endpoint dispatch.
-const dispatchTimeout = 45 * time.Second
 
 // AgentResolver resolves an agent's workspace + runtime + owner from its id.
 // Satisfied by the QueriesAgentResolver adapter over *db.Queries.GetAgent; kept
@@ -60,29 +47,23 @@ type AgentResolver interface {
 }
 
 // Handler exposes api-type connection endpoints to the Multica MCP server.
+//
+// FIR-2388: the "which endpoints does this agent get" decision is delegated to
+// the SHARED runtime.APIConnectionResolver — the same one the cloud gateway and
+// the claim brief use — so the local and cloud surfaces can never drift. This
+// handler owns only the agent-identity gate (requireAgent) and the local
+// dispatch contract; the resolver owns the flag check, endpoint discovery, and
+// the per-endpoint policy verdict.
 type Handler struct {
-	pool   *pgxpool.Pool
-	conns  *connections.Store
-	policy *toolpolicy.Store
-	flags  *cerebrodb.Queries
-	agents AgentResolver
-	client *http.Client
+	agents   AgentResolver
+	resolver *runtime.APIConnectionResolver
 }
 
-// NewHandler wires the handler from the shared pool, the cerebro queries (for the
-// feature flag), and an agent resolver. The connection store and tool-policy
-// store are both built over the pool — ConnectionEndpointEffective needs the pool
-// (it reads the per-connection default and the policy table), so this uses
-// toolpolicy.NewStore, NOT NewStoreFromQueries.
-func NewHandler(pool *pgxpool.Pool, cerebroQueries *cerebrodb.Queries, agents AgentResolver) *Handler {
-	return &Handler{
-		pool:   pool,
-		conns:  connections.New(pool),
-		policy: toolpolicy.NewStore(pool),
-		flags:  cerebroQueries,
-		agents: agents,
-		client: &http.Client{Timeout: dispatchTimeout},
-	}
+// NewHandler wires the handler from an agent resolver and the shared
+// api-connection resolver. A nil resolver makes the endpoints return an empty
+// tool list (feature off), never an error.
+func NewHandler(agents AgentResolver, resolver *runtime.APIConnectionResolver) *Handler {
+	return &Handler{agents: agents, resolver: resolver}
 }
 
 // --- request/response types -------------------------------------------------
@@ -122,14 +103,26 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	allowed := h.allowedTools(r, ident)
 	descs := make([]toolDescriptor, 0, len(allowed))
-	for _, t := range allowed {
+	for _, v := range allowed {
 		descs = append(descs, toolDescriptor{
-			Name:        t.Name(),
-			Description: t.Description(),
-			InputSchema: t.InputSchema(),
+			Name:        v.Tool.Name(),
+			Description: endpointDescription(v),
+			InputSchema: v.Tool.InputSchema(),
 		})
 	}
 	writeJSON(w, http.StatusOK, listResponse{Tools: descs})
+}
+
+// endpointDescription is the model-facing one-liner for a listed endpoint. An Ask
+// endpoint is surfaced (not hidden) with a clear note that it needs approval and
+// cannot be auto-dispatched on a local runtime — matching the FIR-2388 rule that
+// only Deny is hidden.
+func endpointDescription(v runtime.APIConnectionToolVerdict) string {
+	desc := v.Tool.Description()
+	if v.Verdict != toolpolicy.SettingAllow {
+		desc += " Requires human approval — not available on a local runtime; run it on the cloud runtime."
+	}
+	return desc
 }
 
 // Call — POST /api/cerebro/connection-tools/call
@@ -156,13 +149,20 @@ func (h *Handler) Call(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Re-resolve the allowed set; the gate is the only source of truth for which
-	// tool may run. allowedTools already filters to SettingAllow, so a tool found
-	// in this set is, by construction, an allowed endpoint for this agent.
-	for _, t := range h.allowedTools(r, ident) {
-		if t.Name() != req.Tool {
+	// tool may run. The set contains Allow AND Ask endpoints (Deny/unresolved are
+	// dropped by the resolver), so a match must still be verdict-checked here.
+	for _, v := range h.allowedTools(r, ident) {
+		if v.Tool.Name() != req.Tool {
 			continue
 		}
-		result, err := t.Call(r.Context(), req.Arguments)
+		if v.Verdict != toolpolicy.SettingAllow {
+			// Ask cannot be auto-approved on this path — there is no approval inbox
+			// on the local MCP surface, and this fronts the secrets box. Fail closed
+			// with a clear reason rather than dispatch an unapproved call.
+			writeError(w, http.StatusForbidden, "tool requires human approval and cannot be dispatched on a local runtime")
+			return
+		}
+		result, err := v.Tool.Call(r.Context(), req.Arguments)
 		if err != nil {
 			// The endpoint call itself failed (upstream HTTP error, bad params,
 			// timeout). Surface as a 502 with the redacted message Call already
@@ -239,66 +239,23 @@ func (h *Handler) requireAgent(w http.ResponseWriter, r *http.Request) (agentIde
 	}, true
 }
 
-// allowedTools builds every api-type connection endpoint tool for the workspace
-// and keeps only those the calling agent is granted (SettingAllow). When the
-// feature flag is off, or there are no enabled connections, it returns an empty
-// slice. Any discovery error is logged and swallowed — the list endpoint must
-// fail OPEN to an empty list, never break the caller's MCP tool loop.
-func (h *Handler) allowedTools(r *http.Request, ident agentIdentity) []*runtime.APIConnectionTool {
-	if !h.flagEnabled(r, ident.workspaceID) {
+// allowedTools resolves the api-type connection endpoint tools the calling agent
+// may use, each with its Allow/Ask verdict, through the SHARED resolver. When the
+// resolver is not wired, the flag is off, or there are no granted endpoints, it
+// returns nil (the list endpoint must fail OPEN to an empty list, never break the
+// caller's MCP tool loop). Deny and unresolved endpoints are already dropped by
+// the resolver (fail closed); the caller verdict-checks Allow vs Ask before
+// dispatch.
+func (h *Handler) allowedTools(r *http.Request, ident agentIdentity) []runtime.APIConnectionToolVerdict {
+	if h.resolver == nil {
 		return nil
 	}
-	conns, err := h.conns.ListEnabled(r.Context(), ident.workspaceID)
-	if err != nil {
-		slog.Warn("connection-tools: list enabled connections failed",
-			"workspace_id", util.UUIDToString(ident.workspaceID), "error", err)
-		return nil
-	}
-	built := runtime.BuildAPIConnectionTools(conns, h.client)
-
-	var out []*runtime.APIConnectionTool
-	for _, t := range built {
-		api, ok := t.(*runtime.APIConnectionTool)
-		if !ok {
-			continue
-		}
-		setting, _, err := h.policy.ConnectionEndpointEffective(
-			r.Context(),
-			ident.workspaceID, ident.runtimeID, ident.agentID, ident.ownerID,
-			api.ConnectionName(), api.Method(), api.Path(),
-		)
-		if err != nil {
-			// Fail closed on this endpoint — a resolve error must not expose a
-			// gate that fronts the secrets box.
-			slog.Warn("connection-tools: endpoint gate resolve failed — skipping",
-				"workspace_id", util.UUIDToString(ident.workspaceID),
-				"agent_id", util.UUIDToString(ident.agentID),
-				"connection", api.ConnectionName(), "method", api.Method(), "path", api.Path(),
-				"error", err)
-			continue
-		}
-		if setting == toolpolicy.SettingAllow {
-			out = append(out, api)
-		}
-	}
-	return out
-}
-
-// flagEnabled reports whether cerebro_api_connection_tools is on for the
-// workspace. Default OFF: a missing override or a DB error resolves to false.
-func (h *Handler) flagEnabled(r *http.Request, workspaceID pgtype.UUID) bool {
-	if h.flags == nil {
-		return false
-	}
-	enabled, err := h.flags.GetCerebroFeatureFlag(r.Context(), cerebrodb.GetCerebroFeatureFlagParams{
-		WorkspaceID: workspaceID,
-		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
-		FlagKey:     flagAPIConnectionTools,
+	return h.resolver.ListForAgent(r.Context(), runtime.APIConnectionIdentity{
+		WorkspaceID: ident.workspaceID,
+		RuntimeID:   ident.runtimeID,
+		AgentID:     ident.agentID,
+		OwnerID:     ident.ownerID,
 	})
-	if err != nil {
-		return false
-	}
-	return enabled
 }
 
 // --- helpers ----------------------------------------------------------------

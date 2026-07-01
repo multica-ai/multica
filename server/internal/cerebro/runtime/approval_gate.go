@@ -224,7 +224,8 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// failClosed=true: this is the authoritative call-time guard in front of the
 	// secrets box, so an unresolved endpoint verdict denies the call rather than
 	// allowing it (FIR-2166 C review fix).
-	if epSetting, epConn := e.apiEndpointSetting(ctx, agentID, workspaceID, reg, toolName, true, meta); epSetting != toolpolicy.SettingAllow {
+	epSetting, epConn := e.apiEndpointSetting(ctx, agentID, workspaceID, reg, toolName, true, meta)
+	if epSetting != toolpolicy.SettingAllow {
 		if connName == "" {
 			connName = epConn
 		}
@@ -234,6 +235,21 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 		e.logger.Info("connection tool blocked by per-tool Deny (TECH-3174)",
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool", toolName)
 		return false, fmt.Sprintf("tool %q is denied for this agent by a connection permission", toolName)
+	}
+	// FIR-2388: an API-connection ENDPOINT set to Ask fronts the secrets box and is
+	// dispatched server-side on this runtime, so it MUST reach the approval inbox
+	// before it runs — it must never be silently downgraded to Allow by an inactive
+	// approval gate. Unlike an ordinary Ask (a UX pause) or an MCP-connection Ask
+	// (relayed, TECH-3498 "no-op when the gate is off"), letting this through
+	// unapproved would dispatch a credentialed secrets call the agent should have
+	// had to get approved. So if the inbox will not run for this call (gate off,
+	// workspace approval flag off, or agent outside the gate's rollout scope), fail
+	// CLOSED — mirroring the local MCP path, which 403s an Ask endpoint. When the
+	// inbox IS active the Ask flows to guardConnectionAsk below via connSetting.
+	if epSetting == toolpolicy.SettingAsk && !e.approvalInboxActive(ctx, agentID, workspaceID) {
+		e.logger.Info("api endpoint Ask blocked — approval inbox inactive (FIR-2388)",
+			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool", toolName, "connection", connName)
+		return false, fmt.Sprintf("tool %q requires human approval, which is not available for this run", toolName)
 	}
 	if e.gate == nil {
 		return true, ""
@@ -493,6 +509,25 @@ func (e *FirtalGatewayExecutor) workspaceApprovalGateEnabled(ctx context.Context
 		return true // no override or DB error → default ON
 	}
 	return enabled
+}
+
+// approvalInboxActive reports whether an Ask verdict on this call will actually
+// reach the approval inbox (and block for a human) rather than be short-circuited
+// to Allow. It mirrors exactly the gate/allowlist/workspace-flag preconditions
+// guardToolCall applies before routing any Ask (e.gate != nil, agent inside the
+// gate's rollout scope, workspace approval flag on). FIR-2388 uses it to fail
+// CLOSED on an API-connection endpoint Ask when the inbox is inactive: those
+// front the secrets box and must never run unapproved.
+func (e *FirtalGatewayExecutor) approvalInboxActive(ctx context.Context, agentID, workspaceID pgtype.UUID) bool {
+	if e == nil || e.gate == nil {
+		return false
+	}
+	if len(e.gateAgents) > 0 {
+		if _, ok := e.gateAgents[agentID.Bytes]; !ok || !agentID.Valid {
+			return false
+		}
+	}
+	return e.workspaceApprovalGateEnabled(ctx, workspaceID)
 }
 
 // memberOverrideEnabled reports whether the default-OFF cerebro_member_override

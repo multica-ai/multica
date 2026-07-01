@@ -36,6 +36,36 @@ type AgentTaskToolEntry struct {
 	Verdict     string `json:"verdict,omitempty"`
 }
 
+// CerebroAPIConnectionBriefResolver (FIR-2388) resolves the api-type connection
+// endpoint tools an agent is granted, for the claim-time brief. It is the SAME
+// resolver the cloud gateway and the local MCP handler use, so a tool listed in
+// the brief is a tool the agent can actually call. It is an injected interface —
+// not a direct call — because the concrete resolver lives in the cerebro/runtime
+// package, which imports this handler package; the handler importing runtime back
+// would be a cycle. The router wires *cerebro/runtime.APIConnectionResolver here.
+type CerebroAPIConnectionBriefResolver interface {
+	APIConnectionToolsForBrief(ctx context.Context, ident CerebroAPIConnectionBriefIdentity) []CerebroAPIConnectionBriefTool
+}
+
+// CerebroAPIConnectionBriefIdentity is the actor the endpoints are gated for. It
+// mirrors runtime.APIConnectionIdentity but is declared here so the interface has
+// no runtime-package types in its signature (keeping the cycle broken).
+type CerebroAPIConnectionBriefIdentity struct {
+	WorkspaceID pgtype.UUID
+	RuntimeID   pgtype.UUID
+	AgentID     pgtype.UUID
+	OwnerID     pgtype.UUID
+}
+
+// CerebroAPIConnectionBriefTool is one resolved endpoint tool for the brief.
+// Name is the exact tool name the agent calls verbatim; Verdict is "allow" or
+// "ask".
+type CerebroAPIConnectionBriefTool struct {
+	Name        string
+	Description string
+	Verdict     string
+}
+
 // cerebroEffectiveToolsForBrief resolves the agent's exposed non-CLI tools for
 // the brief. Returns nil (no section) when the tool-access service is not wired,
 // the agent is unknown, or nothing is exposed — all expected, non-error cases.
@@ -107,6 +137,55 @@ func (h *Handler) cerebroEffectiveToolsForBrief(ctx context.Context, runtime db.
 			Verdict:     strings.TrimSpace(v.Policy.Effective),
 		})
 	}
+
+	// FIR-2388: append the api-type connection endpoint tools this agent is
+	// granted. The tool-policy chain above (ListEffectiveTools) covers MCP and
+	// platform tools but NOT api-connection endpoints — those are a separate,
+	// server-side-dispatched family gated by ConnectionEndpointEffective. Resolve
+	// them through the SAME shared resolver the cloud gateway and local MCP handler
+	// use, so "listed in the brief" == "callable" for every runtime. The endpoint
+	// gate keys on the agent's OWNER as the user layer (matching the cloud call-
+	// time guard, apiEndpointSetting), so the brief cannot show a tool the call
+	// path would then refuse.
+	if h.APIConnectionBrief != nil {
+		var ownerID pgtype.UUID
+		if strings.TrimSpace(agent.OwnerID) != "" {
+			if u, err := util.ParseUUID(agent.OwnerID); err == nil {
+				ownerID = u
+			}
+		}
+		seen := make(map[string]struct{}, len(out))
+		for _, e := range out {
+			seen[e.Name] = struct{}{}
+		}
+		apiTools := h.APIConnectionBrief.APIConnectionToolsForBrief(ctx, CerebroAPIConnectionBriefIdentity{
+			WorkspaceID: runtime.WorkspaceID,
+			RuntimeID:   runtime.ID,
+			AgentID:     agentID,
+			OwnerID:     ownerID,
+		})
+		for _, t := range apiTools {
+			name := strings.TrimSpace(t.Name)
+			if name == "" {
+				continue
+			}
+			if _, dup := seen[name]; dup {
+				continue
+			}
+			seen[name] = struct{}{}
+			verdict := strings.TrimSpace(t.Verdict)
+			if verdict == "" {
+				verdict = "allow"
+			}
+			out = append(out, AgentTaskToolEntry{
+				Family:      "Connections",
+				Name:        name,
+				Description: strings.TrimSpace(t.Description),
+				Verdict:     verdict,
+			})
+		}
+	}
+
 	if len(out) == 0 {
 		return nil
 	}

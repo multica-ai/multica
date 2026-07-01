@@ -30,50 +30,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
-	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
-	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// apiConnectionToolsEnabled reports whether the cerebro_api_connection_tools
-// workspace flag is on. Default OFF: a nil cerebro handle, a missing override, or
-// a DB error all resolve to false, so this never switches itself on by accident
-// (it mirrors policyCELEvaluator's fail-to-default-OFF, not the always-on gates).
-func (e *FirtalGatewayExecutor) apiConnectionToolsEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
-	if e == nil || e.cerebro == nil {
-		return false
-	}
-	enabled, err := e.cerebro.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
-		WorkspaceID: workspaceID,
-		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
-		FlagKey:     flagAPIConnectionTools,
-	})
-	if err != nil {
-		return false
-	}
-	return enabled
-}
-
-// apiConnectionTools discovers the workspace's enabled API connections and
-// returns one tool per allowed endpoint, or nil when the feature is off, no store
-// is wired, or there are none. A discovery error is logged and swallowed — the
-// feature is additive and flag-gated, so a transient blip must never break the
-// tool loop for the rest of the agent's tools.
-func (e *FirtalGatewayExecutor) apiConnectionTools(ctx context.Context, workspaceID pgtype.UUID) []Tool {
-	if e == nil || e.apiConnStore == nil || !workspaceID.Valid {
+// apiConnectionResolver builds the shared APIConnectionResolver from the
+// executor's own pool-backed stores (FIR-2388). The cloud gateway, the local MCP
+// handler, and the claim brief all resolve through NewAPIConnectionResolver, so
+// the LIST decision is identical on every surface — there is no per-consumer
+// filter left to drift. A nil apiConnStore or connDeny (feature not wired) makes
+// ListForAgent return nil, exactly as the old apiConnectionTools guard did.
+func (e *FirtalGatewayExecutor) apiConnectionResolver() *APIConnectionResolver {
+	if e == nil {
 		return nil
 	}
-	if !e.apiConnectionToolsEnabled(ctx, workspaceID) {
-		return nil
-	}
-	conns, err := e.apiConnStore.ListEnabled(ctx, workspaceID)
-	if err != nil {
-		e.logger.Warn("firtal gateway: list enabled API connections failed",
-			"workspace_id", util.UUIDToString(workspaceID), "error", err)
-		return nil
-	}
-	return buildAPIConnectionTools(conns, &http.Client{Timeout: apiConnectionToolTimeout})
+	return NewAPIConnectionResolver(e.apiConnStore, e.connDeny, e.cerebro, e.logger)
 }
 
 // flagAPIConnectionTools is the workspace feature flag that exposes API-connection

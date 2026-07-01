@@ -255,6 +255,8 @@ type Handler struct {
 	CapabilityToolPolicy AgentCapabilityToolTabler
 	// CEREBRO-PATCH(handler-capability-card-conns): TECH-3642 capabilities card reuses the connections list.
 	CapabilityConnections AgentCapabilityConnectionsLister
+	// CEREBRO-PATCH(handler-api-connection-brief): FIR-2388 shared api-connection resolver for the claim brief.
+	APIConnectionBrief CerebroAPIConnectionBriefResolver
 }
 
 // CustomStatusResolver is the upstream-side seam for the cerebro status-model

@@ -1635,6 +1635,10 @@
       "gate": "via:POST /api/issues/{id}/comments"
     },
     {
+      "id": "multica_connection_tools_status",
+      "exempt": "read-only diagnostic — reports whether api-connection tools loaded and how many; no API mutation, no secrets in output (FIR-2388)"
+    },
+    {
       "id": "list_note_comments",
       "exempt": "read-only — wraps GET /api/notes/{id}/comments"
     },

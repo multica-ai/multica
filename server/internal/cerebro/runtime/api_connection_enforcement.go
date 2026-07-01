@@ -9,10 +9,12 @@ package runtime
 // Two halves, mirroring the MCP-connection enforcement (TECH-3174 Deny /
 // TECH-3498 Ask):
 //
-//   - LIST TIME (filterDeniedAPIEndpoints): a Deny endpoint is dropped from the
-//     agent's tool list, so a model never even sees a tool it isn't allowed to
-//     call. Ask/Allow endpoints stay listed — Ask only pauses at call time, like
-//     every other Ask.
+//   - LIST TIME: a Deny endpoint is dropped from the agent's tool list, so a
+//     model never even sees a tool it isn't allowed to call. Ask/Allow endpoints
+//     stay listed — Ask only pauses at call time, like every other Ask. As of
+//     FIR-2388 the list decision lives in the SHARED APIConnectionResolver
+//     (api_connection_resolver.go), which every surface calls, so this file no
+//     longer carries its own list-time filter — only the CALL-time guard below.
 //   - CALL TIME (apiEndpointSetting, folded into guardToolCall): the verdict is
 //     re-resolved when the tool is actually called, so a Deny blocks and an Ask
 //     routes through the approval inbox even if the list-time filter was bypassed
@@ -97,38 +99,4 @@ func (e *FirtalGatewayExecutor) apiEndpointSetting(
 		return onErr, connName
 	}
 	return eff, connName
-}
-
-// filterDeniedAPIEndpoints drops every API-connection tool whose effective
-// endpoint verdict is Deny for this agent, so a denied endpoint is never listed.
-// Ask and Allow endpoints are kept (Ask pauses at call time). Non-API tools pass
-// through untouched. A resolve error keeps the tool listed (fail-open at list
-// time) — the always-on call-time guard re-checks and is the real enforcement
-// point, so a transient list-time error cannot leak access past the gate.
-func (e *FirtalGatewayExecutor) filterDeniedAPIEndpoints(
-	ctx context.Context,
-	agentID, workspaceID pgtype.UUID,
-	reg *Registry,
-	tools []Tool,
-	meta GatewayRequestMeta,
-) []Tool {
-	if len(tools) == 0 {
-		return tools
-	}
-	out := tools[:0:0]
-	for _, t := range tools {
-		api, ok := t.(*APIConnectionTool)
-		if !ok {
-			out = append(out, t)
-			continue
-		}
-		setting, _ := e.apiEndpointSetting(ctx, agentID, workspaceID, reg, api.Name(), false, meta)
-		if setting == toolpolicy.SettingDeny {
-			e.logger.Info("api endpoint hidden from tool list by Deny (FIR-2166 C PR3)",
-				"agent_id", meta.AgentID, "tool", api.Name(), "connection", api.ConnectionName())
-			continue
-		}
-		out = append(out, t)
-	}
-	return out
 }

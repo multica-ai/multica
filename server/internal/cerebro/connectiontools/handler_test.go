@@ -185,9 +185,9 @@ func TestRequireAgent_RejectsWorkspaceMismatch(t *testing.T) {
 	}
 }
 
-// A well-formed agent token whose workspace matches passes the gate; with the
-// feature flag off (nil flags store -> flagEnabled=false) it must return an
-// empty tool list and 200, never break the caller's MCP loop.
+// A well-formed agent token whose workspace matches passes the gate; with no
+// resolver wired (feature off) it must return an empty tool list and 200, never
+// break the caller's MCP loop.
 func TestList_AllowedAgent_FlagOff_ReturnsEmpty(t *testing.T) {
 	res := &fakeResolver{
 		wsID:    mustUUID(t, testWsID),
@@ -268,10 +268,12 @@ func TestCall_BadBody_BadRequest(t *testing.T) {
 	}
 }
 
-func TestFlagEnabled_NilFlagsIsFalse(t *testing.T) {
-	h := &Handler{} // flags nil
+// A Handler with no resolver wired (feature off) resolves to an empty allowed set
+// rather than panicking — the default-OFF, fail-open-to-empty contract.
+func TestAllowedTools_NilResolverIsEmpty(t *testing.T) {
+	h := &Handler{} // resolver nil
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	if h.flagEnabled(r, mustUUID(t, testWsID)) {
-		t.Fatalf("flagEnabled must be false when the flags store is nil (default OFF)")
+	if got := h.allowedTools(r, agentIdentity{workspaceID: mustUUID(t, testWsID), agentID: mustUUID(t, testAgentID)}); len(got) != 0 {
+		t.Fatalf("allowedTools must be empty when the resolver is nil (default OFF), got %d", len(got))
 	}
 }

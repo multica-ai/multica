@@ -113,6 +113,34 @@ func TestDecodeToolArgs(t *testing.T) {
 
 // --- guardToolCall ----------------------------------------------------------
 
+// FIR-2388: approvalInboxActive decides whether an Ask reaches the approval inbox
+// (and can therefore block for a human) rather than being downgraded to Allow.
+// The API-connection endpoint Ask fail-closed hinges on it: inbox inactive → the
+// secrets-fronting Ask endpoint is blocked instead of dispatched unapproved.
+func TestApprovalInboxActive(t *testing.T) {
+	agent := gateTestUUID(1)
+	ws := gateTestUUID(9)
+
+	// gate nil → inbox cannot run.
+	e0 := &FirtalGatewayExecutor{logger: slog.Default()}
+	if e0.approvalInboxActive(context.Background(), agent, ws) {
+		t.Fatalf("nil gate must report inbox inactive")
+	}
+
+	// gate on, no allowlist (all agents in scope), cerebro nil → workspace approval
+	// flag defaults ON → inbox active.
+	e1 := newGatedExecutor(&gateFakeResolver{}, &gateFakeApprovals{})
+	if !e1.approvalInboxActive(context.Background(), agent, ws) {
+		t.Fatalf("gate on + agent in scope + flag default-on must report inbox active")
+	}
+
+	// gate scoped to a DIFFERENT agent → inbox inactive for ours.
+	e2 := newGatedExecutor(&gateFakeResolver{}, &gateFakeApprovals{}, gateTestUUID(7))
+	if e2.approvalInboxActive(context.Background(), agent, ws) {
+		t.Fatalf("agent outside the gate's rollout scope must report inbox inactive")
+	}
+}
+
 func TestGuardToolCall_NilGate_AllowsWithoutLookup(t *testing.T) {
 	e := &FirtalGatewayExecutor{logger: slog.Default()} // gate == nil
 	allowed, reason := e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), "web_fetch", nil, nil, GatewayRequestMeta{})

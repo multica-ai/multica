@@ -9,8 +9,9 @@ import (
 )
 
 // With no connection store wired (connDeny == nil), apiEndpointSetting fails open
-// to Allow and filterDeniedAPIEndpoints keeps every tool — the behaviour-safe
-// default when the resolver is unavailable.
+// to Allow at call time — the behaviour-safe default when the resolver is
+// unavailable (the always-on call-time guard re-checks; the list-time filter now
+// lives in the shared APIConnectionResolver).
 func TestAPIEndpointSettingFailOpenNilStore(t *testing.T) {
 	e := &FirtalGatewayExecutor{logger: slog.Default()}
 	reg := &Registry{tools: map[string]Tool{}}
@@ -51,19 +52,3 @@ func TestAPIEndpointSettingNonAPITool(t *testing.T) {
 	}
 }
 
-// filterDeniedAPIEndpoints passes non-API tools through untouched and, with the
-// resolver failing open, keeps API tools too.
-func TestFilterDeniedAPIEndpointsPassthrough(t *testing.T) {
-	e := &FirtalGatewayExecutor{logger: slog.Default()}
-	reg := &Registry{tools: map[string]Tool{}}
-	api := &APIConnectionTool{toolName: "c__get_x", connName: "c", method: "GET", path: "/x", baseURL: "http://x"}
-	stub := stubTool{name: "web_fetch"}
-	reg.Register(api)
-	reg.Register(stub)
-
-	in := []Tool{api, stub}
-	out := e.filterDeniedAPIEndpoints(context.Background(), gateTestUUID(1), gateTestUUID(9), reg, in, GatewayRequestMeta{})
-	if len(out) != 2 {
-		t.Fatalf("expected both tools kept (fail-open), got %d", len(out))
-	}
-}

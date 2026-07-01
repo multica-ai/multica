@@ -460,6 +460,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "list_sessions", Description: "List the sessions (comment threads) on an issue.", Status: ToolStatusExcluded},
 	{Name: "list_wakeups", Description: "List pending and recent scheduled agent wakeups.", Status: ToolStatusImplemented},
 	{Name: "move_artifact", Description: "Move an artifact into another folder.", Status: ToolStatusExcluded},
+	{Name: "multica_connection_tools_status", Description: "Report whether this runtime's API-connection tools loaded and how many. Auto-registered per agent; not grant-seeded.", Status: ToolStatusExcluded},
 	{Name: "read_note", Description: "Read a note/document by ID — its title, full body, owner, visibility, and scope.", Status: ToolStatusExcluded},
 	{Name: "remove_group_agent", Description: "Remove an agent from a group allowlist.", Status: ToolStatusExcluded},
 	{Name: "remove_group_capability", Description: "Revoke a capability from a group.", Status: ToolStatusExcluded},
