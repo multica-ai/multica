@@ -31,7 +31,7 @@ import { useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
-import { BOARD_STATUSES } from "@multica/core/issues/config";
+import { BOARD_STATUSES, STATUS_ORDER } from "@multica/core/issues/config";
 import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
@@ -206,7 +206,7 @@ function ProjectIssuesContent({
 
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
-      return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
+      return STATUS_ORDER.filter((s) => statusFilters.includes(s));
     return BOARD_STATUSES;
   }, [statusFilters]);
 

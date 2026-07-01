@@ -9,6 +9,7 @@ import {
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
+  issueListOptions,
   issueKeys,
   projectGanttIssuesOptions,
 } from "./queries";
@@ -137,6 +138,34 @@ describe("projectGanttIssuesOptions", () => {
   it("uses the project-scoped Gantt cache key", () => {
     const options = projectGanttIssuesOptions(WS_ID, PROJECT_ID);
     expect(options.queryKey).toEqual(issueKeys.projectGantt(WS_ID, PROJECT_ID));
+  });
+});
+
+describe("issueListOptions", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("fetches the cancelled bucket so cancelled issues stay discoverable", async () => {
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockResolvedValue({ issues: [], total: 0 });
+    installFakeApi(listIssues);
+
+    await qc.fetchQuery(issueListOptions(WS_ID));
+
+    expect(listIssues).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "cancelled" }),
+    );
   });
 });
 
