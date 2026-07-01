@@ -665,10 +665,6 @@ func TestAntigravityBackendRecoversEmptyStdoutFromTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	go func() {
-		for range session.Messages {
-		}
-	}()
 
 	select {
 	case result, ok := <-session.Result:
@@ -690,5 +686,20 @@ func TestAntigravityBackendRecoversEmptyStdoutFromTranscript(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+
+	var messages []Message
+	for msg := range session.Messages {
+		messages = append(messages, msg)
+	}
+	var recoveredMessage bool
+	for _, msg := range messages {
+		if msg.Type == MessageText && strings.Contains(msg.Content, "created result.txt with VERIFIED=yes") {
+			recoveredMessage = true
+			break
+		}
+	}
+	if !recoveredMessage {
+		t.Fatalf("expected recovered transcript reply to be emitted as MessageText, got %#v", messages)
 	}
 }
