@@ -45,3 +45,28 @@ func HasMentionAll(mentions []Mention) bool {
 	}
 	return false
 }
+
+// IssueReferences extracts the deduplicated set of issue IDs referenced via
+// issue mention links ([MUL-123](mention://issue/<id>)) in markdown content,
+// preserving first-seen order.
+//
+// Issue references are pure cross-references: unlike member/agent/squad
+// mentions they never notify anyone and never trigger an agent. This helper
+// exists so callers that persist issue relations/backlinks (ITT-237) can
+// pull the referenced issues out of content without re-implementing the
+// mention parsing — and without ever touching the notification path.
+//
+// Deduplication is enforced here rather than relying on ParseMentions, so the
+// "deduplicated set" contract holds regardless of upstream parsing changes.
+func IssueReferences(content string) []string {
+	var ids []string
+	seen := make(map[string]bool)
+	for _, m := range ParseMentions(content) {
+		if m.Type != "issue" || seen[m.ID] {
+			continue
+		}
+		seen[m.ID] = true
+		ids = append(ids, m.ID)
+	}
+	return ids
+}
