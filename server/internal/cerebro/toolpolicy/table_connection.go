@@ -198,7 +198,7 @@ func connectionWideBases(out []TableRow) map[string]Setting {
 
 // connectionWideAuthoredBases resolves, per connection policy key, the effective
 // connection-wide setting from the authored rows in cerebro_tool_policy
-// (tool_key 'connection:%', resource_pattern '') folded through the same
+// (tool_key 'connection:%', resource_pattern ”) folded through the same
 // Workspace › Runtime › Agent › Group › User chain as every other layer. It is
 // the fallback for connectionWideBases: it does NOT depend on a cerebro_capability
 // row existing, so a connection authored only in workspace_connection (no
@@ -611,6 +611,57 @@ func (s *Store) DisallowedMCPTools(ctx context.Context, workspaceID, runtimeID, 
 // BuildMCPConfig), so the two match by construction.
 func mcpToolToken(connectionName, tool string) string {
 	return "mcp__" + connectionName + "__" + tool
+}
+
+// MCPToolToken is the exported form of mcpToolToken. The connection tool
+// resolver (FIR-2441) derives its --disallowedTools tokens from this single
+// source, so it never re-implements the "mcp__<server>__<tool>" format that
+// DeniedConnectionTools already emits.
+func MCPToolToken(connectionName, tool string) string {
+	return mcpToolToken(connectionName, tool)
+}
+
+// ConnectionToolVerdict is one mcp_http connection tool paired with its resolved
+// effective verdict for a chain context.
+type ConnectionToolVerdict struct {
+	// Connection is the connection name (the "connection:<name>" key stripped).
+	Connection string
+	// Tool is the discovered tool name (the row's resource_pattern).
+	Tool string
+	// Setting is the effective verdict across the whole chain (Allow/Ask/Deny).
+	Setting Setting
+}
+
+// ConnectionToolVerdicts resolves the effective verdict for EVERY discovered
+// mcp_http connection tool in the query context. Where DeniedConnectionTools
+// returns only the Deny tokens for --disallowedTools, this returns each MCP tool
+// with its Allow/Ask/Deny verdict, so the connection tool resolver (FIR-2441)
+// can decide per tool which become raw relay entries and which need a
+// policy-aware path. It reads the same Table() rows the admin screen renders and
+// DeniedConnectionTools filters, so the resolver, the runtime enforcement, and
+// the screen can never drift. API-endpoint rows (connectionEndpointSource) are
+// intentionally excluded — those resolve through ConnectionEndpointEffective.
+func (s *Store) ConnectionToolVerdicts(ctx context.Context, in TableQuery) ([]ConnectionToolVerdict, error) {
+	rows, err := s.Table(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	var out []ConnectionToolVerdict
+	for _, r := range rows {
+		if r.Source != connectionToolSource {
+			continue
+		}
+		connName := strings.TrimPrefix(r.ToolKey, connectionToolKeyPrefix)
+		if connName == "" || r.ResourcePattern == "" {
+			continue
+		}
+		out = append(out, ConnectionToolVerdict{
+			Connection: connName,
+			Tool:       r.ResourcePattern,
+			Setting:    r.Effective.Setting,
+		})
+	}
+	return out, nil
 }
 
 // loadConnectionPolicySettings fetches every explicit per-layer setting authored

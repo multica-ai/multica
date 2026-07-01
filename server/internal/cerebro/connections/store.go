@@ -393,6 +393,16 @@ func mcpServerEntry(c Connection, rewriter MCPURLRewriter) map[string]any {
 	return entry
 }
 
+// MCPServerEntry returns the Claude Code --mcp-config entry for a single
+// mcp_http connection, applying the relay rewriter when one is supplied. It is
+// the exported form of the internal mcpServerEntry: the connection tool resolver
+// (FIR-2441) admits connections one at a time by verdict, so it builds the
+// relay entry per connection instead of BuildMCPConfig's all-enabled sweep. A
+// nil rewriter yields the direct-URL entry cloud runtimes use.
+func MCPServerEntry(c Connection, rewriter MCPURLRewriter) map[string]any {
+	return mcpServerEntry(c, rewriter)
+}
+
 // GetEnabledByName returns one enabled connection by its (workspace-unique)
 // name. Used by the MCP relay to resolve a connection server-side from a token.
 func (s *Store) GetEnabledByName(ctx context.Context, workspaceID pgtype.UUID, name string) (Connection, error) {
