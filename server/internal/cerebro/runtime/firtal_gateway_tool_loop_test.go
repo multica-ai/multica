@@ -422,6 +422,80 @@ func TestLimitFirtalGatewayToolsPreservesAttachmentTools(t *testing.T) {
 	}
 }
 
+func TestGatewayCompatRegistryToolLoopFallsBackToCoreToolsOnMalformedFullList(t *testing.T) {
+	var toolCounts []int
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		tools, _ := body["tools"].([]any)
+		toolCounts = append(toolCounts, len(tools))
+		w.Header().Set("Content-Type", "application/json")
+		if len(toolCounts) == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error":"upstream_rejected_request","message":"request malformed"}`))
+			return
+		}
+		w.Write([]byte(`{"choices":[{"message":{"content":"OK"}}],"firtal":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer srv.Close()
+
+	reg := &Registry{tools: map[string]Tool{}}
+	tools := []Tool{
+		namedTestTool("get_issue"),
+		namedTestTool("list_comments"),
+		namedTestTool("add_comment"),
+		namedTestTool("list_issues"),
+		namedTestTool("create_issue"),
+		namedTestTool("update_issue"),
+		namedTestTool("list_projects"),
+		namedTestTool("get_me"),
+		namedTestTool("list_attachments"),
+		namedTestTool("read_attachment"),
+		namedTestTool("create_file"),
+		namedTestTool("skill_get_observations"),
+	}
+	for _, tool := range tools {
+		reg.Register(tool)
+	}
+
+	e := &FirtalGatewayExecutor{
+		gateway: NewGatewayClient(FirtalGatewayRuntimeConfig{
+			BaseURL:   srv.URL,
+			APIKey:    "rk_test",
+			Model:     "claude-sonnet-4-6",
+			MaxTokens: 4096,
+		}, srv.Client()),
+		logger: testLogger(),
+	}
+	completion, err := e.runGatewayCompatRegistryToolLoop(context.Background(),
+		FirtalGatewayRuntimeConfig{BaseURL: srv.URL, APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096},
+		db.Agent{},
+		[]GatewayMessage{{Role: "user", Content: "hello"}},
+		GatewayRequestMeta{TaskID: "t1"},
+		pgtype.UUID{},
+		pgtype.UUID{},
+		reg,
+		tools,
+		false,
+	)
+	if err != nil {
+		t.Fatalf("runGatewayCompatRegistryToolLoop error = %v", err)
+	}
+	if completion.Output != "OK" {
+		t.Fatalf("Output = %q, want OK", completion.Output)
+	}
+	if len(toolCounts) != 2 {
+		t.Fatalf("gateway calls = %d, want 2", len(toolCounts))
+	}
+	if toolCounts[0] <= toolCounts[1] {
+		t.Fatalf("tool counts = %v, want full list then smaller core list", toolCounts)
+	}
+	if toolCounts[1] != len(coreFirtalGatewayTools(tools)) {
+		t.Fatalf("fallback tool count = %d, want %d", toolCounts[1], len(coreFirtalGatewayTools(tools)))
+	}
+}
+
 type fallbackTestTool struct{}
 
 func (fallbackTestTool) Name() string { return "echo" }

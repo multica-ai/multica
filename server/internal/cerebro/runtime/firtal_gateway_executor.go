@@ -1109,7 +1109,7 @@ func isAnthropicMalformedToolRequest(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "anthropic gateway returned HTTP 400") &&
+	return (strings.Contains(msg, "anthropic gateway returned HTTP 400") || strings.Contains(msg, "gateway returned HTTP 400")) &&
 		(strings.Contains(msg, "upstream_rejected_request") || strings.Contains(msg, "request malformed"))
 }
 
@@ -1190,6 +1190,29 @@ func limitFirtalGatewayTools(tools []Tool) []Tool {
 		out = append(out, tool)
 		if len(out) == firtalGatewayMaxToolDefs {
 			break
+		}
+	}
+	return out
+}
+
+func coreFirtalGatewayTools(tools []Tool) []Tool {
+	core := map[string]struct{}{
+		"get_issue":        {},
+		"list_comments":    {},
+		"add_comment":      {},
+		"list_issues":      {},
+		"create_issue":     {},
+		"update_issue":     {},
+		"list_projects":    {},
+		"get_me":           {},
+		"list_attachments": {},
+		"read_attachment":  {},
+		"create_file":      {},
+	}
+	out := make([]Tool, 0, len(core))
+	for _, tool := range tools {
+		if _, ok := core[tool.Name()]; ok {
+			out = append(out, tool)
 		}
 	}
 	return out
@@ -1353,9 +1376,29 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 		maxRounds = cfg.MaxToolRounds
 	}
 
+	retriedCoreTools := false
 	for round := 0; round < maxRounds; round++ {
 		completion, err := e.completeGatewayWithTools(ctx, cfg, agent.Model.String, history, toolDefs, meta)
 		if err != nil {
+			if round == 0 && !retriedCoreTools && isAnthropicMalformedToolRequest(err) {
+				coreTools := coreFirtalGatewayTools(tools)
+				if len(coreTools) > 0 && len(coreTools) < len(tools) {
+					e.logger.Warn("firtal gateway full tool list malformed; retrying with core tools",
+						"task_id", meta.TaskID,
+						"agent_id", meta.AgentID,
+						"workspace_id", meta.WorkspaceID,
+						"full_tool_count", len(tools),
+						"core_tool_count", len(coreTools),
+						"error", err,
+					)
+					tools = coreTools
+					toolDefs = toolsToGatewayToolDefs(tools)
+					history = withRegistryToolUsageHint(ctx, initialMessages, tools)
+					retriedCoreTools = true
+					round = -1
+					continue
+				}
+			}
 			return GatewayCompletion{}, err
 		}
 		accumulate(completion)
