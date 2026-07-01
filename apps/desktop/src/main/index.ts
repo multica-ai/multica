@@ -10,6 +10,7 @@ import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
+import { installRendererFreezeWatchdog } from "./renderer-freeze-watchdog";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -191,6 +192,10 @@ function createWindow(): void {
       mainWindow = null;
       latestRendererRouteContext = null;
     }
+  });
+
+  installRendererFreezeWatchdog(mainWindow, {
+    enabled: process.platform === "win32",
   });
 
   // Strip Origin header from WebSocket upgrade requests so the server's
