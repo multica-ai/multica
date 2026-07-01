@@ -106,6 +106,13 @@
     },
     "create": "创建",
     "creating": "创建中...",
+    "create_dialog": {
+      "title": "创建 API Token",
+      "description": "为 token 命名，并选择它的有效时长。",
+      "name_label": "名称",
+      "expiry_label": "过期时间",
+      "cancel": "取消"
+    },
     "toast_load_failed": "加载 token 失败",
     "toast_create_failed": "创建 token 失败",
     "toast_revoked": "已吊销 token",

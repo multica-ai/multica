@@ -106,6 +106,13 @@
     },
     "create": "作成",
     "creating": "作成中...",
+    "create_dialog": {
+      "title": "API トークンを作成",
+      "description": "トークン名を入力し、有効期間を選択してください。",
+      "name_label": "名前",
+      "expiry_label": "有効期限",
+      "cancel": "キャンセル"
+    },
     "toast_load_failed": "トークンを読み込めませんでした",
     "toast_create_failed": "トークンを作成できませんでした",
     "toast_revoked": "トークンを失効しました",
