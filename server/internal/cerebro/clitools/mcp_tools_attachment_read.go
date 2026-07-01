@@ -17,7 +17,10 @@ func registerAttachmentReadTools(srv *mcp.Server, client *cli.APIClient) {
 		Description: "List file attachments on a Multica issue or chat message, including attachment IDs needed by read_attachment.",
 		InputSchema: map[string]any{
 			"type": "object",
+			"required": []string{"target_type", "target_id"},
 			"properties": map[string]any{
+				"target_type":     map[string]any{"type": "string", "enum": []string{"issue", "chat_message"}, "description": "Attachment owner type: issue or chat_message."},
+				"target_id":       map[string]any{"type": "string", "description": "Issue ID or chat message ID matching target_type."},
 				"issue_id":        map[string]any{"type": "string", "description": "Issue ID whose issue-level attachments should be listed."},
 				"chat_message_id": map[string]any{"type": "string", "description": "Chat message ID whose attachments should be listed."},
 			},
@@ -25,8 +28,20 @@ func registerAttachmentReadTools(srv *mcp.Server, client *cli.APIClient) {
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
 		issueID := strings.TrimSpace(optString(args, "issue_id"))
 		chatMessageID := strings.TrimSpace(optString(args, "chat_message_id"))
+		targetType := strings.TrimSpace(optString(args, "target_type"))
+		targetID := strings.TrimSpace(optString(args, "target_id"))
+		if targetID != "" {
+			switch targetType {
+			case "issue":
+				issueID = targetID
+			case "chat_message":
+				chatMessageID = targetID
+			default:
+				return mcp.ErrorResult("target_type must be issue or chat_message"), nil
+			}
+		}
 		if (issueID == "") == (chatMessageID == "") {
-			return mcp.ErrorResult("set exactly one of issue_id or chat_message_id"), nil
+			return mcp.ErrorResult("set exactly one attachment target"), nil
 		}
 
 		path := "/api/issues/" + url.PathEscape(issueID) + "/attachments"
