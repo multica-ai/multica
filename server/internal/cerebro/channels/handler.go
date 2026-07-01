@@ -164,6 +164,26 @@ func (s *Service) ArchiveChannelHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// FIR-2321 — archiving a DM/channel must also archive every inbox_item for
+	// that conversation. The inbox folds to one row per issue (deduplicateInboxItems),
+	// so an issue-notification on the same conversation is hidden behind the channel
+	// row; archiving the channel alone (cerebro_channel_archived) leaves that inbox_item
+	// un-archived, and it re-surfaces as its own row on the next refresh. Prior fixes
+	// (JEH-851, FIR-1576) only swept siblings client-side over the deduplicated list, so
+	// masked rows survived. Doing it here is atomic and independent of fold/timing/device.
+	// Best-effort: the channel is already archived, so a failure here is logged, not fatal.
+	if wsUUID, wsErr := util.ParseUUID(middleware.WorkspaceIDFromContext(r.Context())); wsErr == nil {
+		if _, err := s.Queries.ArchiveInboxByIssue(r.Context(), db.ArchiveInboxByIssueParams{
+			WorkspaceID:   wsUUID,
+			RecipientType: "member",
+			RecipientID:   userUUID,
+			IssueID:       channelID,
+		}); err != nil {
+			slog.Warn("channel archive: failed to archive sibling inbox items",
+				"channel_id", util.UUIDToString(channelID), "user_id", userID, "error", err)
+		}
+	}
+
 	ts, _, err := s.GetChannelArchivedAt(r.Context(), channelID, userUUID)
 	if err != nil {
 		slog.Error("channel archive lookup failed", "channel_id", util.UUIDToString(channelID), "user_id", userID, "error", err)
