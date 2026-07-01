@@ -20,6 +20,9 @@ import {
   Attachment as AttachmentRenderer,
   AttachmentDownloadProvider,
 } from "../editor";
+// CEREBRO-PATCH(chat-mermaid-html): FIR-2372 render fenced mermaid/html blocks as diagram/preview so chat matches comments.
+import { MermaidDiagram } from "../editor/mermaid-diagram";
+import { HtmlBlockPreview } from "../editor/html-block-preview";
 
 export type { RenderMode };
 
@@ -104,6 +107,13 @@ function renderFileCard({
   );
 }
 
+// CEREBRO-PATCH(chat-mermaid-html): FIR-2372 fenced mermaid/html → diagram/preview, matching how comments render them.
+function renderCodeBlock({ language, code }: { language?: string; code: string }): React.ReactNode {
+  if (language === "mermaid") return <MermaidDiagram chart={code} />;
+  if (language === "html") return <HtmlBlockPreview html={code} />;
+  return null;
+}
+
 /**
  * App-level Markdown wrapper. Injects:
  *   - entity chips for issue/project mentions
@@ -121,6 +131,7 @@ export function Markdown(props: MarkdownProps): React.JSX.Element {
         renderMention={defaultRenderMention}
         renderImage={renderImage}
         renderFileCard={renderFileCard}
+        renderCodeBlock={renderCodeBlock}
         cdnDomain={cdnDomain}
         {...rest}
       />

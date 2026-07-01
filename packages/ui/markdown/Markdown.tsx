@@ -77,6 +77,8 @@ export interface MarkdownProps {
    * the views-package `<Attachment>` component.
    */
   renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode
+  // CEREBRO-PATCH(chat-mermaid-html): FIR-2372 override fenced code-block rendering (mermaid→diagram, html→preview) for chat parity with comments; return null to fall back to CodeBlock.
+  renderCodeBlock?: (props: { language?: string; code: string }) => React.ReactNode
 }
 
 // Sanitization schema — extends GitHub defaults to allow code highlighting classes
@@ -136,6 +138,8 @@ function createComponents(
   renderMention?: (props: { type: string; id: string }) => React.ReactNode,
   renderImage?: (props: { src: string; alt: string }) => React.ReactNode,
   renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode,
+  // CEREBRO-PATCH(chat-mermaid-html): FIR-2372 thread renderCodeBlock override into the code handlers.
+  renderCodeBlock?: (props: { language?: string; code: string }) => React.ReactNode,
 ): Partial<Components> {
   const baseComponents: Partial<Components> = {
     // FileCard: intercept <div data-type="fileCard"> from preprocessFileCards
@@ -289,6 +293,9 @@ function createComponents(
         // Block code - use CodeBlock with full mode
         if (match || isBlock) {
           const code = String(children).replace(/\n$/, '')
+          // CEREBRO-PATCH(chat-mermaid-html): FIR-2372 let caller render mermaid/html blocks as diagram/preview (comment parity).
+          const custom = renderCodeBlock?.({ language: match?.[1], code })
+          if (custom) return <>{custom}</>
           return <CodeBlock code={code} language={match?.[1]} mode="full" className="my-1" />
         }
 
@@ -352,6 +359,9 @@ function createComponents(
 
       if (match || isBlock) {
         const code = String(children).replace(/\n$/, '')
+        // CEREBRO-PATCH(chat-mermaid-html): FIR-2372 mermaid/html blocks render as diagram/preview (comment parity).
+        const custom = renderCodeBlock?.({ language: match?.[1], code })
+        if (custom) return <>{custom}</>
         return <CodeBlock code={code} language={match?.[1]} mode="full" className="my-1" />
       }
 
@@ -437,11 +447,13 @@ export function Markdown({
   renderMention,
   renderImage,
   renderFileCard,
+  // CEREBRO-PATCH(chat-mermaid-html): FIR-2372 forward renderCodeBlock override.
+  renderCodeBlock,
   cdnDomain
 }: MarkdownProps): React.JSX.Element {
   const components = React.useMemo(
-    () => createComponents(mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard),
-    [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard]
+    () => createComponents(mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard, renderCodeBlock),
+    [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard, renderCodeBlock]
   )
 
   // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content

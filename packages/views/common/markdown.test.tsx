@@ -49,6 +49,21 @@ vi.mock("../projects/components/project-chip", () => ({
   ),
 }));
 
+// FIR-2372 — mermaid/html render the same components comments use; stub them so
+// the test asserts routing (block → the right component) without booting the
+// real mermaid engine / preview iframe.
+vi.mock("../editor/mermaid-diagram", () => ({
+  MermaidDiagram: ({ chart }: { chart: string }) => (
+    <div data-testid="mermaid-diagram">{chart}</div>
+  ),
+}));
+
+vi.mock("../editor/html-block-preview", () => ({
+  HtmlBlockPreview: ({ html }: { html: string }) => (
+    <div data-testid="html-preview">{html}</div>
+  ),
+}));
+
 const ligatureClasses = [
   "[font-variant-ligatures:none]",
   "[font-feature-settings:'liga'_0]",
@@ -88,5 +103,26 @@ describe("Markdown", () => {
 
     expect(screen.getByTestId("project-chip")).toHaveTextContent("project-123");
     expect(screen.getByRole("link")).toHaveAttribute("href", "/projects/project-123");
+  });
+
+  it("renders fenced mermaid blocks as a diagram (chat parity with comments)", () => {
+    render(<Markdown>{"```mermaid\nflowchart TD\n  A --> B\n```"}</Markdown>);
+
+    expect(screen.getByTestId("mermaid-diagram")).toHaveTextContent("flowchart TD");
+    expect(document.querySelector(".shiki")).toBeNull();
+  });
+
+  it("renders fenced html blocks as a preview (chat parity with comments)", () => {
+    render(<Markdown>{"```html\n<b>hi</b>\n```"}</Markdown>);
+
+    expect(screen.getByTestId("html-preview")).toHaveTextContent("<b>hi</b>");
+  });
+
+  it("leaves ordinary code blocks as highlighted code", () => {
+    render(<Markdown>{"```sh\nuv run pytest -q\n```"}</Markdown>);
+
+    expect(screen.queryByTestId("mermaid-diagram")).toBeNull();
+    expect(screen.queryByTestId("html-preview")).toBeNull();
+    expect(screen.getByText("uv run pytest -q")).toBeInTheDocument();
   });
 });
