@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -505,6 +506,82 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
 
+	// DingTalk integration. Bring-your-own-app + Stream mode, modeled on Slack:
+	// each agent's DingTalk Stream-mode robot is pasted in by a workspace admin
+	// (AppKey + AppSecret), encrypted at rest, and gets its own per-installation
+	// Stream connection supervised by the engine. MULTICA_DINGTALK_SECRET_KEY
+	// decrypts the per-installation AppSecret; without it there is no DingTalk.
+	// The ResolverSet/Outbound share the same engine.ChatSession, channel_*
+	// tables, IssueService and TaskService as Feishu and Slack, so /issue, dedup,
+	// and run-triggering behave identically.
+	if dingtalkKey, err := secretbox.LoadKey("MULTICA_DINGTALK_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(dingtalkKey)
+		if err != nil {
+			slog.Error("dingtalk: secretbox.New failed; dingtalk integration disabled", "error", err)
+		} else {
+			// Shared outbound client: access_token cache + Open-API transport.
+			dingtalkClient := dingtalk.NewClient(nil, "")
+
+			// Binding token service mints/redeems the single-use token behind the
+			// "link your DingTalk account" prompt; the redeem endpoint (registered
+			// above, session-authenticated) binds the DingTalk user to their Multica
+			// account.
+			dingtalkBindingSvc := dingtalk.NewBindingTokenService(queries, pool)
+			h.DingTalkBindingTokens = dingtalkBindingSvc
+
+			// Outbound replier delivers the NeedsBinding prompt / agent-offline /
+			// archived / issue-created notices. The bind link (/dingtalk/bind) is a
+			// web-app page, so it uses the app URL (MULTICA_APP_URL ?? FRONTEND_ORIGIN).
+			dingtalkReplier := dingtalk.NewOutboundReplier(dingtalk.OutboundReplierConfig{
+				Binding: dingtalkBindingSvc,
+				Decrypt: box.Open,
+				Client:  dingtalkClient,
+				AppURL:  appURLFromEnv(),
+				Logger:  slog.Default(),
+			})
+			// Ack notifier stands in for a typing indicator: DingTalk has none, so on
+			// ingest it posts a lightweight "working on it" message so a mobile user
+			// is not left staring at silence during a long agent turn.
+			dingtalkAck := dingtalk.NewAckNotifier(dingtalkClient, box.Open, slog.Default())
+			channelRouter.Register(dingtalk.TypeDingTalk, dingtalk.NewDingTalkResolverSet(queries, pool, dingtalkReplier, dingtalkAck))
+			dingtalk.NewOutbound(queries, box.Open, dingtalkClient, slog.Default()).Register(bus)
+
+			// `/issue` quick-create: DingTalk has no native slash-command transport,
+			// so `/issue` is diverted (before the engine) to this processor, which
+			// enqueues a quick-create task on the shared TaskService and replies via
+			// the outbound replier. See issue_command.go.
+			dingtalkIssueCmd := dingtalk.NewIssueCommandProcessor(dingtalk.IssueCommandConfig{
+				Queries: queries,
+				Tasks:   h.TaskService,
+				Replier: dingtalkReplier,
+				Logger:  slog.Default(),
+			})
+
+			// Per-installation inbound: the Supervisor builds + supervises one Stream
+			// connection per active installation, authenticated with that
+			// installation's own AppKey/AppSecret.
+			dingtalk.RegisterDingTalk(channelRegistry, dingtalk.ChannelDeps{
+				Decrypt:      box.Open,
+				Client:       dingtalkClient,
+				IssueCommand: dingtalkIssueCmd,
+				Logger:       slog.Default(),
+			})
+
+			// BYO self-serve install (paste AppKey + AppSecret). The InstallService
+			// needs only the at-rest encryption key — there is no hosted OAuth
+			// client credential.
+			installSvc, ierr := dingtalk.NewInstallService(queries, pool, box, slog.Default())
+			if ierr != nil {
+				slog.Error("dingtalk: InstallService init failed; install disabled", "error", ierr)
+			} else {
+				h.DingTalkInstall = installSvc
+			}
+			slog.Info("dingtalk integration enabled (BYO per-installation stream mode)")
+		}
+	} else {
+		slog.Info("dingtalk integration disabled (MULTICA_DINGTALK_SECRET_KEY not set)")
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -805,6 +882,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/slack/installations/{installationId}", h.RevokeSlackInstallation)
 					r.Post("/slack/install/byo", h.RegisterSlackBYO)
 				})
+
+				// DingTalk integration. Same admin/member
+				// split as Slack: listing is member-visible; BYO install +
+				// revoke are admin-only. Inbound runs over a per-installation
+				// Stream connection (no public webhook), so there is no
+				// callback route to register outside this group.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/dingtalk/installations", h.ListDingTalkInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/dingtalk/installations/{installationId}", h.RevokeDingTalkInstallation)
+					r.Post("/dingtalk/install/byo", h.RegisterDingTalkBYO)
+				})
 			})
 		})
 
@@ -821,6 +913,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// logged-in user (from the session) is bound to the Slack id the token
 		// carries.
 		r.Post("/api/slack/binding/redeem", h.RedeemSlackBindingToken)
+		// DingTalk binding-token redemption. Same rationale as Slack: NOT
+		// workspace-scoped because the redeemer hits this before they have any
+		// workspace context — the redemption itself mints their binding row. The
+		// logged-in user (from the session) is bound to the DingTalk id the token
+		// carries.
+		r.Post("/api/dingtalk/binding/redeem", h.RedeemDingTalkBindingToken)
 
 		// User-scoped invitation routes (no workspace context required)
 		r.Get("/api/invitations", h.ListMyInvitations)

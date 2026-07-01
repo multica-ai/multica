@@ -18,6 +18,7 @@ import { providerSupportsMcpConfig } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
+import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -147,9 +148,15 @@ export function AgentOverviewPane({
     enabled: !!wsId,
   });
   const slackConfigured = slackListing?.configured === true;
-  // The Integrations tab appears once EITHER channel is wired on the
-  // deployment, so a Slack-only deployment (no Lark) still surfaces it.
-  const integrationsConfigured = larkConfigured || slackConfigured;
+  const { data: dingtalkListing } = useQuery({
+    ...dingtalkInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
+  const dingtalkConfigured = dingtalkListing?.configured === true;
+  // The Integrations tab appears once ANY channel is wired on the deployment,
+  // so a DingTalk-only deployment (no Lark/Slack) still surfaces it.
+  const integrationsConfigured =
+    larkConfigured || slackConfigured || dingtalkConfigured;
 
   // The MCP tab is only shown when the agent's runtime backend actually
   // consumes mcp_config — see providerSupportsMcpConfig. We default to

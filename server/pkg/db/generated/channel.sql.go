@@ -925,6 +925,30 @@ func (q *Queries) PurgeExpiredChannelBindingTokens(ctx context.Context, expiresA
 	return err
 }
 
+const rebindChannelChatSession = `-- name: RebindChannelChatSession :exec
+UPDATE channel_chat_session_binding
+SET chat_session_id = $1,
+    last_message_id = NULL,
+    last_thread_id  = NULL
+WHERE installation_id = $2
+  AND channel_chat_id = $3
+`
+
+type RebindChannelChatSessionParams struct {
+	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChannelChatID  string      `json:"channel_chat_id"`
+}
+
+// Repoint an existing (installation, channel_chat_id) binding at a brand-new
+// chat_session, clearing the reply-target pointers. Used by the /new command so
+// a conversation can start a genuinely fresh chat_session (new transcript, no
+// resume) without abandoning its stable isolation key.
+func (q *Queries) RebindChannelChatSession(ctx context.Context, arg RebindChannelChatSessionParams) error {
+	_, err := q.db.Exec(ctx, rebindChannelChatSession, arg.ChatSessionID, arg.InstallationID, arg.ChannelChatID)
+	return err
+}
+
 const recordChannelInboundDrop = `-- name: RecordChannelInboundDrop :exec
 
 INSERT INTO channel_inbound_audit (

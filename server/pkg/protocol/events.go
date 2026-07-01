@@ -142,4 +142,12 @@ const (
 	// invalidate the Slack installations query on either.
 	EventSlackInstallationCreated = "slack_installation:created"
 	EventSlackInstallationRevoked = "slack_installation:revoked"
+
+	// DingTalk installation lifecycle. Same semantics as the Slack events:
+	// `created` covers both first install and re-install (the
+	// UNIQUE on (workspace_id, agent_id, channel_type) means at most one row per
+	// agent), `revoked` flips status without deleting the row. Front-ends
+	// invalidate the DingTalk installations query on either.
+	EventDingTalkInstallationCreated = "dingtalk_installation:created"
+	EventDingTalkInstallationRevoked = "dingtalk_installation:revoked"
 )

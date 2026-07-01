@@ -24,6 +24,7 @@ import {
 import { githubKeys } from "../github/queries";
 import { larkKeys } from "../lark/queries";
 import { slackKeys } from "../slack/queries";
+import { dingtalkKeys } from "../dingtalk/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -496,6 +497,10 @@ export function useRealtimeSync(
       slack_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: slackKeys.installations(wsId) });
+      },
+      dingtalk_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: dingtalkKeys.installations(wsId) });
       },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all

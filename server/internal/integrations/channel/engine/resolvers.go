@@ -57,6 +57,10 @@ type Result struct {
 	IssueNumber     int32
 	IssueIdentifier string
 	IssueTitle      string
+	// RunScheduled reports whether this ingest scheduled an agent run. A run
+	// eventually clears the typing indicator, so the Router only shows it when
+	// this is true; a bare fresh-session reset (/new) schedules none.
+	RunScheduled bool
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router

@@ -299,6 +299,18 @@ SET last_message_id = sqlc.narg('last_message_id'),
     last_thread_id  = sqlc.narg('last_thread_id')
 WHERE chat_session_id = $1;
 
+-- name: RebindChannelChatSession :exec
+-- Repoint an existing (installation, channel_chat_id) binding at a brand-new
+-- chat_session, clearing the reply-target pointers. Used by the /new command so
+-- a conversation can start a genuinely fresh chat_session (new transcript, no
+-- resume) without abandoning its stable isolation key.
+UPDATE channel_chat_session_binding
+SET chat_session_id = sqlc.arg('chat_session_id'),
+    last_message_id = NULL,
+    last_thread_id  = NULL
+WHERE installation_id = sqlc.arg('installation_id')
+  AND channel_chat_id = sqlc.arg('channel_chat_id');
+
 -- name: DeleteChannelChatSessionBindingBySession :exec
 -- Application-layer integrity (replaces the old chat_session-FK ON DELETE
 -- CASCADE): drop the binding when its chat_session is deleted.

@@ -1,0 +1,132 @@
+---
+title: 钉钉 Bot 接入
+description: 把 Multica 智能体接入你自己的钉钉 app——在钉钉开放平台创建一个 Stream 模式的机器人、复制它的 AppKey 与 AppSecret、粘贴进 Multica，然后就能在钉钉里私聊它、在群里 @ 它，或输入 /issue。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+把任意[智能体](/agents)接入一个钉钉 Bot，团队就能在钉钉里直接使用它——私聊 Bot、在群里 @ 它，或者输入 `/issue` 直接创建一个 [Multica issue](/issues)，不用打开应用。
+
+钉钉走的是**自带应用（bring-your-own-app，BYO）**模式：workspace 管理员创建一个钉钉 app，给它加一个 Stream 模式的机器人，再把它的凭证粘贴进 Multica。每个智能体都有**它自己的**钉钉 app——所以多个智能体可以在同一个组织里各自拥有一个独立、可单独 @ 的 Bot。（这一点和 [Lark](/lark-bot-integration) 不同，Lark 的绑定是扫码安装流程。）
+
+整个设置流程在下面，大约五分钟。最后你会得到两个凭证粘贴进 Multica：
+
+- 一个 **AppKey** —— app 的 client id
+- 一个 **AppSecret** —— app 的 client secret
+
+## 设置你的钉钉 app
+
+### 1. 创建 app 并添加一个 Stream 模式的机器人
+
+1. 打开[钉钉开放平台](https://open-dev.dingtalk.com)，创建一个**企业内部应用**。
+2. 进入该应用，添加**机器人**能力。
+3. 在机器人设置里，把**消息接收模式**设为 **Stream 模式**（推送模式）。正是这一项让 Bot 通过一条长连接向外推送接收消息，而不是去接收一个 webhook。
+
+这就是 Multica 在平台层所需的一切——它通过 Stream 模式向外连接，所以你不用配置任何公网地址：
+
+| 配置项 | 为什么需要它 |
+|---|---|
+| **企业内部应用** | 承载机器人、并签发 AppKey / AppSecret 凭证的那个 app 容器。 |
+| **机器人能力** | 创建被 @ 和发回复用的那个 Bot 身份。 |
+| **Stream 模式** | Bot 通过一条长连接的 Stream 向外连接——**无需任何公网 webhook / URL**。 |
+| **机器人发送权限** | 让 Bot 能把消息发回钉钉（智能体的回复以及主动消息）。 |
+| **消息读取权限** | 让 Bot 能接收单聊消息，以及群里 @ 了它的消息。 |
+
+这里**既没有 webhook URL，也没有 OAuth 重定向 URL**，因为机器人跑在 Stream 模式上，而 BYO 不使用 OAuth。
+
+<Callout type="info">
+钉钉没有原生的「正在输入」/ 表情回应指示器，所以——和 Slack 不同——Bot 会在开始处理时先回一条简短的「正在处理」提示，完整回复在智能体处理完后送达。短时间内连发的多条消息会合并为一条提示。
+</Callout>
+
+### 2. 给机器人授权
+
+给机器人授予它需要的权限，让它既能**接收消息**又能**把消息发回去**（机器人消息发送权限）。没有发送权限，智能体能跑，但它的回复发不出来。
+
+### 3. 复制 AppKey 和 AppSecret
+
+打开该应用的 **凭证与基础信息**，复制：
+
+- **AppKey** —— 这就是你 app 的 **client id**
+- **AppSecret** —— 这就是你 app 的 **client secret**
+
+### 4. 在 Multica 里连接它
+
+1. 在 **Agents → _你的智能体_** 打开该智能体 → **Integrations** tab（或左侧栏的 **Integrations** 区块）。
+2. 点击 **Connect DingTalk**。
+3. 粘贴 **AppKey** 和 **AppSecret**，然后点击 **Connect**。
+4. 智能体显示 **Connected to DingTalk**。Bot 现在通过它自己的 Stream 连接在监听了。
+
+<Callout type="warning">
+这两个凭证必须来自**同一个**钉钉 app，而那个 app 恰好对应**一个**智能体。连接一个已经连到别的智能体或 workspace 的 app 会被拒绝。要把一个 app 挪到另一个智能体，先断开它；用一个**新的** app 重新连接某个智能体，会就地更新那个智能体的 Bot。
+</Callout>
+
+<Callout type="info">
+要给**多个智能体**做这套设置？每个智能体都把整套流程走一遍——每个智能体都有自己的钉钉 app 和自己的一对 AppKey / AppSecret，它们会在你的组织里显示成各自独立的 Bot。
+</Callout>
+
+## 这个集成能做什么
+
+| 入口 | 行为 |
+|---|---|
+| **智能体 → Integrations** | 所有者和管理员能看到 **Connect DingTalk**；连接后它会变成一个 **Connected to DingTalk** 徽标，并带一个 **Disconnect** 操作。 |
+| **私聊 Bot** | 工作区成员在单聊里直接给 Bot 发消息。这段对话会成为该智能体的一个 Multica [chat](/chat) 会话；每一条消息都会被读取。 |
+| **群里 @ 它** | 把 Bot 加进群再 @ 它。只有 @ 它的那条消息会被读取——Bot 不会监听整个群。 |
+| **`/issue` 命令** | 以 `/issue <要创建什么>` 开头的消息，会把你的描述交给智能体，由它在后台创作一个格式规整的 Multica issue（正经标题 + 结构化描述），记在你名下。它只回一条确认（而非 issue 编号），issue 就绪后你会收到 Multica 通知。它不会触发智能体的对话回复。 |
+| **`/new` 命令** | 以 `/new <你的消息>` 开头的消息会**新建一个 Chat**——一个没有历史上下文的全新会话，标题取自你的消息。旧对话会保留在该智能体的聊天历史里，后续消息进入新会话。用它来切换话题或清理过长的对话。 |
+| **回复** | 智能体的答复会被发回同一个单聊或群里。 |
+
+## 使用 Bot（成员）
+
+### 第一条消息：绑定你的账号
+
+第一次 @ 或私聊 Bot 时，它会回一条 **绑定你的账号** 提示，指向产品内的 **/dingtalk/bind** 页面。点开链接、登录 Multica，你的钉钉身份就会绑定到你的 Multica 成员身份——正是这一步让智能体能以你的身份行事（比如 `/issue` 会把 issue 记在你名下）。这个链接是一次性的，大约 15 分钟后过期；再给 Bot 发条消息就能拿到一个新的。
+
+<Callout type="warning">
+只有**工作区成员**才能使用 Bot。如果你不是成员，或者跳过了身份绑定，Bot 不会运行——你的消息会被丢弃（仅出于审计目的记录，不保存消息内容）。
+</Callout>
+
+### 对话与命令
+
+- **在群里** —— 把 Bot 加进群，然后 `@your-bot <你的消息>`。每次追问都要重新 @ 它一下（Bot 只读取 @ 了它的消息）。
+- **在单聊里** —— 打开 Bot 并直接给它发消息；不用 @，每一条消息都会被读取。
+- **创建 issue** —— 发送 `/issue Safari 上登录跳转坏了`，用你自己的话描述即可（可以多写几行）。智能体会在后台把它整理成规整的 issue；你会立刻收到确认，issue 落地后收到 Multica 通知。
+- **重新开始** —— 发送 `/new <你的消息>` 即可新建一个没有历史上下文的 Chat（旧对话保留在历史里），之后照常对话即可。
+
+## 管理与断开
+
+工作区级别的管理在 **Settings → Integrations**：
+
+- **Connected bots** 列出工作区里每个 Bot 以及它各自绑定的智能体（所有成员都能看到）。
+- **Disconnect** 仅限 **所有者 / 管理员**。它会让 Bot 停止接收钉钉消息并拆掉它的连接；安装记录会保留以便审计，之后你可以重新连接。
+
+## 权限
+
+- **连接 / 断开** 需要工作区**所有者**或**管理员**。
+- **和 Bot 对话** 需要你是工作区成员且已绑定钉钉身份。其余的人一律被丢弃。
+- 对于被丢弃的消息，绝不保存消息内容——只记录一个丢弃原因，用于审计。
+
+## 自部署配置
+
+在 Multica Cloud 上这个集成已经可用——可跳过本节。
+
+自部署时，**在你设置好静态加密密钥之前，钉钉是关闭的**。这个密钥会在每个 app 的 AppKey + AppSecret 落库之前对其加密。BYO 在部署层面**不需要** OAuth client id/secret——每个安装用的都是管理员粘贴进来的那对凭证。
+
+1. 生成一个 32 字节的密钥并设置到 API 服务器：
+
+   ```dotenv
+   MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
+   ```
+
+   例如：`openssl rand -base64 32`。
+
+2. 重启 API。在密钥设置好之前，**Settings → Integrations** 会显示一条「DingTalk integration not enabled」提示，**Connect DingTalk** 入口也会保持隐藏。
+
+<Callout type="info">
+这个密钥必须正好解码出 32 字节——`openssl rand -base64 32` 就能做到。把它当成一个长期有效的密钥：轮换或丢失它会让已存储的凭证无法解密，迫使每个 Bot 重新连接。「绑定你的账号」链接是用你的 Web 应用地址（`MULTICA_APP_URL`，未设置时回退到 `FRONTEND_ORIGIN`）拼出来的——正常部署里这个值本来就有，不需要额外配置。
+</Callout>
+
+## 下一步
+
+- [聊天集成](/channels) —— channel 引擎、会话与授权是怎么运作的
+- [智能体](/agents) · [Chat](/chat) · [Issues](/issues)
+- [环境变量](/environment-variables) —— 完整的自部署配置参考

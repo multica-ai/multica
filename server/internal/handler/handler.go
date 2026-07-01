@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflagdispatch"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -190,7 +191,16 @@ type Handler struct {
 	// unless Slack is configured; GetChatChannelHistory then reports "no channel
 	// integration". A future platform satisfies the same reader interface.
 	SlackHistory ChatChannelHistoryReader
-	cfg          Config
+	// DingTalkInstall owns the bring-your-own-app DingTalk install lifecycle
+	// (register pasted AppKey/AppSecret / list / revoke) and the at-rest
+	// encryption of each robot's AppSecret (MUL-3666 mirror). Nil unless
+	// MULTICA_DINGTALK_SECRET_KEY is set.
+	DingTalkInstall *dingtalk.InstallService
+	// DingTalkBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your DingTalk account" prompt. Nil unless DingTalk is configured
+	// (MULTICA_DINGTALK_SECRET_KEY set).
+	DingTalkBindingTokens *dingtalk.BindingTokenService
+	cfg                   Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
