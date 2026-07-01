@@ -21,13 +21,13 @@ import (
 // change it without also updating those consumers.
 const openclawNoParseableOutput = "openclaw returned no parseable output"
 
-// minOpenclawVersion is the lowest openclaw version that emits its
+// minOpenclawVersion is the lowest openclaw version known to emit its
 // --json result on stdout. PR #2101 swapped the adapter from reading
 // stderr to stdout; older builds wrote JSON to stderr and now appear
 // to silently produce no output. The check in Execute fails fast with
 // a hardcoded upgrade hint so users see an actionable message instead
 // of "openclaw returned no parseable output".
-const minOpenclawVersion = "2026.5.5"
+const minOpenclawVersion = "2026.5.4"
 
 // openclawVersionPattern extracts a three-segment dotted version from
 // arbitrary `openclaw --version` output (e.g. "openclaw 2026.5.5",
@@ -301,8 +301,9 @@ type openclawEventResult struct {
 // log overflow and is captured separately by the caller. The stream may
 // contain:
 //
-//   - A final result JSON (with payloads + meta) — the format openclaw 2026.5.x
-//     emits today, typically pretty-printed across many lines
+//   - A final result JSON — either the legacy payloads/meta shape or the
+//     wrapped OpenClaw 2026.5 result shape, typically pretty-printed across
+//     many lines
 //   - NDJSON streaming events (type: "text", "tool_use", "tool_result", "error",
 //     "step_start", "step_finish") — supported for forward compatibility and
 //     other backends sharing this code path; openclaw does not emit these today
@@ -417,7 +418,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 			continue
 		}
 
-		// Try parsing as a final result blob (legacy format).
+		// Try parsing as a final result blob.
 		if result, ok := tryParseOpenclawResult(line); ok {
 			gotEvents = true
 			res := b.buildOpenclawEventResult(result, ch, &output)
@@ -452,6 +453,9 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 	if !gotEvents {
 		trimmed := strings.TrimSpace(strings.Join(rawLines, "\n"))
 		if trimmed != "" {
+			if strings.HasPrefix(trimmed, "{") {
+				return openclawEventResult{status: "failed", errMsg: openclawNoParseableOutput}
+			}
 			return openclawEventResult{status: "completed", output: trimmed}
 		}
 		return openclawEventResult{
@@ -493,7 +497,7 @@ func parseWholeBufferOpenclawResult(buf []byte) (openclawResult, bool) {
 	for i, line := range lines {
 		if len(line) > 0 && line[0] == '{' {
 			candidate := strings.TrimSpace(strings.Join(lines[i:], "\n"))
-			if result, ok := tryParseOpenclawResult(candidate); ok {
+			if result, ok := tryParseOpenclawResultPrefix(candidate); ok {
 				return result, true
 			}
 			return openclawResult{}, false
@@ -518,10 +522,11 @@ func tryParseOpenclawEvent(line string) (openclawEvent, bool) {
 	return event, true
 }
 
-// tryParseOpenclawResult attempts to parse a line as a final result blob
-// (the legacy format with payloads + meta). Lines must start with '{' to be
-// considered — we no longer scan for braces at arbitrary positions, which
-// avoids false matches on log lines containing JSON fragments.
+// tryParseOpenclawResult attempts to parse a line as a final result blob. It
+// accepts the legacy format with payloads + meta and the OpenClaw 2026.5
+// wrapper shape with result.payloads + result.meta. Lines must start with '{'
+// to be considered — we no longer scan for braces at arbitrary positions,
+// which avoids false matches on log lines containing JSON fragments.
 func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 	if len(raw) == 0 || raw[0] != '{' {
 		return openclawResult{}, false
@@ -530,10 +535,36 @@ func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		return openclawResult{}, false
 	}
-	if result.Payloads == nil && result.Meta.DurationMs == 0 {
+	if isOpenclawResult(result) {
+		return result, true
+	}
+
+	var wrapped openclawWrappedResult
+	if err := json.Unmarshal([]byte(raw), &wrapped); err != nil {
 		return openclawResult{}, false
 	}
-	return result, true
+	if wrapped.Result == nil || !isOpenclawResult(*wrapped.Result) {
+		return openclawResult{}, false
+	}
+	return *wrapped.Result, true
+}
+
+// tryParseOpenclawResultPrefix parses the first JSON object in raw as an
+// OpenClaw result. This handles pretty-printed results followed by diagnostics.
+func tryParseOpenclawResultPrefix(raw string) (openclawResult, bool) {
+	if len(raw) == 0 || raw[0] != '{' {
+		return openclawResult{}, false
+	}
+	var first json.RawMessage
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	if err := decoder.Decode(&first); err != nil {
+		return openclawResult{}, false
+	}
+	return tryParseOpenclawResult(string(first))
+}
+
+func isOpenclawResult(result openclawResult) bool {
+	return result.Payloads != nil || result.Meta.DurationMs != 0 || result.Meta.AgentMeta != nil
 }
 
 // buildOpenclawEventResult extracts text and metadata from a final result blob.
@@ -549,6 +580,9 @@ func (b *openclawBackend) buildOpenclawEventResult(result openclawResult, ch cha
 	var sessionID string
 	var model string
 	var usage TokenUsage
+	if result.Meta.SessionID != "" {
+		sessionID = result.Meta.SessionID
+	}
 	if result.Meta.AgentMeta != nil {
 		if sid, ok := result.Meta.AgentMeta["sessionId"].(string); ok {
 			sessionID = sid
@@ -692,11 +726,18 @@ type openclawResult struct {
 	Meta     openclawMeta      `json:"meta"`
 }
 
+type openclawWrappedResult struct {
+	RunID  string          `json:"runId"`
+	Status string          `json:"status"`
+	Result *openclawResult `json:"result"`
+}
+
 type openclawPayload struct {
 	Text string `json:"text"`
 }
 
 type openclawMeta struct {
 	DurationMs int64          `json:"durationMs"`
+	SessionID  string         `json:"sessionId"`
 	AgentMeta  map[string]any `json:"agentMeta"`
 }
