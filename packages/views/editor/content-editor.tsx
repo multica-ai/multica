@@ -54,6 +54,7 @@ import type { MentionItem } from "./extensions/mention-suggestion";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { clampSelectionToText } from "./utils/restore-selection";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
@@ -219,6 +220,17 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     >(undefined);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
+    // The exact preprocessed markdown last handed to the parser — seeded at
+    // mount in `onCreate`, then advanced whenever the sync effect re-parses.
+    // Re-applying the identical input only rebuilds the same document and
+    // disturbs the caret; comparing on the parser INPUT (not the serialized
+    // output) makes the short-circuit robust to markdown whose round-trip
+    // isn't byte-identical, e.g. an ordered list (`1. `). This is what stopped
+    // the "type `1.`, switch issues, come back, caret jumps off the list item"
+    // bug: the comment box remounts, the effect saw the redrawn draft as
+    // "changed", re-parsed it, and the caret got clamped onto the list's
+    // structural gap.
+    const appliedIncomingRef = useRef<string | null>(null);
 
     // In-session record of attachments freshly uploaded through this editor.
     // Surfaces (like the quick-create modal) that don't have a server-supplied
@@ -326,6 +338,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           }
         }
         lastEmittedRef.current = normalizeEditorMarkdown(ed);
+        appliedIncomingRef.current = initialContent;
       },
       content: mountChunked ? "" : initialContent,
       contentType: mountChunked
@@ -441,6 +454,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       if (isDirty) return;
 
       const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
+      // Guard 2.5: the editor already holds the parse of this exact input
+      // (from mount, or a previous run of this effect). Re-parsing produces an
+      // identical document and only serves to move the caret — skip it. Unlike
+      // Guard 3 below this compares the parser INPUT, so an ordered-list draft
+      // whose serialization isn't byte-identical to its source (which slips
+      // past the normalized-markdown check) still short-circuits here.
+      if (incoming === appliedIncomingRef.current) return;
       const incomingNormalized = normalizeMarkdown(incoming);
       // Guard 3: normalized-equal short-circuit. Avoids a no-op transaction
       // when the cache reflects a write this same editor just emitted.
@@ -467,14 +487,18 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         });
       }
 
-      // Clamp prior selection to the new doc size so the caret doesn't snap
-      // to position 0 after ProseMirror replaces the document.
-      const docSize = editor.state.doc.content.size;
-      editor.commands.setTextSelection({
-        from: Math.min(from, docSize),
-        to: Math.min(to, docSize),
-      });
+      // Restore the caret after ProseMirror replaced the document. Snap the
+      // prior offsets to the nearest VALID text positions instead of a bare
+      // `Math.min` clamp — a clamped offset can resolve onto a structural
+      // (non-text) boundary such as the gap before a list's first item, where
+      // the caret visibly jumps to the next line. See clampSelectionToText.
+      editor.view.dispatch(
+        editor.state.tr.setSelection(
+          clampSelectionToText(editor.state.doc, from, to),
+        ),
+      );
 
+      appliedIncomingRef.current = incoming;
       lastEmittedRef.current = normalizeEditorMarkdown(editor);
     }, [defaultValue, editor]);
 

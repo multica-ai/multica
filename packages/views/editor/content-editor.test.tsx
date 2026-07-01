@@ -42,6 +42,13 @@ vi.mock("./utils/preprocess", () => ({
   preprocessMarkdown: (value: string) => value,
 }));
 
+// The real caret-restore logic needs a live ProseMirror doc (covered by
+// restore-selection.test.ts). Here we only care that the sync effect reaches
+// the dispatch, so return a sentinel selection.
+vi.mock("./utils/restore-selection", () => ({
+  clampSelectionToText: vi.fn(() => ({ __selection: true })),
+}));
+
 vi.mock("./bubble-menu", () => ({
   EditorBubbleMenu: () => null,
 }));
@@ -86,6 +93,7 @@ vi.mock("@tiptap/react", () => ({
           setTextSelection: mockSetTextSelection,
         },
         getMarkdown: () => editorState.markdown,
+        view: { dispatch: vi.fn() },
         state: {
           doc: {
             content: { size: 0 },
@@ -96,6 +104,14 @@ vi.mock("@tiptap/react", () => ({
             },
           },
           selection: { empty: true, from: 0, to: 0 },
+          // Minimal chainable transaction stub: the content-sync effect calls
+          // `editor.state.tr.setSelection(...)` then hands the result to
+          // `view.dispatch`. Real selection math lives in restore-selection.ts.
+          tr: {
+            setSelection() {
+              return this;
+            },
+          },
         },
       };
     }
@@ -113,6 +129,7 @@ vi.mock("@tiptap/react", () => ({
 }));
 
 import { ContentEditor, type ContentEditorRef } from "./content-editor";
+import { clampSelectionToText } from "./utils/restore-selection";
 
 describe("ContentEditor", () => {
   beforeEach(() => {
@@ -240,6 +257,21 @@ describe("ContentEditor", () => {
     );
 
     expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("does not re-parse or move the caret on remount when the draft's markdown round-trip isn't byte-identical (ordered-list cursor bug)", () => {
+    // RAS-27: the comment box remounts on issue switch and feeds the persisted
+    // draft back as defaultValue. The editor mounts from that draft, but
+    // @tiptap/markdown reserializes an ordered list slightly differently from
+    // its source (here, an extra space). The normalized-markdown guard alone
+    // treats that as an external change and re-parses — clamping the caret onto
+    // the list's structural gap (caret "jumps to the second line"). The
+    // parser-input guard must short-circuit instead: no setContent, no caret move.
+    editorState.markdown = "1.  buy milk"; // reserialized: differs from source
+    render(<ContentEditor defaultValue="1. buy milk" />);
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+    expect(clampSelectionToText).not.toHaveBeenCalled();
   });
 
   it("does not sync when defaultValue normalizes to the current editor markdown", () => {
