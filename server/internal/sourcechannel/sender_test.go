@@ -33,8 +33,8 @@ func recordingClient(t *testing.T, got chan<- Report) *http.Client {
 			if req.Method != http.MethodPost {
 				t.Errorf("method: want POST, got %s", req.Method)
 			}
-			if req.URL.String() != sourceChannelReportAPIURL+ReportPath {
-				t.Errorf("url: want %s, got %s", sourceChannelReportAPIURL+ReportPath, req.URL.String())
+			if req.URL.String() != OfficialMulticaAPIURL+ReportPath {
+				t.Errorf("url: want %s, got %s", OfficialMulticaAPIURL+ReportPath, req.URL.String())
 			}
 			var payload Report
 			if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
