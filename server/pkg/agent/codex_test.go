@@ -1932,6 +1932,21 @@ func TestWithAgentStderrAppendsHint(t *testing.T) {
 	}
 }
 
+func TestBuildCodexArgsLetsToolSubprocessesInheritDaemonEnv(t *testing.T) {
+	args := buildCodexArgs(ExecOptions{
+		CustomArgs: []string{"-c", `shell_environment_policy.include_only=["PATH"]`},
+	}, slog.Default())
+	if len(args) < 5 {
+		t.Fatalf("args too short: %v", args)
+	}
+	if args[0] != "app-server" || args[1] != "--listen" || args[2] != "stdio://" {
+		t.Fatalf("expected app-server stdio prefix, got %v", args)
+	}
+	if args[len(args)-2] != "-c" || args[len(args)-1] != "shell_environment_policy.inherit=all" {
+		t.Fatalf("expected daemon env inheritance override at the end, got %v", args)
+	}
+}
+
 func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 	args := buildCodexArgs(ExecOptions{
 		ExtraArgs:  []string{"--listen", "tcp://evil", "--sandbox", "read-only"},
