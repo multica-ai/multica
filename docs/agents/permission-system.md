@@ -125,6 +125,24 @@ MCP surface adds an endpoint that should be callable by gateway agents, add the
 matching proxy entry in `server/internal/cerebro/runtime/customer_service_mcp_tools.go`
 and cover the name in `TestCustomerServiceMCPToolsAreRegisteredAndInMetadata`.
 
+**API-connection tool argument shape (FIR-2441).** An `api`-type connection tool
+(exposed under the default-off `cerebro_api_connection_tools` flag, row 2b) takes
+a fixed argument shape: **path** parameters at the **top level**, **query**
+parameters inside a **`query`** object, and the request **body** inside
+**`body`**. Passing query parameters at the top level instead of inside `query`
+silently drops them and the call fails. This shape is stated to the agent up
+front in its first prompt — both the local brief
+(`server/internal/daemon/execenv/cerebro_tools_brief.go`) and the cloud gateway
+system prompt (`runtime/firtal_gateway_executor.go`) — from ONE shared constant,
+`connmeta.APIConnectionArgHint` (`server/internal/cerebro/connmeta/argform.go`),
+re-exported as `runtime.APIConnectionArgHint`, so the local and cloud prompts
+cannot drift on it (guarded by tests on both surfaces). See
+`docs/agents/agent-tool-brief.md` for the render path. When an agent has **zero**
+connection tools, the same brief now states that explicitly and points at the
+read-only `multica_connection_tools_status` diagnostic, so silence is never
+mistaken for a docs/tools load failure. This is documentation of an existing
+tool's argument contract, not a permission gate.
+
 Relevant files: `runtime/approval_gate.go` (`approvalGateEnvEnabled`, `BuildApprovalGate`, `toolCapabilityKey`), `permissions/resolver.go`, `permgate/permgate.go`, `packages/cerebro-feature-flags/registry.ts`.
 
 Note: the resolver is also consulted live by the **credentials** policy (row 1
