@@ -404,10 +404,12 @@ RETURNING *;
 -- name: CompleteOrReclaimAgentTask :one
 -- Dedicated interface for long-running task completion. Allows reclaiming a task
 -- that was prematurely marked failed by background sweepers due to network jitter
--- or liveness timeouts (e.g. runtime_offline, timeout, runtime_recovery, queued_expired).
+-- or liveness timeouts (e.g. runtime_offline, timeout, runtime_recovery).
+-- queued_expired is intentionally excluded: a task that expired in the queue was
+-- never dispatched, so no daemon can hold a pending terminal report for it.
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2, session_id = $3, work_dir = $4, prepare_lease_expires_at = NULL, error = NULL, failure_reason = NULL
-WHERE id = $1 AND (status = 'running' OR (status = 'failed' AND failure_reason IN ('runtime_offline', 'timeout', 'runtime_recovery', 'queued_expired')))
+WHERE id = $1 AND (status = 'running' OR (status = 'failed' AND failure_reason IN ('runtime_offline', 'timeout', 'runtime_recovery')))
 RETURNING *;
 
 -- name: GetLastTaskSession :one
@@ -493,7 +495,9 @@ RETURNING *;
 -- name: FailOrReclaimAgentTask :one
 -- Dedicated interface for long-running task failure reporting. Allows reclaiming a task
 -- that was prematurely marked failed by background sweepers due to network jitter
--- or liveness timeouts (e.g. runtime_offline, timeout, runtime_recovery, queued_expired).
+-- or liveness timeouts (e.g. runtime_offline, timeout, runtime_recovery).
+-- queued_expired is intentionally excluded: a task that expired in the queue was
+-- never dispatched, so no daemon can hold a pending terminal report for it.
 UPDATE agent_task_queue
 SET status = 'failed',
     completed_at = now(),
@@ -502,7 +506,7 @@ SET status = 'failed',
     session_id = COALESCE(sqlc.narg('session_id'), session_id),
     work_dir = COALESCE(sqlc.narg('work_dir'), work_dir),
     prepare_lease_expires_at = NULL
-WHERE id = $1 AND (status IN ('dispatched', 'running', 'waiting_local_directory') OR (status = 'failed' AND failure_reason IN ('runtime_offline', 'timeout', 'runtime_recovery', 'queued_expired')))
+WHERE id = $1 AND (status IN ('dispatched', 'running', 'waiting_local_directory') OR (status = 'failed' AND failure_reason IN ('runtime_offline', 'timeout', 'runtime_recovery')))
 RETURNING *;
 
 -- name: UpdateAgentTaskSession :exec
@@ -796,6 +800,26 @@ ORDER BY created_at DESC;
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: CancelActiveRetryChildrenByParent :many
+-- Cancels active retry children spawned from a parent task that was prematurely
+-- marked failed by a sweeper. Called when the parent task is reclaimed by a
+-- late terminal report from the daemon, so the retry child doesn't produce
+-- duplicate output or comments. Only cancels immediate children (grandchildren
+-- are handled transitively if the child itself is cancelled before failing).
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+WHERE parent_task_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING *;
+
+-- name: HasCompletedRetryChildByParent :one
+-- Returns true if a retry child for the given parent has already reached a
+-- terminal completed state. Used by the reclaim path to decide whether the
+-- late parent report should be accepted: if a retry child already completed
+-- successfully, the child's result is authoritative and the parent reclaim
+-- must be rejected to avoid two competing terminal results.
+SELECT count(*) > 0 AS has_completed FROM agent_task_queue
+WHERE parent_task_id = $1 AND status = 'completed';
 
 -- name: RefreshAgentStatusFromTasks :one
 UPDATE agent AS a

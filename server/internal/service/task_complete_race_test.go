@@ -32,6 +32,7 @@ func (r *mockRow) Scan(dest ...any) error {
 		&t.Attempt, &t.MaxAttempts, &t.ParentTaskID, &t.FailureReason,
 		&t.TriggerSummary, &t.ForceFreshSession, &t.IsLeaderTask,
 		&t.WaitReason, &t.InitiatorUserID, &t.HandoffNote, &t.PrepareLeaseExpiresAt,
+		&t.SquadID, &t.EscalationForTaskID, &t.FireAt,
 	}
 	for i, p := range ptrs {
 		if i >= len(dest) {
@@ -61,15 +62,48 @@ func (r *mockRow) Scan(dest ...any) error {
 // mockDBTX routes QueryRow calls: complete/fail queries return ErrNoRows unless reclaimable,
 // getAgentTask returns the stored task.
 type mockDBTX struct {
-	task db.AgentTaskQueue
+	task                db.AgentTaskQueue
+	retryChildren       []db.AgentTaskQueue
+	completedRetryChild bool
 }
 
 func (m *mockDBTX) Exec(_ context.Context, _ string, _ ...interface{}) (pgconn.CommandTag, error) {
 	return pgconn.NewCommandTag(""), nil
 }
 
-func (m *mockDBTX) Query(_ context.Context, _ string, _ ...interface{}) (pgx.Rows, error) {
-	return nil, pgx.ErrNoRows
+type mockRows struct {
+	tasks []db.AgentTaskQueue
+	idx   int
+}
+
+func (r *mockRows) Close()                                                {}
+func (r *mockRows) Err() error                                            { return nil }
+func (r *mockRows) CommandTag() pgconn.CommandTag                         { return pgconn.NewCommandTag("") }
+func (r *mockRows) FieldDescriptions() []pgconn.FieldDescription          { return nil }
+func (r *mockRows) Next() bool {
+	if r.idx < len(r.tasks) {
+		r.idx++
+		return true
+	}
+	return false
+}
+func (r *mockRows) Scan(dest ...any) error {
+	t := &r.tasks[r.idx-1]
+	row := &mockRow{task: t}
+	return row.Scan(dest...)
+}
+func (r *mockRows) Values() ([]any, error) { return nil, nil }
+func (r *mockRows) RawValues() [][]byte    { return nil }
+func (r *mockRows) Conn() *pgx.Conn        { return nil }
+
+func (m *mockDBTX) Query(_ context.Context, sql string, _ ...interface{}) (pgx.Rows, error) {
+	if strings.Contains(sql, "parent_task_id = $1") && strings.Contains(sql, "SET status = 'cancelled'") {
+		for i := range m.retryChildren {
+			m.retryChildren[i].Status = "cancelled"
+		}
+		return &mockRows{tasks: m.retryChildren}, nil
+	}
+	return &mockRows{}, nil
 }
 
 
@@ -115,6 +149,9 @@ func (m *mockDBTX) QueryRow(_ context.Context, sql string, args ...interface{}) 
 	if strings.Contains(sql, "UPDATE agent AS a") {
 		return &mockAgentRow{}
 	}
+	if strings.Contains(sql, "HasCompletedRetryChildByParent") {
+		return &mockBoolRow{val: m.completedRetryChild}
+	}
 	if strings.Contains(sql, "SELECT count(*) > 0") || strings.Contains(sql, "HasSquadLeaderNoActionEvaluationForTask") || strings.Contains(sql, "HasAgentCommentedSince") {
 		return &mockBoolRow{val: false}
 	}
@@ -123,7 +160,7 @@ func (m *mockDBTX) QueryRow(_ context.Context, sql string, args ...interface{}) 
 	}
 	if strings.Contains(sql, "SET status = 'completed'") {
 		canReclaim := m.task.Status == "running" ||
-			(strings.Contains(sql, "status = 'failed'") && m.task.Status == "failed" && (m.task.FailureReason.String == "runtime_offline" || m.task.FailureReason.String == "timeout" || m.task.FailureReason.String == "runtime_recovery" || m.task.FailureReason.String == "queued_expired"))
+			(strings.Contains(sql, "status = 'failed'") && m.task.Status == "failed" && (m.task.FailureReason.String == "runtime_offline" || m.task.FailureReason.String == "timeout" || m.task.FailureReason.String == "runtime_recovery"))
 		if !canReclaim {
 			return &mockRow{err: pgx.ErrNoRows}
 		}
@@ -139,7 +176,7 @@ func (m *mockDBTX) QueryRow(_ context.Context, sql string, args ...interface{}) 
 	}
 	if strings.Contains(sql, "SET status = 'failed'") {
 		canReclaim := m.task.Status == "dispatched" || m.task.Status == "running" || m.task.Status == "waiting_local_directory" ||
-			(strings.Contains(sql, "status = 'failed'") && m.task.Status == "failed" && (m.task.FailureReason.String == "runtime_offline" || m.task.FailureReason.String == "timeout" || m.task.FailureReason.String == "runtime_recovery" || m.task.FailureReason.String == "queued_expired"))
+			(strings.Contains(sql, "status = 'failed'") && m.task.Status == "failed" && (m.task.FailureReason.String == "runtime_offline" || m.task.FailureReason.String == "timeout" || m.task.FailureReason.String == "runtime_recovery"))
 		if !canReclaim {
 			return &mockRow{err: pgx.ErrNoRows}
 		}
@@ -218,7 +255,7 @@ func TestCompleteTask_ReclaimOfflineFailure(t *testing.T) {
 	taskID := testUUID(1)
 	agentID := testUUID(2)
 
-	reclaimableReasons := []string{"runtime_offline", "timeout", "runtime_recovery", "queued_expired"}
+	reclaimableReasons := []string{"runtime_offline", "timeout", "runtime_recovery"}
 
 	for _, reason := range reclaimableReasons {
 		t.Run("reclaim_"+reason, func(t *testing.T) {
@@ -366,3 +403,92 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		})
 	}
 }
+
+func TestCompleteTask_ReclaimCancelsRetryChild(t *testing.T) {
+	taskID := testUUID(1)
+	agentID := testUUID(2)
+	childTaskID := testUUID(4)
+
+	parent := db.AgentTaskQueue{
+		ID:            taskID,
+		AgentID:       agentID,
+		Status:        "failed",
+		Error:         pgtype.Text{String: "task timed out", Valid: true},
+		FailureReason: pgtype.Text{String: "timeout", Valid: true},
+	}
+	child := db.AgentTaskQueue{
+		ID:           childTaskID,
+		AgentID:      agentID,
+		Status:       "running",
+		ParentTaskID: taskID,
+		Context:      []byte(`{"type": "quick_create", "workspace_id": "ws-1"}`),
+	}
+
+	mock := &mockDBTX{
+		task:          parent,
+		retryChildren: []db.AgentTaskQueue{child},
+	}
+	bus := events.New()
+	var cancelledEvents []events.Event
+	bus.Subscribe("task:cancelled", func(e events.Event) {
+		cancelledEvents = append(cancelledEvents, e)
+	})
+
+	svc := &TaskService{
+		Queries: db.New(mock),
+		Bus:     bus,
+	}
+
+	resultPayload := []byte(`{"output": "late success output"}`)
+	got, err := svc.CompleteTask(context.Background(), taskID, resultPayload, "sess-123", "/work/dir")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected task, got nil")
+	}
+	if got.Status != "completed" {
+		t.Errorf("expected parent status 'completed', got %q", got.Status)
+	}
+	if len(mock.retryChildren) != 1 || mock.retryChildren[0].Status != "cancelled" {
+		t.Errorf("expected retry child status to be 'cancelled', got %v", mock.retryChildren)
+	}
+	if len(cancelledEvents) != 1 {
+		t.Errorf("expected 1 task:cancelled event broadcast, got %d", len(cancelledEvents))
+	}
+}
+
+func TestCompleteTask_ReclaimRejectedIfRetryChildCompleted(t *testing.T) {
+	taskID := testUUID(1)
+	agentID := testUUID(2)
+
+	parent := db.AgentTaskQueue{
+		ID:            taskID,
+		AgentID:       agentID,
+		Status:        "failed",
+		Error:         pgtype.Text{String: "task timed out", Valid: true},
+		FailureReason: pgtype.Text{String: "timeout", Valid: true},
+	}
+
+	mock := &mockDBTX{
+		task:                parent,
+		completedRetryChild: true,
+	}
+	svc := &TaskService{
+		Queries: db.New(mock),
+		Bus:     events.New(),
+	}
+
+	resultPayload := []byte(`{"output": "late success output"}`)
+	got, err := svc.CompleteTask(context.Background(), taskID, resultPayload, "sess-123", "/work/dir")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected task, got nil")
+	}
+	if got.Status != "failed" {
+		t.Errorf("expected parent status to remain 'failed' when retry child completed, got %q", got.Status)
+	}
+}
+
