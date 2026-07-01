@@ -147,6 +147,32 @@ func TestExplicitWorkSessionID_Required(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(mcp-attachment-read-tools): regression coverage for gateway attachment read MCP tools.
+func TestAttachmentReadTools_EndToEnd(t *testing.T) {
+	mock := newMultiicaMock(t)
+	defer mock.Close()
+
+	srv := mcp.NewServer("multica", "test")
+	client := cli.NewAPIClient(mock.URL, "ws-test", "token-test")
+	var sessionState clitools.SessionState
+	clitools.RegisterTools(srv, client, &sessionState, "ws-test", "proj-test", "")
+
+	ctx := context.Background()
+	listed := callTool(t, srv, ctx, "list_attachments", map[string]any{
+		"issue_id": "issue-with-file",
+	})
+	if !strings.Contains(listed, "test-attachment.csv") || !strings.Contains(listed, "att-1") {
+		t.Fatalf("list_attachments did not return attachment metadata: %s", listed)
+	}
+
+	text := callTool(t, srv, ctx, "read_attachment", map[string]any{
+		"attachment_id": "att-1",
+	})
+	if text != "sku,qty\nABC,2\n" {
+		t.Fatalf("read_attachment text = %q, want CSV text", text)
+	}
+}
+
 // callTool invokes a tool by name and returns the concatenated text content
 // of the result (or fails the test on error / IsError).
 func callTool(t *testing.T, srv *mcp.Server, ctx context.Context, name string, args map[string]any) string {
@@ -238,6 +264,19 @@ func (m *multicaMock) handle(w http.ResponseWriter, r *http.Request) {
 
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/projects/"):
 		writeJSON(w, map[string]any{"title": "Test Project"})
+
+	case r.Method == http.MethodGet && r.URL.Path == "/api/issues/issue-with-file/attachments":
+		writeJSON(w, []map[string]any{{
+			"id":           "att-1",
+			"filename":     "test-attachment.csv",
+			"content_type": "text/csv",
+			"size_bytes":   14,
+			"download_url": "/api/attachments/att-1/download",
+		}})
+
+	case r.Method == http.MethodGet && r.URL.Path == "/api/attachments/att-1/content":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("sku,qty\nABC,2\n"))
 
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/"):
 		// e.g. /api/issues/issue-parent

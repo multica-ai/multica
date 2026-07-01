@@ -1635,6 +1635,14 @@
       "gate": "via:POST /api/issues/{id}/comments"
     },
     {
+      "id": "list_attachments",
+      "exempt": "read-only — GET endpoints carry their own auth, no mutation"
+    },
+    {
+      "id": "read_attachment",
+      "exempt": "read-only — wraps GET /api/attachments/{id}/content"
+    },
+    {
       "id": "multica_connection_tools_status",
       "exempt": "read-only diagnostic — reports whether api-connection tools loaded and how many; no API mutation, no secrets in output (FIR-2388)"
     },

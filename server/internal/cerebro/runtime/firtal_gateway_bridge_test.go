@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/clitools"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/mcp"
 )
@@ -144,6 +145,53 @@ func TestBridge_SearchIssuesEndToEnd(t *testing.T) {
 	}
 }
 
+func TestBridge_AttachmentReadToolsEndToEnd(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/issue-with-file/attachments":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `[{"id":"att-1","filename":"test-attachment.csv","content_type":"text/csv","size_bytes":14}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/attachments/att-1/content":
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			_, _ = io.WriteString(w, "sku,qty\nABC,2\n")
+		default:
+			http.Error(w, "unexpected: "+r.Method+" "+r.URL.Path, http.StatusNotImplemented)
+		}
+	})
+
+	client := InProcessAPIClient(handler, "ws-uuid-456", "agent-uuid-123", "task-token-xyz", "task-uuid-789")
+	srv := mcp.NewServer("multica", "test")
+	var session clitools.SessionState
+	clitools.RegisterTools(srv, client, &session, "ws-uuid-456", "proj-uuid-123", "")
+
+	reg := NewRegistry(nil)
+	registerBuiltinTools(reg, nil, nil, ToolContext{})
+	RegisterBridgedMCPTools(reg, srv, DefaultInAppAdminDenylist(), true)
+
+	if !reg.hasTool("list_attachments") {
+		t.Fatal("list_attachments was not bridged into the gateway registry")
+	}
+	if !reg.hasTool("read_attachment") {
+		t.Fatal("read_attachment was not bridged into the gateway registry")
+	}
+
+	listed, err := reg.Call(context.Background(), "list_attachments", map[string]any{"issue_id": "issue-with-file"})
+	if err != nil {
+		t.Fatalf("list_attachments call failed: %v", err)
+	}
+	if !strings.Contains(listed, "test-attachment.csv") || !strings.Contains(listed, "att-1") {
+		t.Fatalf("list_attachments result missing attachment metadata: %q", listed)
+	}
+
+	text, err := reg.Call(context.Background(), "read_attachment", map[string]any{"attachment_id": "att-1"})
+	if err != nil {
+		t.Fatalf("read_attachment call failed: %v", err)
+	}
+	if text != "sku,qty\nABC,2\n" {
+		t.Fatalf("read_attachment text = %q, want CSV text", text)
+	}
+}
+
 // TestBridge_AdminDenylistShape guards the product boundary: read tools stay
 // allowed, write/admin tools stay denied.
 func TestBridge_AdminDenylistShape(t *testing.T) {
@@ -164,7 +212,7 @@ func TestBridge_AdminDenylistShape(t *testing.T) {
 	mustAllow := []string{
 		"search_issues", "skill_list", "skill_get", "list_groups",
 		"create_artifact", "schedule_wakeup", "list_wakeups",
-		"add_attachment",
+		"add_attachment", "list_attachments", "read_attachment",
 	}
 	for _, name := range mustAllow {
 		if deny[name] {

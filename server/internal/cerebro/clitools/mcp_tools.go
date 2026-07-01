@@ -98,6 +98,7 @@ func optBool(args map[string]any, key string, defaultVal bool) bool {
 
 func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState, workspaceID, projectID, gitRoot string) {
 	registerArtifactTools(srv, client)
+	registerAttachmentReadTools(srv, client)
 	// CEREBRO-PATCH(cerebro-groups-mcp): JEH-1172 register group MCP tools.
 	registerCerebroGroupTools(srv, client)
 	// CEREBRO-PATCH(mcp-agent-capabilities): TECH-3642 per-agent capabilities card MCP tool.
