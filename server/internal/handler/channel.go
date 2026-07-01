@@ -142,7 +142,7 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 			// CEREBRO-PATCH(channel-create-dm-unarchive): JEH-1046 — explicit
 			// DM reopen is a re-surface signal. No-op when not archived.
 			if h.ChannelListen != nil {
-				h.ChannelListen.MaybeUnarchiveForUser(r.Context(), existing.ID, parseUUID(userID), workspaceID, "member", userID)
+				h.ChannelListen.MaybeUnarchiveForUser(r.Context(), existing.ID, parseUUID(userID), workspaceID, "member", userID, "") // CEREBRO-PATCH(channel-create-dm-unarchive): FIR-2321 diagnostics param, no trigger notif here
 			}
 			resp := h.channelToResponse(r.Context(), existing, userID)
 			writeJSON(w, http.StatusOK, resp)

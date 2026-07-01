@@ -439,7 +439,10 @@ func (s *Service) registerArchiveResurfaceListener() {
 		if err != nil {
 			return
 		}
-		s.MaybeUnarchiveForUser(context.Background(), channelID, recipientID, e.WorkspaceID, e.ActorType, e.ActorID)
+		// FIR-2321 (diagnostics) — carry the triggering notification's type
+		// through so a re-surface can be tied back to what actually caused it.
+		notifType, _ := item["type"].(string)
+		s.MaybeUnarchiveForUser(context.Background(), channelID, recipientID, e.WorkspaceID, e.ActorType, e.ActorID, notifType)
 	})
 }
 
@@ -448,10 +451,18 @@ func (s *Service) registerArchiveResurfaceListener() {
 // listener), or the user explicitly reopens the DM via the new-message modal
 // (JEH-1046). No-op for non-channel issues or when the user hasn't archived
 // the channel. Best-effort: failures are logged but never bubble.
+//
+// FIR-2321 (diagnostics) — triggerNotifType is the InboxItemType of the
+// inbox_item that caused this re-surface (empty when called from the
+// explicit-reopen path, which has no triggering notification). Logged on
+// every successful re-surface so a reported "came back with no visible
+// event" can be matched to the actual InboxItemType in the server logs
+// instead of guessed at.
 func (s *Service) MaybeUnarchiveForUser(
 	ctx context.Context,
 	channelID, userID pgtype.UUID,
 	workspaceID, actorType, actorID string,
+	triggerNotifType string,
 ) {
 	issue, err := s.Queries.GetIssue(ctx, channelID)
 	if err != nil {
@@ -471,6 +482,14 @@ func (s *Service) MaybeUnarchiveForUser(
 			"error", err)
 		return
 	}
+	// FIR-2321 (diagnostics) — this is the log line that answers "what made
+	// this come back": every successful re-surface, with the channel, the
+	// user it re-surfaced for, and the notification type that triggered it.
+	slog.Info("channel re-surfaced from archive",
+		"channel_id", util.UUIDToString(channelID),
+		"user_id", util.UUIDToString(userID),
+		"issue_kind", issue.Kind,
+		"trigger_notif_type", triggerNotifType)
 	userIDStr := util.UUIDToString(userID)
 	s.Bus.Publish(events.Event{
 		Type:        EventChannelUnarchived,
