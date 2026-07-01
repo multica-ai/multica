@@ -162,6 +162,26 @@ describe("SourceBackfillModal", () => {
     ).toBeChecked();
   });
 
+  it("does not show reporting controls on the official API URL", async () => {
+    setUser({
+      id: "u1",
+      onboarded_at: "2026-01-01T00:00:00Z",
+      onboarding_questionnaire: { source: [] },
+    });
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(await screen.findByText("Friends or colleagues"));
+
+    expect(
+      screen.queryByText(
+        "Help us understand how you heard about Multica. No extra information is sent.",
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("switch", { name: /allow sending domain/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("Submit PATCHes the merged questionnaire preserving role / use_case", async () => {
     setUser({
       id: "u1",

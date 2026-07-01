@@ -83,6 +83,22 @@ describe("StepSource (single-select primary source)", () => {
     ).toBeChecked();
   });
 
+  it("does not show reporting controls on the official API URL", () => {
+    renderStep({
+      ...EMPTY,
+      source: ["social_linkedin"],
+    });
+
+    expect(
+      screen.queryByText(
+        "Help us understand how you heard about Multica. No extra information is sent.",
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("switch", { name: /allow sending domain/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("lets the user disable plaintext domain reporting", async () => {
     setApiInstance(new ApiClient("https://api.customer.example"));
     const user = userEvent.setup();
