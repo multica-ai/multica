@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, CheckCircle2, ChevronRight, Loader2, RotateCcw, Square, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
@@ -259,6 +259,7 @@ export function ActiveTaskRow({
   issueId: string;
 }) {
   const { t } = useT("issues");
+  const queryClient = useQueryClient();
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
@@ -293,6 +294,8 @@ export function ActiveTaskRow({
       await api.cancelTask(issueId, task.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.cancel_failed));
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
       setCancelling(false);
     }
   };

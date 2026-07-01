@@ -230,6 +230,14 @@ export interface AgentTask {
   relative_work_dir?: string;
 }
 
+export type CancelTaskState = "cancelled" | "already_terminal";
+
+export interface CancelTaskResult {
+  task: AgentTask;
+  cancel_state: CancelTaskState;
+  message: string;
+}
+
 export interface Agent {
   id: string;
   workspace_id: string;

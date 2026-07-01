@@ -331,6 +331,12 @@ type AgentTaskResponse struct {
 	AuthToken string `json:"auth_token,omitempty"`
 }
 
+type CancelTaskResponse struct {
+	Task        AgentTaskResponse `json:"task"`
+	CancelState string            `json:"cancel_state"`
+	Message     string            `json:"message"`
+}
+
 // ChatAttachmentMeta is the structured attachment metadata embedded in
 // claim responses for chat tasks. The agent uses these to run
 // `multica attachment download <id>` rather than guessing from the
