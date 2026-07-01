@@ -575,6 +575,37 @@ WHERE t.id = v.id
   AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
 RETURNING t.*;
 
+-- name: CancelQueuedTasksForClosedIssues :many
+-- Cancels queued tasks whose linked issues are done or cancelled.
+-- This is the sweeper arm of the "linked issue closed but task still queued"
+-- fix (MYW-2121): it catches cases where the issue reached a terminal status
+-- through a path that did not cascade-cancel the task (e.g. API gap, race,
+-- historical backlog).  Tasks are marked cancelled with an audit failure_reason
+-- so they do not later expire as failed/queued_expired and pollute run stats.
+--
+-- Concurrency safety: FOR UPDATE SKIP LOCKED + re-check status='queued' on
+-- the outer UPDATE so a daemon claim racing in between selection and update
+-- is not clobbered.  Capped per tick so a large backlog cannot monopolise DB.
+WITH victims AS (
+    SELECT atq.id, i.status AS issue_status
+    FROM agent_task_queue atq
+    JOIN issue i ON i.id = atq.issue_id
+    WHERE atq.status = 'queued'
+      AND i.status IN ('done', 'cancelled')
+    ORDER BY atq.created_at ASC
+    LIMIT @max_per_tick::int
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE agent_task_queue t
+SET status = 'cancelled',
+    completed_at = now(),
+    failure_reason = 'issue_closed',
+    error = 'linked issue was ' || v.issue_status
+FROM victims v
+WHERE t.id = v.id
+  AND t.status = 'queued'
+RETURNING t.*;
+
 -- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
