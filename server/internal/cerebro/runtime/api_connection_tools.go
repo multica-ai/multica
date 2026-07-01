@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
+	"github.com/multica-ai/multica/server/internal/cerebro/connmeta"
 )
 
 // apiConnectionResolver builds the shared APIConnectionResolver from the
@@ -61,13 +62,11 @@ const apiConnectionResponseLimit = 1 << 20 // 1 MiB
 // pathParamRe matches a `{name}` path parameter placeholder in an endpoint path.
 var pathParamRe = regexp.MustCompile(`\{([^/{}]+)\}`)
 
-// APIConnectionArgHint is the argument-shape guidance for api-connection tools.
-// It is surfaced in the agent's first prompt — the cloud gateway system prompt
-// (firtal_gateway_executor.go) and the local claim brief (cerebro_tools_brief.go)
-// both use it — so an agent knows the shape at run start instead of calling once
-// and reading the error to discover the `query` object (FIR-2441). The two first
-// prompts must agree, so the wording lives here as the single source.
-const APIConnectionArgHint = "Some of your tools are **API connection tools** (server-side HTTP endpoints). They take a fixed argument shape: path parameters at the top level, query parameters inside a `query` object, and the request body inside `body`. Passing query parameters at the top level instead of inside `query` drops them and the call fails."
+// APIConnectionArgHint re-exports the single-source hint from connmeta so callers
+// in this package keep the short name. The canonical text lives in connmeta so the
+// cloud gateway (here) and the local claim brief (daemon/execenv) render byte-for-
+// byte the same argument-shape guidance in the first prompt (FIR-2441).
+const APIConnectionArgHint = connmeta.APIConnectionArgHint
 
 // registryHasAPIConnectionTool reports whether any of the named tools resolves,
 // in the registry, to an *APIConnectionTool. The cloud gateway uses it to decide

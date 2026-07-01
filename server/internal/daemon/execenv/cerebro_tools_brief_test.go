@@ -3,6 +3,8 @@ package execenv
 import (
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/connmeta"
 )
 
 func TestCerebroToolsBriefEmptyRendersNothing(t *testing.T) {
@@ -33,7 +35,9 @@ func TestCerebroToolsBriefGroupsAndOrders(t *testing.T) {
 		// FIR-2441: the first prompt must state the api-connection argument shape
 		// (path top-level, query params inside `query`, body inside `body`) so an
 		// agent never has to call-and-read-the-error to discover the `query` object.
-		"inside a `query` object",
+		// Assert the exact shared connmeta constant so the local brief and the cloud
+		// gateway system prompt render byte-for-byte the same rule (single source).
+		connmeta.APIConnectionArgHint,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected rendered brief to contain %q\n---\n%s", want, out)

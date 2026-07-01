@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/connmeta"
 )
 
 // ToolBriefEntry is one non-CLI tool the agent currently has, already resolved
@@ -91,7 +93,7 @@ func cerebroToolsBrief(entries []ToolBriefEntry) string { // CEREBRO-PATCH(cereb
 	var b strings.Builder
 	b.WriteString("### Connections & MCP tools (resolved live from your permissions)\n\n")
 	b.WriteString("Beyond the `multica` CLI commands above, these are the non-CLI tools you have **right now**. This list is built from your actual permissions when this task starts — if a tool is not listed, you do not have it, and if a permission is removed the tool disappears from here. The same Allow/Ask/Deny chain that decides this list also enforces every call, so the two can never disagree.\n\n")
-	b.WriteString("A **connection** is an external API or MCP server a workspace admin wired into this workspace (for example a customer-service backend or a data registry). Its tools show up below and you call them like any other tool. **MCP tools** are self-describing — read their schema for exact arguments. **API connection tools** (server-side HTTP endpoints, listed under **Connections**) take a fixed argument shape: path parameters at the top level, query parameters inside a `query` object, and the request body inside `body`. Passing query parameters at the top level instead of inside `query` drops them and the call fails — so you do not need to call once and read the error first. Tools marked `(ask)` pause for human approval when you call them.\n\n")
+	b.WriteString("A **connection** is an external API or MCP server a workspace admin wired into this workspace (for example a customer-service backend or a data registry). Its tools show up below and you call them like any other tool. **MCP tools** are self-describing — read their schema for exact arguments. " + connmeta.APIConnectionArgHint + " Tools marked `(ask)` pause for human approval when you call them.\n\n")
 
 	for _, fam := range fams {
 		list := byFamily[fam]
