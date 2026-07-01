@@ -165,9 +165,24 @@ func cursorProjectRoot(workDir string) string {
 		dir = workDir
 	}
 	fallback := dir
+	tmpRoot := os.TempDir()
+	if resolvedTmp, err := filepath.EvalSymlinks(tmpRoot); err == nil {
+		tmpRoot = resolvedTmp
+	}
+	if absTmp, err := filepath.Abs(tmpRoot); err == nil {
+		tmpRoot = absTmp
+	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return dir
+		// Test and scratch workdirs often live under os.TempDir. A stray
+		// /tmp/.git must not turn every temp workdir into one shared Cursor
+		// project and make managed .cursor/mcp.json collide globally.
+		if dir != tmpRoot {
+			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+				return dir
+			}
+		}
+		if dir == tmpRoot {
+			return fallback
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
