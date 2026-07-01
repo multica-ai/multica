@@ -16,6 +16,8 @@ jobs:
             target: linux
           - os: windows-latest
             target: win
+          - os: macos-latest
+            target: mac
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
