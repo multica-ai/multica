@@ -220,16 +220,18 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     >(undefined);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
-    // The exact preprocessed markdown last handed to the parser — seeded at
-    // mount in `onCreate`, then advanced whenever the sync effect re-parses.
-    // Re-applying the identical input only rebuilds the same document and
-    // disturbs the caret; comparing on the parser INPUT (not the serialized
-    // output) makes the short-circuit robust to markdown whose round-trip
-    // isn't byte-identical, e.g. an ordered list (`1. `). This is what stopped
-    // the "type `1.`, switch issues, come back, caret jumps off the list item"
-    // bug: the comment box remounts, the effect saw the redrawn draft as
-    // "changed", re-parsed it, and the caret got clamped onto the list's
-    // structural gap.
+    // The exact preprocessed markdown the editor's current document was built
+    // from — seeded synchronously at first render (below) and kept in step with
+    // the document thereafter: advanced whenever the sync effect re-parses AND
+    // whenever it confirms the editor already matches `incoming` (Guard 3), so
+    // it never lags behind what the editor actually holds. Re-applying the
+    // identical input only rebuilds the same document and disturbs the caret;
+    // comparing on the parser INPUT (not the serialized output) makes the
+    // short-circuit robust to markdown whose round-trip isn't byte-identical,
+    // e.g. an ordered list (`1. `). This is what stopped the "type `1.`, switch
+    // issues, come back, caret jumps off the list item" bug: the comment box
+    // remounts, the effect saw the redrawn draft as "changed", re-parsed it,
+    // and the caret got clamped onto the list's structural gap.
     const appliedIncomingRef = useRef<string | null>(null);
 
     // In-session record of attachments freshly uploaded through this editor.
@@ -310,6 +312,17 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const queryClient = useQueryClient();
 
     const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
+    // Seed the parser-input guard SYNCHRONOUSLY at first render. Tiptap v3's
+    // `onCreate` is deferred (fires a tick after `useEditor` first hands the
+    // component a non-null editor), so the content-sync effect can run before
+    // it — seeding there would leave the ref null on that first run and let a
+    // remount re-parse the draft anyway. `initialContent` is the exact input
+    // the editor mounts from, so recording it here keeps the mount and its
+    // first sync run consistent. Only the very first render seeds; later
+    // divergence is tracked by the effect itself.
+    if (appliedIncomingRef.current === null) {
+      appliedIncomingRef.current = initialContent;
+    }
     // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
@@ -338,7 +351,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           }
         }
         lastEmittedRef.current = normalizeEditorMarkdown(ed);
-        appliedIncomingRef.current = initialContent;
       },
       content: mountChunked ? "" : initialContent,
       contentType: mountChunked
@@ -463,8 +475,15 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       if (incoming === appliedIncomingRef.current) return;
       const incomingNormalized = normalizeMarkdown(incoming);
       // Guard 3: normalized-equal short-circuit. Avoids a no-op transaction
-      // when the cache reflects a write this same editor just emitted.
-      if (incomingNormalized === current) return;
+      // when the cache reflects a write this same editor just emitted. Record
+      // this input as the one the current document reflects, so a later
+      // external change back to an OLDER value (e.g. a collaborator reverts the
+      // description) isn't mistaken by Guard 2.5 for an already-applied input
+      // and swallowed.
+      if (incomingNormalized === current) {
+        appliedIncomingRef.current = incoming;
+        return;
+      }
 
       // Guard 4: `emitUpdate: false`. Tiptap v3's setContent defaults to
       // `emitUpdate: true`; without this we would re-trigger onUpdate →
