@@ -67,17 +67,29 @@ the tokens to read the files the answer cites, on any corpus. See
 
 ## firtal-cerebro specifics
 
-- **Generated output is git-ignored.** `graphify extract`/`update` writes a
-  `graphify-out/` directory (graph.json, graph.html, GRAPH_REPORT.md, cache).
-  It is in `.gitignore` — **do not commit it.** A graph is derived state; it
-  goes stale as code changes, so we rebuild on demand rather than version it.
-- **Rebuild before querying** if the checkout changed since the last build.
-  After a large refactor that deletes code, use `graphify update <path> --force`.
-- **This is a big monorepo.** Scope the build to the area you care about
-  (e.g. `graphify extract server/internal/cerebro --out .`) rather than the
-  whole repo when you only need one subsystem — faster and cheaper.
+- **The map is committed — query it, don't rebuild it.** `graphify-out/graph.json`
+  is versioned in the repo (unlike upstream graphify, where it is git-ignored), so
+  every agent gets it for free on checkout. Just query it:
+  `graphify query "<question>" --graph graphify-out/graph.json --budget 2000`.
+  No build, no LLM key, no wait.
+- **Scope: the cerebro fork surface.** The committed map covers
+  `server/internal/cerebro/`, all `packages/cerebro-*/`, and this skill —
+  scoped by `.graphifyignore` so the file stays small enough to version. It is a
+  code-only graph (Tree-sitter AST, no LLM clustering), so nodes carry
+  `file:line` but not named communities.
+- **CI keeps it fresh.** `.github/workflows/cerebro-graphify-map.yml` rebuilds and
+  commits the map on every merge to `main` that touches the mapped surface, so it
+  is never more than one merge stale.
+- **If you changed cerebro code in your branch**, the map is a moment behind for
+  *your* edits. Refresh it before querying — and before committing — with
+  `scripts/cerebro/build-graphify-map.sh` (build + deterministic normalize). This
+  is the only supported way to update the tracked map; a bare `graphify update .`
+  writes machine-specific absolute paths that must not be committed.
+- **Local-only artifacts.** `graphify-out/cache/` and `graphify-out/manifest.json`
+  stay git-ignored (per-machine); only `graph.json` is tracked.
 - **No telemetry.** Graphify's only outbound call is the optional semantic
-  step, which sends descriptions to your configured LLM, never raw source.
+  step, which sends descriptions to your configured LLM, never raw source. The
+  committed map is built code-only, so it makes no network calls at all.
 
 ## When NOT to use it
 

@@ -61,8 +61,10 @@ apps/web/test-results/
 # feature tracking
 _features/
 
-# graphify generated knowledge graph (derived state, rebuild on demand)
-graphify-out/
+# graphify code-map: the map itself (graph.json) is committed so every agent
+# gets it on checkout (see AGENTS.md); the local cache/ and manifest.json are not.
+graphify-out/*
+!graphify-out/graph.json
 
 # runtime
 *.pid

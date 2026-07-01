@@ -6,6 +6,8 @@ This file provides guidance to AI agents when working with code in this reposito
 > All authoritative architecture, coding rules, commands, and conventions
 > live in **CLAUDE.md** at the project root. Read that file first.
 
+> **Code-map:** a queryable map of the cerebro codebase is committed at `graphify-out/graph.json` — query it before grepping to learn how things connect (`graphify query "<question>" --graph graphify-out/graph.json`); if you changed cerebro code, refresh it with `scripts/cerebro/build-graphify-map.sh` (or `graphify update .`).
+
 ## Quick Reference
 
 ### Architecture

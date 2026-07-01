@@ -1,0 +1,65 @@
+name: Cerebro graphify map
+
+# Keeps the committed cerebro code-map (graphify-out/graph.json) fresh.
+#
+# Every agent gets the map for free on checkout — no local build, no LLM key —
+# so it must never be more than one merge stale. On each push to main that
+# touches the mapped cerebro surface, this rebuilds the map (offline, code-only,
+# Tree-sitter AST) and commits it back if it changed.
+#
+# Fork-safe: this is a cerebro-only workflow that touches exactly one path
+# (graphify-out/graph.json) via a cerebro-only script. It never edits upstream
+# code, so an upstream sync can drop it without conflict.
+#
+# The rebuild is deterministic across machines (scripts/cerebro/graphify-normalize.py),
+# so an unchanged surface produces an unchanged file and no commit is made.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/internal/cerebro/**"
+      - "packages/cerebro-*/**"
+      - ".agents/skills/graphify/**"
+      - ".graphifyignore"
+      - "scripts/cerebro/graphify-normalize.py"
+      - "scripts/cerebro/build-graphify-map.sh"
+      - ".github/workflows/cerebro-graphify-map.yml"
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild-map:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install graphify (pinned)
+        run: pip install "graphifyy==0.8.40"
+
+      - name: Rebuild the cerebro code-map
+        run: bash scripts/cerebro/build-graphify-map.sh
+
+      - name: Commit the map if it changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- graphify-out/graph.json; then
+            echo "Map unchanged — nothing to commit."
+            exit 0
+          fi
+          git config user.name "cerebro-bot"
+          git config user.email "cerebro-bot@firtal.com"
+          git add graphify-out/graph.json
+          git commit -m "chore(cerebro): refresh graphify code-map [skip ci]"
+          git push origin HEAD:main
