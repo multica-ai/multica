@@ -91,6 +91,8 @@ type Config struct {
 	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
 	GCArtifactTTL                  time.Duration         // when a task has been completed for at least this long but its issue is still open, drop regenerable artifacts (default: 12h, set 0 to disable)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
+	SkillTraceEnabled              bool                  // opt-in local JSONL skill behavior trace (default: false)
+	SkillTracePath                 string                // append-only JSONL target for skill trace events
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
 	PollInterval                   time.Duration
@@ -453,6 +455,12 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// Keep env after task: env > default (false)
 	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
 
+	skillTraceEnabled := envBool("MULTICA_SKILL_TRACE_ENABLED")
+	skillTracePath := strings.TrimSpace(os.Getenv("MULTICA_SKILL_TRACE_PATH"))
+	if skillTracePath == "" {
+		skillTracePath = filepath.Join(workspacesRoot, "skill-invocations.jsonl")
+	}
+
 	// GC config: env > defaults
 	gcEnabled := true
 	if v := os.Getenv("MULTICA_GC_ENABLED"); v == "false" || v == "0" {
@@ -521,6 +529,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCOrphanTTL:                    gcOrphanTTL,
 		GCArtifactTTL:                  gcArtifactTTL,
 		GCArtifactPatterns:             gcArtifactPatterns,
+		SkillTraceEnabled:              skillTraceEnabled,
+		SkillTracePath:                 skillTracePath,
 		AutoUpdateEnabled:              autoUpdateEnabled,
 		AutoUpdateCheckInterval:        autoUpdateInterval,
 		HealthPort:                     healthPort,
@@ -617,6 +627,15 @@ func ResolveWorkspacesRoot(profile, override string) (string, error) {
 // matches what the GC would actually reclaim.
 func ArtifactPatternsFromEnv() []string {
 	return patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", DefaultGCArtifactPatterns)
+}
+
+func envBool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // patternsFromEnv reads a comma-separated list from env. Patterns containing
