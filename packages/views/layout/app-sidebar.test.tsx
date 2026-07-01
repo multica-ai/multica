@@ -193,7 +193,11 @@ vi.mock("@multica/core/api", async (importOriginal) => {
     },
   };
 });
-vi.mock("@multica/core/inbox/queries", () => ({ deduplicateInboxItems: (items: unknown[]) => items, inboxKeys: { list: () => ["inbox"] } }));
+vi.mock("@multica/core/inbox/queries", () => ({
+  deduplicateInboxItems: (items: unknown[]) => items,
+  inboxKeys: { list: () => ["inbox"] },
+  inboxListOptions: () => ({ queryKey: ["inbox"] }),
+}));
 vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   useCreateModeStore: { getState: () => ({ lastMode: "agent" }) },
