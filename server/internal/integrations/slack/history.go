@@ -20,43 +20,38 @@ import (
 
 // ErrNoSlackSession reports that the chat session has no Slack channel binding —
 // it is a Feishu or web-only session. Callers surface it as an empty (not
-// failed) history read so the unified `multica chat history` command answers
-// gracefully on a non-Slack conversation.
+// failed) read so the unified `multica chat history` / `multica chat thread`
+// commands answer gracefully on a non-Slack conversation.
 var ErrNoSlackSession = errors.New("slack: session has no slack channel binding")
 
 const (
 	// defaultHistoryLimit is the page size used when the caller asks for none.
 	defaultHistoryLimit = 20
-	// maxHistoryLimit caps a single page. Slack's own conversations.* limit is
-	// far higher; we self-cap so a pull can't dump an unbounded transcript into
-	// the agent's context (mirrors the Feishu recent-context clamp).
+	// maxHistoryLimit caps a single page so a pull can't dump an unbounded
+	// transcript into the agent's context.
 	maxHistoryLimit = 50
 )
 
-// historyQueries is the slice of generated queries the history reader needs.
-// *db.Queries satisfies it. It mirrors outboundQueries: resolve the session's
-// Slack binding, then load the installation that owns the bot token.
+// historyQueries is the slice of generated queries the reader needs.
 type historyQueries interface {
 	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 }
 
 // historyClient is the slice of the slack-go Web API the reader calls. The real
-// *slack.Client satisfies it; tests inject a fake so the fetch/labeling logic is
-// exercised without a live Slack.
+// *slack.Client satisfies it; tests inject a fake.
 type historyClient interface {
 	GetConversationHistoryContext(ctx context.Context, params *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error)
 	GetConversationRepliesContext(ctx context.Context, params *slack.GetConversationRepliesParameters) ([]slack.Message, bool, string, error)
 	GetUsersInfoContext(ctx context.Context, users ...string) (*[]slack.User, error)
 }
 
-// History reads a Slack conversation's prior messages on demand — the pull half
-// of the unified `multica chat history` tool (MUL-3871). It mirrors Outbound:
-// given a chat_session it finds the Slack binding, decrypts the installation's
-// bot token, and calls conversations.replies (a real thread) or
-// conversations.history (DM / top-level channel context). Sessions with no
-// Slack binding return ErrNoSlackSession, so it coexists with Feishu sessions on
-// the shared endpoint.
+// History reads a Slack conversation on demand — the pull side of the unified
+// `multica chat history` (channel overview) and `multica chat thread [id]`
+// (one thread) commands (MUL-3871). Both are scoped to the session's OWN
+// channel: the channel is resolved server-side from the binding and never taken
+// from the agent, so a thread id is only a within-channel locator. Sessions with
+// no Slack binding return ErrNoSlackSession.
 type History struct {
 	q         historyQueries
 	decrypt   Decrypter
@@ -72,83 +67,147 @@ func NewHistory(q historyQueries, decrypt Decrypter, logger *slog.Logger) *Histo
 	}
 	h := &History{q: q, decrypt: decrypt, logger: logger}
 	h.newClient = func(botToken string) historyClient {
-		// Only the bot token is needed to read history; the app-level token is
-		// for the inbound Socket Mode connection (slack_channel.go).
+		// Only the bot token is needed to read; the app-level token is for the
+		// inbound Socket Mode connection (slack_channel.go).
 		return slack.New(botToken)
 	}
 	return h
 }
 
-// Fetch returns one normalized, oldest-first page of the session's Slack
-// conversation. It returns ErrNoSlackSession when the session is not Slack-bound
-// or its installation is inactive.
-func (h *History) Fetch(ctx context.Context, chatSessionID pgtype.UUID, opts channel.HistoryOptions) (channel.HistoryPage, error) {
+// slackTarget is the resolved per-session read context: a bot-token client plus
+// the session's pinned channel and its own thread root.
+type slackTarget struct {
+	client     historyClient
+	channelID  string
+	threadRoot string // the session's own thread (empty for a DM)
+	botUserID  string
+}
+
+// resolve maps a chat_session to its Slack channel + bot client. The channel is
+// server-derived here and never accepted from the caller — that is the security
+// boundary for `multica chat thread <id>` (the agent supplies only a
+// within-channel thread locator).
+func (h *History) resolve(ctx context.Context, chatSessionID pgtype.UUID) (slackTarget, error) {
 	binding, err := h.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
 		ChatSessionID: chatSessionID,
 		ChannelType:   string(TypeSlack),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return channel.HistoryPage{}, ErrNoSlackSession
+			return slackTarget{}, ErrNoSlackSession
 		}
-		return channel.HistoryPage{}, fmt.Errorf("lookup slack chat binding: %w", err)
+		return slackTarget{}, fmt.Errorf("lookup slack chat binding: %w", err)
 	}
 	inst, err := h.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          binding.InstallationID,
 		ChannelType: string(TypeSlack),
 	})
 	if err != nil {
-		return channel.HistoryPage{}, fmt.Errorf("load slack installation: %w", err)
+		return slackTarget{}, fmt.Errorf("load slack installation: %w", err)
 	}
 	if inst.Status != "active" {
-		return channel.HistoryPage{}, ErrNoSlackSession // revoked install: nothing to read
+		return slackTarget{}, ErrNoSlackSession // revoked install: nothing to read
 	}
 	creds, err := decodeCredentials(inst.Config, h.decrypt)
 	if err != nil {
-		return channel.HistoryPage{}, fmt.Errorf("decode slack credentials: %w", err)
+		return slackTarget{}, fmt.Errorf("decode slack credentials: %w", err)
 	}
 	channelID, threadRoot := historyTarget(binding)
-	// Resolve the concrete scope to read. The handler resolves "auto" to
-	// thread/channel (it knows first-turn vs follow-up); here we additionally
-	// degrade "thread" to "channel" when there is no thread to read — a DM, or a
-	// group whose root could not be recovered.
-	scope := channel.HistoryScopeChannel
-	if opts.Scope == channel.HistoryScopeThread &&
-		binding.ChatType == string(channel.ChatTypeGroup) && threadRoot != "" {
-		scope = channel.HistoryScopeThread
-	}
+	return slackTarget{
+		client:     h.newClient(creds.BotToken),
+		channelID:  channelID,
+		threadRoot: threadRoot,
+		botUserID:  creds.BotUserID,
+	}, nil
+}
 
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = defaultHistoryLimit
-	}
-	if limit > maxHistoryLimit {
-		limit = maxHistoryLimit
-	}
-
-	fetchThreadTS := ""
-	if scope == channel.HistoryScopeThread {
-		fetchThreadTS = threadRoot
-	}
-	client := h.newClient(creds.BotToken)
-	raw, err := fetchRaw(ctx, client, channelID, fetchThreadTS, opts.Before, limit)
+// ChannelOverview returns the channel's recent top-level messages (oldest-first),
+// each thread tagged with its id + reply count. It does NOT expand thread
+// contents — it is the table of contents the agent reads to find a thread, then
+// drills into with `multica chat thread <id>`. Backs `multica chat history`.
+func (h *History) ChannelOverview(ctx context.Context, chatSessionID pgtype.UUID, opts channel.HistoryOptions) (channel.HistoryPage, error) {
+	t, err := h.resolve(ctx, chatSessionID)
 	if err != nil {
-		return channel.HistoryPage{}, fmt.Errorf("read slack history: %w", err)
+		return channel.HistoryPage{}, err
 	}
-
-	page := normalizeHistory(ctx, client, h.logger, raw, creds.BotUserID, limit)
+	limit := clampHistoryLimit(opts.Limit)
+	resp, err := t.client.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
+		ChannelID: t.channelID,
+		Latest:    opts.Before,
+		Inclusive: false,
+		Limit:     limit,
+	})
+	if err != nil {
+		return channel.HistoryPage{}, fmt.Errorf("read slack channel: %w", err)
+	}
+	page := normalizePage(ctx, t.client, h.logger, resp.Messages, t.botUserID, limit, true)
 	page.ChannelType = string(TypeSlack)
-	page.Scope = scope
 	return page, nil
 }
 
-// historyTarget recovers the real channel id and the thread root from the
-// binding. The channel_chat_id may be a composite "channel:threadRoot"
+// Thread returns one thread's messages (oldest-first). threadID empty reads the
+// thread the session is in (the agent's own thread); a non-empty id reads that
+// specific thread — but always within the session's pinned channel. A DM (no
+// threads) reads its linear conversation. Backs `multica chat thread [id]`.
+func (h *History) Thread(ctx context.Context, chatSessionID pgtype.UUID, threadID string, opts channel.HistoryOptions) (channel.HistoryPage, error) {
+	t, err := h.resolve(ctx, chatSessionID)
+	if err != nil {
+		return channel.HistoryPage{}, err
+	}
+	limit := clampHistoryLimit(opts.Limit)
+	ts := threadID
+	if ts == "" {
+		ts = t.threadRoot // the session's own thread
+	}
+
+	var raw []slack.Message
+	if ts == "" {
+		// No thread to read (a DM, or a group whose root could not be recovered):
+		// fall back to the channel's linear conversation.
+		resp, herr := t.client.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
+			ChannelID: t.channelID,
+			Latest:    opts.Before,
+			Inclusive: false,
+			Limit:     limit,
+		})
+		if herr != nil {
+			return channel.HistoryPage{}, fmt.Errorf("read slack thread: %w", herr)
+		}
+		raw = resp.Messages
+	} else {
+		msgs, _, _, rerr := t.client.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{
+			ChannelID: t.channelID,
+			Timestamp: ts,
+			Latest:    opts.Before,
+			Inclusive: false,
+			Limit:     limit,
+		})
+		if rerr != nil {
+			return channel.HistoryPage{}, fmt.Errorf("read slack thread: %w", rerr)
+		}
+		raw = msgs
+	}
+	page := normalizePage(ctx, t.client, h.logger, raw, t.botUserID, limit, false)
+	page.ChannelType = string(TypeSlack)
+	page.ThreadID = ts
+	return page, nil
+}
+
+func clampHistoryLimit(n int) int {
+	if n <= 0 {
+		return defaultHistoryLimit
+	}
+	if n > maxHistoryLimit {
+		return maxHistoryLimit
+	}
+	return n
+}
+
+// historyTarget recovers the real channel id and the session's own thread root
+// from the binding. The channel_chat_id may be a composite "channel:threadRoot"
 // isolation key, so the real channel id is read from the binding config
-// (slackBindingConfig). The thread root — present for every engaged group
-// session, since the bot's first reply opens a thread on the @mention — is the
-// recorded reply thread (last_thread_id), falling back to the composite-key
-// suffix. It is empty for a DM (no threads).
+// (slackBindingConfig). The thread root is the recorded reply thread
+// (last_thread_id), falling back to the composite-key suffix; empty for a DM.
 func historyTarget(b db.ChannelChatSessionBinding) (channelID, threadRoot string) {
 	channelID = b.ChannelChatID
 	if len(b.Config) > 0 {
@@ -165,38 +224,12 @@ func historyTarget(b db.ChannelChatSessionBinding) (channelID, threadRoot string
 	return channelID, threadRoot
 }
 
-// fetchRaw pulls the most recent `limit` messages older than `before` (exclusive
-// when set). A thread read uses conversations.replies anchored on the thread
-// root; a channel read uses conversations.history. Both return newest-first;
-// ordering is normalized downstream.
-func fetchRaw(ctx context.Context, client historyClient, channelID, threadTS, before string, limit int) ([]slack.Message, error) {
-	if threadTS != "" {
-		msgs, _, _, err := client.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{
-			ChannelID: channelID,
-			Timestamp: threadTS,
-			Latest:    before,
-			Inclusive: false,
-			Limit:     limit,
-		})
-		return msgs, err
-	}
-	resp, err := client.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
-		ChannelID: channelID,
-		Latest:    before,
-		Inclusive: false,
-		Limit:     limit,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return resp.Messages, nil
-}
-
-// normalizeHistory turns raw Slack messages into a normalized, oldest-first
-// page: it resolves human display names in one batch, labels each sender, maps
-// the role, and computes the back-paging cursor.
-func normalizeHistory(ctx context.Context, client historyClient, logger *slog.Logger, raw []slack.Message, botUserID string, limit int) channel.HistoryPage {
-	// Oldest-first so the transcript reads top-to-bottom like the chat does.
+// normalizePage turns raw Slack messages into a normalized, oldest-first page:
+// it resolves display names in one batch, labels senders, maps roles, and
+// computes the back-paging cursor. When overview is true, a message that heads a
+// thread (reply_count > 0) is tagged with its thread id + reply count so the
+// agent can drill in with `multica chat thread <id>`.
+func normalizePage(ctx context.Context, client historyClient, logger *slog.Logger, raw []slack.Message, botUserID string, limit int, overview bool) channel.HistoryPage {
 	sort.SliceStable(raw, func(i, j int) bool { return slackTSLess(raw[i].Timestamp, raw[j].Timestamp) })
 
 	names := resolveUserNames(ctx, client, logger, raw, botUserID)
@@ -205,8 +238,7 @@ func normalizeHistory(ctx context.Context, client historyClient, logger *slog.Lo
 	out := make([]channel.HistoryMessage, 0, len(raw))
 	for i := range raw {
 		m := raw[i]
-		text := m.Text
-		if text == "" {
+		if m.Text == "" {
 			continue // join/system/edit markers carry no readable body
 		}
 		own := m.User != "" && m.User == botUserID
@@ -214,18 +246,24 @@ func normalizeHistory(ctx context.Context, client historyClient, logger *slog.Lo
 		if own {
 			role = channel.HistoryRoleAssistant
 		}
-		out = append(out, channel.HistoryMessage{
+		hm := channel.HistoryMessage{
 			ID:       m.Timestamp,
 			Author:   labeler.label(m, own),
 			AuthorID: m.User,
 			Role:     role,
-			Text:     text,
+			Text:     m.Text,
 			TS:       m.Timestamp,
-		})
+		}
+		if overview && m.ReplyCount > 0 {
+			hm.ThreadID = m.Timestamp
+			hm.ReplyCount = m.ReplyCount
+			hm.LatestReply = m.LatestReply
+		}
+		out = append(out, hm)
 	}
 
 	page := channel.HistoryPage{Messages: out}
-	// Only advertise a cursor when the platform returned a full page (more may
+	// Advertise a cursor only when the platform returned a full page (more may
 	// exist older than the oldest message we just returned).
 	if len(raw) >= limit && len(out) > 0 {
 		page.NextCursor = out[0].TS
@@ -233,8 +271,8 @@ func normalizeHistory(ctx context.Context, client historyClient, logger *slog.Lo
 	return page
 }
 
-// resolveUserNames batch-resolves the human senders' display names, best-effort.
-// A failure (missing users:read scope, transport error) yields a nil map so the
+// resolveUserNames batch-resolves human senders' display names, best-effort. A
+// failure (missing users:read scope, transport error) yields a nil map so the
 // labeler falls back to positional "User N" rather than blocking the read.
 func resolveUserNames(ctx context.Context, client historyClient, logger *slog.Logger, msgs []slack.Message, botUserID string) map[string]string {
 	seen := make(map[string]bool)
@@ -278,10 +316,9 @@ func slackDisplayName(u slack.User) string {
 	}
 }
 
-// historyLabeler assigns stable, human-readable labels within one page, mirroring
-// the Feishu speakerLabeler: this bot is "Bot"; a resolved human gets their real
-// name; an unresolved human falls back to positional "User N"; a third-party bot
-// uses its posted username.
+// historyLabeler assigns stable, human-readable labels within one page: this bot
+// is "Bot"; a resolved human gets their real name; an unresolved human falls
+// back to positional "User N"; a third-party bot uses its posted username.
 type historyLabeler struct {
 	names map[string]string
 	seen  map[string]string
@@ -298,8 +335,6 @@ func (l *historyLabeler) label(m slack.Message, own bool) string {
 	}
 	key := m.User
 	if key == "" {
-		// A third-party bot (alerting app, …) posts with a bot_id and often a
-		// username but no user id; label it by that username when present.
 		if m.Username != "" {
 			return m.Username
 		}
@@ -321,9 +356,7 @@ func (l *historyLabeler) label(m slack.Message, own bool) string {
 	return lbl
 }
 
-// slackTSLess orders two Slack timestamps ("secs.micros") chronologically. Slack
-// ts strings are not safely comparable lexicographically across widths, so parse
-// them; an unparseable value sorts as 0 (oldest).
+// slackTSLess orders two Slack timestamps ("secs.micros") chronologically.
 func slackTSLess(a, b string) bool {
 	return parseSlackTS(a) < parseSlackTS(b)
 }

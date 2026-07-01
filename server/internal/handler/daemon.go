@@ -1597,13 +1597,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.ThreadName = cs.Title
 			// Flag a channel-backed session so the daemon makes the agent aware
 			// it is operating inside Slack — read this conversation's history
-			// from the channel via `multica chat history`, not from Multica
-			// (MUL-3871). Empty for a web-only chat session.
-			if _, berr := h.Queries.GetChannelChatSessionBindingBySession(r.Context(), db.GetChannelChatSessionBindingBySessionParams{
+			// from the channel via `multica chat history` / `multica chat thread`,
+			// not from Multica (MUL-3871). Empty for a web-only chat session.
+			// ChatInThread tells the agent which command to start with: the
+			// latest trigger was a thread reply iff its reply-target thread
+			// (last_thread_id) differs from its own message id (a top-level
+			// @mention records its own ts as both).
+			if binding, berr := h.Queries.GetChannelChatSessionBindingBySession(r.Context(), db.GetChannelChatSessionBindingBySessionParams{
 				ChatSessionID: cs.ID,
 				ChannelType:   string(slack.TypeSlack),
 			}); berr == nil {
 				resp.ChatChannelType = string(slack.TypeSlack)
+				resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
+					binding.LastThreadID.String != binding.LastMessageID.String
 			}
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData

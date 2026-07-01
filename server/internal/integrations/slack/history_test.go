@@ -58,12 +58,19 @@ func msg(user, text, ts string) slack.Message {
 	return slack.Message{Msg: slack.Msg{User: user, Text: text, Timestamp: ts}}
 }
 
+// threadParent is a top-level message that heads a thread (reply_count > 0).
+func threadParent(user, text, ts string, replyCount int, latestReply string) slack.Message {
+	m := msg(user, text, ts)
+	m.ReplyCount = replyCount
+	m.LatestReply = latestReply
+	return m
+}
+
 func activeSlackInstall() db.ChannelInstallation {
 	return db.ChannelInstallation{Status: "active", Config: slackInstallConfigJSON()}
 }
 
-// groupBinding builds a group session binding rooted at threadRoot (the thread
-// the bot's reply opened on the @mention).
+// groupBinding builds a group session binding whose own thread root is threadRoot.
 func groupBinding(threadRoot string) db.ChannelChatSessionBinding {
 	b := db.ChannelChatSessionBinding{
 		InstallationID: uid(2),
@@ -92,51 +99,58 @@ func newTestHistory(q historyQueries, fc historyClient) *History {
 	return h
 }
 
-// TestHistoryFetchChannelScope verifies a channel-scope read uses
-// conversations.history and normalizes oldest-first with roles + labels.
-func TestHistoryFetchChannelScope(t *testing.T) {
-	q := &fakeHistoryQueries{binding: groupBinding("50.000000"), inst: activeSlackInstall()}
+func findByTS(msgs []channel.HistoryMessage, ts string) *channel.HistoryMessage {
+	for i := range msgs {
+		if msgs[i].TS == ts {
+			return &msgs[i]
+		}
+	}
+	return nil
+}
+
+// TestChannelOverview verifies `chat history` reads conversations.history,
+// normalizes oldest-first, and tags thread parents with their id + reply count
+// without expanding thread contents.
+func TestChannelOverview(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("100.000000"), inst: activeSlackInstall()}
 	fc := &fakeHistoryClient{
-		// Slack returns newest-first; the bot (UBOT) replied last.
+		// Slack returns newest-first.
 		historyMsgs: []slack.Message{
-			msg("UBOT", "on it", "102.000000"),
-			msg("U1", "@bot look into this", "101.000000"),
-			msg("U2", "alert: 5xx spiking", "100.000000"),
+			threadParent("U1", "deploy discussion", "102.000000", 3, "105.000000"),
+			msg("U2", "fyi unrelated", "101.000000"),
+			msg("U3", "@bot take a look", "100.000000"),
 		},
-		users: []slack.User{{ID: "U1", RealName: "Alice"}}, // U2 unresolved -> positional
+		users: []slack.User{{ID: "U1", RealName: "Alice"}},
 	}
 	h := newTestHistory(q, fc)
 
-	page, err := h.Fetch(context.Background(), uid(9), channel.HistoryOptions{Scope: channel.HistoryScopeChannel})
+	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{})
 	if err != nil {
-		t.Fatalf("Fetch: %v", err)
+		t.Fatalf("ChannelOverview: %v", err)
 	}
 	if fc.historyCalls != 1 || fc.repliesCalls != 0 {
-		t.Fatalf("expected conversations.history, got history=%d replies=%d", fc.historyCalls, fc.repliesCalls)
+		t.Fatalf("expected conversations.history only, got history=%d replies=%d", fc.historyCalls, fc.repliesCalls)
 	}
 	if fc.lastHistory.ChannelID != "C1" {
 		t.Errorf("channel id = %q, want C1", fc.lastHistory.ChannelID)
 	}
-	if page.ChannelType != "slack" || page.Scope != channel.HistoryScopeChannel {
-		t.Errorf("channel_type/scope = %q/%q, want slack/channel", page.ChannelType, page.Scope)
+	if page.ChannelType != "slack" || page.ThreadID != "" {
+		t.Errorf("channel_type/thread_id = %q/%q, want slack/<empty>", page.ChannelType, page.ThreadID)
 	}
 	if len(page.Messages) != 3 || page.Messages[0].TS != "100.000000" || page.Messages[2].TS != "102.000000" {
 		t.Fatalf("expected 3 msgs oldest-first, got %+v", page.Messages)
 	}
-	if got := page.Messages[0]; got.Author != "User 1" || got.Role != channel.HistoryRoleUser {
-		t.Errorf("msg0 author/role = %q/%q, want User 1/user", got.Author, got.Role)
+	parent := findByTS(page.Messages, "102.000000")
+	if parent == nil || parent.ThreadID != "102.000000" || parent.ReplyCount != 3 || parent.LatestReply != "105.000000" || parent.Author != "Alice" {
+		t.Fatalf("thread parent metadata wrong: %+v", parent)
 	}
-	if got := page.Messages[1]; got.Author != "Alice" {
-		t.Errorf("msg1 author = %q, want Alice", got.Author)
-	}
-	if got := page.Messages[2]; got.Author != "Bot" || got.Role != channel.HistoryRoleAssistant {
-		t.Errorf("msg2 author/role = %q/%q, want Bot/assistant", got.Author, got.Role)
+	if plain := findByTS(page.Messages, "101.000000"); plain == nil || plain.ThreadID != "" || plain.ReplyCount != 0 {
+		t.Fatalf("plain message should carry no thread metadata: %+v", plain)
 	}
 }
 
-// TestHistoryFetchThreadScope verifies a thread-scope read uses
-// conversations.replies anchored on the session's thread root (from the binding).
-func TestHistoryFetchThreadScope(t *testing.T) {
+// TestThreadCurrent reads the session's own thread via conversations.replies.
+func TestThreadCurrent(t *testing.T) {
 	q := &fakeHistoryQueries{binding: groupBinding("50.000000"), inst: activeSlackInstall()}
 	fc := &fakeHistoryClient{repliesMsgs: []slack.Message{
 		msg("U1", "second", "52.000000"),
@@ -144,67 +158,96 @@ func TestHistoryFetchThreadScope(t *testing.T) {
 	}}
 	h := newTestHistory(q, fc)
 
-	page, err := h.Fetch(context.Background(), uid(9), channel.HistoryOptions{Scope: channel.HistoryScopeThread, Limit: 10})
+	page, err := h.Thread(context.Background(), uid(9), "", channel.HistoryOptions{Limit: 10})
 	if err != nil {
-		t.Fatalf("Fetch: %v", err)
+		t.Fatalf("Thread: %v", err)
 	}
 	if fc.repliesCalls != 1 || fc.historyCalls != 0 {
-		t.Fatalf("expected conversations.replies, got history=%d replies=%d", fc.historyCalls, fc.repliesCalls)
+		t.Fatalf("expected conversations.replies only, got history=%d replies=%d", fc.historyCalls, fc.repliesCalls)
 	}
 	if fc.lastReplies.Timestamp != "50.000000" || fc.lastReplies.ChannelID != "C1" {
 		t.Errorf("replies anchored at %q/%q, want C1/50.000000", fc.lastReplies.ChannelID, fc.lastReplies.Timestamp)
 	}
-	if page.Scope != channel.HistoryScopeThread {
-		t.Errorf("scope = %q, want thread", page.Scope)
+	if page.ThreadID != "50.000000" {
+		t.Errorf("thread_id = %q, want 50.000000", page.ThreadID)
 	}
 	if len(page.Messages) != 2 || page.Messages[0].TS != "50.000000" {
 		t.Fatalf("expected 2 msgs oldest-first, got %+v", page.Messages)
 	}
 }
 
-// TestHistoryFetchDMIgnoresThreadScope confirms a DM (no threads) degrades a
-// thread request to channel history.
-func TestHistoryFetchDMIgnoresThreadScope(t *testing.T) {
+// TestThreadByID reads a specific (non-current) thread within the same channel.
+func TestThreadByID(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("50.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{repliesMsgs: []slack.Message{msg("U1", "x", "77.000000")}}
+	h := newTestHistory(q, fc)
+
+	page, err := h.Thread(context.Background(), uid(9), "70.000000", channel.HistoryOptions{})
+	if err != nil {
+		t.Fatalf("Thread: %v", err)
+	}
+	if fc.lastReplies == nil || fc.lastReplies.Timestamp != "70.000000" {
+		t.Fatalf("expected replies anchored at the passed id 70.000000, got %+v", fc.lastReplies)
+	}
+	if fc.lastReplies.ChannelID != "C1" {
+		t.Errorf("channel must stay pinned to the session: got %q, want C1", fc.lastReplies.ChannelID)
+	}
+	if page.ThreadID != "70.000000" {
+		t.Errorf("thread_id = %q, want 70.000000", page.ThreadID)
+	}
+}
+
+// TestThreadDMUsesHistory: a DM has no threads, so a thread read falls back to
+// the linear conversation (conversations.history).
+func TestThreadDMUsesHistory(t *testing.T) {
 	q := &fakeHistoryQueries{binding: dmBinding(), inst: activeSlackInstall()}
 	fc := &fakeHistoryClient{historyMsgs: []slack.Message{msg("U1", "hi", "100.000000")}}
 	h := newTestHistory(q, fc)
 
-	page, err := h.Fetch(context.Background(), uid(9), channel.HistoryOptions{Scope: channel.HistoryScopeThread})
+	page, err := h.Thread(context.Background(), uid(9), "", channel.HistoryOptions{})
 	if err != nil {
-		t.Fatalf("Fetch: %v", err)
+		t.Fatalf("Thread: %v", err)
 	}
 	if fc.historyCalls != 1 || fc.repliesCalls != 0 {
-		t.Fatalf("DM must use conversations.history, got history=%d replies=%d", fc.historyCalls, fc.repliesCalls)
+		t.Fatalf("DM thread must use conversations.history, got history=%d replies=%d", fc.historyCalls, fc.repliesCalls)
 	}
-	if page.Scope != channel.HistoryScopeChannel {
-		t.Errorf("scope = %q, want channel (DM has no thread)", page.Scope)
+	if page.ThreadID != "" {
+		t.Errorf("DM has no thread id, got %q", page.ThreadID)
 	}
 }
 
-// TestHistoryFetchThreadFallsBackWithoutRoot: a group binding with no recoverable
-// thread root degrades a thread request to channel history.
-func TestHistoryFetchThreadFallsBackWithoutRoot(t *testing.T) {
+func TestChannelOverviewNoBinding(t *testing.T) {
+	q := &fakeHistoryQueries{bindingErr: pgx.ErrNoRows}
+	h := newTestHistory(q, &fakeHistoryClient{})
+	if _, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{}); !errors.Is(err, ErrNoSlackSession) {
+		t.Fatalf("err = %v, want ErrNoSlackSession", err)
+	}
+}
+
+func TestThreadInactiveInstall(t *testing.T) {
 	q := &fakeHistoryQueries{
-		binding: db.ChannelChatSessionBinding{InstallationID: uid(2), ChannelChatID: "C1", ChatType: string(channel.ChatTypeGroup), Config: []byte(`{"channel_id":"C1"}`)},
-		inst:    activeSlackInstall(),
+		binding: groupBinding("50.0"),
+		inst:    db.ChannelInstallation{Status: "revoked", Config: slackInstallConfigJSON()},
 	}
-	fc := &fakeHistoryClient{historyMsgs: []slack.Message{msg("U1", "x", "100.000000")}}
-	h := newTestHistory(q, fc)
-
-	page, err := h.Fetch(context.Background(), uid(9), channel.HistoryOptions{Scope: channel.HistoryScopeThread})
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	if fc.historyCalls != 1 || fc.repliesCalls != 0 {
-		t.Fatalf("expected fallback to history, got history=%d replies=%d", fc.historyCalls, fc.repliesCalls)
-	}
-	if page.Scope != channel.HistoryScopeChannel {
-		t.Errorf("scope = %q, want channel", page.Scope)
+	h := newTestHistory(q, &fakeHistoryClient{})
+	if _, err := h.Thread(context.Background(), uid(9), "", channel.HistoryOptions{}); !errors.Is(err, ErrNoSlackSession) {
+		t.Fatalf("err = %v, want ErrNoSlackSession", err)
 	}
 }
 
-// TestHistoryTargetDerivesRoot pins the channel + thread-root recovery from a
-// binding: last_thread_id first, then the composite-key suffix, empty for a DM.
+func TestChannelOverviewLimitClamp(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("50.0"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{}
+	h := newTestHistory(q, fc)
+	if _, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{Limit: 5000}); err != nil {
+		t.Fatalf("ChannelOverview: %v", err)
+	}
+	if fc.lastHistory.Limit != maxHistoryLimit {
+		t.Errorf("limit = %d, want clamp to %d", fc.lastHistory.Limit, maxHistoryLimit)
+	}
+}
+
+// TestHistoryTargetDerivesRoot pins channel + thread-root recovery from a binding.
 func TestHistoryTargetDerivesRoot(t *testing.T) {
 	if ch, root := historyTarget(groupBinding("50.0")); ch != "C1" || root != "50.0" {
 		t.Errorf("from last_thread_id: got %q/%q, want C1/50.0", ch, root)
@@ -215,39 +258,5 @@ func TestHistoryTargetDerivesRoot(t *testing.T) {
 	}
 	if ch, root := historyTarget(dmBinding()); ch != "D1" || root != "" {
 		t.Errorf("dm: got %q/%q, want D1/<empty>", ch, root)
-	}
-}
-
-// TestHistoryFetchNoBinding maps a missing Slack binding to ErrNoSlackSession.
-func TestHistoryFetchNoBinding(t *testing.T) {
-	q := &fakeHistoryQueries{bindingErr: pgx.ErrNoRows}
-	h := newTestHistory(q, &fakeHistoryClient{})
-	if _, err := h.Fetch(context.Background(), uid(9), channel.HistoryOptions{}); !errors.Is(err, ErrNoSlackSession) {
-		t.Fatalf("err = %v, want ErrNoSlackSession", err)
-	}
-}
-
-// TestHistoryFetchInactiveInstall treats a revoked installation as empty.
-func TestHistoryFetchInactiveInstall(t *testing.T) {
-	q := &fakeHistoryQueries{
-		binding: groupBinding("50.0"),
-		inst:    db.ChannelInstallation{Status: "revoked", Config: slackInstallConfigJSON()},
-	}
-	h := newTestHistory(q, &fakeHistoryClient{})
-	if _, err := h.Fetch(context.Background(), uid(9), channel.HistoryOptions{}); !errors.Is(err, ErrNoSlackSession) {
-		t.Fatalf("err = %v, want ErrNoSlackSession", err)
-	}
-}
-
-// TestHistoryLimitClamp confirms an over-large limit is clamped before the call.
-func TestHistoryLimitClamp(t *testing.T) {
-	q := &fakeHistoryQueries{binding: groupBinding("50.0"), inst: activeSlackInstall()}
-	fc := &fakeHistoryClient{}
-	h := newTestHistory(q, fc)
-	if _, err := h.Fetch(context.Background(), uid(9), channel.HistoryOptions{Scope: channel.HistoryScopeChannel, Limit: 5000}); err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	if fc.lastHistory.Limit != maxHistoryLimit {
-		t.Errorf("limit = %d, want clamp to %d", fc.lastHistory.Limit, maxHistoryLimit)
 	}
 }
