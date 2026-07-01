@@ -280,8 +280,12 @@ export function MermaidDiagram({ chart }: { chart: string }) {
           securityLevel: "strict",
           theme: "base",
           themeVariables: getMermaidThemeVariables(containerRef.current),
+          // On invalid syntax, make render() throw instead of drawing Mermaid's
+          // built-in error graphic into the DOM. The catch below then shows our
+          // own compact error state — no orphaned error SVG, and no extra parse
+          // pass over valid charts.
+          suppressErrorRendering: true,
         });
-        await mermaid.parse(chart);
         const { svg: renderedSvg } = await mermaid.render(diagramId, chart);
         if (!cancelled) {
           const measured = getMermaidLayout(renderedSvg);
