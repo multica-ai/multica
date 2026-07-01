@@ -48,21 +48,29 @@ type AgentResolver interface {
 
 // Handler exposes api-type connection endpoints to the Multica MCP server.
 //
-// FIR-2388: the "which endpoints does this agent get" decision is delegated to
-// the SHARED runtime.APIConnectionResolver — the same one the cloud gateway and
-// the claim brief use — so the local and cloud surfaces can never drift. This
-// handler owns only the agent-identity gate (requireAgent) and the local
-// dispatch contract; the resolver owns the flag check, endpoint discovery, and
-// the per-endpoint policy verdict.
+// FIR-2441 (the Flip, slice 3): the "which endpoints does this agent get"
+// decision now runs through the UNIFIED runtime.ConnectionToolResolver — the same
+// resolver the claim brief (slice 1, #2000) and the cloud executor (slice 2,
+// #2001) moved onto — reading its api half (Resolve(...).APITools). The api
+// sub-component is the reused APIConnectionResolver, so APITools is the same
+// Allow+Ask verdict list ListForAgent returned before (Deny and any endpoint
+// whose verdict could not be resolved are dropped, fail closed) — identical
+// callable handles, same default-off cerebro_api_connection_tools flag gate
+// (Resolve yields the zero value with the flag off). Both List and Call read that
+// single output, so "listed == callable" holds identically for the local surface.
+// This handler still owns only the agent-identity gate (requireAgent) and the
+// local dispatch contract; the resolver owns the flag check, endpoint discovery,
+// and the per-endpoint policy verdict. The always-on call-time guard inside
+// APIConnectionTool.Call is untouched.
 type Handler struct {
 	agents   AgentResolver
-	resolver *runtime.APIConnectionResolver
+	resolver *runtime.ConnectionToolResolver
 }
 
-// NewHandler wires the handler from an agent resolver and the shared
-// api-connection resolver. A nil resolver makes the endpoints return an empty
-// tool list (feature off), never an error.
-func NewHandler(agents AgentResolver, resolver *runtime.APIConnectionResolver) *Handler {
+// NewHandler wires the handler from an agent resolver and the unified connection
+// tool resolver. A nil resolver makes the endpoints return an empty tool list
+// (feature off), never an error.
+func NewHandler(agents AgentResolver, resolver *runtime.ConnectionToolResolver) *Handler {
 	return &Handler{agents: agents, resolver: resolver}
 }
 
@@ -240,22 +248,28 @@ func (h *Handler) requireAgent(w http.ResponseWriter, r *http.Request) (agentIde
 }
 
 // allowedTools resolves the api-type connection endpoint tools the calling agent
-// may use, each with its Allow/Ask verdict, through the SHARED resolver. When the
-// resolver is not wired, the flag is off, or there are no granted endpoints, it
-// returns nil (the list endpoint must fail OPEN to an empty list, never break the
-// caller's MCP tool loop). Deny and unresolved endpoints are already dropped by
-// the resolver (fail closed); the caller verdict-checks Allow vs Ask before
-// dispatch.
+// may use, each with its Allow/Ask verdict, through the UNIFIED resolver's api
+// half (Resolve(...).APITools). When the resolver is not wired, the flag is off,
+// or there are no granted endpoints, it returns nil (the list endpoint must fail
+// OPEN to an empty list, never break the caller's MCP tool loop). Deny and
+// unresolved endpoints are already dropped by the resolver (fail closed); the
+// caller verdict-checks Allow vs Ask before dispatch.
+//
+// InitiatorID is left unset: this local surface carries no separate on_behalf_of
+// actor, so the user ceiling is simply the owner (ident.ownerID = the task
+// token's X-User-ID, or the agent-row owner fallback) — byte-for-byte the
+// identity the old ListForAgent(APIConnectionIdentity{OwnerID: ident.ownerID})
+// used, so the swap is parity-preserving.
 func (h *Handler) allowedTools(r *http.Request, ident agentIdentity) []runtime.APIConnectionToolVerdict {
 	if h.resolver == nil {
 		return nil
 	}
-	return h.resolver.ListForAgent(r.Context(), runtime.APIConnectionIdentity{
+	return h.resolver.Resolve(r.Context(), runtime.ConnectionIdentity{
 		WorkspaceID: ident.workspaceID,
 		RuntimeID:   ident.runtimeID,
 		AgentID:     ident.agentID,
 		OwnerID:     ident.ownerID,
-	})
+	}).APITools
 }
 
 // --- helpers ----------------------------------------------------------------
