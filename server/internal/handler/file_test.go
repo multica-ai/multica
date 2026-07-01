@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +24,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -1262,5 +1265,65 @@ func TestIsDurablePublicURL(t *testing.T) {
 				t.Errorf("isDurablePublicURL(%q) = %v, want %v", tc.url, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestServeLocalUpload_RelaxesFrameAncestorsForPreview covers the self-hosted
+// local-disk case where document previews (PDF/HTML) are fetched straight from
+// the public /uploads/* static route. That route inherits the global
+// "frame-ancestors 'none'" CSP from the middleware, which blocks iframe
+// previews; ServeLocalUpload must overwrite it with the same relaxed preview
+// policy the /api/attachments download endpoint uses. See MUL-3821 / #4477.
+func TestServeLocalUpload_RelaxesFrameAncestorsForPreview(t *testing.T) {
+	dir := t.TempDir()
+	key := "workspaces/ws-1/preview.pdf"
+	full := filepath.Join(dir, filepath.FromSlash(key))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	const body = "%PDF-1.7 local-disk preview"
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	t.Setenv("LOCAL_UPLOAD_DIR", dir)
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
+	local := storage.NewLocalStorageFromEnv()
+	if local == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+
+	h := &Handler{
+		Storage: local,
+		cfg:     Config{AttachmentFrameAncestors: []string{"https://app.example.test"}},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/uploads/"+key, nil)
+	w := httptest.NewRecorder()
+	// Simulate the global CSP middleware having already stamped the strict
+	// policy on the response before the static route runs.
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
+
+	h.ServeLocalUpload(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%q", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != body {
+		t.Fatalf("body = %q, want %q", got, body)
+	}
+	requireAttachmentPreviewCSP(t, w.Header(), "https://app.example.test")
+}
+
+// TestServeLocalUpload_NonLocalStorage404 guards the defensive branch: the
+// /uploads/* route is only registered under local storage, but the handler
+// must not serve anything when the backing store is not local disk.
+func TestServeLocalUpload_NonLocalStorage404(t *testing.T) {
+	h := &Handler{Storage: &mockStorage{}}
+	req := httptest.NewRequest(http.MethodGet, "/uploads/workspaces/ws-1/x.png", nil)
+	w := httptest.NewRecorder()
+	h.ServeLocalUpload(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
 	}
 }
