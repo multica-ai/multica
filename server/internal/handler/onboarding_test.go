@@ -44,6 +44,214 @@ func newWaitlistRequest(userID string, body map[string]string) *http.Request {
 	return req
 }
 
+type recordedSourceChannelReport struct {
+	userID        string
+	channel       string
+	sourceOther   string
+	apiBaseURL    string
+	includeDomain bool
+}
+
+type recordingSourceChannelReporter struct {
+	calls []recordedSourceChannelReport
+}
+
+func (r *recordingSourceChannelReporter) ReportSelfHostSourceChannel(userID, channel, sourceOther, apiBaseURL string, includeDomain bool) {
+	r.calls = append(r.calls, recordedSourceChannelReport{userID: userID, channel: channel, sourceOther: sourceOther, apiBaseURL: apiBaseURL, includeDomain: includeDomain})
+}
+
+func installRecordingSourceChannelReporter(t *testing.T) *recordingSourceChannelReporter {
+	t.Helper()
+	recorder := &recordingSourceChannelReporter{}
+	prev := testHandler.SourceChannelReporter
+	testHandler.SourceChannelReporter = recorder
+	t.Cleanup(func() { testHandler.SourceChannelReporter = prev })
+	return recorder
+}
+
+func newPatchOnboardingRequest(userID string, questionnaire string) *http.Request {
+	body := map[string]json.RawMessage{
+		"questionnaire": json.RawMessage(questionnaire),
+	}
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(body)
+	req := httptest.NewRequest(http.MethodPatch, "/api/me/onboarding", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", userID)
+	return req
+}
+
+func TestPatchOnboardingReportsSelfHostSourceWhenQuestionnaireCompletes(t *testing.T) {
+	userID := newWaitlistTestUser(t, "source-complete@multica.ai")
+	recorder := installRecordingSourceChannelReporter(t)
+
+	w := httptest.NewRecorder()
+	testHandler.PatchOnboarding(w, newPatchOnboardingRequest(userID, `{
+		"source": ["search"],
+		"source_other": null,
+		"source_skipped": false,
+			"source_domain_consent": true,
+		"version": 2
+	}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("source-only patch: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(recorder.calls) != 0 {
+		t.Fatalf("source-only patch should not report before questionnaire completion, got %+v", recorder.calls)
+	}
+
+	w = httptest.NewRecorder()
+	testHandler.PatchOnboarding(w, newPatchOnboardingRequest(userID, `{
+		"source": ["search"],
+		"source_other": null,
+		"source_skipped": false,
+			"source_domain_consent": true,
+		"role": "engineer",
+		"role_other": null,
+		"role_skipped": false,
+		"use_case": ["ship_code"],
+		"use_case_other": null,
+		"use_case_skipped": false,
+		"version": 2
+	}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("complete patch: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(recorder.calls) != 1 {
+		t.Fatalf("complete patch should report once, got %+v", recorder.calls)
+	}
+	if recorder.calls[0].userID != userID || recorder.calls[0].channel != "search" {
+		t.Fatalf("unexpected report: %+v", recorder.calls[0])
+	}
+	if !recorder.calls[0].includeDomain {
+		t.Fatalf("expected plaintext domain consent to be forwarded")
+	}
+
+	w = httptest.NewRecorder()
+	testHandler.PatchOnboarding(w, newPatchOnboardingRequest(userID, `{
+		"source": ["search"],
+		"source_other": null,
+		"source_skipped": false,
+			"source_domain_consent": true,
+		"role": "engineer",
+		"role_other": null,
+		"role_skipped": false,
+		"use_case": ["ship_code"],
+		"use_case_other": null,
+		"use_case_skipped": false,
+		"version": 2
+	}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("unchanged complete patch: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(recorder.calls) != 1 {
+		t.Fatalf("unchanged complete patch should not report again, got %+v", recorder.calls)
+	}
+}
+
+func TestPatchOnboardingReportsSelfHostSourceWithoutPlaintextDomain(t *testing.T) {
+	userID := newWaitlistTestUser(t, "source-no-domain@multica.ai")
+	recorder := installRecordingSourceChannelReporter(t)
+
+	w := httptest.NewRecorder()
+	testHandler.PatchOnboarding(w, newPatchOnboardingRequest(userID, `{
+		"source": ["search"],
+		"source_other": null,
+		"source_skipped": false,
+		"source_domain_consent": false,
+		"role": "engineer",
+		"role_other": null,
+		"role_skipped": false,
+		"use_case": ["ship_code"],
+		"use_case_other": null,
+		"use_case_skipped": false,
+		"version": 2
+	}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("complete patch: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(recorder.calls) != 1 {
+		t.Fatalf("complete patch should report once, got %+v", recorder.calls)
+	}
+	if recorder.calls[0].includeDomain {
+		t.Fatalf("expected plaintext domain consent to be false")
+	}
+}
+
+func TestPatchOnboardingReportsSelfHostSourceOtherText(t *testing.T) {
+	userID := newWaitlistTestUser(t, "source-other@multica.ai")
+	recorder := installRecordingSourceChannelReporter(t)
+
+	w := httptest.NewRecorder()
+	testHandler.PatchOnboarding(w, newPatchOnboardingRequest(userID, `{
+		"source": ["other"],
+		"source_other": "a podcast",
+		"source_skipped": false,
+			"source_domain_consent": true,
+		"role": "engineer",
+		"role_other": null,
+		"role_skipped": false,
+		"use_case": ["ship_code"],
+		"use_case_other": null,
+		"use_case_skipped": false,
+		"version": 2
+	}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("complete other patch: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(recorder.calls) != 1 {
+		t.Fatalf("complete other patch should report once, got %+v", recorder.calls)
+	}
+	if recorder.calls[0].userID != userID || recorder.calls[0].channel != "other" || recorder.calls[0].sourceOther != "a podcast" {
+		t.Fatalf("unexpected report: %+v", recorder.calls[0])
+	}
+}
+
+func TestPatchOnboardingReportsSelfHostSourceForBackfillSubmit(t *testing.T) {
+	userID := newWaitlistTestUser(t, "source-backfill@multica.ai")
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE "user"
+		   SET onboarded_at = now(),
+		       onboarding_questionnaire = $2::jsonb
+		 WHERE id = $1
+	`, userID, `{
+		"role": "engineer",
+		"role_other": null,
+		"role_skipped": false,
+		"use_case": ["ship_code"],
+		"use_case_other": null,
+		"use_case_skipped": false,
+		"version": 2
+	}`); err != nil {
+		t.Fatalf("seed onboarded user: %v", err)
+	}
+	recorder := installRecordingSourceChannelReporter(t)
+
+	w := httptest.NewRecorder()
+	testHandler.PatchOnboarding(w, newPatchOnboardingRequest(userID, `{
+		"source": ["blog_newsletter"],
+		"source_other": null,
+		"source_skipped": false,
+			"source_domain_consent": true,
+		"role": "engineer",
+		"role_other": null,
+		"role_skipped": false,
+		"use_case": ["ship_code"],
+		"use_case_other": null,
+		"use_case_skipped": false,
+		"version": 2
+	}`))
+	if w.Code != http.StatusOK {
+		t.Fatalf("backfill patch: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(recorder.calls) != 1 {
+		t.Fatalf("backfill patch should report once, got %+v", recorder.calls)
+	}
+	if recorder.calls[0].userID != userID || recorder.calls[0].channel != "blog_newsletter" {
+		t.Fatalf("unexpected report: %+v", recorder.calls[0])
+	}
+}
+
 func TestJoinCloudWaitlistRecordsEmailAndReason(t *testing.T) {
 	userID := newWaitlistTestUser(t, "waitlist-ok@multica.ai")
 

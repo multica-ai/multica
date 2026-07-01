@@ -49,6 +49,12 @@
     "submit": "提交",
     "hint_ready": "看起来不错，准备好就点提交。"
   },
+  "source_reporting": {
+    "description": "帮助我们了解你从哪里知道 Multica，不会发送额外信息。",
+    "domain": {
+      "label": "允许发送域名"
+    }
+  },
   "questions": {
     "eyebrow_about_you": "关于你",
     "source": {

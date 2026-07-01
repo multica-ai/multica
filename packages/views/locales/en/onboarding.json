@@ -49,6 +49,12 @@
     "submit": "Submit",
     "hint_ready": "Looks good. Hit Submit when you're ready."
   },
+  "source_reporting": {
+    "description": "Help us understand how you heard about Multica. No extra information is sent.",
+    "domain": {
+      "label": "Allow sending domain"
+    }
+  },
   "questions": {
     "eyebrow_about_you": "About you",
     "source": {

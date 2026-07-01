@@ -236,11 +236,11 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 
 ## 用量统计
 
-默认上报到 Multica 官方 PostHog 实例。不想上报就把 `ANALYTICS_DISABLED=true`。
+默认会把产品分析事件上报到 Multica 官方 PostHog 实例。要关闭 PostHog 事件上报，请设置 `ANALYTICS_DISABLED=true`。
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `ANALYTICS_DISABLED` | `false` | 设 `true` 完全关闭后端上报 |
+| `ANALYTICS_DISABLED` | `false` | 设 `true` 关闭后端 PostHog 分析事件 |
 | `POSTHOG_API_KEY` | 内置默认 key | 换成你自己的 PostHog 实例时填 |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | 自建 PostHog 的话改成你自己的地址 |
 

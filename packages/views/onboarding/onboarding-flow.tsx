@@ -29,6 +29,7 @@ const EMPTY_QUESTIONNAIRE: QuestionnaireAnswers = {
   source: [],
   source_other: null,
   source_skipped: false,
+  source_domain_consent: true,
   role: null,
   role_other: null,
   role_skipped: false,
@@ -71,6 +72,7 @@ function mergeQuestionnaire(
   return {
     ...merged,
     source: coerceToArray<QuestionnaireAnswers["source"][number]>(raw.source),
+    source_domain_consent: raw.source_domain_consent !== false,
     use_case: coerceToArray<QuestionnaireAnswers["use_case"][number]>(
       raw.use_case,
     ),

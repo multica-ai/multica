@@ -231,11 +231,11 @@ S3 앞에 CloudFront를 두는 경우 세 가지 변수가 적용됩니다: `CLO
 
 ## 사용량 분석
 
-기본적으로 서버는 Multica의 공식 PostHog 인스턴스로 보고합니다. 옵트아웃하려면 `ANALYTICS_DISABLED=true`로 설정하세요.
+기본적으로 서버는 제품 분석 이벤트를 Multica의 공식 PostHog 인스턴스로 보고합니다. PostHog 이벤트 전송을 비활성화하려면 `ANALYTICS_DISABLED=true`로 설정하세요.
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `ANALYTICS_DISABLED` | `false` | 백엔드 분석을 완전히 비활성화하려면 `true`로 설정 |
+| `ANALYTICS_DISABLED` | `false` | 백엔드 PostHog 분석 이벤트를 비활성화하려면 `true`로 설정 |
 | `POSTHOG_API_KEY` | 내장 기본 키 | 자신의 PostHog 인스턴스를 가리킬 때 설정 |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog를 자체 호스팅하는 경우 자신의 호스트로 변경 |
 

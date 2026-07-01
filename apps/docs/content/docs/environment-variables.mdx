@@ -233,11 +233,11 @@ The [GitHub PR ↔ issue integration](/github-integration) needs two variables. 
 
 ## Usage analytics
 
-By default, the server reports to Multica's official PostHog instance. To opt out, set `ANALYTICS_DISABLED=true`.
+By default, the server reports product analytics events to Multica's official PostHog instance. To disable PostHog event shipping, set `ANALYTICS_DISABLED=true`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `ANALYTICS_DISABLED` | `false` | Set `true` to disable backend analytics entirely |
+| `ANALYTICS_DISABLED` | `false` | Set `true` to disable backend PostHog analytics events |
 | `POSTHOG_API_KEY` | built-in default key | Set when pointing at your own PostHog instance |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | Change to your own host if you self-host PostHog |
 

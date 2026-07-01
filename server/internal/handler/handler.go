@@ -103,6 +103,10 @@ type RuntimeProfileRefreshNotifier interface {
 	NotifyRuntimeProfilesChanged(workspaceID, profileID string)
 }
 
+type SourceChannelReporter interface {
+	ReportSelfHostSourceChannel(userID, channel, sourceOther, apiBaseURL string, includeDomain bool)
+}
+
 type Handler struct {
 	Queries               *db.Queries
 	DB                    dbExecutor
@@ -125,6 +129,7 @@ type Handler struct {
 	Storage               storage.Storage
 	CFSigner              *auth.CloudFrontSigner
 	Analytics             analytics.Client
+	SourceChannelReporter SourceChannelReporter
 	// Metrics is the shared business-metrics collector built by main.go.
 	// May be nil in tests / self-hosted with the metrics listener disabled;
 	// every Record* method is nil-safe and obsmetrics.RecordEvent treats a

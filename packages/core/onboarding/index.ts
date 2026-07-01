@@ -16,6 +16,14 @@ export {
   needsSourceBackfill,
   SOURCE_BACKFILL_MAX_DISMISSALS,
 } from "./needs-backfill";
+export {
+  OFFICIAL_MULTICA_API_URL,
+  currentApiBaseUrl,
+  isOfficialMulticaApiUrl,
+  isSelfHostedApiBaseUrl,
+  normalizeApiBaseUrl,
+  shouldShowSourceChannelReporting,
+} from "./source-reporting";
 export { recommendTemplate, type AgentTemplateId } from "./recommend-template";
 export {
   useWelcomeStore,

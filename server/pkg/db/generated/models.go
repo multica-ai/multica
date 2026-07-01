@@ -697,6 +697,19 @@ type RuntimeProfile struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type SelfHostSourceChannel struct {
+	InstanceHash    string             `json:"instance_hash"`
+	SubjectHash     string             `json:"subject_hash"`
+	Channel         string             `json:"channel"`
+	SchemaVersion   int32              `json:"schema_version"`
+	FirstReceivedAt pgtype.Timestamptz `json:"first_received_at"`
+	LastReceivedAt  pgtype.Timestamptz `json:"last_received_at"`
+	ReportCount     int32              `json:"report_count"`
+	SourceOther     pgtype.Text        `json:"source_other"`
+	Domain          pgtype.Text        `json:"domain"`
+	DomainMd5       pgtype.Text        `json:"domain_md5"`
+}
+
 type Skill struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -765,6 +778,13 @@ type SysCronExecution struct {
 	ErrorMsg     pgtype.Text        `json:"error_msg"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SystemSetting struct {
+	Key       string             `json:"key"`
+	Value     string             `json:"value"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type TaskMessage struct {

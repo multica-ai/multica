@@ -13,6 +13,7 @@ const EMPTY: QuestionnaireAnswers = {
   source: [],
   source_other: null,
   source_skipped: false,
+  source_domain_consent: true,
   role: null,
   role_other: null,
   role_skipped: false,

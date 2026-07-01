@@ -49,6 +49,12 @@
     "submit": "送信",
     "hint_ready": "OK です。準備ができたら送信を押してください。"
   },
+  "source_reporting": {
+    "description": "Multica をどこで知ったかを教えてください。追加情報は送信されません。",
+    "domain": {
+      "label": "ドメインの送信を許可"
+    }
+  },
   "questions": {
     "eyebrow_about_you": "あなたについて",
     "source": {

@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/sourcechannel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -170,16 +171,17 @@ func (s *stringOrSlice) UnmarshalJSON(data []byte) error {
 }
 
 type questionnaireAnswers struct {
-	Source         stringOrSlice `json:"source"`
-	SourceOther    string        `json:"source_other"`
-	SourceSkipped  bool          `json:"source_skipped"`
-	Role           string        `json:"role"`
-	RoleOther      string        `json:"role_other"`
-	RoleSkipped    bool          `json:"role_skipped"`
-	UseCase        stringOrSlice `json:"use_case"`
-	UseCaseOther   string        `json:"use_case_other"`
-	UseCaseSkipped bool          `json:"use_case_skipped"`
-	Version        int           `json:"version"`
+	Source              stringOrSlice `json:"source"`
+	SourceOther         string        `json:"source_other"`
+	SourceSkipped       bool          `json:"source_skipped"`
+	SourceDomainConsent bool          `json:"source_domain_consent"`
+	Role                string        `json:"role"`
+	RoleOther           string        `json:"role_other"`
+	RoleSkipped         bool          `json:"role_skipped"`
+	UseCase             stringOrSlice `json:"use_case"`
+	UseCaseOther        string        `json:"use_case_other"`
+	UseCaseSkipped      bool          `json:"use_case_skipped"`
+	Version             int           `json:"version"`
 }
 
 func (q questionnaireAnswers) sourceResolved() bool {
@@ -234,8 +236,10 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 	// we should, never twice for the same transition.
 	var before questionnaireAnswers
 	beforeRaw := []byte("{}")
+	beforeOnboarded := false
 	if beforeUser, err := h.Queries.GetUser(r.Context(), parseUUID(userID)); err == nil {
 		beforeRaw = beforeUser.OnboardingQuestionnaire
+		beforeOnboarded = beforeUser.OnboardedAt.Valid
 		_ = json.Unmarshal(beforeRaw, &before)
 	}
 	// firstTouch is true when the user has never written any
@@ -265,6 +269,7 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 
 	var after questionnaireAnswers
 	_ = json.Unmarshal(user.OnboardingQuestionnaire, &after)
+	h.reportSelfHostSourceChannelIfNeeded(r, userID, before, after, beforeOnboarded)
 	if after.complete() && !before.complete() {
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.OnboardingQuestionnaireSubmitted(
 			userID,
@@ -281,6 +286,22 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, userToResponse(user))
+}
+
+func (h *Handler) reportSelfHostSourceChannelIfNeeded(r *http.Request, userID string, before, after questionnaireAnswers, beforeOnboarded bool) {
+	if h.SourceChannelReporter == nil || len(after.Source) == 0 {
+		return
+	}
+	channel := strings.TrimSpace(after.Source[0])
+	if channel == "" {
+		return
+	}
+
+	questionnaireJustCompleted := after.complete() && !before.complete()
+	backfillSubmitted := beforeOnboarded && len(before.Source) == 0 && !before.SourceSkipped && len(after.Source) > 0
+	if questionnaireJustCompleted || backfillSubmitted {
+		h.SourceChannelReporter.ReportSelfHostSourceChannel(userID, channel, after.SourceOther, sourcechannel.ReportingAPIBaseURL(r), after.SourceDomainConsent)
+	}
 }
 
 type joinCloudWaitlistRequest struct {

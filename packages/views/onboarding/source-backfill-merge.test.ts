@@ -16,6 +16,7 @@ describe("mergedQuestionnairePatch", () => {
       source: ["search"],
       source_other: null,
       source_skipped: false,
+      source_domain_consent: true,
     });
     expect(out.source).toEqual(["search"]);
     expect(out.role).toBe("engineer");
@@ -33,6 +34,7 @@ describe("mergedQuestionnairePatch", () => {
       source: ["friends_colleagues"],
       source_other: null,
       source_skipped: false,
+      source_domain_consent: true,
     });
     expect(out.source_skipped).toBe(false);
     expect(out.role).toBe("founder");
@@ -48,11 +50,22 @@ describe("mergedQuestionnairePatch", () => {
       source: [],
       source_other: null,
       source_skipped: true,
+      source_domain_consent: true,
     });
     expect(out.source).toEqual([]);
     expect(out.source_skipped).toBe(true);
     expect(out.role).toBe("designer");
     expect(out.use_case).toEqual(["plan_research"]);
+  });
+
+  it("preserves an explicit plaintext-domain opt-out", () => {
+    const out = mergedQuestionnairePatch(null, {
+      source: ["search"],
+      source_other: null,
+      source_skipped: false,
+      source_domain_consent: false,
+    });
+    expect(out.source_domain_consent).toBe(false);
   });
 
   it("coerces legacy single-string use_case into a one-element array", () => {
@@ -64,6 +77,7 @@ describe("mergedQuestionnairePatch", () => {
       source: ["search"],
       source_other: null,
       source_skipped: false,
+      source_domain_consent: true,
     });
     expect(out.use_case).toEqual(["ship_code"]);
   });
@@ -73,6 +87,7 @@ describe("mergedQuestionnairePatch", () => {
       source: ["search"],
       source_other: null,
       source_skipped: false,
+      source_domain_consent: true,
     });
     expect(out.role).toBeNull();
     expect(out.role_other).toBeNull();
@@ -94,6 +109,7 @@ describe("mergedQuestionnairePatch", () => {
       source: [],
       source_other: null,
       source_skipped: false,
+      source_domain_consent: true,
     });
     expect(out.role).toBeNull();
     expect(out.role_other).toBeNull();
@@ -109,6 +125,7 @@ describe("mergedQuestionnairePatch", () => {
       source: ["search"],
       source_other: null,
       source_skipped: false,
+      source_domain_consent: true,
     });
     expect(out.version).toBe(2);
   });

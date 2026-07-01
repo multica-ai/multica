@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { ApiClient, setApiInstance } from "@multica/core/api";
 import type { QuestionnaireAnswers } from "@multica/core/onboarding";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -13,6 +14,7 @@ const EMPTY: QuestionnaireAnswers = {
   source: [],
   source_other: null,
   source_skipped: false,
+  source_domain_consent: true,
   role: null,
   role_other: null,
   role_skipped: false,
@@ -42,7 +44,10 @@ function renderStep(answers: QuestionnaireAnswers = EMPTY) {
 }
 
 describe("StepSource (single-select primary source)", () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    setApiInstance(new ApiClient("https://api.multica.ai"));
+  });
 
   it("clicking a non-Other option writes a one-element source array", async () => {
     const user = userEvent.setup();
@@ -54,9 +59,45 @@ describe("StepSource (single-select primary source)", () => {
       source: ["social_linkedin"],
       source_other: null,
       source_skipped: false,
+      source_domain_consent: true,
     });
     // A click only records — it must NOT auto-advance.
     expect(onAdvance).not.toHaveBeenCalled();
+  });
+
+  it("shows reporting controls after a source is selected on a non-official API URL", () => {
+    setApiInstance(new ApiClient("https://api.customer.example"));
+
+    renderStep({
+      ...EMPTY,
+      source: ["social_linkedin"],
+    });
+
+    expect(
+      screen.getByText(
+        "Help us understand how you heard about Multica. No extra information is sent.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: /allow sending domain/i }),
+    ).toBeChecked();
+  });
+
+  it("lets the user disable plaintext domain reporting", async () => {
+    setApiInstance(new ApiClient("https://api.customer.example"));
+    const user = userEvent.setup();
+    const { onChange } = renderStep({
+      ...EMPTY,
+      source: ["search"],
+    });
+
+    await user.click(
+      screen.getByRole("switch", { name: /allow sending domain/i }),
+    );
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      source_domain_consent: false,
+    });
   });
 
   it("picking a second option replaces the first (no stacking)", async () => {
@@ -72,6 +113,7 @@ describe("StepSource (single-select primary source)", () => {
       source: ["social_x"],
       source_other: null,
       source_skipped: false,
+      source_domain_consent: true,
     });
   });
 
@@ -99,6 +141,7 @@ describe("StepSource (single-select primary source)", () => {
       source: ["other"],
       source_other: null,
       source_skipped: false,
+      source_domain_consent: true,
     });
 
     const input = await screen.findByPlaceholderText(/podcast/i);
@@ -120,6 +163,7 @@ describe("StepSource (single-select primary source)", () => {
       source: ["social_linkedin"],
       source_other: null,
       source_skipped: false,
+      source_domain_consent: true,
     });
   });
 });

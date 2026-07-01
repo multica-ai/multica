@@ -49,6 +49,12 @@
     "submit": "제출",
     "hint_ready": "좋습니다. 준비되면 제출을 눌러주세요."
   },
+  "source_reporting": {
+    "description": "Multica를 어디서 알게 되었는지 이해하는 데 도움이 됩니다. 추가 정보는 전송되지 않습니다.",
+    "domain": {
+      "label": "도메인 전송 허용"
+    }
+  },
   "questions": {
     "eyebrow_about_you": "내 정보",
     "source": {

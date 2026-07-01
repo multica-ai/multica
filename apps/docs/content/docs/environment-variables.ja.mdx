@@ -231,11 +231,11 @@ S3 の前段に CloudFront を置く場合、3 つの変数が適用されます
 
 ## 使用量分析
 
-デフォルトでは、サーバーは Multica の公式 PostHog インスタンスにレポートします。オプトアウトするには `ANALYTICS_DISABLED=true` を設定してください。
+デフォルトでは、サーバーは製品分析イベントを Multica の公式 PostHog インスタンスにレポートします。PostHog イベント送信を無効にするには `ANALYTICS_DISABLED=true` を設定してください。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `ANALYTICS_DISABLED` | `false` | バックエンド分析を完全に無効にするには `true` に設定 |
+| `ANALYTICS_DISABLED` | `false` | バックエンドの PostHog 分析イベントを無効にするには `true` に設定 |
 | `POSTHOG_API_KEY` | 組み込みのデフォルトキー | 自身の PostHog インスタンスを指す場合に設定 |
 | `POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog をセルフホストする場合は自身のホストに変更 |
 

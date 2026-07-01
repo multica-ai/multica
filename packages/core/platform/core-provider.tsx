@@ -6,6 +6,7 @@ import { installFreezeWatchdog } from "../diagnostics/freeze-watchdog";
 import { setApiInstance, setSchemaLogger } from "../api";
 import { createAuthStore, registerAuthStore } from "../auth";
 import { createChatStore, registerChatStore } from "../chat";
+import { shouldShowSourceChannelReporting } from "../onboarding/source-reporting";
 import {
   I18nProvider,
   LocaleAdapterProvider,
@@ -43,6 +44,10 @@ function initCore(
   });
   setApiInstance(api);
   setSchemaLogger(createLogger("api-schema"));
+  console.info(
+    "[Multica] self-hosted API:",
+    shouldShowSourceChannelReporting(),
+  );
 
   // In token mode, hydrate token from storage.
   if (!cookieAuth) {
