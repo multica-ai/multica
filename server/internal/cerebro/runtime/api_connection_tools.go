@@ -61,6 +61,32 @@ const apiConnectionResponseLimit = 1 << 20 // 1 MiB
 // pathParamRe matches a `{name}` path parameter placeholder in an endpoint path.
 var pathParamRe = regexp.MustCompile(`\{([^/{}]+)\}`)
 
+// APIConnectionArgHint is the argument-shape guidance for api-connection tools.
+// It is surfaced in the agent's first prompt — the cloud gateway system prompt
+// (firtal_gateway_executor.go) and the local claim brief (cerebro_tools_brief.go)
+// both use it — so an agent knows the shape at run start instead of calling once
+// and reading the error to discover the `query` object (FIR-2441). The two first
+// prompts must agree, so the wording lives here as the single source.
+const APIConnectionArgHint = "Some of your tools are **API connection tools** (server-side HTTP endpoints). They take a fixed argument shape: path parameters at the top level, query parameters inside a `query` object, and the request body inside `body`. Passing query parameters at the top level instead of inside `query` drops them and the call fails."
+
+// registryHasAPIConnectionTool reports whether any of the named tools resolves,
+// in the registry, to an *APIConnectionTool. The cloud gateway uses it to decide
+// whether to append APIConnectionArgHint to the system prompt, so the check keys
+// on the concrete tool type rather than a fragile tool-name pattern (FIR-2441).
+func registryHasAPIConnectionTool(registry *Registry, toolNames []string) bool {
+	if registry == nil {
+		return false
+	}
+	for _, name := range toolNames {
+		if t, ok := registry.Get(name); ok {
+			if _, isAPI := t.(*APIConnectionTool); isAPI {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // APIConnectionTool exposes one allowed endpoint (`<METHOD> <path>`) of an
 // enabled API-type connection as a Tool. Dispatch is server-side: Call issues the
 // HTTP request to baseURL+path with auth applied and returns the response body.

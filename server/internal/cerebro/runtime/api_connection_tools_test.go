@@ -264,3 +264,28 @@ func TestRedactCredentialsSkipsShortAndEmpty(t *testing.T) {
 		t.Fatalf("short/empty secrets must leave body unchanged, got %q", got)
 	}
 }
+
+// FIR-2441: the cloud gateway appends APIConnectionArgHint to the system prompt
+// only when an api-connection tool is actually offered — detected via the
+// registry, not a name pattern — so the cloud and local first prompts agree.
+func TestRegistryHasAPIConnectionTool(t *testing.T) {
+	if registryHasAPIConnectionTool(nil, []string{"anything"}) {
+		t.Fatal("nil registry must report no api-connection tool")
+	}
+
+	reg := NewRegistry(nil)
+	reg.Register(&APIConnectionTool{toolName: "infisical_admin__get_secrets", connName: "infisical-admin", method: "GET", path: "/secrets"})
+
+	if !registryHasAPIConnectionTool(reg, []string{"infisical_admin__get_secrets"}) {
+		t.Error("expected api-connection tool to be detected when it is registered and offered")
+	}
+	if registryHasAPIConnectionTool(reg, []string{"schedule_wakeup"}) {
+		t.Error("did not expect detection for a name that is not a registered api-connection tool")
+	}
+
+	// The shared hint must state the query-object rule the whole feature exists to
+	// teach, so cloud and local first prompts both prevent the top-level 502.
+	if !strings.Contains(APIConnectionArgHint, "`query` object") {
+		t.Errorf("APIConnectionArgHint must state the query-object rule; got %q", APIConnectionArgHint)
+	}
+}

@@ -1548,6 +1548,13 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 				break
 			}
 		}
+		// FIR-2441: surface the api-connection argument shape in the cloud system
+		// prompt too, so the cloud and local (claim brief) first prompts agree.
+		// Detect an api-connection tool through the registry rather than a fragile
+		// name pattern; the same shared hint text is rendered in both places.
+		if registryHasAPIConnectionTool(registry, toolNames) {
+			systemText += "\n\n" + APIConnectionArgHint
+		}
 	}
 
 	history := ConvertGatewayMessagesToAnthropic(initialMessages[msgStart:])

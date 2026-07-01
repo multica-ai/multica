@@ -30,6 +30,10 @@ func TestCerebroToolsBriefGroupsAndOrders(t *testing.T) {
 		"`customer-service / lookup_order`",
 		"`customer-service / draft_reply`",
 		"Look up an order",
+		// FIR-2441: the first prompt must state the api-connection argument shape
+		// (path top-level, query params inside `query`, body inside `body`) so an
+		// agent never has to call-and-read-the-error to discover the `query` object.
+		"inside a `query` object",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected rendered brief to contain %q\n---\n%s", want, out)
