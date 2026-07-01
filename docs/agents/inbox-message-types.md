@@ -70,6 +70,25 @@ read / snooze ("Remind me") / archive actions are the same everywhere.
 > `MobileRowActions` + a hover dropdown so it stays identical across kinds —
 > don't reimplement a one-off mobile gesture.
 
+### Reminder creation entrypoints (FIR-2385)
+
+User-created reminders are stored as `cerebro_reminder` rows first. The due
+sweeper later creates or re-surfaces the inbox row when `remind_at` fires. The
+code map lives in `packages/cerebro-inbox/mutations.ts`; keep these entrypoints
+on the unified endpoint/table:
+
+| Surface | Code path | Backend |
+|---|---|---|
+| Inbox toolbar / free reminder | `useCreateGlobalReminder` | `POST /api/cerebro/reminders` |
+| Legacy inbox reminder export | `useCreateInboxReminder` -> `api.createInboxReminder` | `POST /api/cerebro/reminders` |
+| Inbox row, channel, DM snooze | `useSnoozeAsReminder` | `POST /api/cerebro/reminders` |
+| Focus-list snooze | `packages/cerebro-focus-list/mutations.ts` `useSnoozeFocusItemAsReminder` | `POST /api/cerebro/reminders` |
+| Issue/channel/DM comment menu | `useCreateCommentReminder` | `POST /api/cerebro/reminders` |
+| Agent chat message menu | `packages/cerebro-chat/mutations.ts` `useCreateChatMessageReminder` | `POST /api/cerebro/reminders` |
+| Reminders overview sheet | `packages/cerebro-reminders/core/mutations.ts` `useCreateReminder` | `POST /api/cerebro/reminders` |
+| Mobile comment reminder | `apps/mobile/data/api.ts` `createCommentReminder` | `POST /api/cerebro/reminders` |
+| Legacy clients | `server/internal/cerebro/inbox/handler.go` `CreateReminder` | accepts `/api/inbox/reminders`, writes `cerebro_reminder` |
+
 ### Favorite star — dynamic inbox only (TECH-3579)
 
 The dynamic inbox adds one affordance that is **not** part of the shared

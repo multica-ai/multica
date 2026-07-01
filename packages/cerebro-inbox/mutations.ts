@@ -6,6 +6,18 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { inboxKeys } from "@multica/core/inbox/queries";
 import type { InboxItem } from "@multica/core/types";
 
+// FIR-2385 reminder creation map. Every product surface that can create a
+// reminder must land in the unified cerebro_reminder table:
+// - Inbox toolbar / free reminder: useCreateGlobalReminder -> POST /api/cerebro/reminders.
+// - Legacy inbox reminder export: useCreateInboxReminder -> api.createInboxReminder -> POST /api/cerebro/reminders.
+// - Inbox row, channel, DM snooze: useSnoozeAsReminder -> POST /api/cerebro/reminders with issue_id/project_id.
+// - Focus-list snooze: packages/cerebro-focus-list/mutations.ts useSnoozeFocusItemAsReminder -> POST /api/cerebro/reminders.
+// - Issue/channel/DM comment menu: useCreateCommentReminder -> POST /api/cerebro/reminders with message_id.
+// - Agent chat message menu: packages/cerebro-chat/mutations.ts useCreateChatMessageReminder -> POST /api/cerebro/reminders with chat_message_id.
+// - Reminders overview sheet: packages/cerebro-reminders/core/mutations.ts useCreateReminder -> POST /api/cerebro/reminders.
+// - Mobile comment reminder: apps/mobile/data/api.ts createCommentReminder -> POST /api/cerebro/reminders with message_id.
+// - Legacy compatibility clients: server/internal/cerebro/inbox/handler.go CreateReminder accepts /api/inbox/reminders and writes cerebro_reminder.
+
 function updateInboxIssueSiblings(
   items: InboxItem[] | undefined,
   id: string,

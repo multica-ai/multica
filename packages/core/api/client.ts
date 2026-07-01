@@ -2843,21 +2843,23 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/unread`, { method: "POST" });
   }
 
-  // CEREBRO-PATCH(inbox-reminders-client): create global reminders from the inbox toolbar.
+  // CEREBRO-PATCH(inbox-reminders-client): create inbox/global reminders via
+  // the unified cerebro_reminder entity. The legacy /api/inbox/reminders route
+  // stays server-side only as a compatibility shim.
   async createInboxReminder(params: {
     text: string;
     plannedAt: Date;
     issueId?: string | null;
     // CEREBRO-PATCH(comment-reminder-client): FIR-2643 — pin a reminder to one comment.
     commentId?: string | null;
-  }): Promise<InboxItem> {
-    return this.fetch("/api/inbox/reminders", {
+  }): Promise<unknown> {
+    return this.fetch("/api/cerebro/reminders", {
       method: "POST",
       body: JSON.stringify({
         text: params.text,
-        planned_at: params.plannedAt.toISOString(),
+        remind_at: params.plannedAt.toISOString(),
         issue_id: params.issueId ?? null,
-        comment_id: params.commentId ?? null, // CEREBRO-PATCH(comment-reminder-client): FIR-2643
+        message_id: params.commentId ?? null,
       }),
     });
   }

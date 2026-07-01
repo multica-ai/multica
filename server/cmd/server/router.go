@@ -50,8 +50,8 @@ import (
 	cerebrodictation "github.com/multica-ai/multica/server/internal/cerebro/dictation"
 	"github.com/multica-ai/multica/server/internal/cerebro/feature_flags"
 	// CEREBRO-PATCH(cerebro-groups-routes): JEH-721 group handler import
-	cerebrogroups "github.com/multica-ai/multica/server/internal/cerebro/groups"
 	cerebroagentoffice "github.com/multica-ai/multica/server/internal/cerebro/agentoffice" // CEREBRO-PATCH(cerebro-agent-office-routes): FIR-1775 agent context versioning + governance
+	cerebrogroups "github.com/multica-ai/multica/server/internal/cerebro/groups"
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy handler import
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	// CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 read-only effective runtime tool access preview.
@@ -1880,7 +1880,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/unread-count", h.CountUnreadInbox)
 				// CEREBRO-PATCH(cerebro-inbox-routes): cerebro-only handler.
 				r.Get("/active-issue-tasks", cerebroInboxHandler.ListActiveIssueTasks)
-				r.Post("/reminders", cerebroInboxHandler.CreateReminder) // CEREBRO-PATCH(inbox-reminders-route): create muted reminder items.
+				r.Post("/reminders", cerebroInboxHandler.CreateReminder) // CEREBRO-PATCH(inbox-reminders-route): legacy shape, writes cerebro_reminder.
 				r.Post("/mark-all-read", h.MarkAllInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)

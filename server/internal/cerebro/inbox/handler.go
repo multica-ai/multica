@@ -104,11 +104,30 @@ type createReminderRequest struct {
 	Text      string  `json:"text"`
 	PlannedAt string  `json:"planned_at"`
 	IssueID   *string `json:"issue_id"`
-	// CommentID makes the reminder point at one specific comment (FIR-2641).
-	// When set, clicking the fired reminder opens the issue and scrolls to that
-	// comment — the inbox deep-link reads details.comment_id. text may be left
-	// empty: it is then auto-suggested from the comment body.
+	// CommentID is the legacy client field for the unified reminder message_id
+	// anchor (FIR-2641). text may be left empty: it is then auto-suggested from
+	// the comment body.
 	CommentID *string `json:"comment_id"`
+}
+
+type legacyReminderResponse struct {
+	ID             string  `json:"id"`
+	RecipientType  string  `json:"recipient_type"`
+	RecipientID    string  `json:"recipient_id"`
+	RemindAt       string  `json:"remind_at"`
+	Status         string  `json:"status"`
+	Text           string  `json:"text"`
+	AnchorType     string  `json:"anchor_type"`
+	MessageID      *string `json:"message_id"`
+	ConversationID *string `json:"conversation_id"`
+}
+
+func optUUIDString(u pgtype.UUID) *string {
+	if !u.Valid {
+		return nil
+	}
+	s := util.UUIDToString(u)
+	return &s
 }
 
 // MuteInboxItem mutes an inbox item until the timestamp supplied in the
@@ -226,10 +245,9 @@ func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toResponse(item))
 }
 
-// CreateReminder creates a personal reminder by inserting a muted inbox row.
-// The row is visible in the Muted/Snooze inbox view until planned_at, then it
-// automatically becomes active because the regular inbox filters stop treating
-// muted_until as muted once the timestamp has passed.
+// CreateReminder is the legacy /api/inbox/reminders compatibility route. New
+// clients post to /api/cerebro/reminders; this handler accepts the old
+// planned_at/comment_id shape and writes the same unified cerebro_reminder row.
 func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -266,9 +284,8 @@ func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
 	// supply the auto-suggested text. Gated by the per-user
 	// cerebro_comment_reminders flag so it can be switched off without redeploy.
 	var (
-		comment      db.Comment
-		commentIDStr string
-		haveComment  bool
+		comment     db.Comment
+		haveComment bool
 	)
 	if body.CommentID != nil && strings.TrimSpace(*body.CommentID) != "" {
 		if !h.commentRemindersEnabled(r.Context(), wsUUID, recipientID) {
@@ -288,14 +305,13 @@ func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "comment not found")
 			return
 		}
-		commentIDStr = util.UUIDToString(parsedCommentID)
 		haveComment = true
 	}
 
 	// Resolve the issue. A comment reference fixes the issue to the comment's
 	// own issue; an explicit issue_id, if also supplied, must match it.
-	var issueID pgtype.UUID
-	title := "Reminder"
+	anchorType := "none"
+	var messageID, conversationID pgtype.UUID
 	switch {
 	case haveComment:
 		if body.IssueID != nil && strings.TrimSpace(*body.IssueID) != "" {
@@ -309,26 +325,32 @@ func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		issue, err := h.Upstream.GetIssue(r.Context(), comment.IssueID)
-		if err != nil || util.UUIDToString(issue.WorkspaceID) != wsID {
+		if _, err := h.Upstream.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          comment.IssueID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
 			writeError(w, http.StatusNotFound, "issue not found")
 			return
 		}
-		issueID = comment.IssueID
-		title = "Reminder: " + issue.Title
+		anchorType = "comment"
+		messageID = comment.ID
+		conversationID = comment.IssueID
 	case body.IssueID != nil && strings.TrimSpace(*body.IssueID) != "":
 		parsedIssueID, err := util.ParseUUID(strings.TrimSpace(*body.IssueID))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid issue_id")
 			return
 		}
-		issue, err := h.Upstream.GetIssue(r.Context(), parsedIssueID)
-		if err != nil || util.UUIDToString(issue.WorkspaceID) != wsID {
+		issue, err := h.Upstream.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          parsedIssueID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
 			writeError(w, http.StatusNotFound, "issue not found")
 			return
 		}
-		issueID = parsedIssueID
-		title = "Reminder: " + issue.Title
+		anchorType = "issue"
+		conversationID = issue.ID
 	}
 
 	// Reminder text: caller-supplied wins; when blank and a comment is
@@ -343,57 +365,32 @@ func (h *Handler) CreateReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	planned := pgtype.Timestamptz{Time: plannedAt, Valid: true}
-	detailsMap := map[string]string{
-		// CEREBRO-PATCH(inbox-reminders-due): due sweeper only claims reminders explicitly marked pending.
-		"due_pending": "true",
-		"planned_at":  plannedAt.Format(time.RFC3339),
-		"text":        text,
-	}
-	if haveComment {
-		// The inbox deep-link (packages/views/inbox) reads details.comment_id to
-		// scroll the opened issue to this exact comment.
-		detailsMap["comment_id"] = commentIDStr
-	}
-	details, _ := json.Marshal(detailsMap)
-	existing, err := h.Cerebro.FindPendingReminder(r.Context(), cerebrodb.FindPendingReminderParams{
-		WorkspaceID: wsUUID,
-		RecipientID: recipientID,
-		Column3:     issueID,
-		Title:       title,
-		Body:        pgtype.Text{String: text, Valid: true},
-		Column6:     commentIDStr,
-	})
-	if err == nil {
-		item, err := h.Cerebro.UpdateReminderInboxItem(r.Context(), cerebrodb.UpdateReminderInboxItemParams{
-			ID:         existing.ID,
-			MutedUntil: planned,
-			Details:    details,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update reminder")
-			return
-		}
-		writeJSON(w, http.StatusOK, toResponse(item))
-		return
-	}
-
-	item, err := h.Cerebro.CreateReminderInboxItem(r.Context(), cerebrodb.CreateReminderInboxItemParams{
-		WorkspaceID: wsUUID,
-		RecipientID: recipientID,
-		IssueID:     issueID,
-		Title:       title,
-		Body:        pgtype.Text{String: text, Valid: true},
-		ActorType:   pgtype.Text{String: "member", Valid: true},
-		ActorID:     recipientID,
-		Details:     details,
-		MutedUntil:  planned,
+	id, err := h.Cerebro.CreateReminder(r.Context(), cerebrodb.CreateReminderParams{
+		WorkspaceID:    wsUUID,
+		UserID:         recipientID,
+		RecipientType:  "member",
+		RecipientID:    recipientID,
+		RemindAt:       pgtype.Timestamptz{Time: plannedAt, Valid: true},
+		Text:           text,
+		AnchorType:     anchorType,
+		MessageID:      messageID,
+		ConversationID: conversationID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create reminder")
 		return
 	}
-	writeJSON(w, http.StatusCreated, toResponse(item))
+	writeJSON(w, http.StatusCreated, legacyReminderResponse{
+		ID:             util.UUIDToString(id),
+		RecipientType:  "member",
+		RecipientID:    userID,
+		RemindAt:       plannedAt.Format(time.RFC3339),
+		Status:         "pending",
+		Text:           text,
+		AnchorType:     anchorType,
+		MessageID:      optUUIDString(messageID),
+		ConversationID: optUUIDString(conversationID),
+	})
 }
 
 // commentRemindersEnabled resolves the per-user cerebro_comment_reminders flag.
@@ -431,52 +428,52 @@ func suggestReminderText(content string) string {
 // notifications page consumes the same shape as the inbox feed. Kept local
 // to the cerebro package so this file does not import the upstream handler.
 type notificationItemResponse struct {
-	ID            string          `json:"id"`
-	WorkspaceID   string          `json:"workspace_id"`
-	RecipientType string          `json:"recipient_type"`
-	RecipientID   string          `json:"recipient_id"`
-	Type          string          `json:"type"`
-	Severity      string          `json:"severity"`
-	Route         string          `json:"route"`
-	IssueID          *string      `json:"issue_id"`
-	ProjectID        *string      `json:"project_id"`
-	ParentIssueID    *string      `json:"parent_issue_id"`
-	ParentIssueTitle *string      `json:"parent_issue_title"`
-	Title         string          `json:"title"`
-	Body          *string         `json:"body"`
-	Read          bool            `json:"read"`
-	Archived      bool            `json:"archived"`
-	MutedUntil    *string         `json:"muted_until"`
-	CreatedAt     string          `json:"created_at"`
-	IssueStatus   *string         `json:"issue_status"`
-	ActorType     *string         `json:"actor_type"`
-	ActorID       *string         `json:"actor_id"`
-	Details       json.RawMessage `json:"details"`
+	ID               string          `json:"id"`
+	WorkspaceID      string          `json:"workspace_id"`
+	RecipientType    string          `json:"recipient_type"`
+	RecipientID      string          `json:"recipient_id"`
+	Type             string          `json:"type"`
+	Severity         string          `json:"severity"`
+	Route            string          `json:"route"`
+	IssueID          *string         `json:"issue_id"`
+	ProjectID        *string         `json:"project_id"`
+	ParentIssueID    *string         `json:"parent_issue_id"`
+	ParentIssueTitle *string         `json:"parent_issue_title"`
+	Title            string          `json:"title"`
+	Body             *string         `json:"body"`
+	Read             bool            `json:"read"`
+	Archived         bool            `json:"archived"`
+	MutedUntil       *string         `json:"muted_until"`
+	CreatedAt        string          `json:"created_at"`
+	IssueStatus      *string         `json:"issue_status"`
+	ActorType        *string         `json:"actor_type"`
+	ActorID          *string         `json:"actor_id"`
+	Details          json.RawMessage `json:"details"`
 }
 
 func notificationsRowToResponse(r db.ListNotificationsItemsRow) notificationItemResponse {
 	return notificationItemResponse{
-		ID:            util.UUIDToString(r.ID),
-		WorkspaceID:   util.UUIDToString(r.WorkspaceID),
-		RecipientType: r.RecipientType,
-		RecipientID:   util.UUIDToString(r.RecipientID),
-		Type:          r.Type,
-		Severity:      r.Severity,
-		Route:         r.Route,
+		ID:               util.UUIDToString(r.ID),
+		WorkspaceID:      util.UUIDToString(r.WorkspaceID),
+		RecipientType:    r.RecipientType,
+		RecipientID:      util.UUIDToString(r.RecipientID),
+		Type:             r.Type,
+		Severity:         r.Severity,
+		Route:            r.Route,
 		IssueID:          uuidPtr(r.IssueID),
 		ProjectID:        uuidPtr(r.ProjectID),
 		ParentIssueID:    uuidPtr(r.ParentIssueID),
 		ParentIssueTitle: textPtr(r.ParentIssueTitle),
-		Title:         r.Title,
-		Body:          textPtr(r.Body),
-		Read:          r.Read,
-		Archived:      r.Archived,
-		MutedUntil:    timestampPtr(r.MutedUntil),
-		CreatedAt:     r.CreatedAt.Time.Format(time.RFC3339Nano),
-		IssueStatus:   textPtr(r.IssueStatus),
-		ActorType:     textPtr(r.ActorType),
-		ActorID:       uuidPtr(r.ActorID),
-		Details:       json.RawMessage(r.Details),
+		Title:            r.Title,
+		Body:             textPtr(r.Body),
+		Read:             r.Read,
+		Archived:         r.Archived,
+		MutedUntil:       timestampPtr(r.MutedUntil),
+		CreatedAt:        r.CreatedAt.Time.Format(time.RFC3339Nano),
+		IssueStatus:      textPtr(r.IssueStatus),
+		ActorType:        textPtr(r.ActorType),
+		ActorID:          uuidPtr(r.ActorID),
+		Details:          json.RawMessage(r.Details),
 	}
 }
 

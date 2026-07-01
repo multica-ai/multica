@@ -146,6 +146,34 @@ describe("ApiClient", () => {
     expect(init?.body).toBe(JSON.stringify({ title: "Follow-up thread" }));
   });
 
+  it("createInboxReminder POSTs to the unified reminder endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "reminder-1" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.createInboxReminder({
+      text: "Follow up",
+      plannedAt: new Date("2026-07-02T09:00:00.000Z"),
+      issueId: "issue-1",
+      commentId: "comment-1",
+    });
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/cerebro/reminders");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      text: "Follow up",
+      remind_at: "2026-07-02T09:00:00.000Z",
+      issue_id: "issue-1",
+      message_id: "comment-1",
+    });
+  });
+
   it("updateMyPreferences PATCHes the preferences endpoint with the partial blob", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

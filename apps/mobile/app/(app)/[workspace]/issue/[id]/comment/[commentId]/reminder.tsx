@@ -8,12 +8,10 @@
  *   - tap a quick preset (in 1 hour / tomorrow 9:00), or
  *   - pick a specific date + time on the native wheel.
  *
- * On commit it creates a personal reminder pinned to the comment via the
- * cerebro backend (POST /api/inbox/reminders with comment_id, FIR-2641). When
- * that reminder later fires, tapping it in the inbox deep-links straight to the
- * comment — that flow already exists (the inbox row carries details.comment_id,
- * see (tabs)/inbox.tsx → highlight param, and components/issue/timeline-list.tsx
- * scrolls + flashes the matching comment). This route only creates the reminder.
+ * On commit it creates a personal reminder pinned to the comment via
+ * POST /api/cerebro/reminders with message_id. When that reminder later fires,
+ * the sweeper creates/surfaces the inbox row that deep-links straight to the
+ * comment. This route only creates the reminder.
  *
  * iOS-native-first (apps/mobile/CLAUDE.md UI waterfall): the date+time control
  * is @react-native-community/datetimepicker — the same native picker the

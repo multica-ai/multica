@@ -487,28 +487,23 @@ class ApiClient {
   }
 
   // Create a personal reminder that points at one specific comment (FIR-2641 /
-  // FIR-2644). The backend (server/internal/cerebro/inbox/handler.go
-  // CreateReminder) accepts comment_id, fixes the reminder's issue to the
-  // comment's own issue, and stores comment_id in details so a tap in the inbox
-  // deep-links straight to the comment. `text` may be empty — the server then
-  // auto-suggests a snippet from the comment body (the picker pre-fills the
-  // same suggestion via lib/suggest-reminder-text.ts). When the
-  // cerebro_comment_reminders flag is off the server replies 403; the caller
-  // surfaces that as an alert. No parseWithFallback (mirrors markInboxRead): the
-  // response is not rendered, we invalidate the inbox list on settle instead.
+  // FIR-2644). Posts to the unified cerebro_reminder endpoint with message_id;
+  // the due sweeper creates/surfaces the inbox row later. `text` may be empty —
+  // the server then auto-suggests a snippet from the comment body. No
+  // parseWithFallback: the response is not rendered, we invalidate the inbox
+  // list on settle instead.
   async createCommentReminder(params: {
     commentId: string;
     issueId: string;
     text: string;
     plannedAt: Date;
-  }): Promise<InboxItem> {
-    return this.fetch<InboxItem>("/api/inbox/reminders", {
+  }): Promise<unknown> {
+    return this.fetch<unknown>("/api/cerebro/reminders", {
       method: "POST",
       body: JSON.stringify({
-        comment_id: params.commentId,
-        issue_id: params.issueId,
+        message_id: params.commentId,
         text: params.text,
-        planned_at: params.plannedAt.toISOString(),
+        remind_at: params.plannedAt.toISOString(),
       }),
     });
   }
