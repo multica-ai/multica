@@ -269,6 +269,33 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
+          version: "0.3.34",
+          date: "2026-07-01",
+          title: "Slack /issue 슬래시 명령, ByteDance TRAE CLI 런타임, Claude Sonnet 5 지원",
+          changes: [],
+          features: [
+            "Slack의 네이티브 /issue 슬래시 명령이 Multica Issue를 생성하고 실행자에게만 Issue 링크를 개인 메시지로 회신합니다.",
+            "같은 Slack 워크스페이스에서 이미 한 Multica 봇과 계정을 연결한 사용자는, 새로 추가된 다른 봇에서 다시 연결을 요구받지 않습니다.",
+            "Slack 채널 문맥 읽기가 두 개의 명령으로 정리되었습니다: 채널 개요와 단일 스레드 읽기입니다.",
+            "ByteDance TRAE CLI(traecli)가 표준 ACP 프로토콜을 통해 내장 에이전트 런타임에 추가되었습니다.",
+            "Anthropic 모델 목록에 Claude Sonnet 5가 추가되고 도입기 가격이 반영되었습니다.",
+            "각 태스크 실행에서 프롬프트 캐시 히트율이 사용량 로그에 기록됩니다.",
+          ],
+          improvements: [
+            "Autopilot의 «액세스 관리» 진입점이 별도 버튼이 아니라 편집 대화상자 안의 가벼운 팝오버로 바뀌었습니다.",
+            "Issue와 댓글 에디터가 Tiptap 3.27.1로 업그레이드되어 인라인 `code` 단축 입력 시 앞 글자가 사라지는 문제가 해결되었습니다.",
+          ],
+          fixes: [
+            "Slack 채팅 에이전트가 채널 히스토리 조회 과정을 서술하지 않고, 조용히 읽은 뒤 답변만 회신합니다.",
+            "셀프호스트의 로컬 디스크 구성에서 첨부 미리보기(PDF / HTML)가 다시 열립니다. (커뮤니티 보고)",
+            "Cursor와 Kiro 런타임 완료 시 트랜스크립트가 복구되어 최종 결과가 유실되지 않습니다.",
+            "셀프호스트: docker-compose.selfhost.yml에서 MULTICA_SLACK_SECRET_KEY가 백엔드 컨테이너로 전달됩니다. (커뮤니티 보고)",
+            "Issue 보드 상단의 «N개 처리 중» 칩이 에이전트가 아니라 Issue 수를 기준으로 집계됩니다.",
+            "셀프호스트 익명 소스 채널 리포팅 대상이 정식 Multica API로 복원되었습니다.",
+            "댓글 딥링크 하이라이트가 배경색만 사용하도록 통일되어, 루트 댓글과 답글 동작이 일치합니다.",
+          ],
+        },
+        {
           version: "0.3.33",
           date: "2026-06-30",
           title: "Autopilot 액세스 관리, Slack 히스토리 백필, 스킬 번들 아카이브 가져오기",
