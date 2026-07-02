@@ -2022,6 +2022,48 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 	}
 }
 
+// Regression test for issue #4336: the final disposition report must land
+// even when the caller's run/loop context is ALREADY cancelled (daemon
+// shutdown / restart / auto-update). Before the fix, reportTaskResult posted
+// on the cancelled parent ctx, FailTask aborted with "context canceled", the
+// report was lost, and the cloud stranded the task at `in_progress` — which,
+// under a per-agent concurrency cap of 1, permanently wedged the agent's
+// dispatch queue. dispositionCtx detaches from the parent's cancellation
+// (WithoutCancel) so the POST still reaches the server.
+func TestReportTaskResult_FailReportSurvivesCancelledParentCtx(t *testing.T) {
+	t.Parallel()
+
+	rec := &reportTaskResultRecorder{}
+	srv := httptest.NewServer(rec.handler(t))
+	t.Cleanup(srv.Close)
+
+	// Simulate the shutdown path: the context the run loop hands to
+	// reportTaskResult is already cancelled.
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(cancelledCtx, "task-shutdown", TaskResult{
+		Status:        "blocked",
+		Comment:       "force-stopped by idle watchdog",
+		FailureReason: "idle_watchdog",
+		SessionID:     "ses-shutdown",
+		WorkDir:       "/tmp/shutdown",
+	}, slog.Default())
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.path != "/api/daemon/tasks/task-shutdown/fail" {
+		t.Fatalf("expected /fail endpoint to be hit despite cancelled parent ctx, got %q (report was lost — task would strand at in_progress)", rec.path)
+	}
+	if rec.payload["failure_reason"] != "idle_watchdog" {
+		t.Errorf("failure_reason: got %v, want idle_watchdog", rec.payload["failure_reason"])
+	}
+	if rec.payload["session_id"] != "ses-shutdown" {
+		t.Errorf("session_id: got %v, want ses-shutdown", rec.payload["session_id"])
+	}
+}
+
 // Regression test for the MUL-2780 incident: a short 502 burst on the
 // /complete callback used to (a) drop the task at the first failure and
 // (b) wrongly fall back to /fail, surfacing a successful run as red.

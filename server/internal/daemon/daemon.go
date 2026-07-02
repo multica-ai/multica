@@ -2945,9 +2945,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// classifier so the failure_reason column reflects the actual
 		// shape of the failure (provider 5xx, network, process crash,
 		// …) rather than the coarse legacy "agent_error" bucket.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", taskfailure.Classify(err.Error()).String()); failErr != nil {
+		// #4336: report on a detached, bounded context — if the agent run
+		// errored *because* the daemon is shutting down, `ctx` is already
+		// cancelled and reporting on it would be lost, stranding the task
+		// at `in_progress`.
+		failCtx, failCancel := dispositionCtx(ctx)
+		if failErr := d.client.FailTask(failCtx, task.ID, err.Error(), "", "", taskfailure.Classify(err.Error()).String()); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
+		failCancel()
 		return
 	}
 
@@ -3113,6 +3119,25 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	return release, false
 }
 
+// reportDispositionTimeout bounds the detached final-disposition report so a
+// shutdown can't hang on an unreachable server, while still giving the POST
+// enough time to land through a transient blip.
+const reportDispositionTimeout = 15 * time.Second
+
+// dispositionCtx returns a bounded context DETACHED from parentCtx's
+// cancellation (issue #4336). The final task-disposition POST (Complete/Fail)
+// must land even when the daemon is shutting down — at which point the
+// caller's run/loop ctx is already cancelled, so reporting on it aborts with
+// "context canceled", the report is lost, and the cloud strands the task at
+// `in_progress` (which, under a per-agent concurrency cap of 1, permanently
+// wedges that agent's dispatch queue). WithoutCancel preserves request-scoped
+// values (e.g. auth) while ignoring the parent's Done channel; the timeout
+// keeps a shutdown from blocking on an unreachable server. Callers must
+// `defer cancel()`.
+func dispositionCtx(parentCtx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parentCtx), reportDispositionTimeout)
+}
+
 // reportTaskResult writes the final task disposition back to the server.
 //
 // Fail closed: only an explicit "completed" status is reported as success.
@@ -3123,7 +3148,21 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 // the agent may have built a real session before getting stuck, and we want
 // the next chat turn to resume there rather than start over and "forget"
 // the conversation.
-func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
+//
+// The final disposition POST runs on a context DETACHED from the caller's
+// run/loop context (issue #4336). On daemon shutdown / restart (including the
+// auto-update self-restart) the parent ctx is already cancelled by the time we
+// get here, so reporting on it aborts with "context canceled" — the report is
+// LOST and the cloud keeps the task `in_progress` forever. With a per-agent
+// concurrency cap of 1 that orphaned task permanently holds the agent's only
+// slot, so every later task to it sits `queued` and never starts. Detaching
+// (WithoutCancel, preserving request-scoped values like auth) under a bounded
+// timeout lets the disposition land even mid-shutdown, so the task reaches a
+// terminal state and the slot is freed.
+func (d *Daemon) reportTaskResult(parentCtx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
+	ctx, cancel := dispositionCtx(parentCtx)
+	defer cancel()
+
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
