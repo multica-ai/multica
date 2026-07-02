@@ -1060,42 +1060,22 @@ func (h *Handler) resolveAutopilotTeam(
 	projectID pgtype.UUID,
 	fallback pgtype.UUID,
 ) (pgtype.UUID, bool) {
-	teamID := fallback
+	requested := fallback
 	if rawTeamID != nil && *rawTeamID != "" {
 		parsed, ok := parseUUIDOrBadRequest(w, *rawTeamID, "team_id")
 		if !ok {
 			return pgtype.UUID{}, false
 		}
-		teamID = parsed
+		requested = parsed
 	}
-	if !teamID.Valid {
-		team, err := h.Queries.GetDefaultWorkspaceTeam(r.Context(), workspaceID)
-		if err != nil || !team.ID.Valid || team.ArchivedAt.Valid {
-			writeError(w, http.StatusBadRequest, "default team not found")
-			return pgtype.UUID{}, false
+	team, err := service.ResolveTeam(r.Context(), h.Queries, workspaceID, requested, projectID)
+	if err != nil {
+		if !writeTeamResolveError(w, err) {
+			writeError(w, http.StatusBadRequest, err.Error())
 		}
-		teamID = team.ID
-	}
-	team, err := h.Queries.GetWorkspaceTeam(r.Context(), db.GetWorkspaceTeamParams{
-		ID:          teamID,
-		WorkspaceID: workspaceID,
-	})
-	if err != nil || team.ArchivedAt.Valid {
-		writeError(w, http.StatusBadRequest, "team_id must reference an active team in this workspace")
 		return pgtype.UUID{}, false
 	}
-	if projectID.Valid {
-		hasTeam, err := h.Queries.ProjectHasTeam(r.Context(), db.ProjectHasTeamParams{
-			WorkspaceID: workspaceID,
-			ProjectID:   projectID,
-			TeamID:      teamID,
-		})
-		if err != nil || !hasTeam {
-			writeError(w, http.StatusBadRequest, "project_id is not associated with team_id")
-			return pgtype.UUID{}, false
-		}
-	}
-	return teamID, true
+	return team.ID, true
 }
 
 func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {

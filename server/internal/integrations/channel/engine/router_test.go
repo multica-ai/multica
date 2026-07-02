@@ -192,6 +192,12 @@ func (f *fakeReader) GetWorkspaceTeam(_ context.Context, _ db.GetWorkspaceTeamPa
 	}
 	return f.team, nil
 }
+func (f *fakeReader) GetDefaultWorkspaceTeam(_ context.Context, _ pgtype.UUID) (db.WorkspaceTeam, error) {
+	if f.teamErr != nil {
+		return db.WorkspaceTeam{}, f.teamErr
+	}
+	return f.team, nil
+}
 
 // ---- harness ----
 

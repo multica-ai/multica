@@ -32,6 +32,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -325,7 +326,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		))
 	}
 	if issueCreated {
-		prefix := h.getIssuePrefixForIssue(r.Context(), issue)
+		prefix := issueidentifier.PrefixForIssue(r.Context(), h.Queries, issue)
 		resp := issueToResponse(issue, prefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
@@ -474,7 +475,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	}
 
 	if issueCreated {
-		prefix := h.getIssuePrefixForIssue(r.Context(), issue)
+		prefix := issueidentifier.PrefixForIssue(r.Context(), h.Queries, issue)
 		resp := issueToResponse(issue, prefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform2, _, _ := middleware.ClientMetadataFromContext(r.Context())

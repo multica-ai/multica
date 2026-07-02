@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	"github.com/multica-ai/multica/server/internal/service"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // Router is the channel-agnostic inbound pipeline — the generalization of the
@@ -300,7 +300,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		res.IssueID = issueRes.Issue.ID
 		res.IssueNumber = issueRes.Issue.Number
 		res.IssueTitle = issueRes.Issue.Title
-		res.IssueIdentifier = r.issueIdentifierForIssue(ctx, issueRes.Issue)
+		res.IssueIdentifier = issueidentifier.ForIssue(ctx, r.reader, issueRes.Issue)
 	}
 
 	// 8. Debounce the run trigger. The synchronous outcome is OutcomeIngested
@@ -328,22 +328,6 @@ func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg cha
 		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, r.takePendingFresh(key, fresh))
 	}
 	r.batcher.Schedule(key, flush)
-}
-
-func (r *Router) issueIdentifierForIssue(ctx context.Context, issue db.Issue) string {
-	if issue.TeamID.Valid {
-		team, err := r.reader.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
-			ID:          issue.TeamID,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if err == nil && team.Key != "" {
-			return fmt.Sprintf("%s-%d", team.Key, issue.Number)
-		}
-	}
-	if ws, err := r.reader.GetWorkspace(ctx, issue.WorkspaceID); err == nil && ws.IssuePrefix != "" {
-		return fmt.Sprintf("%s-%d", ws.IssuePrefix, issue.Number)
-	}
-	return fmt.Sprintf("#%d", issue.Number)
 }
 
 // chatRunFlushTimeout bounds the detached flush (session reload + enqueue +

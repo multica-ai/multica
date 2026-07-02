@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -83,8 +84,9 @@ type IssueCreateOpts struct {
 	// package to depend on handler-layer types. If nil, the service
 	// emits a minimal `{"issue_id": <uuid>}` payload — enough for cache
 	// invalidation, but front-ends that expect the full response shape
-	// must provide BroadcastPayload.
-	BroadcastPayload func(issue db.Issue, attachments []db.Attachment) map[string]any
+	// must provide BroadcastPayload. teamKey is the resolved Team key so
+	// the callback can build the identifier without re-querying the Team.
+	BroadcastPayload func(issue db.Issue, attachments []db.Attachment, teamKey string) map[string]any
 
 	// ActorID overrides the actor ID used for broadcast + analytics
 	// when it differs from the creator on the row. Agent-created issues
@@ -135,12 +137,38 @@ var ErrParentIssueNotFound = errors.New("parent issue not found in this workspac
 var ErrProjectNotFound = errors.New("project not found in this workspace")
 
 // ErrTeamNotFound signals that the requested or fallback Team does not exist
-// in the workspace, or is archived and cannot receive new work.
+// in the workspace. Callers translate this into 400.
 var ErrTeamNotFound = errors.New("team not found in this workspace")
+
+// ErrTeamArchived signals that the resolved Team exists but is archived and
+// cannot receive new work. Kept distinct from ErrTeamNotFound so callers can
+// return a clear "team is archived" message instead of a misleading "not found".
+var ErrTeamArchived = errors.New("team is archived")
 
 // ErrProjectTeamMismatch signals that an issue is being created into a Team
 // that is not associated with its Project.
 var ErrProjectTeamMismatch = errors.New("project is not associated with this team")
+
+// ErrProjectTeamAmbiguous signals that a Team was not specified for an issue
+// whose Project belongs to more than one Team, so no single Team can be
+// inferred. Callers translate this into a 400 that names the candidate Team
+// keys; matched via errors.Is against a *ProjectTeamAmbiguousError.
+var ErrProjectTeamAmbiguous = errors.New("project has multiple teams; specify team_id")
+
+// ProjectTeamAmbiguousError carries the candidate Team keys so the transport
+// layer can produce a guided message. It matches ErrProjectTeamAmbiguous under
+// errors.Is.
+type ProjectTeamAmbiguousError struct {
+	TeamKeys []string
+}
+
+func (e *ProjectTeamAmbiguousError) Error() string {
+	return fmt.Sprintf("project has multiple teams (%s); specify team_id", strings.Join(e.TeamKeys, ", "))
+}
+
+func (e *ProjectTeamAmbiguousError) Is(target error) bool {
+	return target == ErrProjectTeamAmbiguous
+}
 
 // ErrCrossTeamChild signals that a child issue attempted to use a different
 // Team from its parent. v1 keeps parent/child trees within one Team.
@@ -153,9 +181,19 @@ var ErrCrossTeamChild = errors.New("child issue must use the same team as parent
 //   - On ErrActiveDuplicate: DuplicateIssue is the row that blocked the
 //     create; Issue and Attachments are zero.
 type IssueCreateResult struct {
-	Issue          db.Issue
-	Attachments    []db.Attachment
+	Issue       db.Issue
+	Attachments []db.Attachment
+	// TeamKey is the identifier prefix of the resolved Team, captured during
+	// creation so callers building the broadcast payload and HTTP response do
+	// not each re-query the Team that Create already resolved.
+	TeamKey        string
 	DuplicateIssue *db.Issue
+	// EnqueueErr carries a non-fatal agent/squad task enqueue failure that
+	// happened AFTER the issue was committed. The issue itself is valid; the
+	// manual HTTP path ignores this (warn-only, historical behavior), but the
+	// autopilot path uses it to fail the run instead of recording a success
+	// for work whose agent task was never created.
+	EnqueueErr error
 }
 
 // Create runs the full issue-creation pipeline atomically end-to-end:
@@ -222,7 +260,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			return IssueCreateResult{}, ErrProjectNotFound
 		}
 	}
-	team, err := s.resolveIssueTeam(ctx, qtx, p.WorkspaceID, projectID, teamID)
+	team, err := ResolveTeam(ctx, qtx, p.WorkspaceID, teamID, projectID)
 	if err != nil {
 		return IssueCreateResult{}, err
 	}
@@ -324,43 +362,59 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		actorID = util.UUIDToString(issue.CreatorID)
 	}
 
-	s.publishIssueCreated(issue, attachments, p.CreatorType, actorID, opts)
+	s.publishIssueCreated(issue, attachments, team.Key, p.CreatorType, actorID, opts)
 	s.captureCreatedAnalytics(issue, p.CreatorType, actorID, opts)
-	s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID, opts.InitiatorUserID)
+	enqueueErr := s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID, opts.InitiatorUserID)
 
-	return IssueCreateResult{Issue: issue, Attachments: attachments}, nil
+	return IssueCreateResult{Issue: issue, Attachments: attachments, TeamKey: team.Key, EnqueueErr: enqueueErr}, nil
 }
 
-func (s *IssueService) resolveIssueTeam(ctx context.Context, qtx *db.Queries, workspaceID, projectID, requestedTeamID pgtype.UUID) (db.WorkspaceTeam, error) {
+// ResolveTeam is the single authority for choosing an issue's Team. It is used
+// by IssueService.Create and by the HTTP quick-create / autopilot handlers so
+// every issue-producing path shares one inference and validation policy:
+//
+//   - an explicit requestedTeamID is validated and used;
+//   - otherwise, when a Project is given: a single-team Project infers that
+//     Team, a multi-team Project is ambiguous (ErrProjectTeamAmbiguous), and a
+//     Project with no Team links falls through;
+//   - otherwise the workspace default Team is used.
+//
+// The chosen Team must be active (ErrTeamNotFound / ErrTeamArchived) and, when
+// a Project is given, associated with it (ErrProjectTeamMismatch).
+func ResolveTeam(ctx context.Context, q *db.Queries, workspaceID, requestedTeamID, projectID pgtype.UUID) (db.WorkspaceTeam, error) {
 	teamID := requestedTeamID
 	if !teamID.Valid && projectID.Valid {
-		teams, err := qtx.ListProjectTeams(ctx, db.ListProjectTeamsParams{
+		teams, err := q.ListProjectTeams(ctx, db.ListProjectTeamsParams{
 			WorkspaceID: workspaceID,
 			ProjectID:   projectID,
 		})
 		if err != nil {
 			return db.WorkspaceTeam{}, ErrProjectTeamMismatch
 		}
-		if len(teams) == 1 {
+		switch {
+		case len(teams) == 1:
 			teamID = teams[0].ID
+		case len(teams) > 1:
+			keys := make([]string, len(teams))
+			for i, t := range teams {
+				keys[i] = t.Key
+			}
+			return db.WorkspaceTeam{}, &ProjectTeamAmbiguousError{TeamKeys: keys}
 		}
 	}
 	if !teamID.Valid {
-		team, err := qtx.GetDefaultWorkspaceTeam(ctx, workspaceID)
+		team, err := q.GetDefaultWorkspaceTeam(ctx, workspaceID)
 		if err != nil {
 			return db.WorkspaceTeam{}, ErrTeamNotFound
 		}
 		teamID = team.ID
 	}
-	team, err := qtx.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
-		ID:          teamID,
-		WorkspaceID: workspaceID,
-	})
-	if err != nil || !team.ID.Valid || team.ArchivedAt.Valid {
-		return db.WorkspaceTeam{}, ErrTeamNotFound
+	team, err := ValidateActiveTeam(ctx, q, workspaceID, teamID)
+	if err != nil {
+		return db.WorkspaceTeam{}, err
 	}
 	if projectID.Valid {
-		hasTeam, err := qtx.ProjectHasTeam(ctx, db.ProjectHasTeamParams{
+		hasTeam, err := q.ProjectHasTeam(ctx, db.ProjectHasTeamParams{
 			WorkspaceID: workspaceID,
 			ProjectID:   projectID,
 			TeamID:      team.ID,
@@ -368,6 +422,23 @@ func (s *IssueService) resolveIssueTeam(ctx context.Context, qtx *db.Queries, wo
 		if err != nil || !hasTeam {
 			return db.WorkspaceTeam{}, ErrProjectTeamMismatch
 		}
+	}
+	return team, nil
+}
+
+// ValidateActiveTeam loads a Team by ID and returns it only if it exists in the
+// workspace and is not archived. Shared active-team validation for ResolveTeam
+// and for handlers validating a Team-id list.
+func ValidateActiveTeam(ctx context.Context, q *db.Queries, workspaceID, teamID pgtype.UUID) (db.WorkspaceTeam, error) {
+	team, err := q.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
+		ID:          teamID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil || !team.ID.Valid {
+		return db.WorkspaceTeam{}, ErrTeamNotFound
+	}
+	if team.ArchivedAt.Valid {
+		return db.WorkspaceTeam{}, ErrTeamArchived
 	}
 	return team, nil
 }
@@ -404,13 +475,13 @@ func (s *IssueService) linkAttachments(ctx context.Context, issue db.Issue, ids 
 	return list
 }
 
-func (s *IssueService) publishIssueCreated(issue db.Issue, attachments []db.Attachment, creatorType, actorID string, opts IssueCreateOpts) {
+func (s *IssueService) publishIssueCreated(issue db.Issue, attachments []db.Attachment, teamKey, creatorType, actorID string, opts IssueCreateOpts) {
 	if s.Bus == nil {
 		return
 	}
 	var payload map[string]any
 	if opts.BroadcastPayload != nil {
-		payload = opts.BroadcastPayload(issue, attachments)
+		payload = opts.BroadcastPayload(issue, attachments, teamKey)
 	} else {
 		// Minimal fallback so cache invalidations still fire even if the
 		// caller forgot to supply a builder. Front-ends that expect the
@@ -474,12 +545,17 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 	}
 }
 
-func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue, creatorType, actorID string, initiatorUserID pgtype.UUID) {
+// maybeEnqueueOnAssign enqueues the assignee agent (or squad leader) task for a
+// freshly created, non-backlog, assigned issue. It still logs a warning on
+// failure so the manual create path is unchanged, but it also RETURNS the
+// failure so callers that need a durable outcome (autopilot) can act on it
+// instead of silently recording a success.
+func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue, creatorType, actorID string, initiatorUserID pgtype.UUID) error {
 	if s.TaskService == nil {
-		return
+		return nil
 	}
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
-		return
+		return nil
 	}
 	if s.shouldEnqueueAgentTask(ctx, issue) {
 		var err error
@@ -492,11 +568,15 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 			slog.Warn("enqueue agent task on create failed",
 				"issue_id", util.UUIDToString(issue.ID),
 				"error", err)
+			return fmt.Errorf("enqueue agent task: %w", err)
 		}
 	}
 	if s.shouldEnqueueSquadLeaderOnAssign(ctx, issue) {
-		s.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, creatorType, actorID, initiatorUserID)
+		if err := s.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, creatorType, actorID, initiatorUserID); err != nil {
+			return fmt.Errorf("enqueue squad leader task: %w", err)
+		}
 	}
+	return nil
 }
 
 // shouldEnqueueAgentTask returns true when an issue create or assignment
@@ -551,13 +631,13 @@ func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) b
 	return ready
 }
 
-func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string, initiatorUserID pgtype.UUID) {
+func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string, initiatorUserID pgtype.UUID) error {
 	squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
-		return
+		return nil
 	}
 	hasPending, err := s.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: issue.ID,
@@ -566,7 +646,7 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 		HeadSha: headShaText(s.TaskService.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil || hasPending {
-		return
+		return nil
 	}
 	if initiatorUserID.Valid {
 		_, err = s.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, "", initiatorUserID)
@@ -579,5 +659,7 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 			"squad_id", util.UUIDToString(squad.ID),
 			"leader_id", util.UUIDToString(squad.LeaderID),
 			"error", err)
+		return err
 	}
+	return nil
 }

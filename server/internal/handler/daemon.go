@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -2279,7 +2280,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 							WorkspaceID: wsUUID,
 						})
 						if perr == nil && parent.ID.Valid {
-							resp.ParentIssueIdentifier = h.getIssuePrefixForIssue(r.Context(), parent) + "-" + strconv.Itoa(int(parent.Number))
+							resp.ParentIssueIdentifier = issueidentifier.PrefixForIssue(r.Context(), h.Queries, parent) + "-" + strconv.Itoa(int(parent.Number))
 						}
 					}
 				}

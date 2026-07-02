@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -3430,7 +3431,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							// it here too. Without it the board / status-filter
 							// caches keep showing the issue as in_progress until
 							// the next write touches it (#4648 / MUL-3782).
-							s.broadcastIssueUpdated(updatedIssue, issue.Status)
+							s.broadcastIssueUpdated(ctx, updatedIssue, issue.Status)
 						}
 					}
 				}
@@ -3899,8 +3900,8 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // emit status-change activity / notifications. That is intentional for the
 // realtime-staleness fix (#4648 / MUL-3782); folding those side effects in
 // would mean unifying the payload type and is left as a follow-up.
-func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
-	prefix := s.getIssuePrefixForIssue(issue)
+func (s *TaskService) broadcastIssueUpdated(ctx context.Context, issue db.Issue, prevStatus string) {
+	prefix := issueidentifier.PrefixForIssue(ctx, s.Queries, issue)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
@@ -3912,31 +3913,6 @@ func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 			"prev_status":    prevStatus,
 		},
 	})
-}
-
-func (s *TaskService) getIssuePrefixForIssue(issue db.Issue) string {
-	if issue.TeamID.Valid {
-		team, err := s.Queries.GetWorkspaceTeam(context.Background(), db.GetWorkspaceTeamParams{
-			ID:          issue.TeamID,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if err == nil && team.Key != "" {
-			return team.Key
-		}
-	}
-	return s.getIssuePrefix(issue.WorkspaceID)
-}
-
-func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
-	team, err := s.Queries.GetDefaultWorkspaceTeam(context.Background(), workspaceID)
-	if err == nil && team.Key != "" {
-		return team.Key
-	}
-	ws, err := s.Queries.GetWorkspace(context.Background(), workspaceID)
-	if err != nil {
-		return ""
-	}
-	return ws.IssuePrefix
 }
 
 func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) {
@@ -4167,7 +4143,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 			},
 		})
 	}
-	prefix := s.getIssuePrefixForIssue(issue)
+	prefix := issueidentifier.PrefixForIssue(ctx, s.Queries, issue)
 	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
 	details, _ := json.Marshal(map[string]any{
 		"task_id":         util.UUIDToString(task.ID),

@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -588,7 +589,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	prefix := h.getIssuePrefix(r.Context(), squad.WorkspaceID)
+	prefix := issueidentifier.PrefixForWorkspace(r.Context(), h.Queries, squad.WorkspaceID)
 	now := time.Now()
 
 	// Group rows by member_id while preserving the SQL ORDER BY (squad_member

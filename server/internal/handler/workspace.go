@@ -21,20 +21,6 @@ var nonAlpha = regexp.MustCompile(`[^a-zA-Z]`)
 var workspaceSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 var teamKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,6}$`)
 
-// generateIssuePrefix produces a 2-5 char uppercase prefix from a workspace name.
-// Examples: "Jiayuan's Workspace" → "JIA", "My Team" → "MYT", "AB" → "AB".
-func generateIssuePrefix(name string) string {
-	letters := nonAlpha.ReplaceAllString(name, "")
-	if len(letters) == 0 {
-		return "WS"
-	}
-	letters = strings.ToUpper(letters)
-	if len(letters) > 3 {
-		letters = letters[:3]
-	}
-	return letters
-}
-
 func defaultTeamKeyFromSlug(slug string) string {
 	letters := nonAlpha.ReplaceAllString(slug, "")
 	if len(letters) == 0 {

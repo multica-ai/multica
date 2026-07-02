@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -58,8 +59,11 @@ func projectToResponse(p db.Project) ProjectResponse {
 		LeadID:      uuidToPtr(p.LeadID),
 		StartDate:   dateToPtr(p.StartDate),
 		DueDate:     dateToPtr(p.DueDate),
-		CreatedAt:   timestampToString(p.CreatedAt),
-		UpdatedAt:   timestampToString(p.UpdatedAt),
+		// Always a non-nil slice so no endpoint can serialize team_ids as null;
+		// the frontend zod schema rejects null and would blank the surface.
+		TeamIDs:   []string{},
+		CreatedAt: timestampToString(p.CreatedAt),
+		UpdatedAt: timestampToString(p.UpdatedAt),
 	}
 }
 
@@ -79,33 +83,34 @@ func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype
 	return rows[0].ResourceCount
 }
 
-func (h *Handler) attachProjectTeams(ctx context.Context, resp *ProjectResponse) {
-	projectID, err := parseStrictUUID(resp.ID)
-	if err != nil {
-		return
-	}
-	workspaceID, err := parseStrictUUID(resp.WorkspaceID)
-	if err != nil {
-		return
-	}
+// attachProjectTeams loads the team links for a single project. Callers pass the
+// pgtype.UUIDs they already hold (from the sqlc row) instead of re-parsing the
+// string form on the response. The error is returned rather than swallowed so
+// callers can log it — a silent failure here serializes team_ids as [] and
+// blanks the project's team affiliation in the UI.
+func (h *Handler) attachProjectTeams(ctx context.Context, resp *ProjectResponse, workspaceID, projectID pgtype.UUID) error {
 	teams, err := h.Queries.ListProjectTeams(ctx, db.ListProjectTeamsParams{
 		WorkspaceID: workspaceID,
 		ProjectID:   projectID,
 	})
 	if err != nil {
-		return
+		return err
 	}
 	resp.TeamIDs = make([]string, len(teams))
 	for i, team := range teams {
 		resp.TeamIDs[i] = uuidToString(team.ID)
 	}
+	return nil
 }
 
 func (h *Handler) resolveProjectTeamIDs(ctx context.Context, workspaceID pgtype.UUID, raw []string) ([]pgtype.UUID, bool, string) {
 	if len(raw) == 0 {
 		team, err := h.Queries.GetDefaultWorkspaceTeam(ctx, workspaceID)
-		if err != nil || !team.ID.Valid || team.ArchivedAt.Valid {
-			return nil, false, "default team not found"
+		if err != nil || !team.ID.Valid {
+			return nil, false, teamNotFoundMessage
+		}
+		if team.ArchivedAt.Valid {
+			return nil, false, teamArchivedMessage
 		}
 		return []pgtype.UUID{team.ID}, true, ""
 	}
@@ -121,12 +126,8 @@ func (h *Handler) resolveProjectTeamIDs(ctx context.Context, workspaceID pgtype.
 			continue
 		}
 		seen[key] = struct{}{}
-		team, err := h.Queries.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
-			ID:          id,
-			WorkspaceID: workspaceID,
-		})
-		if err != nil || team.ArchivedAt.Valid {
-			return nil, false, "team not found in this workspace"
+		if _, err := service.ValidateActiveTeam(ctx, h.Queries, workspaceID, id); err != nil {
+			return nil, false, teamResolveMessage(err)
 		}
 		ids = append(ids, id)
 	}
@@ -206,9 +207,12 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Batch-fetch issue stats and resource counts for all projects
+	// Batch-fetch issue stats, resource counts, and team links for all projects
+	// in one query each — same shape as loadProjectIssueStats batching — so the
+	// list endpoint never N+1s per project row.
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
 	resourceCountMap := make(map[string]int64)
+	teamIDsMap := make(map[string][]string)
 	if len(projects) > 0 {
 		projectIDs := make([]pgtype.UUID, len(projects))
 		for i, p := range projects {
@@ -226,6 +230,18 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 				resourceCountMap[uuidToString(c.ProjectID)] = c.ResourceCount
 			}
 		}
+		teamRows, err := h.Queries.ListProjectTeamsByProjects(r.Context(), db.ListProjectTeamsByProjectsParams{
+			WorkspaceID: wsUUID,
+			ProjectIds:  projectIDs,
+		})
+		if err != nil {
+			slog.Error("failed to batch-load project teams", append(logger.RequestAttrs(r), "error", err)...)
+		} else {
+			for _, tr := range teamRows {
+				pid := uuidToString(tr.ProjectID)
+				teamIDsMap[pid] = append(teamIDsMap[pid], uuidToString(tr.ID))
+			}
+		}
 	}
 
 	resp := make([]ProjectResponse, len(projects))
@@ -236,7 +252,9 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			resp[i].DoneCount = s.DoneCount
 		}
 		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
-		h.attachProjectTeams(r.Context(), &resp[i])
+		if teams, ok := teamIDsMap[resp[i].ID]; ok {
+			resp[i].TeamIDs = teams
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
 }
@@ -262,7 +280,9 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
-	h.attachProjectTeams(r.Context(), &resp)
+	if err := h.attachProjectTeams(r.Context(), &resp, project.WorkspaceID, project.ID); err != nil {
+		slog.Error("failed to attach project teams", append(logger.RequestAttrs(r), "error", err, "project_id", uuidToString(project.ID))...)
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -488,7 +508,9 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		resourceResp[i] = projectResourceToResponse(row)
 	}
 	resp := projectToResponse(project)
-	h.attachProjectTeams(r.Context(), &resp)
+	if err := h.attachProjectTeams(r.Context(), &resp, project.WorkspaceID, project.ID); err != nil {
+		slog.Error("failed to attach project teams", append(logger.RequestAttrs(r), "error", err, "project_id", uuidToString(project.ID))...)
+	}
 	resp.ResourceCount = int64(len(resourceResp))
 	h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
 	for _, rr := range resourceResp {
@@ -720,7 +742,9 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
-	h.attachProjectTeams(r.Context(), &resp)
+	if err := h.attachProjectTeams(r.Context(), &resp, project.WorkspaceID, project.ID); err != nil {
+		slog.Error("failed to attach project teams", append(logger.RequestAttrs(r), "error", err, "project_id", uuidToString(project.ID))...)
+	}
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -989,9 +1013,13 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		total = results[0].totalCount
 	}
 
-	// Batch-fetch issue stats and resource counts
+	// Batch-fetch issue stats, resource counts, and team links. Search is the
+	// only project endpoint that previously never attached teams, so it
+	// serialized team_ids as [] for every hit; without the team links the
+	// frontend cannot render project team affiliation for search results.
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
 	resourceCountMap := make(map[string]int64)
+	teamIDsMap := make(map[string][]string)
 	if len(results) > 0 {
 		projectIDs := make([]pgtype.UUID, len(results))
 		for i, r := range results {
@@ -1009,6 +1037,18 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 				resourceCountMap[uuidToString(c.ProjectID)] = c.ResourceCount
 			}
 		}
+		teamRows, err := h.Queries.ListProjectTeamsByProjects(ctx, db.ListProjectTeamsByProjectsParams{
+			WorkspaceID: wsUUID,
+			ProjectIds:  projectIDs,
+		})
+		if err != nil {
+			slog.Error("failed to batch-load project teams", append(logger.RequestAttrs(r), "error", err)...)
+		} else {
+			for _, tr := range teamRows {
+				pid := uuidToString(tr.ProjectID)
+				teamIDsMap[pid] = append(teamIDsMap[pid], uuidToString(tr.ID))
+			}
+		}
 	}
 
 	resp := make([]SearchProjectResponse, len(results))
@@ -1019,6 +1059,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			pr.DoneCount = s.DoneCount
 		}
 		pr.ResourceCount = resourceCountMap[pr.ID]
+		if teams, ok := teamIDsMap[pr.ID]; ok {
+			pr.TeamIDs = teams
+		}
 		spr := SearchProjectResponse{
 			ProjectResponse: pr,
 			MatchSource:     row.matchSource,

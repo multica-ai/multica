@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -498,11 +499,21 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, queryTeamKey 
 	// Number match
 	numParam := ""
 	teamKeyParam := ""
+	// identifierKeyExpr is the Team key an identifier search ("MUL-123") matches
+	// against. During the rolling-deploy window some issues still have a NULL
+	// team_id; those rows carry the workspace's default-team key, so we fall
+	// back to it exactly like GetIssueByTeamKeyAndNumber does. defaultTeamJoin
+	// is only added when an identifier search needs the fallback.
+	// TODO(migration-b): remove null-team fallback after numbering cutover
+	identifierKeyExpr := "wt.key"
+	defaultTeamJoin := ""
 	if hasNum {
 		numParam = nextArg(queryNum)
 		if queryTeamKey != "" {
 			teamKeyParam = nextArg(queryTeamKey)
-			whereParts = append(whereParts, fmt.Sprintf("(i.number = %s AND lower(wt.key) = lower(%s))", numParam, teamKeyParam))
+			identifierKeyExpr = "COALESCE(wt.key, dt.key)"
+			defaultTeamJoin = "\n\t\tLEFT JOIN workspace_team dt ON dt.workspace_id = i.workspace_id AND dt.is_default"
+			whereParts = append(whereParts, fmt.Sprintf("(i.number = %s AND lower(%s) = lower(%s))", numParam, identifierKeyExpr, teamKeyParam))
 		} else {
 			whereParts = append(whereParts, fmt.Sprintf("i.number = %s", numParam))
 		}
@@ -521,7 +532,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, queryTeamKey 
 	// Tier 0: Identifier exact match
 	if hasNum {
 		if queryTeamKey != "" {
-			rankCases = append(rankCases, fmt.Sprintf("WHEN i.number = %s AND lower(wt.key) = lower(%s) THEN 0", numParam, teamKeyParam))
+			rankCases = append(rankCases, fmt.Sprintf("WHEN i.number = %s AND lower(%s) = lower(%s) THEN 0", numParam, identifierKeyExpr, teamKeyParam))
 		} else {
 			rankCases = append(rankCases, fmt.Sprintf("WHEN i.number = %s THEN 0", numParam))
 		}
@@ -650,12 +661,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, queryTeamKey 
 		%s AS match_source,
 		%s AS matched_comment_content
 	FROM issue i
-	LEFT JOIN workspace_team wt ON wt.id = i.team_id AND wt.workspace_id = i.workspace_id
+	LEFT JOIN workspace_team wt ON wt.id = i.team_id AND wt.workspace_id = i.workspace_id%s
 	WHERE i.workspace_id = %s AND %s
 	ORDER BY %s, %s, i.updated_at DESC
 	LIMIT %s OFFSET %s`,
 		matchSourceExpr,
 		commentSubquery,
+		defaultTeamJoin,
 		wsParam,
 		whereClause,
 		rankExpr,
@@ -771,10 +783,11 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := make([]SearchIssueResponse, len(results))
+	identifiers := issueidentifier.NewResolver(h.Queries)
 	for i, sr := range results {
 		prefix := sr.teamKey
 		if prefix == "" {
-			prefix = h.getIssuePrefixForIssue(ctx, sr.issue)
+			prefix = identifiers.PrefixForIssue(ctx, sr.issue)
 		}
 		sir := SearchIssueResponse{
 			IssueResponse: issueToResponse(sr.issue, prefix),
@@ -926,7 +939,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		prefix := h.getIssuePrefix(ctx, wsUUID)
+		prefix := issueidentifier.PrefixForWorkspace(ctx, h.Queries, wsUUID)
 		ids := make([]pgtype.UUID, len(issues))
 		for i, issue := range issues {
 			ids[i] = issue.ID
@@ -1207,7 +1220,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 		total = int64(len(issues))
 	}
 
-	prefix := h.getIssuePrefix(ctx, wsUUID)
+	prefix := issueidentifier.PrefixForWorkspace(ctx, h.Queries, wsUUID)
 	ids := make([]pgtype.UUID, len(issues))
 	for i, issue := range issues {
 		ids[i] = issue.ID
@@ -1776,7 +1789,7 @@ ORDER BY
 		ids[i] = row.ID
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
-	prefix := h.getIssuePrefix(ctx, wsUUID)
+	prefix := issueidentifier.PrefixForWorkspace(ctx, h.Queries, wsUUID)
 
 	groups := []IssueAssigneeGroupResponse{}
 	groupIndex := map[string]int{}
@@ -1813,7 +1826,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	prefix := h.getIssuePrefixForIssue(r.Context(), issue)
+	prefix := issueidentifier.PrefixForIssue(r.Context(), h.Queries, issue)
 	resp := issueToResponse(issue, prefix)
 	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
 	if detailLabels == nil {
@@ -1857,8 +1870,9 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := make([]IssueResponse, len(children))
+	identifiers := issueidentifier.NewResolver(h.Queries)
 	for i, child := range children {
-		resp[i] = issueToResponse(child, h.getIssuePrefixForIssue(r.Context(), child))
+		resp[i] = issueToResponse(child, identifiers.PrefixForIssue(r.Context(), child))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -1925,8 +1939,9 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	resp := make([]IssueResponse, len(children))
+	identifiers := issueidentifier.NewResolver(h.Queries)
 	for i, child := range children {
-		resp[i] = issueToResponse(child, h.getIssuePrefixForIssue(r.Context(), child))
+		resp[i] = issueToResponse(child, identifiers.PrefixForIssue(r.Context(), child))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -2178,6 +2193,9 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		requestedTeamUUID = tid
 	}
+	// A sub-issue inherits its parent's Team; the resolved parent Team is fed
+	// into the shared resolver as the requested Team so it goes through the same
+	// active-team + project-association validation as an explicit team_id.
 	teamUUID := requestedTeamUUID
 	if parentIssueUUID.Valid && parentIssue.TeamID.Valid {
 		if teamUUID.Valid && teamUUID != parentIssue.TeamID {
@@ -2186,41 +2204,12 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		teamUUID = parentIssue.TeamID
 	}
-	if !teamUUID.Valid && projectUUID.Valid {
-		teams, err := h.Queries.ListProjectTeams(r.Context(), db.ListProjectTeamsParams{
-			WorkspaceID: wsUUID,
-			ProjectID:   projectUUID,
-		})
-		if err == nil && len(teams) == 1 {
-			teamUUID = teams[0].ID
+	team, err := service.ResolveTeam(r.Context(), h.Queries, wsUUID, teamUUID, projectUUID)
+	if err != nil {
+		if !writeTeamResolveError(w, err) {
+			writeError(w, http.StatusBadRequest, err.Error())
 		}
-	}
-	if !teamUUID.Valid {
-		team, err := h.Queries.GetDefaultWorkspaceTeam(r.Context(), wsUUID)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "default team not found")
-			return
-		}
-		teamUUID = team.ID
-	}
-	team, err := h.Queries.GetWorkspaceTeam(r.Context(), db.GetWorkspaceTeamParams{
-		ID:          teamUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil || team.ArchivedAt.Valid {
-		writeError(w, http.StatusBadRequest, "team_id must reference an active team in this workspace")
 		return
-	}
-	if projectUUID.Valid {
-		hasTeam, err := h.Queries.ProjectHasTeam(r.Context(), db.ProjectHasTeamParams{
-			WorkspaceID: wsUUID,
-			ProjectID:   projectUUID,
-			TeamID:      team.ID,
-		})
-		if err != nil || !hasTeam {
-			writeError(w, http.StatusBadRequest, "project_id is not associated with team_id")
-			return
-		}
 	}
 
 	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, team.ID, attachmentIDs)
@@ -2565,8 +2554,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
 		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
-		BroadcastPayload: func(issue db.Issue, atts []db.Attachment) map[string]any {
-			payload := issueToResponse(issue, h.getIssuePrefixForIssue(r.Context(), issue))
+		BroadcastPayload: func(issue db.Issue, atts []db.Attachment, teamKey string) map[string]any {
+			payload := issueToResponse(issue, teamKey)
 			payload.Attachments = buildAttachmentResponses(atts)
 			return map[string]any{"issue": payload}
 		},
@@ -2574,7 +2563,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	if errors.Is(err, service.ErrActiveDuplicate) {
 		dup := *res.DuplicateIssue
-		existing := issueToResponse(dup, h.getIssuePrefixForIssue(r.Context(), dup))
+		existing := issueToResponse(dup, issueidentifier.PrefixForIssue(r.Context(), h.Queries, dup))
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"code":  "active_duplicate_issue",
 			"error": duplicateIssueMessage(existing),
@@ -2590,12 +2579,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "project not found in this workspace")
 		return
 	}
-	if errors.Is(err, service.ErrTeamNotFound) {
-		writeError(w, http.StatusBadRequest, "team not found in this workspace")
-		return
-	}
-	if errors.Is(err, service.ErrProjectTeamMismatch) {
-		writeError(w, http.StatusBadRequest, "project is not associated with this team")
+	if writeTeamResolveError(w, err) {
 		return
 	}
 	if errors.Is(err, service.ErrCrossTeamChild) {
@@ -2611,7 +2595,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	issue := res.Issue
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
-	resp := issueToResponse(issue, h.getIssuePrefixForIssue(r.Context(), issue))
+	resp := issueToResponse(issue, res.TeamKey)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -2863,7 +2847,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
 	}
 
-	prefix := h.getIssuePrefixForIssue(r.Context(), issue)
+	prefix := issueidentifier.PrefixForIssue(r.Context(), h.Queries, issue)
 	resp := issueToResponse(issue, prefix)
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
@@ -3244,6 +3228,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// the parent/stage notification is evaluated once against the final state
 	// after the loop (MUL-4155) rather than per-child mid-batch.
 	var childDoneCompleted []db.Issue
+	identifiers := issueidentifier.NewResolver(h.Queries)
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -3401,7 +3386,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		prefix := h.getIssuePrefixForIssue(r.Context(), issue)
+		prefix := identifiers.PrefixForIssue(r.Context(), issue)
 		resp := issueToResponse(issue, prefix)
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 

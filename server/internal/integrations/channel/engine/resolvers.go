@@ -224,4 +224,5 @@ type SessionReader interface {
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
 	GetWorkspaceTeam(ctx context.Context, arg db.GetWorkspaceTeamParams) (db.WorkspaceTeam, error)
+	GetDefaultWorkspaceTeam(ctx context.Context, workspaceID pgtype.UUID) (db.WorkspaceTeam, error)
 }
