@@ -67,7 +67,12 @@ describe("attachmentIdFromDownloadURL", () => {
 });
 
 describe("contentReferencesAttachment", () => {
-  const att = { id: ID, url: "/uploads/workspaces/ws/legacy.png" };
+  const att = {
+    id: ID,
+    url: "/uploads/workspaces/ws/legacy.png",
+    download_url: "https://cdn.example.com/workspaces/ws/file.png?Signature=fresh",
+    markdown_url: `https://multica-api.copilothub.ai/api/attachments/${ID}/download`,
+  };
 
   it("matches when the markdown uses the stable download path", () => {
     const md = `body\n\n![file](${attachmentDownloadPath(ID)})\n`;
@@ -76,6 +81,22 @@ describe("contentReferencesAttachment", () => {
 
   it("matches when the markdown uses the legacy storage URL", () => {
     const md = `body\n\n![file](${att.url})\n`;
+    expect(contentReferencesAttachment(md, att)).toBe(true);
+  });
+
+  it("matches when the markdown uses the response download_url", () => {
+    const md = `body\n\n![file](${att.download_url})\n`;
+    expect(contentReferencesAttachment(md, att)).toBe(true);
+  });
+
+  it("matches when the markdown uses an older signed download_url for the same object", () => {
+    const stale = "https://cdn.example.com/workspaces/ws/file.png?Signature=stale";
+    const md = `body\n\n![file](${stale})\n`;
+    expect(contentReferencesAttachment(md, att)).toBe(true);
+  });
+
+  it("matches when the markdown uses the server-provided markdown_url", () => {
+    const md = `body\n\n![file](${att.markdown_url})\n`;
     expect(contentReferencesAttachment(md, att)).toBe(true);
   });
 
@@ -111,8 +132,7 @@ describe("contentReferencesAttachment", () => {
   // absolute-host download URL via its stable-path substring, so the
   // attachment now binds the same way comments do.
   it("matches the absolute-host markdown_url the editor actually persists", () => {
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${ID}/download`;
-    const md = `body\n\n![pasted](${markdownUrl})\n`;
+    const md = `body\n\n![pasted](${att.markdown_url})\n`;
     // The raw storage url is NOT present in the body — the old
     // `md.includes(a.url)` check would have returned false here.
     expect(md.includes(att.url)).toBe(false);

@@ -9,6 +9,7 @@ import {
   ArrowLeftRight,
   ArrowUp,
   CalendarClock,
+  CalendarDays,
   Check,
   ChevronRight,
   Maximize2,
@@ -35,7 +36,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multi
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
-import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
+import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
@@ -47,6 +48,7 @@ import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-stor
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
+import { useAttachLabelToIssue } from "@multica/core/labels";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import {
   api,
@@ -223,6 +225,7 @@ export function ManualCreatePanel({
   });
   const [startDate, setStartDate] = useState<string | null>(draft.startDate);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
+  const [labelIds, setLabelIds] = useState<string[]>(draft.labelIds);
   const [projectId, setProjectId] = useState<string | undefined>(
     (data?.project_id as string) || undefined,
   );
@@ -240,6 +243,10 @@ export function ManualCreatePanel({
   // mounts the inline pill (the popover's anchor) AND opens the calendar.
   // When the popover closes without a value set, the pill unmounts again.
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
+  // Due date follows the same overflow pattern as start date: collapsed into
+  // the ⋯ menu by default, mounted inline (as the popover anchor) only when it
+  // has a value or the user just opened it from the menu.
+  const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
   // Children live as full Issue objects — the picker always returns the whole
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
@@ -300,15 +307,18 @@ export function ManualCreatePanel({
   };
   const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
+  const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setDraft({ labelIds: ids }); };
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
+  const attachLabelMutation = useAttachLabelToIssue();
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
     setPriority("none");
     setStartDate(null);
     setDueDate(null);
+    setLabelIds([]);
     setProjectId(undefined);
     setParentIssueId(undefined);
     setStage(null);
@@ -322,6 +332,7 @@ export function ManualCreatePanel({
       assigneeId,
       startDate: null,
       dueDate: null,
+      labelIds: [],
       attachments: [],
     });
     descEditorRef.current?.clearContent();
@@ -383,6 +394,28 @@ export function ManualCreatePanel({
                   total: childIssues.length,
                 }),
           );
+        }
+      }
+
+      // Attach the labels chosen in the dialog. Like the sub-issue links
+      // above, this is deferred to after create because the new issue's ID
+      // doesn't exist yet, and the create endpoint takes no labels. Partial
+      // failures don't roll back the committed issue.
+      if (labelIds.length > 0) {
+        const results = await Promise.allSettled(
+          labelIds.map((labelId) =>
+            attachLabelMutation.mutateAsync({ issueId: issue.id, labelId }),
+          ),
+        );
+        let labelsFailed = 0;
+        for (const result of results) {
+          if (result.status === "rejected") {
+            labelsFailed += 1;
+            console.error("[create-issue] label attach failed", result.reason);
+          }
+        }
+        if (labelsFailed > 0) {
+          toast.error(t(($) => $.create_issue.toast_link_labels_failed));
         }
       }
 
@@ -631,10 +664,13 @@ export function ManualCreatePanel({
                 align="start"
               />
 
-              {/* Due date */}
-              <DueDatePicker
-                dueDate={dueDate}
-                onUpdate={(u) => updateDueDate(u.due_date ?? null)}
+              {/* Labels — occupies the slot that used to hold Due date so the
+                  add-label entry is exposed directly on the dialog. Draft mode:
+                  selection is local until the issue is created (handleSubmit
+                  attaches the labels afterward). */}
+              <LabelPicker
+                selectedIds={labelIds}
+                onSelectedIdsChange={updateLabelIds}
                 triggerRender={<PillButton />}
                 align="start"
               />
@@ -671,6 +707,21 @@ export function ManualCreatePanel({
                   align="start"
                   open={startDatePickerOpen}
                   onOpenChange={setStartDatePickerOpen}
+                />
+              )}
+
+              {/* Due date — collapsed into the ⋯ menu by default (moved off
+                  the toolbar to make room for Labels). Same reveal rule as
+                  start date: inline only when it has a value or the user just
+                  opened it from the overflow menu. */}
+              {(dueDate || dueDatePickerOpen) && (
+                <DueDatePicker
+                  dueDate={dueDate}
+                  onUpdate={(u) => updateDueDate(u.due_date ?? null)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={dueDatePickerOpen}
+                  onOpenChange={setDueDatePickerOpen}
                 />
               )}
 
@@ -735,6 +786,12 @@ export function ManualCreatePanel({
                   }
                 />
                 <DropdownMenuContent align="start" className="w-auto">
+                  {!dueDate && (
+                    <DropdownMenuItem onClick={() => setDueDatePickerOpen(true)}>
+                      <CalendarDays className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_due_date)}
+                    </DropdownMenuItem>
+                  )}
                   {!startDate && (
                     <DropdownMenuItem onClick={() => setStartDatePickerOpen(true)}>
                       <CalendarClock className="h-3.5 w-3.5" />

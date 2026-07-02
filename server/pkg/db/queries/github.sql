@@ -7,9 +7,13 @@ SELECT * FROM github_installation
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
--- name: GetGitHubInstallationByInstallationID :one
+-- name: ListGitHubInstallationsByInstallationID :many
+-- One installation_id can be bound to several workspaces; webhook routing lists
+-- every binding and picks the target workspace via the repos registry. Ordered
+-- so the oldest binding is the deterministic routing fallback (insts[0]).
 SELECT * FROM github_installation
-WHERE installation_id = $1;
+WHERE installation_id = $1
+ORDER BY created_at ASC, id ASC;
 
 -- name: GetGitHubInstallationByID :one
 SELECT * FROM github_installation
@@ -21,8 +25,7 @@ INSERT INTO github_installation (
 ) VALUES (
     $1, $2, $3, $4, sqlc.narg('account_avatar_url'), sqlc.narg('connected_by_id')
 )
-ON CONFLICT (installation_id) DO UPDATE SET
-    workspace_id = EXCLUDED.workspace_id,
+ON CONFLICT (workspace_id, installation_id) DO UPDATE SET
     account_login = EXCLUDED.account_login,
     account_type = EXCLUDED.account_type,
     account_avatar_url = EXCLUDED.account_avatar_url,
@@ -33,9 +36,24 @@ RETURNING *;
 -- name: DeleteGitHubInstallation :exec
 DELETE FROM github_installation WHERE id = $1 AND workspace_id = $2;
 
--- name: DeleteGitHubInstallationByInstallationID :one
+-- name: DeleteGitHubInstallationByInstallationID :many
+-- GitHub-side uninstall/suspend removes trust in the installation entirely, so
+-- drop every workspace binding. Returns one row per deleted binding so the
+-- handler can broadcast to each affected workspace.
 DELETE FROM github_installation WHERE installation_id = $1
 RETURNING id, workspace_id;
+
+-- name: UpdateGitHubInstallationAccountByInstallationID :many
+-- Refresh the GitHub account display metadata across every workspace binding of
+-- an installation (fired by installation.created/new_permissions_accepted/
+-- unsuspend). Leaves workspace_id and connected_by_id untouched.
+UPDATE github_installation
+SET account_login = $2,
+    account_type = $3,
+    account_avatar_url = sqlc.narg('account_avatar_url'),
+    updated_at = now()
+WHERE installation_id = $1
+RETURNING *;
 
 -- name: UpsertPendingGitHubInstallation :one
 INSERT INTO github_pending_installation (

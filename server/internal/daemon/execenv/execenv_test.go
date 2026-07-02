@@ -134,6 +134,24 @@ func TestPrepareDirectoryMode(t *testing.T) {
 		}
 	}
 
+	markerContent, err := os.ReadFile(filepath.Join(env.WorkDir, TaskContextMarkerRelPath))
+	if err != nil {
+		t.Fatalf("failed to read task context marker: %v", err)
+	}
+	var marker struct {
+		ManagedBy string `json:"managed_by"`
+		IssueID   string `json:"issue_id"`
+	}
+	if err := json.Unmarshal(markerContent, &marker); err != nil {
+		t.Fatalf("task context marker unmarshal: %v\n%s", err, string(markerContent))
+	}
+	if marker.ManagedBy != TaskContextMarkerManagedBy {
+		t.Fatalf("marker managed_by = %q, want %q", marker.ManagedBy, TaskContextMarkerManagedBy)
+	}
+	if marker.IssueID != "a1b2c3d4-e5f6-7890-abcd-ef1234567890" {
+		t.Fatalf("marker issue_id = %q, want issue id", marker.IssueID)
+	}
+
 	// Verify skill files.
 	skillContent, err := os.ReadFile(filepath.Join(env.WorkDir, ".agent_context", "skills", "code-review", "SKILL.md"))
 	if err != nil {
@@ -320,7 +338,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name != ".agent_context" && name != "CLAUDE.md" && name != ".claude" {
+		if name != ".agent_context" && name != ".multica" && name != "CLAUDE.md" && name != ".claude" {
 			t.Errorf("unexpected entry in workdir: %s", name)
 		}
 	}
@@ -1461,7 +1479,7 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name != ".agent_context" && name != "AGENTS.md" {
+		if name != ".agent_context" && name != ".multica" && name != "AGENTS.md" {
 			t.Errorf("unexpected entry in workdir: %s", name)
 		}
 	}

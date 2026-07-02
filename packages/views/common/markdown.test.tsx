@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { Markdown as MarkdownBase } from "@multica/ui/markdown";
 import { Markdown } from "./markdown";
 
 vi.mock("@multica/core/config", () => ({
@@ -88,5 +89,40 @@ describe("Markdown", () => {
 
     expect(screen.getByTestId("project-chip")).toHaveTextContent("project-123");
     expect(screen.getByRole("link")).toHaveAttribute("href", "/projects/project-123");
+  });
+});
+
+// The base renderer uses a plain <img>; exercising it here (instead of the
+// views wrapper, which swaps in <Attachment>) lets us assert the sanitized
+// `src` directly. Covers the two gates that used to blank data-URI images:
+// rehype-sanitize's protocols.src and react-markdown's urlTransform.
+describe("Markdown inline data-URI images", () => {
+  const PNG_1X1 =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+  it("preserves the src of an inline data:image/png image", () => {
+    render(<MarkdownBase>{`![demo](${PNG_1X1})`}</MarkdownBase>);
+
+    const img = screen.getByAltText("demo");
+    expect(img.tagName).toBe("IMG");
+    expect(img).toHaveAttribute("src", PNG_1X1);
+  });
+
+  it("keeps regular http(s) images working", () => {
+    render(<MarkdownBase>{"![cat](https://cdn.example.com/cat.png)"}</MarkdownBase>);
+
+    expect(screen.getByAltText("cat")).toHaveAttribute(
+      "src",
+      "https://cdn.example.com/cat.png",
+    );
+  });
+
+  it("strips non-image data URIs (data:text/html)", () => {
+    render(
+      <MarkdownBase>{"![x](data:text/html,<script>alert(1)</script>)"}</MarkdownBase>,
+    );
+
+    const img = screen.getByAltText("x");
+    expect(img.getAttribute("src") ?? "").toBe("");
   });
 });
