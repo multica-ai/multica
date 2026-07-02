@@ -534,7 +534,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
 		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
+		seenRepoURLs := make(map[string]bool) // CEREBRO-PATCH(repo-list-dedupe): FIR-2577 — the workspace repo list can contain the same URL twice; render each repo once
 		for _, repo := range ctx.Repos {
+			if seenRepoURLs[repo.URL] { // CEREBRO-PATCH(repo-list-dedupe)
+				continue // CEREBRO-PATCH(repo-list-dedupe)
+			}
+			seenRepoURLs[repo.URL] = true // CEREBRO-PATCH(repo-list-dedupe)
 			if repo.Description != "" {
 				fmt.Fprintf(&b, "- %s — %s\n", repo.URL, repo.Description)
 			} else {
@@ -845,7 +850,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		if ctx.IsSquadLeader {
 			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `multica squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently — such comments are noise. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")
 		} else {
-			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+			// CEREBRO-PATCH(output-silence-exception): FIR-2577 — carry the workflow step-5 silence exception into this section so the two rules stop contradicting each other.
+			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct. The single exception: if the trigger was a pure acknowledgment/thanks/sign-off from another agent AND you produced no work this run, exit silently instead — do not post a \"no reply needed\" comment.\n\n")
 		}
 		b.WriteString("**Post exactly ONE comment per run — your final result, before this turn exits.** Do NOT post progress updates, plans, or \"here's what I'm about to do next\" as comments while you work; keep all planning and progress in your own reasoning.\n\n")
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")

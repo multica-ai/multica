@@ -5,7 +5,7 @@ package execenv
 // cerebro-prefixed sibling file so the upstream file (runtime_config.go) only
 // needs a single marked call-site rather than a multi-line inline patch.
 func cerebroArtifactBrief() string { // CEREBRO-PATCH(cerebro-artifact-brief): new sibling file — Documents & Artifacts section for Available Commands (TECH-2949)
-	// CEREBRO-PATCH(cerebro-artifact-brief-white-card): FIR-1905 — steer agents to the white-card mention link (not grey --attachment) for .md output across comment/chat/DM/channel
+	// CEREBRO-PATCH(cerebro-artifact-brief-white-card): FIR-1905 — steer agents to the white-card mention link (not grey --attachment) for .md output across comment/chat/DM/channel. FIR-2577 — deduplicated: each rule stated once.
 	return `### Documents & Artifacts
 
 - ` + "`multica artifact create --kind <report|plan|decision|diagram|note> --title \"...\" [--body-stdin] [--issue <id>] [--folder <id>] [--origin-issue <id>]`" + ` — Create a typed document. Use for any output with a title: reports, analyses, plans, decision logs, diagrams. Do NOT paste long outputs in comments — create an artifact instead.
@@ -15,14 +15,9 @@ func cerebroArtifactBrief() string { // CEREBRO-PATCH(cerebro-artifact-brief): n
 
 **When to create an artifact vs. a comment:** Comments are for status, short answers (< ~100 words), and questions back to the user. Artifacts are for everything with a title that the user will want to find again. When in doubt, create an artifact and reference it in the comment.
 
-**Show a document on a comment / chat / DM / channel — use the white card, never a grey ` + "`--attachment`" + `.** When your titled output (` + "`.md`" + ` report, plan, analysis, note) is meant to appear in a message, create it with ` + "`multica artifact create`" + ` / ` + "`multica document create`" + ` and then reference it with the ` + "`--artifact <id>`" + ` flag (preferred) OR, if you hand-write it, as a **real markdown link** ` + "`[document](mention://artifact/<id>)`" + ` inside the message body. The bare string ` + "`mention://artifact/<id>`" + ` is NOT autolinked — it renders as plain text with no card, on both web and mobile. The platform renders the markdown link as a compact **white card**; clicking it opens the full note editor. This is the rule on all four message surfaces:
-- **Issue comment** — pass ` + "`--artifact <id>`" + ` to ` + "`multica issue comment add`" + `, or write ` + "`[document](mention://artifact/<id>)`" + ` in the ` + "`--content`" + ` body (HEREDOC over ` + "`--content-stdin`" + `, per ## Comment Formatting).
-- **Chat session** — pass ` + "`--artifact <id>`" + ` to ` + "`multica chat session send`" + `, or write ` + "`[document](mention://artifact/<id>)`" + ` in ` + "`--content`" + `.
-- **DM** and **channel** — same: write ` + "`[document](mention://artifact/<id>)`" + ` (a real markdown link) in the message text.
+**Showing a document in a message (issue comment, chat, DM, channel):** pass ` + "`--artifact <id>`" + ` where the command supports it (` + "`issue comment add`" + `, ` + "`chat session send`" + `) — the platform renders the document as a compact **white card** that opens the full note editor. Where there is no flag (DM, channel), write a real markdown link ` + "`[document](mention://artifact/<id>)`" + ` in the message body instead. The bare string ` + "`mention://artifact/<id>`" + ` is NOT autolinked — it renders as plain text with no card.
 
-**` + "`--attachment`" + ` is ONLY for raw binary files** — screenshots, image proof, PDFs, exported binaries. It uploads the file as a **grey raw-file row**, which is the WRONG surface for an agent's own ` + "`.md`" + ` output: a grey row is not browsable, not editable, and easy to miss. Never pass a ` + "`.md`" + ` you authored to ` + "`--attachment`" + `; create it as an artifact and link the white card instead. Mental model: **grey row = uploaded raw file; white card = a real document/note.**
-
-> The first-class ` + "`--artifact <id>`" + ` flag for ` + "`issue comment add`" + ` / ` + "`chat session send`" + ` (FIR-1904) is now LIVE — it injects the white-card mention link for you, so prefer it. If you ever hand-write the link, it MUST be a markdown link ` + "`[document](mention://artifact/<id>)`" + `; the bare string ` + "`mention://artifact/<id>`" + ` is not autolinked and shows as plain text.
+**` + "`--attachment`" + ` is ONLY for raw binary files** — screenshots, image proof, PDFs, exported binaries. It renders as a grey raw-file row: not browsable, not editable, easy to miss. Never pass a ` + "`.md`" + ` you authored to ` + "`--attachment`" + ` — create it as an artifact and show the white card instead.
 
 **Scope:** use ` + "`--issue <id>`" + ` when the artifact belongs to the current issue; omit for workspace-level output and add ` + "`--origin-issue <id>`" + ` to preserve the trail.
 

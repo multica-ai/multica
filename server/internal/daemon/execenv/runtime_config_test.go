@@ -1659,7 +1659,7 @@ func TestNoBusyWaitRulePresentForIssueRunsOnly(t *testing.T) {
 // contradicting the wakeup-mandatory section.
 func TestWakeupRuleEmittedOnceAndReconciledWithNoBusyWait(t *testing.T) {
 	t.Parallel()
-	const wakeupHeading = "## Wakeup ved ventetid — obligatorisk (gælder ALLE agenter)"
+	const wakeupHeading = "## Wakeup before waiting — mandatory (ALL agents)"
 
 	for _, tc := range []struct {
 		name string
