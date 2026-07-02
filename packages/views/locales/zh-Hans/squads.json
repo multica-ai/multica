@@ -78,6 +78,8 @@
   },
   "instructions_tab": {
     "description": "小队指引会在 Leader 智能体处理分配给该小队的 issue 时注入到它的 prompt 中。可用来给 Leader 提供贯穿全队的指导、协作规范，或每次任务都应遵循的上下文。",
+    "mode_rich": "富文本",
+    "mode_source": "Markdown 源码",
     "unsaved_changes": "有未保存的修改",
     "save_button": "保存"
   },
