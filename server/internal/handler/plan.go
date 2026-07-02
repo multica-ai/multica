@@ -2,10 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 type PlanResponse struct {
@@ -63,9 +66,17 @@ func (h *Handler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetPlan(w http.ResponseWriter, r *http.Request) {
-	planID := chi.URLParam(r, "planId")
+	planIDStr := chi.URLParam(r, "planId")
+	planID, ok := parseUUIDOrBadRequest(w, planIDStr, "planId")
+	if !ok {
+		return
+	}
 	plan, err := h.PlanSvc.Get(r.Context(), planID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "plan not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -73,8 +84,12 @@ func (h *Handler) GetPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListPlans(w http.ResponseWriter, r *http.Request) {
-	wsID := chi.URLParam(r, "workspaceId")
-	plans, err := h.PlanSvc.List(r.Context(), wsID)
+	wsIDStr := chi.URLParam(r, "workspaceId")
+	wsID, ok := parseUUIDOrBadRequest(w, wsIDStr, "workspaceId")
+	if !ok {
+		return
+	}
+	plans, err := h.PlanSvc.List(r.Context(), util.UUIDToString(wsID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -87,7 +102,11 @@ func (h *Handler) ListPlans(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
-	planID := chi.URLParam(r, "planId")
+	planIDStr := chi.URLParam(r, "planId")
+	planID, ok := parseUUIDOrBadRequest(w, planIDStr, "planId")
+	if !ok {
+		return
+	}
 	var body struct {
 		Title   *string `json:"title"`
 		Content *string `json:"content"`
@@ -99,6 +118,10 @@ func (h *Handler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	plan, err := h.PlanSvc.Update(r.Context(), planID, body.Title, body.Content, body.Status)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "plan not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
