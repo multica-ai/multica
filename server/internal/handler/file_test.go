@@ -1178,6 +1178,69 @@ func TestDownloadAttachment_SeekableMultiRangeServes206(t *testing.T) {
 	}
 }
 
+// TestDownloadAttachment_NonSeekableEmptyObjectRangeServesFull200 covers the
+// zero-length nit the maintainer flagged during re-review (same class as RAS-31
+// ②). A WELL-FORMED Range against a 0-byte attachment used to collapse to 416 on
+// the non-seekable path (parseSingleByteRange → rangeUnsatisfiable) while the
+// seekable http.ServeContent path ignores the Range and returns an empty 200.
+// parseSingleByteRange now classifies a well-formed range against an empty object
+// as rangeUnsupported (→ empty 200), so neither backend hard-fails it. Malformed
+// ranges are covered by the 416 companion test below.
+func TestDownloadAttachment_NonSeekableEmptyObjectRangeServesFull200(t *testing.T) {
+	// Both a start-based range and a suffix range must be ignored on an empty
+	// object; the suffix form ("bytes=-100" against size 0) is the exact case the
+	// maintainer referenced.
+	for _, rangeHeader := range []string{"bytes=0-", "bytes=-100", "bytes=0-99"} {
+		t.Run(rangeHeader, func(t *testing.T) {
+			id := setProxyDownloadHandler(t, &mockStorage{}, []byte{})
+
+			req, w := newDownloadRequest(t, id, testWorkspaceID)
+			req.Header.Set("Range", rangeHeader)
+			testHandler.DownloadAttachment(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (Range ignored on empty object); body=%s", w.Code, w.Body.String())
+			}
+			if got := w.Body.Len(); got != 0 {
+				t.Fatalf("empty object must serve an empty body, got %d bytes", got)
+			}
+			if got := w.Header().Get("Content-Length"); got != "0" {
+				t.Fatalf("Content-Length = %q, want %q for an empty 200", got, "0")
+			}
+			if got := w.Header().Get("Content-Range"); got != "" {
+				t.Fatalf("full 200 response must not carry Content-Range, got %q", got)
+			}
+			if got, want := w.Header().Get("Accept-Ranges"), "bytes"; got != want {
+				t.Fatalf("Accept-Ranges = %q, want %q", got, want)
+			}
+			requireAttachmentDownloadHeaders(t, w.Header(), "sample.bin")
+		})
+	}
+}
+
+// TestDownloadAttachment_NonSeekableEmptyObjectMalformedRangeReturns416 is the
+// guard against over-correcting the zero-length nit: a MALFORMED / unknown-unit
+// Range against a 0-byte object must still return 416, not be swallowed into a
+// 200. stdlib http.ServeContent returns 416 for these even on an empty object
+// (it rejects the range before the empty-content short-circuit), so returning
+// 200 here would introduce a NEW backend-dependent divergence — the exact
+// regression a blanket "total == 0 → 200" would cause.
+func TestDownloadAttachment_NonSeekableEmptyObjectMalformedRangeReturns416(t *testing.T) {
+	for _, rangeHeader := range []string{"items=0-10", "bytes=abc-def", "bytes=100"} {
+		t.Run(rangeHeader, func(t *testing.T) {
+			id := setProxyDownloadHandler(t, &mockStorage{}, []byte{})
+
+			req, w := newDownloadRequest(t, id, testWorkspaceID)
+			req.Header.Set("Range", rangeHeader)
+			testHandler.DownloadAttachment(w, req)
+
+			if w.Code != http.StatusRequestedRangeNotSatisfiable {
+				t.Fatalf("status = %d, want 416 for malformed range on empty object; body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestParseSingleByteRange(t *testing.T) {
 	const size = 1000
 	tests := []struct {
@@ -1207,7 +1270,26 @@ func TestParseSingleByteRange(t *testing.T) {
 		{"no dash", "bytes=100", size, rangeUnsatisfiable, 0, 0},
 		{"suffix zero", "bytes=-0", size, rangeUnsatisfiable, 0, 0},
 		{"negative garbage", "bytes=abc-def", size, rangeUnsatisfiable, 0, 0},
-		{"suffix on empty object", "bytes=-100", 0, rangeUnsatisfiable, 0, 0},
+		// Empty object (size == 0): a WELL-FORMED range has no bytes to satisfy it,
+		// so it is ignored → full (empty) 200, matching stdlib http.ServeContent
+		// rather than diverging with a 416. This covers the maintainer's
+		// zero-length nit. Genuinely malformed / unknown-unit ranges against an
+		// empty object still yield rangeUnsatisfiable (416), also matching stdlib.
+		{"suffix on empty object", "bytes=-100", 0, rangeUnsupported, 0, 0},
+		{"start range on empty object", "bytes=0-", 0, rangeUnsupported, 0, 0},
+		{"mid range on empty object", "bytes=5-10", 0, rangeUnsupported, 0, 0},
+		{"closed range on empty object", "bytes=0-99", 0, rangeUnsupported, 0, 0},
+		// stdlib checks start-vs-size before validating the end, so on an empty
+		// object it ignores (200) even a range with a bad end or reversed bounds;
+		// mirror that. The paired non-empty rows below lock the other half of the
+		// contract: once the start is IN range, the end IS validated → 416.
+		{"bad end on empty object", "bytes=0-abc", 0, rangeUnsupported, 0, 0},
+		{"reversed on empty object", "bytes=10-5", 0, rangeUnsupported, 0, 0},
+		{"bad end on non-empty", "bytes=0-abc", size, rangeUnsatisfiable, 0, 0},
+		{"reversed on non-empty", "bytes=10-5", size, rangeUnsatisfiable, 0, 0},
+		{"unknown unit on empty object", "items=0-10", 0, rangeUnsatisfiable, 0, 0},
+		{"malformed start on empty object", "bytes=abc-def", 0, rangeUnsatisfiable, 0, 0},
+		{"no dash on empty object", "bytes=100", 0, rangeUnsatisfiable, 0, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

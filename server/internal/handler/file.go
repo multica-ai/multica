@@ -805,9 +805,11 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	rangeHeader := strings.TrimSpace(r.Header.Get("Range"))
 
 	// Decide how to respond. We serve the full body (200) when there is no Range,
-	// when the total size is unknown, or when the Range uses a form this
-	// forward-only path does not implement (multi-range). A well-formed but
-	// out-of-bounds bytes range is the only case that yields 416.
+	// when the total size is unknown (total < 0), or when parseSingleByteRange
+	// classifies the Range as unsupported — multi-range, or a well-formed range
+	// against an empty object (see rangeUnsupported). A well-formed, in-bounds
+	// single range yields 206; a well-formed but out-of-bounds range on a
+	// non-empty object is the only case that yields 416.
 	serveFull := rangeHeader == "" || total < 0
 	var start, length int64
 	if !serveFull {
@@ -885,11 +887,19 @@ const (
 	// answers all of these with 416, so replying 416 here keeps the two backends
 	// aligned; the caller adds `Content-Range: bytes */<total>` (RFC 7233 §4.4).
 	rangeUnsatisfiable
-	// rangeUnsupported: a valid Range form this hand-rolled path does not
-	// implement — currently only multi-range (`bytes=a-b,c-d`). Per RFC 7233 an
-	// unsupported Range MUST be ignored (serve the full body, 200), NOT rejected.
-	// The seekable path serves multi-range as a successful 206 multipart, so
-	// falling back to a full 200 here keeps both paths returning complete data.
+	// rangeUnsupported: a well-formed Range this path answers by ignoring the
+	// Range and serving the full body (200), per RFC 7233. Two cases:
+	//   - multi-range (`bytes=a-b,c-d`): the seekable path serves it as a 206
+	//     multipart, so a full 200 here keeps both paths returning complete data
+	//     instead of one hard-failing with 416.
+	//   - a well-formed byte range against an EMPTY object (size == 0): there are
+	//     no bytes to satisfy any range, and stdlib http.ServeContent ignores the
+	//     Range and returns an empty 200 rather than 416. Classifying it here as
+	//     unsupported (→ empty 200) keeps the non-seekable path aligned with the
+	//     seekable one; answering 416 would make the same request against a
+	//     0-byte attachment succeed on a seekable backend but fail on an
+	//     S3/MinIO stream. Genuinely malformed / unknown-unit ranges against an
+	//     empty object stay rangeUnsatisfiable (416), matching ServeContent.
 	rangeUnsupported
 )
 
@@ -900,8 +910,10 @@ const (
 //
 // Supported forms (RFC 7233): `bytes=start-end`, `bytes=start-` (to EOF), and
 // `bytes=-suffix` (final suffix bytes). An out-of-range end is clamped to the
-// last byte; a start at or past EOF is unsatisfiable. Multi-range is a valid but
-// unsupported form and yields rangeUnsupported (ignored → full body).
+// last byte; a start at or past EOF on a non-empty object is unsatisfiable (416).
+// Multi-range, and any well-formed range against an empty object (size == 0),
+// are valid-but-unsupported forms and yield rangeUnsupported (ignored → full
+// body), matching how the seekable http.ServeContent path handles them.
 func parseSingleByteRange(header string, size int64) (start, length int64, outcome rangeParseOutcome) {
 	const prefix = "bytes="
 	if !strings.HasPrefix(header, prefix) {
@@ -927,12 +939,18 @@ func parseSingleByteRange(header string, size int64) (start, length int64, outco
 
 	if startStr == "" {
 		// Suffix form: bytes=-N → final N bytes.
-		if endStr == "" || size == 0 {
+		if endStr == "" {
 			return 0, 0, rangeUnsatisfiable
 		}
 		n, err := strconv.ParseInt(endStr, 10, 64)
 		if err != nil || n <= 0 {
 			return 0, 0, rangeUnsatisfiable
+		}
+		if size == 0 {
+			// Well-formed suffix against an empty object: no bytes to satisfy it.
+			// Ignore the Range and serve an empty 200 (rangeUnsupported) to match
+			// the seekable path, instead of a divergent 416.
+			return 0, 0, rangeUnsupported
 		}
 		if n > size {
 			n = size
@@ -941,8 +959,18 @@ func parseSingleByteRange(header string, size int64) (start, length int64, outco
 	}
 
 	s, err := strconv.ParseInt(startStr, 10, 64)
-	if err != nil || s < 0 || s >= size {
-		// A start at or beyond EOF is unsatisfiable.
+	if err != nil || s < 0 {
+		return 0, 0, rangeUnsatisfiable
+	}
+	if s >= size {
+		// The start is at or beyond EOF, so no bytes overlap. For an empty object
+		// (size == 0) every start is at EOF; stdlib http.ServeContent ignores the
+		// Range and serves an empty 200 there (it never validates the end once the
+		// start is out of range), so classify as rangeUnsupported (→ empty 200) to
+		// stay aligned. For a non-empty object a start past EOF is a genuine 416.
+		if size == 0 {
+			return 0, 0, rangeUnsupported
+		}
 		return 0, 0, rangeUnsatisfiable
 	}
 	if endStr == "" {
