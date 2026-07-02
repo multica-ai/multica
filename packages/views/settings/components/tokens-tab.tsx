@@ -37,11 +37,13 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useT } from "../../i18n";
+import { DATE_ONLY_FORMAT, useDateFormatter } from "../../common/date-format";
 
 const EXPIRY_KEYS = ["30", "90", "365", "never"] as const;
 
 export function TokensTab() {
   const { t } = useT("settings");
+  const formatDate = useDateFormatter();
   const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
   const [tokenName, setTokenName] = useState("");
   const [tokenExpiry, setTokenExpiry] = useState("90");
@@ -161,15 +163,15 @@ export function TokensTab() {
                     <div className="text-xs text-muted-foreground">
                       {t(($) => $.tokens.metadata_prefix, {
                         prefix: token.token_prefix,
-                        created: new Date(token.created_at).toLocaleDateString(),
+                        created: formatDate(token.created_at, DATE_ONLY_FORMAT),
                         lastUsed: token.last_used_at
                           ? t(($) => $.tokens.last_used_with_date, {
-                              date: new Date(token.last_used_at!).toLocaleDateString(),
+                              date: formatDate(token.last_used_at!, DATE_ONLY_FORMAT),
                             })
                           : t(($) => $.tokens.last_used_never),
                       })}
                       {token.expires_at && t(($) => $.tokens.expires_with_date, {
-                        date: new Date(token.expires_at!).toLocaleDateString(),
+                        date: formatDate(token.expires_at!, DATE_ONLY_FORMAT),
                       })}
                     </div>
                   </div>
