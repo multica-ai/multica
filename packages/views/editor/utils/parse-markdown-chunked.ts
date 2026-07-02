@@ -1,13 +1,12 @@
 import type { JSONContent } from "@tiptap/core";
+import { LARGE_TEXT_THRESHOLD } from "@multica/ui/markdown";
 
 /**
- * Above this source size, ContentEditor parses markdown in chunks instead of in
- * one shot. `@tiptap/markdown` parses via `marked`, whose tokenizer is O(n²) in
- * document length (measured: 533KB plain text → 61.8s parse, while the following
- * ProseMirror setContent is only 40ms). Whole-document parse is the bottleneck;
- * below this threshold the single-parse path is fast enough and stays in use.
+ * Shared cutoff for avoiding unsafe whole-document markdown parsing. Current
+ * ContentEditor behavior bypasses parsing above this size; this chunker remains
+ * as the bounded parser fallback if the bypass threshold is ever raised.
  */
-export const MARKDOWN_CHUNK_THRESHOLD = 50_000;
+export const MARKDOWN_CHUNK_THRESHOLD = LARGE_TEXT_THRESHOLD;
 
 export interface MarkdownManagerLike {
   parse(markdown: string): JSONContent;

@@ -36,6 +36,7 @@ import { Markdown } from "@tiptap/markdown";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { shouldHighlightCode } from "@multica/ui/markdown";
 import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion, type MentionItem } from "./mention-suggestion";
@@ -47,7 +48,7 @@ import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
 import { createSubmitExtension } from "./submit-shortcut";
 import { createBlurShortcutExtension } from "./blur-shortcut";
-import { createFileUploadExtension } from "./file-upload";
+import { createFileUploadExtension, uploadAndInsertFile } from "./file-upload";
 import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
@@ -55,6 +56,30 @@ import { HighlightExtension } from "./highlight";
 import { AutolinkEmailRepairExtension } from "./autolink-email-repair";
 
 const lowlight = createLowlight(common);
+
+function plainLowlightRoot(code: string, language?: string) {
+  return {
+    type: "root",
+    children: [{ type: "text", value: code }],
+    data: language ? { language } : undefined,
+  } as ReturnType<typeof lowlight.highlight>;
+}
+
+const rawHighlight = lowlight.highlight.bind(lowlight);
+lowlight.highlight = ((language: string, code: string, options?: unknown) => {
+  if (!shouldHighlightCode(code, language)) {
+    return plainLowlightRoot(code, language);
+  }
+  return rawHighlight(language, code, options as never);
+}) as typeof lowlight.highlight;
+
+lowlight.highlightAuto = ((code: string) =>
+  plainLowlightRoot(code)) as typeof lowlight.highlightAuto;
+
+function makePastedTextFile(text: string): File | null {
+  if (typeof File === "undefined") return null;
+  return new File([text], "pasted-text.txt", { type: "text/plain" });
+}
 
 const LinkExtension = Link.extend({ inclusive: false }).configure({
   openOnClick: false,
@@ -220,7 +245,15 @@ export function createEditorExtensions(
     }),
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),
-    createMarkdownPasteExtension(),
+    createMarkdownPasteExtension({
+      handleLargeTextPaste: (text, editor) => {
+        const handler = options.onUploadFileRef?.current;
+        const file = handler ? makePastedTextFile(text) : null;
+        if (!handler || !file) return false;
+        void uploadAndInsertFile(editor, file, handler);
+        return true;
+      },
+    }),
     createSubmitExtension(
       () => {
         const fn = options.onSubmitRef?.current;

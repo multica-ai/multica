@@ -10,6 +10,7 @@ import {
   CODE_LIGATURE_CLASS,
   CODE_LIGATURE_DESCENDANT_CLASS,
 } from '@multica/ui/lib/code-style'
+import { shouldHighlightCode } from './code-thresholds'
 
 export interface CodeBlockProps {
   code: string
@@ -75,12 +76,20 @@ export function CodeBlock({
   // Resolve language alias - keep as string to allow 'text' fallback
   const langLower = language.toLowerCase()
   const resolvedLang: string = LANGUAGE_ALIASES[langLower] || langLower
+  const highlightLang = isValidLanguage(resolvedLang) ? resolvedLang : null
 
   React.useEffect(() => {
     let cancelled = false
 
     async function highlight(): Promise<void> {
-      const cacheKey = getCacheKey(code, resolvedLang)
+      const lang = highlightLang
+      if (!shouldHighlightCode(code, lang)) {
+        setHighlighted(null)
+        setIsLoading(false)
+        return
+      }
+
+      const cacheKey = getCacheKey(code, lang)
 
       const cached = highlightCache.get(cacheKey)
       if (cached) {
@@ -92,9 +101,6 @@ export function CodeBlock({
       }
 
       try {
-        // Use valid language or fallback to plaintext
-        const lang = isValidLanguage(resolvedLang) ? resolvedLang : 'text'
-
         // Dual themes: Shiki outputs CSS variables for both themes in one pass.
         // CSS handles switching via .dark selector (see globals.css).
         const html = await codeToHtml(code, {
@@ -132,7 +138,7 @@ export function CodeBlock({
     return () => {
       cancelled = true
     }
-  }, [code, resolvedLang])
+  }, [code, highlightLang, resolvedLang])
 
   const handleCopy = React.useCallback(async () => {
     if (await copyText(code)) {

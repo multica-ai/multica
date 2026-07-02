@@ -24,12 +24,14 @@ function fakePasteEvent(text: string, html?: string) {
   } as unknown as ClipboardEvent;
 }
 
-function makeEditor(content: object) {
+type MarkdownPasteOptions = Parameters<typeof createMarkdownPasteExtension>[0];
+
+function makeEditor(content: object, options?: MarkdownPasteOptions) {
   const element = document.createElement("div");
   document.body.appendChild(element);
   return new Editor({
     element,
-    extensions: [StarterKit, Markdown, createMarkdownPasteExtension()],
+    extensions: [StarterKit, Markdown, createMarkdownPasteExtension(options)],
     content,
   });
 }
@@ -263,13 +265,42 @@ describe("markdownPaste — code block context", () => {
       content: [{ type: "paragraph" }],
     });
 
-    const text = Array.from(
-      { length: 1600 },
-      (_, index) => `log ${index}: ${"payload".repeat(6)}`,
-    ).join("\n");
-    expect(text.length).toBeGreaterThan(50_000);
+    const text = "large paste\n" + "payload\n".repeat(700);
+    expect(text.length).toBeGreaterThan(4_000);
 
-    expectLiteralPaste(editor, text);
+    editor.commands.setTextSelection(1);
+    const parseSpy = vi.spyOn(editor.markdown!, "parse");
+
+    const handled = paste(editor, text);
+
+    expect(handled).toBe(true);
+    expect(parseSpy).not.toHaveBeenCalled();
+    const codeBlock = findFirst(editor.getJSON() as JsonNode, "codeBlock");
+    expect(codeBlock).toBeDefined();
+    expect(nodeText(codeBlock!)).toBe(text);
+  });
+
+  it("turns large pasted text into a file when the editor has a fileification handler", () => {
+    const handleLargeTextPaste = vi.fn(() => true);
+    editor = makeEditor(
+      {
+        type: "doc",
+        content: [{ type: "paragraph" }],
+      },
+      { handleLargeTextPaste },
+    );
+    const text = "large paste\n" + "payload\n".repeat(700);
+    expect(text.length).toBeGreaterThan(4_000);
+
+    editor.commands.setTextSelection(1);
+    const parseSpy = vi.spyOn(editor.markdown!, "parse");
+
+    const handled = paste(editor, text);
+
+    expect(handled).toBe(true);
+    expect(parseSpy).not.toHaveBeenCalled();
+    expect(handleLargeTextPaste).toHaveBeenCalledWith(text, editor);
+    expect(findFirst(editor.getJSON() as JsonNode, "codeBlock")).toBeUndefined();
   });
 
   it("preserves single unknown HTML-like tag (e.g. <T>)", () => {
@@ -356,11 +387,15 @@ describe("markdownPaste — code block context", () => {
     });
 
     const parseJsonSpy = vi.spyOn(JSON, "parse");
-    const text = `{${"not-json".repeat(7_000)}}`;
-    expect(text.length).toBeGreaterThan(50_000);
+    const text = `{${"not-json".repeat(600)}}`;
+    expect(text.length).toBeGreaterThan(4_000);
 
-    expectLiteralPaste(editor, text);
+    const handled = paste(editor, text);
+    expect(handled).toBe(true);
     expect(parseJsonSpy).not.toHaveBeenCalled();
+    const codeBlock = findFirst(editor.getJSON() as JsonNode, "codeBlock");
+    expect(codeBlock).toBeDefined();
+    expect(nodeText(codeBlock!)).toBe(text);
   });
 });
 

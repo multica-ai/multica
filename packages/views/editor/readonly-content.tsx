@@ -32,6 +32,7 @@ import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { shouldHighlightCode } from "@multica/ui/markdown";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import type { Attachment } from "@multica/core/types";
@@ -353,25 +354,25 @@ function buildComponents(): Partial<Components> {
 
       // Block code — highlight with lowlight, output hljs classes
       const code = String(children).replace(/\n$/, "");
-      try {
-        const tree = lang
-          ? lowlight.highlight(lang, code)
-          : lowlight.highlightAuto(code);
-        const html = toHtml(tree);
-        if (html) {
-          return (
-            <code
-              className={cn("hljs", lang && `language-${lang}`)}
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
-          );
+      if (shouldHighlightCode(code, lang)) {
+        try {
+          const tree = lowlight.highlight(lang, code);
+          const html = toHtml(tree);
+          if (html) {
+            return (
+              <code
+                className={cn("hljs", lang && `language-${lang}`)}
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+            );
+          }
+        } catch {
+          // fall through to plain render
         }
-      } catch {
-        // fall through to plain render
       }
       return (
         <code className={cn("hljs", className)} {...props}>
-          {children}
+          {code}
         </code>
       );
     },

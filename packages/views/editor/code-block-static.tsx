@@ -17,6 +17,7 @@ import { useMemo } from "react";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
 import { cn } from "@multica/ui/lib/utils";
+import { shouldHighlightCode } from "@multica/ui/markdown";
 import "./styles/code.css";
 
 const lowlight = createLowlight(common);
@@ -30,10 +31,9 @@ interface CodeBlockStaticProps {
 export function CodeBlockStatic({ language, body, className }: CodeBlockStaticProps) {
   const html = useMemo(() => {
     const code = body.replace(/\n$/, "");
+    if (!shouldHighlightCode(code, language)) return escapeHtml(code);
     try {
-      const tree = language
-        ? lowlight.highlight(language, code)
-        : lowlight.highlightAuto(code);
+      const tree = lowlight.highlight(language, code);
       return toHtml(tree) as string;
     } catch {
       // Unknown language tag — fall back to escaped plain text so we don't

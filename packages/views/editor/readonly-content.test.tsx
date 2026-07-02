@@ -267,13 +267,27 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent).toBe(literalCode);
   });
 
-  it("renders code blocks without a language tag (lowlight highlightAuto fallback)", () => {
+  it("renders code blocks without a language tag as plain text instead of auto-detecting", () => {
     const token = "mul_407ec1e4464b580304362ed749f821901fd7d310";
     const { container } = render(
       <ReadonlyContent content={["```", token, "```"].join("\n")} />,
     );
     const blockCode = container.querySelector("pre code");
     expect(blockCode?.textContent?.trim()).toBe(token);
+    expect(blockCode?.querySelector("span")).toBeNull();
+  });
+
+  it("renders code blocks over the large-text threshold as plain text even with a language tag", () => {
+    const source = "echo payload\n".repeat(400);
+    expect(source.length).toBeGreaterThan(4_000);
+
+    const { container } = render(
+      <ReadonlyContent content={["```bash", source, "```"].join("\n")} />,
+    );
+
+    const blockCode = container.querySelector("pre code");
+    expect(blockCode?.textContent).toBe(source);
+    expect(blockCode?.querySelector("span")).toBeNull();
   });
 
   it("copies the whole fenced code block from the readonly toolbar", async () => {

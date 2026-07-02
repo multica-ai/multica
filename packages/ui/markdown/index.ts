@@ -1,5 +1,6 @@
 export { Markdown, MemoizedMarkdown, type MarkdownProps, type RenderMode } from './Markdown'
 export { CodeBlock, InlineCode, type CodeBlockProps } from './CodeBlock'
+export { LARGE_TEXT_THRESHOLD, shouldHighlightCode } from './code-thresholds'
 export { StreamingMarkdown, type StreamingMarkdownProps } from './StreamingMarkdown'
 export { preprocessLinks, detectLinks, hasLinks } from './linkify'
 export { preprocessMentionShortcodes } from './mentions'

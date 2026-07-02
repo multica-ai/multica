@@ -62,7 +62,11 @@ vi.mock("./attachment-download-context", () => ({
 const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
 const onCreateFired = vi.hoisted(() => ({ value: false }));
 const latestEditorOptions = vi.hoisted<{
-  current?: { onUpdate?: (args: { editor: unknown }) => void };
+  current?: {
+    content?: unknown;
+    contentType?: string;
+    onUpdate?: (args: { editor: unknown }) => void;
+  };
 }>(() => ({}));
 
 vi.mock("@tiptap/react", () => ({
@@ -164,6 +168,49 @@ describe("ContentEditor", () => {
     expect(mockSetContent).toHaveBeenCalledWith(
       "new content from server",
       expect.objectContaining({ emitUpdate: false, contentType: "markdown" }),
+    );
+  });
+
+  it("mounts a large defaultValue as a plain code block doc instead of markdown-parsing the whole string", () => {
+    const large = "large draft\n" + "payload\n".repeat(700);
+    expect(large.length).toBeGreaterThan(4_000);
+
+    render(<ContentEditor defaultValue={large} />);
+
+    expect(latestEditorOptions.current?.content).toEqual({
+      type: "doc",
+      content: [
+        {
+          type: "codeBlock",
+          content: [{ type: "text", text: large }],
+        },
+      ],
+    });
+    expect(latestEditorOptions.current?.contentType).toBeUndefined();
+    expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("syncs a large external defaultValue as a plain code block doc instead of markdown-parsing the whole string", () => {
+    editorState.markdown = "old content";
+    const { rerender } = render(<ContentEditor defaultValue="old content" />);
+    const large = "large draft\n" + "payload\n".repeat(700);
+    expect(large.length).toBeGreaterThan(4_000);
+
+    editorState.markdown = "old content";
+    rerender(<ContentEditor defaultValue={large} />);
+
+    expect(mockSetContent).toHaveBeenCalledTimes(1);
+    expect(mockSetContent).toHaveBeenCalledWith(
+      {
+        type: "doc",
+        content: [
+          {
+            type: "codeBlock",
+            content: [{ type: "text", text: large }],
+          },
+        ],
+      },
+      { emitUpdate: false },
     );
   });
 

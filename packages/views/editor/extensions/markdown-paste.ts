@@ -12,9 +12,10 @@
  * `data-pm-slice` in the HTML — this attribute is added by ProseMirror's
  * own clipboard serializer. If present, the source is another ProseMirror
  * editor and its HTML is structurally correct — let ProseMirror handle it.
- * Otherwise, classify text/plain into one of three paths:
+ * Otherwise, classify text/plain into one of four paths:
  * - native: let ProseMirror or another extension handle it
  * - literal: insert exact text without Markdown parsing
+ * - large-text: hand text to fileification, or insert a plain code block
  * - markdown: parse text/plain as Markdown
  *
  * Why not clipboardTextParser? It only runs when there's NO text/html on
@@ -25,11 +26,12 @@
  * Syntax-highlight wrappers from editors (<pre>/<code>/<span>/<div>) are not
  * enough by themselves, because those should still paste as Markdown source.
  */
-import { Extension } from "@tiptap/core";
+import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Slice } from "@tiptap/pm/model";
+import type { EditorView } from "@tiptap/pm/view";
+import { LARGE_TEXT_THRESHOLD } from "@multica/ui/markdown";
 
-const LARGE_PASTE_TEXT_THRESHOLD = 50_000;
 const SEMANTIC_RICH_HTML_SELECTOR = [
   "a[href]",
   "b",
@@ -236,7 +238,11 @@ function findRawHtmlTagsOutsideCode(text: string): string[] {
   return tags;
 }
 
-type PasteMode = "native" | "literal" | "markdown";
+type PasteMode = "native" | "literal" | "large-text" | "markdown";
+
+interface MarkdownPasteOptions {
+  handleLargeTextPaste?: (text: string, editor: Editor) => boolean;
+}
 
 interface PasteClassificationInput {
   text: string;
@@ -340,14 +346,28 @@ function classifyPaste({
   if (hasFiles) return "native";
   if (!text) return "native";
   if (isInsideCodeBlock) return "literal";
+  if (text.length > LARGE_TEXT_THRESHOLD) return "large-text";
   if (html && html.includes("data-pm-slice")) return "native";
   if (html && hasSemanticRichHtml(html, text)) return "native";
-  if (text.length > LARGE_PASTE_TEXT_THRESHOLD) return "literal";
   if (isStructuredPlainText(text)) return "literal";
   return "markdown";
 }
 
-export function createMarkdownPasteExtension() {
+function insertPlainCodeBlock(view: EditorView, text: string) {
+  const codeBlock = view.state.schema.nodes.codeBlock;
+  if (!codeBlock) {
+    view.dispatch(view.state.tr.insertText(text));
+    return;
+  }
+
+  const node = codeBlock.create(
+    null,
+    text ? view.state.schema.text(text) : undefined,
+  );
+  view.dispatch(view.state.tr.replaceSelectionWith(node, false));
+}
+
+export function createMarkdownPasteExtension(options: MarkdownPasteOptions = {}) {
   return Extension.create({
     name: "markdownPaste",
     addProseMirrorPlugins() {
@@ -375,6 +395,12 @@ export function createMarkdownPasteExtension() {
 
               if (mode === "literal") {
                 view.dispatch(view.state.tr.insertText(text));
+                return true;
+              }
+
+              if (mode === "large-text") {
+                if (options.handleLargeTextPaste?.(text, editor)) return true;
+                insertPlainCodeBlock(view, text);
                 return true;
               }
 
