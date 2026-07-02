@@ -121,3 +121,85 @@ func TestTaskDispatcher_RejectsEmptyArgv(t *testing.T) {
 		t.Fatal("expected error for empty argv")
 	}
 }
+
+// TestTaskDispatcher_EnqueuesJudgeTask proves DispatchJudge resolves the judge
+// agent's runtime and enqueues one quick_create task whose context carries the
+// rubric and the loop_judge bookkeeping the ingress matches on.
+func TestTaskDispatcher_EnqueuesJudgeTask(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	runtimeID := mustScanUUID(t, "22222222-2222-2222-2222-222222222222")
+	wsID := mustScanUUID(t, "33333333-3333-3333-3333-333333333333")
+	q := &fakeDispatchQueries{agent: db.Agent{
+		ID:          mustScanUUID(t, agentID),
+		WorkspaceID: wsID,
+		RuntimeID:   runtimeID,
+	}}
+	d := NewTaskDispatcher(q)
+
+	err := d.DispatchJudge(context.Background(), JudgeDispatch{
+		AgentID:   agentID,
+		IssueID:   "44444444-4444-4444-4444-444444444444",
+		Gate:      "gate-1",
+		Round:     1,
+		CheckID:   "ux-quality",
+		Rubric:    "the UI must not regress",
+		SkillName: "judge-skill",
+	})
+	if err != nil {
+		t.Fatalf("dispatch judge: %v", err)
+	}
+	if len(q.created) != 1 {
+		t.Fatalf("want 1 task enqueued, got %d", len(q.created))
+	}
+
+	task := q.created[0]
+	if task.RuntimeID != runtimeID {
+		t.Fatal("task not routed to the judge agent's runtime")
+	}
+	var ctxMap map[string]any
+	if err := json.Unmarshal(task.Context, &ctxMap); err != nil {
+		t.Fatalf("context not valid JSON: %v", err)
+	}
+	lj, ok := ctxMap["loop_judge"].(map[string]any)
+	if !ok {
+		t.Fatalf("loop_judge bookkeeping missing: %v", ctxMap)
+	}
+	if lj["check_id"] != "ux-quality" {
+		t.Fatalf("loop_judge check_id wrong: %v", lj["check_id"])
+	}
+	if lj["gate"] != "gate-1" {
+		t.Fatalf("loop_judge gate wrong: %v", lj["gate"])
+	}
+	prompt, _ := ctxMap["prompt"].(string)
+	if prompt == "" {
+		t.Fatal("judge prompt should not be empty")
+	}
+}
+
+// TestTaskDispatcher_RejectsEmptyRubric proves a judge check with nowhere to
+// get its scoring criteria from is refused before any agent lookup.
+func TestTaskDispatcher_RejectsEmptyRubric(t *testing.T) {
+	q := &fakeDispatchQueries{}
+	d := NewTaskDispatcher(q)
+	if err := d.DispatchJudge(context.Background(), JudgeDispatch{AgentID: "x", CheckID: "a"}); err == nil {
+		t.Fatal("expected error for empty rubric")
+	}
+}
+
+// TestTaskDispatcher_RejectsJudgeAgentWithoutRuntime proves a judge check with
+// nowhere to run errors instead of being silently dropped.
+func TestTaskDispatcher_RejectsJudgeAgentWithoutRuntime(t *testing.T) {
+	q := &fakeDispatchQueries{agent: db.Agent{}} // zero RuntimeID => not Valid
+	d := NewTaskDispatcher(q)
+	err := d.DispatchJudge(context.Background(), JudgeDispatch{
+		AgentID: "11111111-1111-1111-1111-111111111111",
+		CheckID: "ux-quality",
+		Rubric:  "the UI must not regress",
+	})
+	if err == nil {
+		t.Fatal("expected error for judge agent without runtime")
+	}
+	if len(q.created) != 0 {
+		t.Fatal("no task should be enqueued when the judge agent has no runtime")
+	}
+}

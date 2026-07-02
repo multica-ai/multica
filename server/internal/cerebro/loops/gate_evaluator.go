@@ -82,24 +82,35 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 	if err != nil {
 		return false, err
 	}
+	judgeOutcomes, err := g.store.JudgeOutcomes(ctx, iid, gate, state.Round)
+	if err != nil {
+		return false, err
+	}
 
-	decision := Reconcile(cfg, outcomes)
+	decision := Reconcile(cfg, outcomes, judgeOutcomes)
 	switch decision.Action {
 	case GateAdvance:
 		return true, nil
 	case GateEnqueue:
 		// Register the missing checks as pending, then send any not-yet-sent
-		// check to the worker agent's runtime so it actually runs. The gate
-		// still holds (returns false) until the runtime reports green.
+		// check to the worker agent's runtime (and any not-yet-sent judge
+		// check to the judge agent's runtime) so they actually run. The gate
+		// still holds (returns false) until every runtime reports green.
 		if err := g.store.Enqueue(ctx, iid, gate, state.Round, decision.Enqueue); err != nil {
+			return false, err
+		}
+		if err := g.store.EnqueueJudge(ctx, iid, gate, state.Round, decision.EnqueueJudge); err != nil {
 			return false, err
 		}
 		if err := g.dispatchPending(ctx, iid, cfg.AgentID, gate, state.Round); err != nil {
 			return false, err
 		}
+		if err := g.dispatchPendingJudge(ctx, iid, cfg, gate, state.Round); err != nil {
+			return false, err
+		}
 		return false, nil
 	case GateRevise:
-		return false, g.revise(ctx, iid, gate, cfg, outcomes)
+		return false, g.revise(ctx, iid, gate, cfg, outcomes, judgeOutcomes)
 	default:
 		// GateWait: every required check is in flight; hold.
 		return false, nil
@@ -111,8 +122,8 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 // can fix the failing checks in the fresh round the caps tracker just opened.
 // A cap trip freezes the gate instead: EvaluateCheckGate's Stopped check on
 // the next call is what actually stops the loop from consuming more rounds.
-func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate string, cfg CheckGateConfig, outcomes []CheckOutcome) error {
-	signature := OutcomeSignature(outcomes)
+func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate string, cfg CheckGateConfig, outcomes []CheckOutcome, judgeOutcomes []JudgeOutcome) error {
+	signature := OutcomeSignature(outcomes, judgeOutcomes)
 	next, err := g.store.RecordRevision(ctx, issueID, gate, signature, cfg.Caps)
 	if err != nil {
 		return err
@@ -158,6 +169,45 @@ func (g *GateEvaluator) dispatchPending(ctx context.Context, issueID pgtype.UUID
 			return fmt.Errorf("dispatch pending check: %w", err)
 		}
 		if err := g.store.MarkDispatched(ctx, issueID, gate, round, argv); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dispatchPendingJudge sends every enqueued-but-undispatched judge check for
+// this gate round to the judge agent's runtime exactly once, mirroring
+// dispatchPending. It falls back to the worker agent (cfg.AgentID) when no
+// distinct JudgeAgentID is configured, so a spec with judge checks but no
+// judge agent still dispatches instead of stalling forever — Compile always
+// fills JudgeAgentID (defaulting to AgentID), but a hand-built config used
+// directly against the evaluator may not.
+func (g *GateEvaluator) dispatchPendingJudge(ctx context.Context, issueID pgtype.UUID, cfg CheckGateConfig, gate string, round int32) error {
+	judgeAgentID := cfg.JudgeAgentID
+	if judgeAgentID == "" {
+		judgeAgentID = cfg.AgentID
+	}
+	if g.dispatcher == nil || judgeAgentID == "" {
+		return nil
+	}
+	pending, err := g.store.PendingJudgeDispatch(ctx, issueID, gate, round)
+	if err != nil {
+		return err
+	}
+	issueStr := util.UUIDToString(issueID)
+	for _, check := range pending {
+		if err := g.dispatcher.DispatchJudge(ctx, JudgeDispatch{
+			AgentID:   judgeAgentID,
+			IssueID:   issueStr,
+			Gate:      gate,
+			Round:     round,
+			CheckID:   check.ID,
+			Rubric:    check.Rubric,
+			SkillName: cfg.JudgeSkill,
+		}); err != nil {
+			return fmt.Errorf("dispatch pending judge check: %w", err)
+		}
+		if err := g.store.MarkJudgeDispatched(ctx, issueID, gate, round, check.ID); err != nil {
 			return err
 		}
 	}

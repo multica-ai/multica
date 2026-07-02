@@ -55,9 +55,45 @@ func TestCompile_ProducesGateDispatchEscalate(t *testing.T) {
 	if cfg.Checks[0][0] != "pytest" {
 		t.Fatalf("gate check argv not carried through: %+v", cfg.Checks)
 	}
+	if len(cfg.JudgeChecks) != 1 || cfg.JudgeChecks[0].ID != "note-explains" {
+		t.Fatalf("gate judge check not carried through: %+v", cfg.JudgeChecks)
+	}
+	if cfg.JudgeAgentID != "agent-1" {
+		t.Fatalf("judge agent should default to the worker agent, got %q", cfg.JudgeAgentID)
+	}
+	if cfg.JudgeSkill != "build" {
+		t.Fatalf("judge skill should default to the build skill, got %q", cfg.JudgeSkill)
+	}
 
 	if _, ok := byName["loop:escalate-stalled"]; !ok {
 		t.Fatal("escalation rule missing")
+	}
+}
+
+// TestCompile_CustomJudgeAgentAndSkill proves a caller can route judge checks
+// to a distinct agent/skill instead of the worker-fallback default, which is
+// what makes a blind review possible (a different session grading the work).
+func TestCompile_CustomJudgeAgentAndSkill(t *testing.T) {
+	rules, err := Compile(goodSpec(t), CompileParams{
+		AgentID:      "agent-1",
+		BuildSkill:   "build",
+		JudgeAgentID: "judge-agent",
+		JudgeSkill:   "judge-skill",
+	})
+	if err != nil {
+		t.Fatalf("compile failed: %v", err)
+	}
+	for _, r := range rules {
+		if r.Name != "loop:delivery-gate" {
+			continue
+		}
+		cfg := r.Conditions[0].Value.(CheckGateConfig)
+		if cfg.JudgeAgentID != "judge-agent" {
+			t.Fatalf("expected custom judge agent, got %q", cfg.JudgeAgentID)
+		}
+		if cfg.JudgeSkill != "judge-skill" {
+			t.Fatalf("expected custom judge skill, got %q", cfg.JudgeSkill)
+		}
 	}
 }
 

@@ -1764,5 +1764,6 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	// only when the loop store is wired; nil store = tool absent, gate stays safe.
 	if tctx.LoopStore != nil {
 		r.Register(&FirtalReportLoopCheckTool{store: tctx.LoopStore, tctx: tctx})
+		r.Register(&FirtalReportLoopJudgeTool{store: tctx.LoopStore, tctx: tctx})
 	}
 }

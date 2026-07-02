@@ -118,6 +118,109 @@ func (s *Store) Report(ctx context.Context, issueID pgtype.UUID, gate string, ro
 	return nil
 }
 
+// EnqueueJudge registers each judge check as pending (ran = false) for one
+// gate round, mirroring Enqueue for programmatic checks. Idempotent: an
+// already-enqueued check id keeps its existing row untouched.
+func (s *Store) EnqueueJudge(ctx context.Context, issueID pgtype.UUID, gate string, round int32, checks []JudgeCheck) error {
+	for _, c := range checks {
+		if _, err := s.pool.Exec(ctx,
+			`INSERT INTO cerebro_loop_judge_run (issue_id, gate, round, check_id, rubric)
+			 VALUES ($1, $2, $3, $4, $5)
+			 ON CONFLICT (issue_id, gate, round, check_id) DO NOTHING`,
+			issueID, gate, round, c.ID, c.Rubric); err != nil {
+			return fmt.Errorf("enqueue loop judge run: %w", err)
+		}
+	}
+	return nil
+}
+
+// PendingJudgeDispatch returns every judge check enqueued for this gate round
+// but not yet dispatched to a judge runtime and not yet reported, oldest
+// first — the judge-check mirror of PendingDispatch.
+func (s *Store) PendingJudgeDispatch(ctx context.Context, issueID pgtype.UUID, gate string, round int32) ([]JudgeCheck, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT check_id, rubric
+		 FROM cerebro_loop_judge_run
+		 WHERE issue_id = $1 AND gate = $2 AND round = $3
+		   AND ran = false AND dispatched_at IS NULL
+		 ORDER BY created_at ASC, id ASC`,
+		issueID, gate, round)
+	if err != nil {
+		return nil, fmt.Errorf("list pending dispatch loop judge checks: %w", err)
+	}
+	defer rows.Close()
+
+	var checks []JudgeCheck
+	for rows.Next() {
+		var c JudgeCheck
+		if err := rows.Scan(&c.ID, &c.Rubric); err != nil {
+			return nil, fmt.Errorf("scan pending dispatch loop judge check: %w", err)
+		}
+		checks = append(checks, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending dispatch loop judge checks: %w", err)
+	}
+	return checks, nil
+}
+
+// MarkJudgeDispatched stamps one enqueued judge check as sent to a judge
+// runtime, mirroring MarkDispatched.
+func (s *Store) MarkJudgeDispatched(ctx context.Context, issueID pgtype.UUID, gate string, round int32, checkID string) error {
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE cerebro_loop_judge_run
+		 SET dispatched_at = now()
+		 WHERE issue_id = $1 AND gate = $2 AND round = $3 AND check_id = $4
+		   AND dispatched_at IS NULL`,
+		issueID, gate, round, checkID); err != nil {
+		return fmt.Errorf("mark loop judge check dispatched: %w", err)
+	}
+	return nil
+}
+
+// ReportJudge records a judge agent's verdict for one enqueued judge check.
+func (s *Store) ReportJudge(ctx context.Context, issueID pgtype.UUID, gate string, round int32, checkID string, pass bool, blocking []string) error {
+	if blocking == nil {
+		blocking = []string{}
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE cerebro_loop_judge_run
+		 SET ran = true, pass = $5, blocking_issues = $6, updated_at = now()
+		 WHERE issue_id = $1 AND gate = $2 AND round = $3 AND check_id = $4`,
+		issueID, gate, round, checkID, pass, blocking); err != nil {
+		return fmt.Errorf("report loop judge run: %w", err)
+	}
+	return nil
+}
+
+// JudgeOutcomes returns every judge check (pending and reported) for a gate
+// round, oldest first, folded into the JudgeOutcome shape Reconcile consumes.
+func (s *Store) JudgeOutcomes(ctx context.Context, issueID pgtype.UUID, gate string, round int32) ([]JudgeOutcome, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT check_id, ran, pass, blocking_issues
+		 FROM cerebro_loop_judge_run
+		 WHERE issue_id = $1 AND gate = $2 AND round = $3
+		 ORDER BY created_at ASC, id ASC`,
+		issueID, gate, round)
+	if err != nil {
+		return nil, fmt.Errorf("list loop judge runs: %w", err)
+	}
+	defer rows.Close()
+
+	outcomes := []JudgeOutcome{}
+	for rows.Next() {
+		var o JudgeOutcome
+		if err := rows.Scan(&o.ID, &o.Ran, &o.Pass, &o.Blocking); err != nil {
+			return nil, fmt.Errorf("scan loop judge run: %w", err)
+		}
+		outcomes = append(outcomes, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate loop judge runs: %w", err)
+	}
+	return outcomes, nil
+}
+
 // GateRoundState is the caps-tracking state for one delivery gate, persisted in
 // cerebro_loop_gate_state. It is what turns Spec.Caps from a parsed-but-unused
 // field into an enforced termination guard: LoadGateState tells the evaluator
@@ -156,9 +259,9 @@ func (s *Store) LoadGateState(ctx context.Context, issueID pgtype.UUID, gate str
 
 // RecordRevision advances a gate to a new round after a GateRevise decision
 // and applies the spec's termination guards. signature is
-// OutcomeSignature(outcomes) for the round that just failed: an unchanged
-// signature across two consecutive revisions means the worker made no
-// progress, and increments ConsecutiveStalls instead of resetting it.
+// OutcomeSignature(outcomes, judgeOutcomes) for the round that just failed:
+// an unchanged signature across two consecutive revisions means the worker
+// made no progress, and increments ConsecutiveStalls instead of resetting it.
 //
 // A zero Caps field means that guard is not configured (the raw
 // CheckGateConfig tests in this package do not set Caps) and is never

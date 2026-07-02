@@ -126,6 +126,18 @@ MCP surface adds an endpoint that should be callable by gateway agents, add the
 matching proxy entry in `server/internal/cerebro/runtime/customer_service_mcp_tools.go`
 and cover the name in `TestCustomerServiceMCPToolsAreRegisteredAndInMetadata`.
 
+Loop-gate reporting tools: `report_loop_check` and `report_loop_judge` are
+native Firtal Gateway tools registered only when a loop store is wired into the
+task context (`runtime/firtal_gateway_tools_extended.go`). They do not bypass
+the tool exposure model in row 2: an agent can call them only if the legacy
+grant cascade or the tool-policy chain exposes the tool for that run. The tools
+only record a verdict for an existing `(issue_id, gate, round, check)` row:
+`report_loop_check` records the programmatic exit code, and
+`report_loop_judge` records the judge's structured `pass` plus
+`blocking_issues` verdict. A failing judge verdict must include concrete
+blocking issues; a passing judge verdict stores an empty issue list. They do not
+grant issue access, reveal credentials, or create new work on their own.
+
 **API-connection tool argument shape (FIR-2441).** An `api`-type connection tool
 (exposed under the default-off `cerebro_api_connection_tools` flag, row 2b) takes
 a fixed argument shape: **path** parameters at the **top level**, **query**

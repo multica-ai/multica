@@ -46,9 +46,28 @@ type CheckDispatch struct {
 // agent can fix whatever failed. Optional the same way — a nil dispatcher (or
 // a config missing an agent/skill) leaves the caps tracker updated but does
 // not re-dispatch anything.
+//
+// DispatchJudge is the seam for a judge-type check: instead of a runnable
+// command, it sends the judge agent the rubric and asks for a structured
+// pass/revise verdict. It is sent to cfg.JudgeAgentID (or cfg.AgentID as a
+// self-graded fallback), never assumed to be the same session as the worker
+// — the gate does not enforce blindness, but the caller should route a real
+// judge agent here for the verdict to mean anything.
 type CheckDispatcher interface {
 	DispatchCheck(ctx context.Context, d CheckDispatch) error
 	DispatchRevision(ctx context.Context, d RevisionDispatch) error
+	DispatchJudge(ctx context.Context, d JudgeDispatch) error
+}
+
+// JudgeDispatch is one judge check the engine asks a judge agent to score.
+type JudgeDispatch struct {
+	AgentID   string // judge agent whose runtime scores the check
+	IssueID   string // issue the loop is building
+	Gate      string // stable per-gate key (the workflow id)
+	Round     int32  // loop round the check belongs to
+	CheckID   string // the verification id from loop.yaml, echoed back on report
+	Rubric    string // what the judge scores the delivered work against
+	SkillName string // the skill dispatched to run the judgment
 }
 
 // RevisionDispatch is one round's worth of failed checks the engine asks the
@@ -194,6 +213,77 @@ func (t *TaskDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatc
 		return fmt.Errorf("dispatch revision: enqueue task: %w", err)
 	}
 	return nil
+}
+
+// DispatchJudge enqueues a quick_create task asking the judge agent to score
+// the delivered work against the check's rubric and report a structured
+// verdict back. It resolves the agent's runtime the same way DispatchCheck
+// does and fails loudly if the judge agent is archived or has no runtime — a
+// judge check with nowhere to run must not be silently dropped, or the gate
+// would wait forever.
+func (t *TaskDispatcher) DispatchJudge(ctx context.Context, d JudgeDispatch) error {
+	if d.Rubric == "" {
+		return fmt.Errorf("dispatch judge: empty rubric")
+	}
+	agentID, err := util.ParseUUID(d.AgentID)
+	if err != nil {
+		return fmt.Errorf("dispatch judge: parse agent id: %w", err)
+	}
+	agent, err := t.queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return fmt.Errorf("dispatch judge: load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return fmt.Errorf("dispatch judge: agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return fmt.Errorf("dispatch judge: agent has no runtime")
+	}
+
+	contextJSON, err := json.Marshal(map[string]any{
+		"type":         "quick_create",
+		"prompt":       buildJudgePrompt(d),
+		"workspace_id": util.UUIDToString(agent.WorkspaceID),
+		// Structured loop_judge fields, mirroring loop_check: bookkeeping the
+		// daemon ignores today, but the ingress matches a reported verdict
+		// back to this check on (issue_id, gate, round, check_id).
+		"loop_judge": map[string]any{
+			"issue_id": d.IssueID,
+			"gate":     d.Gate,
+			"round":    d.Round,
+			"check_id": d.CheckID,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("dispatch judge: marshal context: %w", err)
+	}
+
+	if _, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+		AgentID:   agentID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  0,
+		Context:   contextJSON,
+	}); err != nil {
+		return fmt.Errorf("dispatch judge: enqueue task: %w", err)
+	}
+	return nil
+}
+
+// buildJudgePrompt renders the instruction the judge agent's model sees. The
+// gate decides on the reported structured verdict alone, so the prompt makes
+// the rubric the only thing that matters and tells the judge to read the
+// issue's own delivered work (not to trust a worker's summary of it) before
+// scoring — the same "blind, evidence-based" standard the delivery gate
+// programmatic checks get from a raw exit code.
+func buildJudgePrompt(d JudgeDispatch) string {
+	return fmt.Sprintf(
+		"Score this loop delivery against the rubric below (gate %s, round %d, check %q). "+
+			"Read the actual delivered work on the issue yourself — do not take the builder's own summary as proof. "+
+			"Then report your verdict back to the loop gate via the report_loop_judge tool with issue_id, gate, round, check_id=%q, "+
+			"pass (true only if the rubric is fully met), and blocking_issues (the specific, concrete reasons if pass is false; empty if true).\n\n"+
+			"Rubric:\n%s",
+		d.Gate, d.Round, d.CheckID, d.CheckID, d.Rubric,
+	)
 }
 
 // buildRevisionPrompt renders the instruction the worker agent's model sees

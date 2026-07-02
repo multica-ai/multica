@@ -39,6 +39,30 @@ type CheckGateConfig struct {
 	// to the original build round from the worker's point of view — it is
 	// told what failed and asked to fix it.
 	RevisionSkill string `json:"revision_skill,omitempty"`
+	// JudgeChecks are the spec's judge-type verification criteria: a model
+	// scores a rubric and returns a structured pass/revise verdict instead of
+	// an exit code. The gate treats a judge check exactly like a programmatic
+	// one for advance/revise/wait purposes — every one must report Pass
+	// before the gate can advance — but it is scored by JudgeAgentID via
+	// JudgeSkill, never run as a command.
+	JudgeChecks []JudgeCheck `json:"judge_checks,omitempty"`
+	// JudgeAgentID is the agent whose runtime scores judge checks. It should
+	// be a different agent or at least a fresh session than AgentID (the
+	// worker) so the verdict is blind to the worker's own reasoning — Compile
+	// does not enforce that, the caller chooses the judge. Falls back to
+	// AgentID when empty so a spec with judge checks but no configured judge
+	// still dispatches (self-graded) instead of stalling forever.
+	JudgeAgentID string `json:"judge_agent_id,omitempty"`
+	// JudgeSkill is the skill dispatched to JudgeAgentID for a judge check.
+	JudgeSkill string `json:"judge_skill,omitempty"`
+}
+
+// JudgeCheck is one judge-type verification criterion carried into the gate
+// config: an ID (matches the spec's Verification.ID, used to key its reported
+// outcome) and the rubric the judge scores the delivered work against.
+type JudgeCheck struct {
+	ID     string `json:"id"`
+	Rubric string `json:"rubric"`
 }
 
 // CompileParams supplies the issue-specific bindings the spec itself does not
@@ -59,6 +83,16 @@ type CompileParams struct {
 	// state fires the plan immediately.
 	PlanSkill      string
 	PlanningStatus string
+
+	// Judge params — only used when the spec has judge-type verification
+	// criteria (Spec.JudgeChecks). JudgeAgentID is the agent that scores them;
+	// if empty, AgentID is used (the worker judges its own delivery — allowed
+	// so a spec with judge checks never silently stalls, but callers that
+	// want a blind review must set a distinct JudgeAgentID). JudgeSkill is
+	// the skill dispatched to score a judge check; if empty, BuildSkill is
+	// used.
+	JudgeAgentID string
+	JudgeSkill   string
 }
 
 func (p *CompileParams) withDefaults() CompileParams {
@@ -77,6 +111,12 @@ func (p *CompileParams) withDefaults() CompileParams {
 	}
 	if out.PlanSkill == "" {
 		out.PlanSkill = out.BuildSkill
+	}
+	if out.JudgeAgentID == "" {
+		out.JudgeAgentID = out.AgentID
+	}
+	if out.JudgeSkill == "" {
+		out.JudgeSkill = out.BuildSkill
 	}
 	return out
 }
@@ -97,12 +137,14 @@ type Rule struct {
 // the loop on the existing engine:
 //
 //	dispatch  — entering BuildStatus runs the build skill (the worker step)
-//	gate      — entering ReviewStatus, if every programmatic check passes,
-//	            sets DoneStatus; otherwise the issue stays in review
+//	gate      — entering ReviewStatus, if every programmatic check exits zero
+//	            AND every judge check reports a passing verdict, sets
+//	            DoneStatus; otherwise the issue stays in review
 //	escalate  — a stalled issue is walked up to its owner (human stop)
 //
-// The worker (agent) never decides the loop: the gate is a programmatic check
-// the engine evaluates, and only the engine sets DoneStatus.
+// The worker (agent) never decides the loop: the gate is decided by the
+// engine from reported exit codes and judge verdicts, and only the engine
+// sets DoneStatus.
 func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid loop spec: %w", err)
@@ -122,6 +164,11 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 	checks := make([][]string, 0, len(spec.Verification))
 	for _, v := range spec.ProgrammaticChecks() {
 		checks = append(checks, v.Check)
+	}
+
+	judgeChecks := make([]JudgeCheck, 0, len(spec.Verification))
+	for _, v := range spec.JudgeChecks() {
+		judgeChecks = append(judgeChecks, JudgeCheck{ID: v.ID, Rubric: v.Rubric})
 	}
 
 	rules := []Rule{
@@ -145,6 +192,9 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 					AgentID:       params.AgentID,
 					Caps:          spec.Caps,
 					RevisionSkill: p.BuildSkill,
+					JudgeChecks:   judgeChecks,
+					JudgeAgentID:  p.JudgeAgentID,
+					JudgeSkill:    p.JudgeSkill,
 				}},
 			},
 			ActionType:   workflows.ActionSetStatus,

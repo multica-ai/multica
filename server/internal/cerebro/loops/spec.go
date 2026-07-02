@@ -176,3 +176,17 @@ func (s *Spec) ProgrammaticChecks() []Verification {
 	}
 	return out
 }
+
+// JudgeChecks returns the criteria a model must score against a rubric. Unlike
+// a programmatic check, the engine cannot decide these on its own — it
+// dispatches each one to a judge agent and trusts the structured verdict that
+// comes back (see CheckDispatcher.DispatchJudge).
+func (s *Spec) JudgeChecks() []Verification {
+	out := make([]Verification, 0, len(s.Verification))
+	for _, v := range s.Verification {
+		if v.Type == CheckJudge {
+			out = append(out, v)
+		}
+	}
+	return out
+}

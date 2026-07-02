@@ -48,24 +48,36 @@ type GateDecision struct {
 	// Enqueue is the set of check argv arrays the engine must run, set only
 	// when Action is GateEnqueue.
 	Enqueue [][]string
+	// EnqueueJudge is the set of judge checks the engine must dispatch to a
+	// judge agent, set only when Action is GateEnqueue. A gate can enqueue
+	// both programmatic and judge checks in the same decision.
+	EnqueueJudge []JudgeCheck
 }
 
-// Reconcile decides the next action for a delivery gate.
+// Reconcile decides the next action for a delivery gate from the reported
+// programmatic check outcomes and judge verdicts. A judge check is decided
+// the same way as a programmatic one — Pass/exit-zero advances, a failed
+// verdict/non-zero exit revises, a missing result is enqueued — the only
+// difference is what "running" it means (a command vs. a model scoring a
+// rubric).
 //
-//	any required check failed        -> GateRevise   (fail fast)
-//	a required check has no result   -> GateEnqueue  (run it)
-//	all required checks in flight     -> GateWait
-//	all required checks exited zero   -> GateAdvance
+//	any required check/judge failed   -> GateRevise   (fail fast)
+//	a required check/judge has no result -> GateEnqueue  (run/dispatch it)
+//	all required checks/judges in flight  -> GateWait
+//	all required checks/judges passed     -> GateAdvance
 //
-// An empty config never advances on its own — that would be a gate that checks
-// nothing — so it reports GateWait.
-func Reconcile(cfg CheckGateConfig, outcomes []CheckOutcome) GateDecision {
-	if len(cfg.Checks) == 0 {
+// An empty config (no programmatic checks and no judge checks) never advances
+// on its own — that would be a gate that checks nothing — so it reports
+// GateWait.
+func Reconcile(cfg CheckGateConfig, outcomes []CheckOutcome, judgeOutcomes []JudgeOutcome) GateDecision {
+	if len(cfg.Checks) == 0 && len(cfg.JudgeChecks) == 0 {
 		return GateDecision{Action: GateWait}
 	}
 
 	var toEnqueue [][]string
+	var toEnqueueJudge []JudgeCheck
 	inFlight := false
+
 	for _, required := range cfg.Checks {
 		o, found := findOutcome(outcomes, required)
 		switch {
@@ -78,8 +90,20 @@ func Reconcile(cfg CheckGateConfig, outcomes []CheckOutcome) GateDecision {
 		}
 	}
 
-	if len(toEnqueue) > 0 {
-		return GateDecision{Action: GateEnqueue, Enqueue: toEnqueue}
+	for _, required := range cfg.JudgeChecks {
+		o, found := findJudgeOutcome(judgeOutcomes, required.ID)
+		switch {
+		case found && o.Ran && !o.Pass:
+			return GateDecision{Action: GateRevise}
+		case !found:
+			toEnqueueJudge = append(toEnqueueJudge, required)
+		case !o.Ran:
+			inFlight = true
+		}
+	}
+
+	if len(toEnqueue) > 0 || len(toEnqueueJudge) > 0 {
+		return GateDecision{Action: GateEnqueue, Enqueue: toEnqueue, EnqueueJudge: toEnqueueJudge}
 	}
 	if inFlight {
 		return GateDecision{Action: GateWait}

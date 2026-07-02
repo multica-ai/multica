@@ -34,6 +34,12 @@ func TestParse_Valid(t *testing.T) {
 	if got := len(s.ProgrammaticChecks()); got != 1 {
 		t.Fatalf("expected 1 programmatic check, got %d", got)
 	}
+	if got := len(s.JudgeChecks()); got != 1 {
+		t.Fatalf("expected 1 judge check, got %d", got)
+	}
+	if s.JudgeChecks()[0].ID != "note-explains" {
+		t.Fatalf("wrong judge check id: %+v", s.JudgeChecks()[0])
+	}
 }
 
 func TestParse_InvalidYAML(t *testing.T) {

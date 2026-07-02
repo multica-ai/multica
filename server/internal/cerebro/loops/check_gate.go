@@ -24,16 +24,32 @@ type CheckOutcome struct {
 	ExitCode int      `json:"exit_code"`
 }
 
-// OutcomeSignature returns a stable digest of a round's reported outcomes,
-// used by the caps tracker (Store.RecordRevision) to detect a no-progress
-// stall: two consecutive revisions with the same signature mean the worker
-// resubmitted the same failing state instead of fixing anything. Sorted so
-// the signature is independent of report order; unreported checks and their
-// exit codes are included so "still not reported" also counts as unchanged.
-func OutcomeSignature(outcomes []CheckOutcome) string {
-	parts := make([]string, len(outcomes))
-	for i, o := range outcomes {
-		parts[i] = fmt.Sprintf("%s|%t|%d", strings.Join(o.Argv, " "), o.Ran, o.ExitCode)
+// JudgeOutcome is one judge check's reported verdict, as scored by a judge
+// agent against the check's rubric. Ran is false until a verdict has been
+// reported. Blocking lists the specific reasons the judge revised, so the
+// worker does not have to rediscover them — mirroring how a failed
+// programmatic check's exit code alone is not the diagnosis, only the signal.
+type JudgeOutcome struct {
+	ID       string   `json:"id"`
+	Ran      bool     `json:"ran"`
+	Pass     bool     `json:"pass"`
+	Blocking []string `json:"blocking_issues,omitempty"`
+}
+
+// OutcomeSignature returns a stable digest of a round's reported outcomes
+// (programmatic and judge), used by the caps tracker (Store.RecordRevision)
+// to detect a no-progress stall: two consecutive revisions with the same
+// signature mean the worker resubmitted the same failing state instead of
+// fixing anything. Sorted so the signature is independent of report order;
+// unreported checks and their results are included so "still not reported"
+// also counts as unchanged.
+func OutcomeSignature(outcomes []CheckOutcome, judgeOutcomes []JudgeOutcome) string {
+	parts := make([]string, 0, len(outcomes)+len(judgeOutcomes))
+	for _, o := range outcomes {
+		parts = append(parts, fmt.Sprintf("check|%s|%t|%d", strings.Join(o.Argv, " "), o.Ran, o.ExitCode))
+	}
+	for _, o := range judgeOutcomes {
+		parts = append(parts, fmt.Sprintf("judge|%s|%t|%t|%s", o.ID, o.Ran, o.Pass, strings.Join(o.Blocking, ";")))
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, "\n")
@@ -99,6 +115,15 @@ func findOutcome(outcomes []CheckOutcome, argv []string) (CheckOutcome, bool) {
 		}
 	}
 	return CheckOutcome{}, false
+}
+
+func findJudgeOutcome(outcomes []JudgeOutcome, id string) (JudgeOutcome, bool) {
+	for _, o := range outcomes {
+		if o.ID == id {
+			return o, true
+		}
+	}
+	return JudgeOutcome{}, false
 }
 
 func argvEqual(a, b []string) bool {

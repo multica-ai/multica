@@ -90,7 +90,7 @@ func TestStore_RoundTripDrivesGate(t *testing.T) {
 	if len(outcomes) != 2 {
 		t.Fatalf("want 2 enqueued outcomes, got %d", len(outcomes))
 	}
-	if got := Reconcile(cfg, outcomes).Action; got != GateWait {
+	if got := Reconcile(cfg, outcomes, nil).Action; got != GateWait {
 		t.Fatalf("all pending should wait, got %s", got)
 	}
 
@@ -103,7 +103,7 @@ func TestStore_RoundTripDrivesGate(t *testing.T) {
 	if got := EvaluateGate(cfg, outcomes); got != GateFailed {
 		t.Fatalf("a failed check should fail the gate, got %s", got)
 	}
-	if got := Reconcile(cfg, outcomes).Action; got != GateRevise {
+	if got := Reconcile(cfg, outcomes, nil).Action; got != GateRevise {
 		t.Fatalf("a failed check should revise, got %s", got)
 	}
 
@@ -119,7 +119,7 @@ func TestStore_RoundTripDrivesGate(t *testing.T) {
 	if got := EvaluateGate(cfg, outcomes); got != GatePassed {
 		t.Fatalf("all green should pass the gate, got %s", got)
 	}
-	if got := Reconcile(cfg, outcomes).Action; got != GateAdvance {
+	if got := Reconcile(cfg, outcomes, nil).Action; got != GateAdvance {
 		t.Fatalf("all green should advance, got %s", got)
 	}
 
@@ -134,5 +134,118 @@ func TestStore_RoundTripDrivesGate(t *testing.T) {
 	}
 	if got := EvaluateGate(cfg, outcomes); got != GatePassed {
 		t.Fatalf("re-enqueue must not reopen the gate, got %s", got)
+	}
+}
+
+// TestStore_JudgeRoundTripDrivesGate mirrors TestStore_RoundTripDrivesGate for
+// judge checks: enqueue -> reported verdict -> gate decision, proving the
+// persisted judge state drives Reconcile exactly like the in-memory tests.
+func TestStore_JudgeRoundTripDrivesGate(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	store := NewStore(loopTestPool)
+
+	gate := "delivery"
+	round := int32(1)
+	judgeCheck := JudgeCheck{ID: "ux-quality", Rubric: "the UI must not regress"}
+	cfg := CheckGateConfig{JudgeChecks: []JudgeCheck{judgeCheck}}
+
+	// 1. Enqueue the judge check. With nothing reported it is in flight, so the
+	//    gate waits.
+	if err := store.EnqueueJudge(ctx, issueID, gate, round, cfg.JudgeChecks); err != nil {
+		t.Fatalf("enqueue judge: %v", err)
+	}
+	judgeOutcomes, err := store.JudgeOutcomes(ctx, issueID, gate, round)
+	if err != nil {
+		t.Fatalf("judge outcomes: %v", err)
+	}
+	if len(judgeOutcomes) != 1 {
+		t.Fatalf("want 1 enqueued judge outcome, got %d", len(judgeOutcomes))
+	}
+	if got := Reconcile(cfg, nil, judgeOutcomes).Action; got != GateWait {
+		t.Fatalf("pending judge should wait, got %s", got)
+	}
+
+	// 2. The judge reports a failing verdict with blocking issues. The gate
+	//    must revise.
+	if err := store.ReportJudge(ctx, issueID, gate, round, judgeCheck.ID, false, []string{"button misaligned on mobile"}); err != nil {
+		t.Fatalf("report judge failure: %v", err)
+	}
+	judgeOutcomes, _ = store.JudgeOutcomes(ctx, issueID, gate, round)
+	if got := Reconcile(cfg, nil, judgeOutcomes).Action; got != GateRevise {
+		t.Fatalf("a failed judge verdict should revise, got %s", got)
+	}
+	if len(judgeOutcomes) != 1 || len(judgeOutcomes[0].Blocking) != 1 {
+		t.Fatalf("blocking issues not persisted: %+v", judgeOutcomes)
+	}
+
+	// 3. The judge re-scores and passes. The gate advances.
+	if err := store.ReportJudge(ctx, issueID, gate, round, judgeCheck.ID, true, nil); err != nil {
+		t.Fatalf("report judge pass: %v", err)
+	}
+	judgeOutcomes, _ = store.JudgeOutcomes(ctx, issueID, gate, round)
+	if got := Reconcile(cfg, nil, judgeOutcomes).Action; got != GateAdvance {
+		t.Fatalf("a passing judge verdict should advance, got %s", got)
+	}
+
+	// 4. A re-enqueue must not reset the reported verdict.
+	if err := store.EnqueueJudge(ctx, issueID, gate, round, cfg.JudgeChecks); err != nil {
+		t.Fatalf("re-enqueue judge: %v", err)
+	}
+	judgeOutcomes, _ = store.JudgeOutcomes(ctx, issueID, gate, round)
+	if len(judgeOutcomes) != 1 {
+		t.Fatalf("re-enqueue must not add rows, got %d", len(judgeOutcomes))
+	}
+	if got := Reconcile(cfg, nil, judgeOutcomes).Action; got != GateAdvance {
+		t.Fatalf("re-enqueue must not reopen the gate, got %s", got)
+	}
+}
+
+// TestStore_JudgeDispatchOnce proves the judge dispatch dedup at the store
+// layer, mirroring TestStore_DispatchOnce for programmatic checks.
+func TestStore_JudgeDispatchOnce(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	store := NewStore(loopTestPool)
+
+	gate := "delivery"
+	round := int32(1)
+	a := JudgeCheck{ID: "ux-quality", Rubric: "no regressions"}
+	b := JudgeCheck{ID: "copy-tone", Rubric: "matches brand voice"}
+
+	if err := store.EnqueueJudge(ctx, issueID, gate, round, []JudgeCheck{a, b}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	pending, err := store.PendingJudgeDispatch(ctx, issueID, gate, round)
+	if err != nil {
+		t.Fatalf("pending dispatch: %v", err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("both fresh judge checks should be pending dispatch, got %d", len(pending))
+	}
+
+	if err := store.MarkJudgeDispatched(ctx, issueID, gate, round, a.ID); err != nil {
+		t.Fatalf("mark dispatched: %v", err)
+	}
+	pending, _ = store.PendingJudgeDispatch(ctx, issueID, gate, round)
+	if len(pending) != 1 {
+		t.Fatalf("one dispatched should leave one pending, got %d", len(pending))
+	}
+
+	if err := store.MarkJudgeDispatched(ctx, issueID, gate, round, b.ID); err != nil {
+		t.Fatalf("mark dispatched b: %v", err)
+	}
+	if err := store.EnqueueJudge(ctx, issueID, gate, round, []JudgeCheck{a, b}); err != nil {
+		t.Fatalf("re-enqueue: %v", err)
+	}
+	pending, _ = store.PendingJudgeDispatch(ctx, issueID, gate, round)
+	if len(pending) != 0 {
+		t.Fatalf("dispatched judge checks must not re-surface after re-enqueue, got %d", len(pending))
 	}
 }
