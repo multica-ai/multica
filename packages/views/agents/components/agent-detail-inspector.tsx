@@ -45,7 +45,7 @@ import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
-import { VisibilityPicker } from "./inspector/visibility-picker";
+import { AccessPicker } from "./inspector/access-picker";
 import { LarkAgentBindButton } from "../../settings/components/lark-tab";
 import { SlackAgentBindButton } from "../../settings/components/slack-tab";
 
@@ -151,10 +151,16 @@ export function AgentDetailInspector({
           onChange={(v) => update({ thinking_level: v })}
         />
         <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
-          <VisibilityPicker
-            value={agent.visibility}
+          <AccessPicker
+            permissionMode={agent.permission_mode}
+            invocationTargets={agent.invocation_targets}
+            visibility={agent.visibility}
+            members={members}
             canEdit={canEdit}
-            onChange={(v) => update({ visibility: v })}
+            hasComposioAllowlist={
+              (agent.composio_toolkit_allowlist ?? []).length > 0
+            }
+            onChange={(next) => update(next)}
           />
         </PropRow>
         <PropRow label={t(($) => $.inspector.prop_concurrency)} interactive={false}>

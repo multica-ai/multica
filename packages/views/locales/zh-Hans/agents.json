@@ -335,7 +335,9 @@
       "saving": "正在保存…",
       "save_failed_toast": "保存失败，请重试",
       "redacted_title": "已配置 —— 对你隐藏",
-      "redacted_hint": "只有该 agent 的创建者才能查看或修改它可使用的应用。"
+      "redacted_hint": "只有该 agent 的创建者才能查看或修改它可使用的应用。",
+      "shared_warning": "该智能体已共享。能够运行该智能体的人可以通过它使用你在此启用的 Composio 应用。如果这些应用涉及敏感数据，请改用「私有」或缩小访问范围。",
+      "workspace_warning": "公开给工作区：工作区内任何成员都可以通过该智能体使用这些 Composio 应用。"
     },
     "runtime_config": {
       "intro": "选择 OpenClaw 运行时执行该智能体每一回合的方式。Local 模式让智能体直接在 daemon 进程内运行；Gateway 模式则把每一回合转发到一个 OpenClaw Gateway —— 适合 daemon 宿主只是轻量协调机、希望真正算力落在更强的远端机器上的场景。",
@@ -434,6 +436,26 @@
       "label": "工作区",
       "tooltip": "工作区 · 工作区内所有人都可以使用该智能体"
     }
+  },
+  "access": {
+    "tooltip": "访问权限 · 谁可以运行该智能体",
+    "trigger_private": "仅自己",
+    "trigger_workspace": "工作区",
+    "trigger_members_count": "{{count}} 人",
+    "trigger_members_empty": "指定成员",
+    "trigger_team": "团队",
+    "private_title": "私有",
+    "private_desc": "只有你可以运行该智能体",
+    "workspace_title": "公开给工作区",
+    "workspace_desc": "工作区内任何人都可以运行该智能体",
+    "members_title": "公开给指定成员",
+    "members_desc": "只有你选择的人可以运行该智能体",
+    "team_title": "公开给团队",
+    "team_desc": "向整个团队授予访问权限",
+    "team_coming_soon": "即将推出",
+    "members_group": "成员",
+    "members_empty": "没有可选择的工作区成员",
+    "composio_switch_hint": "提示 —— 该智能体已启用 Composio 应用。共享后，所有获得访问权限的人都可以通过该智能体使用这些应用。"
   },
   "profile_card": {
     "unavailable": "智能体不可用",

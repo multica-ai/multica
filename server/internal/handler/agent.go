@@ -54,7 +54,16 @@ type AgentResponse struct {
 	CustomEnvKeyCount  int    `json:"custom_env_key_count"`
 	McpConfigRedacted  bool   `json:"mcp_config_redacted"`
 	Visibility         string `json:"visibility"`
-	Status             string `json:"status"`
+	// PermissionMode is the invocation-permission mode (MUL-3963):
+	// "private" (owner only) or "public_to" (allow-list in InvocationTargets).
+	// Replaces Visibility as the authorization source; Visibility is kept as a
+	// derived legacy field so old clients never see a permission widening.
+	PermissionMode string `json:"permission_mode"`
+	// InvocationTargets is the allow-list for a public_to agent. Empty for
+	// private agents. Only populated on the detail / list / create / update
+	// responses that load it; broadcast payloads leave it empty.
+	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
+	Status             string                     `json:"status"`
 	MaxConcurrentTasks int32  `json:"max_concurrent_tasks"`
 	Model              string `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
@@ -153,6 +162,8 @@ func agentToResponse(a db.Agent) AgentResponse {
 		HasCustomEnv:             envKeyCount > 0,
 		CustomEnvKeyCount:        envKeyCount,
 		Visibility:               a.Visibility,
+		PermissionMode:           a.PermissionMode,
+		InvocationTargets:        []AgentInvocationTargetDTO{},
 		Status:                   a.Status,
 		MaxConcurrentTasks:       a.MaxConcurrentTasks,
 		Model:                    a.Model.String,
@@ -609,18 +620,27 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	alwaysRedact := workspaceAlwaysRedactSecrets(ws.Settings)
 
-	// Resolve the request actor once. Agents bypass the private-agent gate
-	// to preserve A2A collaboration; members must be in allowed_principals
-	// (agent owner or workspace owner/admin) to see private agents.
+	// Resolve the request actor once. Agents bypass the view gate to preserve
+	// A2A collaboration; members see a private agent only when they own it or
+	// are workspace owner/admin, and a public_to agent only when on its
+	// invocation allow-list. Targets are batch-loaded to avoid an N+1 and
+	// reused to enrich each response's invocation_targets.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	targetsByAgent, ok := h.loadInvocationTargetsByAgent(r.Context(), agents)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
+		return
+	}
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
-		if a.Visibility == "private" && actorType == "member" {
-			if !memberAllowedForPrivateAgent(a, actorID, member.Role) {
+		targets := targetsByAgent[uuidToString(a.ID)]
+		if actorType == "member" {
+			if !memberAllowedToViewAgent(a, targets, actorID, member.Role) {
 				continue
 			}
 		}
 		resp := agentToResponse(a)
+		applyInvocationTargetsToResponse(&resp, targets)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
 		}
@@ -666,6 +686,9 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := agentToResponse(agent)
+	if !h.enrichAgentResponseWithTargetsHTTP(w, r, &resp, agent.ID) {
+		return
+	}
 	// Use the summary query (no `content` column) — the embedded
 	// AgentSkillSummary only needs id/name/description, and reading large
 	// SKILL.md bodies just to discard them is the exact regression we fixed
@@ -713,7 +736,14 @@ type CreateAgentRequest struct {
 	CustomArgs         []string          `json:"custom_args"`
 	McpConfig          json.RawMessage   `json:"mcp_config"`
 	Visibility         string            `json:"visibility"`
-	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
+	// PermissionMode + InvocationTargets are the new invocation-permission
+	// inputs (MUL-3963). When permission_mode is present it is authoritative
+	// and Visibility is ignored; when absent, legacy Visibility is mapped
+	// (private -> private, workspace -> public_to+workspace target). On create
+	// only the caller can be the owner, so targets are accepted unconditionally.
+	PermissionMode     *string                    `json:"permission_mode"`
+	InvocationTargets  []AgentInvocationTargetDTO  `json:"invocation_targets"`
+	MaxConcurrentTasks int32                       `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
 	ThinkingLevel      string            `json:"thinking_level"`
 	// ComposioToolkitAllowlist seeds the per-task overlay gate (MUL-3869). On
@@ -795,6 +825,17 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve invocation permission (MUL-3963). permission_mode is
+	// authoritative when present; otherwise the legacy visibility value is
+	// mapped. On create the caller is always the owner, so targets are
+	// accepted unconditionally.
+	_, hasTargets := rawFields["invocation_targets"]
+	legacyVis := req.Visibility
+	perm, _, permErr := parsePermissionInput(wsUUID, req.PermissionMode, req.InvocationTargets, req.PermissionMode != nil, hasTargets, &legacyVis)
+	if permErr != nil {
+		writeError(w, http.StatusBadRequest, permErr.Error())
+		return
+	}
 	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 		ID:          runtimeUUID,
 		WorkspaceID: wsUUID,
@@ -873,7 +914,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		RuntimeMode:              runtime.RuntimeMode,
 		RuntimeConfig:            rc,
 		RuntimeID:                runtime.ID,
-		Visibility:               req.Visibility,
+		Visibility:               perm.legacyVisibility(),
+		PermissionMode:           perm.mode,
 		MaxConcurrentTasks:       req.MaxConcurrentTasks,
 		OwnerID:                  parseUUID(ownerID),
 		CustomEnv:                ce,
@@ -897,12 +939,22 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID)...)
 
+	// Persist the invocation allow-list (MUL-3963). Best-effort log on failure
+	// but do not fail the create — the agent row already exists and defaults
+	// to no targets (deny-by-default private).
+	if err := h.replaceInvocationTargets(r.Context(), created.ID, parseUUID(ownerID), perm.targets); err != nil {
+		slog.Warn("create agent: persist invocation targets failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+	}
+
 	if runtime.Status == "online" {
 		h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)
 		created, _ = h.Queries.GetAgent(r.Context(), created.ID)
 	}
 
 	resp := agentToResponse(created)
+	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, created.ID); err != nil {
+		slog.Warn("create agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+	}
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
@@ -939,7 +991,15 @@ type UpdateAgentRequest struct {
 	CustomArgs         *[]string        `json:"custom_args"`
 	McpConfig          *json.RawMessage `json:"mcp_config"`
 	Visibility         *string          `json:"visibility"`
-	Status             *string          `json:"status"`
+	// PermissionMode + InvocationTargets are the invocation-permission inputs
+	// (MUL-3963). Owner-only writes (like composio_toolkit_allowlist): a
+	// non-owner admin passing them is silently ignored, because the invoke
+	// gate is owner/allow-list based and an admin-authored allow-list would
+	// confuse the owner about who can run their agent. permission_mode is
+	// authoritative when present; otherwise legacy visibility is mapped.
+	PermissionMode     *string                     `json:"permission_mode"`
+	InvocationTargets  *[]AgentInvocationTargetDTO  `json:"invocation_targets"`
+	Status             *string                     `json:"status"`
 	MaxConcurrentTasks *int32           `json:"max_concurrent_tasks"`
 	Model              *string          `json:"model"`
 	// ThinkingLevel is treated as a tri-state per-MUL-2339:
@@ -1230,8 +1290,36 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
 	}
-	if req.Visibility != nil {
-		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}
+	// Invocation permission (MUL-3963). Owner-only write: an admin who passes
+	// permission fields is silently ignored (the invoke gate is owner/allow-
+	// list based, so an admin-authored allow-list would just confuse the
+	// owner). When the owner does pass them, permission_mode is authoritative;
+	// otherwise legacy visibility is mapped. Targets are replaced wholesale.
+	_, hasPermissionMode := rawFields["permission_mode"]
+	_, hasTargets := rawFields["invocation_targets"]
+	permissionTouched := hasPermissionMode || hasTargets || req.Visibility != nil
+	replacePermissionTargets := false
+	var resolvedPerm resolvedPermission
+	if permissionTouched {
+		isAgentOwner := uuidToString(existing.OwnerID) == requestUserID(r)
+		if !isAgentOwner {
+			slog.Debug("update agent: invocation permission write by non-owner silently dropped",
+				append(logger.RequestAttrs(r), "agent_id", id)...)
+		} else {
+			var targetsDTO []AgentInvocationTargetDTO
+			if req.InvocationTargets != nil {
+				targetsDTO = *req.InvocationTargets
+			}
+			perm, _, permErr := parsePermissionInput(existing.WorkspaceID, req.PermissionMode, targetsDTO, hasPermissionMode, hasTargets, req.Visibility)
+			if permErr != nil {
+				writeError(w, http.StatusBadRequest, permErr.Error())
+				return
+			}
+			resolvedPerm = perm
+			replacePermissionTargets = true
+			params.PermissionMode = pgtype.Text{String: perm.mode, Valid: true}
+			params.Visibility = pgtype.Text{String: perm.legacyVisibility(), Valid: true}
+		}
 	}
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
@@ -1381,7 +1469,23 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Invocation targets (MUL-3963): replace wholesale when the owner touched
+	// permission. Done after the row update so a permission_mode flip and its
+	// targets land together.
+	if replacePermissionTargets {
+		if err := h.replaceInvocationTargets(r.Context(), updated.ID, parseUUID(requestUserID(r)), resolvedPerm.targets); err != nil {
+			slog.Warn("update agent: persist invocation targets failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update invocation targets: "+err.Error())
+			return
+		}
+	}
+
 	resp := agentToResponse(updated)
+	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, updated.ID); err != nil {
+		slog.Warn("update agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
+		return
+	}
 	// agentToResponse always initialises Skills as []; junction-table rows
 	// are untouched by the SQL update, so we reload them here to keep the
 	// response (and the broadcast that mirrors it) in sync with reality.

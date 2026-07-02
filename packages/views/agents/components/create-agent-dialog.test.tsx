@@ -107,6 +107,8 @@ function makeTemplate(runtimeId: string): Agent {
     runtime_config: {},
     custom_args: [],
     visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
     status: "idle",
     max_concurrent_tasks: 1,
     model: "",

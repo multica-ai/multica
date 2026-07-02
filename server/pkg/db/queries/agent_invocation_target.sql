@@ -1,0 +1,38 @@
+-- Agent invocation permission targets (MUL-3963). Rows are the allow-list for
+-- agents whose permission_mode = 'public_to'. See migration 130.
+
+-- name: ListAgentInvocationTargets :many
+SELECT * FROM agent_invocation_target
+WHERE agent_id = $1
+ORDER BY target_type ASC, created_at ASC;
+
+-- name: ListAgentInvocationTargetsByAgentIDs :many
+-- Batch load for the agent list endpoint so we don't N+1 per agent.
+SELECT * FROM agent_invocation_target
+WHERE agent_id = ANY(@agent_ids::uuid[])
+ORDER BY agent_id, target_type ASC, created_at ASC;
+
+-- name: CreateAgentInvocationTarget :exec
+-- Idempotent upsert: re-adding an existing (agent, target_type, target)
+-- refreshes created_by/created_at rather than erroring. Callers replace the
+-- whole set via DeleteAgentInvocationTargets + a series of these, so the
+-- ON CONFLICT is belt-and-suspenders against races.
+INSERT INTO agent_invocation_target (agent_id, target_type, target_id, created_by)
+VALUES ($1, $2, $3, sqlc.narg('created_by'))
+ON CONFLICT (agent_id, target_type, target_id) DO UPDATE SET
+    created_by = EXCLUDED.created_by,
+    created_at = now();
+
+-- name: DeleteAgentInvocationTargets :exec
+-- Clears every target for an agent. Used before re-writing the allow-list so
+-- the update is a wholesale replace, matching the composio_toolkit_allowlist
+-- write model.
+DELETE FROM agent_invocation_target
+WHERE agent_id = $1;
+
+-- name: DeleteAgentInvocationTargetsByMember :exec
+-- Removes member-target grants pointing at a leaving user across the whole
+-- workspace. Called from the member-removal / runtime-revoke cleanup path so a
+-- departed user does not linger on any agent's allow-list.
+DELETE FROM agent_invocation_target
+WHERE target_type = 'member' AND target_id = $1;

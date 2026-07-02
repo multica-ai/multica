@@ -46,6 +46,18 @@ type Agent struct {
 	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
 	// Composio toolkit slugs this agent is allowed to mount as MCP. NULL or empty array = no MCP. Only effective when the run originator matches agent.owner_id; see migration 129 + MUL-3869 / MUL-3721. Stored as TEXT[] so the dispatch path can intersect against the originator's active connections with a single SQL ANY() filter, no JSON parse on the hot path.
 	ComposioToolkitAllowlist []string `json:"composio_toolkit_allowlist"`
+	// Agent invocation permission mode (MUL-3963). private = owner only; public_to = allow-list in agent_invocation_target. Replaces visibility as the authorization source for triggering runs; visibility is now a derived legacy field. Default private = deny-by-default.
+	PermissionMode string `json:"permission_mode"`
+}
+
+// Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target). workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to.
+type AgentInvocationTarget struct {
+	ID         pgtype.UUID        `json:"id"`
+	AgentID    pgtype.UUID        `json:"agent_id"`
+	TargetType string             `json:"target_type"`
+	TargetID   pgtype.UUID        `json:"target_id"`
+	CreatedBy  pgtype.UUID        `json:"created_by"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type AgentRuntime struct {

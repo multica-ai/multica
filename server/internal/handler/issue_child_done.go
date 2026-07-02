@@ -485,8 +485,15 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Is
 		return
 	}
 
-	// Private-leader gate: deny if the actor cannot access the leader.
-	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, actorType, actorID, uuidToString(parent.WorkspaceID)) {
+	// Private-leader gate: deny if the actor cannot invoke the leader. Member
+	// actors are their own originator; agent/system child-done triggers have
+	// no resolvable human here, so canInvokeAgent fails closed for member/team
+	// targets while still admitting workspace-target leaders.
+	leaderOriginator := ""
+	if actorType == "member" {
+		leaderOriginator = actorID
+	}
+	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, actorType, actorID, leaderOriginator, uuidToString(parent.WorkspaceID)) {
 		return
 	}
 

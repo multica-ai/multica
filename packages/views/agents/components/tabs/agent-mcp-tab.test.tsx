@@ -83,6 +83,8 @@ const baseAgent: Agent = {
   runtime_config: {},
   custom_args: [],
   visibility: "workspace",
+  permission_mode: "public_to",
+  invocation_targets: [{ target_type: "workspace", target_id: null }],
   status: "idle",
   max_concurrent_tasks: 1,
   model: "",
@@ -173,5 +175,45 @@ describe("AgentMcpTab", () => {
 
     expect(screen.getByText(/hidden from your view/i)).toBeTruthy();
     expect(screen.queryByLabelText(/Allow Notion for this agent/i)).toBeNull();
+  });
+
+  it("shows the strong workspace warning for a public_to-workspace agent", () => {
+    renderTab({
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "workspace", target_id: null }],
+      composio_toolkit_allowlist: [],
+    });
+
+    expect(
+      screen.getByText(/any workspace member may use these Composio apps/i),
+    ).toBeTruthy();
+  });
+
+  it("shows the generic shared warning for a public_to-member agent", () => {
+    renderTab({
+      visibility: "private",
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "member", target_id: "user-2" }],
+      composio_toolkit_allowlist: [],
+    });
+
+    expect(screen.getByText(/This agent is shared\./i)).toBeTruthy();
+    expect(
+      screen.queryByText(/any workspace member may use these Composio apps/i),
+    ).toBeNull();
+  });
+
+  it("shows no sharing warning for a private agent", () => {
+    renderTab({
+      visibility: "private",
+      permission_mode: "private",
+      invocation_targets: [],
+      composio_toolkit_allowlist: ["notion"],
+    });
+
+    expect(screen.queryByText(/This agent is shared\./i)).toBeNull();
+    expect(
+      screen.queryByText(/any workspace member may use these Composio apps/i),
+    ).toBeNull();
   });
 });

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Lock, Plug } from "lucide-react";
+import { AlertTriangle, Loader2, Lock, Plug } from "lucide-react";
 import { toast } from "sonner";
 import type { Agent, ComposioToolkit } from "@multica/core/types";
 import { useUpdateAgentAllowlist } from "@multica/core/agents";
@@ -69,6 +69,18 @@ export function AgentMcpTab({ agent }: { agent: Agent }) {
 
   const settingsHref = `${paths.settings()}?tab=integrations`;
 
+  // Composio access warning (MUL-3963). Once an agent is shared, anyone who
+  // can invoke it can drive the Composio apps enabled here on the owner's
+  // behalf — so surface a heads-up whenever the agent is not private and
+  // there's something to enable (or already enabled). Public-to-workspace
+  // gets the stronger copy because it opens the apps to every member.
+  const isPrivate = agent.permission_mode === "private";
+  const isWorkspacePublic =
+    agent.permission_mode === "public_to" &&
+    agent.invocation_targets.some((target) => target.target_type === "workspace");
+  const showSharedWarning =
+    !isPrivate && (allowlist.length > 0 || activeSlugs.length > 0);
+
   const handleToggle = (slug: string, checked: boolean) => {
     const set = new Set(allowlist);
     if (checked) set.add(slug);
@@ -102,6 +114,20 @@ export function AgentMcpTab({ agent }: { agent: Agent }) {
       <p className="text-xs text-muted-foreground">
         {t(($) => $.tab_body.composio_mcp.subtitle)}
       </p>
+
+      {showSharedWarning && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            {isWorkspacePublic
+              ? t(($) => $.tab_body.composio_mcp.workspace_warning)
+              : t(($) => $.tab_body.composio_mcp.shared_warning)}
+          </span>
+        </div>
+      )}
 
       {connectionsQuery.isLoading ? (
         <p className="text-sm text-muted-foreground">

@@ -49,80 +49,64 @@ type mcpOverlayPayload struct {
 }
 
 // BuildTaskOverlay returns the JSON overlay to write into
-// agent_task_queue.runtime_mcp_overlay for a task whose top-of-chain human
-// originator is the given Multica user and whose dispatching agent is
-// `agent`, or (nil, nil) when ANY of the gates below trip — meaning no
-// Composio session is created and no token is provisioned.
+// agent_task_queue.runtime_mcp_overlay for a task dispatching `agent`, or
+// (nil, nil) when ANY of the gates below trip — meaning no Composio session is
+// created and no token is provisioned.
 //
-// Five short-circuit gates, in order:
+// MUL-3963: Composio MCP now FOLLOWS the agent invocation permission instead
+// of requiring originator == owner. The security boundary is upstream —
+// canInvokeAgent decides who may enqueue a run for this agent at all — so any
+// task that reaches dispatch has already been authorised to run the agent, and
+// therefore to use the Composio apps the OWNER attached to it. The overlay is
+// always built from the AGENT OWNER's connected-apps view: the owner shares
+// those apps as part of the agent's capability with everyone allowed to invoke
+// it (private -> only the owner; public_to -> the allow-list). The front-end
+// warns the owner about this when a shared agent has Composio apps enabled.
 //
-//  1. originator is not a valid UUID — autopilot / system run with no human
-//     in the chain. There is no "current user's connected apps" view, and
-//     gate 2 would also fail, so skip the work.
+// originatorUserID is retained only for audit logging (who triggered) — it no
+// longer gates the overlay.
 //
-//  2. originator != agent.OwnerID — Stage 3.1 of MUL-3721 / MUL-3869. An
-//     agent's Composio overlay is the agent OWNER's connected-apps view
-//     projected into the run. When the run was triggered by anyone else
-//     (another workspace member, an agent fan-out whose originator chain
-//     terminates at someone else), we MUST NOT project the owner's
-//     integration footprint into that run: it would let any workspace
-//     member who can @-mention the agent read into the owner's accounts.
-//     Returns (nil, nil) deterministically — not an error — so the agent
-//     still runs with whatever it had in agent.mcp_config.
+// Gates, in order:
 //
-//  3. agent.composio_toolkit_allowlist is empty/NULL — the agent owner
-//     never explicitly opted into ANY toolkit. Default behavior is OFF: no
-//     overlay. This is the "all-on → opt-in" inversion the Stage 3.1
-//     redesign brought in.
+//  1. agent has no owner — cannot resolve a connected-apps view. No overlay.
 //
-//  4. After intersecting the allowlist with the originator's currently-
-//     active Composio connections, NO toolkit has an active connection.
-//     Either the owner allowlisted toolkits they haven't connected, or the
-//     connection was revoked. Either way we have nothing to mount.
+//  2. agent.composio_toolkit_allowlist is empty/NULL — the agent owner never
+//     opted into any toolkit. Default OFF: no overlay.
 //
-//  5. Composio returns a session with no URL — defensive: a half-baked
-//     overlay would make every runtime fail noisily on an empty MCP URL.
+//  3. After intersecting the allowlist with the OWNER's currently-active
+//     Composio connections, no toolkit has an active connection. Nothing to
+//     mount.
 //
-// On the happy path the overlay is:
+//  4. Composio returns a session with no URL — defensive.
 //
-//	{"mcpServers": {"composio": {"type": "http", "url": "...", "headers": {...}}}}
-//
-// CreateSession is called with BOTH the `toolkits.enable` allowlist filter
-// and `connected_accounts` pinning so the session is narrowed twice over:
-// the tool-router only sees the intersection of what the agent owner
-// allowlisted AND what the originator has live credentials for. This is
-// belt-and-suspenders — neither field alone would be enough to prevent the
-// session from drifting toward toolkits the owner did not authorize.
+// CreateSession is called with the owner as the session user, and with BOTH
+// the `toolkits.enable` allowlist filter and `connected_accounts` pinning so
+// the session is narrowed to (owner allowlist ∩ owner active connections).
 func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.UUID, agent db.Agent) (json.RawMessage, error) {
-	// Gate 1: no human in the chain.
-	if !originatorUserID.Valid {
+	// Gate 1: the overlay is the agent OWNER's connected-apps view. Without an
+	// owner there is nothing to project.
+	if !agent.OwnerID.Valid {
 		return nil, nil
 	}
-	// Gate 2: originator must be the agent owner. Without this gate, any
-	// workspace member who can @-mention the agent (public agent) gets the
-	// owner's connected apps projected into their run, which is the
-	// privacy hole the Stage 3.1 redesign closes.
-	if !agent.OwnerID.Valid || agent.OwnerID.Bytes != originatorUserID.Bytes {
-		return nil, nil
-	}
-	// Gate 3: agent owner has not allowlisted any toolkit. NULL and empty
+	ownerUserID := agent.OwnerID
+	// Gate 2: agent owner has not allowlisted any toolkit. NULL and empty
 	// `{}` are treated identically — both mean "no overlay".
 	allowSet := normaliseAllowlistToSet(agent.ComposioToolkitAllowlist)
 	if len(allowSet) == 0 {
 		return nil, nil
 	}
 
-	// Resolve the originator's active connections and intersect with the
-	// allowlist. The intersection is the canonical input both for filtering
-	// the Composio CreateSession call AND for the early bail-out below.
-	rows, err := s.store.ListActiveUserComposioConnections(ctx, originatorUserID)
+	// Resolve the OWNER's active connections and intersect with the allowlist.
+	// The intersection is the canonical input both for filtering the Composio
+	// CreateSession call AND for the early bail-out below.
+	rows, err := s.store.ListActiveUserComposioConnections(ctx, ownerUserID)
 	if err != nil {
 		return nil, fmt.Errorf("composio: build task overlay: list connections: %w", err)
 	}
 	pinned := pinConnectedAccounts(rows, allowSet)
 	if len(pinned) == 0 {
-		// Gate 4: owner allowlisted toolkits the originator (who is the
-		// owner per gate 2) has not connected — or has revoked since.
+		// Gate 3: owner allowlisted toolkits they have not connected — or have
+		// revoked since.
 		return nil, nil
 	}
 	// `toolkits.enable` narrows what the tool-router exposes; pair it with
@@ -134,14 +118,14 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 	}
 
 	resp, err := s.sdk.CreateSession(ctx, sdk.CreateSessionRequest{
-		UserID:            util.UUIDToString(originatorUserID),
+		UserID:            util.UUIDToString(ownerUserID),
 		Toolkits:          map[string]any{"enable": slugs},
 		ConnectedAccounts: pinned,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("composio: build task overlay: create session: %w", err)
 	}
-	// Gate 5: Composio answered 200 with no MCP URL. Treat as "no overlay"
+	// Gate 4: Composio answered 200 with no MCP URL. Treat as "no overlay"
 	// rather than wire up a server with an empty URL — every runtime fails
 	// noisily on that.
 	if resp == nil || resp.MCP.URL == "" {

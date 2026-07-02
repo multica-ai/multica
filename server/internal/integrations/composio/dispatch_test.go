@@ -61,16 +61,20 @@ func makeAgent(owner pgtype.UUID, allowlist ...string) db.Agent {
 	return a
 }
 
-// --- Gate 1: invalid originator ------------------------------------------
+// --- Overlay follows the agent owner, not the run originator (MUL-3963) ---
 
-// TestBuildTaskOverlay_NoOriginatorIsNoOp covers the autopilot / system-run
-// branch: when there is no human at the top of the chain, we must not
-// project anyone's connected apps into the run. The builder is short-
-// circuited BEFORE touching the store so a guaranteed-empty result never
-// costs a DB query.
-func TestBuildTaskOverlay_NoOriginatorIsNoOp(t *testing.T) {
+// TestBuildTaskOverlay_FollowsOwnerRegardlessOfOriginator: with no human
+// originator (autopilot / system run) the overlay is STILL built from the
+// agent owner's connected apps, because the invocation-permission gate that
+// decides who may run the agent lives upstream (canInvokeAgent /
+// canCreatorInvokeAgent). BuildTaskOverlay no longer gates on the originator.
+func TestBuildTaskOverlay_FollowsOwnerRegardlessOfOriginator(t *testing.T) {
 	t.Parallel()
-	sdkFake := &fakeSDK{}
+	sdkFake := &fakeSDK{
+		createSessResp: &sdk.CreateSessionResponse{
+			MCP: sdk.MCPDescriptor{URL: "https://mcp.composio.dev/session/noorig"},
+		},
+	}
 	store := newFakeStore()
 	svc := newTestService(t, sdkFake, store)
 
@@ -82,45 +86,77 @@ func TestBuildTaskOverlay_NoOriginatorIsNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if overlay != nil {
-		t.Errorf("expected nil overlay for invalid originator, got %s", string(overlay))
+	if len(overlay) == 0 {
+		t.Fatalf("expected overlay from owner connection even with no originator")
 	}
-	if sdkFake.createSessCalls != 0 {
-		t.Errorf("expected zero CreateSession calls, got %d", sdkFake.createSessCalls)
+	if sdkFake.lastSessReq.UserID != uuidToString(owner) {
+		t.Errorf("CreateSession user id = %q, want owner %q", sdkFake.lastSessReq.UserID, uuidToString(owner))
 	}
 }
 
-// --- Gate 2: originator != agent.OwnerID ---------------------------------
+// --- Overlay uses the OWNER's connection, not the originator's -----------
 
-// TestBuildTaskOverlay_OriginatorNotOwnerIsNoOp is the Stage 3.1 contract:
-// even when the originator HAS active connections that overlap the agent's
-// allowlist, projecting them into the run would let any member who can
-// @-mention the agent read into the agent owner's accounts. Must return
-// (nil, nil) without calling CreateSession.
-func TestBuildTaskOverlay_OriginatorNotOwnerIsNoOp(t *testing.T) {
+// TestBuildTaskOverlay_UsesOwnerConnectionNotOriginator is the MUL-3963
+// contract that replaced the old originator==owner gate: a non-owner
+// originator who has passed the invoke gate gets the overlay built from the
+// AGENT OWNER's connection, and never from their own. Seeding only the
+// non-owner originator's connection (owner has none) produces no overlay.
+func TestBuildTaskOverlay_UsesOwnerConnectionNotOriginator(t *testing.T) {
 	t.Parallel()
-	sdkFake := &fakeSDK{}
-	store := newFakeStore()
-	svc := newTestService(t, sdkFake, store)
 
 	owner := mintUUID(11)
-	other := mintUUID(12) // a different human in the workspace
-	agent := makeAgent(owner, "notion")
-	// Even seeding the OTHER user with a matching connection must not
-	// produce an overlay — the gate is on identity, not "has any
-	// connection to that toolkit".
-	seedActiveConnection(t, store, other, "notion", "ca_other_notion")
+	other := mintUUID(12) // a different human who triggered the run
 
-	overlay, err := svc.BuildTaskOverlay(context.Background(), other, agent)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if overlay != nil {
-		t.Errorf("expected nil overlay when originator != owner, got %s", string(overlay))
-	}
-	if sdkFake.createSessCalls != 0 {
-		t.Errorf("CreateSession must not be called for non-owner originator, got %d calls", sdkFake.createSessCalls)
-	}
+	// Case A: owner HAS the connection -> overlay built with OWNER identity,
+	// even though the originator is a different user.
+	t.Run("owner-connection-used", func(t *testing.T) {
+		t.Parallel()
+		sdkFake := &fakeSDK{
+			createSessResp: &sdk.CreateSessionResponse{
+				MCP: sdk.MCPDescriptor{URL: "https://mcp.composio.dev/session/owner"},
+			},
+		}
+		store := newFakeStore()
+		svc := newTestService(t, sdkFake, store)
+		agent := makeAgent(owner, "notion")
+		seedActiveConnection(t, store, owner, "notion", "ca_owner_notion")
+		// The originator also has a matching connection; it must NOT be used.
+		seedActiveConnection(t, store, other, "notion", "ca_other_notion")
+
+		overlay, err := svc.BuildTaskOverlay(context.Background(), other, agent)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(overlay) == 0 {
+			t.Fatalf("expected overlay built from owner connection")
+		}
+		if sdkFake.lastSessReq.UserID != uuidToString(owner) {
+			t.Errorf("CreateSession user id = %q, want owner %q (not originator)", sdkFake.lastSessReq.UserID, uuidToString(owner))
+		}
+		assertPinnedAccount(t, sdkFake.lastSessReq, "notion", "ca_owner_notion")
+	})
+
+	// Case B: only the originator has the connection (owner has none) -> the
+	// intersection with the OWNER's connections is empty, so no overlay.
+	t.Run("originator-connection-ignored", func(t *testing.T) {
+		t.Parallel()
+		sdkFake := &fakeSDK{}
+		store := newFakeStore()
+		svc := newTestService(t, sdkFake, store)
+		agent := makeAgent(owner, "notion")
+		seedActiveConnection(t, store, other, "notion", "ca_other_notion")
+
+		overlay, err := svc.BuildTaskOverlay(context.Background(), other, agent)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if overlay != nil {
+			t.Errorf("expected nil overlay: owner has no connection, originator's must be ignored, got %s", string(overlay))
+		}
+		if sdkFake.createSessCalls != 0 {
+			t.Errorf("CreateSession must not run when owner has no matching connection, got %d", sdkFake.createSessCalls)
+		}
+	})
 }
 
 // --- Gate 3: empty / NULL allowlist --------------------------------------

@@ -327,7 +327,9 @@
       "saving": "保存中…",
       "save_failed_toast": "保存できませんでした。もう一度お試しください",
       "redacted_title": "設定済み — あなたには非表示",
-      "redacted_hint": "この agent が使用できるアプリを閲覧・変更できるのは作成者のみです。"
+      "redacted_hint": "この agent が使用できるアプリを閲覧・変更できるのは作成者のみです。",
+      "shared_warning": "このエージェントは共有されています。このエージェントを実行できる人は、ここで有効化した Composio アプリを利用できます。これらのアプリが機微なデータを扱う場合は、Private にするかアクセス範囲を絞ってください。",
+      "workspace_warning": "ワークスペースに公開：ワークスペースの全メンバーがこのエージェントを通じてこれらの Composio アプリを利用できます。"
     },
     "runtime_config": {
       "intro": "OpenClaw ランタイムがこのエージェントの各ターンをどのように実行するかを選択します。Local モードはエージェントを daemon プロセス内で実行します。Gateway モードは各ターンを OpenClaw Gateway に転送します — daemon のホストが軽量な調整役で、エージェントの実作業はより強力なマシンで動かしたい場合に有用です。",
@@ -426,6 +428,26 @@
       "label": "ワークスペース",
       "tooltip": "ワークスペース · このワークスペースの全員がこのエージェントを使用できます"
     }
+  },
+  "access": {
+    "tooltip": "アクセス · 誰がこのエージェントを実行できるか",
+    "trigger_private": "自分のみ",
+    "trigger_workspace": "ワークスペース",
+    "trigger_members_count": "{{count}} 人",
+    "trigger_members_empty": "特定のメンバー",
+    "trigger_team": "チーム",
+    "private_title": "プライベート",
+    "private_desc": "あなただけがこのエージェントを実行できます",
+    "workspace_title": "ワークスペースに公開",
+    "workspace_desc": "このワークスペースの全員がこのエージェントを実行できます",
+    "members_title": "特定のメンバーに公開",
+    "members_desc": "選択した人だけがこのエージェントを実行できます",
+    "team_title": "チームに公開",
+    "team_desc": "チーム全体にアクセス権を付与します",
+    "team_coming_soon": "近日公開",
+    "members_group": "メンバー",
+    "members_empty": "選択できるワークスペースメンバーがいません",
+    "composio_switch_hint": "ご注意 — このエージェントは Composio アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。"
   },
   "profile_card": {
     "unavailable": "エージェントを利用できません",
