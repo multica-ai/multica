@@ -90,7 +90,8 @@
     "card_due_date": "Due date",
     "card_project": "Project",
     "card_labels": "Labels",
-    "card_child_progress": "Sub-issue progress"
+    "card_child_progress": "Sub-issue progress",
+    "show_sub_issues": "Show sub-issues"
   },
   "view": {
     "tooltip_board": "Board view",

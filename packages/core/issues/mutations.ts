@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import { hashKey, useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { api } from "../api";
 import {
   issueKeys,
@@ -9,11 +9,17 @@ import {
   type MyIssuesFilter,
 } from "./queries";
 import { projectKeys } from "../projects/queries";
+import { inboxKeys } from "../inbox/queries";
+import {
+  applyIssueChange,
+  invalidateIssueDerivatives,
+  invalidateStaleListKeys,
+  rollbackIssueChange,
+} from "./cache-coordinator";
+import { issueChangedDims } from "./surface/membership";
 import {
   addIssueToBuckets,
-  findIssueLocation,
   getBucket,
-  patchIssueInBuckets,
   setBucket,
 } from "./cache-helpers";
 import {
@@ -28,7 +34,7 @@ import {
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
-import type { GroupedIssuesResponse, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
+import type { GroupedIssuesResponse, InboxItem, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
 import type {
   CreateIssueRequest,
   UpdateIssueRequest,
@@ -211,21 +217,6 @@ export function useCreateIssue() {
 export function useUpdateIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
-  // Every bucketed board cache an optimistic move must keep in sync: the
-  // workspace board (issueKeys.list*) AND the My-Issues / Project board
-  // (issueKeys.myList* under `my`), which share the ListIssuesCache shape.
-  // Filtering by `byStatus` skips the grouped (assignee) and flat
-  // (gantt/detail/children) caches that also live under those prefixes. The
-  // board reconciles local columns from its own feeding cache on settle, so a
-  // move that only patched the workspace cache would snap back on My-Issues /
-  // Project boards.
-  const readBucketedLists = () =>
-    [
-      ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) }),
-      ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.myAll(wsId) }),
-    ].filter(
-      (entry): entry is [QueryKey, ListIssuesCache] => !!entry[1]?.byStatus,
-    );
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string } & UpdateIssueRequest) =>
       api.updateIssue(id, data),
@@ -241,9 +232,19 @@ export function useUpdateIssue() {
       // before the optimistic update lands.
       qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
       qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
-      const prevLists = readBucketedLists();
-      const firstListData = prevLists[0]?.[1];
+      if (patch.status !== undefined) {
+        qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      }
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
+      // The coordinator owns the cross-cache rules: surgical patch/rebucket
+      // where the card is loaded and still belongs, surgical REMOVE where the
+      // change moves it off a filtered surface, stale-key bookkeeping where
+      // the server result may have drifted (invalidated on settle, not here —
+      // a mid-flight refetch would stomp the optimistic state).
+      const change = applyIssueChange(qc, wsId, id, patch as Partial<Issue>, {
+        changed: issueChangedDims(patch, prevDetail),
+        baseIssue: prevDetail,
+      });
 
       // Resolve parent_issue_id from the freshest source so we can keep the
       // parent's children cache in sync (used by the parent issue's
@@ -252,7 +253,7 @@ export function useUpdateIssue() {
       // child may live only there, not in detail/list.
       let parentId: string | null =
         prevDetail?.parent_issue_id ??
-        (firstListData ? findIssueLocation(firstListData, id)?.issue.parent_issue_id : null) ??
+        change.prevIssue?.parent_issue_id ??
         null;
       if (!parentId) {
         const childrenCaches = qc.getQueriesData<Issue[]>({
@@ -271,12 +272,6 @@ export function useUpdateIssue() {
         ? qc.getQueryData<Issue[]>(issueKeys.children(wsId, parentId))
         : undefined;
 
-      for (const [key, cached] of prevLists) {
-        if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, patch));
-      }
-      qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
-        old ? { ...old, ...patch } : old,
-      );
       if (parentId) {
         // When the write re-parents this issue away from `parentId` (detach
         // to standalone, or move under a different parent), prune it from the
@@ -295,16 +290,12 @@ export function useUpdateIssue() {
               : old?.map((c) => (c.id === id ? { ...c, ...patch } : c)),
         );
       }
-      return { prevLists, prevDetail, prevChildren, parentId, id };
+      return { change, prevChildren, parentId, id };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prevLists) {
-        for (const [key, snapshot] of ctx.prevLists) {
-          qc.setQueryData(key, snapshot);
-        }
+      if (ctx) {
+        rollbackIssueChange(qc, wsId, ctx.id, ctx.change);
       }
-      if (ctx?.prevDetail)
-        qc.setQueryData(issueKeys.detail(wsId, ctx.id), ctx.prevDetail);
       if (ctx?.parentId && ctx.prevChildren !== undefined) {
         qc.setQueryData(
           issueKeys.children(wsId, ctx.parentId),
@@ -312,7 +303,7 @@ export function useUpdateIssue() {
         );
       }
     },
-    onSuccess: (serverIssue) => {
+    onSuccess: (serverIssue, vars) => {
       // Reconcile with the authoritative server entity by patching the one card
       // in place — NOT by invalidating + refetching the list. The list refetch
       // is what made a successful move flicker: the optimistic card was already
@@ -320,38 +311,37 @@ export function useUpdateIssue() {
       // card re-landed. updateIssue returns the full issue and a position update
       // touches only that row, so a surgical patch is the authoritative
       // reconcile and is a visual no-op when the optimistic value matched.
-      for (const [key, cached] of readBucketedLists()) {
-        qc.setQueryData<ListIssuesCache>(
-          key,
-          patchIssueInBuckets(cached, serverIssue.id, serverIssue),
-        );
-      }
-      qc.setQueryData<Issue>(issueKeys.detail(wsId, serverIssue.id), (old) =>
-        old ? { ...old, ...serverIssue } : old,
-      );
+      //
+      // baseIssue = serverIssue: membership moves were already handled
+      // optimistically; against the post-write entity the changed dims come
+      // out false unless the server coerced a different value, so this pass
+      // is the plain surgical patch it always was.
+      const { suppress_run: _suppressRun, handoff_note: _handoffNote, id: _id, ...intent } = vars;
+      const reconcile = applyIssueChange(qc, wsId, serverIssue.id, serverIssue, {
+        changed: issueChangedDims(intent, serverIssue),
+        baseIssue: serverIssue,
+      });
+      // The server has committed — safe to flush any drift it reported now.
+      invalidateStaleListKeys(qc, reconcile.staleKeys);
     },
     onSettled: (_data, _err, vars, ctx) => {
       // The issue's own list + detail caches are reconciled surgically in
       // onSuccess / onError, so they are deliberately NOT invalidated here — a
       // full-list refetch on settle is what made drags flicker. Only aggregate
-      // caches that cannot be patched from a single issue are refreshed below.
-      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
-      if (
-        vars.status !== undefined ||
-        Object.prototype.hasOwnProperty.call(vars, "project_id")
-      ) {
-        qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
-      }
-      // Local safety net for a project move. The WS echo now carries
-      // project_changed, but a moved issue must also drop out of the OLD
-      // project's filtered list here in case the echo is delayed or dropped. The
-      // surgical onMutate patch is filter-blind — it never removes a card that no
-      // longer matches the list's project filter — so reconcile by refetching
-      // myAll whenever project_id was part of this update (MUL-3669 / #4548).
-      if (Object.prototype.hasOwnProperty.call(vars, "project_id")) {
-        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      // caches that cannot be patched from a single issue are refreshed, plus
+      // the specific list keys the coordinator flagged as drifted (unknown
+      // membership, enter/leave beyond the loaded window, bucket-count drift).
+      // Those stale keys are the surgical replacement for the old blanket
+      // "invalidate myAll on project move" safety net (MUL-3669 / #4548): the
+      // old project's loaded list already had the card removed in onMutate,
+      // and only genuinely undecidable lists refetch here.
+      invalidateIssueDerivatives(qc, wsId, {
+        statusOrProjectChanged:
+          vars.status !== undefined ||
+          Object.prototype.hasOwnProperty.call(vars, "project_id"),
+      });
+      if (ctx) {
+        invalidateStaleListKeys(qc, ctx.change.staleKeys);
       }
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
@@ -469,28 +459,40 @@ export function useBatchUpdateIssues() {
       updates: UpdateIssueRequest;
     }) => api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
-      // Patch BOTH the workspace board (issueKeys.list) and the filtered
-      // My-Issues / Project / actor lists (issueKeys.myAll). The single-issue
-      // update already patches both; batch only touched issueKeys.list, so a
-      // batch edit on a My-Issues board had no optimistic effect and relied
-      // entirely on the settle refetch. Filter to bucketed (byStatus) caches so
-      // grouped/flat caches under the same prefix are skipped.
-      //
       // Control fields steer the server; they are not Issue columns and must
       // not enter the cache (MUL-3375). mutationFn still sends them.
       const { suppress_run: _suppressRun, handoff_note: _handoffNote, ...patch } = updates;
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
       await qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) });
-      const prevLists = [
-        ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) }),
-        ...qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.myAll(wsId) }),
-      ].filter(
-        (entry): entry is [QueryKey, ListIssuesCache] => !!entry[1]?.byStatus,
-      );
-      for (const [key, cached] of prevLists) {
-        let next = cached;
-        for (const id of ids) next = patchIssueInBuckets(next, id, patch);
-        qc.setQueryData<ListIssuesCache>(key, next);
+      if (patch.status !== undefined) {
+        await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      }
+
+      // Run every issue through the coordinator — the same rules table the
+      // single-issue update uses, so a batch edit patches/removes across the
+      // workspace board AND every filtered myList surface identically.
+      // Snapshots are first-wins per cache key: after the first issue's
+      // application a cache already carries partial patches, so only the
+      // first snapshot per key is pristine for rollback.
+      const prevListByHash = new Map<string, [QueryKey, ListIssuesCache]>();
+      const prevDetailById = new Map<string, Issue>();
+      let prevInboxList: InboxItem[] | undefined;
+      const staleKeys: QueryKey[] = [];
+      for (const id of ids) {
+        const base = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
+        const change = applyIssueChange(qc, wsId, id, patch as Partial<Issue>, {
+          changed: issueChangedDims(patch, base),
+          baseIssue: base,
+        });
+        for (const [key, snapshot] of change.prevLists) {
+          const hash = hashKey(key);
+          if (!prevListByHash.has(hash)) prevListByHash.set(hash, [key, snapshot]);
+        }
+        if (change.prevDetail) prevDetailById.set(id, change.prevDetail);
+        if (prevInboxList === undefined && change.prevInboxList !== undefined) {
+          prevInboxList = change.prevInboxList;
+        }
+        staleKeys.push(...change.staleKeys);
       }
 
       // Mirror the optimistic patch into any loaded children cache so
@@ -512,13 +514,28 @@ export function useBatchUpdateIssues() {
         );
       }
 
-      return { prevLists, prevChildren, affectedParentIds };
+      return {
+        prevLists: [...prevListByHash.values()],
+        prevDetailById,
+        prevInboxList,
+        staleKeys,
+        prevChildren,
+        affectedParentIds,
+      };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prevLists) {
         for (const [key, snapshot] of ctx.prevLists) {
           qc.setQueryData(key, snapshot);
         }
+      }
+      if (ctx?.prevDetailById) {
+        for (const [id, snapshot] of ctx.prevDetailById) {
+          qc.setQueryData(issueKeys.detail(wsId, id), snapshot);
+        }
+      }
+      if (ctx?.prevInboxList !== undefined) {
+        qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
       }
       if (ctx?.prevChildren) {
         for (const [parentId, snapshot] of ctx.prevChildren) {
@@ -528,25 +545,20 @@ export function useBatchUpdateIssues() {
     },
     onSettled: (_data, _err, _vars, ctx) => {
       // Deliberately NOT invalidating issueKeys.list / myAll here: the onMutate
-      // patch above is a complete surgical reconcile for these bucketed boards
-      // (batch changes status / priority / project — never a server-computed
-      // value), so a full-board refetch on settle would only re-introduce the
+      // pass above is a complete surgical reconcile for the loaded bucketed
+      // boards, so a full-board refetch on settle would only re-introduce the
       // flicker the single-issue update already removed. Aggregate / grouped
-      // caches that cannot be recomputed from a single-issue patch are still
-      // refreshed below.
-      qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
-      if (
-        _vars.updates.status !== undefined ||
-        Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")
-      ) {
-        qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
-      }
-      // Local safety net mirroring useUpdateIssue: drop moved issues from the old
-      // project's filtered list even if the WS echo is delayed (MUL-3669 / #4548).
-      if (Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")) {
-        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      // caches that cannot be recomputed from a single-issue patch are
+      // refreshed below, plus the specific keys the coordinator flagged as
+      // drifted — the surgical replacement for the old blanket "invalidate
+      // myAll on project move" safety net (MUL-3669 / #4548).
+      invalidateIssueDerivatives(qc, wsId, {
+        statusOrProjectChanged:
+          _vars.updates.status !== undefined ||
+          Object.prototype.hasOwnProperty.call(_vars.updates, "project_id"),
+      });
+      if (ctx) {
+        invalidateStaleListKeys(qc, ctx.staleKeys);
       }
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {

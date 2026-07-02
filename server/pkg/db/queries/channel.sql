@@ -227,6 +227,30 @@ RETURNING *;
 SELECT * FROM channel_user_binding
 WHERE installation_id = $1 AND channel_user_id = $2;
 
+-- name: FindReusableChannelUserBinding :one
+-- Cross-installation account-link reuse (MUL-3911). When a platform user
+-- messages an installation they have NOT linked, but the SAME user id is already
+-- bound to ANOTHER installation in the SAME Multica workspace + SAME Slack team,
+-- the inbound identity step reuses that link instead of re-prompting. Slack user
+-- ids are stable within a team, so an identical channel_user_id denotes the same
+-- human across that team's apps. The match is fenced to one workspace AND one
+-- team (installation config->>'team_id'): a Slack team can be connected to two
+-- different Multica workspaces, and a user may hold different Multica accounts in
+-- each, so reuse must cross neither boundary. Most-recently-bound wins. The
+-- caller re-checks membership and materializes a fresh per-installation binding.
+--
+-- team_id is pinned ::text so sqlc types the arg as a string instead of
+-- attributing the bare param to the JSONB config column (mirrors
+-- GetChannelInstallationByAppID's app_id cast).
+SELECT b.* FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = sqlc.arg('workspace_id')
+  AND b.channel_type = sqlc.arg('channel_type')
+  AND b.channel_user_id = sqlc.arg('channel_user_id')
+  AND ci.config ->> 'team_id' = sqlc.arg('team_id')::text
+ORDER BY b.bound_at DESC
+LIMIT 1;
+
 -- name: DeleteChannelUserBindingsByWorkspaceMember :exec
 -- Application-layer integrity (replaces the old member-FK ON DELETE
 -- CASCADE): prune every binding for a user who has been removed from a

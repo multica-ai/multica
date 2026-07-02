@@ -86,7 +86,11 @@ function fakeQc(data: {
 
 function items(qc: QueryClient, query = ""): SlashCommandItem[] {
   const config = createSlashCommandSuggestion(qc);
-  return config.items!({ query, editor: {} as never }) as SlashCommandItem[];
+  return config.items!({
+    query,
+    editor: {} as never,
+    signal: new AbortController().signal,
+  }) as SlashCommandItem[];
 }
 
 describe("slash command suggestion items", () => {

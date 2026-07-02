@@ -79,7 +79,6 @@
     "fallback_runtime_cloud": "云端",
     "fallback_runtime_local": "本地",
     "actions_aria": "行操作",
-    "task_count_one": "{{count}} 个任务",
     "task_count_other": "{{count}} 个任务"
   },
   "activity_tooltip": {
@@ -104,8 +103,8 @@
     "cancel_failed_toast": "取消 task 失败",
     "cancel_dialog_title": "取消\"{{name}}\"的全部 task？",
     "cancel_dialog_no_tasks": "没有要取消的活动 task。",
-    "cancel_dialog_running_one": "{{count}} 个进行中",
-    "cancel_dialog_queued_one": "{{count}} 个排队中",
+    "cancel_dialog_running_other": "{{count}} 个进行中",
+    "cancel_dialog_queued_other": "{{count}} 个排队中",
     "cancel_dialog_impact_other": "将取消 {{summary}} 个 task。",
     "cancel_dialog_running_note": " 进行中的 task 最多需要 5 秒才能完全停止。",
     "cancel_dialog_irreversible": " 已取消的 task 无法恢复。",
@@ -478,14 +477,12 @@
   },
   "last_active": {
     "today": "今天",
-    "days_ago_one": "{{count}} 天前",
     "days_ago_other": "{{count}} 天前",
     "none": "30 天内无活动"
   },
   "toolbar": {
     "result_count_title": "当前结果 / 范围内全部",
     "filter_label": "筛选",
-    "filter_active_count_one": "{{count}} 项筛选",
     "filter_active_count_other": "{{count}} 项筛选",
     "clear_filters": "清除筛选",
     "section_availability": "可用性",
@@ -499,7 +496,6 @@
     "section_model": "模型"
   },
   "actions": {
-    "selected_one": "已选 {{count}} 项",
     "selected_other": "已选 {{count}} 项",
     "clear_selection": "清除选择"
   }

@@ -93,7 +93,7 @@ func TestSlackThreadIsolation(t *testing.T) {
 }
 
 func TestNewSlackResolverSet(t *testing.T) {
-	set := NewSlackResolverSet(nil, nil, nil)
+	set := NewSlackResolverSet(nil, nil, nil, nil)
 	if set.Installation == nil || set.Identity == nil || set.Dedup == nil || set.Session == nil || set.Audit == nil {
 		t.Error("resolver set must populate all required resolvers")
 	}
@@ -103,11 +103,17 @@ func TestNewSlackResolverSet(t *testing.T) {
 	if set.Replier != nil {
 		t.Error("a nil replier arg must leave Replier nil (not a typed-nil interface)")
 	}
+	if set.Typing != nil {
+		t.Error("a nil typing arg must leave Typing nil (not a typed-nil interface)")
+	}
 
-	// A real replier threads through.
-	set = NewSlackResolverSet(nil, nil, NewOutboundReplier(OutboundReplierConfig{}))
+	// A real replier + typing manager thread through.
+	set = NewSlackResolverSet(nil, nil, NewOutboundReplier(OutboundReplierConfig{}), NewTypingIndicatorManager(nil, nil, nil))
 	if set.Replier == nil {
 		t.Error("a non-nil replier must populate ResolverSet.Replier")
+	}
+	if set.Typing == nil {
+		t.Error("a non-nil typing manager must populate ResolverSet.Typing")
 	}
 }
 

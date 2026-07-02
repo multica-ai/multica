@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1607,6 +1608,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
 			resp.ThreadName = cs.Title
+			// Flag a channel-backed session so the daemon makes the agent aware
+			// it is operating inside Slack — read this conversation's history
+			// from the channel via `multica chat history` / `multica chat thread`,
+			// not from Multica (MUL-3871). Empty for a web-only chat session.
+			// ChatInThread tells the agent which command to start with: the
+			// latest trigger was a thread reply iff its reply-target thread
+			// (last_thread_id) differs from its own message id (a top-level
+			// @mention records its own ts as both).
+			if binding, berr := h.Queries.GetChannelChatSessionBindingBySession(r.Context(), db.GetChannelChatSessionBindingBySessionParams{
+				ChatSessionID: cs.ID,
+				ChannelType:   string(slack.TypeSlack),
+			}); berr == nil {
+				resp.ChatChannelType = string(slack.TypeSlack)
+				resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
+					binding.LastThreadID.String != binding.LastMessageID.String
+			}
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
@@ -2344,6 +2361,24 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
+
+		// Surface prompt-cache effectiveness per run so cache hit rates are
+		// observable in logs, not just queryable from runtime_usage. The ratio
+		// is cached input over total input-side tokens; a persistently low
+		// value flags a prompt prefix that is not being reused across runs
+		// (e.g. volatile values poisoning the cacheable prefix). MUL-3887.
+		if totalInput := u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens; totalInput > 0 {
+			slog.Info("task prompt-cache usage",
+				"task_id", taskID,
+				"provider", provider,
+				"model", u.Model,
+				"input_tokens", u.InputTokens,
+				"output_tokens", u.OutputTokens,
+				"cache_read_tokens", u.CacheReadTokens,
+				"cache_write_tokens", u.CacheWriteTokens,
+				"cache_read_ratio", float64(u.CacheReadTokens)/float64(totalInput),
+			)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

@@ -1,25 +1,22 @@
 "use client";
 
 import { memo, type Ref } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AppLink } from "../../navigation";
-import type { Issue } from "@multica/core/types";
+import type { Issue, Project } from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useWorkspaceId } from "@multica/core/hooks";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
-import { projectListOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { useIssueSurfaceSelection } from "../surface/selection-context";
 
 export interface ChildProgress {
   done: number;
@@ -33,6 +30,7 @@ function formatDate(date: string): string {
 function ListRowContent({
   issue,
   childProgress,
+  project,
   isDragging,
   containerRef,
   containerStyle,
@@ -41,22 +39,18 @@ function ListRowContent({
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
+  project?: Project;
   isDragging?: boolean;
   containerRef?: Ref<HTMLDivElement>;
   containerStyle?: React.CSSProperties;
   containerProps?: Record<string, unknown>;
   checkboxProps?: Pick<React.HTMLAttributes<HTMLDivElement>, "onClick" | "onMouseDown" | "onPointerDown">;
 }) {
-  const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
-  const toggle = useIssueSelectionStore((s) => s.toggle);
+  const selection = useIssueSurfaceSelection();
+  const selected = selection.selectedIds.has(issue.id);
+  const toggle = selection.toggle;
   const p = useWorkspacePaths();
   const storeProperties = useViewStore((s) => s.cardProperties);
-  const wsId = useWorkspaceId();
-  const { data: projects = [] } = useQuery({
-    ...projectListOptions(wsId),
-    enabled: storeProperties.project && !!issue.project_id,
-  });
-  const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
   const labels = issue.labels ?? [];
 
   const showProject = storeProperties.project && project;
@@ -158,11 +152,19 @@ function ListRowContent({
 export const ListRow = memo(function ListRow({
   issue,
   childProgress,
+  project,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
+  project?: Project;
 }) {
-  return <ListRowContent issue={issue} childProgress={childProgress} />;
+  return (
+    <ListRowContent
+      issue={issue}
+      childProgress={childProgress}
+      project={project}
+    />
+  );
 });
 
 const animateLayoutChanges: AnimateLayoutChanges = (args) => {
@@ -178,10 +180,12 @@ const stopDrag = (e: React.SyntheticEvent) => {
 export const DraggableListRow = memo(function DraggableListRow({
   issue,
   childProgress,
+  project,
   disableSorting,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
+  project?: Project;
   disableSorting?: boolean;
 }) {
   const {
@@ -207,6 +211,7 @@ export const DraggableListRow = memo(function DraggableListRow({
     <ListRowContent
       issue={issue}
       childProgress={childProgress}
+      project={project}
       isDragging={isDragging}
       containerRef={setNodeRef}
       containerStyle={style}

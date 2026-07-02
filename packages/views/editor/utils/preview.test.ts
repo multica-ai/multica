@@ -35,6 +35,10 @@ describe("getPreviewKind", () => {
     // Build files without extension
     ["application/octet-stream", "Dockerfile", "text"],
     ["application/octet-stream", "Makefile", "text"],
+    ["application/octet-stream", ".env", "text"],
+    ["application/octet-stream", ".gitignore", "text"],
+    ["application/octet-stream", "service.dockerfile", "text"],
+    ["application/octet-stream", "rules.makefile", "text"],
 
     // Out of scope
     ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "report.docx", null],
@@ -81,6 +85,14 @@ describe("extensionToLanguage", () => {
   it("recognizes extension-less build files", () => {
     expect(extensionToLanguage("Dockerfile")).toBe("dockerfile");
     expect(extensionToLanguage("Makefile")).toBe("makefile");
+    expect(extensionToLanguage(".env")).toBe("plaintext");
+    expect(extensionToLanguage(".gitignore")).toBe("plaintext");
+  });
+
+  it("recognizes build file extensions allowed by the server", () => {
+    expect(extensionToLanguage("service.dockerfile")).toBe("dockerfile");
+    expect(extensionToLanguage("rules.makefile")).toBe("makefile");
+    expect(extensionToLanguage("nested/.gitignore")).toBe("plaintext");
   });
 
   it("returns undefined for unknown extensions", () => {

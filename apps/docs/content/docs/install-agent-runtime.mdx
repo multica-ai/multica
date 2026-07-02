@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 13 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 14 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 13 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 14 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,9 +31,9 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 13 supported tools
+## The 14 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 13.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 14.
 
 ### Claude Code (Anthropic)
 
@@ -156,6 +156,17 @@ Agentic coding CLI using the ACP protocol over stdio (shares the transport with 
 | Daemon looks for | `qodercli` |
 | Install | See the official CLI docs at [qoder.com/cli](https://qoder.com/cli). |
 | Authentication | Per the vendor's docs. |
+
+### Trae CLI (ByteDance)
+
+ByteDance's official TRAE CLI (`traecli`, paired with the Trae IDE — **not** the open-source `bytedance/trae-agent`). It is ACP-native, so Multica drives it over stdio via `traecli acp serve --yolo`, sharing the transport with Hermes, Kimi, Kiro CLI, and Qoder. Session resumption works through ACP `session/load`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically (switched per task via `session/set_model`), and skills are copied into `.traecli/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `traecli` |
+| Install | See the official CLI docs at [docs.trae.cn/cli](https://docs.trae.cn/cli). |
+| Authentication | Run `traecli` once interactively to complete the browser-based enterprise login (the token persists in `~/.trae` plus the OS keyring). Logging into the Trae **IDE** does not log in the CLI — they are separate. |
+| Notes | traecli reads project rules from `.trae/rules/` and has no `--system-prompt` flag, so Multica delivers its runtime brief inline in the prompt. Set a daemon-wide default model with `MULTICA_TRAECLI_MODEL`. |
 
 ### Antigravity (Google)
 

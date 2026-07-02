@@ -5,18 +5,13 @@ import { AppLink } from "../../navigation";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { toast } from "sonner";
-import type { Issue, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, Project, UpdateIssueRequest } from "@multica/core/types";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { CalendarClock, CalendarDays } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
-import { projectListOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "./pickers";
@@ -26,6 +21,7 @@ import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
@@ -60,39 +56,28 @@ export const BoardCardContent = memo(function BoardCardContent({
   issue,
   editable = false,
   childProgress,
+  project,
 }: {
   issue: Issue;
   editable?: boolean;
   childProgress?: ChildProgress;
+  project?: Project;
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const storeProperties = useViewStore((s) => s.cardProperties);
-  const wsId = useWorkspaceId();
-  const { data: projects = [] } = useQuery({
-    ...projectListOptions(wsId),
-    enabled: storeProperties.project && !!issue.project_id,
-  });
-  const project = issue.project_id ? projects.find((p) => p.id === issue.project_id) : undefined;
   const labels = issue.labels ?? [];
 
-  const updateIssueMutation = useUpdateIssue();
+  const surfaceActions = useIssueSurfaceActionsOptional();
   const handleUpdate = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
-      updateIssueMutation.mutate(
-        { id: issue.id, ...updates },
-        {
-          onError: (err) =>
-            toast.error(
-              err instanceof Error && err.message
-                ? err.message
-                : t(($) => $.card.update_failed),
-            ),
-        },
-      );
+      surfaceActions?.updateIssue(issue.id, updates, {
+        errorMessage: t(($) => $.card.update_failed),
+      });
     },
-    [issue.id, updateIssueMutation, t],
+    [issue.id, surfaceActions, t],
   );
+  const canEdit = editable && !!surfaceActions;
 
   const showPriority = storeProperties.priority;
   const showDescription = storeProperties.description && issue.description;
@@ -114,7 +99,7 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   const priorityLabel = t(($) => $.priority[issue.priority]);
   const priorityIconNode = showPriority ? (
-    editable ? (
+    canEdit ? (
       <PickerWrapper>
         <PriorityPicker
           priority={issue.priority}
@@ -161,7 +146,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   );
 
   const assigneeNode = showAssigneeSection ? (
-    editable ? (
+    canEdit ? (
       <PickerWrapper className={assigneeContainerClass}>
         <AssigneePicker
           assigneeType={issue.assignee_type}
@@ -230,7 +215,7 @@ export const BoardCardContent = memo(function BoardCardContent({
           {showRightMeta && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
               {showStartDate && (
-                editable ? (
+                canEdit ? (
                   <PickerWrapper className="shrink-0">
                     <StartDatePicker
                       startDate={issue.start_date}
@@ -251,7 +236,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                 )
               )}
               {showDueDate && (
-                editable ? (
+                canEdit ? (
                   <PickerWrapper className="shrink-0">
                     <DueDatePicker
                       dueDate={issue.due_date}
@@ -310,7 +295,17 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
   return defaultAnimateLayoutChanges(args);
 };
 
-export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress, disableSorting }: { issue: Issue; childProgress?: ChildProgress; disableSorting?: boolean }) {
+export const DraggableBoardCard = memo(function DraggableBoardCard({
+  issue,
+  childProgress,
+  project,
+  disableSorting,
+}: {
+  issue: Issue;
+  childProgress?: ChildProgress;
+  project?: Project;
+  disableSorting?: boolean;
+}) {
   const p = useWorkspacePaths();
   const {
     attributes,
@@ -344,7 +339,12 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
           href={p.issueDetail(issue.id)}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
         >
-          <BoardCardContent issue={issue} editable childProgress={childProgress} />
+          <BoardCardContent
+            issue={issue}
+            editable
+            childProgress={childProgress}
+            project={project}
+          />
         </AppLink>
       </div>
     </IssueActionsContextMenu>

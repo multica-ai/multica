@@ -176,10 +176,19 @@ type OutboundReplier interface {
 	Reply(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, res Result)
 }
 
-// TypingNotifier shows a "processing" indicator when a message is ingested.
-// Optional; nil disables it.
+// TypingNotifier shows a "processing" indicator when a message is ingested and
+// clears it once the message reaches a terminal outcome. Optional; nil disables
+// it.
 type TypingNotifier interface {
+	// OnIngested shows the indicator for a successfully ingested message.
 	OnIngested(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID)
+	// OnSettled clears the indicator for a session whose run trigger produced no
+	// task (agent offline / archived, or an enqueue failure). In that case no
+	// task lifecycle event is ever published, so the platform's own bus-driven
+	// clear (on chat-done / task-failed) would never fire and the indicator would
+	// stick. The Router calls this from the debounced flush. Idempotent: a
+	// session with no indicator is a no-op.
+	OnSettled(ctx context.Context, sessionID pgtype.UUID)
 }
 
 // ResolverSet is the per-platform bundle the Router runs the pipeline through.

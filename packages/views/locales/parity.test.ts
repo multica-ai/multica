@@ -85,3 +85,27 @@ describe("locale bundle parity", () => {
     }
   }
 });
+
+// Dead plural-key guard: a locale whose CLDR plural rules have no `one`
+// category (e.g. ja/ko/zh-Hans) resolves only `_other`, so any `_one` key in
+// it is dead weight i18next never renders. Left unchecked these accumulate and
+// hide bugs — a missing `_other` silently falls back while the orphan `_one`
+// looks like coverage. i18next resolves plurals via Intl.PluralRules, so we
+// gate on the same source of truth.
+describe("dead plural-key guard", () => {
+  for (const locale of translatedLocales) {
+    const categories = new Intl.PluralRules(locale).resolvedOptions()
+      .pluralCategories;
+    if (categories.includes("one")) continue;
+
+    const bundle = RESOURCES[locale as keyof typeof RESOURCES];
+    it(`${locale} ships no dead _one keys (plural categories: ${categories.join("/")})`, () => {
+      const offenders = Object.keys(bundle).flatMap((ns) =>
+        flattenKeys(bundle[ns])
+          .filter((key) => key.endsWith("_one"))
+          .map((key) => `${ns}:${key}`),
+      );
+      expect(offenders).toEqual([]);
+    });
+  }
+});

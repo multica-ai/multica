@@ -1,11 +1,11 @@
 ---
 title: AI coding tools matrix
-description: Multica supports 13 AI coding tools; they implement the same interface, but the capability details diverge significantly.
+description: Multica supports 14 AI coding tools; they implement the same interface, but the capability details diverge significantly.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica ships with built-in support for **13 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
+Multica ships with built-in support for **14 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
 
 For guidance on picking a tool when creating an agent, see [Creating and configuring agents](/agents-create).
 
@@ -26,6 +26,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **OpenClaw** | Open source | ✅ | ✅ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
 | **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
 | **Qoder** | Alibaba | ✅ | ✅ | `.qoder/skills/` | Dynamic discovery |
+| **Trae** | ByteDance | ✅ (ACP `session/load`) | ✅ | `.traecli/skills/` | Dynamic discovery |
 
 ## What each tool is for
 
@@ -89,15 +90,28 @@ From Inflection AI, minimalist. **Session resumption is unusual** — the sessio
 
 From Alibaba. An agentic coding CLI. Uses the ACP protocol over stdio (shares a transport with Hermes, Kimi, and Kiro CLI). Session resumption works through ACP `session/resume`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically, and skills are copied into `.qoder/skills/` for native discovery.
 
+### Trae
+
+From ByteDance — the official **TRAE CLI** (`traecli`, documented at [docs.trae.cn/cli](https://docs.trae.cn/cli); this is the product paired with the Trae IDE, **not** the open-source `bytedance/trae-agent`). traecli is ACP-native, so Multica drives it over the standard ACP JSON-RPC transport via `traecli acp serve --yolo`, exactly like Kiro and Qoder — `--yolo` puts it in bypass-permissions mode so headless runs don't block on tool-approval prompts.
+
+- **Session resumption works** through ACP `session/load` (traecli advertises `loadSession: true` from `initialize`).
+- **Model selection is dynamic**: the model catalog is discovered from `session/new` (`models.availableModels`) and switched per task via `session/set_model`. Set the daemon-wide default with `MULTICA_TRAECLI_MODEL`.
+- **MCP is supported** — config is passed through ACP `mcpServers`; traecli advertises `mcpCapabilities: {http, sse}`, and unsupported transports are filtered out before `session/new`.
+- **Authentication** is traecli's own enterprise login: run `traecli` once interactively to complete the browser login (the token persists in `~/.trae` + the OS keyring). The IDE login is separate — logging into the Trae IDE does **not** log in the CLI.
+- **Skills** are written to `.traecli/skills/` (project) for native discovery; global skills live in `~/.traecli/skills`.
+- The Multica runtime brief is also inlined into the prompt (traecli has no `--system-prompt` flag and reads project rules from `.trae/rules/`, not `AGENTS.md`), so the workflow instructions reach the agent regardless.
+
+> The capabilities above were captured from the real `traecli` v0.120.42 binary: `initialize` → `loadSession:true` + `mcpCapabilities{http,sse}`; `session/new` → `result.sessionId` + `models.availableModels`; `session/prompt` streams `session/update` notifications with `sessionUpdate: agent_message_chunk`.
+
 ## Session resumption: who really supports it
 
 The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continue-from-the-previous-context). **Every supported tool resumes sessions** — pass the resume id and the task continues from the previous context. The one quirk is Pi, whose resume id is a session file path on disk rather than a string id (see [Pi](#pi) above).
 
 ## MCP configuration: provider-specific support
 
-**Of the 13 tools, ten consume `mcp_config`: Claude Code, CodeBuddy, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Qoder**. The other three accept the field but **ignore it** — no error, no warning, the config just has no effect.
+**Of the 14 tools, eleven consume `mcp_config`: Claude Code, CodeBuddy, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Qoder, and Trae**. The other three (Antigravity, Copilot, Pi) accept the field but **ignore it** — no error, no warning, the config just has no effect.
 
-The runtime paths are provider-specific: Claude Code and CodeBuddy receive it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Cursor writes `.cursor/mcp.json` plus per-task project approvals under `CURSOR_DATA_DIR`; Hermes, Kimi, Kiro CLI, and Qoder receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Multica's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
+The runtime paths are provider-specific: Claude Code and CodeBuddy receive it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Cursor writes `.cursor/mcp.json` plus per-task project approvals under `CURSOR_DATA_DIR`; Hermes, Kimi, Kiro CLI, Qoder, and Trae receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Multica's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
 
 <Callout type="warning">
 If you set `mcp_config` in an agent configuration but pick a tool not marked ✅ in the MCP column, your MCP servers have **no effect** on that agent. MCP integration is provider-specific.
@@ -134,4 +148,4 @@ For creating and using skills, see [Skills](/skills).
 - [Creating and configuring agents](/agents-create) — pick a tool for your agent
 - [Tasks](/tasks) — task lifecycle and session-resumption mechanics
 - [Daemon and runtimes](/daemon-runtimes) — where the tools run and how they connect to Multica
-- [Install an agent runtime](/install-agent-runtime) — installation and authentication for each of the 13 supported tools
+- [Install an agent runtime](/install-agent-runtime) — installation and authentication for each of the 14 supported tools
