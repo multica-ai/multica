@@ -756,6 +756,21 @@ describe("CreateIssueModal", () => {
     );
   });
 
+  it("keeps the Switch to Agent control free of continuous border animation", () => {
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    const switchButton = screen.getByRole("button", { name: /Switch to Agent/i });
+    expect(switchButton).not.toHaveClass("border-beam");
+    expect(switchButton).toHaveClass("ring-brand/20");
+  });
+
   // Manual → agent must forward parent_issue_id when the modal was opened
   // from "Add sub issue". Before this, the agent panel received no parent
   // context and the new issue was filed as a standalone — silently dropping
