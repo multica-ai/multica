@@ -40,7 +40,10 @@ function flattenKeys(obj: unknown, prefix = ""): string[] {
 }
 
 function normalizePlural(key: string): string {
-  return key.replace(/_(one|other)$/, "_count");
+  // Russian (and other Slavic / Arabic locales) add `_few` / `_many` plural
+  // categories on top of EN's `_one` / `_other`. Collapse every i18next plural
+  // category to `_count` so a 4-form RU family compares equal to a 2-form EN one.
+  return key.replace(/_(one|few|many|other)$/, "_count");
 }
 
 function keySet(bundle: Record<string, unknown>): Set<string> {

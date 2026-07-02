@@ -1,0 +1,47 @@
+{
+  "nav": {
+    "inbox": "Входящие",
+    "my_issues": "Мои issue",
+    "issues": "Issue",
+    "projects": "Проекты",
+    "autopilots": "Автопилот",
+    "agents": "Агенты",
+    "squads": "Отряды",
+    "usage": "Использование",
+    "runtimes": "Среды выполнения",
+    "skills": "Skill",
+    "settings": "Настройки"
+  },
+  "help": {
+    "trigger": "Помощь",
+    "docs": "Документация",
+    "changelog": "Журнал изменений",
+    "discord": "Discord",
+    "feedback": "Обратная связь"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Загрузка рабочего пространства…",
+    "loading_named_prefix": "Загрузка"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Открепить",
+    "workspaces_label": "Рабочие пространства",
+    "create_workspace": "Создать рабочее пространство",
+    "pending_invitations_label": "Ожидающие приглашения",
+    "invitation_workspace_fallback": "Рабочее пространство",
+    "invitation_join": "Присоединиться",
+    "invitation_decline": "Отклонить",
+    "log_out": "Выйти",
+    "new_issue": "Новый issue",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Закреплённые",
+    "workspace_group": "Рабочее пространство",
+    "configure_group": "Настройка",
+    "unread_overflow": "99+",
+    "discord_card": {
+      "title": "Присоединяйтесь к нашему Discord",
+      "description": "Общайтесь с командой и другими разработчиками.",
+      "dismiss": "Закрыть"
+    }
+  }
+}
