@@ -2476,6 +2476,19 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Persist the whole batch in one transaction so a mid-batch DB error
+	// rolls back every prior insert instead of leaving a partial transcript
+	// (prefix committed + broadcast, suffix silently lost).
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		slog.Error("failed to begin task message tx", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to persist task message")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	created := make([]db.TaskMessage, 0, len(req.Messages))
 	for _, msg := range req.Messages {
 		// Redact sensitive information before persisting or broadcasting.
 		msg.Content = redact.Text(msg.Content)
@@ -2486,7 +2499,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if msg.Input != nil {
 			inputJSON, _ = json.Marshal(msg.Input)
 		}
-		created, createErr := h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
+		row, createErr := qtx.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
 			TaskID:  parseUUID(taskID),
 			Seq:     int32(msg.Seq),
 			Type:    msg.Type,
@@ -2500,10 +2513,20 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to persist task message")
 			return
 		}
+		created = append(created, row)
+	}
 
-		if workspaceID != "" {
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Error("failed to commit task message batch", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to persist task message")
+		return
+	}
+
+	// Publish only after commit so no event ever describes an uncommitted row.
+	if workspaceID != "" {
+		for _, row := range created {
 			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID,
-				taskMessageToPayload(created, taskID, uuidToString(task.IssueID)))
+				taskMessageToPayload(row, taskID, uuidToString(task.IssueID)))
 		}
 	}
 
