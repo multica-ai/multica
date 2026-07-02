@@ -111,6 +111,16 @@ var issuePullRequestsCmd = &cobra.Command{
 	RunE:    runIssuePullRequests,
 }
 
+var issueRescanPullRequestCmd = &cobra.Command{
+	Use:     "rescan-pr <issue-id> <pull-request>",
+	Aliases: []string{"relink-pr"},
+	Short:   "Re-scan an existing GitHub pull request and rebuild issue links",
+	Long: "Fetch the current GitHub PR payload and rerun the same issue-key scanner " +
+		"used by webhook delivery. Accepted PR refs: owner/repo#123 or https://github.com/owner/repo/pull/123.",
+	Args: exactArgs(2),
+	RunE: runIssueRescanPullRequest,
+}
+
 var issueChildrenCmd = &cobra.Command{
 	Use:     "children <id>",
 	Aliases: []string{"subissues"},
@@ -294,6 +304,7 @@ func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
 	issueCmd.AddCommand(issuePullRequestsCmd)
+	issueCmd.AddCommand(issueRescanPullRequestCmd)
 	issueCmd.AddCommand(issueChildrenCmd)
 	issueCmd.AddCommand(issueCreateCmd)
 	issueCmd.AddCommand(issueUpdateCmd)
@@ -335,6 +346,8 @@ func init() {
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
+	issueRescanPullRequestCmd.Flags().String("output", "table", "Output format: table or json")
+	issueRescanPullRequestCmd.Flags().Int64("installation-id", 0, "Optional GitHub installation ID to force for the rescan")
 
 	issueChildrenCmd.Flags().String("output", "table", "Output format: table or json")
 	issueChildrenCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
@@ -601,6 +614,90 @@ func runIssuePullRequests(cmd *cobra.Command, args []string) error {
 	prs, _ := result["pull_requests"].([]any)
 	printIssuePullRequestsTable(normalizePullRequestList(prs))
 	return nil
+}
+
+func runIssueRescanPullRequest(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	repoOwner, repoName, number, err := parsePullRequestRef(args[1])
+	if err != nil {
+		return err
+	}
+
+	body := map[string]any{
+		"repo_owner": repoOwner,
+		"repo_name":  repoName,
+		"number":     number,
+	}
+	if installationID, _ := cmd.Flags().GetInt64("installation-id"); installationID > 0 {
+		body["installation_id"] = installationID
+	}
+
+	var result map[string]any
+	path := "/api/issues/" + url.PathEscape(issueRef.ID) + "/pull-requests/rescan"
+	if err := client.PostJSON(ctx, path, body, &result); err != nil {
+		return fmt.Errorf("rescan pull request: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	if pr, ok := result["pull_request"].(map[string]any); ok {
+		printIssuePullRequestsTable([]map[string]any{pr})
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
+}
+
+func parsePullRequestRef(input string) (repoOwner, repoName string, number int, err error) {
+	raw := strings.TrimSpace(input)
+	if raw == "" {
+		return "", "", 0, fmt.Errorf("pull request ref is required")
+	}
+
+	if strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://") {
+		u, parseErr := url.Parse(raw)
+		if parseErr != nil {
+			return "", "", 0, fmt.Errorf("parse pull request ref: %w", parseErr)
+		}
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if !strings.EqualFold(u.Host, "github.com") || len(parts) < 4 || parts[2] != "pull" {
+			return "", "", 0, fmt.Errorf("pull request ref %q is not a recognized GitHub pull request URL", input)
+		}
+		n, ok := parsePositiveInt(parts[3])
+		if !ok {
+			return "", "", 0, fmt.Errorf("pull request ref %q has an invalid pull request number", input)
+		}
+		return parts[0], parts[1], n, nil
+	}
+
+	hash := strings.LastIndex(raw, "#")
+	if hash <= 0 || hash >= len(raw)-1 {
+		return "", "", 0, fmt.Errorf("pull request ref %q is not recognized; use owner/repo#123 or a GitHub pull request URL", input)
+	}
+	repo := raw[:hash]
+	numberPart := raw[hash+1:]
+	slash := strings.Index(repo, "/")
+	if slash <= 0 || slash >= len(repo)-1 || strings.Contains(repo[slash+1:], "/") {
+		return "", "", 0, fmt.Errorf("pull request ref %q is not recognized; use owner/repo#123 or a GitHub pull request URL", input)
+	}
+	n, ok := parsePositiveInt(numberPart)
+	if !ok {
+		return "", "", 0, fmt.Errorf("pull request ref %q has an invalid pull request number", input)
+	}
+	return repo[:slash], repo[slash+1:], n, nil
 }
 
 func normalizePullRequestList(raw []any) []map[string]any {

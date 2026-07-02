@@ -373,6 +373,13 @@ func newIssuePullRequestsTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newIssueRescanPullRequestTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "rescan-pr"}
+	cmd.Flags().String("output", "table", "")
+	cmd.Flags().Int64("installation-id", 0, "")
+	return cmd
+}
+
 func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
 	var gotPaths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -517,6 +524,129 @@ func TestRunIssuePullRequestsTableIncludesCoreFields(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("table output missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestParsePullRequestRef(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantOwner string
+		wantRepo  string
+		wantNum   int
+		wantErr   string
+	}{
+		{
+			name:      "owner repo hash syntax",
+			input:     "Wilson-G/multi-loop#44",
+			wantOwner: "Wilson-G",
+			wantRepo:  "multi-loop",
+			wantNum:   44,
+		},
+		{
+			name:      "github url syntax",
+			input:     "https://github.com/Wilson-G/multi-loop/pull/44",
+			wantOwner: "Wilson-G",
+			wantRepo:  "multi-loop",
+			wantNum:   44,
+		},
+		{
+			name:    "reject malformed ref",
+			input:   "Wilson-G/multi-loop",
+			wantErr: "not recognized",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			owner, repo, num, err := parsePullRequestRef(tt.input)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("parsePullRequestRef(%q) error = %v, want substring %q", tt.input, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parsePullRequestRef(%q): %v", tt.input, err)
+			}
+			if owner != tt.wantOwner || repo != tt.wantRepo || num != tt.wantNum {
+				t.Fatalf("parsePullRequestRef(%q) = (%q, %q, %d), want (%q, %q, %d)", tt.input, owner, repo, num, tt.wantOwner, tt.wantRepo, tt.wantNum)
+			}
+		})
+	}
+}
+
+func TestRunIssueRescanPullRequestPostsBodyAsJSON(t *testing.T) {
+	var gotMethod string
+	var gotPaths []string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/issues/MUL-2818":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-2818",
+				"title":      "CLI PR rescan",
+			})
+		case "/api/issues/issue-uuid/pull-requests/rescan":
+			if r.Method != http.MethodPost {
+				t.Fatalf("rescan method = %s, want POST", r.Method)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"pull_request": map[string]any{
+					"html_url": "https://github.com/Wilson-G/multi-loop/pull/44",
+					"number":   float64(44),
+					"state":    "merged",
+					"title":    "PUR-133: tighten mention routing",
+				},
+				"linked_issue_ids": []string{"issue-uuid"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueRescanPullRequestTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssueRescanPullRequest(cmd, []string{"MUL-2818", "Wilson-G/multi-loop#44"})
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssueRescanPullRequest: %v", err)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if want := []string{"/api/issues/MUL-2818", "/api/issues/issue-uuid/pull-requests/rescan"}; fmt.Sprint(gotPaths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	}
+	if gotBody["repo_owner"] != "Wilson-G" || gotBody["repo_name"] != "multi-loop" || gotBody["number"] != float64(44) {
+		t.Fatalf("unexpected body: %#v", gotBody)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, string(out))
+	}
+	pr, _ := payload["pull_request"].(map[string]any)
+	if pr["number"] != float64(44) || pr["state"] != "merged" {
+		t.Fatalf("unexpected pull_request payload: %#v", pr)
 	}
 }
 
