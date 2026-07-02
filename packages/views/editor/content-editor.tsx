@@ -54,7 +54,6 @@ import type { MentionItem } from "./extensions/mention-suggestion";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
-import { clampSelectionToText } from "./utils/restore-selection";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
@@ -220,19 +219,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     >(undefined);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
-    // The exact preprocessed markdown the editor's current document was built
-    // from — seeded synchronously at first render (below) and kept in step with
-    // the document thereafter: advanced whenever the sync effect re-parses AND
-    // whenever it confirms the editor already matches `incoming` (Guard 3), so
-    // it never lags behind what the editor actually holds. Re-applying the
-    // identical input only rebuilds the same document and disturbs the caret;
-    // comparing on the parser INPUT (not the serialized output) makes the
-    // short-circuit robust to markdown whose round-trip isn't byte-identical,
-    // e.g. an ordered list (`1. `). This is what stopped the "type `1.`, switch
-    // issues, come back, caret jumps off the list item" bug: the comment box
-    // remounts, the effect saw the redrawn draft as "changed", re-parsed it,
-    // and the caret got clamped onto the list's structural gap.
-    const appliedIncomingRef = useRef<string | null>(null);
 
     // In-session record of attachments freshly uploaded through this editor.
     // Surfaces (like the quick-create modal) that don't have a server-supplied
@@ -312,17 +298,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const queryClient = useQueryClient();
 
     const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
-    // Seed the parser-input guard SYNCHRONOUSLY at first render. Tiptap v3's
-    // `onCreate` is deferred (fires a tick after `useEditor` first hands the
-    // component a non-null editor), so the content-sync effect can run before
-    // it — seeding there would leave the ref null on that first run and let a
-    // remount re-parse the draft anyway. `initialContent` is the exact input
-    // the editor mounts from, so recording it here keeps the mount and its
-    // first sync run consistent. Only the very first render seeds; later
-    // divergence is tracked by the effect itself.
-    if (appliedIncomingRef.current === null) {
-      appliedIncomingRef.current = initialContent;
-    }
     // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
@@ -466,24 +441,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       if (isDirty) return;
 
       const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
-      // Guard 2.5: the editor already holds the parse of this exact input
-      // (from mount, or a previous run of this effect). Re-parsing produces an
-      // identical document and only serves to move the caret — skip it. Unlike
-      // Guard 3 below this compares the parser INPUT, so an ordered-list draft
-      // whose serialization isn't byte-identical to its source (which slips
-      // past the normalized-markdown check) still short-circuits here.
-      if (incoming === appliedIncomingRef.current) return;
       const incomingNormalized = normalizeMarkdown(incoming);
       // Guard 3: normalized-equal short-circuit. Avoids a no-op transaction
-      // when the cache reflects a write this same editor just emitted. Record
-      // this input as the one the current document reflects, so a later
-      // external change back to an OLDER value (e.g. a collaborator reverts the
-      // description) isn't mistaken by Guard 2.5 for an already-applied input
-      // and swallowed.
-      if (incomingNormalized === current) {
-        appliedIncomingRef.current = incoming;
-        return;
-      }
+      // when the cache reflects a write this same editor just emitted.
+      if (incomingNormalized === current) return;
 
       // Guard 4: `emitUpdate: false`. Tiptap v3's setContent defaults to
       // `emitUpdate: true`; without this we would re-trigger onUpdate →
@@ -506,18 +467,14 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         });
       }
 
-      // Restore the caret after ProseMirror replaced the document. Snap the
-      // prior offsets to the nearest VALID text positions instead of a bare
-      // `Math.min` clamp — a clamped offset can resolve onto a structural
-      // (non-text) boundary such as the gap before a list's first item, where
-      // the caret visibly jumps to the next line. See clampSelectionToText.
-      editor.view.dispatch(
-        editor.state.tr.setSelection(
-          clampSelectionToText(editor.state.doc, from, to),
-        ),
-      );
+      // Clamp prior selection to the new doc size so the caret doesn't snap
+      // to position 0 after ProseMirror replaces the document.
+      const docSize = editor.state.doc.content.size;
+      editor.commands.setTextSelection({
+        from: Math.min(from, docSize),
+        to: Math.min(to, docSize),
+      });
 
-      appliedIncomingRef.current = incoming;
       lastEmittedRef.current = normalizeEditorMarkdown(editor);
     }, [defaultValue, editor]);
 
