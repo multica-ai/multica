@@ -20,6 +20,9 @@ import {
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
 } from "@multica/core/inbox/mutations";
+import {
+  useInboxFilterStore,
+} from "@multica/core/inbox/inbox-filter-store";
 
 import { IssueDetail } from "../../issues/components";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
@@ -33,6 +36,7 @@ import {
   BookCheck,
   ListChecks,
   ArrowLeft,
+  ArrowDown,
 } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -51,10 +55,27 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
-import { InboxListItem, useTimeAgo } from "./inbox-list-item";
 import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
+import { useTimeAgo } from "./inbox-list-item-hooks";
+import { InboxToolbar } from "./inbox-toolbar";
+import { groupInboxItems } from "./inbox-grouping";
+import { InboxGroupSection } from "./inbox-group-section";
+import { InboxBulkBar } from "./inbox-bulk-bar";
+import { InboxEmptyState, type EmptyStateType } from "./inbox-empty-state";
 import { useT } from "../../i18n";
+
+// Tablet breakpoint: < 1024px
+function useIsTablet(): boolean {
+  const [isTablet, setIsTablet] = useState(false);
+  useEffect(() => {
+    const check = () => setIsTablet(window.innerWidth < 1024);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+  return isTablet;
+}
 
 export function InboxPage() {
   const { t } = useT("inbox");
@@ -64,7 +85,7 @@ export function InboxPage() {
 
   const [selectedKey, setSelectedKeyState] = useState(() => urlIssue);
 
-  // Sync from URL when searchParams change (e.g. navigation)
+  // Sync from URL when searchParams change
   useEffect(() => {
     setSelectedKeyState(urlIssue);
   }, [urlIssue]);
@@ -73,30 +94,68 @@ export function InboxPage() {
   const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
 
-  const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+  // Filter store state
+  const groupMode = useInboxFilterStore((s) => s.groupMode);
+  const density = useInboxFilterStore((s) => s.density);
+  const unreadOnly = useInboxFilterStore((s) => s.unreadOnly);
+  const searchQuery = useInboxFilterStore((s) => s.searchQuery);
+  const selectedIds = useInboxFilterStore((s) => s.selectedIds);
+  const collapsedGroups = useInboxFilterStore((s) => s.collapsedGroups);
+  const multiselectActive = useInboxFilterStore((s) => s.multiselectActive);
+  const toggleSelect = useInboxFilterStore((s) => s.toggleSelect);
+  const selectAll = useInboxFilterStore((s) => s.selectAll);
+  const clearSelection = useInboxFilterStore((s) => s.clearSelection);
+  const toggleGroupCollapse = useInboxFilterStore((s) => s.toggleGroupCollapse);
+  const setSearchQuery = useInboxFilterStore((s) => s.setSearchQuery);
 
-  // Track the last key we actually resolved against the inbox list. Lets the
-  // fallback effect distinguish "shared-link to a notification not in our
-  // inbox" (never resolved → redirect to the issue page) from "item was in
-  // our inbox and just got removed" (was resolved → stay on /inbox).
+  // Apply filters: unreadOnly, searchQuery
+  const filteredItems = useMemo(() => {
+    let result = items;
+    if (unreadOnly) {
+      result = result.filter((i) => !i.read);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (i) =>
+          i.title.toLowerCase().includes(q) ||
+          (i.body?.toLowerCase().includes(q) ?? false),
+      );
+    }
+    return result;
+  }, [items, unreadOnly, searchQuery]);
+
+  // Group filtered items
+  const groups = useMemo(
+    () => groupInboxItems(filteredItems, groupMode),
+    [filteredItems, groupMode],
+  );
+
+  // Flatten groups for j/k navigation and selection lookup
+  const flatItems = useMemo(
+    () => groups.flatMap((g) => g.items),
+    [groups],
+  );
+
+  const selected = flatItems.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+
+  // Track the last key we actually resolved against the inbox list
   const lastResolvedKeyRef = useRef<string>("");
   useEffect(() => {
     if (selected) lastResolvedKeyRef.current = selectedKey;
   }, [selected, selectedKey]);
 
-  const setSelectedKey = useCallback((key: string) => {
-    setSelectedKeyState(key);
-    const inboxPath = wsPaths.inbox();
-    const url = key ? `${inboxPath}?issue=${key}` : inboxPath;
-    replace(url);
-  }, [replace, wsPaths]);
+  const setSelectedKey = useCallback(
+    (key: string) => {
+      setSelectedKeyState(key);
+      const inboxPath = wsPaths.inbox();
+      const url = key ? `${inboxPath}?issue=${key}` : inboxPath;
+      replace(url);
+    },
+    [replace, wsPaths],
+  );
 
-  // Shared inbox links (?issue=<id>) may point to notifications not in this
-  // user's inbox (archived, or never received). Fall back to the issue page
-  // so the URL still resolves to something meaningful. But if the key was
-  // previously resolvable (e.g. the issue was just deleted in another tab
-  // and `onInboxIssueDeleted` pruned the cache), the issue detail would 404
-  // too — clear the selection and stay on /inbox instead.
+  // Fallback redirect for unresolvable keys
   useEffect(() => {
     if (loading) return;
     if (!selectedKey) return;
@@ -113,6 +172,7 @@ export function InboxPage() {
   });
 
   const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
@@ -124,12 +184,7 @@ export function InboxPage() {
   const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
 
-
-  // Auto-mark-read whenever a selected item is unread — covers both click-
-  // to-select and URL-param-select (e.g. OS notification click on desktop).
-  // The mutation flips `read: true` optimistically, so this effect settles
-  // in one pass and can't loop. Kept in a `useEffect` rather than inlined
-  // in handleSelect so URL-driven selection triggers it too.
+  // Auto-mark-read when selected item is unread
   const markReadMutate = markReadMutation.mutate;
   const selectedId = selected?.id;
   const selectedRead = selected?.read;
@@ -149,27 +204,48 @@ export function InboxPage() {
     setSelectedKey(item.issue_id ?? item.id);
   };
 
-  const handleArchive = (id: string) => {
-    const idx = items.findIndex((i) => i.id === id);
-    const archived = idx >= 0 ? items[idx] : null;
-    const wasSelected =
-      !!archived && (archived.issue_id ?? archived.id) === selectedKey;
-    if (wasSelected) {
-      // List is sorted newest-first; prefer the next (older) item, fall back
-      // to the previous (newer) one when archiving at the bottom, and only
-      // clear the selection when nothing else is left.
-      const next = items[idx + 1] ?? items[idx - 1] ?? null;
-      setSelectedKey(next ? (next.issue_id ?? next.id) : "");
-    }
-    archiveMutation.mutate(id, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_failed),
-        ),
-    });
-  };
+  const handleArchive = useCallback(
+    (id: string) => {
+      const idx = items.findIndex((i) => i.id === id);
+      const archived = idx >= 0 ? items[idx] : null;
+      const wasSelected =
+        !!archived && (archived.issue_id ?? archived.id) === selectedKey;
+      if (wasSelected) {
+        const next = items[idx + 1] ?? items[idx - 1] ?? null;
+        setSelectedKey(next ? (next.issue_id ?? next.id) : "");
+      }
+      archiveMutation.mutate(id, {
+        onError: (err) =>
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.errors.archive_failed),
+          ),
+      });
+    },
+    [items, selectedKey, archiveMutation, setSelectedKey, t],
+  );
+
+  const handleMarkRead = useCallback(
+    (id: string) => {
+      markReadMutation.mutate(id, {
+        onError: (err) =>
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.errors.mark_read_failed),
+          ),
+      });
+    },
+    [markReadMutation, t],
+  );
+
+  const handleOpenIssue = useCallback(
+    (issueId: string) => {
+      setSelectedKey(issueId);
+    },
+    [setSelectedKey],
+  );
 
   // Batch operations
   const handleMarkAllRead = () => {
@@ -220,14 +296,159 @@ export function InboxPage() {
     });
   };
 
-  // -- Shared sub-components --------------------------------------------------
+  // Bulk selection operations
+  const handleBulkMarkRead = useCallback(() => {
+    const ids = Array.from(selectedIds);
+    for (const id of ids) {
+      const item = flatItems.find((i) => (i.issue_id ?? i.id) === id);
+      if (item && !item.read) {
+        markReadMutation.mutate(item.id);
+      }
+    }
+    clearSelection();
+  }, [selectedIds, flatItems, markReadMutation, clearSelection]);
+
+  const handleBulkArchive = useCallback(() => {
+    const ids = Array.from(selectedIds);
+    for (const id of ids) {
+      const item = flatItems.find((i) => (i.issue_id ?? i.id) === id);
+      if (item) {
+        archiveMutation.mutate(item.id);
+      }
+    }
+    if (ids.includes(selectedKey)) setSelectedKey("");
+    clearSelection();
+  }, [selectedIds, flatItems, archiveMutation, clearSelection, selectedKey, setSelectedKey]);
+
+  // Group selection helpers
+  const handleSelectAllInGroup = useCallback(
+    (groupItems: InboxItem[]) => {
+      const ids = groupItems.map((i) => i.issue_id ?? i.id);
+      selectAll(ids);
+    },
+    [selectAll],
+  );
+
+  const handleDeselectAllInGroup = useCallback(
+    (groupItems: InboxItem[]) => {
+      const ids = groupItems.map((i) => i.issue_id ?? i.id);
+      const next = new Set(selectedIds);
+      for (const id of ids) next.delete(id);
+      useInboxFilterStore.setState({ selectedIds: next });
+    },
+    [selectedIds],
+  );
+
+  // --- Real-time notification banner ---
+  const [showNewNotifBanner, setShowNewNotifBanner] = useState(false);
+  const prevItemCountRef = useRef(items.length);
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const prevCount = prevItemCountRef.current;
+    const newCount = items.length;
+    if (newCount > prevCount && prevCount > 0) {
+      // New items arrived while user was viewing the list
+      const scrollTop = listScrollRef.current?.scrollTop ?? 0;
+      if (scrollTop > 80) {
+        setShowNewNotifBanner(true);
+      }
+    }
+    prevItemCountRef.current = newCount;
+  }, [items.length]);
+
+  const handleScrollToTop = useCallback(() => {
+    listScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    setShowNewNotifBanner(false);
+  }, []);
+
+  // --- Keyboard navigation ---
+  const [keyFocusedIndex, setKeyFocusedIndex] = useState(-1);
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+        if (e.key === "Escape") {
+          (e.target as HTMLElement).blur();
+          setSearchQuery("");
+        }
+        return;
+      }
+
+      switch (e.key) {
+        case "j":
+        case "ArrowDown": {
+          e.preventDefault();
+          setKeyFocusedIndex((prev) => Math.min(prev + 1, flatItems.length - 1));
+          break;
+        }
+        case "k":
+        case "ArrowUp": {
+          e.preventDefault();
+          setKeyFocusedIndex((prev) => Math.max(prev - 1, 0));
+          break;
+        }
+        case "e": {
+          e.preventDefault();
+          if (keyFocusedIndex >= 0 && keyFocusedIndex < flatItems.length) {
+            const focused = flatItems[keyFocusedIndex];
+            if (focused) handleArchive(focused.id);
+          }
+          break;
+        }
+        case "/": {
+          e.preventDefault();
+          searchInputRef.current?.focus();
+          break;
+        }
+        case "Escape": {
+          e.preventDefault();
+          if (multiselectActive) {
+            useInboxFilterStore.setState({ multiselectActive: false });
+            clearSelection();
+          } else {
+            setSearchQuery("");
+          }
+          break;
+        }
+      }
+    },
+    [flatItems, keyFocusedIndex, handleArchive, searchInputRef, setSearchQuery, multiselectActive, clearSelection],
+  );
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
+  // Sync keyboard focus to selection
+  useEffect(() => {
+    if (keyFocusedIndex >= 0 && keyFocusedIndex < flatItems.length) {
+      const item = flatItems[keyFocusedIndex];
+      if (item) handleSelect(item);
+    }
+  }, [keyFocusedIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Determine empty state ---
+  const emptyStateType: EmptyStateType | null = useMemo(() => {
+    if (items.length === 0) return "empty";
+    if (filteredItems.length === 0) {
+      if (unreadOnly && items.every((i) => i.read)) return "no_unread";
+      if (searchQuery.trim()) return "no_search_results";
+      return "no_filter_results";
+    }
+    return null;
+  }, [items, filteredItems, unreadOnly, searchQuery]);
+
+  // --- Shared sub-components ---
 
   const listHeader = (
-    <PageHeader className="justify-between">
+    <PageHeader className="justify-between shrink-0">
       <div className="flex items-center gap-2">
         <h1 className="text-sm font-semibold">{t(($) => $.page.title)}</h1>
         {unreadCount > 0 && (
-          <span className="text-xs text-muted-foreground">
+          <span className="rounded-full bg-brand/10 px-1.5 py-0.5 text-[10px] font-semibold text-brand">
             {unreadCount}
           </span>
         )}
@@ -267,30 +488,60 @@ export function InboxPage() {
     </PageHeader>
   );
 
-  const listBody = items.length === 0 ? (
-    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-      <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
-      <p className="text-sm">{t(($) => $.list.empty)}</p>
-    </div>
-  ) : (
-    <div>
-      {items.map((item) => (
-        <InboxListItem
-          key={item.id}
-          item={item}
-          isSelected={(item.issue_id ?? item.id) === selectedKey}
-          onClick={() => handleSelect(item)}
-          onArchive={() => handleArchive(item.id)}
-        />
-      ))}
-    </div>
+  const listBody = (
+    <>
+      {/* Real-time notification banner */}
+      {showNewNotifBanner && (
+        <button
+          type="button"
+          onClick={handleScrollToTop}
+          className="flex w-full items-center justify-center gap-1.5 border-b bg-brand/10 py-1.5 text-xs font-medium text-brand transition-colors hover:bg-brand/20"
+        >
+          <ArrowDown className="h-3 w-3" />
+          {t(($) => $.realtime.new_notifications)}
+        </button>
+      )}
+
+      {emptyStateType ? (
+        <InboxEmptyState type={emptyStateType} />
+      ) : (
+        <div>
+          {groups.map((group) => {
+            const isCollapsed = collapsedGroups.has(group.key);
+            return (
+              <InboxGroupSection
+                key={group.key}
+                group={group}
+                isCollapsed={isCollapsed}
+                density={density}
+                selectedKey={selectedKey}
+                selectedIds={selectedIds}
+                showCheckbox={multiselectActive}
+                onToggleCollapse={() => toggleGroupCollapse(group.key)}
+                onSelectAll={() => handleSelectAllInGroup(group.items)}
+                onDeselectAll={() => handleDeselectAllInGroup(group.items)}
+                onSelectItem={handleSelect}
+                onArchiveItem={handleArchive}
+                onMarkReadItem={handleMarkRead}
+                onOpenIssue={handleOpenIssue}
+                onToggleCheck={toggleSelect}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {/* Bulk operation bar */}
+      <InboxBulkBar
+        selectedCount={selectedIds.size}
+        onMarkReadSelected={handleBulkMarkRead}
+        onArchiveSelected={handleBulkArchive}
+        onClearSelection={clearSelection}
+      />
+    </>
   );
 
   const detailContent = selected?.issue_id ? (
-    // Key by issue_id (not inbox-item id): a new comment/reaction generates a
-    // new inbox notification for the same issue, and the dedup helper picks the
-    // newest one — keying on its id would remount IssueDetail on every event,
-    // wiping the comment composer draft and resetting scroll position.
     <ErrorBoundary resetKeys={[selected.issue_id]}>
       <IssueDetail
         key={selected.issue_id}
@@ -299,10 +550,6 @@ export function InboxPage() {
         layoutId="multica_inbox_issue_detail_layout"
         highlightCommentId={selected.details?.comment_id ?? undefined}
         onDelete={() => {
-          // Issue deletion CASCADE-deletes the inbox item server-side, and the
-          // issue:deleted WS event prunes it from the inbox cache. Just clear
-          // the selection — calling archive here would 404 on a row that no
-          // longer exists.
           setSelectedKey("");
         }}
         onDone={() => {
@@ -326,7 +573,9 @@ export function InboxPage() {
           <p className="text-xs font-medium text-muted-foreground">
             {t(($) => $.detail.original_input)}
           </p>
-          <p className="mt-1 whitespace-pre-wrap text-sm">{selected.details.original_prompt}</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm">
+            {selected.details.original_prompt}
+          </p>
         </div>
       )}
       <div className="mt-4 flex gap-2">
@@ -334,10 +583,6 @@ export function InboxPage() {
           <Button
             size="sm"
             onClick={() => {
-              // Seed the legacy advanced form with the original prompt so the
-              // user can recover their input in the full editor instead of
-              // retyping. The agent picker hint becomes the assignee
-              // candidate (still editable).
               const prompt = selected.details?.original_prompt ?? "";
               const agentId = selected.details?.agent_id;
               useIssueDraftStore.getState().setDraft({
@@ -364,10 +609,9 @@ export function InboxPage() {
     </div>
   ) : null;
 
-  // -- Mobile layout: list / detail toggle -----------------------------------
-
-  if (isMobile) {
-    if (loading) {
+  // --- Loading state ---
+  if (loading) {
+    if (isMobile) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
           <div className="flex h-12 shrink-0 items-center border-b px-4">
@@ -388,45 +632,20 @@ export function InboxPage() {
       );
     }
 
-    // Mobile: show detail full-screen when an item is selected
-    if (selected) {
-      return (
-        <div className="flex flex-1 flex-col min-h-0">
-          <div className="flex h-12 shrink-0 items-center border-b px-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelectedKey("")}
-              className="gap-1.5 text-muted-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              {t(($) => $.page.back)}
-            </Button>
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {detailContent}
-          </div>
-        </div>
-      );
-    }
-
-    // Mobile: full-screen list
     return (
-      <div className="flex flex-1 flex-col min-h-0">
-        {listHeader}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {listBody}
-        </div>
-      </div>
-    );
-  }
-
-  // -- Desktop layout: resizable two-panel -----------------------------------
-
-  if (loading) {
-    return (
-      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-        <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
+      <ResizablePanelGroup
+        orientation="horizontal"
+        className="flex-1 min-h-0"
+        defaultLayout={defaultLayout}
+        onLayoutChanged={onLayoutChanged}
+      >
+        <ResizablePanel
+          id="list"
+          defaultSize={320}
+          minSize={240}
+          maxSize={480}
+          groupResizeBehavior="preserve-pixel-size"
+        >
           <div className="flex flex-col border-r h-full">
             <div className="flex h-12 shrink-0 items-center border-b px-4">
               <Skeleton className="h-5 w-16" />
@@ -455,30 +674,107 @@ export function InboxPage() {
     );
   }
 
-  return (
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-      <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
-      <div className="flex flex-col border-r h-full">
+  // --- Mobile layout ---
+  if (isMobile) {
+    if (selected) {
+      return (
+        <div className="flex flex-1 flex-col min-h-0">
+          <div className="flex h-12 shrink-0 items-center border-b px-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedKey("")}
+              className="gap-1.5 text-muted-foreground"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              {t(($) => $.page.back)}
+            </Button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">{detailContent}</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-1 flex-col min-h-0">
         {listHeader}
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <InboxToolbar searchInputRef={searchInputRef} />
+        <div ref={listScrollRef} className="flex-1 min-h-0 overflow-y-auto">
           {listBody}
         </div>
       </div>
+    );
+  }
+
+  // --- Tablet layout: single-panel with slide-over detail ---
+  if (isTablet) {
+    if (selected) {
+      return (
+        <div className="flex flex-1 flex-col min-h-0">
+          <div className="flex h-12 shrink-0 items-center border-b px-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedKey("")}
+              className="gap-1.5 text-muted-foreground"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              {t(($) => $.page.back)}
+            </Button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">{detailContent}</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-1 flex-col min-h-0">
+        {listHeader}
+        <InboxToolbar searchInputRef={searchInputRef} />
+        <div ref={listScrollRef} className="flex-1 min-h-0 overflow-y-auto">
+          {listBody}
+        </div>
+      </div>
+    );
+  }
+
+  // --- Desktop layout: resizable two-panel ---
+  return (
+    <ResizablePanelGroup
+      orientation="horizontal"
+      className="flex-1 min-h-0"
+      defaultLayout={defaultLayout}
+      onLayoutChanged={onLayoutChanged}
+    >
+      <ResizablePanel
+        id="list"
+        defaultSize={320}
+        minSize={240}
+        maxSize={480}
+        groupResizeBehavior="preserve-pixel-size"
+      >
+        <div className="flex flex-col border-r h-full">
+          {listHeader}
+          <InboxToolbar searchInputRef={searchInputRef} />
+          <div ref={listScrollRef} className="flex-1 min-h-0 overflow-y-auto">
+            {listBody}
+          </div>
+        </div>
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel id="detail" minSize="40%">
-      <div className="flex flex-col min-h-0 h-full">
-        {detailContent ?? (
-          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
-            <p className="text-sm">
-              {items.length === 0
-                ? t(($) => $.detail.empty)
-                : t(($) => $.detail.select_prompt)}
-            </p>
-          </div>
-        )}
-      </div>
+        <div className="flex flex-col min-h-0 h-full">
+          {detailContent ?? (
+            <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+              <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
+              <p className="text-sm">
+                {items.length === 0
+                  ? t(($) => $.detail.empty)
+                  : t(($) => $.detail.select_prompt)}
+              </p>
+            </div>
+          )}
+        </div>
       </ResizablePanel>
     </ResizablePanelGroup>
   );

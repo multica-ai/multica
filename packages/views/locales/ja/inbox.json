@@ -9,10 +9,25 @@
     "archive_all_read": "既読の項目をすべてアーカイブ",
     "archive_completed": "完了した項目をアーカイブ"
   },
+  "toolbar": {
+    "aria_label": "インボックスツールバー",
+    "search_placeholder": "通知を検索...",
+    "search_aria_label": "通知を検索",
+    "group_aria_label": "グループ化",
+    "group_by": "グループ化",
+    "group.time": "時間別",
+    "group.severity": "重大度別",
+    "group.project": "プロジェクト別",
+    "group.type": "種類別",
+    "unread_only": "未読のみ表示",
+    "density_compact": "コンパクト表示",
+    "density_comfortable": "標準表示"
+  },
   "list": {
     "empty": "通知はありません",
-    "mark_done_tooltip": "完了にする",
+    "mark_read_tooltip": "既読にする",
     "archive_tooltip": "アーカイブ",
+    "open_issue_tooltip": "Issueを開く",
     "time": {
       "just_now": "たった今",
       "minutes": "{{count}}分",
@@ -26,6 +41,38 @@
     "original_input": "元の入力",
     "edit_advanced": "詳細フォームで編集",
     "archive": "アーカイブ"
+  },
+  "empty": {
+    "inbox_empty": "インボックスは空です",
+    "inbox_empty_sub": "Issueやタスクの通知がここに表示されます",
+    "all_caught_up": "すべて確認済み！",
+    "all_caught_up_sub": "すべての通知を読みました",
+    "no_search_results": "検索結果が見つかりません",
+    "no_filter_results": "一致する通知はありません"
+  },
+  "bulk": {
+    "aria_label": "一括操作",
+    "selected_count": "{{count}}件選択中",
+    "mark_read_selected": "既読にする",
+    "archive_selected": "アーカイブ",
+    "clear_selection": "選択解除"
+  },
+  "realtime": {
+    "new_notifications": "新しい通知 — クリックで更新"
+  },
+  "group_labels": {
+    "today": "今日",
+    "yesterday": "昨日",
+    "this_week": "今週",
+    "older": "以前",
+    "action_required": "対応が必要",
+    "attention": "注意",
+    "info": "情報",
+    "no_project": "プロジェクトなし",
+    "comments": "コメント",
+    "assignments": "割り当て",
+    "status_changes": "ステータス変更",
+    "agents": "エージェント"
   },
   "types": {
     "issue_assigned": "割り当て済み",
@@ -67,6 +114,8 @@
     "mark_all_read_failed": "すべて既読にできませんでした",
     "archive_all_failed": "すべてアーカイブできませんでした",
     "archive_all_read_failed": "既読の項目をアーカイブできませんでした",
-    "archive_completed_failed": "完了した項目をアーカイブできませんでした"
+    "archive_completed_failed": "完了した項目をアーカイブできませんでした",
+    "bulk_mark_read_failed": "選択項目を既読にできませんでした",
+    "bulk_archive_failed": "選択項目をアーカイブできませんでした"
   }
 }

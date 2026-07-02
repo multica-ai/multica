@@ -9,10 +9,25 @@
     "archive_all_read": "归档全部已读",
     "archive_completed": "归档已完成"
   },
+  "toolbar": {
+    "aria_label": "收件箱工具栏",
+    "search_placeholder": "搜索通知…",
+    "search_aria_label": "搜索通知",
+    "group_aria_label": "分组方式",
+    "group_by": "分组方式",
+    "group.time": "按时间",
+    "group.severity": "按严重级别",
+    "group.project": "按项目",
+    "group.type": "按类型",
+    "unread_only": "仅显示未读",
+    "density_compact": "紧凑视图",
+    "density_comfortable": "舒适视图"
+  },
   "list": {
     "empty": "暂无通知",
-    "mark_done_tooltip": "标为已完成",
+    "mark_read_tooltip": "标为已读",
     "archive_tooltip": "归档",
+    "open_issue_tooltip": "打开 Issue",
     "time": {
       "just_now": "刚刚",
       "minutes": "{{count}} 分钟",
@@ -26,6 +41,38 @@
     "original_input": "原始输入",
     "edit_advanced": "在完整表单中编辑",
     "archive": "归档"
+  },
+  "empty": {
+    "inbox_empty": "收件箱为空",
+    "inbox_empty_sub": "与你相关的 Issue 和任务通知将显示在这里",
+    "all_caught_up": "全部已读！",
+    "all_caught_up_sub": "你已经阅读了所有通知",
+    "no_search_results": "未找到匹配结果",
+    "no_filter_results": "没有符合条件的通知"
+  },
+  "bulk": {
+    "aria_label": "批量操作",
+    "selected_count": "已选 {{count}} 条",
+    "mark_read_selected": "标为已读",
+    "archive_selected": "归档",
+    "clear_selection": "取消选择"
+  },
+  "realtime": {
+    "new_notifications": "有新通知 — 点击刷新"
+  },
+  "group_labels": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "this_week": "本周",
+    "older": "更早",
+    "action_required": "需要处理",
+    "attention": "需要关注",
+    "info": "信息",
+    "no_project": "无项目",
+    "comments": "评论",
+    "assignments": "分配",
+    "status_changes": "状态变更",
+    "agents": "智能体"
   },
   "types": {
     "issue_assigned": "已分配",
@@ -67,6 +114,8 @@
     "mark_all_read_failed": "全部标为已读失败",
     "archive_all_failed": "归档全部失败",
     "archive_all_read_failed": "归档已读失败",
-    "archive_completed_failed": "归档已完成失败"
+    "archive_completed_failed": "归档已完成失败",
+    "bulk_mark_read_failed": "批量标为已读失败",
+    "bulk_archive_failed": "批量归档失败"
   }
 }

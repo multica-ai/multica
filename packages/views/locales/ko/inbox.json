@@ -9,10 +9,25 @@
     "archive_all_read": "읽은 항목 모두 보관",
     "archive_completed": "완료된 항목 보관"
   },
+  "toolbar": {
+    "aria_label": "인박스 도구 모음",
+    "search_placeholder": "알림 검색...",
+    "search_aria_label": "알림 검색",
+    "group_aria_label": "그룹화",
+    "group_by": "그룹화",
+    "group.time": "시간별",
+    "group.severity": "중요도별",
+    "group.project": "프로젝트별",
+    "group.type": "유형별",
+    "unread_only": "읽지 않음만 표시",
+    "density_compact": "간격 좁게",
+    "density_comfortable": "간격 넓게"
+  },
   "list": {
     "empty": "알림이 없습니다",
-    "mark_done_tooltip": "완료로 표시",
+    "mark_read_tooltip": "읽음으로 표시",
     "archive_tooltip": "보관",
+    "open_issue_tooltip": "이슈 열기",
     "time": {
       "just_now": "방금 전",
       "minutes": "{{count}}분",
@@ -26,6 +41,38 @@
     "original_input": "원본 입력",
     "edit_advanced": "고급 양식으로 수정",
     "archive": "보관"
+  },
+  "empty": {
+    "inbox_empty": "인박스가 비어 있습니다",
+    "inbox_empty_sub": "이슈와 작업에 대한 알림이 여기에 표시됩니다",
+    "all_caught_up": "모두 확인했습니다!",
+    "all_caught_up_sub": "모든 알림을 읽었습니다",
+    "no_search_results": "검색 결과가 없습니다",
+    "no_filter_results": "일치하는 알림이 없습니다"
+  },
+  "bulk": {
+    "aria_label": "일괄 작업",
+    "selected_count": "{{count}}개 선택됨",
+    "mark_read_selected": "읽음으로 표시",
+    "archive_selected": "보관",
+    "clear_selection": "선택 해제"
+  },
+  "realtime": {
+    "new_notifications": "새 알림 — 클릭하여 새로고침"
+  },
+  "group_labels": {
+    "today": "오늘",
+    "yesterday": "어제",
+    "this_week": "이번 주",
+    "older": "이전",
+    "action_required": "조치 필요",
+    "attention": "주의",
+    "info": "정보",
+    "no_project": "프로젝트 없음",
+    "comments": "댓글",
+    "assignments": "할당",
+    "status_changes": "상태 변경",
+    "agents": "에이전트"
   },
   "types": {
     "issue_assigned": "할당됨",
@@ -67,6 +114,8 @@
     "mark_all_read_failed": "모두 읽음으로 표시하지 못했습니다",
     "archive_all_failed": "모두 보관하지 못했습니다",
     "archive_all_read_failed": "읽은 항목을 보관하지 못했습니다",
-    "archive_completed_failed": "완료된 항목을 보관하지 못했습니다"
+    "archive_completed_failed": "완료된 항목을 보관하지 못했습니다",
+    "bulk_mark_read_failed": "선택 항목을 읽음으로 표시하지 못했습니다",
+    "bulk_archive_failed": "선택 항목을 보관하지 못했습니다"
   }
 }

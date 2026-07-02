@@ -9,10 +9,25 @@
     "archive_all_read": "Archive all read",
     "archive_completed": "Archive completed"
   },
+  "toolbar": {
+    "aria_label": "Inbox toolbar",
+    "search_placeholder": "Search notifications...",
+    "search_aria_label": "Search notifications",
+    "group_aria_label": "Group notifications",
+    "group_by": "Group by",
+    "group.time": "Time",
+    "group.severity": "Severity",
+    "group.project": "Project",
+    "group.type": "Type",
+    "unread_only": "Show unread only",
+    "density_compact": "Compact view",
+    "density_comfortable": "Comfortable view"
+  },
   "list": {
     "empty": "No notifications",
-    "mark_done_tooltip": "Mark as done",
+    "mark_read_tooltip": "Mark as read",
     "archive_tooltip": "Archive",
+    "open_issue_tooltip": "Open issue",
     "time": {
       "just_now": "just now",
       "minutes": "{{count}}m",
@@ -26,6 +41,38 @@
     "original_input": "Original input",
     "edit_advanced": "Edit as advanced form",
     "archive": "Archive"
+  },
+  "empty": {
+    "inbox_empty": "Your inbox is empty",
+    "inbox_empty_sub": "Notifications about your issues and tasks will appear here",
+    "all_caught_up": "All caught up!",
+    "all_caught_up_sub": "You've read all your notifications",
+    "no_search_results": "No results found",
+    "no_filter_results": "No matching notifications"
+  },
+  "bulk": {
+    "aria_label": "Batch operations",
+    "selected_count": "{{count}} selected",
+    "mark_read_selected": "Mark read",
+    "archive_selected": "Archive",
+    "clear_selection": "Clear selection"
+  },
+  "realtime": {
+    "new_notifications": "New notifications — click to refresh"
+  },
+  "group_labels": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "this_week": "This week",
+    "older": "Older",
+    "action_required": "Action Required",
+    "attention": "Attention",
+    "info": "Info",
+    "no_project": "No project",
+    "comments": "Comments",
+    "assignments": "Assignments",
+    "status_changes": "Status changes",
+    "agents": "Agents"
   },
   "types": {
     "issue_assigned": "Assigned",
@@ -67,6 +114,8 @@
     "mark_all_read_failed": "Failed to mark all as read",
     "archive_all_failed": "Failed to archive all",
     "archive_all_read_failed": "Failed to archive read items",
-    "archive_completed_failed": "Failed to archive completed"
+    "archive_completed_failed": "Failed to archive completed",
+    "bulk_mark_read_failed": "Failed to mark selected as read",
+    "bulk_archive_failed": "Failed to archive selected"
   }
 }
