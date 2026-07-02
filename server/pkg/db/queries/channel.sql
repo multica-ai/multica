@@ -98,6 +98,58 @@ SELECT * FROM channel_installation
 WHERE channel_type = sqlc.arg('channel_type')
   AND config ->> 'app_id' = sqlc.arg('app_id')::text;
 
+-- name: GetChannelInstallationReclaimByAppID :one
+-- Reclaim probe for a BYO install colliding on the (channel_type, app_id)
+-- routing index: return the current owner of this app_id (workspace, agent,
+-- status) plus whether its agent still exists, so the caller can free a DEAD
+-- binding and let the robot move to a new agent, while still refusing to steal a
+-- recoverable or LIVE one. "Dead" is decided in the app layer (ReclaimDeadAppID):
+-- an orphan (agent gone — channel_installation has no FK, MUL-3515 §4, so a
+-- deleted workspace cascade-drops the agent but leaves this row; the LEFT JOIN
+-- yields agent_exists=false), or a revoked binding IN THE SAME WORKSPACE. A
+-- revoked binding in ANOTHER workspace is refused (Revoke preserves it for the
+-- owning workspace to re-install), and an archived agent counts as LIVE
+-- (archiving is reversible), so agent_archived is not needed here.
+--
+-- FOR UPDATE OF ci row-locks the owner installation for the caller's tx. The
+-- reclaim probe and the subsequent hard DELETE are separate statements, so under
+-- READ COMMITTED a concurrent re-activation (dead -> active, e.g. the owner
+-- workspace re-installs the same robot) could otherwise slip in between them and
+-- the status-free DELETE would destroy a now-LIVE binding. Holding the lock from
+-- the probe through the DELETE/upsert serializes that re-activation after this
+-- tx, so we only ever delete a row still observed as DEAD. OF ci keeps the lock
+-- off the LEFT-JOINed agent row.
+SELECT ci.id, ci.workspace_id, ci.agent_id, ci.status,
+       (a.id IS NOT NULL)::bool AS agent_exists
+FROM channel_installation ci
+LEFT JOIN agent a ON a.id = ci.agent_id
+WHERE ci.channel_type = sqlc.arg('channel_type')
+  AND ci.config ->> 'app_id' = sqlc.arg('app_id')::text
+FOR UPDATE OF ci;
+
+-- name: DeleteChannelInstallation :exec
+-- Hard-delete one installation by id, plus the child rows keyed to it. The
+-- channel_* tables carry no FK/cascade (MUL-3515 §4), so this fans the delete
+-- out in the app layer — same reason DeleteChannelChatSessionBindingsByInstallation
+-- exists for the Slack re-connect path. Used by the BYO reclaim path to free a
+-- DEAD binding's routing key; without the fan-out the deleted installation's
+-- user/session/dedup/token/audit rows would linger forever as unreachable
+-- orphans (matching what DeleteWorkspace clears). channel_outbound_card_message
+-- is keyed on chat_session_id (not installation_id) and its sessions outlive a
+-- single reclaim, so it is left to the session/workspace delete paths.
+WITH deleted_user_bindings AS (
+    DELETE FROM channel_user_binding WHERE installation_id = $1
+), deleted_chat_session_bindings AS (
+    DELETE FROM channel_chat_session_binding WHERE installation_id = $1
+), deleted_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup WHERE installation_id = $1
+), deleted_binding_tokens AS (
+    DELETE FROM channel_binding_token WHERE installation_id = $1
+), deleted_inbound_audit AS (
+    DELETE FROM channel_inbound_audit WHERE installation_id = $1
+)
+DELETE FROM channel_installation WHERE channel_installation.id = $1;
+
 -- name: ListChannelInstallationsByWorkspace :many
 -- Scoped by channel_type so a per-channel management surface (e.g. the Lark
 -- installation list) only ever sees its own platform's installations.
@@ -298,6 +350,18 @@ UPDATE channel_chat_session_binding
 SET last_message_id = sqlc.narg('last_message_id'),
     last_thread_id  = sqlc.narg('last_thread_id')
 WHERE chat_session_id = $1;
+
+-- name: RebindChannelChatSession :exec
+-- Repoint an existing (installation, channel_chat_id) binding at a brand-new
+-- chat_session, clearing the reply-target pointers. Used by the /new command so
+-- a conversation can start a genuinely fresh chat_session (new transcript, no
+-- resume) without abandoning its stable isolation key.
+UPDATE channel_chat_session_binding
+SET chat_session_id = sqlc.arg('chat_session_id'),
+    last_message_id = NULL,
+    last_thread_id  = NULL
+WHERE installation_id = sqlc.arg('installation_id')
+  AND channel_chat_id = sqlc.arg('channel_chat_id');
 
 -- name: DeleteChannelChatSessionBindingBySession :exec
 -- Application-layer integrity (replaces the old chat_session-FK ON DELETE

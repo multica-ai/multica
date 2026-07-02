@@ -510,6 +510,55 @@ func TestRouter_ForceFresh_Propagates(t *testing.T) {
 	}
 }
 
+func TestRouter_BareFreshReset_NoRun(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.ForceFresh = true
+	msg.BareFresh = true // a lone "/new": rotate the session, no prompt to run
+	msg.Text = ""
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The session is still rotated (EnsureSession) and the ingest is durable,
+	// but with no prompt there is nothing for the agent to act on.
+	if h.tasks.wasCalled() {
+		t.Fatalf("a bare fresh-session reset must not enqueue an agent run")
+	}
+	// No prompt to record: the fresh transcript must not begin with a blank
+	// user message, so AppendMessage is skipped entirely.
+	if h.binder.lastAppend.SessionID.Valid {
+		t.Fatalf("a bare fresh-session reset must not append an (empty) user message")
+	}
+	// No run means nothing would ever clear a typing indicator, so it must not
+	// be shown in the first place. The indicator fires in a detached goroutine,
+	// so wait a bounded window and fail if it is ever shown.
+	if waitFor(200*time.Millisecond, func() bool { return h.typing.calls() > 0 }) {
+		t.Fatalf("a bare fresh-session reset must not show the typing indicator")
+	}
+}
+
+// A "/new hello" (ForceFresh but NOT bare) must still run the agent: the reset
+// short-circuit keys on BareFresh, never on Text being empty. This guards the
+// regression where an adapter enriches Text (e.g. Lark injects group
+// <recent_context>) so a lone "/new" arrives with a non-empty Text — the run
+// must be decided by BareFresh, which the adapter sets from the user's own body.
+func TestRouter_ForceFreshWithPrompt_Runs(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.ForceFresh = true
+	msg.BareFresh = false
+	msg.Text = "[Alice]: hello\n<recent_context>…</recent_context>" // enriched, non-empty
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !h.tasks.wasCalled() {
+		t.Fatalf("a fresh session with a prompt must still enqueue an agent run")
+	}
+	if !h.binder.lastAppend.SessionID.Valid {
+		t.Fatalf("a fresh session with a prompt must append the user message")
+	}
+}
+
 func TestRouter_DrainJoinsReplies(t *testing.T) {
 	h := newHarness(t)
 	h.ident.err = ErrSenderUnbound // triggers a NeedsBinding reply goroutine

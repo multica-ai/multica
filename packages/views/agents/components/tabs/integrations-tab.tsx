@@ -7,9 +7,11 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
+import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { LarkAgentBindButton } from "../../../settings/components/lark-tab";
 import { SlackAgentBindButton } from "../../../settings/components/slack-tab";
+import { DingTalkAgentBindButton } from "../../../settings/components/dingtalk-tab";
 import { useT } from "../../../i18n";
 
 /**
@@ -43,6 +45,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     ...slackInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: dingtalkListing } = useQuery({
+    ...dingtalkInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: !!wsId,
@@ -64,6 +70,8 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     slackListing?.installations.some(
       (inst) => inst.agent_id === agent.id && inst.status === "active",
     ) ?? false;
+
+  const dingtalkConfigured = dingtalkListing?.configured === true;
 
   // Install / manage is gated on workspace owner/admin for every platform, so
   // the role notice is hoisted above the per-platform sections — one note
@@ -159,6 +167,29 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             </div>
           ) : (
             <SlackAgentBindButton agentId={agent.id} agentName={agent.name} />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border">
+        <div className="flex items-start gap-3 p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+            <MessagesSquare className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="text-sm font-medium">{ts(($) => $.dingtalk.section_title)}</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {ts(($) => $.dingtalk.page_description)}
+            </p>
+          </div>
+        </div>
+        <div className="border-t px-4 py-3">
+          {!dingtalkConfigured ? (
+            <p className="text-xs text-muted-foreground">
+              {ts(($) => $.dingtalk.not_enabled_title)}
+            </p>
+          ) : (
+            <DingTalkAgentBindButton agentId={agent.id} agentName={agent.name} />
           )}
         </div>
       </section>

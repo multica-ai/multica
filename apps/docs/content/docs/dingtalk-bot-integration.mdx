@@ -1,0 +1,132 @@
+---
+title: DingTalk Bot integration
+description: Connect a Multica agent to your own DingTalk app — create a Stream-mode robot in the DingTalk Open Platform, copy its AppKey + AppSecret, paste them into Multica, then DM it, @-mention it in a group, or type /issue from inside DingTalk.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Connect any [agent](/agents) to a DingTalk bot and your team can work with it from inside DingTalk — DM the bot, @-mention it in a group, or type `/issue` to file a [Multica issue](/issues) without opening the app.
+
+DingTalk uses a **bring-your-own-app (BYO)** model: a workspace admin creates a DingTalk app, adds a Stream-mode robot to it, and pastes its credentials into Multica. Each agent gets **its own** DingTalk app — so several agents can each have a distinct, separately @-mentionable bot in the same organization. (This differs from [Lark](/lark-bot-integration), where binding is a scan-to-install flow.)
+
+The whole setup is below and takes about five minutes. You'll end up with two credentials to paste into Multica:
+
+- an **AppKey** — the app's client id
+- an **AppSecret** — the app's client secret
+
+## Set up your DingTalk app
+
+### 1. Create the app and add a Stream-mode robot
+
+1. Go to the [DingTalk Open Platform](https://open-dev.dingtalk.com) and create an **enterprise internal app** (企业内部应用).
+2. Open the app and add the **robot** (机器人) capability.
+3. In the robot settings, set the **message-receiving mode** to **Stream mode** (Stream 模式 / 推送模式). This is what lets the bot connect out over a long-lived push connection instead of receiving a webhook.
+
+This is everything Multica needs at the platform level — it connects out over Stream mode, so you don't configure any public address:
+
+| Setting | Why it's there |
+|---|---|
+| **Enterprise internal app** | The app container that owns the robot and issues the AppKey / AppSecret credentials. |
+| **Robot capability** | Creates the bot identity that gets @-mentioned and posts replies. |
+| **Stream mode** | The bot connects out over a long-lived Stream connection — **no public webhook / URL needed**. |
+| **Robot send permission** | Lets the bot send messages back into DingTalk (the agent's replies and proactive messages). |
+| **Message-read scopes** | So the bot receives 1:1 messages and the group messages that @-mention it. |
+
+There is **no webhook URL and no OAuth redirect URL**, because the robot runs over Stream mode and BYO doesn't use OAuth.
+
+<Callout type="info">
+DingTalk has no native typing / reaction indicator, so — unlike Slack — the bot instead posts a short "working on it" acknowledgement when it starts, and the full reply follows once the agent is done. A quick burst of messages is coalesced into a single acknowledgement.
+</Callout>
+
+### 2. Grant the robot its permissions
+
+Grant the robot the scopes it needs so it can **receive messages** and **send messages back** (the robot message-send permission). Without the send permission the agent can run but its reply can't be delivered.
+
+### 3. Copy the AppKey and AppSecret
+
+Open the app's **凭证与基础信息** (Credentials & Basic Information) and copy:
+
+- the **AppKey** — this is your app's **client id**
+- the **AppSecret** — this is your app's **client secret**
+
+### 4. Connect it in Multica
+
+1. Open the agent in **Agents → _your agent_** → the **Integrations** tab (or the **Integrations** section in the left sidebar).
+2. Click **Connect DingTalk**.
+3. Paste the **AppKey** and the **AppSecret**, then click **Connect**.
+4. The agent shows **Connected to DingTalk**. The bot is now listening over its own Stream connection.
+
+<Callout type="warning">
+Both credentials must be from the **same** DingTalk app, and that app maps to exactly **one** agent. Connecting an app that's already connected to a different agent or workspace is refused. To move an app to another agent, disconnect it first; re-connecting an agent with a **new** app updates that agent's bot in place.
+</Callout>
+
+<Callout type="info">
+Setting this up for **multiple agents**? Repeat the whole flow once per agent — each agent gets its own DingTalk app and its own AppKey / AppSecret, and they show up as separate bots in your organization.
+</Callout>
+
+## What the integration does
+
+| Surface | Behavior |
+|---|---|
+| **Agent → Integrations** | Owners and admins see **Connect DingTalk**; once connected it flips to a **Connected to DingTalk** badge with a **Disconnect** control. |
+| **DM the bot** | A workspace member messages the bot in a 1:1 chat. The conversation becomes a Multica [chat](/chat) session with the agent; every message is read. |
+| **@-mention in a group** | Add the bot to the group and @-mention it. Only the mentioning message is read — the bot does not listen to the whole group. |
+| **`/issue` command** | Starting a message with `/issue <what to file>` hands your description to the agent, which authors a well-formed Multica issue (proper title + structured description) in the background, attributed to you. It replies with an acknowledgement — not an issue number — and you get a Multica notification when the issue is ready. It starts no agent chat turn. |
+| **`/new` command** | Starting a message with `/new <your message>` opens a **new chat** — a fresh session with no prior context, titled from your message. The old conversation stays in the agent's chat history; new messages continue in the new one. Use it to switch topics or clear a long thread. |
+| **Reply** | The agent's answer is posted back into the same 1:1 chat or group. |
+
+## Use the bot (members)
+
+### First message: link your account
+
+The first time you @-mention or DM the bot, it replies with a **link your account** prompt pointing at the in-product **/dingtalk/bind** page. Tap the link, sign in to Multica, and your DingTalk identity is bound to your Multica membership — this is what lets the agent act as you (e.g. `/issue` files under your name). The link is single-use and expires in about 15 minutes; just message the bot again for a fresh one.
+
+<Callout type="warning">
+Only **members of the workspace** can use the bot. If you aren't a member, or you skip the identity link, the bot won't run — your message is dropped (recorded for audit, without its contents).
+</Callout>
+
+### Chat and commands
+
+- **In a group** — add the bot to the group, then `@your-bot <your message>`. Re-mention it for each follow-up (the bot only reads messages that mention it).
+- **In a 1:1 chat** — open the bot and message it directly; no mention needed, every message is read.
+- **File an issue** — send `/issue the login redirect is broken on Safari`; describe it in your own words (extra lines are fine). The agent turns it into a well-formed issue in the background; you get an acknowledgement right away and a Multica notification when it lands.
+- **Start fresh** — send `/new <your message>` to open a new chat with no prior context (the old one stays in history), then keep chatting normally.
+
+## Manage and disconnect
+
+Workspace-wide management lives in **Settings → Integrations**:
+
+- **Connected bots** lists every bot in the workspace and the agent each is bound to (visible to all members).
+- **Disconnect** is **owner / admin only**. It stops the bot from receiving DingTalk messages and tears down its connection; the installation record is kept for audit, and you can re-connect later.
+
+## Permissions
+
+- **Connect / disconnect** require workspace **owner** or **admin**.
+- **Talking to the bot** requires being a workspace member with a linked DingTalk identity. Everyone else is dropped.
+- Message bodies for dropped messages are never stored — only a drop reason, for audit.
+
+## Self-host setup
+
+On Multica Cloud the integration is already available — skip this section.
+
+For self-host, DingTalk is **off until you set an at-rest encryption key**. The key encrypts each app's AppKey + AppSecret before they touch the database. BYO needs **no** OAuth client id/secret at the deployment level — each installation uses the credentials the admin pastes.
+
+1. Generate a 32-byte key and set it on the API server:
+
+   ```dotenv
+   MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
+   ```
+
+   For example: `openssl rand -base64 32`.
+
+2. Restart the API. Until the key is set, **Settings → Integrations** shows a "DingTalk integration not enabled" notice and the **Connect DingTalk** entry points stay hidden.
+
+<Callout type="info">
+The key must decode to exactly 32 bytes — `openssl rand -base64 32` does this. Treat it as a long-lived secret: rotating or losing it makes already-stored credentials undecryptable, forcing every bot to reconnect. The "link your account" link is built from your web app URL (`MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN`) — a normal deployment already sets this, so there's nothing extra to configure.
+</Callout>
+
+## Next
+
+- [Chat integrations](/channels) — how the channel engine, sessions, and authorization work
+- [Agents](/agents) · [Chat](/chat) · [Issues](/issues)
+- [Environment variables](/environment-variables) — full self-host configuration reference

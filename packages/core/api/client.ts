@@ -117,6 +117,10 @@ import type {
   ListSlackInstallationsResponse,
   RegisterSlackBYORequest,
   RedeemSlackBindingTokenResponse,
+  DingTalkInstallation,
+  ListDingTalkInstallationsResponse,
+  RegisterDingTalkBYORequest,
+  RedeemDingTalkBindingTokenResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -202,6 +206,12 @@ import {
   CreateBillingCheckoutSessionResponseSchema,
   BillingCheckoutSessionStatusSchema,
   CreateBillingPortalSessionResponseSchema,
+  DingTalkInstallationSchema,
+  ListDingTalkInstallationsResponseSchema,
+  RedeemDingTalkBindingTokenResponseSchema,
+  EMPTY_DINGTALK_INSTALLATION,
+  EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -2323,5 +2333,61 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ token }),
     });
+  }
+
+  // DingTalk integration
+  async listDingTalkInstallations(
+    workspaceId: string,
+  ): Promise<ListDingTalkInstallationsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/dingtalk/installations`);
+    return parseWithFallback(
+      raw,
+      ListDingTalkInstallationsResponseSchema,
+      EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/dingtalk/installations" },
+    );
+  }
+
+  // registerDingTalkBYO performs a bring-your-own-app install: the admin pastes
+  // the AppKey (client id) + AppSecret (client secret) of the DingTalk
+  // Stream-mode robot they created, and the backend validates + persists it,
+  // returning the new installation.
+  async registerDingTalkBYO(
+    workspaceId: string,
+    agentId: string,
+    body: RegisterDingTalkBYORequest,
+  ): Promise<DingTalkInstallation> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/dingtalk/install/byo?${search.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    return parseWithFallback(raw, DingTalkInstallationSchema, EMPTY_DINGTALK_INSTALLATION, {
+      endpoint: "POST /api/workspaces/:id/dingtalk/install/byo",
+    });
+  }
+
+  async deleteDingTalkInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/dingtalk/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async redeemDingTalkBindingToken(
+    token: string,
+  ): Promise<RedeemDingTalkBindingTokenResponse> {
+    const raw = await this.fetch<unknown>(`/api/dingtalk/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    return parseWithFallback(
+      raw,
+      RedeemDingTalkBindingTokenResponseSchema,
+      EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE,
+      { endpoint: "POST /api/dingtalk/binding/redeem" },
+    );
   }
 }

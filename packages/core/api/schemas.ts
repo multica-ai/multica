@@ -14,6 +14,9 @@ import type {
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
+  DingTalkInstallation,
+  ListDingTalkInstallationsResponse,
+  RedeemDingTalkBindingTokenResponse,
   GroupedIssuesResponse,
   InboxWorkspaceUnread,
   ListIssuesResponse,
@@ -1106,4 +1109,56 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
+};
+
+// DingTalk installation management. Fields the older desktop build may not know
+// about stay optional/defaulted so a newer backend never fails the parse. See
+// CLAUDE.md → API Compatibility.
+export const DingTalkInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  app_id: z.string().default(""),
+  robot_code: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default("revoked"),
+  installed_at: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_DINGTALK_INSTALLATION: DingTalkInstallation = {
+  id: "",
+  workspace_id: "",
+  agent_id: "",
+  app_id: "",
+  robot_code: "",
+  installer_user_id: "",
+  status: "revoked",
+  installed_at: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListDingTalkInstallationsResponseSchema = z.object({
+  installations: z.array(DingTalkInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE: ListDingTalkInstallationsResponse = {
+  installations: [],
+  configured: false,
+};
+
+export const RedeemDingTalkBindingTokenResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  installation_id: z.string().default(""),
+  dingtalk_user_id: z.string().default(""),
+}).loose();
+
+export const EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE: RedeemDingTalkBindingTokenResponse = {
+  workspace_id: "",
+  installation_id: "",
+  dingtalk_user_id: "",
 };

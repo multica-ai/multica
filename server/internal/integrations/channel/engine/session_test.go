@@ -41,6 +41,8 @@ type fakeSessionQueries struct {
 	messages        []string
 	touched         int
 	replyTargets    int
+	rebinds         int
+	lastTitle       string // title of the most recent CreateChatSession
 	lastConfig      []byte // config of the most recent CreateChannelChatSessionBinding
 
 	prevMessage      *string // GetMostRecentUserChatMessage result; nil → ErrNoRows
@@ -64,10 +66,17 @@ func (f *fakeSessionQueries) GetChannelChatSessionBinding(_ context.Context, arg
 	return db.ChannelChatSessionBinding{}, pgx.ErrNoRows
 }
 
-func (f *fakeSessionQueries) CreateChatSession(_ context.Context, _ db.CreateChatSessionParams) (db.ChatSession, error) {
+func (f *fakeSessionQueries) CreateChatSession(_ context.Context, arg db.CreateChatSessionParams) (db.ChatSession, error) {
 	f.nextSession++
 	f.createdSessions++
+	f.lastTitle = arg.Title
 	return db.ChatSession{ID: uid(f.nextSession)}, nil
+}
+
+func (f *fakeSessionQueries) RebindChannelChatSession(_ context.Context, arg db.RebindChannelChatSessionParams) error {
+	f.rebinds++
+	f.bindings[bindKey(arg.InstallationID, arg.ChannelChatID)] = arg.ChatSessionID
+	return nil
 }
 
 func (f *fakeSessionQueries) CreateChannelChatSessionBinding(_ context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error) {
@@ -109,6 +118,61 @@ func (f *fakeSessionQueries) MarkChannelInboundDedupProcessed(context.Context, d
 
 func newTestSession(f SessionQueries) *ChatSession {
 	return newChatSessionWith(f, fakeTxStarter{}, channel.TypeFeishu, SessionTitles{Group: "G", Direct: "D", Fallback: "F"})
+}
+
+func TestEnsureSession_FreshRotatesToNewSession(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	base := EnsureSessionInput{InstallationID: uid(1), BindingKey: "chatA", ChatType: channel.ChatTypeP2P, Sender: uid(7)}
+
+	id1, err := s.EnsureSession(context.Background(), base)
+	if err != nil {
+		t.Fatalf("first contact: %v", err)
+	}
+	// A Fresh call on the SAME binding must mint a new session and repoint the
+	// binding to it, not reuse the old one.
+	fresh := base
+	fresh.Fresh = true
+	id2, err := s.EnsureSession(context.Background(), fresh)
+	if err != nil {
+		t.Fatalf("fresh: %v", err)
+	}
+	if id1 == id2 {
+		t.Fatal("/new must rotate to a brand-new chat_session")
+	}
+	if f.rebinds != 1 {
+		t.Fatalf("expected exactly one rebind, got %d", f.rebinds)
+	}
+	// A subsequent normal message resumes the rotated-in session, not the old one.
+	id3, err := s.EnsureSession(context.Background(), base)
+	if err != nil {
+		t.Fatalf("reuse after fresh: %v", err)
+	}
+	if id3 != id2 {
+		t.Fatalf("normal message after /new must reuse the fresh session, got %v want %v", id3, id2)
+	}
+}
+
+func TestEnsureSession_TitleSeedAndFallback(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	in := EnsureSessionInput{InstallationID: uid(1), BindingKey: "chatA", ChatType: channel.ChatTypeP2P, Sender: uid(7), Title: "let's talk weather"}
+	if _, err := s.EnsureSession(context.Background(), in); err != nil {
+		t.Fatalf("seeded title: %v", err)
+	}
+	if f.lastTitle != "let's talk weather" {
+		t.Fatalf("session title should use the seed, got %q", f.lastTitle)
+	}
+
+	f2 := newFake()
+	s2 := newTestSession(f2)
+	blank := EnsureSessionInput{InstallationID: uid(2), BindingKey: "chatB", ChatType: channel.ChatTypeP2P, Sender: uid(7)}
+	if _, err := s2.EnsureSession(context.Background(), blank); err != nil {
+		t.Fatalf("blank title: %v", err)
+	}
+	if f2.lastTitle != "D" { // SessionTitles.Direct fallback
+		t.Fatalf("empty seed should fall back to platform default, got %q", f2.lastTitle)
+	}
 }
 
 func TestEnsureSession_CreateThenReuse(t *testing.T) {
