@@ -754,8 +754,9 @@ func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
 //     Content-Range / 416 correctly out of the box.
 //   - Non-seekable backend (S3/MinIO streaming body): advertise
 //     Accept-Ranges and implement single-range requests by hand
-//     (serveProxyRange). Multi-range is not supported — a single range is
-//     enough for browser/downloader resume.
+//     (serveProxyRange). Multi-range is not implemented on this path; per
+//     RFC 7233 it is ignored and the full body is served (200), matching the
+//     seekable path's successful outcome rather than failing with 416.
 func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string) {
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
@@ -802,8 +803,36 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	w.Header().Set("Accept-Ranges", "bytes")
 
 	rangeHeader := strings.TrimSpace(r.Header.Get("Range"))
-	if rangeHeader == "" || total < 0 {
-		// No Range (or unknown total): stream the whole object.
+
+	// Decide how to respond. We serve the full body (200) when there is no Range,
+	// when the total size is unknown, or when the Range uses a form this
+	// forward-only path does not implement (multi-range). A well-formed but
+	// out-of-bounds bytes range is the only case that yields 416.
+	serveFull := rangeHeader == "" || total < 0
+	var start, length int64
+	if !serveFull {
+		var outcome rangeParseOutcome
+		start, length, outcome = parseSingleByteRange(rangeHeader, total)
+		switch outcome {
+		case rangeUnsupported:
+			// Unsupported Range form (multi-range). RFC 7233 requires an
+			// unsupported Range to be *ignored* and the full representation served
+			// (200), not rejected with 416. This also keeps the non-seekable path
+			// from diverging from the seekable http.ServeContent path, which
+			// answers multi-range with a successful 206 multipart: both backends
+			// now return complete, correctly-labeled data instead of one silently
+			// turning a resumable download into a hard 416 failure.
+			serveFull = true
+		case rangeUnsatisfiable:
+			// Well-formed bytes range that does not overlap the content. RFC 7233
+			// §4.4 requires the total in the Content-Range of a 416 response.
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+			writeError(w, http.StatusRequestedRangeNotSatisfiable, "requested range not satisfiable")
+			return
+		}
+	}
+
+	if serveFull {
 		if total >= 0 {
 			w.Header().Set("Content-Length", strconv.FormatInt(total, 10))
 		}
@@ -813,21 +842,22 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 		return
 	}
 
-	start, length, ok := parseSingleByteRange(rangeHeader, total)
-	if !ok {
-		// Unsatisfiable / malformed range. RFC 7233 §4.4 requires the total in
-		// the Content-Range of a 416 response.
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
-		writeError(w, http.StatusRequestedRangeNotSatisfiable, "requested range not satisfiable")
-		return
-	}
-
-	// Forward-only reader: discard the bytes before `start` before copying the
-	// requested interval. Wasteful for large offsets but correct; seekable
-	// backends never reach here (they take the ServeContent path above).
+	// Satisfiable single range → 206. Forward-only reader: discard the bytes
+	// before `start` before copying the requested interval. Wasteful for large
+	// offsets but correct; seekable backends never reach here (they take the
+	// ServeContent path above).
 	if start > 0 {
 		if _, err := io.CopyN(io.Discard, reader, start); err != nil {
+			// The skip failed BEFORE any response header was written. We must send
+			// an explicit error status here: a bare `return` would let net/http
+			// emit its default 200 OK + empty body, which a resuming client reads
+			// as "Range ignored, here is the whole file" — silently turning a
+			// transient storage read error into a corrupt/empty download and
+			// defeating the very resume feature this path implements. (A copy
+			// failure AFTER WriteHeader below can only be logged: the 206 status
+			// is already on the wire and cannot be revised.)
 			slog.Error("failed to skip to range start for attachment", "id", uuidToString(att.ID), "error", err)
+			writeError(w, http.StatusBadGateway, "failed to read attachment range")
 			return
 		}
 	}
@@ -839,27 +869,58 @@ func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db
 	}
 }
 
+// rangeParseOutcome classifies how serveProxyRange must respond to a `Range`
+// header on the forward-only (non-seekable) proxy path. It exists so the three
+// distinct HTTP outcomes required by RFC 7233 are not collapsed into a single
+// bool — collapsing them is exactly what caused a multi-range request to fail
+// with 416 on this path while succeeding (206 multipart) on the seekable path.
+type rangeParseOutcome int
+
+const (
+	// rangeSatisfiable: a single byte range we can serve as 206 + Content-Range.
+	rangeSatisfiable rangeParseOutcome = iota
+	// rangeUnsatisfiable: a well-formed request that cannot be served as a range
+	// we support — a bytes range that does not overlap the content (start at/after
+	// EOF, reversed), or a malformed / unknown-unit Range. stdlib http.ServeContent
+	// answers all of these with 416, so replying 416 here keeps the two backends
+	// aligned; the caller adds `Content-Range: bytes */<total>` (RFC 7233 §4.4).
+	rangeUnsatisfiable
+	// rangeUnsupported: a valid Range form this hand-rolled path does not
+	// implement — currently only multi-range (`bytes=a-b,c-d`). Per RFC 7233 an
+	// unsupported Range MUST be ignored (serve the full body, 200), NOT rejected.
+	// The seekable path serves multi-range as a successful 206 multipart, so
+	// falling back to a full 200 here keeps both paths returning complete data.
+	rangeUnsupported
+)
+
 // parseSingleByteRange parses a single-range HTTP `Range` header value against
-// a known content size and returns the absolute start offset and byte length
-// of the interval to serve. ok is false for malformed, multi-range, or
-// unsatisfiable inputs (the caller then replies 416).
+// a known content size and returns the absolute start offset, byte length, and
+// an outcome telling the caller which status to send (see rangeParseOutcome).
+// start/length are only meaningful when the outcome is rangeSatisfiable.
 //
 // Supported forms (RFC 7233): `bytes=start-end`, `bytes=start-` (to EOF), and
 // `bytes=-suffix` (final suffix bytes). An out-of-range end is clamped to the
-// last byte; a start at or past EOF is unsatisfiable.
-func parseSingleByteRange(header string, size int64) (start, length int64, ok bool) {
+// last byte; a start at or past EOF is unsatisfiable. Multi-range is a valid but
+// unsupported form and yields rangeUnsupported (ignored → full body).
+func parseSingleByteRange(header string, size int64) (start, length int64, outcome rangeParseOutcome) {
 	const prefix = "bytes="
 	if !strings.HasPrefix(header, prefix) {
-		return 0, 0, false
+		// Unknown / missing unit (e.g. "items=0-10", "0-100"). stdlib
+		// http.ServeContent rejects these with 416; mirror that here.
+		return 0, 0, rangeUnsatisfiable
 	}
 	spec := strings.TrimSpace(header[len(prefix):])
-	// Only single-range is implemented; reject comma-separated multi-range.
-	if spec == "" || strings.Contains(spec, ",") {
-		return 0, 0, false
+	if spec == "" {
+		return 0, 0, rangeUnsatisfiable
+	}
+	// Multi-range is a valid HTTP form we do not implement on this forward-only
+	// path; ignore it and serve the full body rather than failing with 416.
+	if strings.Contains(spec, ",") {
+		return 0, 0, rangeUnsupported
 	}
 	dash := strings.IndexByte(spec, '-')
 	if dash < 0 {
-		return 0, 0, false
+		return 0, 0, rangeUnsatisfiable
 	}
 	startStr := strings.TrimSpace(spec[:dash])
 	endStr := strings.TrimSpace(spec[dash+1:])
@@ -867,34 +928,34 @@ func parseSingleByteRange(header string, size int64) (start, length int64, ok bo
 	if startStr == "" {
 		// Suffix form: bytes=-N → final N bytes.
 		if endStr == "" || size == 0 {
-			return 0, 0, false
+			return 0, 0, rangeUnsatisfiable
 		}
 		n, err := strconv.ParseInt(endStr, 10, 64)
 		if err != nil || n <= 0 {
-			return 0, 0, false
+			return 0, 0, rangeUnsatisfiable
 		}
 		if n > size {
 			n = size
 		}
-		return size - n, n, true
+		return size - n, n, rangeSatisfiable
 	}
 
 	s, err := strconv.ParseInt(startStr, 10, 64)
 	if err != nil || s < 0 || s >= size {
 		// A start at or beyond EOF is unsatisfiable.
-		return 0, 0, false
+		return 0, 0, rangeUnsatisfiable
 	}
 	if endStr == "" {
-		return s, size - s, true
+		return s, size - s, rangeSatisfiable
 	}
 	e, err := strconv.ParseInt(endStr, 10, 64)
 	if err != nil || e < s {
-		return 0, 0, false
+		return 0, 0, rangeUnsatisfiable
 	}
 	if e >= size {
 		e = size - 1
 	}
-	return s, e - s + 1, true
+	return s, e - s + 1, rangeSatisfiable
 }
 
 func (h *Handler) setAttachmentPreviewSecurityHeaders(w http.ResponseWriter) {

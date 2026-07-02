@@ -159,6 +159,46 @@ func (m *seekableMockStorage) GetReader(_ context.Context, key string) (io.ReadC
 	return nil, fmt.Errorf("seekableMockStorage GetReader: key not found: %q", key)
 }
 
+// failingReader serves up to failAfter bytes and then errors on the next Read.
+// It is forward-only (no Seek), so proxyAttachmentDownload routes it through the
+// manual serveProxyRange path — letting us simulate a storage backend that dies
+// mid-stream while the handler is discarding bytes to reach a Range start.
+type failingReader struct {
+	data      []byte
+	pos       int
+	failAfter int
+}
+
+func (f *failingReader) Read(p []byte) (int, error) {
+	if f.pos >= f.failAfter {
+		return 0, fmt.Errorf("simulated storage read failure at offset %d", f.pos)
+	}
+	if remaining := f.failAfter - f.pos; len(p) > remaining {
+		p = p[:remaining]
+	}
+	n := copy(p, f.data[f.pos:])
+	f.pos += n
+	return n, nil
+}
+
+func (f *failingReader) Close() error { return nil }
+
+// failingMockStorage returns a failingReader so the non-seekable Range path hits
+// a read error partway through the skip-to-start CopyN.
+type failingMockStorage struct {
+	mockStorage
+	failAfter int
+}
+
+func (m *failingMockStorage) GetReader(_ context.Context, key string) (io.ReadCloser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if data, ok := m.files[key]; ok {
+		return &failingReader{data: data, failAfter: m.failAfter}, nil
+	}
+	return nil, fmt.Errorf("failingMockStorage GetReader: key not found: %q", key)
+}
+
 func TestUploadFileForeignWorkspace(t *testing.T) {
 	origStorage := testHandler.Storage
 	testHandler.Storage = &mockStorage{}
@@ -464,6 +504,29 @@ func newDownloadRequest(t *testing.T, attachmentID, workspaceID string) (*http.R
 	rctx.URLParams.Add("id", attachmentID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	return req, httptest.NewRecorder()
+}
+
+// requireAttachmentDownloadHeaders asserts the security / disposition headers
+// that proxyAttachmentDownload sets before choosing a Range branch are preserved
+// on the final response, whether it went out as a 206 (partial) or a full 200.
+// The Range/206 work must not drop Content-Type / Content-Disposition /
+// Cache-Control: no-store / X-Content-Type-Options / preview CSP — the seekable
+// (http.ServeContent) path in particular could silently clobber them.
+func requireAttachmentDownloadHeaders(t *testing.T, header http.Header, wantFilename string) {
+	t.Helper()
+	if got, want := header.Get("Content-Type"), "application/octet-stream"; got != want {
+		t.Fatalf("Content-Type = %q, want %q", got, want)
+	}
+	if got := header.Get("Content-Disposition"); got == "" || !strings.Contains(got, wantFilename) {
+		t.Fatalf("Content-Disposition = %q, want non-empty containing %q", got, wantFilename)
+	}
+	if got, want := header.Get("Cache-Control"), "no-store"; got != want {
+		t.Fatalf("Cache-Control = %q, want %q", got, want)
+	}
+	if got, want := header.Get("X-Content-Type-Options"), "nosniff"; got != want {
+		t.Fatalf("X-Content-Type-Options = %q, want %q", got, want)
+	}
+	requireAttachmentPreviewCSP(t, header)
 }
 
 func requireAttachmentPreviewCSP(t *testing.T, header http.Header, extraAncestors ...string) {
@@ -955,6 +1018,7 @@ func runProxyRangeMatrix(t *testing.T, newStore func() storage.Storage) {
 		if got := w.Body.Bytes(); !bytes.Equal(got, body[:1024]) {
 			t.Fatalf("partial body mismatch: len(got)=%d, want first 1024 bytes of object", len(got))
 		}
+		requireAttachmentDownloadHeaders(t, w.Header(), "sample.bin")
 	})
 
 	t.Run("MidStreamRangeMatchesFullSlice", func(t *testing.T) {
@@ -1020,6 +1084,7 @@ func runProxyRangeMatrix(t *testing.T, newStore func() storage.Storage) {
 		if got := w.Body.Bytes(); !bytes.Equal(got, body) {
 			t.Fatalf("full body mismatch: len(got)=%d, want %d", len(got), len(body))
 		}
+		requireAttachmentDownloadHeaders(t, w.Header(), "sample.bin")
 	})
 }
 
@@ -1035,41 +1100,122 @@ func TestDownloadAttachment_ProxyRange_NonSeekable(t *testing.T) {
 	runProxyRangeMatrix(t, func() storage.Storage { return &mockStorage{} })
 }
 
+// TestDownloadAttachment_NonSeekableRangeSkipFailureReturns502 is the must-fix
+// regression (RAS-31 ①). When the storage read fails while the handler is
+// skipping forward to the Range start — before any response header is written —
+// it must reply with an honest 502, NOT net/http's default 200 OK + empty body.
+// A resuming client reads that default 200 as "Range ignored, this is the full
+// object", silently turning a transient storage error into a corrupt/empty
+// download and defeating the resume feature itself.
+func TestDownloadAttachment_NonSeekableRangeSkipFailureReturns502(t *testing.T) {
+	body := rangeBody()
+	// Die at offset 500, well before the Range start (1000), so the failure lands
+	// inside the skip CopyN rather than the payload copy.
+	store := &failingMockStorage{failAfter: 500}
+	id := setProxyDownloadHandler(t, store, body)
+
+	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	req.Header.Set("Range", "bytes=1000-1999")
+	testHandler.DownloadAttachment(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502; body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "failed to read attachment range") {
+		t.Fatalf("502 body should carry the honest error, got %q", w.Body.String())
+	}
+	if got := w.Body.Bytes(); bytes.Contains(got, body[:64]) {
+		t.Fatalf("502 response must not leak object bytes; got %q", got)
+	}
+}
+
+// TestDownloadAttachment_NonSeekableMultiRangeServesFull200 is the should-fix
+// (RAS-31 ②). A multi-range request the non-seekable path cannot serve must be
+// ignored and answered with a full 200 (RFC 7233), not 416. Paired with the
+// seekable test below, this proves the two backends no longer disagree on
+// success vs failure for the same multi-range request.
+func TestDownloadAttachment_NonSeekableMultiRangeServesFull200(t *testing.T) {
+	body := rangeBody()
+	id := setProxyDownloadHandler(t, &mockStorage{}, body)
+
+	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	req.Header.Set("Range", "bytes=0-10,20-30")
+	testHandler.DownloadAttachment(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (multi-range ignored); body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Body.Bytes(); !bytes.Equal(got, body) {
+		t.Fatalf("multi-range should serve full body: len(got)=%d, want %d", len(got), len(body))
+	}
+	if got := w.Header().Get("Content-Range"); got != "" {
+		t.Fatalf("full 200 response must not carry Content-Range, got %q", got)
+	}
+	if got, want := w.Header().Get("Accept-Ranges"), "bytes"; got != want {
+		t.Fatalf("Accept-Ranges = %q, want %q", got, want)
+	}
+	requireAttachmentDownloadHeaders(t, w.Header(), "sample.bin")
+}
+
+// TestDownloadAttachment_SeekableMultiRangeServes206 documents the other half of
+// the ②-divergence: the seekable (http.ServeContent) path answers the same
+// multi-range request with a successful 206 multipart. Together with the
+// non-seekable 200 test above, it shows neither backend fails the request with
+// 416 — the divergence the maintainer flagged is gone.
+func TestDownloadAttachment_SeekableMultiRangeServes206(t *testing.T) {
+	body := rangeBody()
+	id := setProxyDownloadHandler(t, &seekableMockStorage{}, body)
+
+	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	req.Header.Set("Range", "bytes=0-10,20-30")
+	testHandler.DownloadAttachment(w, req)
+
+	if w.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d, want 206 (multipart); body len=%d", w.Code, w.Body.Len())
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "multipart/byteranges") {
+		t.Fatalf("Content-Type = %q, want multipart/byteranges", ct)
+	}
+}
+
 func TestParseSingleByteRange(t *testing.T) {
 	const size = 1000
 	tests := []struct {
-		name       string
-		header     string
-		size       int64
-		wantOK     bool
-		wantStart  int64
-		wantLength int64
+		name        string
+		header      string
+		size        int64
+		wantOutcome rangeParseOutcome
+		wantStart   int64
+		wantLength  int64
 	}{
-		{"full closed range", "bytes=0-1023", 2000, true, 0, 1024},
-		{"open-ended range", "bytes=500-", size, true, 500, 500},
-		{"end clamped to eof", "bytes=900-5000", size, true, 900, 100},
-		{"suffix range", "bytes=-200", size, true, 800, 200},
-		{"suffix larger than size clamps", "bytes=-5000", size, true, 0, 1000},
-		{"single byte", "bytes=0-0", size, true, 0, 1},
-		{"last byte", "bytes=999-999", size, true, 999, 1},
-		{"start at eof unsatisfiable", "bytes=1000-1001", size, false, 0, 0},
-		{"start past eof unsatisfiable", "bytes=2000-", size, false, 0, 0},
-		{"end before start", "bytes=500-499", size, false, 0, 0},
-		{"missing unit", "0-100", size, false, 0, 0},
-		{"multi-range rejected", "bytes=0-10,20-30", size, false, 0, 0},
-		{"empty spec", "bytes=", size, false, 0, 0},
-		{"no dash", "bytes=100", size, false, 0, 0},
-		{"suffix zero", "bytes=-0", size, false, 0, 0},
-		{"negative garbage", "bytes=abc-def", size, false, 0, 0},
-		{"suffix on empty object", "bytes=-100", 0, false, 0, 0},
+		{"full closed range", "bytes=0-1023", 2000, rangeSatisfiable, 0, 1024},
+		{"open-ended range", "bytes=500-", size, rangeSatisfiable, 500, 500},
+		{"end clamped to eof", "bytes=900-5000", size, rangeSatisfiable, 900, 100},
+		{"suffix range", "bytes=-200", size, rangeSatisfiable, 800, 200},
+		{"suffix larger than size clamps", "bytes=-5000", size, rangeSatisfiable, 0, 1000},
+		{"single byte", "bytes=0-0", size, rangeSatisfiable, 0, 1},
+		{"last byte", "bytes=999-999", size, rangeSatisfiable, 999, 1},
+		{"start at eof unsatisfiable", "bytes=1000-1001", size, rangeUnsatisfiable, 0, 0},
+		{"start past eof unsatisfiable", "bytes=2000-", size, rangeUnsatisfiable, 0, 0},
+		{"end before start", "bytes=500-499", size, rangeUnsatisfiable, 0, 0},
+		{"missing unit", "0-100", size, rangeUnsatisfiable, 0, 0},
+		// Multi-range is a valid-but-unsupported form: ignored → full body (200),
+		// not 416. This is the must-fix that stops the non-seekable path from
+		// diverging from the seekable (ServeContent) path on multi-range.
+		{"multi-range ignored", "bytes=0-10,20-30", size, rangeUnsupported, 0, 0},
+		{"empty spec", "bytes=", size, rangeUnsatisfiable, 0, 0},
+		{"no dash", "bytes=100", size, rangeUnsatisfiable, 0, 0},
+		{"suffix zero", "bytes=-0", size, rangeUnsatisfiable, 0, 0},
+		{"negative garbage", "bytes=abc-def", size, rangeUnsatisfiable, 0, 0},
+		{"suffix on empty object", "bytes=-100", 0, rangeUnsatisfiable, 0, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			start, length, ok := parseSingleByteRange(tc.header, tc.size)
-			if ok != tc.wantOK {
-				t.Fatalf("ok = %v, want %v (start=%d length=%d)", ok, tc.wantOK, start, length)
+			start, length, outcome := parseSingleByteRange(tc.header, tc.size)
+			if outcome != tc.wantOutcome {
+				t.Fatalf("outcome = %v, want %v (start=%d length=%d)", outcome, tc.wantOutcome, start, length)
 			}
-			if !ok {
+			if outcome != rangeSatisfiable {
 				return
 			}
 			if start != tc.wantStart || length != tc.wantLength {
