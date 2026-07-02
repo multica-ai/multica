@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildLaunchdPlist,
   classifyIssue,
+  defaultReportDir,
+  defaultReportPath,
+  evaluateCommandResult,
   extractRecheckCommands,
+  inferSemanticAssertion,
   isSafeRecheckCommand,
   isRetryableMulticaError,
+  normalizeReportRow,
   normalizeIssueRecord,
   parseArgs,
   summarizeReport,
@@ -116,23 +122,124 @@ test("normalizes issue rows with updated_at as the documented done_at fallback",
 
 test("summarizes survival rate as pass divided by total evaluated issues", () => {
   const summary = summarizeReport([
-    { pass: true },
-    { pass: false },
-    { pass: true },
+    { status: "pass" },
+    { status: "fail" },
+    { status: "pass" },
+    { status: "skipped" },
   ]);
 
   assert.deepEqual(summary, {
-    total: 3,
+    total: 4,
+    evaluated: 3,
+    skipped: 1,
     pass: 2,
     fail: 1,
     survival_rate: 0.6667,
   });
 });
 
+test("normalizes legacy boolean rows into tri-state rows", () => {
+  assert.deepEqual(normalizeReportRow({ pass: true }), { status: "pass", pass: true });
+  assert.deepEqual(normalizeReportRow({ pass: false }), { status: "fail", pass: false });
+  assert.deepEqual(normalizeReportRow({ status: "skipped" }), { status: "skipped", pass: null });
+});
+
+test("requires semantic assertions instead of accepting bare exit zero", () => {
+  assert.deepEqual(inferSemanticAssertion("date", ""), {
+    kind: "unsupported",
+    reason: "no semantic assertion can be inferred",
+  });
+
+  const bareExitZero = evaluateCommandResult({
+    command: "date",
+    assertion: inferSemanticAssertion("date", ""),
+    result: { exitCode: 0, stdoutTail: "Thu Jul 2", stderrTail: "", timedOut: false },
+  });
+  assert.equal(bareExitZero.status, "skipped");
+  assert.equal(bareExitZero.pass, null);
+});
+
+test("infers concrete grep assertions from command output", () => {
+  const assertion = inferSemanticAssertion("launchctl print gui/501/com.multica.daemon | rg 'state = running'", "");
+  assert.deepEqual(assertion, {
+    kind: "stdout_matches",
+    pattern: "state = running",
+    reason: "pipeline grep/rg pattern must appear in stdout",
+  });
+
+  const pass = evaluateCommandResult({
+    command: "launchctl print gui/501/com.multica.daemon | rg 'state = running'",
+    assertion,
+    result: { exitCode: 0, stdoutTail: "state = running", stderrTail: "", timedOut: false },
+  });
+  assert.equal(pass.status, "pass");
+
+  const fail = evaluateCommandResult({
+    command: "launchctl print gui/501/com.multica.daemon | rg 'state = running'",
+    assertion,
+    result: { exitCode: 0, stdoutTail: "state = waiting", stderrTail: "", timedOut: false },
+  });
+  assert.equal(fail.status, "fail");
+});
+
+test("infers standalone grep and rg assertions", () => {
+  assert.deepEqual(inferSemanticAssertion("rg 'rows_touched' /tmp/report.json", ""), {
+    kind: "stdout_matches",
+    pattern: "rows_touched",
+    reason: "standalone grep/rg pattern must appear in stdout",
+  });
+});
+
+test("prefers semantically assertable commands over unsupported high-score reads", async () => {
+  const { pickRecheckCommand } = await import("./done-stability-survival-rate.mjs");
+  const commands = [
+    "multica issue get WS-1309 --output json",
+    "rg 'rows_touched' /tmp/report.json",
+  ];
+
+  assert.equal(pickRecheckCommand(commands, ""), "rg 'rows_touched' /tmp/report.json");
+});
+
 test("accepts the default unlimited recheck cap", () => {
   const options = parseArgs([]);
 
   assert.equal(options.maxRechecks, Infinity);
+});
+
+test("defaults report output to durable multica reports directory", () => {
+  assert.match(defaultReportDir(), /\/\.multica\/reports\/done-stability-survival-rate$/);
+  assert.match(
+    defaultReportPath(new Date("2026-07-02T00:00:00Z")),
+    /\/\.multica\/reports\/done-stability-survival-rate\/done-stability-survival-rate-2026-07-02\.json$/,
+  );
+
+  const options = parseArgs(["--output-dir", "/tmp/done-stability"]);
+  assert.equal(options.output, "/tmp/done-stability/done-stability-survival-rate-2026-07-02.json");
+});
+
+test("builds launchd plist for daily retained reports", () => {
+  const plist = buildLaunchdPlist({
+    label: "ai.multica.done-stability-survival-rate",
+    nodePath: "/usr/local/bin/node",
+    scriptPath: "/repo/scripts/done-stability-survival-rate.mjs",
+    outputDir: "/Users/example/.multica/reports/done-stability-survival-rate",
+    logDir: "/Users/example/.multica/logs",
+    hour: 9,
+    minute: 15,
+    environment: {
+      PATH: "/opt/homebrew/bin:/usr/bin:/bin",
+      OPENAI_API_KEY: "",
+    },
+  });
+
+  assert.match(plist, /<key>Label<\/key>\s*<string>ai\.multica\.done-stability-survival-rate<\/string>/);
+  assert.match(plist, /<string>--output-dir<\/string>/);
+  assert.match(plist, /<string>\/Users\/example\/\.multica\/reports\/done-stability-survival-rate<\/string>/);
+  assert.match(plist, /<key>Hour<\/key>\s*<integer>9<\/integer>/);
+  assert.match(plist, /<key>Minute<\/key>\s*<integer>15<\/integer>/);
+  assert.match(plist, /<key>EnvironmentVariables<\/key>/);
+  assert.match(plist, /<key>PATH<\/key>\s*<string>\/opt\/homebrew\/bin:\/usr\/bin:\/bin<\/string>/);
+  assert.match(plist, /<key>OPENAI_API_KEY<\/key>\s*<string><\/string>/);
 });
 
 test("treats CLI deadline timeouts as retryable", () => {

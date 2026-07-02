@@ -2,6 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -272,28 +273,48 @@ export function normalizeIssueRecord(issue) {
   };
 }
 
+export function normalizeReportRow(row) {
+  if (row.status === "pass") return { status: "pass", pass: true };
+  if (row.status === "fail") return { status: "fail", pass: false };
+  if (row.status === "skipped") return { status: "skipped", pass: null };
+  if (row.pass === true) return { status: "pass", pass: true };
+  if (row.pass === false) return { status: "fail", pass: false };
+  return { status: "skipped", pass: null };
+}
+
 export function summarizeReport(rows) {
-  const total = rows.length;
-  const pass = rows.filter((row) => row.pass === true).length;
-  const fail = total - pass;
+  const normalized = rows.map(normalizeReportRow);
+  const total = normalized.length;
+  const skipped = normalized.filter((row) => row.status === "skipped").length;
+  const evaluated = total - skipped;
+  const pass = normalized.filter((row) => row.status === "pass").length;
+  const fail = normalized.filter((row) => row.status === "fail").length;
   return {
     total,
+    evaluated,
+    skipped,
     pass,
     fail,
-    survival_rate: total === 0 ? null : Number((pass / total).toFixed(4)),
+    survival_rate: evaluated === 0 ? null : Number((pass / evaluated).toFixed(4)),
   };
 }
 
 export function parseArgs(argv) {
-  const stamp = new Date().toISOString().slice(0, 10);
+  const now = new Date();
   const options = {
     days: 7,
     pageSize: 100,
     commentThreads: 10,
     timeoutMs: 30_000,
-    output: resolve(repoRoot, "artifacts", `done-stability-survival-rate-${stamp}.json`),
+    output: defaultReportPath(now),
+    outputDir: defaultReportDir(),
     dryRun: false,
     maxRechecks: Infinity,
+    installLaunchd: false,
+    loadLaunchd: false,
+    launchdHour: 9,
+    launchdMinute: 15,
+    launchdLabel: "ai.multica.done-stability-survival-rate",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -308,12 +329,24 @@ export function parseArgs(argv) {
       return { ...options, help: true };
     }
     if (arg === "--output") options.output = resolve(process.cwd(), next());
+    else if (arg === "--output-dir") {
+      options.outputDir = resolve(process.cwd(), next());
+      options.output = reportPathForDir(options.outputDir, now);
+    }
     else if (arg === "--days") options.days = Number(next());
     else if (arg === "--page-size") options.pageSize = Number(next());
     else if (arg === "--comment-threads") options.commentThreads = Number(next());
     else if (arg === "--timeout-ms") options.timeoutMs = Number(next());
     else if (arg === "--max-rechecks") options.maxRechecks = Number(next());
     else if (arg === "--dry-run") options.dryRun = true;
+    else if (arg === "--install-launchd") options.installLaunchd = true;
+    else if (arg === "--load-launchd") {
+      options.installLaunchd = true;
+      options.loadLaunchd = true;
+    }
+    else if (arg === "--launchd-hour") options.launchdHour = Number(next());
+    else if (arg === "--launchd-minute") options.launchdMinute = Number(next());
+    else if (arg === "--launchd-label") options.launchdLabel = next();
     else throw new Error(`unknown argument: ${arg}`);
   }
 
@@ -326,22 +359,157 @@ export function parseArgs(argv) {
   if (options.maxRechecks !== Infinity && (!Number.isFinite(options.maxRechecks) || options.maxRechecks < 0)) {
     throw new Error("--max-rechecks must be >= 0");
   }
+  if (!Number.isInteger(options.launchdHour) || options.launchdHour < 0 || options.launchdHour > 23) {
+    throw new Error("--launchd-hour must be between 0 and 23");
+  }
+  if (!Number.isInteger(options.launchdMinute) || options.launchdMinute < 0 || options.launchdMinute > 59) {
+    throw new Error("--launchd-minute must be between 0 and 59");
+  }
 
   return options;
+}
+
+export function defaultReportDir() {
+  return resolve(homedir(), ".multica", "reports", "done-stability-survival-rate");
+}
+
+export function defaultReportPath(date = new Date()) {
+  return reportPathForDir(defaultReportDir(), date);
+}
+
+function reportPathForDir(outputDir, date = new Date()) {
+  const stamp = date.toISOString().slice(0, 10);
+  return resolve(outputDir, `done-stability-survival-rate-${stamp}.json`);
 }
 
 function printHelp() {
   console.log(`Usage: node scripts/done-stability-survival-rate.mjs [options]
 
 Options:
-  --output <path>          JSON report path (default: artifacts/done-stability-survival-rate-YYYY-MM-DD.json)
+  --output <path>          JSON report path (overrides --output-dir)
+  --output-dir <path>      Retained JSON report directory (default: ~/.multica/reports/done-stability-survival-rate)
   --days <n>               Stable age threshold in days, using issue.updated_at fallback (default: 7)
   --page-size <n>          multica issue list page size (default: 100)
   --comment-threads <n>    recent comment threads to scan per candidate (default: 10)
   --timeout-ms <n>         per-command timeout (default: 30000)
   --max-rechecks <n>       cap evaluated target issues after filtering (default: unlimited)
   --dry-run                do not execute recheck commands; report what would run
+  --install-launchd        Install daily macOS LaunchAgent for retained reports
+  --load-launchd           Install and bootstrap the LaunchAgent immediately
+  --launchd-hour <0-23>    LaunchAgent daily hour (default: 9)
+  --launchd-minute <0-59>  LaunchAgent daily minute (default: 15)
 `);
+}
+
+export function buildLaunchdPlist({
+  label,
+  nodePath,
+  scriptPath,
+  outputDir,
+  logDir,
+  hour,
+  minute,
+  environment = {},
+}) {
+  const args = [nodePath, scriptPath, "--output-dir", outputDir];
+  const environmentEntries = Object.entries(environment)
+    .filter(([key, value]) => key && typeof value === "string")
+    .map(([key, value]) => `    <key>${escapeXml(key)}</key>\n    <string>${escapeXml(value)}</string>`)
+    .join("\n");
+  const environmentBlock = environmentEntries
+    ? `  <key>EnvironmentVariables</key>\n  <dict>\n${environmentEntries}\n  </dict>\n`
+    : "";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${escapeXml(label)}</string>
+  <key>ProgramArguments</key>
+  <array>
+${args.map((arg) => `    <string>${escapeXml(arg)}</string>`).join("\n")}
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${escapeXml(repoRoot)}</string>
+${environmentBlock}  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>${hour}</integer>
+    <key>Minute</key>
+    <integer>${minute}</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${escapeXml(resolve(logDir, `${label}.out.log`))}</string>
+  <key>StandardErrorPath</key>
+  <string>${escapeXml(resolve(logDir, `${label}.err.log`))}</string>
+</dict>
+</plist>
+`;
+}
+
+function escapeXml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+async function installLaunchd(options) {
+  const launchAgentsDir = resolve(homedir(), "Library", "LaunchAgents");
+  const logDir = resolve(homedir(), ".multica", "logs");
+  const plistPath = resolve(launchAgentsDir, `${options.launchdLabel}.plist`);
+  const scriptPath = resolve(repoRoot, "scripts", "done-stability-survival-rate.mjs");
+  mkdirSync(launchAgentsDir, { recursive: true });
+  mkdirSync(logDir, { recursive: true });
+  mkdirSync(options.outputDir, { recursive: true });
+  const plist = buildLaunchdPlist({
+    label: options.launchdLabel,
+    nodePath: process.execPath,
+    scriptPath,
+    outputDir: options.outputDir,
+    logDir,
+    hour: options.launchdHour,
+    minute: options.launchdMinute,
+    environment: defaultLaunchdEnvironment(),
+  });
+  writeFileSync(plistPath, plist);
+  console.log(plistPath);
+
+  if (options.loadLaunchd) {
+    const uid = process.getuid?.();
+    if (!Number.isInteger(uid)) throw new Error("--load-launchd requires a numeric uid");
+    const cleanEnv = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" };
+    await runProcess("launchctl", ["bootout", `gui/${uid}`, plistPath], { timeoutMs: 10_000, env: cleanEnv });
+    const loaded = await runProcess("launchctl", ["bootstrap", `gui/${uid}`, plistPath], {
+      timeoutMs: 10_000,
+      env: cleanEnv,
+    });
+    if (loaded.exitCode !== 0) {
+      throw new Error(`launchctl bootstrap failed: ${loaded.stderrTail || loaded.stdoutTail}`);
+    }
+  }
+}
+
+function defaultLaunchdEnvironment() {
+  const pathEntries = [
+    dirname(process.execPath),
+    resolve(homedir(), ".local", "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+  ];
+  return {
+    PATH: [...new Set(pathEntries)].join(":"),
+    OPENAI_API_KEY: "",
+    OPENAI_BASE_URL: "",
+    MULTICA_SKILL_TRACE_ENABLED: "",
+    MULTICA_SKILL_TRACE_PATH: "",
+  };
 }
 
 export function isRetryableMulticaError(message) {
@@ -438,20 +606,155 @@ function commandScore(command) {
   return 10;
 }
 
-function pickRecheckCommand(commands) {
+export function pickRecheckCommand(commands, context = "") {
   const safeCommands = commands
-    .map((command) => ({ command, safety: isSafeRecheckCommand(command) }))
+    .map((command) => ({
+      command,
+      safety: isSafeRecheckCommand(command),
+      assertion: inferSemanticAssertion(command, context),
+    }))
     .filter((entry) => entry.safety.safe)
     .sort((a, b) => commandScore(b.command) - commandScore(a.command));
-  return safeCommands[0]?.command ?? "";
+  return (
+    safeCommands.find((entry) => entry.assertion.kind !== "unsupported")?.command
+    ?? safeCommands[0]?.command
+    ?? ""
+  );
+}
+
+export function inferSemanticAssertion(command, context) {
+  const raw = String(command ?? "").trim();
+  const surrounding = String(context ?? "").toLowerCase();
+  const grepPattern = extractPipelineSearchPattern(raw);
+  if (grepPattern) {
+    return {
+      kind: "stdout_matches",
+      pattern: grepPattern,
+      reason: "pipeline grep/rg pattern must appear in stdout",
+    };
+  }
+
+  const standaloneSearchPattern = extractStandaloneSearchPattern(raw);
+  if (standaloneSearchPattern) {
+    return {
+      kind: "stdout_matches",
+      pattern: standaloneSearchPattern,
+      reason: "standalone grep/rg pattern must appear in stdout",
+    };
+  }
+
+  const pgrepPattern = extractPgrepPattern(raw);
+  if (pgrepPattern) {
+    if (/无进程|不存在|不应存在|not running|no process|absent|gone/.test(surrounding)) {
+      return {
+        kind: "stdout_absent",
+        pattern: pgrepPattern,
+        reason: "concrete process pattern must be absent",
+      };
+    }
+    return {
+      kind: "stdout_matches",
+      pattern: pgrepPattern,
+      reason: "concrete process pattern must appear in stdout",
+    };
+  }
+
+  return {
+    kind: "unsupported",
+    reason: "no semantic assertion can be inferred",
+  };
+}
+
+function extractPipelineSearchPattern(command) {
+  const segments = String(command ?? "")
+    .split(/\s*\|\s*/)
+    .map((segment) => segment.trim());
+  for (const segment of segments.slice(1)) {
+    if (/^(?:rg|grep)\b/.test(segment)) {
+      return firstSearchArgument(segment);
+    }
+  }
+  return "";
+}
+
+function extractPgrepPattern(command) {
+  const trimmed = String(command ?? "").trim();
+  if (!/^pgrep\b/.test(trimmed)) return "";
+  return firstSearchArgument(trimmed);
+}
+
+function extractStandaloneSearchPattern(command) {
+  const trimmed = String(command ?? "").trim();
+  if (!/^(?:rg|grep)\b/.test(trimmed)) return "";
+  return firstSearchArgument(trimmed);
+}
+
+function firstSearchArgument(segment) {
+  const tokens = shellWords(segment);
+  for (const token of tokens.slice(1)) {
+    if (!token || token.startsWith("-")) continue;
+    return token;
+  }
+  return "";
+}
+
+function shellWords(input) {
+  const words = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match;
+  while ((match = re.exec(String(input ?? ""))) !== null) {
+    words.push(match[1] ?? match[2] ?? match[3] ?? "");
+  }
+  return words;
+}
+
+export function evaluateCommandResult({ command, assertion, result }) {
+  const actualAssertion = assertion ?? inferSemanticAssertion(command, "");
+  if (!actualAssertion || actualAssertion.kind === "unsupported") {
+    return {
+      status: "skipped",
+      pass: null,
+      reason: actualAssertion?.reason ?? "no semantic assertion can be inferred",
+    };
+  }
+
+  const output = `${result?.stdoutTail ?? ""}\n${result?.stderrTail ?? ""}`;
+  if (result?.timedOut) {
+    return { status: "fail", pass: false, reason: "command timed out" };
+  }
+
+  if (actualAssertion.kind === "stdout_matches") {
+    const matched = output.includes(actualAssertion.pattern);
+    return {
+      status: result?.exitCode === 0 && matched ? "pass" : "fail",
+      pass: result?.exitCode === 0 && matched,
+      reason: matched
+        ? `matched required output: ${actualAssertion.pattern}`
+        : `missing required output: ${actualAssertion.pattern}`,
+    };
+  }
+
+  if (actualAssertion.kind === "stdout_absent") {
+    const matched = output.includes(actualAssertion.pattern);
+    return {
+      status: result?.exitCode === 0 && !matched ? "pass" : "fail",
+      pass: result?.exitCode === 0 && !matched,
+      reason: matched
+        ? `forbidden output was present: ${actualAssertion.pattern}`
+        : `forbidden output absent: ${actualAssertion.pattern}`,
+    };
+  }
+
+  return { status: "skipped", pass: null, reason: "unsupported semantic assertion" };
 }
 
 async function evaluateIssue(rawIssue, options) {
   const issue = normalizeIssueRecord(rawIssue);
   const surface = await fetchIssueSurface(issue.id, options.commentThreads);
   const commentText = surface.comments.map((comment) => String(comment.content ?? "")).join("\n\n");
-  const commands = extractRecheckCommands(`${issue.title}\n\n${issue.description}\n\n${commentText}`);
-  const recheckCmd = pickRecheckCommand(commands);
+  const context = `${issue.title}\n\n${issue.description}\n\n${commentText}`;
+  const commands = extractRecheckCommands(context);
+  const recheckCmd = pickRecheckCommand(commands, context);
 
   if (!recheckCmd) {
     return {
@@ -463,12 +766,33 @@ async function evaluateIssue(rawIssue, options) {
       done_at: issue.done_at,
       done_at_source: issue.done_at_source,
       recheck_cmd: "",
-      pass: false,
+      status: "skipped",
+      pass: null,
       evidence: {
         reason: surface.comment_error
           ? `no safe recheck command found; comment read failed: ${surface.comment_error}`
           : "no safe recheck command found in issue description or recent comments",
         extracted_commands: commands,
+      },
+    };
+  }
+
+  const assertion = inferSemanticAssertion(recheckCmd, `${issue.title}\n\n${issue.description}\n\n${commentText}`);
+  if (assertion.kind === "unsupported") {
+    return {
+      issue: {
+        id: issue.id,
+        identifier: issue.identifier,
+        title: issue.title,
+      },
+      done_at: issue.done_at,
+      done_at_source: issue.done_at_source,
+      recheck_cmd: recheckCmd,
+      semantic_assertion: assertion,
+      status: "skipped",
+      pass: null,
+      evidence: {
+        reason: assertion.reason,
       },
     };
   }
@@ -483,7 +807,9 @@ async function evaluateIssue(rawIssue, options) {
       done_at: issue.done_at,
       done_at_source: issue.done_at_source,
       recheck_cmd: recheckCmd,
-      pass: true,
+      semantic_assertion: assertion,
+      status: "skipped",
+      pass: null,
       evidence: {
         reason: "dry run; command was not executed",
       },
@@ -494,6 +820,7 @@ async function evaluateIssue(rawIssue, options) {
   const result = await runProcess("/bin/zsh", ["-lc", recheckCmd], {
     timeoutMs: options.timeoutMs,
   });
+  const semantic = evaluateCommandResult({ command: recheckCmd, assertion, result });
   return {
     issue: {
       id: issue.id,
@@ -503,8 +830,11 @@ async function evaluateIssue(rawIssue, options) {
     done_at: issue.done_at,
     done_at_source: issue.done_at_source,
     recheck_cmd: recheckCmd,
-    pass: result.exitCode === 0,
+    semantic_assertion: assertion,
+    status: semantic.status,
+    pass: semantic.pass,
     evidence: {
+      assertion_result: semantic.reason,
       exit_code: result.exitCode,
       timed_out: result.timedOut,
       duration_ms: Date.now() - startedAt,
@@ -514,11 +844,11 @@ async function evaluateIssue(rawIssue, options) {
   };
 }
 
-async function runProcess(command, args, { timeoutMs }) {
+async function runProcess(command, args, { timeoutMs, env = process.env }) {
   return new Promise((resolvePromise) => {
     const child = spawn(command, args, {
       cwd: process.cwd(),
-      env: process.env,
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -589,7 +919,7 @@ async function buildReport(options) {
     row.classification = classification;
     rows.push(row);
     console.error(
-      `[${rows.length}/${candidates.length}] ${row.issue.identifier || row.issue.id}: ${row.pass ? "pass" : "fail"}`,
+      `[${rows.length}/${candidates.length}] ${row.issue.identifier || row.issue.id}: ${row.status}`,
     );
   }
 
@@ -616,13 +946,17 @@ async function main() {
     printHelp();
     return;
   }
+  if (options.installLaunchd) {
+    await installLaunchd(options);
+    return;
+  }
 
   const report = await buildReport(options);
   mkdirSync(dirname(options.output), { recursive: true });
   writeFileSync(options.output, `${JSON.stringify(report, null, 2)}\n`);
   console.log(options.output);
   console.log(
-    `done_total=${report.source.done_total} evaluated=${report.summary.total} pass=${report.summary.pass} fail=${report.summary.fail} survival_rate=${report.summary.survival_rate}`,
+    `done_total=${report.source.done_total} total=${report.summary.total} evaluated=${report.summary.evaluated} skipped=${report.summary.skipped} pass=${report.summary.pass} fail=${report.summary.fail} survival_rate=${report.summary.survival_rate}`,
   );
 }
 
