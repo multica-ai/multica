@@ -1142,6 +1142,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 
 	// Check this before EmptyClaim: a lost claim response moves the task out of
 	// `queued`, so the empty-queued cache cannot represent recoverability.
+	// 1. 尝试找回并重新锁定由于断连等原因“超时未响应”的僵尸任务
 	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
 		RuntimeID:         runtimeID,
 		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
@@ -1155,7 +1156,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 			"runtime_id", runtimeKey,
 			"agent_id", util.UUIDToString(stale.AgentID),
 		)
-		return &stale, nil
+		return &stale, nil // 如果有僵尸任务，直接原地复活交还给当前 Runtime 续跑
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		outcome = "error_reclaim_dispatched"
@@ -1176,6 +1177,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	preSelectVersion := s.EmptyClaim.CurrentVersion(ctx, runtimeKey)
 
 	t0 := time.Now()
+	// 2. 批量查出当前所有处于排队中（queued）可以被当前 Runtime 领取的候选任务
 	tasks, err := s.Queries.ListQueuedClaimCandidatesByRuntime(ctx, runtimeID)
 	listMs = time.Since(t0).Milliseconds()
 	listCount = len(tasks)
@@ -1184,6 +1186,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		return nil, fmt.Errorf("list queued claim candidates: %w", err)
 	}
 
+	// 如果候选池是空的，说明没有任务要执行
 	if len(tasks) == 0 {
 		s.EmptyClaim.MarkEmpty(ctx, runtimeKey, preSelectVersion)
 		outcome = "empty_db"
@@ -1193,6 +1196,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	loopStart := time.Now()
 	triedAgents := map[string]struct{}{}
 	var claimed *db.AgentTaskQueue
+	// 3. 遍历刚才捞出来的候选任务列表
 	for _, candidate := range tasks {
 		agentKey := util.UUIDToString(candidate.AgentID)
 		if _, seen := triedAgents[agentKey]; seen {
@@ -1201,12 +1205,14 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		triedAgents[agentKey] = struct{}{}
 		tried++
 
+		// 👈 【致命追踪点】：调用了底层的特定抢单方法
 		task, err := s.ClaimTask(ctx, candidate.AgentID)
 		if err != nil {
 			loopMs = time.Since(loopStart).Milliseconds()
 			outcome = "error_claim"
 			return nil, err
 		}
+		// 👈 【安全检查点】：只有当抢到的任务，其 RuntimeID 真正属于当前发起请求的 Runtime 时，才算成功！
 		if task != nil && task.RuntimeID == runtimeID {
 			claimed = task
 			break

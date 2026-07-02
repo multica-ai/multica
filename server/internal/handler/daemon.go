@@ -1267,6 +1267,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	authMs = time.Since(start).Milliseconds()
 
 	claimStart := time.Now()
+	// 👈 核心关键点：调用底层的 TaskService 开始真正执行“抢占/认领”任务的逻辑
 	task, err := h.TaskService.ClaimTaskForRuntime(r.Context(), parseUUID(runtimeID))
 	claimMs = time.Since(claimStart).Milliseconds()
 	if err != nil {
