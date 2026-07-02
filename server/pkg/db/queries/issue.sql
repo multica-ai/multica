@@ -84,12 +84,8 @@ INSERT INTO issue (
     sqlc.narg('stage')
 ) RETURNING *;
 
--- name: GetIssueByNumber :one
-SELECT * FROM issue
-WHERE workspace_id = $1 AND number = $2;
-
 -- name: GetIssueByTeamKeyAndNumber :one
--- TODO(migration-b): remove null-team fallback after numbering cutover
+-- TODO(migration-b): remove null-team fallback after migration 132 has run in production
 SELECT i.* FROM issue i
 LEFT JOIN workspace_team issue_team ON issue_team.id = i.team_id AND issue_team.workspace_id = i.workspace_id
 LEFT JOIN workspace_team default_team ON default_team.workspace_id = i.workspace_id AND default_team.is_default

@@ -57,11 +57,6 @@ UPDATE workspace SET
 WHERE id = $1
 RETURNING *;
 
--- name: IncrementIssueCounter :one
-UPDATE workspace SET issue_counter = issue_counter + 1
-WHERE id = $1
-RETURNING issue_counter;
-
 -- name: LockWorkspaceForDelete :one
 -- Taken first by DeleteWorkspace, before it enumerates the workspace's chat
 -- sessions. LockChatSessionsByWorkspace only covers sessions that exist when it
