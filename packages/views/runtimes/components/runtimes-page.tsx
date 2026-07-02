@@ -32,6 +32,7 @@ import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
+import { OpenClawConfigDialog } from "./openclaw-config-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import {
@@ -690,6 +691,11 @@ function MachineDetail({
 }) {
   const { t } = useT("runtimes");
   const healthLabel = useHealthLabel();
+  // Layer 2 of #3875: the "Choose OpenClaw instance..." dialog. State lives
+  // here in MachineDetail (next to the RuntimeList instance whose row menu
+  // triggers it) rather than in RuntimesPage, because each MachineDetail is
+  // a distinct machine and may have its own daemon profile to address.
+  const [showOpenclawDialog, setShowOpenclawDialog] = useState(false);
 
   if (!machine) {
     return (
@@ -795,6 +801,12 @@ function MachineDetail({
         runtimes={machine.runtimes}
         updatableIds={updatableIds}
         now={now}
+        onConfigureOpenclaw={() => setShowOpenclawDialog(true)}
+      />
+
+      <OpenClawConfigDialog
+        open={showOpenclawDialog}
+        onClose={() => setShowOpenclawDialog(false)}
       />
     </main>
   );
