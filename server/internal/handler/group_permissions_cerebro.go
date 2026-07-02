@@ -47,6 +47,9 @@ type GroupPermissionsInvoker interface {
 	ResolveGroupIDs(ctx context.Context, workspaceID, userID pgtype.UUID) ([]pgtype.UUID, error)
 	CanCreateRuntime(ctx context.Context, viewer GroupPermissionsViewer, workspaceID pgtype.UUID) (bool, error)
 	CanCreateAgent(ctx context.Context, viewer GroupPermissionsViewer, workspaceID pgtype.UUID) (bool, error)
+	// CanCreateMemory gates the Cognee memory feature (FIR-1794 Gate 2) — same
+	// shape as CanCreateAgent, default deny.
+	CanCreateMemory(ctx context.Context, viewer GroupPermissionsViewer, workspaceID pgtype.UUID) (bool, error)
 	CanUseRuntime(ctx context.Context, viewer GroupPermissionsViewer, runtimeID pgtype.UUID) (bool, error)
 	// JEH-1009 PR 4 — allowlist enforcement on `TriggerAgent` / `ListAgents` /
 	// `ListRuntimes` / `ListProjects` / `ListIssues`. `VisibleXxxIDs` return
@@ -134,7 +137,7 @@ func (h *Handler) cerebroRequireCapability(w http.ResponseWriter, r *http.Reques
 	// the handler fails fast with 500 — we'd rather see this in a test than
 	// ship a backdoor that silently grants an unknown right.
 	switch capability {
-	case "create_runtime", "create_agent":
+	case "create_runtime", "create_agent", "create_memory":
 		// known
 	default:
 		writeError(w, http.StatusInternalServerError, "unknown capability")
@@ -158,6 +161,8 @@ func (h *Handler) cerebroRequireCapability(w http.ResponseWriter, r *http.Reques
 		allowed, err = h.GroupPermissions.CanCreateRuntime(r.Context(), viewer, wsUUID)
 	case "create_agent":
 		allowed, err = h.GroupPermissions.CanCreateAgent(r.Context(), viewer, wsUUID)
+	case "create_memory":
+		allowed, err = h.GroupPermissions.CanCreateMemory(r.Context(), viewer, wsUUID)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")

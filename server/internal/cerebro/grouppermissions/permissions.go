@@ -38,6 +38,11 @@ const (
 	// filters (FIR-1659 Fase 4). Read by the savedfilters handler via
 	// HasCerebroCapability; granted per group on the group detail page.
 	CapabilityCreateSharedFilters = "create_shared_filters"
+	// CapabilityCreateMemory gates who may use Cognee-backed memory. Default
+	// deny — even with the cerebro_memory feature flag on for the workspace, a
+	// user must belong to a group that has been granted this capability before
+	// they can enable or write memory. Granted per group on the group detail page.
+	CapabilityCreateMemory = "create_memory"
 )
 
 // knownCapabilities mirrors the DB-side CHECK; validating in Go gives a clean
@@ -46,6 +51,7 @@ var knownCapabilities = map[string]struct{}{
 	CapabilityCreateRuntime:       {},
 	CapabilityCreateAgent:         {},
 	CapabilityCreateSharedFilters: {},
+	CapabilityCreateMemory:        {},
 }
 
 // IsKnownCapability returns true for the small fixed set of capability
@@ -304,6 +310,12 @@ func (s *Service) CanCreateRuntime(ctx context.Context, viewer Viewer, workspace
 // CanCreateAgent — same shape as CanCreateRuntime but for agent creation.
 func (s *Service) CanCreateAgent(ctx context.Context, viewer Viewer, workspaceID pgtype.UUID) (bool, error) {
 	return s.hasCapability(ctx, viewer, workspaceID, CapabilityCreateAgent)
+}
+
+// CanCreateMemory — same shape as CanCreateAgent but for memory use. Default
+// deny: only an admin or a member of a group granted create_memory passes.
+func (s *Service) CanCreateMemory(ctx context.Context, viewer Viewer, workspaceID pgtype.UUID) (bool, error) {
+	return s.hasCapability(ctx, viewer, workspaceID, CapabilityCreateMemory)
 }
 
 func (s *Service) hasCapability(ctx context.Context, viewer Viewer, workspaceID pgtype.UUID, capability string) (bool, error) {

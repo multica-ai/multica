@@ -27,6 +27,7 @@ type stubGroupPermissions struct {
 	resolve     func(ctx context.Context, ws, user pgtype.UUID) ([]pgtype.UUID, error)
 	canRT       func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error)
 	canAG       func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error)
+	canMem      func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error)
 	canUseR     func(ctx context.Context, viewer GroupPermissionsViewer, rt pgtype.UUID) (bool, error)
 	canUseA     func(ctx context.Context, viewer GroupPermissionsViewer, ag pgtype.UUID) (bool, error)
 	canSeeProj  func(ctx context.Context, viewer GroupPermissionsViewer, pr pgtype.UUID) (bool, error)
@@ -55,6 +56,13 @@ func (s *stubGroupPermissions) CanCreateAgent(ctx context.Context, viewer GroupP
 		return false, nil
 	}
 	return s.canAG(ctx, viewer, ws)
+}
+
+func (s *stubGroupPermissions) CanCreateMemory(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error) {
+	if s.canMem == nil {
+		return false, nil
+	}
+	return s.canMem(ctx, viewer, ws)
 }
 
 func (s *stubGroupPermissions) CanUseRuntime(ctx context.Context, viewer GroupPermissionsViewer, rt pgtype.UUID) (bool, error) {

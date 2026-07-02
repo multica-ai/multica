@@ -259,6 +259,8 @@ type Handler struct {
 	CapabilityConnections AgentCapabilityConnectionsLister
 	// CEREBRO-PATCH(handler-api-connection-brief): FIR-2388 shared api-connection resolver for the claim brief.
 	APIConnectionBrief CerebroAPIConnectionBriefResolver
+	// CEREBRO-PATCH(handler-agent-memory-settings): FIR-1794 Gate 3 — per-(user,agent) memory read/write toggle.
+	AgentMemory AgentMemorySettingsService
 }
 
 // CustomStatusResolver is the upstream-side seam for the cerebro status-model

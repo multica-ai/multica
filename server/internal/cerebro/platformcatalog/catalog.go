@@ -429,6 +429,20 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:           "create_memory",
+		Title:         "Use agent memory",
+		Category:      CategoryAgents,
+		Description:   "Whether a group may use Cognee-backed memory: turn a per-(user,agent) memory read/write toggle on or off. FIR-1794 Gate 3 — default deny, so a group must be explicitly granted this before any member can enable memory for an agent, even when the workspace-wide memory flag is on.",
+		DescriptionZh: "群组是否可使用 Cognee 支持的记忆功能：开启或关闭按（用户，agent）设置的记忆读写开关。FIR-1794 Gate 3——默认拒绝，即使工作区级记忆开关已打开，群组也必须被明确授予此能力后，成员才能为某个 agent 启用记忆。",
+		Ops: []string{
+			"PUT /api/agents/{id}/memory-settings",
+		},
+		Evidence: []string{
+			"server/internal/cerebro/grouppermissions/permissions.go:45",   // CapabilityCreateMemory
+			"server/internal/handler/agent_memory_settings_cerebro.go:118", // cerebroRequireCapability("create_memory") on the PUT route
+		},
+	},
+	{
 		Key:           "trigger_other_agent",
 		Title:         "Trigger someone else's agent",
 		Category:      CategoryAgents,

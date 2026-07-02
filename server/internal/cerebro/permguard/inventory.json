@@ -29,6 +29,10 @@
       "gate": "agent_context_manage"
     },
     {
+      "id": "PUT /api/agents/{id}/memory-settings",
+      "gate": "cerebro_capability:create_memory"
+    },
+    {
       "id": "DELETE /api/artifact-folders/{id}",
       "gate": "workspace_member"
     },

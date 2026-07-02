@@ -17,6 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { createAgentToolsTabs } from "@multica/cerebro-agent-tools/views"; // CEREBRO-PATCH(agent-tools-tab): tab extension
 import { createAgentCapabilitiesTabs } from "@multica/cerebro-agent-capabilities/views"; // CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 tab extension
+import { createAgentMemoryTabs } from "@multica/cerebro-agent-memory/views"; // CEREBRO-PATCH(agent-memory-tab): FIR-1794 tab extension
 import {
   AgentTabSections,
   type AgentTabSectionItem,
@@ -107,6 +108,7 @@ const detailTabs = [
   ...coreDetailTabs,
   ...createAgentToolsTabs(), // CEREBRO-PATCH(agent-tools-tab): Cerebro-owned tab
   ...createAgentCapabilitiesTabs(), // CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 Cerebro-owned tab
+  ...createAgentMemoryTabs(), // CEREBRO-PATCH(agent-memory-tab): FIR-1794 Cerebro-owned tab
 ];
 
 interface AgentOverviewPaneProps {

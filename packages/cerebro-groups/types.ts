@@ -66,7 +66,8 @@ export const cerebroGroupMemberListSchema = z.array(cerebroGroupMemberSchema);
 export type CerebroGroupCapability =
   | "create_runtime"
   | "create_agent"
-  | "create_shared_filters";
+  | "create_shared_filters"
+  | "create_memory";
 
 export interface CerebroGroupCapabilityRow {
   group_id: string;

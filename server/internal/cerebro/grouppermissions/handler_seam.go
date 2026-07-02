@@ -44,6 +44,11 @@ func (a *HandlerSeam) CanCreateAgent(ctx context.Context, viewer handler.GroupPe
 	return a.Service.CanCreateAgent(ctx, toServiceViewer(viewer), workspaceID)
 }
 
+// CanCreateMemory — same shape as CanCreateAgent (FIR-1794 Gate 2).
+func (a *HandlerSeam) CanCreateMemory(ctx context.Context, viewer handler.GroupPermissionsViewer, workspaceID pgtype.UUID) (bool, error) {
+	return a.Service.CanCreateMemory(ctx, toServiceViewer(viewer), workspaceID)
+}
+
 // CanUseRuntime checks the runtime allowlist for the resolved viewer.
 func (a *HandlerSeam) CanUseRuntime(ctx context.Context, viewer handler.GroupPermissionsViewer, runtimeID pgtype.UUID) (bool, error) {
 	return a.Service.CanUseRuntime(ctx, toServiceViewer(viewer), runtimeID)

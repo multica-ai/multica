@@ -501,6 +501,14 @@ type CerebroChannelAgentSetting struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroUserAgentMemorySetting struct {
+	UserID         pgtype.UUID        `json:"user_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	CanReadMemory  bool               `json:"can_read_memory"`
+	CanWriteMemory bool               `json:"can_write_memory"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroChannelArchived struct {
 	ChannelID  pgtype.UUID        `json:"channel_id"`
 	UserID     pgtype.UUID        `json:"user_id"`

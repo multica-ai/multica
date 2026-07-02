@@ -24,6 +24,8 @@ import (
 	cerebroaccount "github.com/multica-ai/multica/server/internal/cerebro/account"
 	// CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin handler import
 	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
+	// CEREBRO-PATCH(cerebro-agent-memory-routes): FIR-1794 Gate 3 per-(user,agent) memory toggle service import.
+	cerebroagentmemory "github.com/multica-ai/multica/server/internal/cerebro/agentmemory"
 	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-auth): Cloudflare Access verifier
 	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
 	// CEREBRO-PATCH(comments-move-to-subissue): JEH-1309 move-comment-to-sub-issue handler import.
@@ -541,6 +543,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// dispatch always-listening agents in channels.
 	channelListenSvc := cerebrochannels.New(cerebroQueries, queries, h.TaskService, bus)
 	h.ChannelListen = channelListenSvc
+	// CEREBRO-PATCH(cerebro-agent-memory-wire): FIR-1794 Gate 3 — per-(user,agent) memory read/write toggle service.
+	h.AgentMemory = cerebroagentmemory.New(cerebroQueries, bus)
 	h.ChannelPerms = channelListenSvc // CEREBRO-PATCH(router-channel-perms): TECH-3698 per-channel permission gate (rename/add-remove/leave).
 	// CEREBRO-PATCH(cerebro-presence-typing-routes): TECH-3422 member presence (heartbeat + sweeper) and typing relay for the inbox Slack-block.
 	presenceHandler := cerebropresence.NewHandler(cerebropresence.NewTracker(cerebropresence.DefaultTTL), bus)
@@ -989,6 +993,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			agentToolScope := middleware.AllowTaskScopeForAgent("id")
 			r.With(agentToolScope).Get("/api/agents/{id}/tools", h.ListAgentTools)
 			r.With(agentToolScope).Post("/api/agents/{id}/tools/{name}/invoke", h.InvokeAgentTool)
+			// CEREBRO-PATCH(agent-memory-settings-routes): FIR-1794 Gate 3 — the
+			// caller's own per-agent memory read/write toggle. Human-only (RequireUserScope):
+			// a user turns memory on for themselves on one agent, never a task token.
+			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/memory-settings", h.GetAgentMemorySettings)
+			r.With(middleware.RequireUserScope).Put("/api/agents/{id}/memory-settings", h.SetAgentMemorySettings)
 			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess)  // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
 			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/tool-grants", h.AddAgentToolGrant)      // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
 			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/tool-grants", h.RemoveAgentToolGrant) // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.

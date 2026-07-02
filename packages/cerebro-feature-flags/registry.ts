@@ -8,6 +8,9 @@
 
 export type CerebroFlagKey =
   | "cerebro_channels"
+  // Memory: admin master switch for the Cognee-backed agent/member memory.
+  // Default OFF — an admin enables it for the workspace before anyone can use it.
+  | "cerebro_memory"
   | "cerebro_chat_message_cost"
   // FIR-39: per-comment cost badge on issues + channels (mirror of the chat
   // per-reply badge from FIR-31). One run can post multiple comments; cost is
@@ -343,6 +346,7 @@ export type CerebroFlagKey =
  */
 export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_channels: true,
+  cerebro_memory: false, // Off by default; admin enables memory per workspace.
   cerebro_channel_permissions: true, // TECH-3698
   cerebro_chat_message_cost: true,
   cerebro_comment_cost: true,
@@ -1004,6 +1008,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Enable workspace groups: named collections of members used by Cerebro features such as scoped resources.",
+  },
+  {
+    key: "cerebro_memory",
+    label: "Agent & member memory",
+    group: "agents",
+    description:
+      "Master switch for Cognee-backed memory (private + company + repo). Off by default; an admin turns it on for the workspace. Even when on, using memory still requires the create_memory permission, and private (member/agent) memory must be enabled per agent by each user for themselves. Company memory is readable by all agents once the switch is on.",
   },
   {
     key: "cerebro_runtime_pause",

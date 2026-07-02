@@ -23,6 +23,8 @@ func TestIsKnownCapability(t *testing.T) {
 	}{
 		{CapabilityCreateRuntime, true},
 		{CapabilityCreateAgent, true},
+		{CapabilityCreateSharedFilters, true},
+		{CapabilityCreateMemory, true},
 		{"", false},
 		{"manage_billing", false},
 		{"CREATE_RUNTIME", false}, // case-sensitive
