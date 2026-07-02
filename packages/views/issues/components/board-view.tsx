@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, memo, type HTMLAttributes } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -19,12 +19,15 @@ import type { AssigneeGroupedIssuesFilter, IssueSortParam, MyIssuesFilter } from
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
 import { BoardCardContent } from "./board-card";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import type { ChildProgress } from "./list-row";
 import { useDragSettle } from "./use-drag-settle";
+import { useNavigation } from "../../navigation";
+import { useIssueKeyboardNavigation } from "../hooks";
 import { useT } from "../../i18n";
 import {
   type DragMoveUpdates,
@@ -141,6 +144,8 @@ export function BoardView({
   projectId?: string;
 }) {
   const { t } = useT("issues");
+  const router = useNavigation();
+  const paths = useWorkspacePaths();
   const grouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
@@ -250,6 +255,19 @@ export function BoardView({
   if (!isDraggingRef.current && !isSettlingRef.current) {
     issueMapRef.current = issueMap;
   }
+
+  const keyboardIssueIds = useMemo(
+    () => groups.flatMap((group) => columns[group.id] ?? EMPTY_IDS),
+    [columns, groups],
+  );
+  const keyboardNav = useIssueKeyboardNavigation({
+    issueIds: keyboardIssueIds,
+    disabled: isDraggingRef.current,
+    onOpenIssue: useCallback(
+      (issueId: string) => router.push(paths.issueDetail(issueId)),
+      [paths, router],
+    ),
+  });
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -422,6 +440,8 @@ export function BoardView({
                 sort={sort}
                 projectId={projectId}
                 sortLabel={sortLabel}
+                activeIssueId={keyboardNav.activeIssueId}
+                getIssueKeyboardProps={keyboardNav.issueKeyboardProps}
               />
             ) : (
               assigneeGroupQueryKey && assigneeGroupFilter ? (
@@ -436,6 +456,8 @@ export function BoardView({
                   sort={sort}
                   projectId={projectId}
                   sortLabel={sortLabel}
+                  activeIssueId={keyboardNav.activeIssueId}
+                  getIssueKeyboardProps={keyboardNav.issueKeyboardProps}
                 />
               ) : (
                 <BoardColumn
@@ -447,6 +469,8 @@ export function BoardView({
                   projectId={projectId}
                   totalCount={group.totalCount}
                   sortLabel={sortLabel}
+                  activeIssueId={keyboardNav.activeIssueId}
+                  getIssueKeyboardProps={keyboardNav.issueKeyboardProps}
                 />
               )
             ),
@@ -483,6 +507,8 @@ const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn(
   sort,
   projectId,
   sortLabel,
+  activeIssueId,
+  getIssueKeyboardProps,
 }: {
   group: BoardColumnGroup;
   issueIds: string[];
@@ -493,6 +519,8 @@ const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn(
   sort?: IssueSortParam;
   projectId?: string;
   sortLabel?: string | null;
+  activeIssueId?: string | null;
+  getIssueKeyboardProps?: (issueId: string) => HTMLAttributes<HTMLDivElement>;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByAssigneeGroup(
     {
@@ -513,6 +541,8 @@ const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn(
       totalCount={total}
       projectId={projectId}
       sortLabel={sortLabel}
+      activeIssueId={activeIssueId}
+      getIssueKeyboardProps={getIssueKeyboardProps}
       footer={
         hasMore ? (
           <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
@@ -531,6 +561,8 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   sort,
   projectId,
   sortLabel,
+  activeIssueId,
+  getIssueKeyboardProps,
 }: {
   group: BoardColumnGroup & { status: IssueStatus };
   issueIds: string[];
@@ -540,6 +572,8 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   sort?: IssueSortParam;
   projectId?: string;
   sortLabel?: string | null;
+  activeIssueId?: string | null;
+  getIssueKeyboardProps?: (issueId: string) => HTMLAttributes<HTMLDivElement>;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     group.status,
@@ -555,6 +589,8 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
       totalCount={total}
       projectId={projectId}
       sortLabel={sortLabel}
+      activeIssueId={activeIssueId}
+      getIssueKeyboardProps={getIssueKeyboardProps}
       footer={
         hasMore ? (
           <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type Ref } from "react";
+import { memo, type HTMLAttributes, type Ref } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
@@ -38,14 +38,16 @@ function ListRowContent({
   containerStyle,
   containerProps,
   checkboxProps,
+  isKeyboardActive = false,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
   isDragging?: boolean;
   containerRef?: Ref<HTMLDivElement>;
   containerStyle?: React.CSSProperties;
-  containerProps?: Record<string, unknown>;
+  containerProps?: HTMLAttributes<HTMLDivElement>;
   checkboxProps?: Pick<React.HTMLAttributes<HTMLDivElement>, "onClick" | "onMouseDown" | "onPointerDown">;
+  isKeyboardActive?: boolean;
 }) {
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
@@ -74,6 +76,8 @@ function ListRowContent({
         {...containerProps}
         className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
           selected ? "bg-accent/30" : ""
+        } ${
+          isKeyboardActive ? "bg-accent/60 ring-1 ring-inset ring-ring/30" : ""
         } ${isDragging ? "opacity-30" : ""}`}
       >
         <div
@@ -158,11 +162,22 @@ function ListRowContent({
 export const ListRow = memo(function ListRow({
   issue,
   childProgress,
+  isKeyboardActive,
+  keyboardProps,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
+  isKeyboardActive?: boolean;
+  keyboardProps?: HTMLAttributes<HTMLDivElement>;
 }) {
-  return <ListRowContent issue={issue} childProgress={childProgress} />;
+  return (
+    <ListRowContent
+      issue={issue}
+      childProgress={childProgress}
+      isKeyboardActive={isKeyboardActive}
+      containerProps={keyboardProps}
+    />
+  );
 });
 
 const animateLayoutChanges: AnimateLayoutChanges = (args) => {
@@ -179,10 +194,14 @@ export const DraggableListRow = memo(function DraggableListRow({
   issue,
   childProgress,
   disableSorting,
+  isKeyboardActive,
+  keyboardProps,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
   disableSorting?: boolean;
+  isKeyboardActive?: boolean;
+  keyboardProps?: HTMLAttributes<HTMLDivElement>;
 }) {
   const {
     attributes,
@@ -208,9 +227,10 @@ export const DraggableListRow = memo(function DraggableListRow({
       issue={issue}
       childProgress={childProgress}
       isDragging={isDragging}
+      isKeyboardActive={isKeyboardActive}
       containerRef={setNodeRef}
       containerStyle={style}
-      containerProps={{ ...attributes, ...listeners }}
+      containerProps={{ ...keyboardProps, ...attributes, ...listeners }}
       checkboxProps={{ onClick: stopDrag, onMouseDown: stopDrag, onPointerDown: stopDrag }}
     />
   );

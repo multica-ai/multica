@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useMemo, type HTMLAttributes, type ReactNode } from "react";
 import { EyeOff, MoreHorizontal, Plus, UserMinus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { useDroppable } from "@dnd-kit/core";
@@ -49,6 +49,8 @@ export const BoardColumn = memo(function BoardColumn({
   footer,
   projectId,
   sortLabel,
+  activeIssueId,
+  getIssueKeyboardProps,
 }: {
   group: BoardColumnGroup;
   issueIds: string[];
@@ -59,6 +61,8 @@ export const BoardColumn = memo(function BoardColumn({
   /** When set, the per-column "+" pre-fills the project on the create form. */
   projectId?: string;
   sortLabel?: string | null;
+  activeIssueId?: string | null;
+  getIssueKeyboardProps?: (issueId: string) => HTMLAttributes<HTMLDivElement>;
 }) {
   const status = group.status;
   const cfg = status ? STATUS_CONFIG[status] : null;
@@ -143,7 +147,14 @@ export const BoardColumn = memo(function BoardColumn({
         >
           <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
             {resolvedIssues.map((issue) => (
-              <DraggableBoardCard key={issue.id} issue={issue} childProgress={childProgressMap?.get(issue.id)} disableSorting={!!sortLabel} />
+              <DraggableBoardCard
+                key={issue.id}
+                issue={issue}
+                childProgress={childProgressMap?.get(issue.id)}
+                disableSorting={!!sortLabel}
+                isKeyboardActive={activeIssueId === issue.id}
+                keyboardProps={getIssueKeyboardProps?.(issue.id)}
+              />
             ))}
           </SortableContext>
           {issueIds.length === 0 && (
