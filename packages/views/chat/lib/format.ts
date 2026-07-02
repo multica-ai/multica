@@ -17,3 +17,38 @@ export function formatElapsedSecs(secs: number): string {
 export function formatElapsedMs(ms: number): string {
   return formatElapsedSecs(Math.max(0, Math.round(ms / 1000)));
 }
+
+const KST_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Seoul",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+export function formatKstTimestamp(iso: string): string | null {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return null;
+
+  const parts = Object.fromEntries(
+    KST_FORMATTER.formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+
+  if (
+    !parts.year ||
+    !parts.month ||
+    !parts.day ||
+    !parts.hour ||
+    !parts.minute ||
+    !parts.second
+  ) {
+    return null;
+  }
+
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}

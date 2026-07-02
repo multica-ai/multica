@@ -29,7 +29,7 @@ import type { ChatTimelineItem } from "@multica/core/chat";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
-import { formatElapsedMs } from "../lib/format";
+import { formatElapsedMs, formatKstTimestamp } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
 import { useT } from "../../i18n";
 
@@ -192,19 +192,22 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm max-w-[80%] break-words">
-          {/* User messages are authored as markdown in ContentEditor, so
-           * render them through the same pipeline as assistant replies.
-           * Neutralise prose's leading/trailing margin so single-line
-           * bubbles stay as compact as the plain-text version used to. */}
-          <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-            <Markdown attachments={message.attachments}>{message.content}</Markdown>
+        <div className="max-w-[80%] space-y-1">
+          <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm break-words">
+            {/* User messages are authored as markdown in ContentEditor, so
+             * render them through the same pipeline as assistant replies.
+             * Neutralise prose's leading/trailing margin so single-line
+             * bubbles stay as compact as the plain-text version used to. */}
+            <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+              <Markdown attachments={message.attachments}>{message.content}</Markdown>
+            </div>
+            <AttachmentList
+              attachments={message.attachments}
+              content={message.content}
+              className="mt-1.5"
+            />
           </div>
-          <AttachmentList
-            attachments={message.attachments}
-            content={message.content}
-            className="mt-1.5"
-          />
+          <MessageTimestamp createdAt={message.created_at} className="text-right" />
         </div>
       </div>
     );
@@ -285,14 +288,42 @@ function MessageFooter({
   isPending: boolean;
 }) {
   const showCopy = !isPending;
-  if (message.elapsed_ms == null && !showCopy) return null;
+  const timestamp = formatKstTimestamp(message.created_at);
+  if (message.elapsed_ms == null && !showCopy && !timestamp) return null;
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       {message.elapsed_ms != null && (
         <ElapsedCaption variant="replied" elapsedMs={message.elapsed_ms} />
       )}
+      {message.elapsed_ms != null && timestamp && (
+        <span className="text-xs text-muted-foreground/50">·</span>
+      )}
+      <MessageTimestamp createdAt={message.created_at} />
       {showCopy && <MessageCopyButton message={message} timeline={timeline} />}
     </div>
+  );
+}
+
+function MessageTimestamp({
+  createdAt,
+  className,
+}: {
+  createdAt: string;
+  className?: string;
+}) {
+  const timestamp = formatKstTimestamp(createdAt);
+  if (!timestamp) return null;
+  return (
+    <time
+      dateTime={createdAt}
+      title="KST"
+      aria-label={`${timestamp} KST`}
+      data-acceptance="chat-message-timestamp"
+      data-testid="chat-message-timestamp"
+      className={cn("text-xs text-muted-foreground/70", className)}
+    >
+      {timestamp}
+    </time>
   );
 }
 
@@ -321,6 +352,8 @@ function MessageCopyButton({
             className="text-muted-foreground/70 hover:text-foreground"
             onClick={handleCopy}
             aria-label={t(($) => $.message_list.copy_action)}
+            data-acceptance="copy-message"
+            data-testid="copy-message"
           />
         }
       >

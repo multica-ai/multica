@@ -164,6 +164,8 @@ export function TaskStatusPill({
 
   return (
     <div
+      data-acceptance="chat-response-in-progress"
+      data-testid="chat-task-status-pill"
       className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground"
       aria-live="polite"
     >
