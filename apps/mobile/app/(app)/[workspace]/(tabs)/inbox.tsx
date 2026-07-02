@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Header } from "@/components/ui/header";
 import { IconButton } from "@/components/ui/icon-button";
 import { HeaderActions } from "@/components/ui/app-header-actions";
+import { WorkspaceSwitcherButton } from "@/components/workspace/workspace-switcher-button";
 import { SwipeableInboxRow } from "@/components/inbox/swipeable-inbox-row";
 import { inboxListOptions } from "@/data/queries/inbox";
 import {
@@ -116,6 +117,7 @@ export default function Inbox() {
     <View className="flex-1 bg-background">
       <Header
         title="Inbox"
+        left={<WorkspaceSwitcherButton />}
         right={
           <>
             <IconButton
