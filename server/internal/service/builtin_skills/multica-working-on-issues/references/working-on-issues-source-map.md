@@ -63,14 +63,18 @@ auto-link flag (`workspaceAutoLinkPRsEnabled`, `github.go:1074`).
 ### Path 1 — link (title OR body OR branch)
 
 - `extractIdentifiers` regex helper: `server/internal/handler/github.go:1028`
-- driving regex `identifierRe` (`\b([a-z][a-z0-9]{1,9})-(\d+)\b`, case-insensitive):
-  `server/internal/handler/github.go:490`
+- driving regex `identifierRe` (`\b([a-z][a-z0-9]{0,6})-(\d+)\b`, case-insensitive):
+  `server/internal/handler/github.go:584`
 - call site: `server/internal/handler/github.go:727` —
   `extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)`
 
-Every `PREFIX-NUMBER` mention in **title, body, or branch** resolves to an issue
+Every `TEAM_KEY-NUMBER` mention in **title, body, or branch** resolves to an issue
 in the workspace and writes a link row (`LinkIssueToPullRequest`, ~`github.go:762`).
-This is what `multica issue pull-requests` later reads back.
+This is what `multica issue pull-requests` later reads back. The prefix is a Team
+key — letter-first, 1-7 chars total (`[a-z][a-z0-9]{0,6}`, narrowed from the old
+`{1,9}`/1-10 char bound) — because a Team now owns the issue-number namespace. Each
+workspace has a default team whose key is the legacy workspace prefix, so a bare
+`MUL-2759` routes through that default team.
 
 **Reference-only flag (MUL-3739).** The link row carries a `reference_only`
 boolean (`migrations/127_issue_pull_request_reference_only.up.sql`). The handler
@@ -92,12 +96,12 @@ call-site location for the link logic.
 
 - `extractClosingIdentifiers` regex helper: `server/internal/handler/github.go:1051`
 - driving regex `closingIdentifierRe`
-  (`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[:\s]+([a-z][a-z0-9]{1,9})-(\d+)\b`):
-  `server/internal/handler/github.go:501`
+  (`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[:\s]+([a-z][a-z0-9]{0,6})-(\d+)\b`):
+  `server/internal/handler/github.go:596`
 - call site: `server/internal/handler/github.go:736` —
   `extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body)` (no branch arg)
 
-Only a `PREFIX-NUMBER` immediately after a closing keyword
+Only a `TEAM_KEY-NUMBER` immediately after a closing keyword
 (`Closes`/`Fixes`/`Resolves`, optional `:` then whitespace) sets the link row's
 `close_intent` flag — the gate that auto-advances the issue to `done` on merge.
 `Fix MUL-1` closes; `Fix login MUL-1` does not (adjacency). Branch names are

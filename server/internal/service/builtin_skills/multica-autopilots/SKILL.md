@@ -38,14 +38,22 @@ Execution modes:
 ```bash
 multica autopilot list --output json
 multica autopilot get <autopilot-id> --output json
-multica autopilot create --title "<title>" --description "<task prompt>" --agent <agent-name-or-id> --mode create_issue|run_only --output json
+multica autopilot create --title "<title>" --description "<task prompt>" --agent <agent-name-or-id> --mode create_issue|run_only --team <team-id-or-key> --output json
 multica autopilot update <autopilot-id> --status active|paused --output json
+multica autopilot update <autopilot-id> --team <team-id-or-key> --output json
 multica autopilot runs <autopilot-id> --output json
 multica autopilot trigger-add <autopilot-id> --kind schedule --cron "0 9 * * *" --timezone Asia/Shanghai --output json
 multica autopilot trigger-add <autopilot-id> --kind webhook --label "ci" --output json
 multica autopilot trigger <autopilot-id> --output json
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id> --yes --output json
 ```
+
+`--team <team-id-or-key>` (UUID or key) sets the autopilot's team on `create` and
+reassigns it on `update`. Omitting `--team` on create uses the workspace's default
+team, whose key is the legacy workspace prefix; omitting it on update keeps the
+current team. Every autopilot always belongs to a team — there is no clear
+operation, and `--team ""` is ignored (the server keeps the existing team).
+`multica autopilot list --team <team-id-or-key>` filters by team.
 
 Use `trigger` only when the user explicitly asks for a manual run. Use `trigger-rotate-url` only when rotating a webhook URL; the old URL stops being valid.
 

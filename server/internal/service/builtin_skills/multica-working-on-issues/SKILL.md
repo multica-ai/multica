@@ -22,10 +22,13 @@ The GitHub webhook runs two separate scans over an incoming PR. They are not the
 same gate and they read different fields.
 
 **Linking** scans the PR **title, body, OR branch** for a routable issue key
-(`PREFIX-NUMBER`, e.g. `MUL-2759`). Each match writes an issue ↔ PR link row.
-This is the link that `multica issue pull-requests` reads back — but see the
-reference-only rule below: a key that appears **only** as a bare mention in the
-body is linked yet hidden from that list.
+(`TEAM_KEY-NUMBER`, e.g. `MUL-2759`). The prefix is the issue's Team key — a team
+owns its issue-number namespace, and each workspace has a default team whose key
+is the legacy workspace prefix, so a bare `MUL-2759` still routes. Each match
+writes an issue ↔ PR link row. This is the link that `multica issue
+pull-requests` reads back — but see the reference-only rule below: a key that
+appears **only** as a bare mention in the body is linked yet hidden from that
+list.
 
 ```text
 MUL-2759: add built-in issue working skill        # title prefix → links, shown
@@ -193,6 +196,11 @@ on it. These are the contracts, not advice:
 On an agent-assigned issue, create status decides whether the assignee fires
 immediately. A non-backlog status (e.g. `todo`) enqueues the agent at create
 time; `backlog` sets the assignee without triggering.
+
+`multica issue create` files the issue under a team: pass `--team <UUID>` to pick
+one explicitly (the team owns the `TEAM_KEY-NUMBER` identifier namespace), or omit
+it to fall back to the workspace's default team, whose key is the legacy workspace
+prefix. `multica issue list --team <UUID>` filters a listing to one team.
 
 Parallel children — all start now:
 

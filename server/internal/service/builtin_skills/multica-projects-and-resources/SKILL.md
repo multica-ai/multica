@@ -31,16 +31,41 @@ Common resource types:
 - `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`;
 - `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, and optional label.
 
+## Teams
+
+A workspace is organized into teams. A team owns an issue-key prefix and its own
+issue-number counter, so issue identifiers read `TEAM_KEY-NUMBER` (e.g. `MUL-42`).
+Every workspace has a default team whose key is the legacy workspace prefix;
+commands that omit `--team` fall back to it.
+
+Projects belong to one or more teams. `project create` and `project update` take a
+repeatable `--team <team-id-or-key>` (UUID or key); on `update` the flag
+**replaces** the project's team set. `project list --team <team-id-or-key>` filters
+a listing to one team.
+
+```bash
+multica team list --output json
+multica team create --name "<name>" --key <PREFIX> --output json
+multica team update <team-id-or-key> --name "<name>" --key <PREFIX> --output json
+multica team archive <team-id-or-key> --output json
+```
+
+`team create` requires `--name`; `--key` sets the issue prefix and is optional.
+`--description` and `--icon` are optional on both `create` and `update`. `archive`
+resolves a team by id or key.
+
 ## CLI
 
 ```bash
 multica project list --output json
+multica project list --team <team-id-or-key> --output json
 multica project get <project-id> --output json
-multica project create --title "<title>" --repo <github-url> --output json
-multica project create --title "<title>" --start-date 2026-03-01 --due-date 2026-03-31 --output json
+multica project create --title "<title>" --team <team-id-or-key> --repo <github-url> --output json
+multica project create --title "<title>" --team <team-id-or-key> --start-date 2026-03-01 --due-date 2026-03-31 --output json
 multica project update <project-id> --title "<title>" --output json
 multica project update <project-id> --due-date 2026-04-15 --output json
 multica project update <project-id> --start-date "" --output json   # clear the start date
+multica project update <project-id> --team <team-id-or-key> --output json
 multica project status <project-id> in_progress --output json
 multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json

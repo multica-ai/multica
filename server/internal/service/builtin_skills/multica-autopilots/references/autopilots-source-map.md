@@ -1,6 +1,7 @@
 # Autopilots source map
 
 - `server/cmd/multica/cmd_autopilot.go` registers `list`, `get`, `create`, `update`, `delete`, `trigger`, `runs`, `trigger-add`, `trigger-update`, `trigger-delete`, and `trigger-rotate-url`.
+- `autopilot create`/`update` take `--team` (single UUID or key, resolved via `resolveTeamRef` into `team_id`). On `update` a supplied value reassigns the team; `resolveAutopilotTeam` (`server/internal/handler/autopilot.go:974`) falls back to the previous team when the value is nil/empty, and `UpdateAutopilot` SQL uses `team_id = COALESCE(sqlc.narg('team_id')::uuid, team_id)` (`server/pkg/db/queries/autopilot.sql:75`), so `--team ""` is a no-op — there is no clear operation and every autopilot always belongs to a team. `autopilot list --team` sets the `team_id` filter. Omitting `--team` on create files the autopilot under the workspace's default team, whose key is the legacy workspace prefix.
 - The CLI maps reads/writes to `/api/autopilots`, `/api/autopilots/{id}`, `/api/autopilots/{id}/trigger`, `/api/autopilots/{id}/runs`, and trigger subroutes.
 - `server/internal/service/autopilot.go` has `DispatchAutopilot`, synchronous delivery-idempotent `AdmitAutopilotWebhookDelivery`, and worker-side `DispatchAutopilotForWebhookDelivery`; it creates `autopilot_run` and switches on `execution_mode`.
 - `create_issue` calls `dispatchCreateIssue`; `run_only` calls `dispatchRunOnly`.
