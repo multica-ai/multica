@@ -608,16 +608,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool)   // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.
 	h.CapabilityToolPolicy = cerebrotoolpolicy.NewStore(pool) // CEREBRO-PATCH(cerebro-capability-card-tools-wire): TECH-3642 capabilities card tool-policy table.
 	h.CapabilityConnections = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-capability-card-conns-wire): TECH-3642 capabilities card connections list.
-	// CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 per-agent Agent Vault broker at claim.
-	if avMod, avOK := cerebroagentvault.NewModule(pool); avOK {
-		h.AgentVaultBroker = avMod.Service
-		// CEREBRO-PATCH(cerebro-agentvault-mirror-wire): FIR-1739 Part B project tool-policy credential grants onto the Agent Vault access table.
-		avMod.Service.SetGrantMirror(&chainCredentialGrantSource{policy: cerebrotoolpolicy.NewStore(pool), creds: cerebroQueries}, avMod.Store)
-	}
-	// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent access-table CRUD handler.
-	cerebroAgentVaultHandler := cerebroagentvault.NewHandler(pool)
-	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from). FIR-1739: wire the Agent Vault vault lister so the Credentials tab also lists Agent Vault boxes (agentvault-vault:<name>) as grantable rows; nil-safe when admin creds absent.
-	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool).WithVaultLister(cerebroagentvault.NewVaultLister()))
+	avMod := cerebroagentvault.NewModule(pool)                // CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 per-agent Agent Vault broker at claim.
+	h.AgentVaultBroker = avMod.Service                        // CEREBRO-PATCH(cerebro-agentvault-broker-service): TECH-3196 expose grant-reconciling service.
+	// CEREBRO-PATCH(cerebro-agentvault-mirror-wire): FIR-1739 Part B project tool-policy credential grants onto the Agent Vault access table.
+	avMod.Service.SetGrantMirror(&chainCredentialGrantSource{policy: cerebrotoolpolicy.NewStore(pool), creds: cerebroQueries}, avMod.Store)
+	// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent access-table CRUD handler; FIR-2478 vault-listing resolves the "Agent Vault" connection.
+	cerebroAgentVaultHandler := cerebroagentvault.NewHandler(pool, cerebroConnectionsHandler.Store)
+	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler; FIR-1739/FIR-2478 wire the Agent Vault vault lister via the "Agent Vault" connection so the Credentials tab lists the same boxes.
+	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool).WithVaultLister(cerebroagentvault.NewVaultLister(cerebroConnectionsHandler.Store)))
 	// CEREBRO-PATCH(cerebro-tool-policy-registry-fold-in): FIR-2269 restore FIR-1609 Phase 5 —
 	// re-wire the firtal_registry per-data-source projection removed by FIR-2208 so the unified
 	// tool-policy table appends per-source rows and the "Data sources (N)" per-actor picker renders.

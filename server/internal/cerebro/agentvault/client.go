@@ -1,28 +1,42 @@
 package agentvault
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/connections"
 )
 
-// Client talks to the Agent Vault management API over the internal path. It is
-// constructed from Config and is safe for reuse; each call performs an admin
-// login to obtain a short-lived bearer token (Agent Vault sessions are
-// short-lived by design — see /v1/auth/login).
-type Client struct {
-	cfg  Config
-	http *http.Client
+// connectionResolver resolves a workspace's enabled connections server-side. It
+// is satisfied by *connections.Store — the SAME seam the MCP relay uses to
+// resolve a connection's credential without going through an agent. Declared as
+// an interface so the client can be unit-tested with a fake.
+type connectionResolver interface {
+	ListEnabled(ctx context.Context, workspaceID pgtype.UUID) ([]connections.Connection, error)
 }
 
-// NewClient builds a Client. The caller is responsible for only constructing it
-// when LoadConfig reported ok (admin credentials present).
-func NewClient(cfg Config) *Client {
-	return &Client{cfg: cfg, http: &http.Client{Timeout: 20 * time.Second}}
+// Client talks to the Agent Vault management API over the internal path. It
+// resolves the workspace's "Agent Vault" connection at call time and uses that
+// connection's own Bearer credential — no admin login, no env secret.
+type Client struct {
+	cfg   Config
+	conns connectionResolver
+	http  *http.Client
+}
+
+// NewClient builds a Client. conns resolves the Agent Vault connection per
+// workspace; a nil conns makes ListVaults degrade to an empty list (the same
+// "not configured" contract the vaults endpoint has always used).
+func NewClient(cfg Config, conns connectionResolver) *Client {
+	return &Client{cfg: cfg, conns: conns, http: &http.Client{Timeout: 20 * time.Second}}
 }
 
 // Vault is one Agent Vault box as listed by GET /v1/vaults. Only the two fields
@@ -35,50 +49,84 @@ type Vault struct {
 	Name string `json:"name"`
 }
 
-// ListVaults returns the Agent Vault boxes visible to the admin identity. The
-// backend logs in as the instance owner, so this is every vault on the instance
-// (owners see all; non-owners see only granted ones). Used read-only to populate
-// the vault picker on the credential Permissions row (FIR-1739 v1, vault-level).
-func (c *Client) ListVaults(ctx context.Context) ([]Vault, error) {
-	adminTok, err := c.login(ctx)
+// ListVaults returns the Agent Vault boxes visible to the "Agent Vault"
+// connection's credential (an owner token, so every box on the instance). It
+// resolves the connection for this workspace, then calls GET /v1/vaults with the
+// connection's Bearer token. Returns an empty list (not an error) when no Agent
+// Vault connection is configured for the workspace, so the picker degrades to
+// "no vaults available" rather than breaking the Permissions screen. Used
+// read-only to populate the vault picker on the credential Permissions row
+// (FIR-1739 v1, vault-level).
+func (c *Client) ListVaults(ctx context.Context, workspaceID pgtype.UUID) ([]Vault, error) {
+	conn, ok, err := c.resolveConnection(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
+	if !ok {
+		return nil, nil
+	}
+	bearer := strings.TrimSpace(conn.AuthConfig.BearerToken)
+	if bearer == "" {
+		return nil, fmt.Errorf("agentvault: %q connection has no bearer token", conn.Name)
+	}
+	base := strings.TrimRight(strings.TrimSpace(conn.URL), "/")
 	var out struct {
 		Vaults []Vault `json:"vaults"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/v1/vaults", adminTok, nil, &out); err != nil {
+	if err := c.get(ctx, base+"/v1/vaults", bearer, &out); err != nil {
 		return nil, fmt.Errorf("agentvault list vaults: %w", err)
 	}
 	return out.Vaults, nil
 }
 
-// login authenticates as the instance owner and returns a bearer token.
-// Verified against the live instance: POST /v1/auth/login -> {token, expires_at}.
-func (c *Client) login(ctx context.Context) (string, error) {
-	body, _ := json.Marshal(map[string]string{"email": c.cfg.AdminEmail, "password": c.cfg.AdminPassword})
-	var out struct {
-		Token string `json:"token"`
+// resolveConnection finds the enabled "Agent Vault" connection for the workspace:
+// the REST API connection whose URL points at the configured internal endpoint.
+// The internal host is a fixed deployment fact (the connection wouldn't function
+// with any other URL), so matching on it is credential-free and does not depend
+// on the connection's display name or slug. Returns ok=false when none is
+// configured (degrade to an empty vault list); a nil resolver behaves the same.
+func (c *Client) resolveConnection(ctx context.Context, workspaceID pgtype.UUID) (connections.Connection, bool, error) {
+	if c == nil || c.conns == nil {
+		return connections.Connection{}, false, nil
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/auth/login", "", body, &out); err != nil {
-		return "", fmt.Errorf("agentvault login: %w", err)
+	list, err := c.conns.ListEnabled(ctx, workspaceID)
+	if err != nil {
+		return connections.Connection{}, false, fmt.Errorf("agentvault: list connections: %w", err)
 	}
-	if out.Token == "" {
-		return "", fmt.Errorf("agentvault login: empty token")
+	want := hostOf(c.cfg.InternalURL)
+	for _, conn := range list {
+		if conn.Type == connections.TypeAPI && want != "" && hostOf(conn.URL) == want {
+			return conn, true, nil
+		}
 	}
-	return out.Token, nil
+	return connections.Connection{}, false, nil
 }
 
-// do performs one JSON request against the internal Agent Vault API.
-func (c *Client) do(ctx context.Context, method, path, bearer string, body []byte, out any) error {
-	req, err := http.NewRequestWithContext(ctx, method, c.cfg.InternalURL+path, bytes.NewReader(body))
+// hostOf returns the host:port of a URL, or "" when it does not parse. Used to
+// match a connection's URL against the Agent Vault internal endpoint regardless
+// of trailing slash or path. A scheme-less value (e.g. "agent-vault.internal:14321"
+// from a mis-set override) is treated as a host:port so a missing scheme does not
+// silently blank the match on one side only.
+func hostOf(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw != "" && !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
+// get performs one authenticated JSON GET against the internal Agent Vault API.
+func (c *Client) get(ctx context.Context, fullURL, bearer string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+bearer)
-	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+bearer)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err

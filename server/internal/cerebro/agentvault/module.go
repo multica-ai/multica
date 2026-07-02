@@ -15,14 +15,11 @@ type Module struct {
 	Store   *Store
 }
 
-// NewModule builds the broker from environment config + the DB pool. Returns
-// ok=false when Agent Vault is not configured (no admin creds) so callers can
-// skip mounting cleanly — the grant-mirror path stays dormant.
-func NewModule(pool *pgxpool.Pool) (*Module, bool) {
-	if _, ok := LoadConfig(); !ok {
-		return nil, false
-	}
-	store := NewStore(pool)
-	svc := NewService()
-	return &Module{Service: svc, Store: store}, true
+// NewModule builds the broker from the DB pool. FIR-2478: the grant-reconciling
+// Service and per-agent access Store never used Agent Vault admin credentials —
+// they operate purely on the DB — so construction no longer gates on any env
+// config. Actual claim-time behavior stays gated by the cerebro_agent_vault
+// feature flag (see agentvault_claim_cerebro.go).
+func NewModule(pool *pgxpool.Pool) *Module {
+	return &Module{Service: NewService(), Store: NewStore(pool)}
 }

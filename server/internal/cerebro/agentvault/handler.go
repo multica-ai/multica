@@ -26,27 +26,22 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// VaultLister lists the Agent Vault boxes a member can author a grant against.
-// Implemented by *Client; left nil when Agent Vault is not configured (no admin
-// creds) so the vaults endpoint degrades to an empty list instead of erroring.
-// Exported so the credentials tool-policy table can source the same box list and
-// surface each box as a grantable agentvault-vault:<name> row (FIR-1739).
+// VaultLister lists the Agent Vault boxes a member can author a grant against,
+// scoped to a workspace (the Agent Vault connection is resolved per workspace).
+// Implemented by *Client. Exported so the credentials tool-policy table can
+// source the same box list and surface each box as a grantable
+// agentvault-vault:<name> row (FIR-1739).
 type VaultLister interface {
-	ListVaults(ctx context.Context) ([]Vault, error)
+	ListVaults(ctx context.Context, workspaceID pgtype.UUID) ([]Vault, error)
 }
 
-// NewVaultLister builds a vault lister from ambient Agent Vault admin config, or
-// returns a true nil interface when admin creds are absent (LoadConfig ok=false).
-// Callers nil-check the result and degrade to an empty vault list — the same
-// degradation contract the Vaults endpoint uses. This is the shared seam the
+// NewVaultLister builds a vault lister that resolves the "Agent Vault" connection
+// per workspace via conns (a *connections.Store). This is the shared seam the
 // router wires into the credentials tool-policy table so the table lists the same
-// boxes the vaults endpoint does, without each call site re-deriving the config.
-func NewVaultLister() VaultLister {
-	cfg, ok := LoadConfig()
-	if !ok {
-		return nil
-	}
-	return NewClient(cfg)
+// boxes the vaults endpoint does. A nil conns degrades every ListVaults call to
+// an empty list — the same "not configured" contract the endpoint has always had.
+func NewVaultLister(conns connectionResolver) VaultLister {
+	return NewClient(LoadConfig(), conns)
 }
 
 // Handler exposes the access store over HTTP.
@@ -55,16 +50,12 @@ type Handler struct {
 	vaults VaultLister
 }
 
-// NewHandler constructs a Handler over a Store built from the given pool. When
-// Agent Vault admin creds are present it also builds a client so the read-only
-// vaults endpoint can list boxes for the Permissions vault-picker; otherwise the
-// endpoint serves an empty list.
-func NewHandler(pool *pgxpool.Pool) *Handler {
-	h := &Handler{store: NewStore(pool)}
-	if cfg, ok := LoadConfig(); ok {
-		h.vaults = NewClient(cfg)
-	}
-	return h
+// NewHandler constructs a Handler over a Store built from the given pool. It also
+// builds a client so the read-only vaults endpoint can list boxes for the
+// Permissions vault-picker via the workspace's "Agent Vault" connection; when no
+// such connection exists the endpoint serves an empty list.
+func NewHandler(pool *pgxpool.Pool, conns connectionResolver) *Handler {
+	return &Handler{store: NewStore(pool), vaults: NewClient(LoadConfig(), conns)}
 }
 
 type accessWriteRequest struct {
@@ -101,14 +92,15 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 // not an error — when Agent Vault is not configured, so the picker degrades to
 // "no vaults available" rather than breaking the Permissions screen.
 func (h *Handler) Vaults(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.workspaceID(w, r); !ok {
+	wsID, ok := h.workspaceID(w, r)
+	if !ok {
 		return
 	}
 	if h.vaults == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"vaults": []Vault{}})
 		return
 	}
-	vaults, err := h.vaults.ListVaults(r.Context())
+	vaults, err := h.vaults.ListVaults(r.Context(), wsID)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return

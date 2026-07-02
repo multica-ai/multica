@@ -229,7 +229,7 @@ func (s *Store) discoverCredentialResources(ctx context.Context, workspaceID pgt
 		})
 		seen[box.name] = true
 	}
-	for _, name := range s.agentVaultBoxNames(ctx) {
+	for _, name := range s.agentVaultBoxNames(ctx, workspaceID) {
 		if seen[name] {
 			continue
 		}
@@ -244,15 +244,15 @@ func (s *Store) discoverCredentialResources(ctx context.Context, workspaceID pgt
 }
 
 // agentVaultBoxNames lists the Agent Vault box names for the credentials table,
-// or nil when no vault lister is wired (Agent Vault admin creds absent) — the
-// same degradation as the vaults endpoint. A live ListVaults error is logged and
-// downgraded to nil so an Agent Vault outage hides the vault-sourced rows but
-// never fails the whole permissions table.
-func (s *Store) agentVaultBoxNames(ctx context.Context) []string {
+// or nil when no vault lister is wired, or when the workspace has no "Agent
+// Vault" connection — the same degradation as the vaults endpoint. A live
+// ListVaults error is logged and downgraded to nil so an Agent Vault outage
+// hides the vault-sourced rows but never fails the whole permissions table.
+func (s *Store) agentVaultBoxNames(ctx context.Context, workspaceID pgtype.UUID) []string {
 	if s.vaults == nil {
 		return nil
 	}
-	vaults, err := s.vaults.ListVaults(ctx)
+	vaults, err := s.vaults.ListVaults(ctx, workspaceID)
 	if err != nil {
 		slog.Error("toolpolicy: list agent vault boxes for credentials table failed", "error", err)
 		return nil
