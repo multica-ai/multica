@@ -3,7 +3,7 @@ import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
 import { chatKeys } from "./queries";
 import { createLogger } from "../logger";
-import type { ChatSession } from "../types";
+import type { ChatMessage, ChatSession } from "../types";
 
 const logger = createLogger("chat.mut");
 
@@ -23,6 +23,58 @@ export function useCreateChatSession() {
       logger.error("createChatSession.error", err);
     },
     onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+/**
+ * Sends a user message to an existing chat session. Optimistically appends
+ * the message to the cached thread so it shows instantly, then invalidates
+ * the thread, the session's pending-task signal, and the sessions list (the
+ * reply bumps updated_at / re-orders the inbox feed) once the request
+ * settles. Rolls the optimistic message back on failure.
+ *
+ * Scoped to an existing session id — the floating chat's lazy
+ * session-creation path is separate; this is the inline (inbox) surface.
+ */
+export function useSendChatMessage(sessionId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: (vars: { content: string; attachmentIds?: string[] }) => {
+      logger.info("sendChatMessage.start", {
+        sessionId,
+        contentLength: vars.content.length,
+        attachmentCount: vars.attachmentIds?.length ?? 0,
+      });
+      return api.sendChatMessage(sessionId, vars.content, vars.attachmentIds);
+    },
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: chatKeys.messages(sessionId) });
+      const prev = qc.getQueryData<ChatMessage[]>(chatKeys.messages(sessionId));
+      const optimistic: ChatMessage = {
+        id: `optimistic-${Date.now()}`,
+        chat_session_id: sessionId,
+        role: "user",
+        content: vars.content,
+        task_id: null,
+        created_at: new Date().toISOString(),
+        attachments: [],
+      };
+      qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
+        old ? [...old, optimistic] : [optimistic],
+      );
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      logger.error("sendChatMessage.error.rollback", err);
+      if (ctx?.prev) qc.setQueryData(chatKeys.messages(sessionId), ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
     },
   });

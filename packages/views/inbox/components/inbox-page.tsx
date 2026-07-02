@@ -5,13 +5,12 @@ import { useDefaultLayout } from "react-resizable-panels";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useModalStore } from "@multica/core/modals";
-import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   inboxListOptions,
   deduplicateInboxItems,
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
+import { chatSessionsOptions } from "@multica/core/chat/queries";
 import {
   useMarkInboxRead,
   useArchiveInbox,
@@ -51,29 +50,65 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
-import { InboxListItem, useTimeAgo } from "./inbox-list-item";
-import { useTypeLabels } from "./inbox-detail-label";
-import { getInboxDisplayTitle } from "./inbox-display";
+import {
+  getInboxItemRenderer,
+  notificationEntry,
+  conversationEntry,
+  type InboxFeedEntry,
+} from "../item-types";
 import { useT } from "../../i18n";
 
 export function InboxPage() {
   const { t } = useT("inbox");
   const { searchParams, replace } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
+  const urlConversation = searchParams.get("conversation") ?? "";
   const wsPaths = useWorkspacePaths();
 
   const [selectedKey, setSelectedKeyState] = useState(() => urlIssue);
+  const [selectedConversationId, setSelectedConversationId] = useState(
+    () => urlConversation,
+  );
 
   // Sync from URL when searchParams change (e.g. navigation)
   useEffect(() => {
     setSelectedKeyState(urlIssue);
   }, [urlIssue]);
+  useEffect(() => {
+    setSelectedConversationId(urlConversation);
+  }, [urlConversation]);
 
   const wsId = useWorkspaceId();
   const { data: rawItems = [], isLoading: loading } = useQuery(inboxListOptions(wsId));
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
 
+  // Agent conversations are surfaced inline in the same feed as notifications.
+  const { data: rawSessions = [] } = useQuery(chatSessionsOptions(wsId));
+  const sessions = useMemo(
+    () => rawSessions.filter((s) => s.status === "active"),
+    [rawSessions],
+  );
+
+  // The merged typed feed: notifications + conversations, newest first. Each
+  // entry dispatches to its item-type renderer for the row.
+  const feed = useMemo<InboxFeedEntry[]>(() => {
+    const entries = [
+      ...items.map(notificationEntry),
+      ...sessions.map(conversationEntry),
+    ];
+    return entries.sort((a, b) => b.sortAt.localeCompare(a.sortAt));
+  }, [items, sessions]);
+
   const selected = items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+  const selectedConversation =
+    sessions.find((s) => s.id === selectedConversationId) ?? null;
+
+  // Notifications backed by an issue defer to the shared IssueDetail surface;
+  // everything else renders the detail pane its item-type renderer provides.
+  const SelectedDetail =
+    selected && !selected.issue_id
+      ? getInboxItemRenderer("issue_notification").Detail
+      : undefined;
 
   // Track the last key we actually resolved against the inbox list. Lets the
   // fallback effect distinguish "shared-link to a notification not in our
@@ -86,9 +121,19 @@ export function InboxPage() {
 
   const setSelectedKey = useCallback((key: string) => {
     setSelectedKeyState(key);
+    setSelectedConversationId("");
     const inboxPath = wsPaths.inbox();
     const url = key ? `${inboxPath}?issue=${key}` : inboxPath;
     replace(url);
+  }, [replace, wsPaths]);
+
+  // Open a conversation in the detail pane (like opening an issue), clearing
+  // any notification selection. The floating chat window is intentionally not
+  // involved — it is being deprecated in favour of this inline surface.
+  const selectConversation = useCallback((id: string) => {
+    setSelectedConversationId(id);
+    setSelectedKeyState("");
+    replace(`${wsPaths.inbox()}?conversation=${id}`);
   }, [replace, wsPaths]);
 
   // Shared inbox links (?issue=<id>) may point to notifications not in this
@@ -121,8 +166,6 @@ export function InboxPage() {
   const archiveAllMutation = useArchiveAllInbox();
   const archiveAllReadMutation = useArchiveAllReadInbox();
   const archiveCompletedMutation = useArchiveCompletedInbox();
-  const timeAgo = useTimeAgo();
-  const typeLabels = useTypeLabels();
 
 
   // Auto-mark-read whenever a selected item is unread — covers both click-
@@ -267,26 +310,46 @@ export function InboxPage() {
     </PageHeader>
   );
 
-  const listBody = items.length === 0 ? (
+  const listBody = feed.length === 0 ? (
     <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
       <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
       <p className="text-sm">{t(($) => $.list.empty)}</p>
     </div>
   ) : (
     <div>
-      {items.map((item) => (
-        <InboxListItem
-          key={item.id}
-          item={item}
-          isSelected={(item.issue_id ?? item.id) === selectedKey}
-          onClick={() => handleSelect(item)}
-          onArchive={() => handleArchive(item.id)}
-        />
-      ))}
+      {feed.map((entry) => {
+        const { Row } = getInboxItemRenderer(entry.kind);
+        const isNotification = entry.kind === "issue_notification";
+        return (
+          <Row
+            key={`${entry.kind}:${entry.id}`}
+            entry={entry}
+            isSelected={
+              isNotification
+                ? (entry.notification.issue_id ?? entry.notification.id) === selectedKey
+                : entry.id === selectedConversationId
+            }
+            onSelect={() => {
+              // Both kinds open into the same detail pane.
+              if (isNotification) handleSelect(entry.notification);
+              else selectConversation(entry.id);
+            }}
+            onArchive={() => {
+              if (isNotification) handleArchive(entry.notification.id);
+            }}
+          />
+        );
+      })}
     </div>
   );
 
-  const detailContent = selected?.issue_id ? (
+  const ConversationDetailComp = getInboxItemRenderer("conversation").Detail;
+  const detailContent = selectedConversation && ConversationDetailComp ? (
+    <ConversationDetailComp
+      entry={conversationEntry(selectedConversation)}
+      onArchive={() => {}}
+    />
+  ) : selected?.issue_id ? (
     // Key by issue_id (not inbox-item id): a new comment/reaction generates a
     // new inbox notification for the same issue, and the dedup helper picks the
     // newest one — keying on its id would remount IssueDetail on every event,
@@ -310,58 +373,11 @@ export function InboxPage() {
         }}
       />
     </ErrorBoundary>
-  ) : selected ? (
-    <div className="p-6">
-      <h2 className="text-lg font-semibold">{getInboxDisplayTitle(selected)}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {typeLabels[selected.type]} · {timeAgo(selected.created_at)}
-      </p>
-      {selected.body && (
-        <div className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
-          {selected.body}
-        </div>
-      )}
-      {selected.type === "quick_create_failed" && selected.details?.original_prompt && (
-        <div className="mt-4 rounded-md border bg-muted/40 p-3">
-          <p className="text-xs font-medium text-muted-foreground">
-            {t(($) => $.detail.original_input)}
-          </p>
-          <p className="mt-1 whitespace-pre-wrap text-sm">{selected.details.original_prompt}</p>
-        </div>
-      )}
-      <div className="mt-4 flex gap-2">
-        {selected.type === "quick_create_failed" && (
-          <Button
-            size="sm"
-            onClick={() => {
-              // Seed the legacy advanced form with the original prompt so the
-              // user can recover their input in the full editor instead of
-              // retyping. The agent picker hint becomes the assignee
-              // candidate (still editable).
-              const prompt = selected.details?.original_prompt ?? "";
-              const agentId = selected.details?.agent_id;
-              useIssueDraftStore.getState().setDraft({
-                description: prompt,
-                ...(agentId
-                  ? { assigneeType: "agent" as const, assigneeId: agentId }
-                  : {}),
-              });
-              useModalStore.getState().open("create-issue");
-            }}
-          >
-            {t(($) => $.detail.edit_advanced)}
-          </Button>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => handleArchive(selected.id)}
-        >
-          <Archive className="mr-1.5 h-3.5 w-3.5" />
-          {t(($) => $.detail.archive)}
-        </Button>
-      </div>
-    </div>
+  ) : selected && SelectedDetail ? (
+    <SelectedDetail
+      entry={notificationEntry(selected)}
+      onArchive={() => handleArchive(selected.id)}
+    />
   ) : null;
 
   // -- Mobile layout: list / detail toggle -----------------------------------
@@ -389,7 +405,7 @@ export function InboxPage() {
     }
 
     // Mobile: show detail full-screen when an item is selected
-    if (selected) {
+    if (selected || selectedConversation) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
           <div className="flex h-12 shrink-0 items-center border-b px-2">
@@ -472,7 +488,7 @@ export function InboxPage() {
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
             <p className="text-sm">
-              {items.length === 0
+              {feed.length === 0
                 ? t(($) => $.detail.empty)
                 : t(($) => $.detail.select_prompt)}
             </p>
