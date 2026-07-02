@@ -12,13 +12,19 @@ import (
 	"testing"
 )
 
-// fakeDispatcher records every check it is asked to dispatch.
+// fakeDispatcher records every check and revision it is asked to dispatch.
 type fakeDispatcher struct {
-	calls []CheckDispatch
+	calls         []CheckDispatch
+	revisionCalls []RevisionDispatch
 }
 
 func (f *fakeDispatcher) DispatchCheck(ctx context.Context, d CheckDispatch) error {
 	f.calls = append(f.calls, d)
+	return nil
+}
+
+func (f *fakeDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatch) error {
+	f.revisionCalls = append(f.revisionCalls, d)
 	return nil
 }
 
@@ -133,5 +139,57 @@ func TestGateEvaluator_DispatchesEachCheckOnce(t *testing.T) {
 	}
 	if len(disp.calls) != 2 {
 		t.Fatalf("advancing must not dispatch more, got %d", len(disp.calls))
+	}
+}
+
+// TestGateEvaluator_DispatchesRevisionOnFailure proves the revise-loop egress:
+// a failed check calls DispatchRevision (re-running the build), not
+// DispatchCheck, and carries the failing outcome so the worker knows what to
+// fix.
+func TestGateEvaluator_DispatchesRevisionOnFailure(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	disp := &fakeDispatcher{}
+	eval := NewGateEvaluator(loopTestPool).WithDispatcher(disp)
+
+	gate := "revision-gate"
+	agentID := "11111111-1111-1111-1111-111111111111"
+	check := []string{"go", "test", "./..."}
+	value := CheckGateConfig{
+		Checks:        [][]string{check},
+		AgentID:       agentID,
+		RevisionSkill: "build",
+		Caps:          Caps{MaxIterations: 10, MaxRevisions: 10, NoProgressStalls: 10},
+	}
+
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {
+		t.Fatalf("first eval: %v", err)
+	}
+	if err := eval.store.Report(ctx, issueID, gate, 1, check, 1); err != nil {
+		t.Fatalf("report failing: %v", err)
+	}
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {
+		t.Fatalf("eval after failure: %v", err)
+	}
+
+	if len(disp.revisionCalls) != 1 {
+		t.Fatalf("want 1 revision dispatched, got %d", len(disp.revisionCalls))
+	}
+	rc := disp.revisionCalls[0]
+	if rc.AgentID != agentID || rc.Gate != gate || rc.SkillName != "build" {
+		t.Fatalf("revision dispatch wrong: %+v", rc)
+	}
+	if rc.Round != 2 {
+		t.Fatalf("revision should target the fresh round, got %d", rc.Round)
+	}
+	if len(rc.Failures) != 1 || rc.Failures[0].ExitCode != 1 {
+		t.Fatalf("revision must carry the failing outcome: %+v", rc.Failures)
+	}
+	// A revision must not also fire a check dispatch for the same failure.
+	if len(disp.calls) != 1 {
+		t.Fatalf("want exactly the round-1 check dispatch, got %d", len(disp.calls))
 	}
 }

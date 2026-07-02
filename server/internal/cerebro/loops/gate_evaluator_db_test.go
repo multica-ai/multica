@@ -54,7 +54,9 @@ func TestGateEvaluator_AdvancesOnlyWhenAllChecksGreen(t *testing.T) {
 		t.Fatalf("first eval should register 2 pending checks, got %d", len(outcomes))
 	}
 
-	// 2. One check reports failure. The gate must still hold.
+	// 2. One check reports failure. The gate must revise: it records the
+	//    revision against the (unconfigured, so never-tripping) caps and
+	//    advances to a fresh round, but still holds.
 	if err := eval.store.Report(ctx, issueID, gate, gateRound, test, 1); err != nil {
 		t.Fatalf("report failing: %v", err)
 	}
@@ -65,12 +67,34 @@ func TestGateEvaluator_AdvancesOnlyWhenAllChecksGreen(t *testing.T) {
 	if advance {
 		t.Fatal("gate advanced with a failed check")
 	}
+	state, err := eval.store.LoadGateState(ctx, issueID, gate)
+	if err != nil {
+		t.Fatalf("load gate state: %v", err)
+	}
+	if state.Round != 2 {
+		t.Fatalf("a failed check should advance the round, got round %d", state.Round)
+	}
+	if state.Revisions != 1 {
+		t.Fatalf("want 1 revision recorded, got %d", state.Revisions)
+	}
+	if state.Stopped {
+		t.Fatal("gate should not stop: value carries no caps")
+	}
 
-	// 3. Both checks report green. Only now does the gate advance.
-	if err := eval.store.Report(ctx, issueID, gate, gateRound, test, 0); err != nil {
+	// 3. Re-evaluating enqueues the fresh round's checks (mirroring the
+	//    runtime re-running the build after a revision). Once both report
+	//    green, the gate advances.
+	advance, err = eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value)
+	if err != nil {
+		t.Fatalf("eval enqueues round 2: %v", err)
+	}
+	if advance {
+		t.Fatal("gate advanced before round 2 checks reported")
+	}
+	if err := eval.store.Report(ctx, issueID, gate, state.Round, test, 0); err != nil {
 		t.Fatalf("report passing test: %v", err)
 	}
-	if err := eval.store.Report(ctx, issueID, gate, gateRound, vet, 0); err != nil {
+	if err := eval.store.Report(ctx, issueID, gate, state.Round, vet, 0); err != nil {
 		t.Fatalf("report passing vet: %v", err)
 	}
 	advance, err = eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value)
@@ -79,6 +103,78 @@ func TestGateEvaluator_AdvancesOnlyWhenAllChecksGreen(t *testing.T) {
 	}
 	if !advance {
 		t.Fatal("gate did not advance with all checks green")
+	}
+}
+
+// TestGateEvaluator_StopsOnMaxRevisions proves the caps tracker actually
+// freezes the gate: once MaxRevisions is reached, further failures stop
+// advancing the round and the gate never enqueues, dispatches, or advances
+// again — it stays exactly where the cap tripped until a human intervenes.
+func TestGateEvaluator_StopsOnMaxRevisions(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	eval := NewGateEvaluator(loopTestPool)
+
+	gate := "capped-gate"
+	check := []string{"go", "test", "./..."}
+	value := CheckGateConfig{
+		Checks: [][]string{check},
+		Caps:   Caps{MaxIterations: 10, MaxRevisions: 2, NoProgressStalls: 10},
+	}
+
+	// Round 1 fails -> revision 1, round advances to 2, not stopped yet.
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {
+		t.Fatalf("eval enqueue round 1: %v", err)
+	}
+	if err := eval.store.Report(ctx, issueID, gate, 1, check, 1); err != nil {
+		t.Fatalf("report round 1 failure: %v", err)
+	}
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {
+		t.Fatalf("eval revise round 1: %v", err)
+	}
+	state, err := eval.store.LoadGateState(ctx, issueID, gate)
+	if err != nil {
+		t.Fatalf("load state after revision 1: %v", err)
+	}
+	if state.Stopped || state.Round != 2 || state.Revisions != 1 {
+		t.Fatalf("unexpected state after revision 1: %+v", state)
+	}
+
+	// Round 2 also fails -> revision 2 hits MaxRevisions=2 and stops.
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {
+		t.Fatalf("eval enqueue round 2: %v", err)
+	}
+	if err := eval.store.Report(ctx, issueID, gate, 2, check, 1); err != nil {
+		t.Fatalf("report round 2 failure: %v", err)
+	}
+	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {
+		t.Fatalf("eval revise round 2: %v", err)
+	}
+	state, err = eval.store.LoadGateState(ctx, issueID, gate)
+	if err != nil {
+		t.Fatalf("load state after revision 2: %v", err)
+	}
+	if !state.Stopped {
+		t.Fatalf("gate should stop after MaxRevisions=2, got: %+v", state)
+	}
+	if state.StopReason == "" {
+		t.Fatal("stopped gate must carry a stop reason")
+	}
+
+	// Even if round 3's checks somehow report green, a stopped gate never
+	// advances again — it is frozen for a human to look at, not auto-cleared.
+	if err := eval.store.Report(ctx, issueID, gate, 3, check, 0); err != nil {
+		t.Fatalf("report round 3: %v", err)
+	}
+	advance, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value)
+	if err != nil {
+		t.Fatalf("eval after stop: %v", err)
+	}
+	if advance {
+		t.Fatal("a stopped gate must never advance")
 	}
 }
 

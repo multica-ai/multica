@@ -40,8 +40,26 @@ type CheckDispatch struct {
 // TaskDispatcher enqueues an agent task. Optional and nil-safe on the
 // evaluator: without it the gate only records pending checks (the pre-dispatch
 // behavior).
+//
+// DispatchRevision is the parallel seam for a GateRevise decision: instead of
+// running one check command, it re-dispatches the worker's build skill so the
+// agent can fix whatever failed. Optional the same way — a nil dispatcher (or
+// a config missing an agent/skill) leaves the caps tracker updated but does
+// not re-dispatch anything.
 type CheckDispatcher interface {
 	DispatchCheck(ctx context.Context, d CheckDispatch) error
+	DispatchRevision(ctx context.Context, d RevisionDispatch) error
+}
+
+// RevisionDispatch is one round's worth of failed checks the engine asks the
+// worker agent to fix by re-running its build skill.
+type RevisionDispatch struct {
+	AgentID   string         // worker agent whose runtime re-runs the build
+	IssueID   string         // issue the loop is building
+	Gate      string         // stable per-gate key (the workflow id)
+	Round     int32          // the new round this revision starts
+	SkillName string         // the skill to re-dispatch (Compile sets the build skill)
+	Failures  []CheckOutcome // the outcomes that triggered this revision
 }
 
 // DispatchQueries is the narrow slice of the upstream issue queries the task
@@ -125,4 +143,69 @@ func buildCheckPrompt(d CheckDispatch) string {
 		"Run this loop verification check in the repository checkout, exactly as given, and report its exit code back to the loop gate (gate %s, round %d) without judging the result yourself:\n\n    %s",
 		d.Gate, d.Round, strings.Join(d.Argv, " "),
 	)
+}
+
+// DispatchRevision enqueues a quick_create task asking the worker agent to
+// re-run its build skill and fix the checks that failed, starting a new
+// round. It resolves the agent's runtime the same way DispatchCheck does and
+// fails loudly rather than silently dropping a revision the caps tracker has
+// already counted.
+func (t *TaskDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatch) error {
+	if d.SkillName == "" {
+		return fmt.Errorf("dispatch revision: empty skill name")
+	}
+	agentID, err := util.ParseUUID(d.AgentID)
+	if err != nil {
+		return fmt.Errorf("dispatch revision: parse agent id: %w", err)
+	}
+	agent, err := t.queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return fmt.Errorf("dispatch revision: load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return fmt.Errorf("dispatch revision: agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return fmt.Errorf("dispatch revision: agent has no runtime")
+	}
+
+	contextJSON, err := json.Marshal(map[string]any{
+		"type":         "quick_create",
+		"prompt":       buildRevisionPrompt(d),
+		"workspace_id": util.UUIDToString(agent.WorkspaceID),
+		// Structured loop_revision fields, mirroring loop_check: bookkeeping
+		// the daemon ignores today, pinned for a later deterministic handler.
+		"loop_revision": map[string]any{
+			"issue_id": d.IssueID,
+			"gate":     d.Gate,
+			"round":    d.Round,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("dispatch revision: marshal context: %w", err)
+	}
+
+	if _, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+		AgentID:   agentID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  0,
+		Context:   contextJSON,
+	}); err != nil {
+		return fmt.Errorf("dispatch revision: enqueue task: %w", err)
+	}
+	return nil
+}
+
+// buildRevisionPrompt renders the instruction the worker agent's model sees
+// on a revision: which checks failed and with what exit code, so the agent
+// does not have to re-discover the failure before it can fix it.
+func buildRevisionPrompt(d RevisionDispatch) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Loop gate %s failed and needs round %d: the previous round's verification checks did not all pass. Fix the issue, then let the loop re-verify.\n\nFailed checks:\n", d.Gate, d.Round)
+	for _, o := range d.Failures {
+		if o.Ran && o.ExitCode != 0 {
+			fmt.Fprintf(&b, "  - exit %d: %s\n", o.ExitCode, strings.Join(o.Argv, " "))
+		}
+	}
+	return b.String()
 }

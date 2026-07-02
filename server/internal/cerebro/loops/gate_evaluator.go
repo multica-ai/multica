@@ -19,12 +19,11 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// gateRound is the loop round the gate evaluates against. It is fixed at 1
-// until per-revision round tracking lands (the caps/iteration counter is a
-// later slice). A constant round is correct meanwhile: a re-run re-reports the
-// same argv, updating the same row, so the gate always decides on the latest
-// reported exit codes — "latest wins" idempotency, which is exactly what an
-// engine that re-evaluates on every event needs.
+// gateRound is the round a fresh gate starts on, before any revision has
+// advanced it. GateRoundState.Round (persisted in cerebro_loop_gate_state, see
+// Store.LoadGateState) is the round the evaluator actually evaluates against
+// — it is 1 until the first GateRevise, then advances by one per revision.
+// Tests that never trigger a revision can still assume round 1 throughout.
 const gateRound int32 = 1
 
 // GateEvaluator decides loop delivery gates for the workflow engine. It is the
@@ -49,11 +48,18 @@ func (g *GateEvaluator) WithDispatcher(d CheckDispatcher) *GateEvaluator {
 	return g
 }
 
-// EvaluateCheckGate reads the reported outcomes for this gate, decides via
-// Reconcile, and registers any not-yet-seen checks as pending so the runtime
-// can pick them up. It advances only when every required check has run and
-// exited zero; a missing or in-flight check waits, a failed check revises —
-// in every non-advance case it returns false so the gate stays closed.
+// EvaluateCheckGate reads the reported outcomes for this gate's current
+// round, decides via Reconcile, and registers any not-yet-seen checks as
+// pending so the runtime can pick them up. It advances only when every
+// required check has run and exited zero; a missing or in-flight check waits,
+// a failed check revises — in every non-advance case it returns false so the
+// gate stays closed.
+//
+// A gate the caps tracker has already Stopped (see Store.RecordRevision) is
+// frozen: it returns false without reading outcomes, enqueuing checks, or
+// dispatching anything. That is the stop-rule itself — once a loop's caps
+// trip, the engine must stop feeding it more rounds and wait for a human
+// (loop:escalate-stalled already notifies the issue owner on review entry).
 func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate string, value any) (bool, error) {
 	cfg, err := parseCheckGateConfig(value)
 	if err != nil {
@@ -64,7 +70,15 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 		return false, fmt.Errorf("check gate: parse issue id: %w", err)
 	}
 
-	outcomes, err := g.store.Outcomes(ctx, iid, gate, gateRound)
+	state, err := g.store.LoadGateState(ctx, iid, gate)
+	if err != nil {
+		return false, err
+	}
+	if state.Stopped {
+		return false, nil
+	}
+
+	outcomes, err := g.store.Outcomes(ctx, iid, gate, state.Round)
 	if err != nil {
 		return false, err
 	}
@@ -77,17 +91,46 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 		// Register the missing checks as pending, then send any not-yet-sent
 		// check to the worker agent's runtime so it actually runs. The gate
 		// still holds (returns false) until the runtime reports green.
-		if err := g.store.Enqueue(ctx, iid, gate, gateRound, decision.Enqueue); err != nil {
+		if err := g.store.Enqueue(ctx, iid, gate, state.Round, decision.Enqueue); err != nil {
 			return false, err
 		}
-		if err := g.dispatchPending(ctx, iid, cfg.AgentID, gate); err != nil {
+		if err := g.dispatchPending(ctx, iid, cfg.AgentID, gate, state.Round); err != nil {
 			return false, err
 		}
 		return false, nil
+	case GateRevise:
+		return false, g.revise(ctx, iid, gate, cfg, outcomes)
 	default:
-		// GateWait (in flight) or GateRevise (a check failed): hold the gate.
+		// GateWait: every required check is in flight; hold.
 		return false, nil
 	}
+}
+
+// revise records a failed round against the spec's caps (Store.RecordRevision)
+// and, unless that trips a cap, re-dispatches the worker's build skill so it
+// can fix the failing checks in the fresh round the caps tracker just opened.
+// A cap trip freezes the gate instead: EvaluateCheckGate's Stopped check on
+// the next call is what actually stops the loop from consuming more rounds.
+func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate string, cfg CheckGateConfig, outcomes []CheckOutcome) error {
+	signature := OutcomeSignature(outcomes)
+	next, err := g.store.RecordRevision(ctx, issueID, gate, signature, cfg.Caps)
+	if err != nil {
+		return err
+	}
+	if next.Stopped {
+		return nil
+	}
+	if g.dispatcher == nil || cfg.AgentID == "" || cfg.RevisionSkill == "" {
+		return nil
+	}
+	return g.dispatcher.DispatchRevision(ctx, RevisionDispatch{
+		AgentID:   cfg.AgentID,
+		IssueID:   util.UUIDToString(issueID),
+		Gate:      gate,
+		Round:     next.Round,
+		SkillName: cfg.RevisionSkill,
+		Failures:  outcomes,
+	})
 }
 
 // dispatchPending sends every enqueued-but-undispatched check for this gate
@@ -95,11 +138,11 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 // so a later evaluation never re-sends it. A nil dispatcher (the pre-dispatch
 // wiring) or a config without an agent leaves the checks pending without
 // sending them — the gate still holds, it just has no egress.
-func (g *GateEvaluator) dispatchPending(ctx context.Context, issueID pgtype.UUID, agentID, gate string) error {
+func (g *GateEvaluator) dispatchPending(ctx context.Context, issueID pgtype.UUID, agentID, gate string, round int32) error {
 	if g.dispatcher == nil || agentID == "" {
 		return nil
 	}
-	pending, err := g.store.PendingDispatch(ctx, issueID, gate, gateRound)
+	pending, err := g.store.PendingDispatch(ctx, issueID, gate, round)
 	if err != nil {
 		return err
 	}
@@ -109,12 +152,12 @@ func (g *GateEvaluator) dispatchPending(ctx context.Context, issueID pgtype.UUID
 			AgentID: agentID,
 			IssueID: issueStr,
 			Gate:    gate,
-			Round:   gateRound,
+			Round:   round,
 			Argv:    argv,
 		}); err != nil {
 			return fmt.Errorf("dispatch pending check: %w", err)
 		}
-		if err := g.store.MarkDispatched(ctx, issueID, gate, gateRound, argv); err != nil {
+		if err := g.store.MarkDispatched(ctx, issueID, gate, round, argv); err != nil {
 			return err
 		}
 	}

@@ -118,6 +118,97 @@ func (s *Store) Report(ctx context.Context, issueID pgtype.UUID, gate string, ro
 	return nil
 }
 
+// GateRoundState is the caps-tracking state for one delivery gate, persisted in
+// cerebro_loop_gate_state. It is what turns Spec.Caps from a parsed-but-unused
+// field into an enforced termination guard: LoadGateState tells the evaluator
+// which round to evaluate against, and RecordRevision is where a GateRevise
+// decision gets checked against MaxIterations / MaxRevisions /
+// NoProgressStalls and frozen (Stopped) the moment one trips.
+type GateRoundState struct {
+	Round                int32
+	Revisions            int32
+	ConsecutiveStalls    int32
+	LastOutcomeSignature string
+	Stopped              bool
+	StopReason           string
+}
+
+// LoadGateState returns the current caps-tracking state for a gate, creating
+// a fresh row (round 1, not stopped) on first access. Idempotent: calling it
+// repeatedly for the same gate never resets an existing row.
+func (s *Store) LoadGateState(ctx context.Context, issueID pgtype.UUID, gate string) (GateRoundState, error) {
+	if _, err := s.pool.Exec(ctx,
+		`INSERT INTO cerebro_loop_gate_state (issue_id, gate) VALUES ($1, $2)
+		 ON CONFLICT (issue_id, gate) DO NOTHING`,
+		issueID, gate); err != nil {
+		return GateRoundState{}, fmt.Errorf("init loop gate state: %w", err)
+	}
+	var st GateRoundState
+	if err := s.pool.QueryRow(ctx,
+		`SELECT round, revisions, consecutive_stalls, last_outcome_signature, stopped, stop_reason
+		 FROM cerebro_loop_gate_state WHERE issue_id = $1 AND gate = $2`,
+		issueID, gate,
+	).Scan(&st.Round, &st.Revisions, &st.ConsecutiveStalls, &st.LastOutcomeSignature, &st.Stopped, &st.StopReason); err != nil {
+		return GateRoundState{}, fmt.Errorf("load loop gate state: %w", err)
+	}
+	return st, nil
+}
+
+// RecordRevision advances a gate to a new round after a GateRevise decision
+// and applies the spec's termination guards. signature is
+// OutcomeSignature(outcomes) for the round that just failed: an unchanged
+// signature across two consecutive revisions means the worker made no
+// progress, and increments ConsecutiveStalls instead of resetting it.
+//
+// A zero Caps field means that guard is not configured (the raw
+// CheckGateConfig tests in this package do not set Caps) and is never
+// checked — in production Compile always populates Caps from a validated
+// Spec, whose caps are required to be positive. Once any guard trips the gate
+// is Stopped for good: a cap trip is a one-way door, so a later call is a
+// no-op that returns the already-stopped state unchanged.
+func (s *Store) RecordRevision(ctx context.Context, issueID pgtype.UUID, gate string, signature string, caps Caps) (GateRoundState, error) {
+	cur, err := s.LoadGateState(ctx, issueID, gate)
+	if err != nil {
+		return GateRoundState{}, err
+	}
+	if cur.Stopped {
+		return cur, nil
+	}
+
+	next := cur
+	next.Round = cur.Round + 1
+	next.Revisions = cur.Revisions + 1
+	if signature != "" && signature == cur.LastOutcomeSignature {
+		next.ConsecutiveStalls = cur.ConsecutiveStalls + 1
+	} else {
+		next.ConsecutiveStalls = 0
+	}
+	next.LastOutcomeSignature = signature
+
+	switch {
+	case caps.MaxRevisions > 0 && next.Revisions >= int32(caps.MaxRevisions):
+		next.Stopped = true
+		next.StopReason = fmt.Sprintf("max_revisions reached (%d)", caps.MaxRevisions)
+	case caps.MaxIterations > 0 && next.Round > int32(caps.MaxIterations):
+		next.Stopped = true
+		next.StopReason = fmt.Sprintf("max_iterations reached (%d)", caps.MaxIterations)
+	case caps.NoProgressStalls > 0 && next.ConsecutiveStalls >= int32(caps.NoProgressStalls):
+		next.Stopped = true
+		next.StopReason = fmt.Sprintf("no_progress_stalls reached (%d)", caps.NoProgressStalls)
+	}
+
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE cerebro_loop_gate_state
+		 SET round = $3, revisions = $4, consecutive_stalls = $5,
+		     last_outcome_signature = $6, stopped = $7, stop_reason = $8, updated_at = now()
+		 WHERE issue_id = $1 AND gate = $2`,
+		issueID, gate, next.Round, next.Revisions, next.ConsecutiveStalls,
+		next.LastOutcomeSignature, next.Stopped, next.StopReason); err != nil {
+		return GateRoundState{}, fmt.Errorf("record loop gate revision: %w", err)
+	}
+	return next, nil
+}
+
 // Outcomes returns every check (pending and reported) for a gate round, oldest
 // first, folded into the CheckOutcome shape Reconcile / EvaluateGate consume.
 func (s *Store) Outcomes(ctx context.Context, issueID pgtype.UUID, gate string, round int32) ([]CheckOutcome, error) {

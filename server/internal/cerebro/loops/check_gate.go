@@ -10,12 +10,33 @@ package loops
 // unit-tested. The agent's opinion never enters the decision — only the
 // reported exit codes do. That is what makes the gate trustworthy.
 
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
 // CheckOutcome is one programmatic check's result as reported by the runtime
 // that executed it. Ran is false until a result has been reported.
 type CheckOutcome struct {
 	Argv     []string `json:"argv"`
 	Ran      bool     `json:"ran"`
 	ExitCode int      `json:"exit_code"`
+}
+
+// OutcomeSignature returns a stable digest of a round's reported outcomes,
+// used by the caps tracker (Store.RecordRevision) to detect a no-progress
+// stall: two consecutive revisions with the same signature mean the worker
+// resubmitted the same failing state instead of fixing anything. Sorted so
+// the signature is independent of report order; unreported checks and their
+// exit codes are included so "still not reported" also counts as unchanged.
+func OutcomeSignature(outcomes []CheckOutcome) string {
+	parts := make([]string, len(outcomes))
+	for i, o := range outcomes {
+		parts[i] = fmt.Sprintf("%s|%t|%d", strings.Join(o.Argv, " "), o.Ran, o.ExitCode)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "\n")
 }
 
 // GateState is the engine's verdict for a delivery gate.

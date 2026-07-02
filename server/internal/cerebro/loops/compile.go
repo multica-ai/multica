@@ -27,6 +27,18 @@ type CheckGateConfig struct {
 	// the build agent: when the gate enqueues checks, the evaluator dispatches
 	// them to this agent's runtime.
 	AgentID string `json:"agent_id,omitempty"`
+	// Caps are the spec's termination guards, carried into the gate so
+	// Store.RecordRevision can enforce them on every GateRevise decision.
+	// Zero value means "no caps configured" (never trips) — Compile
+	// always fills this from a validated Spec, whose caps are required to be
+	// positive, so a real compiled loop always enforces its guards.
+	Caps Caps `json:"caps,omitempty"`
+	// RevisionSkill is the skill re-dispatched to AgentID when the gate
+	// revises (a required check failed). Compile sets it to the same build
+	// skill the loop:dispatch-build rule runs, so a revision looks identical
+	// to the original build round from the worker's point of view — it is
+	// told what failed and asked to fix it.
+	RevisionSkill string `json:"revision_skill,omitempty"`
 }
 
 // CompileParams supplies the issue-specific bindings the spec itself does not
@@ -128,7 +140,12 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 			TriggerType:   workflows.TriggerStatusChanged,
 			TriggerConfig: workflows.TriggerConfigStatusChanged{ToStatus: p.ReviewStatus},
 			Conditions: []workflows.Condition{
-				{Field: "loop.checks", Op: CheckGateOp, Value: CheckGateConfig{Checks: checks, AgentID: params.AgentID}},
+				{Field: "loop.checks", Op: CheckGateOp, Value: CheckGateConfig{
+					Checks:        checks,
+					AgentID:       params.AgentID,
+					Caps:          spec.Caps,
+					RevisionSkill: p.BuildSkill,
+				}},
 			},
 			ActionType:   workflows.ActionSetStatus,
 			ActionConfig: workflows.ActionConfigSetStatus{Status: p.DoneStatus},
