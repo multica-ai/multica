@@ -58,6 +58,19 @@ const (
 // thread, otherwise stay in_review".
 const OpEvidencePresent = "evidence_present"
 
+// OpCheckPasses is the loop delivery-gate condition: it holds only when every
+// programmatic check the loop requires has run and exited zero. Like
+// evidence_present it is not a pure in-memory comparison — it reads the
+// reported check outcomes out of band — so conditionsHold routes it through
+// the injected GateEvaluator (see check_gate.go) rather than evaluate().
+//
+// The string MUST equal loops.CheckGateOp. The two packages cannot share the
+// constant directly: loops imports workflows (to compile a spec into Rules),
+// so workflows importing loops would be a cycle. The op string is the wire
+// contract across that boundary; the GateEvaluator interface inverts the
+// dependency so the loops adapter is plugged in at main.go.
+const OpCheckPasses = "check_passes"
+
 // EvidenceConfig is the shape stored under Condition.Value when Op is
 // "evidence_present". All fields are optional; sensible defaults apply when
 // the field is empty:
@@ -181,6 +194,13 @@ type ActionConfigRunSkill struct {
 	SkillName  string         `json:"skill_name"`
 	AgentID    string         `json:"agent_id"`
 	SkillInput map[string]any `json:"skill_input,omitempty"`
+	// LoopPlanning signals that this run_skill action is the build step of a
+	// loop that requires an explicit planning phase. When true, the loop engine
+	// (FIR-2283) prepends a planning-dispatch rule so the agent must produce a
+	// plan before the build phase begins. The field is persisted as part of the
+	// opaque action_config JSON and has no effect on the base run_skill action
+	// runner — it is consumed only by the loop compiler.
+	LoopPlanning bool `json:"loop_planning,omitempty"`
 }
 
 // ActionConfigCommentOnIssue — post a workflow-authored comment on either

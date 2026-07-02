@@ -1,0 +1,123 @@
+package loops
+
+// Pure unit tests for the check dispatcher — no DB. Proves DispatchCheck turns
+// one enqueued check into a single quick_create task on the worker agent's
+// runtime, carrying the argv and the loop_check bookkeeping the ingress matches
+// on, and that a check with nowhere to run fails loudly instead of vanishing.
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+)
+
+// fakeDispatchQueries stubs the upstream issue queries the TaskDispatcher needs.
+type fakeDispatchQueries struct {
+	agent   db.Agent
+	getErr  error
+	created []db.CreateQuickCreateTaskParams
+}
+
+func (f *fakeDispatchQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error) {
+	return f.agent, f.getErr
+}
+
+func (f *fakeDispatchQueries) CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error) {
+	f.created = append(f.created, arg)
+	return db.AgentTaskQueue{}, nil
+}
+
+func mustScanUUID(t *testing.T, s string) pgtype.UUID {
+	t.Helper()
+	var u pgtype.UUID
+	if err := u.Scan(s); err != nil {
+		t.Fatalf("parse uuid %q: %v", s, err)
+	}
+	return u
+}
+
+// TestTaskDispatcher_EnqueuesCheckTask proves DispatchCheck resolves the agent's
+// runtime and enqueues one quick_create task whose context carries the argv and
+// the loop_check bookkeeping.
+func TestTaskDispatcher_EnqueuesCheckTask(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	runtimeID := mustScanUUID(t, "22222222-2222-2222-2222-222222222222")
+	wsID := mustScanUUID(t, "33333333-3333-3333-3333-333333333333")
+	q := &fakeDispatchQueries{agent: db.Agent{
+		ID:          mustScanUUID(t, agentID),
+		WorkspaceID: wsID,
+		RuntimeID:   runtimeID,
+	}}
+	d := NewTaskDispatcher(q)
+
+	err := d.DispatchCheck(context.Background(), CheckDispatch{
+		AgentID: agentID,
+		IssueID: "44444444-4444-4444-4444-444444444444",
+		Gate:    "gate-1",
+		Round:   1,
+		Argv:    []string{"go", "test", "./..."},
+	})
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(q.created) != 1 {
+		t.Fatalf("want 1 task enqueued, got %d", len(q.created))
+	}
+
+	task := q.created[0]
+	if task.RuntimeID != runtimeID {
+		t.Fatal("task not routed to the agent's runtime")
+	}
+	var ctxMap map[string]any
+	if err := json.Unmarshal(task.Context, &ctxMap); err != nil {
+		t.Fatalf("context not valid JSON: %v", err)
+	}
+	if ctxMap["type"] != "quick_create" {
+		t.Fatalf("task type wrong: %v", ctxMap["type"])
+	}
+	lc, ok := ctxMap["loop_check"].(map[string]any)
+	if !ok {
+		t.Fatalf("loop_check bookkeeping missing: %v", ctxMap)
+	}
+	if lc["gate"] != "gate-1" {
+		t.Fatalf("loop_check gate wrong: %v", lc["gate"])
+	}
+	if lc["issue_id"] != "44444444-4444-4444-4444-444444444444" {
+		t.Fatalf("loop_check issue_id wrong: %v", lc["issue_id"])
+	}
+	argv, ok := lc["argv"].([]any)
+	if !ok || len(argv) != 3 || argv[0] != "go" {
+		t.Fatalf("loop_check argv wrong: %v", lc["argv"])
+	}
+}
+
+// TestTaskDispatcher_RejectsAgentWithoutRuntime proves a check with nowhere to
+// run errors instead of being silently dropped (which would stall the gate).
+func TestTaskDispatcher_RejectsAgentWithoutRuntime(t *testing.T) {
+	q := &fakeDispatchQueries{agent: db.Agent{}} // zero RuntimeID => not Valid
+	d := NewTaskDispatcher(q)
+	err := d.DispatchCheck(context.Background(), CheckDispatch{
+		AgentID: "11111111-1111-1111-1111-111111111111",
+		Argv:    []string{"go", "test"},
+	})
+	if err == nil {
+		t.Fatal("expected error for agent without runtime")
+	}
+	if len(q.created) != 0 {
+		t.Fatal("no task should be enqueued when the agent has no runtime")
+	}
+}
+
+// TestTaskDispatcher_RejectsEmptyArgv proves an empty check is refused before
+// any agent lookup — there is nothing to run.
+func TestTaskDispatcher_RejectsEmptyArgv(t *testing.T) {
+	q := &fakeDispatchQueries{}
+	d := NewTaskDispatcher(q)
+	if err := d.DispatchCheck(context.Background(), CheckDispatch{AgentID: "x", Argv: nil}); err == nil {
+		t.Fatal("expected error for empty argv")
+	}
+}

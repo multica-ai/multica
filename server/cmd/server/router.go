@@ -38,6 +38,8 @@ import (
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 loop planning-dispatch materializer import
+	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 per-workspace saving-mode handler import.
 	cerebrocostoptimization "github.com/multica-ai/multica/server/internal/cerebro/cost_optimization"
 	// CEREBRO-PATCH(cerebro-display-currency-routes): FIR-40 per-workspace display-currency handler import.
@@ -741,6 +743,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	daemonHub.SetDisconnectHandler(cerebroTerminalBridge.OnDaemonDisconnect)
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).WithService(opts.WorkflowService)
+	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 — plug the loop planning-dispatch materializer so a run_skill workflow's `loop_planning` toggle actually creates its companion planning-phase rule (see workflows/loop_planning.go).
+	cerebroWorkflowsHandler.WithLoopPlanningMaterializer(cerebroloops.NewPlanningMaterializer(cerebroQueries))
 	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 v2b — pass upstream queries so per-issue custom status mirrors onto the upstream issue row, and pass the pool so the two writes commit atomically (Mia review).
 	cerebroStatusModelsHandler := cerebrostatusmodels.NewHandler(cerebroQueries).WithUpstream(queries).WithTx(pool)
 	// CEREBRO-PATCH(custom-status-resolver-wire): FIR-1550 v2b — UpdateIssue invokes the resolver.

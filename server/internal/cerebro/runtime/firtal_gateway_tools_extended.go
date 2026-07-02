@@ -1760,4 +1760,9 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	for _, tool := range customerServiceMCPTools() {
 		r.Register(tool)
 	}
+	// CEREBRO-PATCH(register-report-loop-check): FIR-2283 — register ingress tool
+	// only when the loop store is wired; nil store = tool absent, gate stays safe.
+	if tctx.LoopStore != nil {
+		r.Register(&FirtalReportLoopCheckTool{store: tctx.LoopStore, tctx: tctx})
+	}
 }

@@ -45,6 +45,12 @@ type Service struct {
 	// var stays as the master kill switch so an ops-driven disable doesn't
 	// require a UI round-trip.
 	enabled bool
+
+	// gateEval decides OpCheckPasses (loop delivery gate) conditions. Optional
+	// and nil-safe: without it an OpCheckPasses gate fails closed. Wired via
+	// WithGateEvaluator (see check_gate.go) so the loops adapter plugs in
+	// without workflows importing loops.
+	gateEval GateEvaluator
 }
 
 // New builds a Service. enabled is true when the CEREBRO_WORKFLOWS_ENABLED
@@ -471,6 +477,32 @@ func (s *Service) conditionsHold(ctx context.Context, wf workflow, te TriggerEve
 			ok, err := s.evaluateEvidence(ctx, wf, te, c)
 			if err != nil {
 				slog.Warn("workflow conditions: evidence eval failed",
+					"workflow_id", uuidString(wf.id),
+					"issue_id", te.IssueID,
+					"error", err,
+				)
+				return false
+			}
+			if !ok {
+				return false
+			}
+			continue
+		}
+		if c.Op == OpCheckPasses {
+			// Loop delivery gate. Fail closed when no evaluator is wired or the
+			// decision errors — advancing a `set_status: done` gate without a
+			// confirmed green check is exactly the untrustworthy outcome the
+			// gate exists to prevent.
+			if s.gateEval == nil {
+				slog.Warn("workflow conditions: check_passes has no gate evaluator wired",
+					"workflow_id", uuidString(wf.id),
+					"issue_id", te.IssueID,
+				)
+				return false
+			}
+			ok, err := s.gateEval.EvaluateCheckGate(ctx, te.IssueID, uuidString(wf.id), c.Value)
+			if err != nil {
+				slog.Warn("workflow conditions: check_passes eval failed",
 					"workflow_id", uuidString(wf.id),
 					"issue_id", te.IssueID,
 					"error", err,

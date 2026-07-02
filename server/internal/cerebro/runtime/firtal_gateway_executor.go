@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -82,6 +83,11 @@ type FirtalGatewayExecutor struct {
 
 	attachmentStorage storage.Storage
 
+	// CEREBRO-PATCH(executor-loopstore): FIR-2283 — loop check outcome store wired
+	// into ToolContext so worker agents can call report_loop_check to report exit
+	// codes back to the delivery gate. Nil disables the tool.
+	loopStore *cerebroloops.Store
+
 	// routerHandler is the server's own HTTP router, used by the FIR-1449
 	// in-process bridge to reach the full CLI/MCP tool surface via a loopback
 	// transport carrying the task's identity. Nil disables the bridge (default).
@@ -111,6 +117,16 @@ func (e *FirtalGatewayExecutor) SetAttachmentStorage(s storage.Storage) {
 	if e != nil {
 		e.attachmentStorage = s
 	}
+}
+
+// CEREBRO-PATCH(executor-loopstore): FIR-2283 — SetLoopStore wires the loop
+// check store so worker agents can call report_loop_check to report check exit
+// codes back to the delivery gate. Nil keeps the tool absent (safe default).
+func (e *FirtalGatewayExecutor) SetLoopStore(s *cerebroloops.Store) *FirtalGatewayExecutor {
+	if e != nil {
+		e.loopStore = s
+	}
+	return e
 }
 
 func NewFirtalGatewayExecutor(
@@ -880,7 +896,7 @@ func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agent
 // The first round without tool calls becomes the final output. Budget is
 // checked before each tool dispatch. Usage is summed across all rounds.
 func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID, originalUserID pgtype.UUID, pruneApply bool) (GatewayCompletion, error) {
-	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage}
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available.
 	// Pin the default file-attachment target (create_file) to the surface this
 	// task runs on, so an agent never has to know the chat-message UUID.
 	if meta.IssueID != "" {
