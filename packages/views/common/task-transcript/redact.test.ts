@@ -25,6 +25,18 @@ describe("redactSecrets", () => {
     expect(result).not.toContain("ghp_");
   });
 
+  it("redacts GitHub fine-grained PATs (github_pat_)", () => {
+    const result = redactSecrets(
+      "the build left github_pat_11ABCDEFG0aBcDeFgHiJkL_mNoPqRsTuVwXyZ0123456789AbCdEfGhIjKlMnOpQrSt in the log",
+    );
+    expect(result).not.toContain("github_pat_");
+  });
+
+  it("redacts Google API keys (AIza...)", () => {
+    const result = redactSecrets("the config still had AIzaSyB1cD3fGhIjKlMnOpQrStUvWxYz012345_z in it");
+    expect(result).not.toContain("AIzaSy");
+  });
+
   it("redacts GitLab tokens", () => {
     const result = redactSecrets("glpat-AbCdEfGhIjKlMnOpQrStUvWx");
     expect(result).not.toContain("glpat-");

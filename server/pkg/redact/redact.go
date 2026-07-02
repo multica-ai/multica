@@ -26,8 +26,14 @@ var patterns = []secretPattern{
 	// PEM private keys (multi-line)
 	{regexp.MustCompile(`(?s)-----BEGIN[A-Z\s]*PRIVATE KEY-----.*?-----END[A-Z\s]*PRIVATE KEY-----`), "[REDACTED PRIVATE KEY]"},
 
-	// GitHub tokens (classic PAT, fine-grained, OAuth, etc.)
+	// GitHub OAuth / classic tokens (ghp_/gho_/ghu_/ghs_/ghr_)
 	{regexp.MustCompile(`\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}\b`), "[REDACTED GITHUB TOKEN]"},
+
+	// GitHub fine-grained PATs (github_pat_…, GitHub's recommended format since 2022)
+	{regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,255}\b`), "[REDACTED GITHUB TOKEN]"},
+
+	// Google API keys (AIza…, e.g. Gemini / Maps / Firebase)
+	{regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35,}\b`), "[REDACTED GOOGLE API KEY]"},
 
 	// OpenAI / Anthropic API keys
 	{regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}\b`), "[REDACTED API KEY]"},

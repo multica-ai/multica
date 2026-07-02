@@ -47,6 +47,30 @@ func TestRedactGitHubToken(t *testing.T) {
 	}
 }
 
+func TestRedactGitHubFineGrainedPAT(t *testing.T) {
+	t.Parallel()
+	// Fine-grained PATs (github_pat_…) have been GitHub's recommended token
+	// format since 2022 and are common in agent git workflows, but the pattern
+	// only matched the classic ghp_/gho_/… prefixes — even though its comment
+	// claimed fine-grained coverage.
+	// Bare token with no "token:"/"key=" lead-in, so only a github_pat_-aware
+	// pattern can catch it (not the generic credential rule).
+	input := "the build left github_pat_11ABCDEFG0aBcDeFgHiJkL_mNoPqRsTuVwXyZ0123456789AbCdEfGhIjKlMnOpQrSt in the log"
+	got := Text(input)
+	if strings.Contains(got, "github_pat_") {
+		t.Fatalf("fine-grained GitHub PAT not redacted: %s", got)
+	}
+}
+
+func TestRedactGoogleAPIKey(t *testing.T) {
+	t.Parallel()
+	input := "the config file still had AIzaSyB1cD3fGhIjKlMnOpQrStUvWxYz012345_z in it"
+	got := Text(input)
+	if strings.Contains(got, "AIzaSy") {
+		t.Fatalf("Google API key not redacted: %s", got)
+	}
+}
+
 func TestRedactOpenAIKey(t *testing.T) {
 	t.Parallel()
 	input := "OPENAI_API_KEY=sk-proj-abc123def456ghi789jkl012mno345"
