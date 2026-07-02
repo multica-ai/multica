@@ -63,6 +63,7 @@ type UserResponse struct {
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
 	StarterContentState     *string         `json:"starter_content_state"`
 	ProfileDescription      string          `json:"profile_description"`
+	Motto                   string          `json:"motto"`
 	CreatedAt               string          `json:"created_at"`
 	UpdatedAt               string          `json:"updated_at"`
 }
@@ -92,6 +93,7 @@ func userToResponse(u db.User) UserResponse {
 		OnboardingQuestionnaire: json.RawMessage(q),
 		StarterContentState:     textToPtr(u.StarterContentState),
 		ProfileDescription:      u.ProfileDescription,
+		Motto:                   u.Motto,
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
 	}
@@ -440,6 +442,7 @@ type UpdateMeRequest struct {
 	AvatarURL          *string `json:"avatar_url"`
 	Language           *string `json:"language"`
 	ProfileDescription *string `json:"profile_description"`
+	Motto              *string `json:"motto"`
 	// IANA tz to pin; "" clears back to NULL; nil leaves untouched.
 	Timezone *string `json:"timezone"`
 }
@@ -696,6 +699,14 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.ProfileDescription = pgtype.Text{String: desc, Valid: true}
+	}
+	if req.Motto != nil {
+		motto := strings.TrimSpace(*req.Motto)
+		if utf8.RuneCountInString(motto) > MaxProfileDescriptionLen {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("motto exceeds %d characters", MaxProfileDescriptionLen))
+			return
+		}
+		params.Motto = pgtype.Text{String: motto, Valid: true}
 	}
 
 	if req.Timezone != nil {
