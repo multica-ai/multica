@@ -69,8 +69,14 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 	if !strings.Contains(query, "i.number = ") {
 		t.Error("query should contain number match in WHERE clause")
 	}
-	if !strings.Contains(query, "lower(wt.key) = lower(") {
-		t.Error("identifier search should constrain by Team key")
+	// Identifier search must constrain by Team key with a default-team fallback
+	// so NULL-team rows (rolling-deploy window) still match, mirroring
+	// GetIssueByTeamKeyAndNumber.
+	if !strings.Contains(query, "lower(COALESCE(wt.key, dt.key)) = lower(") {
+		t.Error("identifier search should constrain by COALESCE(wt.key, dt.key)")
+	}
+	if !strings.Contains(query, "LEFT JOIN workspace_team dt ON dt.workspace_id = i.workspace_id AND dt.is_default") {
+		t.Error("identifier search should LEFT JOIN the default team for the null-team fallback")
 	}
 	if args[4] != int(42) || args[5] != "MUL" {
 		t.Errorf("expected number/team key args at positions 4/5, got %#v", args)
@@ -78,6 +84,20 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 	// Tier 0 rank for identifier match.
 	if !strings.Contains(query, "THEN 0") {
 		t.Error("query should contain tier 0 rank for identifier match")
+	}
+}
+
+// TestBuildSearchQuery_BareNumberNoDefaultTeamJoin confirms a bare-number
+// search (no Team key) does not pull in the default-team fallback join — the
+// null-team fallback is only needed when an identifier pins a specific key.
+func TestBuildSearchQuery_BareNumberNoDefaultTeamJoin(t *testing.T) {
+	query, _ := buildSearchQuery("42", []string{"42"}, 42, "", true, false)
+
+	if strings.Contains(query, "workspace_team dt") {
+		t.Error("bare-number search should not add the default-team fallback join")
+	}
+	if !strings.Contains(query, "i.number = ") {
+		t.Error("bare-number search should still match on i.number")
 	}
 }
 

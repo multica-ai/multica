@@ -111,11 +111,13 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 	}
 
 	var workspaceID string
+	var workspaceCounter int32
+	var workspacePrefix string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description)
-		VALUES ($1, $2, $3)
-		RETURNING id
-	`, "Integration Tests", integrationTestWorkspaceSlug, "Temporary workspace for router integration tests").Scan(&workspaceID); err != nil {
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, issue_counter, issue_prefix
+	`, "Integration Tests", integrationTestWorkspaceSlug, "Temporary workspace for router integration tests", "INT").Scan(&workspaceID, &workspaceCounter, &workspacePrefix); err != nil {
 		return "", "", err
 	}
 
@@ -123,6 +125,18 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		INSERT INTO member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'owner')
 	`, workspaceID, userID); err != nil {
+		return "", "", err
+	}
+
+	// Seed the default Team so team-aware issue creates resolve a Team the same
+	// way migration 131 backfills production workspaces. Without this every
+	// team-aware create fails "team not found in this workspace". The team's
+	// issue_counter mirrors the workspace counter so the two never hand out
+	// overlapping numbers.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workspace_team (workspace_id, name, key, issue_counter, is_default, created_by)
+		VALUES ($1, 'Default', $2, $3, true, $4)
+	`, workspaceID, workspacePrefix, workspaceCounter, userID); err != nil {
 		return "", "", err
 	}
 

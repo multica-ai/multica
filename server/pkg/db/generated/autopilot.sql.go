@@ -92,6 +92,28 @@ func (q *Queries) ArchiveAutopilot(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const countActiveAutopilotsByTeam = `-- name: CountActiveAutopilotsByTeam :one
+SELECT count(*) FROM autopilot
+WHERE workspace_id = $1
+  AND team_id = $2
+  AND status <> 'archived'
+`
+
+type CountActiveAutopilotsByTeamParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+}
+
+// Counts non-archived autopilots pinned to a Team. Used to block archiving a
+// Team that still drives live autopilots (mirrors CountActiveProjectAutopilotsByTeam,
+// which scopes the same liveness column to a single project).
+func (q *Queries) CountActiveAutopilotsByTeam(ctx context.Context, arg CountActiveAutopilotsByTeamParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveAutopilotsByTeam, arg.WorkspaceID, arg.TeamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,

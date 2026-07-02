@@ -37,6 +37,15 @@ WHERE a.workspace_id = $1
   )
 ORDER BY a.created_at DESC;
 
+-- name: CountActiveAutopilotsByTeam :one
+-- Counts non-archived autopilots pinned to a Team. Used to block archiving a
+-- Team that still drives live autopilots (mirrors CountActiveProjectAutopilotsByTeam,
+-- which scopes the same liveness column to a single project).
+SELECT count(*) FROM autopilot
+WHERE workspace_id = $1
+  AND team_id = $2
+  AND status <> 'archived';
+
 -- name: GetAutopilot :one
 SELECT * FROM autopilot
 WHERE id = $1;

@@ -705,6 +705,7 @@ type GetIssueByTeamKeyAndNumberParams struct {
 	Number      int32       `json:"number"`
 }
 
+// TODO(migration-b): remove null-team fallback after numbering cutover
 func (q *Queries) GetIssueByTeamKeyAndNumber(ctx context.Context, arg GetIssueByTeamKeyAndNumberParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, getIssueByTeamKeyAndNumber, arg.WorkspaceID, arg.Lower, arg.Number)
 	var i Issue

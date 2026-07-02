@@ -235,6 +235,23 @@ func (h *Handler) ArchiveTeam(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Block archiving a Team that still drives live autopilots — the SQL only
+	// guards the default team, so without this an archived Team would leave
+	// active autopilots pointing at a Team that can no longer receive work.
+	// Existing issues are intentionally NOT a blocker: the default team always
+	// has issues, and archived-team issues stay readable.
+	activeAutopilots, err := h.Queries.CountActiveAutopilotsByTeam(r.Context(), db.CountActiveAutopilotsByTeamParams{
+		WorkspaceID: wsUUID,
+		TeamID:      teamID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to validate team usage")
+		return
+	}
+	if activeAutopilots > 0 {
+		writeError(w, http.StatusConflict, "cannot archive a team used by active autopilots")
+		return
+	}
 	team, err := h.Queries.ArchiveWorkspaceTeam(r.Context(), db.ArchiveWorkspaceTeamParams{
 		ID:          teamID,
 		WorkspaceID: wsUUID,

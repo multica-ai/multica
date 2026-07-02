@@ -5,19 +5,48 @@
 -- uq_issue_workspace_number remains in place. Migration B can only run after
 -- all write and resolver paths are Team-aware.
 
+-- Deterministically normalize each workspace's legacy issue_prefix into a Team
+-- key that satisfies the workspace_team CHECK (^[A-Z][A-Z0-9]{0,6}$). Legacy
+-- data legitimately contains 8-10 char prefixes (the old UI allowed
+-- slice(0, 10)) and digit-first prefixes, so aborting the deploy on those would
+-- brick upgrades. Instead we normalize: uppercase, strip non-[A-Z0-9],
+-- truncate to 7; if the result is digit-first, prefix 'T' and re-truncate to 7;
+-- if nothing usable remains, fall back to 'TEAM'. The default-team backfill and
+-- every other prefix consumer in this migration use the same function so the
+-- seeded key can never diverge from what is emitted below.
+CREATE FUNCTION pg_temp.normalize_team_key(prefix text) RETURNS text AS $$
+DECLARE
+    cleaned text;
+BEGIN
+    cleaned := left(regexp_replace(upper(coalesce(prefix, '')), '[^A-Z0-9]', '', 'g'), 7);
+    IF cleaned ~ '^[0-9]' THEN
+        cleaned := left('T' || cleaned, 7);
+    END IF;
+    IF cleaned = '' THEN
+        cleaned := 'TEAM';
+    END IF;
+    RETURN cleaned;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
 DO $$
 DECLARE
-    invalid_prefix_count integer;
+    rec record;
     counter_regression_count integer;
 BEGIN
-    SELECT count(*) INTO invalid_prefix_count
-    FROM workspace
-    WHERE btrim(issue_prefix) = ''
-       OR upper(btrim(issue_prefix)) !~ '^[A-Z][A-Z0-9]{0,6}$';
-
-    IF invalid_prefix_count > 0 THEN
-        RAISE EXCEPTION 'workspace_team preflight failed: % workspace.issue_prefix values do not satisfy Team key rules', invalid_prefix_count;
-    END IF;
+    -- Surface every prefix that had to be rewritten so operators can reconcile
+    -- external references to the old key. Informational only, never fatal.
+    FOR rec IN
+        SELECT w.id AS workspace_id,
+               upper(btrim(w.issue_prefix)) AS old_key,
+               pg_temp.normalize_team_key(w.issue_prefix) AS new_key
+        FROM workspace w
+        WHERE pg_temp.normalize_team_key(w.issue_prefix) <> upper(btrim(w.issue_prefix))
+        ORDER BY w.id
+    LOOP
+        RAISE NOTICE 'workspace_team: normalized issue_prefix for workspace % (% -> %)',
+            rec.workspace_id, rec.old_key, rec.new_key;
+    END LOOP;
 
     SELECT count(*) INTO counter_regression_count
     FROM workspace w
@@ -114,7 +143,7 @@ INSERT INTO workspace_team (workspace_id, name, key, issue_counter, is_default, 
 SELECT
     w.id,
     'Default',
-    upper(btrim(w.issue_prefix)),
+    pg_temp.normalize_team_key(w.issue_prefix),
     w.issue_counter,
     true,
     (
@@ -151,3 +180,5 @@ INSERT INTO project_team (workspace_id, project_id, team_id)
 SELECT p.workspace_id, p.id, wt.id
 FROM project p
 JOIN workspace_team wt ON wt.workspace_id = p.workspace_id AND wt.is_default;
+
+DROP FUNCTION pg_temp.normalize_team_key(text);
