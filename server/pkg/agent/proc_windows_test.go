@@ -6,6 +6,9 @@ import (
 	"os/exec"
 	"syscall"
 	"testing"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // TestHideAgentWindowSetsCreateNewConsole guards against a regression where
@@ -61,5 +64,35 @@ func TestHideAgentWindowPreservesExistingSysProcAttr(t *testing.T) {
 	}
 	if cmd.SysProcAttr.CreationFlags&createNewConsole == 0 {
 		t.Error("CREATE_NEW_CONSOLE should be OR'd into existing flags")
+	}
+}
+
+func TestPrepareProcessGroupCreatesKillOnCloseSuspendedJob(t *testing.T) {
+	cmd := exec.Command("cmd.exe", "/c", "echo", "hi")
+	hideAgentWindow(cmd)
+
+	job, err := prepareProcessGroup(cmd)
+	if err != nil {
+		t.Fatalf("prepareProcessGroup failed: %v", err)
+	}
+	defer windows.CloseHandle(job)
+
+	if cmd.SysProcAttr == nil {
+		t.Fatal("SysProcAttr should be initialized")
+	}
+	if cmd.SysProcAttr.CreationFlags&createSuspended == 0 {
+		t.Errorf("CreationFlags should include CREATE_SUSPENDED (0x%x), got 0x%x",
+			createSuspended, cmd.SysProcAttr.CreationFlags)
+	}
+
+	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+	err = windows.QueryInformationJobObject(job, windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), nil)
+	if err != nil {
+		t.Fatalf("QueryInformationJobObject failed: %v", err)
+	}
+	if info.BasicLimitInformation.LimitFlags&windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE == 0 {
+		t.Errorf("job LimitFlags should include KILL_ON_JOB_CLOSE (0x%x), got 0x%x",
+			windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, info.BasicLimitInformation.LimitFlags)
 	}
 }
