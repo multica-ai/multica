@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentType } from "react";
+import type { ComponentType, MouseEvent as ReactMouseEvent } from "react";
 import { autoUpdate, computePosition, flip, offset, shift, size } from "@floating-ui/dom";
 import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
@@ -30,6 +30,21 @@ export function isPickerAcceptKey(event: KeyboardEvent): boolean {
     !event.metaKey &&
     !event.altKey
   );
+}
+
+/**
+ * Keep the editor's selection when a suggestion row is chosen with the mouse.
+ *
+ * A bare click on a popup row fires `mousedown` first, whose default action
+ * moves focus out of the contenteditable. That blur tears down the Tiptap
+ * suggestion range before the row's `onClick` runs, so `command()` executes
+ * against a dead range and nothing is inserted — the candidate "disappears"
+ * on mouse selection while the keyboard path (focus never leaves the editor)
+ * works fine. Wiring this to a row's `onMouseDown` cancels the focus shift;
+ * the click still fires and inserts as expected. See issue #1039.
+ */
+export function preventSuggestionBlur(event: ReactMouseEvent): void {
+  event.preventDefault();
 }
 
 interface SuggestionPopupRenderOptions<

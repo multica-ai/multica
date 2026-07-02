@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workspaceKeys } from "@multica/core/workspace/queries";
@@ -574,5 +574,41 @@ describe("createMentionSuggestion", () => {
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "agent" && i.label === "魏和尚")).toBe(true);
+  });
+
+  it("inserts on mouse selection by cancelling the row's mousedown blur (#1039)", () => {
+    // All MentionRow variants (agent / member / squad / issue / project) share
+    // the same `onMouseDown={preventSuggestionBlur}` guard. Exercise it through
+    // an issue row, which renders without the ActorAvatar -> useQuery dependency
+    // that the agent/member rows require.
+    const command = vi.fn();
+    render(
+      <I18nWrapper>
+        <MentionList
+          items={[
+            { id: "i1", label: "MUL-1", type: "issue", description: "Login bug", status: "todo" },
+          ]}
+          query="login"
+          command={command}
+        />
+      </I18nWrapper>,
+    );
+
+    const row = screen.getByRole("button", { name: /MUL-1/ });
+
+    // The row must cancel `mousedown` so the contenteditable keeps focus and
+    // the Tiptap suggestion range survives until `onClick` runs. Without this,
+    // a mouse click blurs the editor, the range is torn down, and the mention
+    // never inserts (keyboard works because focus never leaves the editor).
+    // fireEvent returns false when a handler called preventDefault().
+    expect(fireEvent.mouseDown(row)).toBe(false);
+
+    // Cancelling mousedown must not swallow the click — mouse selection still
+    // fires the command, matching the keyboard (arrow + Enter) path.
+    fireEvent.click(row);
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "i1", type: "issue" }),
+    );
   });
 });

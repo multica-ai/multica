@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -89,7 +89,6 @@ function items(qc: QueryClient, query = ""): SlashCommandItem[] {
   return config.items!({
     query,
     editor: {} as never,
-    signal: new AbortController().signal,
   }) as SlashCommandItem[];
 }
 
@@ -432,5 +431,29 @@ describe("SlashCommandList built-in command rendering", () => {
     expect(
       getByText("Add a note — won't trigger any agents"),
     ).toBeInTheDocument();
+  });
+
+  it("inserts on mouse selection by cancelling the row's mousedown blur (#1039)", () => {
+    const command = vi.fn();
+    render(
+      <I18nWrapper>
+        <SlashCommandList
+          items={[{ id: "s1", label: "deploy", description: "Ship it" }]}
+          query="dep"
+          command={command}
+        />
+      </I18nWrapper>,
+    );
+
+    const row = screen.getByRole("button", { name: /deploy/ });
+
+    // Same root cause as the @mention popup: the row must cancel `mousedown`
+    // so the editor keeps focus and the suggestion range survives until the
+    // click selects the skill. fireEvent returns false when preventDefault ran.
+    expect(fireEvent.mouseDown(row)).toBe(false);
+
+    fireEvent.click(row);
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command).toHaveBeenCalledWith(expect.objectContaining({ id: "s1" }));
   });
 });
