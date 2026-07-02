@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -740,6 +741,21 @@ func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
 	local.ServeFile(w, r, key)
 }
 
+// proxyAttachmentDownload streams an attachment through the API instead of
+// redirecting to a signed storage URL (used for local-disk / private-host
+// backends, see resolveAttachmentDownloadMode).
+//
+// It supports HTTP Range requests so a download interrupted mid-stream can be
+// resumed with `Range: bytes=<resume>-` instead of restarting from byte 0
+// (RAS-29). Two paths:
+//
+//   - Seekable backend (local disk returns *os.File): delegate to
+//     http.ServeContent, which implements Range / If-Range / 206 /
+//     Content-Range / 416 correctly out of the box.
+//   - Non-seekable backend (S3/MinIO streaming body): advertise
+//     Accept-Ranges and implement single-range requests by hand
+//     (serveProxyRange). Multi-range is not supported — a single range is
+//     enough for browser/downloader resume.
 func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string) {
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
@@ -754,16 +770,131 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 	} else {
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}
-	if att.SizeBytes >= 0 {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", att.SizeBytes))
-	}
 	w.Header().Set("Content-Disposition", storage.ContentDisposition(att.ContentType, att.Filename))
+	// no-store predates Range support; keep it. Range/206 semantics are
+	// independent of caching — clients resume via Content-Range, not the cache.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	h.setAttachmentPreviewSecurityHeaders(w)
-	if _, err := io.Copy(w, reader); err != nil {
-		slog.Error("failed to stream attachment download", "id", uuidToString(att.ID), "error", err)
+
+	// Seekable backends get full standard-library Range handling. A zero
+	// modTime disables Last-Modified / If-Modified-Since (we keep no-store);
+	// ServeContent still honors Range and sets Accept-Ranges / Content-Length /
+	// Content-Range / status itself, and respects the headers we set above.
+	if seeker, ok := reader.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, att.Filename, time.Time{}, seeker)
+		return
 	}
+
+	// Non-seekable backend: single-range fallback.
+	h.serveProxyRange(w, r, att, reader)
+}
+
+// serveProxyRange streams a (possibly partial) attachment body from a
+// forward-only reader. It always advertises Accept-Ranges: bytes and, when the
+// request carries a satisfiable single-range `Range` header, replies 206 +
+// Content-Range with just that byte interval. Without a Range header (or when
+// the size is unknown) it streams the whole body as a 200, preserving the
+// pre-RAS-29 behavior. An unsatisfiable range yields 416 + `Content-Range:
+// bytes */<total>` per RFC 7233.
+func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db.Attachment, reader io.Reader) {
+	total := att.SizeBytes
+	w.Header().Set("Accept-Ranges", "bytes")
+
+	rangeHeader := strings.TrimSpace(r.Header.Get("Range"))
+	if rangeHeader == "" || total < 0 {
+		// No Range (or unknown total): stream the whole object.
+		if total >= 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(total, 10))
+		}
+		if _, err := io.Copy(w, reader); err != nil {
+			slog.Error("failed to stream attachment download", "id", uuidToString(att.ID), "error", err)
+		}
+		return
+	}
+
+	start, length, ok := parseSingleByteRange(rangeHeader, total)
+	if !ok {
+		// Unsatisfiable / malformed range. RFC 7233 §4.4 requires the total in
+		// the Content-Range of a 416 response.
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+		writeError(w, http.StatusRequestedRangeNotSatisfiable, "requested range not satisfiable")
+		return
+	}
+
+	// Forward-only reader: discard the bytes before `start` before copying the
+	// requested interval. Wasteful for large offsets but correct; seekable
+	// backends never reach here (they take the ServeContent path above).
+	if start > 0 {
+		if _, err := io.CopyN(io.Discard, reader, start); err != nil {
+			slog.Error("failed to skip to range start for attachment", "id", uuidToString(att.ID), "error", err)
+			return
+		}
+	}
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, total))
+	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	w.WriteHeader(http.StatusPartialContent)
+	if _, err := io.CopyN(w, reader, length); err != nil {
+		slog.Error("failed to stream attachment range", "id", uuidToString(att.ID), "error", err)
+	}
+}
+
+// parseSingleByteRange parses a single-range HTTP `Range` header value against
+// a known content size and returns the absolute start offset and byte length
+// of the interval to serve. ok is false for malformed, multi-range, or
+// unsatisfiable inputs (the caller then replies 416).
+//
+// Supported forms (RFC 7233): `bytes=start-end`, `bytes=start-` (to EOF), and
+// `bytes=-suffix` (final suffix bytes). An out-of-range end is clamped to the
+// last byte; a start at or past EOF is unsatisfiable.
+func parseSingleByteRange(header string, size int64) (start, length int64, ok bool) {
+	const prefix = "bytes="
+	if !strings.HasPrefix(header, prefix) {
+		return 0, 0, false
+	}
+	spec := strings.TrimSpace(header[len(prefix):])
+	// Only single-range is implemented; reject comma-separated multi-range.
+	if spec == "" || strings.Contains(spec, ",") {
+		return 0, 0, false
+	}
+	dash := strings.IndexByte(spec, '-')
+	if dash < 0 {
+		return 0, 0, false
+	}
+	startStr := strings.TrimSpace(spec[:dash])
+	endStr := strings.TrimSpace(spec[dash+1:])
+
+	if startStr == "" {
+		// Suffix form: bytes=-N → final N bytes.
+		if endStr == "" || size == 0 {
+			return 0, 0, false
+		}
+		n, err := strconv.ParseInt(endStr, 10, 64)
+		if err != nil || n <= 0 {
+			return 0, 0, false
+		}
+		if n > size {
+			n = size
+		}
+		return size - n, n, true
+	}
+
+	s, err := strconv.ParseInt(startStr, 10, 64)
+	if err != nil || s < 0 || s >= size {
+		// A start at or beyond EOF is unsatisfiable.
+		return 0, 0, false
+	}
+	if endStr == "" {
+		return s, size - s, true
+	}
+	e, err := strconv.ParseInt(endStr, 10, 64)
+	if err != nil || e < s {
+		return 0, 0, false
+	}
+	if e >= size {
+		e = size - 1
+	}
+	return s, e - s + 1, true
 }
 
 func (h *Handler) setAttachmentPreviewSecurityHeaders(w http.ResponseWriter) {

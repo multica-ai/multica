@@ -138,6 +138,27 @@ func (m *mockStorage) put(key string, data []byte) {
 	m.files[key] = append([]byte(nil), data...)
 }
 
+// seekableReadCloser adapts a *bytes.Reader (which is an io.ReadSeeker) into an
+// io.ReadCloser, mirroring what LocalStorage.GetReader returns (an *os.File is
+// seekable). Used to exercise proxyAttachmentDownload's http.ServeContent path.
+type seekableReadCloser struct{ *bytes.Reader }
+
+func (seekableReadCloser) Close() error { return nil }
+
+// seekableMockStorage is a mockStorage whose GetReader returns a seekable body,
+// so proxyAttachmentDownload takes the http.ServeContent branch (the local-disk
+// shape) instead of the manual single-range fallback.
+type seekableMockStorage struct{ mockStorage }
+
+func (m *seekableMockStorage) GetReader(_ context.Context, key string) (io.ReadCloser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if data, ok := m.files[key]; ok {
+		return seekableReadCloser{bytes.NewReader(data)}, nil
+	}
+	return nil, fmt.Errorf("seekableMockStorage GetReader: key not found: %q", key)
+}
+
 func TestUploadFileForeignWorkspace(t *testing.T) {
 	origStorage := testHandler.Storage
 	testHandler.Storage = &mockStorage{}
@@ -866,6 +887,195 @@ func TestDownloadAttachment_ExplicitProxyStreamsPublicEndpoint(t *testing.T) {
 	requireAttachmentPreviewCSP(t, w.Header())
 	if len(store.presignCalls) != 0 {
 		t.Fatalf("forced proxy should not presign, calls=%v", store.presignCalls)
+	}
+}
+
+// setProxyDownloadHandler swaps the handler into forced-proxy mode with the
+// given storage backend and returns the seeded attachment id + body. It wires
+// t.Cleanup to restore the original handler fields.
+func setProxyDownloadHandler(t *testing.T, store storage.Storage, body []byte) string {
+	t.Helper()
+	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = store
+	testHandler.cfg.AttachmentDownloadMode = "proxy"
+	testHandler.CFSigner = nil
+	t.Cleanup(func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+		testHandler.CFSigner = origSigner
+	})
+
+	key := "downloads/range-sample.bin"
+	if putter, ok := store.(interface{ put(string, []byte) }); ok {
+		putter.put(key, body)
+	} else {
+		t.Fatalf("store %T does not support put()", store)
+	}
+	return seedAttachmentURL(t, "https://s3.example.com/test-bucket/"+key, "sample.bin", "application/octet-stream", int64(len(body)))
+}
+
+// rangeBody is a deterministic 4 KiB payload used by the Range tests so we can
+// assert that a partial response's bytes match the corresponding slice of the
+// full object.
+func rangeBody() []byte {
+	b := make([]byte, 4096)
+	for i := range b {
+		b[i] = byte(i % 251) // 251 is prime → no alignment with 256 boundaries
+	}
+	return b
+}
+
+// runProxyRangeMatrix exercises the three acceptance paths (Range hit, 416,
+// no-Range) against whichever storage backend is supplied, so both the
+// http.ServeContent (seekable) and manual (non-seekable) branches are covered
+// by identical assertions.
+func runProxyRangeMatrix(t *testing.T, newStore func() storage.Storage) {
+	body := rangeBody()
+
+	t.Run("RangeHitReturns206", func(t *testing.T) {
+		id := setProxyDownloadHandler(t, newStore(), body)
+		req, w := newDownloadRequest(t, id, testWorkspaceID)
+		req.Header.Set("Range", "bytes=0-1023")
+		testHandler.DownloadAttachment(w, req)
+
+		if w.Code != http.StatusPartialContent {
+			t.Fatalf("status = %d, want 206; body=%s", w.Code, w.Body.String())
+		}
+		if got, want := w.Header().Get("Accept-Ranges"), "bytes"; got != want {
+			t.Fatalf("Accept-Ranges = %q, want %q", got, want)
+		}
+		if got, want := w.Header().Get("Content-Range"), fmt.Sprintf("bytes 0-1023/%d", len(body)); got != want {
+			t.Fatalf("Content-Range = %q, want %q", got, want)
+		}
+		if got, want := w.Header().Get("Content-Length"), "1024"; got != want {
+			t.Fatalf("Content-Length = %q, want %q", got, want)
+		}
+		if got := w.Body.Bytes(); !bytes.Equal(got, body[:1024]) {
+			t.Fatalf("partial body mismatch: len(got)=%d, want first 1024 bytes of object", len(got))
+		}
+	})
+
+	t.Run("MidStreamRangeMatchesFullSlice", func(t *testing.T) {
+		id := setProxyDownloadHandler(t, newStore(), body)
+		req, w := newDownloadRequest(t, id, testWorkspaceID)
+		req.Header.Set("Range", "bytes=1000-1999")
+		testHandler.DownloadAttachment(w, req)
+
+		if w.Code != http.StatusPartialContent {
+			t.Fatalf("status = %d, want 206; body=%s", w.Code, w.Body.String())
+		}
+		if got, want := w.Header().Get("Content-Range"), fmt.Sprintf("bytes 1000-1999/%d", len(body)); got != want {
+			t.Fatalf("Content-Range = %q, want %q", got, want)
+		}
+		if got := w.Body.Bytes(); !bytes.Equal(got, body[1000:2000]) {
+			t.Fatalf("mid-stream range bytes do not match object[1000:2000]")
+		}
+	})
+
+	t.Run("SuffixRangeReturnsTail", func(t *testing.T) {
+		id := setProxyDownloadHandler(t, newStore(), body)
+		req, w := newDownloadRequest(t, id, testWorkspaceID)
+		req.Header.Set("Range", "bytes=-500")
+		testHandler.DownloadAttachment(w, req)
+
+		if w.Code != http.StatusPartialContent {
+			t.Fatalf("status = %d, want 206; body=%s", w.Code, w.Body.String())
+		}
+		start := len(body) - 500
+		if got, want := w.Header().Get("Content-Range"), fmt.Sprintf("bytes %d-%d/%d", start, len(body)-1, len(body)); got != want {
+			t.Fatalf("Content-Range = %q, want %q", got, want)
+		}
+		if got := w.Body.Bytes(); !bytes.Equal(got, body[start:]) {
+			t.Fatalf("suffix range bytes do not match object tail")
+		}
+	})
+
+	t.Run("UnsatisfiableRangeReturns416", func(t *testing.T) {
+		id := setProxyDownloadHandler(t, newStore(), body)
+		req, w := newDownloadRequest(t, id, testWorkspaceID)
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", len(body)+10, len(body)+20))
+		testHandler.DownloadAttachment(w, req)
+
+		if w.Code != http.StatusRequestedRangeNotSatisfiable {
+			t.Fatalf("status = %d, want 416; body=%s", w.Code, w.Body.String())
+		}
+		if got, want := w.Header().Get("Content-Range"), fmt.Sprintf("bytes */%d", len(body)); got != want {
+			t.Fatalf("Content-Range = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("NoRangeReturnsFull200", func(t *testing.T) {
+		id := setProxyDownloadHandler(t, newStore(), body)
+		req, w := newDownloadRequest(t, id, testWorkspaceID)
+		testHandler.DownloadAttachment(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+		}
+		if got, want := w.Header().Get("Accept-Ranges"), "bytes"; got != want {
+			t.Fatalf("Accept-Ranges = %q, want %q", got, want)
+		}
+		if got := w.Body.Bytes(); !bytes.Equal(got, body) {
+			t.Fatalf("full body mismatch: len(got)=%d, want %d", len(got), len(body))
+		}
+	})
+}
+
+// TestDownloadAttachment_ProxyRange_Seekable covers the http.ServeContent path
+// taken when the storage backend returns a seekable reader (local disk).
+func TestDownloadAttachment_ProxyRange_Seekable(t *testing.T) {
+	runProxyRangeMatrix(t, func() storage.Storage { return &seekableMockStorage{} })
+}
+
+// TestDownloadAttachment_ProxyRange_NonSeekable covers the manual single-range
+// fallback taken when the backend returns a forward-only stream (S3/MinIO).
+func TestDownloadAttachment_ProxyRange_NonSeekable(t *testing.T) {
+	runProxyRangeMatrix(t, func() storage.Storage { return &mockStorage{} })
+}
+
+func TestParseSingleByteRange(t *testing.T) {
+	const size = 1000
+	tests := []struct {
+		name       string
+		header     string
+		size       int64
+		wantOK     bool
+		wantStart  int64
+		wantLength int64
+	}{
+		{"full closed range", "bytes=0-1023", 2000, true, 0, 1024},
+		{"open-ended range", "bytes=500-", size, true, 500, 500},
+		{"end clamped to eof", "bytes=900-5000", size, true, 900, 100},
+		{"suffix range", "bytes=-200", size, true, 800, 200},
+		{"suffix larger than size clamps", "bytes=-5000", size, true, 0, 1000},
+		{"single byte", "bytes=0-0", size, true, 0, 1},
+		{"last byte", "bytes=999-999", size, true, 999, 1},
+		{"start at eof unsatisfiable", "bytes=1000-1001", size, false, 0, 0},
+		{"start past eof unsatisfiable", "bytes=2000-", size, false, 0, 0},
+		{"end before start", "bytes=500-499", size, false, 0, 0},
+		{"missing unit", "0-100", size, false, 0, 0},
+		{"multi-range rejected", "bytes=0-10,20-30", size, false, 0, 0},
+		{"empty spec", "bytes=", size, false, 0, 0},
+		{"no dash", "bytes=100", size, false, 0, 0},
+		{"suffix zero", "bytes=-0", size, false, 0, 0},
+		{"negative garbage", "bytes=abc-def", size, false, 0, 0},
+		{"suffix on empty object", "bytes=-100", 0, false, 0, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			start, length, ok := parseSingleByteRange(tc.header, tc.size)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (start=%d length=%d)", ok, tc.wantOK, start, length)
+			}
+			if !ok {
+				return
+			}
+			if start != tc.wantStart || length != tc.wantLength {
+				t.Fatalf("got (start=%d, length=%d), want (start=%d, length=%d)", start, length, tc.wantStart, tc.wantLength)
+			}
+		})
 	}
 }
 
