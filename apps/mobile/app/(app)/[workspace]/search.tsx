@@ -14,14 +14,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   TextInput,
   View,
-  type ListRenderItem,
 } from "react-native";
+import { FlashList, type ListRenderItem } from "@shopify/flash-list";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQueries } from "@tanstack/react-query";
 import { router } from "expo-router";
@@ -463,10 +462,11 @@ export default function SearchModal() {
         </View>
 
         {/* Body */}
-        <FlatList
+        <FlashList
           data={data}
           renderItem={renderItem}
           keyExtractor={(item) => item.key}
+          getItemType={(item) => item.kind}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           ListEmptyComponent={
