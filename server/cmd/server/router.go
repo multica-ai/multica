@@ -729,6 +729,32 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.GetNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
 			})
+
+			// Plans
+			r.Route("/api/plans", func(r chi.Router) {
+				r.Get("/", h.ListPlans)
+				r.Post("/", h.CreatePlan)
+				r.Get("/{planId}", h.GetPlan)
+				r.Patch("/{planId}", h.UpdatePlan)
+			})
+		})
+	})
+
+	// Workflow routes (API-level, accessed by workflow ID)
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
+
+		r.Route("/api/workflows", func(r chi.Router) {
+			r.Get("/{workflowId}", h.GetWorkflow)
+			r.Patch("/{workflowId}", h.UpdateWorkflow)
+			r.Get("/{workflowId}/nodes", h.ListWorkflowNodes)
+			r.Post("/{workflowId}/nodes", h.CreateWorkflowNode)
+			r.Patch("/{workflowId}/nodes/{nodeId}", h.UpdateWorkflowNode)
+			r.Delete("/{workflowId}/nodes/{nodeId}", h.DeleteWorkflowNode)
+			r.Get("/{workflowId}/edges", h.ListWorkflowEdges)
+			r.Post("/{workflowId}/edges", h.CreateWorkflowEdge)
+			r.Delete("/{workflowId}/edges/{edgeId}", h.DeleteWorkflowEdge)
+			r.Post("/{workflowId}/confirm", h.ConfirmWorkflow)
 		})
 	})
 

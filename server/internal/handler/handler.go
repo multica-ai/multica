@@ -112,6 +112,8 @@ type Handler struct {
 	WebhookRateLimiter    WebhookRateLimiter
 	WebhookIPRateLimiter  WebhookRateLimiter
 	CloudRuntime          cloudRuntimeProxy
+	PlanSvc              *service.PlanService
+	WorkflowSvc          *service.WorkflowService
 	cfg                   Config
 }
 
@@ -157,7 +159,9 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 			BaseURL: cfg.CloudRuntimeFleetURL,
 			Timeout: cfg.CloudRuntimeFleetTimeout,
 		}),
-		cfg: cfg,
+		cfg:          cfg,
+		PlanSvc:     &service.PlanService{Queries: queries},
+		WorkflowSvc: &service.WorkflowService{Queries: queries},
 	}
 }
 
