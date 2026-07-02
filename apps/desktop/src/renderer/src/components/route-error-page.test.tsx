@@ -79,6 +79,7 @@ describe("DesktopRouteErrorPage", () => {
       "feedback",
       expect.objectContaining({
         initialMessage: expect.stringContaining("kind: desktop_route_error"),
+        kind: "bug",
       }),
     );
   });

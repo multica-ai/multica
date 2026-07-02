@@ -106,6 +106,7 @@ export function DesktopRouteErrorPage() {
           onClick={() =>
             useModalStore.getState().open("feedback", {
               initialMessage: report,
+              kind: "bug",
             })
           }
         >
