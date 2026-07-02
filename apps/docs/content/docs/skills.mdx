@@ -33,6 +33,10 @@ Workspace skills come from four sources:
 
 Both individual files and whole skill packs have size caps (single-file cap around 1 MB when importing from GitHub). The exact rules appear in the import dialog — exceeding them returns an error.
 
+<Callout type="info">
+Multica maintains an official [`multica-cli`](https://github.com/multica-ai/multica-cli) skill for Claude Code, Codex, Cursor, and other local agents. It teaches agents how to use the authenticated `multica` CLI safely, including issue comments, metadata, pull requests, mentions, and status side effects. Import it from GitHub with `https://github.com/multica-ai/multica-cli/tree/main/skills/multica-cli`, or install it directly into your local coding tool from the repository.
+</Callout>
+
 ## Attaching to an agent
 
 Once imported, a skill has to be **attached to a specific agent** to take effect. One agent can have multiple skills attached, and one skill can be attached to multiple agents.
