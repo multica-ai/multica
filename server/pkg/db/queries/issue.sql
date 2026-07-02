@@ -5,11 +5,15 @@
 -- member assignment (`assignee_type='member' AND assignee_id=involves_user_id`)
 -- because that is already the meaning of the `assignee_id` filter (tab 1
 -- "Assigned to me"), and the two filters must produce disjoint result sets.
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+SELECT i.id, i.workspace_id, i.team_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage,
+       COALESCE(wt.key, '')::text AS team_key, COALESCE(wt.name, '')::text AS team_name
 FROM issue i
+LEFT JOIN workspace_team wt ON wt.id = i.team_id AND wt.workspace_id = i.workspace_id
 WHERE i.workspace_id = $1
+  AND (sqlc.narg('team_id')::uuid IS NULL OR i.team_id = sqlc.narg('team_id'))
+  AND (sqlc.narg('team_ids')::uuid[] IS NULL OR i.team_id = ANY(sqlc.narg('team_ids')::uuid[]))
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
@@ -71,18 +75,27 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateIssue :one
 INSERT INTO issue (
-    workspace_id, title, description, status, priority,
+    workspace_id, team_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
     stage
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
     sqlc.narg('stage')
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
 SELECT * FROM issue
 WHERE workspace_id = $1 AND number = $2;
+
+-- name: GetIssueByTeamKeyAndNumber :one
+SELECT i.* FROM issue i
+LEFT JOIN workspace_team issue_team ON issue_team.id = i.team_id AND issue_team.workspace_id = i.workspace_id
+LEFT JOIN workspace_team default_team ON default_team.workspace_id = i.workspace_id AND default_team.is_default
+WHERE i.workspace_id = $1
+  AND lower(COALESCE(issue_team.key, default_team.key)) = lower($2)
+  AND i.number = $3
+  AND (i.team_id IS NOT NULL OR default_team.id IS NOT NULL);
 
 -- name: UpdateIssue :one
 UPDATE issue SET
@@ -112,12 +125,12 @@ RETURNING *;
 
 -- name: CreateIssueWithOrigin :one
 INSERT INTO issue (
-    workspace_id, title, description, status, priority,
+    workspace_id, team_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
     origin_type, origin_id, stage
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
     sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage')
 ) RETURNING *;
 
@@ -128,6 +141,7 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 SELECT * FROM issue
 WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
+  AND team_id = sqlc.arg('team_id')::uuid
   AND project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
   AND parent_issue_id IS NOT DISTINCT FROM sqlc.arg('parent_issue_id')::uuid
   AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = sqlc.arg('normalized_title')
@@ -145,11 +159,15 @@ DELETE FROM issue WHERE id = $1 AND workspace_id = $2;
 -- name: ListOpenIssues :many
 -- See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
 -- filter; member-direct assignment is intentionally excluded).
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+SELECT i.id, i.workspace_id, i.team_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage,
+       COALESCE(wt.key, '')::text AS team_key, COALESCE(wt.name, '')::text AS team_name
 FROM issue i
+LEFT JOIN workspace_team wt ON wt.id = i.team_id AND wt.workspace_id = i.workspace_id
 WHERE i.workspace_id = $1
+  AND (sqlc.narg('team_id')::uuid IS NULL OR i.team_id = sqlc.narg('team_id'))
+  AND (sqlc.narg('team_ids')::uuid[] IS NULL OR i.team_id = ANY(sqlc.narg('team_ids')::uuid[]))
   AND i.status NOT IN ('done', 'cancelled')
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
@@ -195,6 +213,8 @@ ORDER BY i.position ASC, i.created_at DESC;
 -- See ListIssues for the semantics of involves_user_id.
 SELECT count(*) FROM issue i
 WHERE i.workspace_id = $1
+  AND (sqlc.narg('team_id')::uuid IS NULL OR i.team_id = sqlc.narg('team_id'))
+  AND (sqlc.narg('team_ids')::uuid[] IS NULL OR i.team_id = ANY(sqlc.narg('team_ids')::uuid[]))
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))

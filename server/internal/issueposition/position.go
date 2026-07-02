@@ -24,3 +24,17 @@ func NextTopPosition(ctx context.Context, q queryRower, workspaceID pgtype.UUID,
 	}
 	return minPos - 1, nil
 }
+
+// NextTopPositionForTeam is the Team-scoped variant used by Team-owned issue
+// creation. It intentionally keeps the old helper for compatibility with
+// legacy tests and any path not yet cut over.
+func NextTopPositionForTeam(ctx context.Context, q queryRower, workspaceID, teamID pgtype.UUID, status string) (float64, error) {
+	var minPos float64
+	if err := q.QueryRow(ctx,
+		`SELECT COALESCE(MIN(position), 0) FROM issue WHERE workspace_id = $1 AND team_id = $2 AND status = $3`,
+		workspaceID, teamID, status,
+	).Scan(&minPos); err != nil {
+		return 0, fmt.Errorf("query min team issue position: %w", err)
+	}
+	return minPos - 1, nil
+}

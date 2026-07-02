@@ -44,6 +44,7 @@ func LockAndFindActiveDuplicate(
 	ctx context.Context,
 	q *db.Queries,
 	workspaceID pgtype.UUID,
+	teamID pgtype.UUID,
 	projectID pgtype.UUID,
 	parentIssueID pgtype.UUID,
 	title string,
@@ -53,7 +54,7 @@ func LockAndFindActiveDuplicate(
 	if normalizedTitle == "" {
 		return db.Issue{}, false, nil
 	}
-	if err := q.LockIssueDuplicateKey(ctx, lockKey(workspaceID, projectID, parentIssueID, normalizedTitle)); err != nil {
+	if err := q.LockIssueDuplicateKey(ctx, lockKey(workspaceID, teamID, projectID, parentIssueID, normalizedTitle)); err != nil {
 		return db.Issue{}, false, err
 	}
 	if allowDuplicate {
@@ -62,6 +63,7 @@ func LockAndFindActiveDuplicate(
 
 	duplicate, err := q.FindActiveDuplicateIssue(ctx, db.FindActiveDuplicateIssueParams{
 		WorkspaceID:     workspaceID,
+		TeamID:          teamID,
 		ProjectID:       projectID,
 		ParentIssueID:   parentIssueID,
 		NormalizedTitle: normalizedTitle,
@@ -75,10 +77,11 @@ func LockAndFindActiveDuplicate(
 	return duplicate, true, nil
 }
 
-func lockKey(workspaceID, projectID, parentIssueID pgtype.UUID, normalizedTitle string) string {
+func lockKey(workspaceID, teamID, projectID, parentIssueID pgtype.UUID, normalizedTitle string) string {
 	return strings.Join([]string{
 		"issue-active-duplicate",
 		util.UUIDToString(workspaceID),
+		util.UUIDToString(teamID),
 		util.UUIDToString(projectID),
 		util.UUIDToString(parentIssueID),
 		normalizedTitle,

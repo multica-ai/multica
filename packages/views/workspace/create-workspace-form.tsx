@@ -14,6 +14,11 @@ import {
   isWorkspaceSlugConflict,
   nameToWorkspaceSlug,
 } from "./slug";
+import {
+  TEAM_KEY_REGEX,
+  defaultTeamKeyFromSlug,
+  normalizeTeamKey,
+} from "@multica/core/workspace";
 import { useT } from "../i18n";
 import { isReservedSlug } from "@multica/core/paths";
 import { useConfigStore } from "@multica/core/config";
@@ -29,8 +34,10 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
   const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [teamKey, setTeamKey] = useState("");
   const [slugServerError, setSlugServerError] = useState<string | null>(null);
   const slugTouched = useRef(false);
+  const teamKeyTouched = useRef(false);
 
   const slugValidationError =
     slug.length > 0 && !WORKSPACE_SLUG_REGEX.test(slug)
@@ -41,14 +48,27 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
       ? t(($) => $.create_form.errors.slug_reserved)
       : null;
   const slugError = slugValidationError ?? slugReservedError ?? slugServerError;
+  const normalizedTeamKey = normalizeTeamKey(teamKey);
+  const teamKeyError =
+    normalizedTeamKey.length > 0 && !TEAM_KEY_REGEX.test(normalizedTeamKey)
+      ? t(($) => $.create_form.errors.team_key_format)
+      : null;
   const canSubmit =
-    name.trim().length > 0 && slug.trim().length > 0 && !slugError;
+    name.trim().length > 0 &&
+    slug.trim().length > 0 &&
+    normalizedTeamKey.length > 0 &&
+    !slugError &&
+    !teamKeyError;
 
   const handleNameChange = (value: string) => {
     setName(value);
     if (!slugTouched.current) {
-      setSlug(nameToWorkspaceSlug(value));
+      const nextSlug = nameToWorkspaceSlug(value);
+      setSlug(nextSlug);
       setSlugServerError(null);
+      if (!teamKeyTouched.current) {
+        setTeamKey(defaultTeamKeyFromSlug(nextSlug));
+      }
     }
   };
 
@@ -56,12 +76,24 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
     slugTouched.current = true;
     setSlug(value);
     setSlugServerError(null);
+    if (!teamKeyTouched.current) {
+      setTeamKey(defaultTeamKeyFromSlug(value));
+    }
+  };
+
+  const handleTeamKeyChange = (value: string) => {
+    teamKeyTouched.current = true;
+    setTeamKey(normalizeTeamKey(value));
   };
 
   const handleCreate = () => {
     if (!canSubmit) return;
     createWorkspace.mutate(
-      { name: name.trim(), slug: slug.trim() },
+      {
+        name: name.trim(),
+        slug: slug.trim(),
+        default_team_key: normalizedTeamKey,
+      },
       {
         onSuccess,
         onError: (error) => {
@@ -119,6 +151,35 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
           </div>
           {slugError && (
             <p className="text-xs text-destructive">{slugError}</p>
+          )}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ws-team-key">
+            {t(($) => $.create_form.team_key_label)}
+          </Label>
+          <div className="flex items-center gap-0 rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring">
+            <Input
+              id="ws-team-key"
+              type="text"
+              value={teamKey}
+              onChange={(e) => handleTeamKeyChange(e.target.value)}
+              placeholder="MUL"
+              maxLength={7}
+              className="border-0 font-mono shadow-none focus-visible:ring-0"
+              onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
+                if (e.key === "Enter") handleCreate();
+              }}
+            />
+            <span className="pr-3 text-sm font-mono text-muted-foreground select-none">
+              -123
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.create_form.team_key_hint)}
+          </p>
+          {teamKeyError && (
+            <p className="text-xs text-destructive">{teamKeyError}</p>
           )}
         </div>
         <Button

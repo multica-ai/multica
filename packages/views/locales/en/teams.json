@@ -1,0 +1,55 @@
+{
+  "page": {
+    "title": "Teams",
+    "new_team": "New team",
+    "loading": "Loading teams...",
+    "empty_title": "No teams yet",
+    "create_first": "Create your first team"
+  },
+  "table": {
+    "key": "Key",
+    "name": "Name",
+    "issues": "Issues",
+    "state": "State",
+    "actions": "Actions"
+  },
+  "state": {
+    "default": "Default",
+    "active": "Active",
+    "archived": "Archived"
+  },
+  "actions": {
+    "edit": "Edit team",
+    "archive": "Archive team",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving..."
+  },
+  "dialog": {
+    "create_title": "Create team",
+    "edit_title": "Edit team",
+    "description": "Teams own issue identifiers and stable work areas. Membership is informational in v1."
+  },
+  "form": {
+    "name": "Name",
+    "name_placeholder": "Engineering",
+    "key": "Key",
+    "key_hint": "1-7 uppercase letters or numbers, starting with a letter.",
+    "key_locked": "This key is locked because issues have already been created.",
+    "icon": "Icon",
+    "description": "Description",
+    "description_placeholder": "What work does this team own?"
+  },
+  "picker": {
+    "placeholder": "Team",
+    "clear": "Clear team",
+    "empty": "No active teams",
+    "selected_count_one": "{{count}} team",
+    "selected_count_other": "{{count}} teams"
+  },
+  "toast_created": "Team created",
+  "toast_updated": "Team updated",
+  "toast_archived": "Team archived",
+  "toast_archive_failed": "Failed to archive team",
+  "toast_save_failed": "Failed to save team"
+}

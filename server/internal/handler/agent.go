@@ -249,6 +249,9 @@ type AgentTaskResponse struct {
 	ParentTaskID       *string               `json:"parent_task_id,omitempty"`
 	Agent              *TaskAgentData        `json:"agent,omitempty"`
 	Repos              []RepoData            `json:"repos,omitempty"`
+	TeamID             string                `json:"team_id,omitempty"`             // issue/autopilot/quick-create Team, when known
+	TeamKey            string                `json:"team_key,omitempty"`            // Team issue namespace key, e.g. MUL
+	TeamName           string                `json:"team_name,omitempty"`           // human-readable Team name
 	ProjectID          string                `json:"project_id,omitempty"`          // issue's project, when present
 	ProjectTitle       string                `json:"project_title,omitempty"`       // for surfacing in agent context
 	ProjectDescription string                `json:"project_description,omitempty"` // durable project-level context injected into the brief

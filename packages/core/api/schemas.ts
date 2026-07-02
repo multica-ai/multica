@@ -17,10 +17,12 @@ import type {
   GroupedIssuesResponse,
   InboxWorkspaceUnread,
   ListIssuesResponse,
+  ListTeamsResponse,
   ListWebhookDeliveriesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
   Squad,
+  Team,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -243,6 +245,9 @@ const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number()
 export const IssueSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
+  team_id: z.string().nullable().default(null),
+  team_key: z.string().nullable().default(null),
+  team_name: z.string().nullable().default(null),
   number: z.number(),
   identifier: z.string(),
   title: z.string(),
@@ -295,6 +300,46 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   total: 0,
 };
 
+const TeamSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string().default(""),
+  key: z.string().default(""),
+  description: z.string().default(""),
+  icon: z.string().nullable().default(null),
+  issue_counter: z.number().default(0),
+  is_default: z.boolean().default(false),
+  archived_at: z.string().nullable().default(null),
+  created_by: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ListTeamsResponseSchema = z.object({
+  teams: z.array(TeamSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_TEAM: Team = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  key: "",
+  description: "",
+  icon: null,
+  issue_counter: 0,
+  is_default: false,
+  archived_at: null,
+  created_by: null,
+  created_at: "",
+  updated_at: "",
+};
+
+export const EMPTY_LIST_TEAMS_RESPONSE: ListTeamsResponse = {
+  teams: [],
+  total: 0,
+};
+
 const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -310,6 +355,7 @@ const ProjectSchema = z.object({
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
+  team_ids: z.array(z.string()).optional(),
 }).loose();
 
 const SearchProjectResultSchema = ProjectSchema.extend({
@@ -825,6 +871,7 @@ const AutopilotListItemSchema = z.object({
   title: z.string(),
   description: z.string().nullable().optional(),
   project_id: z.string().nullable().optional(),
+  team_id: z.string().nullable().optional(),
   // Older servers (pre-MUL-2429) omit assignee_type; "agent" is the
   // documented default.
   assignee_type: z.string().default("agent"),

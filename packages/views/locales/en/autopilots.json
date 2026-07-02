@@ -268,6 +268,8 @@
     "section_assignee": "Assignee",
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
+    "section_team": "Team",
+    "no_team": "No team",
     "section_project": "Project",
     "no_project": "No project",
     "section_output_mode": "Output mode",

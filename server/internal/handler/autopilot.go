@@ -33,6 +33,7 @@ type AutopilotResponse struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	ProjectID   *string `json:"project_id"`
+	TeamID      *string `json:"team_id"`
 	// AssigneeType is "agent" or "squad". Path A from MUL-2429: when set
 	// to "squad", AssigneeID points at squad(id) rather than agent(id) and
 	// dispatch resolves to squad.leader_id at run time.
@@ -180,6 +181,7 @@ func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) A
 		Title:              a.Title,
 		Description:        textToPtr(a.Description),
 		ProjectID:          uuidToPtr(a.ProjectID),
+		TeamID:             uuidToPtr(a.TeamID),
 		AssigneeType:       assigneeType,
 		AssigneeID:         uuidToString(a.AssigneeID),
 		Status:             a.Status,
@@ -301,6 +303,7 @@ type CreateAutopilotRequest struct {
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	ProjectID   *string `json:"project_id"`
+	TeamID      *string `json:"team_id"`
 	// AssigneeType is optional and defaults to "agent" — preserves backward
 	// compatibility with desktop clients shipped before MUL-2429.
 	AssigneeType       *string           `json:"assignee_type"`
@@ -314,6 +317,7 @@ type UpdateAutopilotRequest struct {
 	Title              *string `json:"title"`
 	Description        *string `json:"description"`
 	ProjectID          *string `json:"project_id"`
+	TeamID             *string `json:"team_id"`
 	AssigneeType       *string `json:"assignee_type"`
 	AssigneeID         *string `json:"assignee_id"`
 	Status             *string `json:"status"`
@@ -384,9 +388,18 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 	if s := r.URL.Query().Get("status"); s != "" {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
+	var teamFilter pgtype.UUID
+	if t := r.URL.Query().Get("team_id"); t != "" {
+		id, ok := parseUUIDOrBadRequest(w, t, "team_id")
+		if !ok {
+			return
+		}
+		teamFilter = id
+	}
 
 	autopilots, err := h.Queries.ListAutopilots(r.Context(), db.ListAutopilotsParams{
 		WorkspaceID: parseUUID(workspaceID),
+		TeamID:      teamFilter,
 		Status:      statusFilter,
 	})
 	if err != nil {
@@ -643,6 +656,10 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	teamID, ok := h.resolveAutopilotTeam(w, r, wsUUID, req.TeamID, projectID, pgtype.UUID{})
+	if !ok {
+		return
+	}
 
 	// Validate before insert so a bad payload doesn't half-create the row.
 	subscriberUUIDs, ok := h.validateAutopilotSubscribers(w, r, req.Subscribers, workspaceID)
@@ -665,6 +682,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		AssigneeID:         assigneeUUID,
 		Status:             "active",
 		ExecutionMode:      req.ExecutionMode,
+		TeamID:             teamID,
 		CreatedByType:      "member",
 		CreatedByID:        parseUUID(userID),
 		Description:        ptrToText(req.Description),
@@ -783,6 +801,7 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		AssigneeID:         prev.AssigneeID,
 		IssueTitleTemplate: prev.IssueTitleTemplate,
 		ProjectID:          prev.ProjectID,
+		TeamID:             prev.TeamID,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -811,6 +830,17 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.ProjectID = projectID
+	}
+	if _, ok := rawFields["team_id"]; ok {
+		teamID, ok := h.resolveAutopilotTeam(w, r, prev.WorkspaceID, req.TeamID, params.ProjectID, prev.TeamID)
+		if !ok {
+			return
+		}
+		params.TeamID = teamID
+	} else if _, projectTouched := rawFields["project_id"]; projectTouched {
+		if _, ok := h.resolveAutopilotTeam(w, r, prev.WorkspaceID, nil, params.ProjectID, params.TeamID); !ok {
+			return
+		}
 	}
 	// assignee_type and assignee_id are validated as a pair: switching
 	// between agent and squad without supplying a new id would leave the
@@ -939,6 +969,52 @@ func (h *Handler) parseAutopilotProjectID(
 		return pgtype.UUID{}, false
 	}
 	return projectID, true
+}
+
+func (h *Handler) resolveAutopilotTeam(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspaceID pgtype.UUID,
+	rawTeamID *string,
+	projectID pgtype.UUID,
+	fallback pgtype.UUID,
+) (pgtype.UUID, bool) {
+	teamID := fallback
+	if rawTeamID != nil && *rawTeamID != "" {
+		parsed, ok := parseUUIDOrBadRequest(w, *rawTeamID, "team_id")
+		if !ok {
+			return pgtype.UUID{}, false
+		}
+		teamID = parsed
+	}
+	if !teamID.Valid {
+		team, err := h.Queries.GetDefaultWorkspaceTeam(r.Context(), workspaceID)
+		if err != nil || !team.ID.Valid || team.ArchivedAt.Valid {
+			writeError(w, http.StatusBadRequest, "default team not found")
+			return pgtype.UUID{}, false
+		}
+		teamID = team.ID
+	}
+	team, err := h.Queries.GetWorkspaceTeam(r.Context(), db.GetWorkspaceTeamParams{
+		ID:          teamID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil || team.ArchivedAt.Valid {
+		writeError(w, http.StatusBadRequest, "team_id must reference an active team in this workspace")
+		return pgtype.UUID{}, false
+	}
+	if projectID.Valid {
+		hasTeam, err := h.Queries.ProjectHasTeam(r.Context(), db.ProjectHasTeamParams{
+			WorkspaceID: workspaceID,
+			ProjectID:   projectID,
+			TeamID:      teamID,
+		})
+		if err != nil || !hasTeam {
+			writeError(w, http.StatusBadRequest, "project_id is not associated with team_id")
+			return pgtype.UUID{}, false
+		}
+	}
+	return teamID, true
 }
 
 func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {

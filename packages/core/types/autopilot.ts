@@ -29,6 +29,7 @@ export interface Autopilot {
   title: string;
   description: string | null;
   project_id?: string | null;
+  team_id?: string | null;
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   status: AutopilotStatus;
@@ -136,6 +137,7 @@ export interface CreateAutopilotRequest {
   title: string;
   description?: string;
   project_id?: string | null;
+  team_id?: string | null;
   // Optional on the wire — when omitted the server defaults to "agent" so
   // older clients keep working.
   assignee_type?: AutopilotAssigneeType;
@@ -149,6 +151,7 @@ export interface UpdateAutopilotRequest {
   title?: string;
   description?: string | null;
   project_id?: string | null;
+  team_id?: string | null;
   // Send `assignee_type` together with `assignee_id` whenever you change the
   // assignee — the server requires both for a type swap.
   assignee_type?: AutopilotAssigneeType;

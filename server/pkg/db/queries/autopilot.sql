@@ -30,6 +30,7 @@ SELECT
   ), '')::text AS last_run_status
 FROM autopilot a
 WHERE a.workspace_id = $1
+  AND (sqlc.narg('team_id')::uuid IS NULL OR a.team_id = sqlc.narg('team_id'))
   AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status'))
 ORDER BY a.created_at DESC;
 
@@ -44,12 +45,12 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
-    status, execution_mode, issue_title_template, project_id,
+    status, execution_mode, issue_title_template, project_id, team_id,
     created_by_type, created_by_id
 ) VALUES (
     $1, $2, sqlc.narg('description'), $3, $4,
-    $5, $6, sqlc.narg('issue_title_template'), sqlc.narg('project_id'),
-    $7, $8
+    $5, $6, sqlc.narg('issue_title_template'), sqlc.narg('project_id'), $7,
+    $8, $9
 ) RETURNING *;
 
 -- name: UpdateAutopilot :one
@@ -62,6 +63,7 @@ UPDATE autopilot SET
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
     project_id = sqlc.narg('project_id'),
+    team_id = COALESCE(sqlc.narg('team_id')::uuid, team_id),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -451,4 +453,3 @@ SELECT EXISTS (
 -- Powers the per-row can_write flag on the list endpoint without an N+1.
 SELECT autopilot_id FROM autopilot_collaborator
 WHERE user_type = 'member' AND user_id = $1;
-

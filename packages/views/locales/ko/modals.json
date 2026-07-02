@@ -118,6 +118,7 @@
     "submitting": "만드는 중...",
     "toast_created": "프로젝트를 만들었습니다",
     "toast_failed": "프로젝트를 만들지 못했습니다",
+    "team_required": "팀을 하나 이상 선택하세요",
     "repos_pill": "저장소",
     "repos_pill_count_other": "저장소 {{count}}개",
     "repos_heading": "이 프로젝트에 GitHub 저장소 연결",

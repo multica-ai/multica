@@ -138,6 +138,7 @@ type Autopilot struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	AssigneeType       string             `json:"assignee_type"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
+	TeamID             pgtype.UUID        `json:"team_id"`
 }
 
 type AutopilotCollaborator struct {
@@ -488,6 +489,7 @@ type Issue struct {
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
 	Stage              pgtype.Int4        `json:"stage"`
+	TeamID             pgtype.UUID        `json:"team_id"`
 }
 
 type IssueDependency struct {
@@ -680,6 +682,13 @@ type ProjectResource struct {
 	Position     int32              `json:"position"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	CreatedBy    pgtype.UUID        `json:"created_by"`
+}
+
+type ProjectTeam struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	TeamID      pgtype.UUID        `json:"team_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type RuntimeProfile struct {
@@ -919,4 +928,28 @@ type WorkspaceInvitation struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
+type WorkspaceTeam struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Name         string             `json:"name"`
+	Key          string             `json:"key"`
+	Description  string             `json:"description"`
+	Icon         pgtype.Text        `json:"icon"`
+	IssueCounter int32              `json:"issue_counter"`
+	IsDefault    bool               `json:"is_default"`
+	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy   pgtype.UUID        `json:"archived_by"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkspaceTeamMember struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	TeamID      pgtype.UUID        `json:"team_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	Role        string             `json:"role"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }

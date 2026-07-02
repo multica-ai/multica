@@ -38,6 +38,7 @@ import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, Fil
 import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { TeamPicker } from "../teams/components/team-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -226,6 +227,9 @@ export function ManualCreatePanel({
   const [projectId, setProjectId] = useState<string | undefined>(
     (data?.project_id as string) || undefined,
   );
+  const [teamId, setTeamId] = useState<string | undefined>(
+    (data?.team_id as string) || undefined,
+  );
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -310,6 +314,7 @@ export function ManualCreatePanel({
     setStartDate(null);
     setDueDate(null);
     setProjectId(undefined);
+    setTeamId(undefined);
     setParentIssueId(undefined);
     setStage(null);
     setChildIssues([]);
@@ -347,6 +352,7 @@ export function ManualCreatePanel({
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
+        team_id: teamId,
         // Stage is only meaningful for a sub-issue (relative to its siblings).
         stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
@@ -518,6 +524,7 @@ export function ManualCreatePanel({
           ? { squad_id: assigneeId }
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
+      ...(teamId ? { team_id: teamId } : {}),
       ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
       ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
     });
@@ -635,6 +642,14 @@ export function ManualCreatePanel({
               <DueDatePicker
                 dueDate={dueDate}
                 onUpdate={(u) => updateDueDate(u.due_date ?? null)}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+
+              {/* Team */}
+              <TeamPicker
+                teamId={teamId ?? null}
+                onChange={(next) => setTeamId(next ?? undefined)}
                 triggerRender={<PillButton />}
                 align="start"
               />

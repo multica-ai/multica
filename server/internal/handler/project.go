@@ -18,19 +18,20 @@ import (
 )
 
 type ProjectResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
-	IssueCount  int64   `json:"issue_count"`
-	DoneCount   int64   `json:"done_count"`
+	ID          string   `json:"id"`
+	WorkspaceID string   `json:"workspace_id"`
+	Title       string   `json:"title"`
+	Description *string  `json:"description"`
+	Icon        *string  `json:"icon"`
+	Status      string   `json:"status"`
+	Priority    string   `json:"priority"`
+	LeadType    *string  `json:"lead_type"`
+	LeadID      *string  `json:"lead_id"`
+	TeamIDs     []string `json:"team_ids"`
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
+	IssueCount  int64    `json:"issue_count"`
+	DoneCount   int64    `json:"done_count"`
 	// ResourceCount is a breadcrumb pointing at the sub-collection at
 	// /api/projects/{id}/resources. Resources themselves stay out of this
 	// payload to keep parent metadata and child collections separate; clients
@@ -70,6 +71,63 @@ func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype
 	return rows[0].ResourceCount
 }
 
+func (h *Handler) attachProjectTeams(ctx context.Context, resp *ProjectResponse) {
+	projectID, err := parseStrictUUID(resp.ID)
+	if err != nil {
+		return
+	}
+	workspaceID, err := parseStrictUUID(resp.WorkspaceID)
+	if err != nil {
+		return
+	}
+	teams, err := h.Queries.ListProjectTeams(ctx, db.ListProjectTeamsParams{
+		WorkspaceID: workspaceID,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		return
+	}
+	resp.TeamIDs = make([]string, len(teams))
+	for i, team := range teams {
+		resp.TeamIDs[i] = uuidToString(team.ID)
+	}
+}
+
+func (h *Handler) resolveProjectTeamIDs(ctx context.Context, workspaceID pgtype.UUID, raw []string) ([]pgtype.UUID, bool, string) {
+	if len(raw) == 0 {
+		team, err := h.Queries.GetDefaultWorkspaceTeam(ctx, workspaceID)
+		if err != nil || !team.ID.Valid || team.ArchivedAt.Valid {
+			return nil, false, "default team not found"
+		}
+		return []pgtype.UUID{team.ID}, true, ""
+	}
+	ids := make([]pgtype.UUID, 0, len(raw))
+	seen := map[string]struct{}{}
+	for _, value := range raw {
+		id, err := parseStrictUUID(strings.TrimSpace(value))
+		if err != nil {
+			return nil, false, "invalid team_id"
+		}
+		key := uuidToString(id)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		team, err := h.Queries.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
+			ID:          id,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil || team.ArchivedAt.Valid {
+			return nil, false, "team not found in this workspace"
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, false, "team_ids must not be empty"
+	}
+	return ids, true, ""
+}
+
 type CreateProjectRequest struct {
 	Title       string                                `json:"title"`
 	Description *string                               `json:"description"`
@@ -79,6 +137,7 @@ type CreateProjectRequest struct {
 	LeadType    *string                               `json:"lead_type"`
 	LeadID      *string                               `json:"lead_id"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	TeamIDs     []string                              `json:"team_ids,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -92,13 +151,14 @@ type CreateProjectResourceRequestPayload struct {
 }
 
 type UpdateProjectRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      *string `json:"status"`
-	Priority    *string `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
+	Title       *string  `json:"title"`
+	Description *string  `json:"description"`
+	Icon        *string  `json:"icon"`
+	Status      *string  `json:"status"`
+	Priority    *string  `json:"priority"`
+	LeadType    *string  `json:"lead_type"`
+	LeadID      *string  `json:"lead_id"`
+	TeamIDs     []string `json:"team_ids"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -115,8 +175,17 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	if p := r.URL.Query().Get("priority"); p != "" {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
 	}
+	var teamFilter pgtype.UUID
+	if t := r.URL.Query().Get("team_id"); t != "" {
+		id, ok := parseUUIDOrBadRequest(w, t, "team_id")
+		if !ok {
+			return
+		}
+		teamFilter = id
+	}
 	projects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{
 		WorkspaceID: wsUUID,
+		TeamID:      teamFilter,
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 	})
@@ -155,6 +224,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			resp[i].DoneCount = s.DoneCount
 		}
 		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
+		h.attachProjectTeams(r.Context(), &resp[i])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
 }
@@ -180,6 +250,7 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
+	h.attachProjectTeams(r.Context(), &resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -311,20 +382,13 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Priority:    priority,
 	}
 
-	// Without resources, keep the simple non-tx path.
-	if len(req.Resources) == 0 {
-		project, err := h.Queries.CreateProject(r.Context(), createParams)
-		if err != nil {
-			h.writeProjectWriteError(w, r, err, "create")
-			return
-		}
-		resp := projectToResponse(project)
-		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
-		writeJSON(w, http.StatusCreated, resp)
+	teamIDs, ok, msg := h.resolveProjectTeamIDs(r.Context(), wsUUID, req.TeamIDs)
+	if !ok {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 
-	// Transactional path: project + all resources are atomic.
+	// Transactional path: project + team links + all resources are atomic.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -337,6 +401,16 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "create")
 		return
+	}
+	for _, teamID := range teamIDs {
+		if err := qtx.AddProjectTeam(r.Context(), db.AddProjectTeamParams{
+			WorkspaceID: wsUUID,
+			ProjectID:   project.ID,
+			TeamID:      teamID,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to attach project team")
+			return
+		}
 	}
 
 	creator, _ := h.parseUserUUIDOrZero(userID)
@@ -379,6 +453,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		resourceResp[i] = projectResourceToResponse(row)
 	}
 	resp := projectToResponse(project)
+	h.attachProjectTeams(r.Context(), &resp)
 	resp.ResourceCount = int64(len(resourceResp))
 	h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
 	for _, rr := range resourceResp {
@@ -488,14 +563,101 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.LeadID = pgtype.UUID{Valid: false}
 		}
 	}
-	project, err := h.Queries.UpdateProject(r.Context(), params)
+	var (
+		replaceTeams bool
+		nextTeamIDs  []pgtype.UUID
+	)
+	if _, ok := rawFields["team_ids"]; ok {
+		replaceTeams = true
+		if len(req.TeamIDs) == 0 {
+			writeError(w, http.StatusBadRequest, "team_ids must not be empty")
+			return
+		}
+		var msg string
+		var valid bool
+		nextTeamIDs, valid, msg = h.resolveProjectTeamIDs(r.Context(), wsUUID, req.TeamIDs)
+		if !valid {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if replaceTeams {
+		next := map[string]struct{}{}
+		for _, id := range nextTeamIDs {
+			next[uuidToString(id)] = struct{}{}
+		}
+		prevTeams, err := qtx.ListProjectTeams(r.Context(), db.ListProjectTeamsParams{
+			WorkspaceID: wsUUID,
+			ProjectID:   prevProject.ID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load project teams")
+			return
+		}
+		for _, team := range prevTeams {
+			if _, keep := next[uuidToString(team.ID)]; keep {
+				continue
+			}
+			issueCount, err := qtx.CountProjectIssuesByTeam(r.Context(), db.CountProjectIssuesByTeamParams{
+				WorkspaceID: wsUUID,
+				ProjectID:   prevProject.ID,
+				TeamID:      team.ID,
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to validate project teams")
+				return
+			}
+			if issueCount > 0 {
+				writeError(w, http.StatusConflict, "cannot remove a team that still has project issues")
+				return
+			}
+			autopilotCount, err := qtx.CountActiveProjectAutopilotsByTeam(r.Context(), db.CountActiveProjectAutopilotsByTeamParams{
+				WorkspaceID: wsUUID,
+				ProjectID:   prevProject.ID,
+				TeamID:      team.ID,
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to validate project teams")
+				return
+			}
+			if autopilotCount > 0 {
+				writeError(w, http.StatusConflict, "cannot remove a team used by active project autopilots")
+				return
+			}
+		}
+	}
+	project, err := qtx.UpdateProject(r.Context(), params)
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "update")
+		return
+	}
+	if replaceTeams {
+		if err := qtx.ReplaceProjectTeams(r.Context(), db.ReplaceProjectTeamsParams{
+			WorkspaceID: wsUUID,
+			ProjectID:   project.ID,
+			TeamIds:     nextTeamIDs,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update project teams")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit project update")
 		return
 	}
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
+	h.attachProjectTeams(r.Context(), &resp)
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
 }

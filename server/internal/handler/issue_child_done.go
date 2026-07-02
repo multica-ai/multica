@@ -126,7 +126,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	}
 	staged := siblingsAreStaged(children)
 
-	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
+	prefix := h.getIssuePrefixForIssue(ctx, issue)
 	identifier := prefix + "-" + strconv.Itoa(int(issue.Number))
 	childID := uuidToString(issue.ID)
 	title := sanitizeChildTitleForSystemComment(issue.Title)

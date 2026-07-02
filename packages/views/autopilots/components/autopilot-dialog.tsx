@@ -50,6 +50,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { activeTeamListOptions } from "@multica/core/teams/queries";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
@@ -68,6 +69,7 @@ import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
+import { TeamPicker } from "../../teams/components/team-picker";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import { SubscriberMultiSelect } from "./subscriber-multi-select";
 import { AutopilotAccessManager } from "./autopilot-access-manager";
@@ -92,6 +94,7 @@ export interface AutopilotInitial {
   title: string;
   description: string;
   project_id: string | null;
+  team_id: string | null;
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
@@ -283,6 +286,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const { data: teams = [] } = useQuery(activeTeamListOptions(wsId));
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isCreate = props.mode === "create";
@@ -293,6 +297,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [title, setTitle] = useState(initial.title ?? "");
   const [description, setDescription] = useState(initial.description ?? "");
   const [projectId, setProjectId] = useState<string | null>(initial.project_id ?? null);
+  const [teamId, setTeamId] = useState<string | null>(initial.team_id ?? null);
   const [assigneeType, setAssigneeType] = useState<AutopilotAssigneeType>(
     initial.assignee_type ?? "agent",
   );
@@ -331,6 +336,12 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   })();
   const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialKind);
 
+  useEffect(() => {
+    if (!open || teamId || teams.length === 0) return;
+    const defaultTeam = teams.find((team) => team.is_default) ?? teams[0];
+    setTeamId(defaultTeam.id);
+  }, [open, teamId, teams]);
+
   const initialEventFilters: WebhookEventFilter[] =
     !isCreate && props.triggers[0]?.event_filters ? props.triggers[0].event_filters : [];
   const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>(initialEventFilters);
@@ -364,6 +375,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     () => projects.find((project) => project.id === projectId) ?? null,
     [projects, projectId],
   );
+  const selectedTeam = useMemo(
+    () => teams.find((team) => team.id === teamId) ?? null,
+    [teams, teamId],
+  );
 
   const handleAssigneeChange = (next: AssigneeSelection) => {
     setAssigneeType(next.type);
@@ -394,6 +409,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           title: title.trim(),
           description: description.trim() || undefined,
           project_id: executionMode === "create_issue" ? projectId : null,
+          team_id: teamId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -447,6 +463,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           title: title.trim(),
           description: description.trim() || null,
           project_id: executionMode === "create_issue" ? projectId : null,
+          team_id: teamId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -684,6 +701,12 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               selectedDescription={selectedAssignee?.description}
             />
 
+            <TeamSection
+              teamId={teamId}
+              selectedTeam={selectedTeam}
+              onChange={setTeamId}
+            />
+
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
 
             {executionMode === "create_issue" && (
@@ -879,6 +902,51 @@ function OutputModeSection({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function TeamSection({
+  teamId,
+  selectedTeam,
+  onChange,
+}: {
+  teamId: string | null;
+  selectedTeam: { name: string; key: string } | null;
+  onChange: (teamId: string | null) => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_team)}</SectionLabel>
+      <TeamPicker
+        teamId={teamId}
+        onChange={onChange}
+        align="start"
+        triggerRender={
+          <button
+            type="button"
+            className={cn(
+              "w-full flex items-center gap-2.5 rounded-md border bg-background px-3 py-2 text-left",
+              "hover:bg-accent/40 transition-colors cursor-pointer",
+            )}
+          >
+            {selectedTeam ? (
+              <span className="inline-flex h-5 min-w-8 items-center justify-center rounded bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">
+                {selectedTeam.key}
+              </span>
+            ) : (
+              <span className="inline-flex size-5 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                <Users className="size-3.5" />
+              </span>
+            )}
+            <span className="flex-1 min-w-0 truncate text-sm font-medium">
+              {selectedTeam?.name ?? t(($) => $.dialog.no_team)}
+            </span>
+            <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
+          </button>
+        }
+      />
     </div>
   );
 }

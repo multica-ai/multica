@@ -51,6 +51,7 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
 	WorkspaceID    pgtype.UUID
+	TeamID         pgtype.UUID
 	Title          string
 	Description    pgtype.Text
 	Status         string
@@ -102,6 +103,11 @@ type IssueCreateOpts struct {
 	// daemon / lark / autopilot). Derived from middleware's client
 	// metadata at the handler layer.
 	Platform string
+
+	// BeforeCommit runs after the issue row has been inserted and before the
+	// create transaction commits. It is for same-transaction side effects that
+	// must be visible when EventIssueCreated fires.
+	BeforeCommit func(ctx context.Context, qtx *db.Queries, issue db.Issue) error
 }
 
 // ErrActiveDuplicate signals that the duplicate guard found an active
@@ -123,6 +129,18 @@ var ErrParentIssueNotFound = errors.New("parent issue not found in this workspac
 // MCP / API key callers) enforces the same workspace boundary without
 // having to remember it. Callers translate this into 400.
 var ErrProjectNotFound = errors.New("project not found in this workspace")
+
+// ErrTeamNotFound signals that the requested or fallback Team does not exist
+// in the workspace, or is archived and cannot receive new work.
+var ErrTeamNotFound = errors.New("team not found in this workspace")
+
+// ErrProjectTeamMismatch signals that an issue is being created into a Team
+// that is not associated with its Project.
+var ErrProjectTeamMismatch = errors.New("project is not associated with this team")
+
+// ErrCrossTeamChild signals that a child issue attempted to use a different
+// Team from its parent. v1 keeps parent/child trees within one Team.
+var ErrCrossTeamChild = errors.New("child issue must use the same team as parent")
 
 // IssueCreateResult is the typed return from IssueService.Create.
 //
@@ -170,6 +188,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	// WorkspaceID — there is no path from this service to a row in a
 	// foreign workspace.
 	projectID := p.ProjectID
+	teamID := p.TeamID
 	if p.ParentIssueID.Valid {
 		parent, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
 			ID:          p.ParentIssueID,
@@ -184,6 +203,12 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if !projectID.Valid {
 			projectID = parent.ProjectID
 		}
+		if parent.TeamID.Valid {
+			if teamID.Valid && teamID != parent.TeamID {
+				return IssueCreateResult{}, ErrCrossTeamChild
+			}
+			teamID = parent.TeamID
+		}
 	}
 	if projectID.Valid {
 		if _, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
@@ -193,8 +218,13 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			return IssueCreateResult{}, ErrProjectNotFound
 		}
 	}
+	team, err := s.resolveIssueTeam(ctx, qtx, p.WorkspaceID, projectID, teamID)
+	if err != nil {
+		return IssueCreateResult{}, err
+	}
+	teamID = team.ID
 
-	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
+	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, teamID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("duplicate guard: %w", err)
 	}
@@ -203,21 +233,24 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{DuplicateIssue: &dup}, ErrActiveDuplicate
 	}
 
-	issueNumber, err := qtx.IncrementIssueCounter(ctx, p.WorkspaceID)
+	issueNumber, err := qtx.IncrementTeamIssueCounter(ctx, db.IncrementTeamIssueCounterParams{
+		ID:          teamID,
+		WorkspaceID: p.WorkspaceID,
+	})
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("increment counter: %w", err)
 	}
 
-	// New issues sort to the top of their (workspace, status) column for
+	// New issues sort to the top of their (workspace, team, status) column for
 	// manual ordering. Computed inside the tx, after IncrementIssueCounter
-	// has already taken the workspace row lock, so two concurrent creates
-	// in the same workspace see each other's positions and don't both
+	// has already taken the team row lock, so two concurrent creates
+	// in the same team see each other's positions and don't both
 	// land on the same min-1 slot. Concurrent manual reorder via
 	// UpdateIssue(position) does NOT take this lock, so a create racing
 	// a reorder is still allowed to collide on position — manual ordering
 	// is best-effort and the UI tolerates equal positions by falling back
 	// to the secondary ORDER BY key.
-	newPosition, err := issueposition.NextTopPosition(ctx, tx, p.WorkspaceID, p.Status)
+	newPosition, err := issueposition.NextTopPositionForTeam(ctx, tx, p.WorkspaceID, teamID, p.Status)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("next top position: %w", err)
 	}
@@ -226,6 +259,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 			WorkspaceID:   p.WorkspaceID,
+			TeamID:        teamID,
 			Title:         p.Title,
 			Description:   p.Description,
 			Status:        p.Status,
@@ -247,6 +281,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
 			WorkspaceID:   p.WorkspaceID,
+			TeamID:        teamID,
 			Title:         p.Title,
 			Description:   p.Description,
 			Status:        p.Status,
@@ -268,6 +303,12 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
 	}
 
+	if opts.BeforeCommit != nil {
+		if err := opts.BeforeCommit(ctx, qtx, issue); err != nil {
+			return IssueCreateResult{}, err
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return IssueCreateResult{}, fmt.Errorf("commit: %w", err)
 	}
@@ -284,6 +325,47 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID)
 
 	return IssueCreateResult{Issue: issue, Attachments: attachments}, nil
+}
+
+func (s *IssueService) resolveIssueTeam(ctx context.Context, qtx *db.Queries, workspaceID, projectID, requestedTeamID pgtype.UUID) (db.WorkspaceTeam, error) {
+	teamID := requestedTeamID
+	if !teamID.Valid && projectID.Valid {
+		teams, err := qtx.ListProjectTeams(ctx, db.ListProjectTeamsParams{
+			WorkspaceID: workspaceID,
+			ProjectID:   projectID,
+		})
+		if err != nil {
+			return db.WorkspaceTeam{}, ErrProjectTeamMismatch
+		}
+		if len(teams) == 1 {
+			teamID = teams[0].ID
+		}
+	}
+	if !teamID.Valid {
+		team, err := qtx.GetDefaultWorkspaceTeam(ctx, workspaceID)
+		if err != nil {
+			return db.WorkspaceTeam{}, ErrTeamNotFound
+		}
+		teamID = team.ID
+	}
+	team, err := qtx.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
+		ID:          teamID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil || !team.ID.Valid || team.ArchivedAt.Valid {
+		return db.WorkspaceTeam{}, ErrTeamNotFound
+	}
+	if projectID.Valid {
+		hasTeam, err := qtx.ProjectHasTeam(ctx, db.ProjectHasTeamParams{
+			WorkspaceID: workspaceID,
+			ProjectID:   projectID,
+			TeamID:      team.ID,
+		})
+		if err != nil || !hasTeam {
+			return db.WorkspaceTeam{}, ErrProjectTeamMismatch
+		}
+	}
+	return team, nil
 }
 
 // linkAttachments links the given attachment IDs to the newly created
@@ -386,6 +468,9 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 }
 
 func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue, creatorType, actorID string) {
+	if s.TaskService == nil {
+		return
+	}
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return
 	}

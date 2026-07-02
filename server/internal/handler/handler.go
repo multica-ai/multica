@@ -649,8 +649,9 @@ func (h *Handler) resolveIssueByIdentifier(ctx context.Context, id, workspaceID 
 	if err != nil {
 		return db.Issue{}, false
 	}
-	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
+	issue, err := h.Queries.GetIssueByTeamKeyAndNumber(ctx, db.GetIssueByTeamKeyAndNumberParams{
 		WorkspaceID: wsUUID,
+		Lower:       parts.prefix,
 		Number:      parts.number,
 	})
 	if err != nil {
@@ -689,10 +690,26 @@ func splitIdentifier(id string) *identifierParts {
 	return &identifierParts{prefix: id[:idx], number: int32(num)}
 }
 
-// getIssuePrefix fetches the issue_prefix for a workspace.
-// Falls back to generating a prefix from the workspace name if the stored
-// prefix is empty (e.g. workspaces created before the prefix was introduced).
+func (h *Handler) getIssuePrefixForIssue(ctx context.Context, issue db.Issue) string {
+	if issue.TeamID.Valid {
+		team, err := h.Queries.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
+			ID:          issue.TeamID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err == nil && team.Key != "" {
+			return team.Key
+		}
+	}
+	return h.getIssuePrefix(ctx, issue.WorkspaceID)
+}
+
+// getIssuePrefix fetches the default Team key for a workspace, falling back to
+// the legacy workspace issue_prefix during the compatibility window.
 func (h *Handler) getIssuePrefix(ctx context.Context, workspaceID pgtype.UUID) string {
+	team, err := h.Queries.GetDefaultWorkspaceTeam(ctx, workspaceID)
+	if err == nil && team.Key != "" {
+		return team.Key
+	}
 	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		return ""

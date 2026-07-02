@@ -473,6 +473,57 @@ func TestDeleteIssueByIdentifier(t *testing.T) {
 	}
 }
 
+func TestResolveIssueByIdentifierFallsBackToDefaultTeamForNullTeamIssue(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano() % 1_000_000
+	defaultKey := fmt.Sprintf("D%06d", suffix)
+	otherKey := fmt.Sprintf("O%06d", suffix)
+
+	var workspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, '', $3)
+		RETURNING id
+	`, "Null Team Resolver", fmt.Sprintf("null-team-resolver-%d", suffix), defaultKey).Scan(&workspaceID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_team (workspace_id, name, key, is_default)
+		VALUES ($1, 'Default', $2, true), ($1, 'Other', $3, false)
+	`, workspaceID, defaultKey, otherKey); err != nil {
+		t.Fatalf("create teams: %v", err)
+	}
+
+	var issueID string
+	var number int32 = 1
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			number, team_id
+		)
+		VALUES ($1, 'Null-team compatibility issue', 'todo', 'none', 'member', $2, $3, NULL)
+		RETURNING id
+	`, workspaceID, testUserID, number).Scan(&issueID); err != nil {
+		t.Fatalf("create null-team issue: %v", err)
+	}
+
+	issue, ok := testHandler.resolveIssueByIdentifier(ctx, fmt.Sprintf("%s-%d", defaultKey, number), workspaceID)
+	if !ok {
+		t.Fatalf("expected default Team key to resolve null-team issue")
+	}
+	if got := uuidToString(issue.ID); got != issueID {
+		t.Fatalf("resolved issue id = %s, want %s", got, issueID)
+	}
+
+	if _, ok := testHandler.resolveIssueByIdentifier(ctx, fmt.Sprintf("%s-%d", otherKey, number), workspaceID); ok {
+		t.Fatalf("non-default Team key must not resolve null-team issue")
+	}
+}
+
 // TestDeleteIssueRejectsInvalidUUID verifies that a path segment that is
 // neither a valid UUID nor a valid identifier returns 404 (not 204) — the
 // handler must never silently succeed on malformed input.

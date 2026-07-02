@@ -26,6 +26,11 @@ import type { Workspace } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
 import { useConfigStore } from "@multica/core/config";
 import { workspaceUrlHost } from "@multica/core/workspace/workspace-url";
+import {
+  TEAM_KEY_REGEX,
+  defaultTeamKeyFromSlug,
+  normalizeTeamKey,
+} from "@multica/core/workspace";
 import { DragStrip } from "@multica/views/platform";
 import { useLogout } from "../../auth";
 import { StepHeader } from "../components/step-header";
@@ -56,20 +61,13 @@ import { isReservedSlug } from "@multica/core/paths";
  * app URL so self-hosted instances show their own domain), and a live
  * `Issues will look
  * like ACME-123` line shows the user what their issue IDs will read
- * like before they've created anything.
+ * like before they've created anything. The Team key is editable because it
+ * becomes the Issue identifier namespace.
  *
  * Resume path ships two picker cards (existing + create-new) and the
  * user toggles between them. No-existing path just shows the create
  * fields directly.
  */
-
-function issuePrefix(slug: string): string {
-  // Mirrors the server's default prefix derivation — first 4 chars of
-  // the slug, uppercased. Falls back to "WS" when the slug is empty so
-  // the preview line never collapses to a single dangling "-".
-  const head = slug.trim().replace(/[^a-z0-9]/g, "").slice(0, 4);
-  return (head || "ws").toUpperCase();
-}
 
 export function StepWorkspace({
   existing,
@@ -114,8 +112,10 @@ export function StepWorkspace({
   // the footer CTA can read `canCreate` and trigger `handleCreate`.
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [teamKey, setTeamKey] = useState("");
   const [slugServerError, setSlugServerError] = useState<string | null>(null);
   const slugTouched = useRef(false);
+  const teamKeyTouched = useRef(false);
 
   const slugValidationError =
     slug.length > 0 && !WORKSPACE_SLUG_REGEX.test(slug)
@@ -126,14 +126,27 @@ export function StepWorkspace({
       ? t(($) => $.step_workspace.slug_reserved_error)
       : null;
   const slugError = slugValidationError ?? slugReservedError ?? slugServerError;
+  const normalizedTeamKey = normalizeTeamKey(teamKey);
+  const teamKeyError =
+    normalizedTeamKey.length > 0 && !TEAM_KEY_REGEX.test(normalizedTeamKey)
+      ? t(($) => $.step_workspace.team_key_format_error)
+      : null;
   const canCreate =
-    name.trim().length > 0 && slug.trim().length > 0 && !slugError;
+    name.trim().length > 0 &&
+    slug.trim().length > 0 &&
+    normalizedTeamKey.length > 0 &&
+    !slugError &&
+    !teamKeyError;
 
   const handleNameChange = (value: string) => {
     setName(value);
     if (!slugTouched.current) {
-      setSlug(nameToWorkspaceSlug(value));
+      const nextSlug = nameToWorkspaceSlug(value);
+      setSlug(nextSlug);
       setSlugServerError(null);
+      if (!teamKeyTouched.current) {
+        setTeamKey(defaultTeamKeyFromSlug(nextSlug));
+      }
     }
   };
 
@@ -141,6 +154,14 @@ export function StepWorkspace({
     slugTouched.current = true;
     setSlug(value);
     setSlugServerError(null);
+    if (!teamKeyTouched.current) {
+      setTeamKey(defaultTeamKeyFromSlug(value));
+    }
+  };
+
+  const handleTeamKeyChange = (value: string) => {
+    teamKeyTouched.current = true;
+    setTeamKey(normalizeTeamKey(value));
   };
 
   const createWorkspace = useCreateWorkspace();
@@ -148,7 +169,11 @@ export function StepWorkspace({
   const handleCreate = () => {
     if (!canCreate || createWorkspace.isPending) return;
     createWorkspace.mutate(
-      { name: name.trim(), slug: slug.trim() },
+      {
+        name: name.trim(),
+        slug: slug.trim(),
+        default_team_key: normalizedTeamKey,
+      },
       {
         onSuccess: onCreated,
         onError: (error) => {
@@ -264,16 +289,38 @@ export function StepWorkspace({
         {slugError && <p className="text-xs text-destructive">{slugError}</p>}
       </div>
       <div className="flex flex-col gap-1.5">
-        <div className="text-xs font-medium text-muted-foreground">
+        <Label
+          htmlFor="ws-team-key"
+          className="text-xs font-medium text-muted-foreground"
+        >
           {t(($) => $.step_workspace.issue_prefix_label)}
+        </Label>
+        <div className="flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground">
+          <Input
+            id="ws-team-key"
+            type="text"
+            value={teamKey}
+            onChange={(e) => handleTeamKeyChange(e.target.value)}
+            placeholder="MUL"
+            maxLength={7}
+            className="border-0 bg-transparent font-mono shadow-none focus-visible:ring-0"
+            onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
+              if (e.key === "Enter") handleCreate();
+            }}
+          />
+          <span className="select-none pr-3 font-mono text-sm text-muted-foreground">
+            -123
+          </span>
         </div>
         <div className="text-sm leading-[1.55] text-muted-foreground">
           {t(($) => $.step_workspace.issue_prefix_prefix)}
-          <span className="font-mono text-foreground">
-            {issuePrefix(slug)}-123
-          </span>
+          <span className="font-mono text-foreground">{normalizedTeamKey || "T"}-123</span>
           {t(($) => $.step_workspace.issue_prefix_suffix)}
         </div>
+        {teamKeyError && (
+          <p className="text-xs text-destructive">{teamKeyError}</p>
+        )}
       </div>
     </div>
   );

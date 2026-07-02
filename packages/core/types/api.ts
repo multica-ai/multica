@@ -11,6 +11,7 @@ export interface CreateIssueRequest {
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;
   parent_issue_id?: string;
+  team_id?: string;
   project_id?: string;
   /** Ordered stage (>= 1) grouping this sub-issue under its parent. */
   stage?: number;
@@ -82,6 +83,7 @@ export interface ListIssuesParams {
   assignee_id?: string;
   assignee_ids?: string[];
   creator_id?: string;
+  team_id?: string;
   project_id?: string;
   /**
    * Widen the assignee filter to issues where the user is the *indirect*
@@ -125,6 +127,7 @@ export interface ListGroupedIssuesParams {
   assignee_id?: string;
   assignee_ids?: string[];
   creator_id?: string;
+  team_id?: string;
   project_id?: string;
   /** See `ListIssuesParams.involves_user_id` — same semantics. */
   involves_user_id?: string;

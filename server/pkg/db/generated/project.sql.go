@@ -11,6 +11,44 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addProjectTeam = `-- name: AddProjectTeam :exec
+INSERT INTO project_team (workspace_id, project_id, team_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (project_id, team_id) DO NOTHING
+`
+
+type AddProjectTeamParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) AddProjectTeam(ctx context.Context, arg AddProjectTeamParams) error {
+	_, err := q.db.Exec(ctx, addProjectTeam, arg.WorkspaceID, arg.ProjectID, arg.TeamID)
+	return err
+}
+
+const countActiveProjectAutopilotsByTeam = `-- name: CountActiveProjectAutopilotsByTeam :one
+SELECT count(*) FROM autopilot
+WHERE workspace_id = $1
+  AND project_id = $2
+  AND team_id = $3
+  AND status <> 'archived'
+`
+
+type CountActiveProjectAutopilotsByTeamParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) CountActiveProjectAutopilotsByTeam(ctx context.Context, arg CountActiveProjectAutopilotsByTeamParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveProjectAutopilotsByTeam, arg.WorkspaceID, arg.ProjectID, arg.TeamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countIssuesByProject = `-- name: CountIssuesByProject :one
 SELECT count(*) FROM issue
 WHERE project_id = $1
@@ -18,6 +56,26 @@ WHERE project_id = $1
 
 func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countIssuesByProject, projectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countProjectIssuesByTeam = `-- name: CountProjectIssuesByTeam :one
+SELECT count(*) FROM issue
+WHERE workspace_id = $1
+  AND project_id = $2
+  AND team_id = $3
+`
+
+type CountProjectIssuesByTeamParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) CountProjectIssuesByTeam(ctx context.Context, arg CountProjectIssuesByTeamParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countProjectIssuesByTeam, arg.WorkspaceID, arg.ProjectID, arg.TeamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -174,22 +232,149 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 	return items, nil
 }
 
+const listProjectTeams = `-- name: ListProjectTeams :many
+SELECT wt.id, wt.workspace_id, wt.name, wt.key, wt.description, wt.icon, wt.issue_counter, wt.is_default, wt.archived_at, wt.archived_by, wt.created_by, wt.created_at, wt.updated_at FROM workspace_team wt
+JOIN project_team pt ON pt.team_id = wt.id AND pt.workspace_id = wt.workspace_id
+WHERE pt.workspace_id = $1
+  AND pt.project_id = $2
+ORDER BY wt.is_default DESC, wt.name ASC, wt.created_at ASC
+`
+
+type ListProjectTeamsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+}
+
+func (q *Queries) ListProjectTeams(ctx context.Context, arg ListProjectTeamsParams) ([]WorkspaceTeam, error) {
+	rows, err := q.db.Query(ctx, listProjectTeams, arg.WorkspaceID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WorkspaceTeam{}
+	for rows.Next() {
+		var i WorkspaceTeam
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Key,
+			&i.Description,
+			&i.Icon,
+			&i.IssueCounter,
+			&i.IsDefault,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjectTeamsByProjects = `-- name: ListProjectTeamsByProjects :many
+SELECT pt.project_id, wt.id, wt.workspace_id, wt.name, wt.key, wt.description,
+       wt.icon, wt.issue_counter, wt.is_default, wt.archived_at, wt.archived_by,
+       wt.created_by, wt.created_at, wt.updated_at
+FROM project_team pt
+JOIN workspace_team wt ON wt.id = pt.team_id AND wt.workspace_id = pt.workspace_id
+WHERE pt.workspace_id = $1
+  AND pt.project_id = ANY($2::uuid[])
+ORDER BY pt.project_id, wt.is_default DESC, wt.name ASC, wt.created_at ASC
+`
+
+type ListProjectTeamsByProjectsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	ProjectIds  []pgtype.UUID `json:"project_ids"`
+}
+
+type ListProjectTeamsByProjectsRow struct {
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Name         string             `json:"name"`
+	Key          string             `json:"key"`
+	Description  string             `json:"description"`
+	Icon         pgtype.Text        `json:"icon"`
+	IssueCounter int32              `json:"issue_counter"`
+	IsDefault    bool               `json:"is_default"`
+	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy   pgtype.UUID        `json:"archived_by"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListProjectTeamsByProjects(ctx context.Context, arg ListProjectTeamsByProjectsParams) ([]ListProjectTeamsByProjectsRow, error) {
+	rows, err := q.db.Query(ctx, listProjectTeamsByProjects, arg.WorkspaceID, arg.ProjectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListProjectTeamsByProjectsRow{}
+	for rows.Next() {
+		var i ListProjectTeamsByProjectsRow
+		if err := rows.Scan(
+			&i.ProjectID,
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Key,
+			&i.Description,
+			&i.Icon,
+			&i.IssueCounter,
+			&i.IsDefault,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjects = `-- name: ListProjects :many
 SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
-WHERE workspace_id = $1
-  AND ($2::text IS NULL OR status = $2)
-  AND ($3::text IS NULL OR priority = $3)
+WHERE project.workspace_id = $1
+  AND ($2::uuid IS NULL OR EXISTS (
+    SELECT 1 FROM project_team pt
+    WHERE pt.project_id = project.id
+      AND pt.workspace_id = project.workspace_id
+      AND pt.team_id = $2::uuid
+  ))
+  AND ($3::text IS NULL OR project.status = $3)
+  AND ($4::text IS NULL OR project.priority = $4)
 ORDER BY created_at DESC
 `
 
 type ListProjectsParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
 	Status      pgtype.Text `json:"status"`
 	Priority    pgtype.Text `json:"priority"`
 }
 
 func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error) {
-	rows, err := q.db.Query(ctx, listProjects, arg.WorkspaceID, arg.Status, arg.Priority)
+	rows, err := q.db.Query(ctx, listProjects,
+		arg.WorkspaceID,
+		arg.TeamID,
+		arg.Status,
+		arg.Priority,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +403,51 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 		return nil, err
 	}
 	return items, nil
+}
+
+const projectHasTeam = `-- name: ProjectHasTeam :one
+SELECT EXISTS (
+  SELECT 1 FROM project_team
+  WHERE workspace_id = $1
+    AND project_id = $2
+    AND team_id = $3
+)::boolean
+`
+
+type ProjectHasTeamParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+	TeamID      pgtype.UUID `json:"team_id"`
+}
+
+func (q *Queries) ProjectHasTeam(ctx context.Context, arg ProjectHasTeamParams) (bool, error) {
+	row := q.db.QueryRow(ctx, projectHasTeam, arg.WorkspaceID, arg.ProjectID, arg.TeamID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const replaceProjectTeams = `-- name: ReplaceProjectTeams :exec
+WITH deleted AS (
+  DELETE FROM project_team
+  WHERE workspace_id = $1
+    AND project_id = $2
+    AND NOT (team_id = ANY($3::uuid[]))
+)
+INSERT INTO project_team (workspace_id, project_id, team_id)
+SELECT $1, $2, unnest($3::uuid[])
+ON CONFLICT (project_id, team_id) DO NOTHING
+`
+
+type ReplaceProjectTeamsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	ProjectID   pgtype.UUID   `json:"project_id"`
+	TeamIds     []pgtype.UUID `json:"team_ids"`
+}
+
+func (q *Queries) ReplaceProjectTeams(ctx context.Context, arg ReplaceProjectTeamsParams) error {
+	_, err := q.db.Exec(ctx, replaceProjectTeams, arg.WorkspaceID, arg.ProjectID, arg.TeamIds)
+	return err
 }
 
 const updateProject = `-- name: UpdateProject :one

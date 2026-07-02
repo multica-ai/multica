@@ -119,6 +119,7 @@
     "submitting": "Creating...",
     "toast_created": "Project created",
     "toast_failed": "Failed to create project",
+    "team_required": "Select at least one team",
     "repos_pill": "Repos",
     "repos_pill_count_one": "{{count}} repo",
     "repos_pill_count_other": "{{count}} repos",

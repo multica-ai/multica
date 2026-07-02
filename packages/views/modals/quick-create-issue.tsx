@@ -30,6 +30,7 @@ import { contentReferencesAttachment, type Agent, type Attachment, type Squad } 
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { TeamPicker } from "../teams/components/team-picker";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
 import {
   PropertyPicker,
@@ -128,6 +129,8 @@ export function AgentCreatePanel({
   const setLastActor = useQuickCreateStore((s) => s.setLastActor);
   const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
   const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
+  const lastTeamId = useQuickCreateStore((s) => s.lastTeamId);
+  const setLastTeamId = useQuickCreateStore((s) => s.setLastTeamId);
   const promptDraft = useQuickCreateStore((s) => s.prompt);
   const setPrompt = useQuickCreateStore((s) => s.setPrompt);
   const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
@@ -198,6 +201,10 @@ export function AgentCreatePanel({
   // replace the persisted default.
   const [projectId, setProjectId] = useState<string | null>(() => {
     const seed = (data?.project_id as string | undefined) ?? lastProjectId;
+    return seed ?? null;
+  });
+  const [teamId, setTeamId] = useState<string | null>(() => {
+    const seed = (data?.team_id as string | undefined) ?? lastTeamId;
     return seed ?? null;
   });
 
@@ -306,11 +313,13 @@ export function AgentCreatePanel({
           ? { agent_id: actor.id }
           : { squad_id: actor.id }),
         prompt: md,
+        team_id: teamId ?? undefined,
         project_id: projectId ?? undefined,
         parent_issue_id: parentIssueId,
         ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
       });
       setLastActor(actor.type, actor.id);
+      setLastTeamId(teamId);
       setLastProjectId(projectId);
       clearPrompt();
       setLastMode("agent");
@@ -396,6 +405,7 @@ export function AgentCreatePanel({
     // through.
     const carry: Record<string, unknown> = {};
     if (projectId) carry.project_id = projectId;
+    if (teamId) carry.team_id = teamId;
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
@@ -516,6 +526,12 @@ export function AgentCreatePanel({
           <ProjectPicker
             projectId={projectId}
             onUpdate={(u) => setProjectId(u.project_id ?? null)}
+            triggerRender={<PillButton />}
+            align="start"
+          />
+          <TeamPicker
+            teamId={teamId}
+            onChange={setTeamId}
             triggerRender={<PillButton />}
             align="start"
           />

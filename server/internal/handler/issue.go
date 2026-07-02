@@ -31,6 +31,9 @@ import (
 type IssueResponse struct {
 	ID            string  `json:"id"`
 	WorkspaceID   string  `json:"workspace_id"`
+	TeamID        *string `json:"team_id,omitempty"`
+	TeamKey       *string `json:"team_key,omitempty"`
+	TeamName      *string `json:"team_name,omitempty"`
 	Number        int32   `json:"number"`
 	Identifier    string  `json:"identifier"`
 	Title         string  `json:"title"`
@@ -86,9 +89,12 @@ func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []str
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	teamKey := issuePrefix
 	return IssueResponse{
 		ID:            uuidToString(i.ID),
 		WorkspaceID:   uuidToString(i.WorkspaceID),
+		TeamID:        uuidToPtr(i.TeamID),
+		TeamKey:       &teamKey,
 		Number:        i.Number,
 		Identifier:    identifier,
 		Title:         i.Title,
@@ -113,10 +119,21 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 
 // issueListRowToResponse converts a list-query row (no description) to an IssueResponse.
 func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueResponse {
+	if i.TeamKey != "" {
+		issuePrefix = i.TeamKey
+	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	teamKey := issuePrefix
+	var teamName *string
+	if i.TeamName != "" {
+		teamName = &i.TeamName
+	}
 	return IssueResponse{
 		ID:            uuidToString(i.ID),
 		WorkspaceID:   uuidToString(i.WorkspaceID),
+		TeamID:        uuidToPtr(i.TeamID),
+		TeamKey:       &teamKey,
+		TeamName:      teamName,
 		Number:        i.Number,
 		Identifier:    identifier,
 		Title:         i.Title,
@@ -171,10 +188,21 @@ func (h *Handler) labelsByIssue(ctx context.Context, wsUUID pgtype.UUID, issueID
 }
 
 func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueResponse {
+	if i.TeamKey != "" {
+		issuePrefix = i.TeamKey
+	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
+	teamKey := issuePrefix
+	var teamName *string
+	if i.TeamName != "" {
+		teamName = &i.TeamName
+	}
 	return IssueResponse{
 		ID:            uuidToString(i.ID),
 		WorkspaceID:   uuidToString(i.WorkspaceID),
+		TeamID:        uuidToPtr(i.TeamID),
+		TeamKey:       &teamKey,
+		TeamName:      teamName,
 		Number:        i.Number,
 		Identifier:    identifier,
 		Title:         i.Title,
@@ -350,29 +378,33 @@ func splitSearchTerms(q string) []string {
 	return terms
 }
 
-// identifierNumberRe matches patterns like "MUL-123" or "ABC-45".
-var identifierNumberRe = regexp.MustCompile(`(?i)^[a-z]+-(\d+)$`)
+// identifierNumberRe matches Team-scoped identifiers like "MUL-123" or "ABC-45".
+var identifierNumberRe = regexp.MustCompile(`(?i)^([a-z][a-z0-9]{0,6})-(\d+)$`)
 
 // parseQueryNumber extracts an issue number from the query if it looks like
-// an identifier (e.g. "MUL-123") or a bare number (e.g. "123").
-func parseQueryNumber(q string) (int, bool) {
+// an identifier (e.g. "MUL-123") or a bare number (e.g. "123"). When an
+// identifier is supplied, the Team key must be preserved so search does not
+// collapse Team namespaces back to workspace+number.
+func parseQueryNumber(q string) (int, string, bool) {
 	q = strings.TrimSpace(q)
 	// Check for identifier pattern like "MUL-123"
 	if m := identifierNumberRe.FindStringSubmatch(q); m != nil {
-		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
-			return n, true
+		if n, err := strconv.Atoi(m[2]); err == nil && n > 0 {
+			return n, m[1], true
 		}
 	}
 	// Check for bare number
 	if n, err := strconv.Atoi(q); err == nil && n > 0 {
-		return n, true
+		return n, "", true
 	}
-	return 0, false
+	return 0, "", false
 }
 
 // searchResult holds a raw row from the dynamic search query.
 type searchResult struct {
 	issue                 db.Issue
+	teamKey               string
+	teamName              string
 	totalCount            int64
 	matchSource           string
 	matchedCommentContent string
@@ -382,7 +414,7 @@ type searchResult struct {
 // It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
 // Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 // LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, queryTeamKey string, hasNum bool, includeClosed bool) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
@@ -442,9 +474,15 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	// Number match
 	numParam := ""
+	teamKeyParam := ""
 	if hasNum {
 		numParam = nextArg(queryNum)
-		whereParts = append(whereParts, fmt.Sprintf("i.number = %s", numParam))
+		if queryTeamKey != "" {
+			teamKeyParam = nextArg(queryTeamKey)
+			whereParts = append(whereParts, fmt.Sprintf("(i.number = %s AND lower(wt.key) = lower(%s))", numParam, teamKeyParam))
+		} else {
+			whereParts = append(whereParts, fmt.Sprintf("i.number = %s", numParam))
+		}
 	}
 
 	whereClause := "(" + strings.Join(whereParts, " OR ") + ")"
@@ -459,7 +497,11 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	// Tier 0: Identifier exact match
 	if hasNum {
-		rankCases = append(rankCases, fmt.Sprintf("WHEN i.number = %s THEN 0", numParam))
+		if queryTeamKey != "" {
+			rankCases = append(rankCases, fmt.Sprintf("WHEN i.number = %s AND lower(wt.key) = lower(%s) THEN 0", numParam, teamKeyParam))
+		} else {
+			rankCases = append(rankCases, fmt.Sprintf("WHEN i.number = %s THEN 0", numParam))
+		}
 	}
 
 	// Tier 1: Exact title match
@@ -571,14 +613,17 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	limitParam := nextArg(nil)  // placeholder
 	offsetParam := nextArg(nil) // placeholder
 
-	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.team_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
+		COALESCE(wt.key, '')::text AS team_key,
+		COALESCE(wt.name, '')::text AS team_name,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source,
 		%s AS matched_comment_content
 	FROM issue i
+	LEFT JOIN workspace_team wt ON wt.id = i.team_id AND wt.workspace_id = i.workspace_id
 	WHERE i.workspace_id = %s AND %s
 	ORDER BY %s, %s, i.updated_at DESC
 	LIMIT %s OFFSET %s`,
@@ -628,9 +673,9 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	terms := splitSearchTerms(q)
-	queryNum, hasNum := parseQueryNumber(q)
+	queryNum, queryTeamKey, hasNum := parseQueryNumber(q)
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed)
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, queryTeamKey, hasNum, includeClosed)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
@@ -650,6 +695,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&sr.issue.ID,
 			&sr.issue.WorkspaceID,
+			&sr.issue.TeamID,
 			&sr.issue.Title,
 			&sr.issue.Description,
 			&sr.issue.Status,
@@ -668,6 +714,8 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 			&sr.issue.UpdatedAt,
 			&sr.issue.Number,
 			&sr.issue.ProjectID,
+			&sr.teamKey,
+			&sr.teamName,
 			&sr.totalCount,
 			&sr.matchSource,
 			&sr.matchedCommentContent,
@@ -689,12 +737,18 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		total = results[0].totalCount
 	}
 
-	prefix := h.getIssuePrefix(ctx, wsUUID)
 	resp := make([]SearchIssueResponse, len(results))
 	for i, sr := range results {
+		prefix := sr.teamKey
+		if prefix == "" {
+			prefix = h.getIssuePrefixForIssue(ctx, sr.issue)
+		}
 		sir := SearchIssueResponse{
 			IssueResponse: issueToResponse(sr.issue, prefix),
 			MatchSource:   sr.matchSource,
+		}
+		if sr.teamName != "" {
+			sir.TeamName = &sr.teamName
 		}
 		// Always populate comment snippet when a matching comment exists
 		if sr.matchedCommentContent != "" {
@@ -774,6 +828,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		projectFilter = id
 	}
+	var teamFilter pgtype.UUID
+	if t := r.URL.Query().Get("team_id"); t != "" {
+		id, ok := parseUUIDOrBadRequest(w, t, "team_id")
+		if !ok {
+			return
+		}
+		teamFilter = id
+	}
 	// involves_user_id widens the assignee filter to surface issues where the
 	// user is the indirect assignee (their owned agent, or a squad they belong
 	// to / lead / have an agent inside). Direct member-assignment is excluded
@@ -801,6 +863,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:    wsUUID,
+			TeamID:         teamFilter,
 			Priority:       priorityFilter,
 			AssigneeID:     assigneeFilter,
 			AssigneeIds:    assigneeIdsFilter,
@@ -923,6 +986,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if projectFilter.Valid {
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectFilter)))
 	}
+	if teamFilter.Valid {
+		where = append(where, fmt.Sprintf("i.team_id = %s::uuid", addArg(teamFilter)))
+	}
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
 	}
@@ -981,10 +1047,12 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	offsetRef := addArg(int64(offset))
 	limitRef := addArg(int64(limit))
 
-	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.team_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata,
+       COALESCE(wt.key, '')::text AS team_key, COALESCE(wt.name, '')::text AS team_name
 FROM issue i
+LEFT JOIN workspace_team wt ON wt.id = i.team_id AND wt.workspace_id = i.workspace_id
 WHERE %s
 ORDER BY %s
 LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
@@ -1003,6 +1071,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 		if err := rows.Scan(
 			&row.ID,
 			&row.WorkspaceID,
+			&row.TeamID,
 			&row.Title,
 			&row.Description,
 			&row.Status,
@@ -1020,6 +1089,8 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
+			&row.TeamKey,
+			&row.TeamName,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1291,6 +1362,22 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
 	}
+	if raw := r.URL.Query().Get("team_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "team_id")
+		if !ok {
+			return
+		}
+		where = append(where, fmt.Sprintf("i.team_id = %s::uuid", addArg(id)))
+	}
+	if raw := r.URL.Query().Get("team_ids"); raw != "" {
+		ids, ok := parseUUIDParamList(w, raw, "team_ids")
+		if !ok {
+			return
+		}
+		if len(ids) > 0 {
+			where = append(where, fmt.Sprintf("i.team_id = ANY(%s::uuid[])", addArg(ids)))
+		}
+	}
 	if filter, ok := parseMetadataFilterParam(w, r.URL.Query().Get("metadata")); !ok {
 		return
 	} else if filter != nil {
@@ -1478,22 +1565,26 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 WITH ranked AS (
 	SELECT
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
+		i.team_id,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.position, i.due_date, i.created_at, i.updated_at,
 		i.number, i.project_id, i.metadata,
+		COALESCE(wt.key, '')::text AS team_key,
+		COALESCE(wt.name, '')::text AS team_name,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
 			ORDER BY %s
 		) AS rn
 	FROM issue i
+	LEFT JOIN workspace_team wt ON wt.id = i.team_id AND wt.workspace_id = i.workspace_id
 	WHERE %s
 )
 SELECT
-	id, workspace_id, title, description, status, priority,
+	id, workspace_id, team_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
 	parent_issue_id, position, due_date, created_at, updated_at,
-	number, project_id, metadata, group_total
+	number, project_id, metadata, team_key, team_name, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
 ORDER BY
@@ -1521,6 +1612,7 @@ ORDER BY
 		if err := rows.Scan(
 			&row.ID,
 			&row.WorkspaceID,
+			&row.TeamID,
 			&row.Title,
 			&row.Description,
 			&row.Status,
@@ -1537,6 +1629,8 @@ ORDER BY
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
+			&row.TeamKey,
+			&row.TeamName,
 			&row.GroupTotal,
 		); err != nil {
 			slog.Warn("ListGroupedIssues scan failed", "error", err)
@@ -1593,7 +1687,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	prefix := h.getIssuePrefixForIssue(r.Context(), issue)
 	resp := issueToResponse(issue, prefix)
 	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
 	if detailLabels == nil {
@@ -1636,10 +1730,9 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
-		resp[i] = issueToResponse(child, prefix)
+		resp[i] = issueToResponse(child, h.getIssuePrefixForIssue(r.Context(), child))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -1705,10 +1798,9 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
-	prefix := h.getIssuePrefix(r.Context(), wsUUID)
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
-		resp[i] = issueToResponse(child, prefix)
+		resp[i] = issueToResponse(child, h.getIssuePrefixForIssue(r.Context(), child))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -1773,6 +1865,7 @@ type QuickCreateIssueRequest struct {
 	AgentID       string   `json:"agent_id,omitempty"`
 	SquadID       string   `json:"squad_id,omitempty"`
 	Prompt        string   `json:"prompt"`
+	TeamID        string   `json:"team_id,omitempty"`
 	ProjectID     string   `json:"project_id,omitempty"`
 	ParentIssueID string   `json:"parent_issue_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
@@ -1933,6 +2026,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// issue" entry, but the handler re-checks so a forged request can't
 	// smuggle a foreign parent UUID through.
 	var parentIssueUUID pgtype.UUID
+	var parentIssue db.Issue
 	if strings.TrimSpace(req.ParentIssueID) != "" {
 		pid, ok := parseUUIDOrBadRequest(w, req.ParentIssueID, "parent_issue_id")
 		if !ok {
@@ -1946,10 +2040,64 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
 			return
 		}
+		parentIssue = parent
 		parentIssueUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, attachmentIDs)
+	var requestedTeamUUID pgtype.UUID
+	if strings.TrimSpace(req.TeamID) != "" {
+		tid, ok := parseUUIDOrBadRequest(w, req.TeamID, "team_id")
+		if !ok {
+			return
+		}
+		requestedTeamUUID = tid
+	}
+	teamUUID := requestedTeamUUID
+	if parentIssueUUID.Valid && parentIssue.TeamID.Valid {
+		if teamUUID.Valid && teamUUID != parentIssue.TeamID {
+			writeError(w, http.StatusBadRequest, "child issue must use the same team as parent")
+			return
+		}
+		teamUUID = parentIssue.TeamID
+	}
+	if !teamUUID.Valid && projectUUID.Valid {
+		teams, err := h.Queries.ListProjectTeams(r.Context(), db.ListProjectTeamsParams{
+			WorkspaceID: wsUUID,
+			ProjectID:   projectUUID,
+		})
+		if err == nil && len(teams) == 1 {
+			teamUUID = teams[0].ID
+		}
+	}
+	if !teamUUID.Valid {
+		team, err := h.Queries.GetDefaultWorkspaceTeam(r.Context(), wsUUID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "default team not found")
+			return
+		}
+		teamUUID = team.ID
+	}
+	team, err := h.Queries.GetWorkspaceTeam(r.Context(), db.GetWorkspaceTeamParams{
+		ID:          teamUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil || team.ArchivedAt.Valid {
+		writeError(w, http.StatusBadRequest, "team_id must reference an active team in this workspace")
+		return
+	}
+	if projectUUID.Valid {
+		hasTeam, err := h.Queries.ProjectHasTeam(r.Context(), db.ProjectHasTeamParams{
+			WorkspaceID: wsUUID,
+			ProjectID:   projectUUID,
+			TeamID:      team.ID,
+		})
+		if err != nil || !hasTeam {
+			writeError(w, http.StatusBadRequest, "project_id is not associated with team_id")
+			return
+		}
+	}
+
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, team.ID, attachmentIDs)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -2050,6 +2198,7 @@ func readRuntimeCLIVersion(metadata []byte) string {
 type CreateIssueRequest struct {
 	Title         string   `json:"title"`
 	Description   *string  `json:"description"`
+	TeamID        *string  `json:"team_id"`
 	Status        string   `json:"status"`
 	Priority      string   `json:"priority"`
 	AssigneeType  *string  `json:"assignee_type"`
@@ -2138,6 +2287,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var parentIssueID pgtype.UUID
 	var projectID pgtype.UUID
+	var teamID pgtype.UUID
+	if req.TeamID != nil {
+		id, ok := parseUUIDOrBadRequest(w, *req.TeamID, "team_id")
+		if !ok {
+			return
+		}
+		teamID = id
+	}
 	if req.ProjectID != nil {
 		id, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
 		if !ok {
@@ -2211,10 +2368,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		originID = oid
 	}
 
-	// Prefix is workspace-level; pre-compute once so both the broadcast
-	// payload builder and the HTTP response share the same value.
-	prefix := h.getIssuePrefix(r.Context(), wsUUID)
-
 	// Analytics agent ID: assignee agent when the issue is being assigned
 	// to an agent, otherwise the creator agent for agent-authored issues.
 	// Resolved here (not in the service) because creator identity is HTTP-side.
@@ -2239,6 +2392,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
 		WorkspaceID:    wsUUID,
+		TeamID:         teamID,
 		Title:          req.Title,
 		Description:    ptrToText(req.Description),
 		Status:         status,
@@ -2261,7 +2415,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		AnalyticsAgentID: analyticsAgentID,
 		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
 		BroadcastPayload: func(issue db.Issue, atts []db.Attachment) map[string]any {
-			payload := issueToResponse(issue, prefix)
+			payload := issueToResponse(issue, h.getIssuePrefixForIssue(r.Context(), issue))
 			payload.Attachments = buildAttachmentResponses(atts)
 			return map[string]any{"issue": payload}
 		},
@@ -2269,7 +2423,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	if errors.Is(err, service.ErrActiveDuplicate) {
 		dup := *res.DuplicateIssue
-		existing := issueToResponse(dup, h.getIssuePrefix(r.Context(), dup.WorkspaceID))
+		existing := issueToResponse(dup, h.getIssuePrefixForIssue(r.Context(), dup))
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"code":  "active_duplicate_issue",
 			"error": duplicateIssueMessage(existing),
@@ -2285,6 +2439,18 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "project not found in this workspace")
 		return
 	}
+	if errors.Is(err, service.ErrTeamNotFound) {
+		writeError(w, http.StatusBadRequest, "team not found in this workspace")
+		return
+	}
+	if errors.Is(err, service.ErrProjectTeamMismatch) {
+		writeError(w, http.StatusBadRequest, "project is not associated with this team")
+		return
+	}
+	if errors.Is(err, service.ErrCrossTeamChild) {
+		writeError(w, http.StatusBadRequest, "child issue must use the same team as parent")
+		return
+	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
@@ -2294,7 +2460,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	issue := res.Issue
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
-	resp := issueToResponse(issue, prefix)
+	resp := issueToResponse(issue, h.getIssuePrefixForIssue(r.Context(), issue))
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -2447,11 +2613,16 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// Validate parent exists in the same workspace.
-			if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 				ID:          newParentID,
 				WorkspaceID: prevIssue.WorkspaceID,
-			}); err != nil {
+			})
+			if err != nil {
 				writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+				return
+			}
+			if prevIssue.TeamID.Valid && parent.TeamID.Valid && prevIssue.TeamID != parent.TeamID {
+				writeError(w, http.StatusBadRequest, "parent issue must be in the same team")
 				return
 			}
 			// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
@@ -2477,6 +2648,24 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			projectUUID, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
 			if !ok {
 				return
+			}
+			if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+				ID:          projectUUID,
+				WorkspaceID: prevIssue.WorkspaceID,
+			}); err != nil {
+				writeError(w, http.StatusBadRequest, "project not found in this workspace")
+				return
+			}
+			if prevIssue.TeamID.Valid {
+				hasTeam, err := h.Queries.ProjectHasTeam(r.Context(), db.ProjectHasTeamParams{
+					WorkspaceID: prevIssue.WorkspaceID,
+					ProjectID:   projectUUID,
+					TeamID:      prevIssue.TeamID,
+				})
+				if err != nil || !hasTeam {
+					writeError(w, http.StatusBadRequest, "project is not associated with this issue team")
+					return
+				}
 			}
 			params.ProjectID = projectUUID
 		} else {
@@ -2523,7 +2712,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
 	}
 
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	prefix := h.getIssuePrefixForIssue(r.Context(), issue)
 	resp := issueToResponse(issue, prefix)
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
@@ -3055,7 +3244,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		prefix := h.getIssuePrefixForIssue(r.Context(), issue)
 		resp := issueToResponse(issue, prefix)
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 

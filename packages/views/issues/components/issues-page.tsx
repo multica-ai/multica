@@ -61,6 +61,7 @@ export function IssuesPage() {
   const assigneeFilters = useIssueViewStore((s) => s.assigneeFilters);
   const includeNoAssignee = useIssueViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useIssueViewStore((s) => s.creatorFilters);
+  const teamFilter = useIssueViewStore((s) => s.teamFilter);
   const projectFilters = useIssueViewStore((s) => s.projectFilters);
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
@@ -82,8 +83,12 @@ export function IssuesPage() {
     [dateFilter],
   );
   const queryParams = useMemo(
-    () => ({ ...sort, ...dateParams }),
-    [dateParams, sort],
+    () => ({
+      ...sort,
+      ...dateParams,
+      ...(teamFilter ? { team_id: teamFilter } : {}),
+    }),
+    [dateParams, sort, teamFilter],
   );
 
   // Derive the set of issue ids that currently have at least one
@@ -108,6 +113,7 @@ export function IssuesPage() {
       assignee_filters: assigneeFilters,
       include_no_assignee: includeNoAssignee,
       creator_filters: creatorFilters,
+      team_id: teamFilter ?? undefined,
       project_ids: projectFilters,
       include_no_project: includeNoProject,
       label_ids: labelFilters,
@@ -115,7 +121,7 @@ export function IssuesPage() {
     if (scope === "members") filter.assignee_types = ["member"];
     if (scope === "agents") filter.assignee_types = ["agent", "squad"];
     return filter;
-  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, scope, statusFilters]);
+  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, scope, statusFilters, teamFilter]);
 
   const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, queryParams);
   const statusIssuesQuery = useQuery({

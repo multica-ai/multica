@@ -118,6 +118,7 @@
     "submitting": "创建中...",
     "toast_created": "已创建项目",
     "toast_failed": "创建项目失败",
+    "team_required": "请至少选择一个 Team",
     "repos_pill": "代码仓库",
     "repos_pill_count_other": "{{count}} 个仓库",
     "repos_heading": "为此项目关联 GitHub 仓库",

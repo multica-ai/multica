@@ -1384,6 +1384,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
+			h.attachTeamToTaskResponse(r.Context(), &resp, issue.WorkspaceID, issue.TeamID)
 
 			// Squad-leader briefing injection: keyed off the task being a
 			// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -1695,6 +1696,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
 				resp.AutopilotTitle = ap.Title
 				resp.ThreadName = ap.Title
+				h.attachTeamToTaskResponse(r.Context(), &resp, ap.WorkspaceID, ap.TeamID)
 				if ap.Description.Valid {
 					resp.AutopilotDescription = ap.Description.String
 				}
@@ -1729,6 +1731,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
 			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
+			resp.TeamID = qc.TeamID
+			resp.TeamKey = qc.TeamKey
+			resp.TeamName = qc.TeamName
+			if qc.TeamID != "" && (resp.TeamKey == "" || resp.TeamName == "") {
+				if teamUUID, err := util.ParseUUID(qc.TeamID); err == nil {
+					if wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID); wsErr == nil {
+						h.attachTeamToTaskResponse(r.Context(), &resp, wsUUID, teamUUID)
+					}
+				}
+			}
 
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
@@ -1803,9 +1815,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							WorkspaceID: wsUUID,
 						})
 						if perr == nil && parent.ID.Valid {
-							if ws, werr := h.Queries.GetWorkspace(r.Context(), wsUUID); werr == nil {
-								resp.ParentIssueIdentifier = ws.IssuePrefix + "-" + strconv.Itoa(int(parent.Number))
-							}
+							resp.ParentIssueIdentifier = h.getIssuePrefixForIssue(r.Context(), parent) + "-" + strconv.Itoa(int(parent.Number))
 						}
 					}
 				}
@@ -1953,6 +1963,22 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+func (h *Handler) attachTeamToTaskResponse(ctx context.Context, resp *AgentTaskResponse, workspaceID, teamID pgtype.UUID) {
+	if !teamID.Valid {
+		return
+	}
+	team, err := h.Queries.GetWorkspaceTeam(ctx, db.GetWorkspaceTeamParams{
+		ID:          teamID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return
+	}
+	resp.TeamID = uuidToString(team.ID)
+	resp.TeamKey = team.Key
+	resp.TeamName = team.Name
 }
 
 type resolveSkillBundlesRequest struct {

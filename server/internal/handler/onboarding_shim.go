@@ -239,8 +239,13 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 
 	var emptyUUID pgtype.UUID
+	defaultTeam, err := qtx.GetDefaultWorkspaceTeam(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve default team")
+		return
+	}
 	issue, foundIssue, err := issueguard.LockAndFindActiveDuplicate(
-		r.Context(), qtx, wsUUID, emptyUUID, emptyUUID, onboardingIssueTitle, false,
+		r.Context(), qtx, wsUUID, defaultTeam.ID, emptyUUID, emptyUUID, onboardingIssueTitle, false,
 	)
 	if err != nil {
 		slog.Warn("bootstrap onboarding (shim): duplicate issue check failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
@@ -249,7 +254,10 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 	issueCreated := false
 	if !foundIssue {
-		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
+		issueNumber, err := qtx.IncrementTeamIssueCounter(r.Context(), db.IncrementTeamIssueCounterParams{
+			ID:          defaultTeam.ID,
+			WorkspaceID: wsUUID,
+		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
@@ -260,6 +268,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			WorkspaceID:   wsUUID,
+			TeamID:        defaultTeam.ID,
 			Title:         onboardingIssueTitle,
 			Description:   strOrNullText(description),
 			Status:        "todo",
@@ -316,7 +325,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		))
 	}
 	if issueCreated {
-		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		prefix := h.getIssuePrefixForIssue(r.Context(), issue)
 		resp := issueToResponse(issue, prefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
@@ -397,8 +406,13 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	}
 
 	var emptyUUID pgtype.UUID
+	defaultTeam, err := qtx.GetDefaultWorkspaceTeam(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve default team")
+		return
+	}
 	existing, foundIssue, err := issueguard.LockAndFindActiveDuplicate(
-		r.Context(), qtx, wsUUID, emptyUUID, emptyUUID, noRuntimeIssueTitle, false,
+		r.Context(), qtx, wsUUID, defaultTeam.ID, emptyUUID, emptyUUID, noRuntimeIssueTitle, false,
 	)
 	if err != nil {
 		slog.Warn("bootstrap no-runtime onboarding (shim): duplicate issue check failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
@@ -411,13 +425,17 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	if foundIssue {
 		issue = existing
 	} else {
-		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
+		issueNumber, err := qtx.IncrementTeamIssueCounter(r.Context(), db.IncrementTeamIssueCounterParams{
+			ID:          defaultTeam.ID,
+			WorkspaceID: wsUUID,
+		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			WorkspaceID:   wsUUID,
+			TeamID:        defaultTeam.ID,
 			Title:         noRuntimeIssueTitle,
 			Description:   strOrNullText(noRuntimeIssueDescription(userBefore.Language)),
 			Status:        "todo",
@@ -456,7 +474,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	}
 
 	if issueCreated {
-		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		prefix := h.getIssuePrefixForIssue(r.Context(), issue)
 		resp := issueToResponse(issue, prefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform2, _, _ := middleware.ClientMetadataFromContext(r.Context())

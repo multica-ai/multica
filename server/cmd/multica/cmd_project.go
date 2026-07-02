@@ -125,6 +125,7 @@ func init() {
 	projectListCmd.Flags().String("output", "table", "Output format: table or json")
 	projectListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	projectListCmd.Flags().String("status", "", "Filter by status")
+	projectListCmd.Flags().String("team", "", "Filter by Team UUID or key")
 
 	// project get
 	projectGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -135,6 +136,7 @@ func init() {
 	projectCreateCmd.Flags().String("status", "", "Project status")
 	projectCreateCmd.Flags().String("icon", "", "Project icon (emoji)")
 	projectCreateCmd.Flags().String("lead", "", "Lead name (member or agent)")
+	projectCreateCmd.Flags().StringArray("team", nil, "Team UUID or key (may be repeated)")
 	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -178,6 +180,7 @@ func init() {
 	projectUpdateCmd.Flags().String("status", "", "New status")
 	projectUpdateCmd.Flags().String("icon", "", "New icon (emoji)")
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
+	projectUpdateCmd.Flags().StringArray("team", nil, "Replace project Teams with these UUIDs or keys (may be repeated)")
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project delete
@@ -206,6 +209,13 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		params.Set("status", v)
+	}
+	if v, _ := cmd.Flags().GetString("team"); v != "" {
+		teamID, err := resolveTeamRef(ctx, client, v)
+		if err != nil {
+			return fmt.Errorf("resolve team: %w", err)
+		}
+		params.Set("team_id", teamID)
 	}
 
 	path := "/api/projects"
@@ -332,6 +342,15 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		body["lead_type"] = aType
 		body["lead_id"] = aID
 	}
+	if teamRefs, _ := cmd.Flags().GetStringArray("team"); len(teamRefs) > 0 {
+		teamIDs, err := resolveTeamRefs(ctx, client, teamRefs)
+		if err != nil {
+			return fmt.Errorf("resolve team: %w", err)
+		}
+		if len(teamIDs) > 0 {
+			body["team_ids"] = teamIDs
+		}
+	}
 
 	// Bundle resources into the create payload so the server attaches them in
 	// the same transaction; this avoids leaving a half-attached project on
@@ -417,9 +436,17 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		body["lead_type"] = aType
 		body["lead_id"] = aID
 	}
+	if cmd.Flags().Changed("team") {
+		teamRefs, _ := cmd.Flags().GetStringArray("team")
+		teamIDs, err := resolveTeamRefs(ctx, client, teamRefs)
+		if err != nil {
+			return fmt.Errorf("resolve team: %w", err)
+		}
+		body["team_ids"] = teamIDs
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --team")
 	}
 
 	var result map[string]any

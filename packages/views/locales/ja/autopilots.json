@@ -268,6 +268,8 @@
     "section_assignee": "担当者",
     "select_agent": "エージェントを選択",
     "select_assignee": "エージェントまたはスクワッドを選択",
+    "section_team": "チーム",
+    "no_team": "チームなし",
     "section_project": "プロジェクト",
     "no_project": "プロジェクトなし",
     "section_subscribers": "購読者",

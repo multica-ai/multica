@@ -581,7 +581,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 // uppercase. Word boundary on the left prevents matching inside email-style
 // strings (e.g. "abc@MUL-1") and the digit anchor on the right rules out
 // version numbers like "v1.2-3".
-var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,9})-(\d+)\b`)
+var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{0,6})-(\d+)\b`)
 
 // closingIdentifierRe extracts identifiers that appear immediately after a
 // GitHub-style closing keyword ("close[sd]?", "fix(e[sd])?", "resolve[sd]?"),
@@ -593,7 +593,7 @@ var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,9})-(\d+)\b`)
 // title prefixes like "MUL-1: ..." link the PR (via identifierRe) but
 // never auto-close.
 var closingIdentifierRe = regexp.MustCompile(
-	`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[:\s]+([a-z][a-z0-9]{1,9})-(\d+)\b`,
+	`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[:\s]+([a-z][a-z0-9]{0,6})-(\d+)\b`,
 )
 
 // HandleGitHubWebhook (POST /api/webhooks/github) is GitHub's destination for
@@ -1380,22 +1380,21 @@ func (h *Handler) workspaceAutoLinkPRsEnabled(ctx context.Context, workspaceID p
 	return *s.GitHubAutoLinkPRsEnabled
 }
 
-// the workspace's configured prefix and the number resolves to a real issue.
+// the Team key and number resolve to a real issue in the workspace.
 func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
+	_ = prefix // compatibility parameter; Team key now comes from identifier itself.
 	idx := strings.LastIndex(identifier, "-")
 	if idx < 0 {
 		return db.Issue{}, false
 	}
 	gotPrefix, numStr := identifier[:idx], identifier[idx+1:]
-	if !strings.EqualFold(gotPrefix, prefix) {
-		return db.Issue{}, false
-	}
 	n, err := strconv.Atoi(numStr)
 	if err != nil {
 		return db.Issue{}, false
 	}
-	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
+	issue, err := h.Queries.GetIssueByTeamKeyAndNumber(ctx, db.GetIssueByTeamKeyAndNumberParams{
 		WorkspaceID: workspaceID,
+		Lower:       gotPrefix,
 		Number:      int32(n),
 	})
 	if err != nil {
@@ -1423,8 +1422,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 	// exists, parent not terminal), so calling it unconditionally is safe.
 	h.notifyParentOfChildDone(ctx, issue, updated, "system", "")
 
-	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
-	resp := issueToResponse(updated, prefix)
+	resp := issueToResponse(updated, h.getIssuePrefixForIssue(ctx, updated))
 	h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", map[string]any{
 		"issue":          resp,
 		"status_changed": true,

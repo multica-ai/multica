@@ -1,0 +1,54 @@
+{
+  "page": {
+    "title": "チーム",
+    "new_team": "新しいチーム",
+    "loading": "チームを読み込み中...",
+    "empty_title": "チームはまだありません",
+    "create_first": "最初のチームを作成"
+  },
+  "table": {
+    "key": "キー",
+    "name": "名前",
+    "issues": "イシュー",
+    "state": "状態",
+    "actions": "操作"
+  },
+  "state": {
+    "default": "デフォルト",
+    "active": "アクティブ",
+    "archived": "アーカイブ済み"
+  },
+  "actions": {
+    "edit": "チームを編集",
+    "archive": "チームをアーカイブ",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "saving": "保存中..."
+  },
+  "dialog": {
+    "create_title": "チームを作成",
+    "edit_title": "チームを編集",
+    "description": "チームはイシュー識別子と安定した作業領域を所有します。v1 のメンバー情報は表示用です。"
+  },
+  "form": {
+    "name": "名前",
+    "name_placeholder": "Engineering",
+    "key": "キー",
+    "key_hint": "1-7 文字の大文字英字または数字。先頭は英字です。",
+    "key_locked": "すでにイシューが作成されているため、このキーはロックされています。",
+    "icon": "アイコン",
+    "description": "説明",
+    "description_placeholder": "このチームが担当する作業は何ですか？"
+  },
+  "picker": {
+    "placeholder": "チーム",
+    "clear": "チームをクリア",
+    "empty": "アクティブなチームはありません",
+    "selected_count_other": "{{count}} チーム"
+  },
+  "toast_created": "チームを作成しました",
+  "toast_updated": "チームを更新しました",
+  "toast_archived": "チームをアーカイブしました",
+  "toast_archive_failed": "チームをアーカイブできませんでした",
+  "toast_save_failed": "チームを保存できませんでした"
+}

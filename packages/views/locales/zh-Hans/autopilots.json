@@ -268,6 +268,8 @@
     "section_assignee": "执行方",
     "select_agent": "选择智能体",
     "select_assignee": "选择智能体或小队",
+    "section_team": "Team",
+    "no_team": "无 Team",
     "section_project": "关联项目",
     "no_project": "不关联项目",
     "section_output_mode": "输出模式",

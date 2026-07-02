@@ -118,6 +118,7 @@
     "submitting": "作成中...",
     "toast_created": "プロジェクトを作成しました",
     "toast_failed": "プロジェクトを作成できませんでした",
+    "team_required": "チームを少なくとも1つ選択してください",
     "repos_pill": "リポジトリ",
     "repos_pill_count_other": "{{count}} 個のリポジトリ",
     "repos_heading": "このプロジェクトに GitHub リポジトリを接続",
