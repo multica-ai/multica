@@ -145,6 +145,8 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				Title:       s.Title,
 				Status:      s.Status,
 				HasUnread:   s.HasUnread,
+				SessionID:   textToPtr(s.SessionID),
+				WorkDir:     textToPtr(s.WorkDir),
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
@@ -171,6 +173,8 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				Title:       s.Title,
 				Status:      s.Status,
 				HasUnread:   s.HasUnread,
+				SessionID:   textToPtr(s.SessionID),
+				WorkDir:     textToPtr(s.WorkDir),
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
@@ -973,9 +977,11 @@ type ChatSessionResponse struct {
 	Title       string `json:"title"`
 	Status      string `json:"status"`
 	// Only populated by list endpoints — single-session fetches return false.
-	HasUnread bool   `json:"has_unread"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	HasUnread bool    `json:"has_unread"`
+	SessionID *string `json:"session_id,omitempty"`
+	WorkDir   *string `json:"work_dir,omitempty"`
+	CreatedAt string  `json:"created_at"`
+	UpdatedAt string  `json:"updated_at"`
 }
 
 type ChatMessageResponse struct {
@@ -1007,6 +1013,8 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		CreatorID:   uuidToString(s.CreatorID),
 		Title:       s.Title,
 		Status:      s.Status,
+		SessionID:   textToPtr(s.SessionID),
+		WorkDir:     textToPtr(s.WorkDir),
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
 	}
