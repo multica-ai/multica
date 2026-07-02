@@ -72,8 +72,8 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Private-agent gate: members must be in allowed_principals to start
-	// a chat with a private agent. Agent-to-agent chat sessions bypass
-	// the gate so A2A collaboration still works.
+	// a chat with a private agent. Agent-to-agent chat sessions are checked
+	// through the calling agent's owner.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
@@ -442,7 +442,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// The session's creator passed the gate at create time, but their
 	// workspace role (or the agent's owner) may have changed since — keep
 	// stale sessions from being a back-door into a private agent the user
-	// can no longer reach. Agent senders bypass to preserve A2A collaboration.
+	// can no longer reach. Agent senders are checked through their owner.
 	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return

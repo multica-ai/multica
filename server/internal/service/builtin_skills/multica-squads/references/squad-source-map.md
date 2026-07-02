@@ -192,22 +192,22 @@ Contracts:
 Source:
 
 ```text
-server/internal/handler/agent_access.go           # canAccessPrivateAgent ~25-40, canEnqueueSquadLeader ~82-91
+server/internal/handler/agent_access.go           # canAccessPrivateAgent ~28-72, canEnqueueSquadLeader ~115-120
 server/internal/handler/squad.go                   # enqueueSquadLeaderTask gate ~1037
 ```
 
 Contracts:
 
 - public leaders pass — `canAccessPrivateAgent` returns true when
-  `agent.Visibility != "private"` (agent_access.go:26-28);
-- agent-to-agent traffic is allowed — `actorType == "agent"` short-circuits
-  (agent_access.go:29-31);
+  `agent.Visibility != "private"` (agent_access.go:29-31);
+- agent-to-agent traffic is checked through the calling agent's owner; another
+  user's agent cannot route work into a private leader unless that owner is
+  allowed directly (agent_access.go:35-72);
 - private leader access for members is limited to owner/admin or agent owner
-  (agent_access.go:32-39);
-- system triggers are treated like agent triggers for squad leader enqueue:
-  `canEnqueueSquadLeader` remaps `actorType == "system"` to `"agent"` before
-  delegating to `canAccessPrivateAgent` (agent_access.go:87-90). This is wired
-  into `enqueueSquadLeaderTask`, which denies the enqueue when the actor cannot
+  (agent_access.go:41-49);
+- system triggers use the platform-owned `"system"` actor type and pass inside
+  `canAccessPrivateAgent` (agent_access.go:32-34). This is wired into
+  `enqueueSquadLeaderTask`, which denies the enqueue when the actor cannot
   access the leader (squad.go:1037).
 
 ## Tests

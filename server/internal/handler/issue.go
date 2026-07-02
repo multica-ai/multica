@@ -2628,8 +2628,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 // to an existing entity in the workspace. For agent assignees it also rejects
 // archived agents and runs the private-agent gate via canAccessPrivateAgent
 // — assigning an issue is a task-producing surface, so it must use the same
-// predicate as chat / @-mention / history. Agent callers (X-Agent-ID) bypass
-// the gate so A2A flows can still hand work off to private agents.
+// predicate as chat / @-mention / history. Agent callers (X-Agent-ID) are
+// checked through their owner, so A2A handoffs cannot cross another user's
+// private-agent boundary unless that owner would be allowed directly.
 //
 // Returns (statusCode, errorMessage). statusCode == 0 means the pair is valid;
 // callers should treat any non-zero status as a rejection and surface it back

@@ -1820,7 +1820,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			continue
 		}
 		// Private-agent gate (member→private requires allowed_principals;
-		// agent→agent always passes).
+		// agent→agent is checked through the calling agent's owner).
 		if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
 			continue
 		}
