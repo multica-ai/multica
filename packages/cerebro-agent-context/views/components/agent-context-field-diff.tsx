@@ -8,6 +8,7 @@
 import type { AgentContextSnapshot } from "@multica/core/types";
 import { snapshotToFields } from "../../core/snapshot-fields";
 import { AgentContextDiffView } from "./agent-context-diff-view";
+import { useSkillNameResolver } from "../use-skill-name-resolver";
 
 interface Props {
   base: AgentContextSnapshot;
@@ -22,8 +23,9 @@ export function AgentContextFieldDiff({
   baseLabel = "base",
   proposedLabel = "proposed",
 }: Props) {
-  const baseFields = snapshotToFields(base);
-  const proposedFields = snapshotToFields(proposed);
+  const resolveSkill = useSkillNameResolver();
+  const baseFields = snapshotToFields(base, { resolveSkill });
+  const proposedFields = snapshotToFields(proposed, { resolveSkill });
 
   const rows = baseFields.map((bf, i) => ({
     key: bf.key,

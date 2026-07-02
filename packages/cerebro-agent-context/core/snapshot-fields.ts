@@ -44,16 +44,40 @@ function listToText(v: string[] | undefined | null): string {
   return v.join("\n");
 }
 
+// Skills are stored as opaque UUIDs. When a resolver is supplied (the view
+// layer has the workspace skill list loaded) we render the human-readable
+// skill name instead of the raw id, falling back to the id only for a skill
+// that no longer resolves. See useSkillNameResolver.
+function skillsToText(
+  ids: string[] | undefined | null,
+  resolveSkill?: (id: string) => string,
+): string {
+  if (!ids || ids.length === 0) return "";
+  if (!resolveSkill) return ids.join("\n");
+  return ids.map((id) => resolveSkill(id)).join("\n");
+}
+
+export interface SnapshotToFieldsOptions {
+  /** Maps a skill id to its human-readable name; id passed through if unknown. */
+  resolveSkill?: (id: string) => string;
+}
+
 // Field order is deliberate: what a person reads first (instructions, model,
 // thinking, sandbox) before the structured config (skills, secrets, configs).
-export function snapshotToFields(s: AgentContextSnapshot): SnapshotField[] {
+export function snapshotToFields(
+  s: AgentContextSnapshot,
+  opts: SnapshotToFieldsOptions = {},
+): SnapshotField[] {
+  // Skills render as names (not UUIDs) when resolved, so they no longer need
+  // the monospace treatment reserved for ids/config.
+  const skillsResolved = Boolean(opts.resolveSkill);
   return [
     { key: "instructions", label: "Instructions", value: (s.instructions ?? "").trim(), mono: false },
     { key: "description", label: "Short description", value: (s.description ?? "").trim(), mono: false },
     { key: "model", label: "Model", value: (s.model ?? "").trim(), mono: true },
     { key: "thinking_level", label: "Thinking level", value: (s.thinking_level ?? "").trim(), mono: true },
     { key: "persona_sandbox", label: "Sandbox", value: (s.persona_sandbox ?? "").trim(), mono: true },
-    { key: "skill_ids", label: "Skills", value: listToText(s.skill_ids), mono: true },
+    { key: "skill_ids", label: "Skills", value: skillsToText(s.skill_ids, opts.resolveSkill), mono: !skillsResolved },
     { key: "custom_env_keys", label: "Secret names", value: listToText(s.custom_env_keys), mono: true },
     { key: "mcp_config", label: "MCP config", value: jsonToText(s.mcp_config), mono: true },
     { key: "custom_args", label: "Custom args", value: jsonToText(s.custom_args), mono: true },
