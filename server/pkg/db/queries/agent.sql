@@ -448,6 +448,33 @@ WHERE agent_id = $1 AND issue_id = $2
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
 LIMIT 1;
 
+-- name: GetLastAutopilotTaskSession :one
+-- Returns the session_id and work_dir from the most recent task spawned by a
+-- given (agent_id, autopilot_id) pair, used for session resumption on the
+-- autopilot path. Run-only autopilot ticks carry no issue_id, so the
+-- (agent_id, issue_id) GetLastTaskSession lookup never matches them: every
+-- watchdog tick would otherwise start a brand-new agent session and -- for
+-- stateful backends like opencode that persist each run as a durable session
+-- in a shared DB -- leak one session per tick forever (MUL: autopilot opencode
+-- session leak). Keying on the autopilot id instead lets consecutive ticks of
+-- the same autopilot resume one session. Same poisoned-state exclusions as
+-- GetLastTaskSession.
+SELECT atq.session_id, atq.work_dir, atq.runtime_id
+FROM agent_task_queue atq
+JOIN autopilot_run ar ON ar.id = atq.autopilot_run_id
+WHERE atq.agent_id = $1 AND ar.autopilot_id = $2
+  AND (
+    atq.status = completed
+    OR (
+      atq.status = failed
+      AND COALESCE(atq.failure_reason, ) NOT IN (iteration_limit, agent_fallback_message, api_invalid_request, codex_semantic_inactivity)
+      AND NOT (COALESCE(atq.error, ) ILIKE %400% AND COALESCE(atq.error, ) ILIKE %invalid_request_error%)
+    )
+  )
+  AND atq.session_id IS NOT NULL
+ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC
+LIMIT 1;
+
 -- name: GetLastTaskStartedAtForIssueAndAgent :one
 -- Returns the started_at of the most recent prior task for this (agent, issue)
 -- pair, used as the "since" anchor for counting comments that arrived since the

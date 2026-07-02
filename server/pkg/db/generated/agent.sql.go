@@ -1926,6 +1926,50 @@ func (q *Queries) GetLastTaskSession(ctx context.Context, arg GetLastTaskSession
 	return i, err
 }
 
+const getLastAutopilotTaskSession = `-- name: GetLastAutopilotTaskSession :one
+SELECT atq.session_id, atq.work_dir, atq.runtime_id
+FROM agent_task_queue atq
+JOIN autopilot_run ar ON ar.id = atq.autopilot_run_id
+WHERE atq.agent_id = $1 AND ar.autopilot_id = $2
+  AND (
+    atq.status = completed
+    OR (
+      atq.status = failed
+      AND COALESCE(atq.failure_reason, ) NOT IN (iteration_limit, agent_fallback_message, api_invalid_request, codex_semantic_inactivity)
+      AND NOT (COALESCE(atq.error, ) ILIKE %400% AND COALESCE(atq.error, ) ILIKE %invalid_request_error%)
+    )
+  )
+  AND atq.session_id IS NOT NULL
+ORDER BY COALESCE(atq.completed_at, atq.started_at, atq.dispatched_at, atq.created_at) DESC
+LIMIT 1
+`
+
+type GetLastAutopilotTaskSessionParams struct {
+	AgentID     pgtype.UUID `json:"agent_id"`
+	AutopilotID pgtype.UUID `json:"autopilot_id"`
+}
+
+type GetLastAutopilotTaskSessionRow struct {
+	SessionID pgtype.Text `json:"session_id"`
+	WorkDir   pgtype.Text `json:"work_dir"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+// Returns the session_id and work_dir from the most recent task spawned by a
+// given (agent_id, autopilot_id) pair, used for session resumption on the
+// autopilot path. Run-only autopilot ticks carry no issue_id, so the
+// (agent_id, issue_id) GetLastTaskSession lookup never matches them: every
+// watchdog tick would otherwise start a brand-new agent session and -- for
+// stateful backends like opencode that persist each run as a durable session
+// in a shared DB -- leak one session per tick forever. Keying on the autopilot
+// id instead lets consecutive ticks of the same autopilot resume one session.
+func (q *Queries) GetLastAutopilotTaskSession(ctx context.Context, arg GetLastAutopilotTaskSessionParams) (GetLastAutopilotTaskSessionRow, error) {
+	row := q.db.QueryRow(ctx, getLastAutopilotTaskSession, arg.AgentID, arg.AutopilotID)
+	var i GetLastAutopilotTaskSessionRow
+	err := row.Scan(&i.SessionID, &i.WorkDir, &i.RuntimeID)
+	return i, err
+}
+
 const getLastTaskStartedAtForIssueAndAgent = `-- name: GetLastTaskStartedAtForIssueAndAgent :one
 SELECT started_at FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2 AND started_at IS NOT NULL
