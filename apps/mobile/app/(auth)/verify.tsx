@@ -6,7 +6,7 @@ import * as Haptics from "expo-haptics";
 import { Text } from "@/components/ui/text";
 import { OtpInput, type OtpInputRef } from "@/components/ui/otp-input";
 import { Button } from "@/components/ui/button";
-import { MulticaLogo } from "@/components/brand/multica-logo";
+import { BrandMark } from "@/components/brand/brand-mark";
 import { useAuthStore } from "@/data/auth-store";
 import { mapAuthError } from "@/lib/auth-error";
 
@@ -74,14 +74,14 @@ export default function Verify() {
         className="flex-1"
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <View className="flex-1 justify-center px-6 gap-6">
-          <View className="items-center gap-3">
-            <MulticaLogo size={32} />
-            <View className="gap-1 items-center">
-              <Text className="text-2xl font-semibold text-foreground">
+        <View className="flex-1 justify-center px-6 gap-8">
+          <View className="items-center gap-5">
+            <BrandMark size={72} />
+            <View className="gap-2 items-center">
+              <Text className="text-3xl font-bold text-foreground">
                 Enter verification code
               </Text>
-              <Text className="text-sm text-muted-foreground text-center">
+              <Text className="text-base text-muted-foreground text-center">
                 We sent a 6-digit code to {email}
               </Text>
             </View>
