@@ -256,9 +256,14 @@ all reuse the same comment-mention engine and the per-user
   note**. `CreateComment` (`server/internal/cerebro/note/comments.go`) calls
   `notifyCommentMentions`, which reuses the exact note-body path above: it
   shares the note with the tagged member and publishes the same
-  `EventNoteMentioned`, so the inbox item deep-links to the note (where the
-  comment lives). No new event or notification type — a comment mention is
-  indistinguishable from a body mention at the inbox layer.
+  `EventNoteMentioned`. Unlike a body mention it also carries the comment, so
+  the event payload adds `comment_id` (the thread-root id) and `comment_excerpt`.
+  The listener puts `comment_id` in `details` and the excerpt in the item **body**,
+  so the inbox message reads with context and the deep-link opens the exact
+  comment: the inbox appends `&comment=<id>` to `?note=<id>` and the Notes surface
+  (`NotesPage`/`NoteEditor` `initialCommentId`) opens the comments panel and
+  scrolls to that comment. Still no new event or notification type — a comment
+  mention is a `mentioned` item with `details.comment_id` also set.
 
 > Takeaway for agents: a note mention is **not** a separate type — it is a
 > `mentioned` notification whose `details.note_id` is set (issue-less). If you

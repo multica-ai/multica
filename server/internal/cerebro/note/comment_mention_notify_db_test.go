@@ -15,8 +15,23 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/events"
 )
+
+// mkComment builds a CerebroNoteComment with a fresh id and the given body, as
+// notifyCommentMentions receives it from CreateComment.
+func mkComment(noteID pgtype.UUID, body string) cerebrodb.CerebroNoteComment {
+	id, _ := uuid.NewV7()
+	return cerebrodb.CerebroNoteComment{
+		ID:     pgtype.UUID{Bytes: id, Valid: true},
+		NoteID: noteID,
+		Body:   body,
+	}
+}
 
 // busHandler builds a handler backed by the shared pool but with a fresh event
 // bus, plus a slice that captures every EventNoteMentioned it publishes.
@@ -40,7 +55,8 @@ func TestCommentMentionNotifiesAndShares(t *testing.T) {
 
 	// UserA (the comment author) tags UserB in a comment body.
 	body := "look at this [@B](mention://member/" + uuidStr(w3UserB) + ")"
-	h.notifyCommentMentions(ctx, w3WsID, noteID, w3UserA, body)
+	comment := mkComment(noteID, body)
+	h.notifyCommentMentions(ctx, w3WsID, noteID, w3UserA, comment)
 
 	if len(*captured) != 1 {
 		t.Fatalf("expected 1 EventNoteMentioned, got %d", len(*captured))
@@ -52,6 +68,16 @@ func TestCommentMentionNotifiesAndShares(t *testing.T) {
 	ids, _ := payload["member_ids"].([]string)
 	if len(ids) != 1 || ids[0] != uuidStr(w3UserB) {
 		t.Fatalf("expected member_ids [%s], got %v", uuidStr(w3UserB), ids)
+	}
+
+	// FIR-2589: the payload carries the comment id (inbox deep-link target) and
+	// a non-empty excerpt (the inbox message body), so the notification opens the
+	// exact comment and reads with context.
+	if got := payload["comment_id"]; got != uuidStr(comment.ID) {
+		t.Fatalf("expected comment_id %s, got %v", uuidStr(comment.ID), got)
+	}
+	if got, _ := payload["comment_excerpt"].(string); got != body {
+		t.Fatalf("expected comment_excerpt %q, got %q", body, got)
 	}
 
 	// The note is now shared with UserB and bumped from private to shared, so
@@ -89,7 +115,7 @@ func TestCommentSelfMentionNotifiesNoOne(t *testing.T) {
 
 	// The author mentions only themselves — nothing should fire.
 	body := "note to self [@A](mention://member/" + uuidStr(w3UserA) + ")"
-	h.notifyCommentMentions(ctx, w3WsID, noteID, w3UserA, body)
+	h.notifyCommentMentions(ctx, w3WsID, noteID, w3UserA, mkComment(noteID, body))
 
 	if len(*captured) != 0 {
 		t.Fatalf("expected no EventNoteMentioned for a self-mention, got %d", len(*captured))

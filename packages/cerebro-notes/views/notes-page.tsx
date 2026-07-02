@@ -135,7 +135,16 @@ function ownerName(
 // list on the left, and the selected note's editor on the right. Private by
 // default; visibility is changed per note. Built on top of Documents — a note
 // is an artifact(kind=note) plus owner/visibility/pin state.
-export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) {
+export function NotesPage({
+  initialNoteId,
+  initialCommentId,
+}: {
+  initialNoteId?: string | null;
+  // FIR-2589: when the Notes surface is opened from a note-comment mention in the
+  // inbox, this is the comment id to open — the editor opens the comments panel
+  // and scrolls to that comment.
+  initialCommentId?: string | null;
+}) {
   const wsId = useWorkspaceId();
   const [search, setSearch] = React.useState("");
   const [selectedId, setSelectedId] = React.useState<string | null>(
@@ -369,6 +378,9 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
               note={selected}
               wsId={wsId}
               onBack={() => setSelectedId(null)}
+              initialCommentId={
+                selected.id === initialNoteId ? initialCommentId : null
+              }
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
@@ -747,6 +759,7 @@ export function NoteEditor({
   wsId,
   onBack,
   onOpenFull,
+  initialCommentId,
 }: {
   note: Note;
   wsId: string;
@@ -755,6 +768,9 @@ export function NoteEditor({
   // jumps to the full Notes surface. Used when the editor is embedded in the
   // inbox detail pane; undefined on the full Notes page (already full).
   onOpenFull?: () => void;
+  // FIR-2589: a comment id to open on mount (from a note-comment mention in the
+  // inbox). Opens the comments panel and scrolls to that comment.
+  initialCommentId?: string | null;
 }) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
@@ -851,6 +867,21 @@ export function NoteEditor({
 
   const activeAnchor = draftQuote ? DRAFT_ANCHOR_ID : activeAnchorId;
   useCommentAnchors(editor, commentAnchors, activeAnchor);
+
+  // FIR-2589: opened from a note-comment mention in the inbox — open the
+  // comments panel and highlight the mentioned comment's thread root (a reply
+  // resolves to its root, which is what the panel highlights). Runs once, after
+  // the comments load, so we can resolve a reply to its root.
+  const openedCommentRef = React.useRef(false);
+  React.useEffect(() => {
+    if (openedCommentRef.current) return;
+    if (!commentsEnabled || !initialCommentId || comments.length === 0) return;
+    const target = comments.find((c) => c.id === initialCommentId);
+    if (!target) return;
+    openedCommentRef.current = true;
+    setActiveAnchorId(target.thread_root_id ?? target.id);
+    setShowComments(true);
+  }, [commentsEnabled, initialCommentId, comments]);
   // FIR-2145: paint find matches in the editor as the user types.
   useFindHighlight(editor, findOpen ? findQuery : "", findOpen ? findActiveIndex : -1);
 

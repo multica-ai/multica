@@ -32,15 +32,25 @@ func registerCerebroNoteMentionListener(bus *events.Bus, queries *db.Queries) {
 		if noteID == "" || len(memberIDs) == 0 {
 			return
 		}
+		// FIR-2589: a mention in a note COMMENT carries the comment id (the inbox
+		// deep-link target) and a trimmed excerpt shown as the message body, so
+		// the notification reads with context and opens the exact comment. A
+		// note-BODY mention has neither and keeps the note-title-only behavior.
+		commentID, _ := payload["comment_id"].(string)
+		commentExcerpt, _ := payload["comment_excerpt"].(string)
 
 		title := noteTitle
 		if title == "" {
 			title = "New note"
 		}
-		details, _ := json.Marshal(map[string]any{
+		detail := map[string]any{
 			"note_id":    noteID,
 			"note_title": noteTitle,
-		})
+		}
+		if commentID != "" {
+			detail["comment_id"] = commentID
+		}
+		details, _ := json.Marshal(detail)
 
 		ctx := context.Background()
 		dispatched := 0
@@ -55,6 +65,7 @@ func registerCerebroNoteMentionListener(bus *events.Bus, queries *db.Queries) {
 				NotifType:     "mentioned",
 				Severity:      "info",
 				Title:         title,
+				Body:          commentExcerpt,
 				Details:       details,
 				Actor:         e,
 			}) {

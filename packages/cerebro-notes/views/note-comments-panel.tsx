@@ -217,6 +217,21 @@ export function NoteCommentsPanel({
   const open = threads.filter((t) => !t.root.resolved);
   const resolved = threads.filter((t) => t.root.resolved);
 
+  // FIR-2589: when a thread becomes active (e.g. opened from a note-comment
+  // mention in the inbox), scroll it into view. Resolved threads live inside a
+  // <details>, so open that first before scrolling.
+  const threadListRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!activeAnchorId) return;
+    const el = threadListRef.current?.querySelector<HTMLElement>(
+      `[data-thread-id="${activeAnchorId}"]`,
+    );
+    if (!el) return;
+    const details = el.closest("details");
+    if (details && !details.open) details.open = true;
+    el.scrollIntoView({ block: "center" });
+  }, [activeAnchorId, threads]);
+
   const unsent = React.useMemo(
     () => comments.filter(isUnsentToAgent),
     [comments],
@@ -478,7 +493,7 @@ export function NoteCommentsPanel({
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className="divide-y">
+        <div ref={threadListRef} className="divide-y">
           {open.length === 0 && resolved.length === 0 && (
             <p className="p-4 text-sm text-muted-foreground">
               No comments yet. Select text and add one.
@@ -594,6 +609,7 @@ function ThreadView({
   return (
     <div
       onClick={onSelect}
+      data-thread-id={root.id}
       className={cn(
         "p-3",
         root.resolved && "opacity-70",

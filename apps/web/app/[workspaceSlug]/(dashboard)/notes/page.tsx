@@ -5,5 +5,10 @@ import { NotesPage } from "@multica/cerebro-notes/views";
 
 export default function Page() {
   const params = useSearchParams();
-  return <NotesPage initialNoteId={params.get("note")} />;
+  return (
+    <NotesPage
+      initialNoteId={params.get("note")}
+      initialCommentId={params.get("comment")}
+    />
+  );
 }

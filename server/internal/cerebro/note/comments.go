@@ -207,23 +207,28 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Notify members @mentioned in the comment body (bug FIR-2589). Reuses the
-	// exact share + EventNoteMentioned path a note-body mention uses, so a
-	// tagged member gets an openable "mentioned" inbox item that deep-links to
-	// the note. Best-effort: a failed lookup never fails the create.
-	h.notifyCommentMentions(r.Context(), wsUUID, noteID, ownerUUID, req.Body)
+	// exact share + EventNoteMentioned path a note-body mention uses, but carries
+	// the comment so the "mentioned" inbox item deep-links to that comment and
+	// shows its text as context. Best-effort: a failed lookup never fails create.
+	h.notifyCommentMentions(r.Context(), wsUUID, noteID, ownerUUID, created)
 	writeJSON(w, http.StatusCreated, commentToResponse(created))
 }
+
+// commentExcerptLimit caps the comment preview carried into the inbox message
+// so a long comment doesn't bloat the notification body.
+const commentExcerptLimit = 280
 
 // notifyCommentMentions fans out "mentioned" notifications for the member
 // (@member) mentions in a newly created note comment. A comment is created
 // once, so every member mention in its body is new — oldBody is "". Delegates
 // to notifyNoteMentions (share the note + publish EventNoteMentioned) so the
-// comment path behaves identically to the note-body path.
-func (h *Handler) notifyCommentMentions(ctx context.Context, wsUUID, noteID, authorID pgtype.UUID, body string) {
+// comment path behaves identically to the note-body path, passing the comment's
+// thread-root id (the inbox deep-link target) and a trimmed excerpt.
+func (h *Handler) notifyCommentMentions(ctx context.Context, wsUUID, noteID, authorID pgtype.UUID, comment cerebrodb.CerebroNoteComment) {
 	if h.Bus == nil {
 		return
 	}
-	if len(newMemberMentions("", body, uuidStr(authorID))) == 0 {
+	if len(newMemberMentions("", comment.Body, uuidStr(authorID))) == 0 {
 		return
 	}
 	noteRow, err := h.Cerebro.GetNote(ctx, noteID)
@@ -234,7 +239,24 @@ func (h *Handler) notifyCommentMentions(ctx context.Context, wsUUID, noteID, aut
 	if err != nil {
 		return
 	}
-	h.notifyNoteMentions(ctx, wsUUID, noteID, authorID, artifact.Title, "", body, noteRow.Visibility)
+	// A reply deep-links to its thread root (the panel highlights the root); a
+	// root comment is its own target.
+	target := uuidStr(comment.ID)
+	if comment.ThreadRootID.Valid {
+		target = uuidStr(comment.ThreadRootID)
+	}
+	h.notifyNoteMentions(ctx, wsUUID, noteID, authorID, artifact.Title, "", comment.Body, noteRow.Visibility, target, commentExcerpt(comment.Body))
+}
+
+// commentExcerpt trims a comment body to a short single-string preview for the
+// inbox message. Mentions stay as raw markdown — the inbox renderer resolves
+// them — and whitespace is collapsed so the preview reads on one line.
+func commentExcerpt(body string) string {
+	trimmed := strings.TrimSpace(body)
+	if len(trimmed) <= commentExcerptLimit {
+		return trimmed
+	}
+	return strings.TrimSpace(trimmed[:commentExcerptLimit]) + "…"
 }
 
 // UpdateComment edits a comment's own text. Author-only (or note owner).

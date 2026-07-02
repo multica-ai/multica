@@ -374,7 +374,12 @@ function DocumentsRoute() {
 
 function NotesRoute() {
   const [search] = useSearchParams();
-  return <NotesPage initialNoteId={search.get("note")} />;
+  return (
+    <NotesPage
+      initialNoteId={search.get("note")}
+      initialCommentId={search.get("comment")}
+    />
+  );
 }
 
 function DocumentNewRoute() {

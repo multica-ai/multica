@@ -86,9 +86,14 @@ func New(upstream *db.Queries, cerebro *cerebrodb.Queries, bus *events.Bus, task
 //   - publishes EventNoteMentioned so the notification listener creates a
 //     routed "mentioned" inbox item, reusing the comment-mention engine.
 //
+// commentID/excerpt carry the comment context when the mention came from a note
+// comment (empty for a note-body mention): commentID is the thread-root id the
+// inbox item deep-links to, and excerpt is a trimmed preview shown as the inbox
+// message body so the notification reads with context (FIR-2589).
+//
 // Everything here is best-effort: a note save must never fail because a share
 // or notification could not be created.
-func (h *Handler) notifyNoteMentions(ctx context.Context, wsID, artifactID, ownerID pgtype.UUID, title, oldBody, newBody, visibility string) {
+func (h *Handler) notifyNoteMentions(ctx context.Context, wsID, artifactID, ownerID pgtype.UUID, title, oldBody, newBody, visibility, commentID, excerpt string) {
 	added := newMemberMentions(oldBody, newBody, uuidStr(ownerID))
 	if len(added) == 0 {
 		return
@@ -108,16 +113,23 @@ func (h *Handler) notifyNoteMentions(ctx context.Context, wsID, artifactID, owne
 	if h.Bus == nil {
 		return
 	}
+	payload := map[string]any{
+		"note_id":    uuidStr(artifactID),
+		"note_title": title,
+		"member_ids": added,
+	}
+	// A comment mention carries the comment it was tagged in, so the inbox item
+	// can deep-link straight to that comment and show its text as context.
+	if commentID != "" {
+		payload["comment_id"] = commentID
+		payload["comment_excerpt"] = excerpt
+	}
 	h.Bus.Publish(events.Event{
 		Type:        EventNoteMentioned,
 		WorkspaceID: uuidStr(wsID),
 		ActorType:   "member",
 		ActorID:     uuidStr(ownerID),
-		Payload: map[string]any{
-			"note_id":    uuidStr(artifactID),
-			"note_title": title,
-			"member_ids": added,
-		},
+		Payload:     payload,
 	})
 }
 
@@ -384,7 +396,7 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Tagging a person in the note body notifies them (and shares the note).
-	h.notifyNoteMentions(r.Context(), wsUUID, artifact.ID, ownerUUID, artifact.Title, "", artifact.Body, noteRow.Visibility)
+	h.notifyNoteMentions(r.Context(), wsUUID, artifact.ID, ownerUUID, artifact.Title, "", artifact.Body, noteRow.Visibility, "", "")
 
 	// FIR-2145: when the note is scoped to an issue, auto-create a reference so
 	// the note's References panel shows the issue link immediately, without the
@@ -622,7 +634,7 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Notify only people newly tagged by this edit (diff vs. the old body).
-	h.notifyNoteMentions(r.Context(), wsUUID, noteID, ownerUUID, updated.Title, artifact.Body, updated.Body, noteRow.Visibility)
+	h.notifyNoteMentions(r.Context(), wsUUID, noteID, ownerUUID, updated.Title, artifact.Body, updated.Body, noteRow.Visibility, "", "")
 
 	// Wave 3 / G2 — snapshot a version for the history. Coalesced: a burst of
 	// edits by the same author becomes one entry (see snapshotVersion). Only
