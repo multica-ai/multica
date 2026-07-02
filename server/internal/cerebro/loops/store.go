@@ -30,6 +30,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // Store reads and writes the per-round check outcomes for a delivery gate.
@@ -219,6 +221,161 @@ func (s *Store) JudgeOutcomes(ctx context.Context, issueID pgtype.UUID, gate str
 		return nil, fmt.Errorf("iterate loop judge runs: %w", err)
 	}
 	return outcomes, nil
+}
+
+// EnqueueHuman registers each human check as pending (ran = false) for one
+// gate round, mirroring EnqueueJudge. Idempotent: an already-enqueued check
+// id keeps its existing row (and any decision already reported on it)
+// untouched.
+func (s *Store) EnqueueHuman(ctx context.Context, issueID pgtype.UUID, gate string, round int32, checks []HumanCheck) error {
+	for _, c := range checks {
+		assigneeID, err := stringToUUID(c.AssigneeID)
+		if err != nil {
+			return fmt.Errorf("enqueue loop human approval: assignee id: %w", err)
+		}
+		if _, err := s.pool.Exec(ctx,
+			`INSERT INTO cerebro_loop_human_approval (issue_id, gate, round, check_id, prompt, assignee_type, assignee_id)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)
+			 ON CONFLICT (issue_id, gate, round, check_id) DO NOTHING`,
+			issueID, gate, round, c.ID, c.Prompt, c.AssigneeType, assigneeID); err != nil {
+			return fmt.Errorf("enqueue loop human approval: %w", err)
+		}
+	}
+	return nil
+}
+
+// PendingHumanDispatch returns every human check enqueued for this gate round
+// but not yet dispatched and not yet reported, oldest first — the human-check
+// mirror of PendingJudgeDispatch.
+func (s *Store) PendingHumanDispatch(ctx context.Context, issueID pgtype.UUID, gate string, round int32) ([]HumanCheck, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT check_id, prompt, assignee_type, assignee_id
+		 FROM cerebro_loop_human_approval
+		 WHERE issue_id = $1 AND gate = $2 AND round = $3
+		   AND ran = false AND dispatched_at IS NULL
+		 ORDER BY created_at ASC, id ASC`,
+		issueID, gate, round)
+	if err != nil {
+		return nil, fmt.Errorf("list pending dispatch loop human approvals: %w", err)
+	}
+	defer rows.Close()
+
+	var checks []HumanCheck
+	for rows.Next() {
+		var c HumanCheck
+		var assigneeID pgtype.UUID
+		if err := rows.Scan(&c.ID, &c.Prompt, &c.AssigneeType, &assigneeID); err != nil {
+			return nil, fmt.Errorf("scan pending dispatch loop human approval: %w", err)
+		}
+		c.AssigneeID = util.UUIDToString(assigneeID)
+		checks = append(checks, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending dispatch loop human approvals: %w", err)
+	}
+	return checks, nil
+}
+
+// PendingApprovals returns every human check at this gate round that has not
+// yet been decided (ran = false), regardless of dispatch state — unlike
+// PendingHumanDispatch (egress-only: undispatched checks), this is for
+// displaying "what's still waiting on a decision" in the control strip, which
+// must keep showing a check even after it has been dispatched.
+func (s *Store) PendingApprovals(ctx context.Context, issueID pgtype.UUID, gate string, round int32) ([]HumanCheck, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT check_id, prompt, assignee_type, assignee_id
+		 FROM cerebro_loop_human_approval
+		 WHERE issue_id = $1 AND gate = $2 AND round = $3 AND ran = false
+		 ORDER BY created_at ASC, id ASC`,
+		issueID, gate, round)
+	if err != nil {
+		return nil, fmt.Errorf("list pending loop human approvals: %w", err)
+	}
+	defer rows.Close()
+
+	var checks []HumanCheck
+	for rows.Next() {
+		var c HumanCheck
+		var assigneeID pgtype.UUID
+		if err := rows.Scan(&c.ID, &c.Prompt, &c.AssigneeType, &assigneeID); err != nil {
+			return nil, fmt.Errorf("scan pending loop human approval: %w", err)
+		}
+		c.AssigneeID = util.UUIDToString(assigneeID)
+		checks = append(checks, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending loop human approvals: %w", err)
+	}
+	return checks, nil
+}
+
+// MarkHumanDispatched stamps one enqueued human check as dispatched (an agent
+// assignee: sent to its runtime; a member assignee: now visible/actionable),
+// mirroring MarkJudgeDispatched.
+func (s *Store) MarkHumanDispatched(ctx context.Context, issueID pgtype.UUID, gate string, round int32, checkID string) error {
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE cerebro_loop_human_approval
+		 SET dispatched_at = now()
+		 WHERE issue_id = $1 AND gate = $2 AND round = $3 AND check_id = $4
+		   AND dispatched_at IS NULL`,
+		issueID, gate, round, checkID); err != nil {
+		return fmt.Errorf("mark loop human approval dispatched: %w", err)
+	}
+	return nil
+}
+
+// ReportHuman records the assignee's decision for one enqueued human check —
+// approved (or not) plus an optional note, and who reported it (the approver
+// may differ from the original assignee only in the sense that a person acts
+// through their own authenticated session; an agent assignee reports through
+// report_loop_human as itself).
+func (s *Store) ReportHuman(ctx context.Context, issueID pgtype.UUID, gate string, round int32, checkID string, approved bool, note string, approvedByID pgtype.UUID, approvedByType string) error {
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE cerebro_loop_human_approval
+		 SET ran = true, approved = $5, note = $6, approved_by_id = $7, approved_by_type = $8, updated_at = now()
+		 WHERE issue_id = $1 AND gate = $2 AND round = $3 AND check_id = $4`,
+		issueID, gate, round, checkID, approved, note, approvedByID, approvedByType); err != nil {
+		return fmt.Errorf("report loop human approval: %w", err)
+	}
+	return nil
+}
+
+// HumanOutcomes returns every human check (pending and reported) for a gate
+// round, oldest first, folded into the HumanOutcome shape Reconcile consumes.
+func (s *Store) HumanOutcomes(ctx context.Context, issueID pgtype.UUID, gate string, round int32) ([]HumanOutcome, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT check_id, ran, approved, note
+		 FROM cerebro_loop_human_approval
+		 WHERE issue_id = $1 AND gate = $2 AND round = $3
+		 ORDER BY created_at ASC, id ASC`,
+		issueID, gate, round)
+	if err != nil {
+		return nil, fmt.Errorf("list loop human approvals: %w", err)
+	}
+	defer rows.Close()
+
+	outcomes := []HumanOutcome{}
+	for rows.Next() {
+		var o HumanOutcome
+		if err := rows.Scan(&o.ID, &o.Ran, &o.Approved, &o.Note); err != nil {
+			return nil, fmt.Errorf("scan loop human approval: %w", err)
+		}
+		outcomes = append(outcomes, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate loop human approvals: %w", err)
+	}
+	return outcomes, nil
+}
+
+// stringToUUID parses a UUID string into pgtype.UUID, returning an invalid
+// (null) UUID for an empty string rather than erroring — a human check with
+// no assignee configured yet should not block enqueueing the others.
+func stringToUUID(s string) (pgtype.UUID, error) {
+	if s == "" {
+		return pgtype.UUID{}, nil
+	}
+	return util.ParseUUID(s)
 }
 
 // GateRoundState is the caps-tracking state for one delivery gate, persisted in

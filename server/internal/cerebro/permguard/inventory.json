@@ -649,6 +649,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/workflows/{id}/human-checks/{checkId}/approve",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cerebro/workflows/{id}/regenerate-outbound-secret",
       "gate": "workspace_member"
     },

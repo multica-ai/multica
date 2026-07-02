@@ -52,30 +52,34 @@ type GateDecision struct {
 	// judge agent, set only when Action is GateEnqueue. A gate can enqueue
 	// both programmatic and judge checks in the same decision.
 	EnqueueJudge []JudgeCheck
+	// EnqueueHuman is the set of human checks the engine must dispatch to
+	// their assignee, set only when Action is GateEnqueue. A gate can
+	// enqueue programmatic, judge, and human checks in the same decision.
+	EnqueueHuman []HumanCheck
 }
 
 // Reconcile decides the next action for a delivery gate from the reported
-// programmatic check outcomes and judge verdicts. A judge check is decided
-// the same way as a programmatic one — Pass/exit-zero advances, a failed
-// verdict/non-zero exit revises, a missing result is enqueued — the only
-// difference is what "running" it means (a command vs. a model scoring a
-// rubric).
+// programmatic check outcomes, judge verdicts, and human decisions. A judge
+// or human check is decided the same way as a programmatic one —
+// pass/approved advances, a failed verdict/rejection revises, a missing
+// result is enqueued — the only difference is what "running" it means (a
+// command, a model scoring a rubric, or a person signing off).
 //
-//	any required check/judge failed   -> GateRevise   (fail fast)
-//	a required check/judge has no result -> GateEnqueue  (run/dispatch it)
-//	all required checks/judges in flight  -> GateWait
-//	all required checks/judges passed     -> GateAdvance
+//	any required check/judge/human failed    -> GateRevise   (fail fast)
+//	a required check/judge/human has no result -> GateEnqueue  (run/dispatch it)
+//	all required checks/judges/humans in flight -> GateWait
+//	all required checks/judges/humans passed    -> GateAdvance
 //
-// An empty config (no programmatic checks and no judge checks) never advances
-// on its own — that would be a gate that checks nothing — so it reports
-// GateWait.
-func Reconcile(cfg CheckGateConfig, outcomes []CheckOutcome, judgeOutcomes []JudgeOutcome) GateDecision {
-	if len(cfg.Checks) == 0 && len(cfg.JudgeChecks) == 0 {
+// An empty config (no checks of any type) never advances on its own — that
+// would be a gate that checks nothing — so it reports GateWait.
+func Reconcile(cfg CheckGateConfig, outcomes []CheckOutcome, judgeOutcomes []JudgeOutcome, humanOutcomes []HumanOutcome) GateDecision {
+	if len(cfg.Checks) == 0 && len(cfg.JudgeChecks) == 0 && len(cfg.HumanChecks) == 0 {
 		return GateDecision{Action: GateWait}
 	}
 
 	var toEnqueue [][]string
 	var toEnqueueJudge []JudgeCheck
+	var toEnqueueHuman []HumanCheck
 	inFlight := false
 
 	for _, required := range cfg.Checks {
@@ -102,8 +106,20 @@ func Reconcile(cfg CheckGateConfig, outcomes []CheckOutcome, judgeOutcomes []Jud
 		}
 	}
 
-	if len(toEnqueue) > 0 || len(toEnqueueJudge) > 0 {
-		return GateDecision{Action: GateEnqueue, Enqueue: toEnqueue, EnqueueJudge: toEnqueueJudge}
+	for _, required := range cfg.HumanChecks {
+		o, found := findHumanOutcome(humanOutcomes, required.ID)
+		switch {
+		case found && o.Ran && !o.Approved:
+			return GateDecision{Action: GateRevise}
+		case !found:
+			toEnqueueHuman = append(toEnqueueHuman, required)
+		case !o.Ran:
+			inFlight = true
+		}
+	}
+
+	if len(toEnqueue) > 0 || len(toEnqueueJudge) > 0 || len(toEnqueueHuman) > 0 {
+		return GateDecision{Action: GateEnqueue, Enqueue: toEnqueue, EnqueueJudge: toEnqueueJudge, EnqueueHuman: toEnqueueHuman}
 	}
 	if inFlight {
 		return GateDecision{Action: GateWait}

@@ -1,11 +1,13 @@
 import { api, parseWithFallback } from "@multica/core/api";
 import {
+  EMPTY_LOOP_STATE,
   EMPTY_REGENERATE_INBOUND_SECRET,
   EMPTY_REGENERATE_INBOUND_TOKEN,
   EMPTY_REGENERATE_OUTBOUND_SECRET,
   EMPTY_WORKFLOW,
   EMPTY_WORKFLOWS_LIST,
   EMPTY_WORKFLOW_RUNS_LIST,
+  loopStateSchema,
   regenerateInboundSigningSecretSchema,
   regenerateInboundTokenSchema,
   regenerateOutboundSecretSchema,
@@ -15,6 +17,7 @@ import {
 } from "./api-schemas";
 import type {
   CerebroWorkflow,
+  LoopStateResponse,
   RegenerateInboundSigningSecretResponse,
   RegenerateInboundTokenResponse,
   RegenerateOutboundSecretResponse,
@@ -115,5 +118,31 @@ export async function regenerateOutboundSecret(
     regenerateOutboundSecretSchema,
     EMPTY_REGENERATE_OUTBOUND_SECRET,
     { endpoint: "regenerateCerebroOutboundSecret" },
+  );
+}
+
+// FIR-2283 — Issue workflow control strip + approval. Routed through the
+// generic cerebroRequest primitive (no dedicated client.ts method needed —
+// see CEREBRO-PATCH(cerebro-api-request)).
+export async function fetchLoopState(
+  workflowId: string,
+  issueId: string,
+): Promise<LoopStateResponse> {
+  const raw = await api.cerebroRequest<unknown>(
+    `/api/cerebro/workflows/${workflowId}/loop-state?issue_id=${encodeURIComponent(issueId)}`,
+  );
+  return parseWithFallback(raw, loopStateSchema, EMPTY_LOOP_STATE, {
+    endpoint: "loopState",
+  });
+}
+
+export async function approveHumanCheck(
+  workflowId: string,
+  checkId: string,
+  input: { issue_id: string; approved: boolean; note?: string },
+): Promise<void> {
+  await api.cerebroRequest<unknown>(
+    `/api/cerebro/workflows/${workflowId}/human-checks/${checkId}/approve`,
+    { method: "POST", body: JSON.stringify(input) },
   );
 }

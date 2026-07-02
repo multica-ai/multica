@@ -745,6 +745,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).WithService(opts.WorkflowService)
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 — plug the loop planning-dispatch materializer so a run_skill workflow's `loop_planning` toggle actually creates its companion planning-phase rule (see workflows/loop_planning.go).
 	cerebroWorkflowsHandler.WithLoopPlanningMaterializer(cerebroloops.NewPlanningMaterializer(cerebroQueries))
+	// CEREBRO-PATCH(cerebro-workflows-issue-loop): FIR-2283 — plug the Issue workflow bridge (workflow_type=="issue_loop": save -> Compile -> materialize the dispatch/gate/escalate rules) and the control-strip/approval seam onto the compiled delivery gate.
+	cerebroIssueLoopColumns := cerebroworkflows.NewIssueLoopColumnStore(pool)
+	cerebroWorkflowsHandler.WithIssueLoopColumns(cerebroIssueLoopColumns).
+		WithIssueLoopCompiler(cerebroloops.NewIssueLoopBridge(cerebroQueries, cerebroIssueLoopColumns)).
+		WithLoopCheckStore(cerebroloops.NewLoopCheckStoreAdapter(cerebroloops.NewStore(pool)))
 	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 v2b — pass upstream queries so per-issue custom status mirrors onto the upstream issue row, and pass the pool so the two writes commit atomically (Mia review).
 	cerebroStatusModelsHandler := cerebrostatusmodels.NewHandler(cerebroQueries).WithUpstream(queries).WithTx(pool)
 	// CEREBRO-PATCH(custom-status-resolver-wire): FIR-1550 v2b — UpdateIssue invokes the resolver.
@@ -2003,6 +2008,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/regenerate-token", cerebroWorkflowsHandler.RegenerateInboundToken)
 				r.Post("/{id}/regenerate-signing-secret", cerebroWorkflowsHandler.RegenerateInboundSigningSecret)
 				r.Post("/{id}/regenerate-outbound-secret", cerebroWorkflowsHandler.RegenerateOutboundSecret)
+				// CEREBRO-PATCH(cerebro-workflows-issue-loop-routes): FIR-2283 — Issue workflow control-strip live state + person-approval action on the compiled delivery gate.
+				r.Get("/{id}/loop-state", cerebroWorkflowsHandler.LoopState)
+				r.Post("/{id}/human-checks/{checkId}/approve", cerebroWorkflowsHandler.ApproveHumanCheck)
 				r.Post("/_test/cron-sweep", cerebroWorkflowsHandler.TestSweepCron)
 			})
 			// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types REST surface.

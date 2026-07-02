@@ -51,18 +51,43 @@ type CheckGateConfig struct {
 	// worker) so the verdict is blind to the worker's own reasoning — Compile
 	// does not enforce that, the caller chooses the judge. Falls back to
 	// AgentID when empty so a spec with judge checks but no configured judge
-	// still dispatches (self-graded) instead of stalling forever.
+	// still dispatches (self-graded) instead of stalling forever. Per-check
+	// judge checks that carry their own AssigneeID (Verification.AssigneeType
+	// == AssigneeAgent) use that instead — this is only the fallback.
 	JudgeAgentID string `json:"judge_agent_id,omitempty"`
-	// JudgeSkill is the skill dispatched to JudgeAgentID for a judge check.
+	// JudgeSkill is the skill dispatched to JudgeAgentID for a judge check
+	// that does not carry its own Skill.
 	JudgeSkill string `json:"judge_skill,omitempty"`
+	// HumanChecks are the spec's human-type verification criteria: a person
+	// (or an agent standing in for one) must explicitly approve or reject.
+	// The gate treats a human check exactly like a programmatic or judge one
+	// for advance/revise/wait purposes — every one must report Approved
+	// before the gate can advance.
+	HumanChecks []HumanCheck `json:"human_checks,omitempty"`
 }
 
 // JudgeCheck is one judge-type verification criterion carried into the gate
 // config: an ID (matches the spec's Verification.ID, used to key its reported
-// outcome) and the rubric the judge scores the delivered work against.
+// outcome), the rubric the judge scores the delivered work against, and an
+// optional per-check assignee/skill override. Empty AssigneeID/Skill fall
+// back to CheckGateConfig.JudgeAgentID/JudgeSkill.
 type JudgeCheck struct {
-	ID     string `json:"id"`
-	Rubric string `json:"rubric"`
+	ID           string `json:"id"`
+	Rubric       string `json:"rubric"`
+	AssigneeID   string `json:"assignee_id,omitempty"`
+	AssigneeType string `json:"assignee_type,omitempty"`
+	Skill        string `json:"skill,omitempty"`
+}
+
+// HumanCheck is one human-type verification criterion carried into the gate
+// config: an ID (matches the spec's Verification.ID), the prompt shown to the
+// assignee, and who must approve — AssigneeType is AssigneeAgent or
+// AssigneeMember, AssigneeID the corresponding agent or member id.
+type HumanCheck struct {
+	ID           string `json:"id"`
+	Prompt       string `json:"prompt"`
+	AssigneeType string `json:"assignee_type"`
+	AssigneeID   string `json:"assignee_id"`
 }
 
 // CompileParams supplies the issue-specific bindings the spec itself does not
@@ -168,7 +193,23 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 
 	judgeChecks := make([]JudgeCheck, 0, len(spec.Verification))
 	for _, v := range spec.JudgeChecks() {
-		judgeChecks = append(judgeChecks, JudgeCheck{ID: v.ID, Rubric: v.Rubric})
+		judgeChecks = append(judgeChecks, JudgeCheck{
+			ID:           v.ID,
+			Rubric:       v.Rubric,
+			AssigneeID:   v.AssigneeID,
+			AssigneeType: v.AssigneeType,
+			Skill:        v.Skill,
+		})
+	}
+
+	humanChecks := make([]HumanCheck, 0, len(spec.Verification))
+	for _, v := range spec.HumanChecks() {
+		humanChecks = append(humanChecks, HumanCheck{
+			ID:           v.ID,
+			Prompt:       v.Prompt,
+			AssigneeType: v.AssigneeType,
+			AssigneeID:   v.AssigneeID,
+		})
 	}
 
 	rules := []Rule{
@@ -195,6 +236,7 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 					JudgeChecks:   judgeChecks,
 					JudgeAgentID:  p.JudgeAgentID,
 					JudgeSkill:    p.JudgeSkill,
+					HumanChecks:   humanChecks,
 				}},
 			},
 			ActionType:   workflows.ActionSetStatus,

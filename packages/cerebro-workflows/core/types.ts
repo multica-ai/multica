@@ -30,6 +30,12 @@ export type CerebroWorkflowRunStatus =
 
 export type CerebroWorkflowEditorMode = "form" | "canvas";
 
+// FIR-2283 — Issue workflow. "standard" is the existing trigger -> conditions
+// -> action rule (unchanged). "issue_loop" is a Plan/Build/Delivery-gate/Done
+// recipe: it carries a LoopSpec instead of a trigger/action, and the server
+// compiles it onto the loop engine (see loop_spec below).
+export type CerebroWorkflowType = "standard" | "issue_loop";
+
 // Phase-3 trigger config shapes (mirrors server/internal/cerebro/workflows/types.go).
 export interface TriggerConfigCron {
   schedule_expr: string;
@@ -89,6 +95,110 @@ export interface CerebroWorkflow {
   inbound_webhook_token?: string;
   inbound_signing_secret_set?: boolean;
   outbound_webhook_secret_set?: boolean;
+  // FIR-2283. Absent on older cached responses -> treat as "standard".
+  workflow_type?: CerebroWorkflowType;
+  loop_spec?: LoopSpec;
+}
+
+// --- FIR-2283 Issue workflow: loop_spec wire shape ---
+// Mirrors server/internal/cerebro/loops.Spec + the issue-specific bindings
+// loops.CompileParams needs (see materialize_issue_loop.go's
+// issueLoopSpecWire) — the recipe designed on the Issue workflow surface.
+
+export type LoopCheckType = "programmatic" | "judge" | "human";
+export type LoopAssigneeType = "agent" | "member";
+
+// "Confirmed by" in the UI. Maps 1:1 to LoopCheckType; kept as a distinct
+// display-facing alias so the editor's copy can read "A command" / "An AI
+// review" / "A person" without every callsite re-deriving the label.
+export const CONFIRMED_BY_OPTIONS: ReadonlyArray<{
+  value: LoopCheckType;
+  label: string;
+}> = [
+  { value: "programmatic", label: "A command" },
+  { value: "judge", label: "An AI review" },
+  { value: "human", label: "A person" },
+];
+
+export interface LoopVerification {
+  id: string;
+  type: LoopCheckType;
+  /** Short human-readable name, e.g. "Test suite". Display-only. */
+  label?: string;
+
+  // Programmatic ("A command").
+  check?: string[]; // argv array, never a shell string
+  expect?: "exit_zero";
+
+  // Judge ("An AI review"). Runs a skill (preferred) or a free-text prompt
+  // ("rubric") — "Runs: A skill / A prompt" in the editor.
+  rubric?: string;
+  skill?: string;
+
+  // Human ("A person").
+  prompt?: string;
+
+  // Assignee for judge/human checks — "Assign to" in the editor, showing
+  // both agents and people in one list.
+  assignee_type?: LoopAssigneeType;
+  assignee_id?: string;
+}
+
+export interface LoopCaps {
+  max_iterations: number;
+  max_revisions: number;
+  no_progress_stalls: number;
+}
+
+export interface LoopSpec {
+  version: 1;
+  goal: string;
+  definition_of_done: string;
+  verification: LoopVerification[];
+  caps: LoopCaps;
+  planning?: boolean;
+
+  // Build bindings.
+  build_agent_id: string;
+  build_skill: string;
+
+  // Planning bindings — only meaningful when planning is true.
+  plan_agent_id?: string;
+  plan_skill?: string;
+
+  // Status names — optional, server defaults apply (todo / in_progress /
+  // in_review / done) when omitted.
+  planning_status?: string;
+  build_status?: string;
+  review_status?: string;
+  done_status?: string;
+
+  // Spec-wide judge fallback, used only by a judge check without its own
+  // assignee_id.
+  judge_agent_id?: string;
+  judge_skill?: string;
+}
+
+export const DEFAULT_LOOP_CAPS: LoopCaps = {
+  max_iterations: 6,
+  max_revisions: 6,
+  no_progress_stalls: 2,
+};
+
+// GET /{id}/loop-state response — the control strip's live read.
+export interface LoopStateResponse {
+  round: number;
+  max_iterations?: number;
+  stopped: boolean;
+  stop_reason?: string;
+  pending_human_checks: PendingHumanCheck[];
+}
+
+export interface PendingHumanCheck {
+  check_id: string;
+  prompt: string;
+  assignee_type: LoopAssigneeType;
+  assignee_id: string;
 }
 
 export interface CerebroWorkflowRun {
@@ -138,15 +248,22 @@ export interface WorkflowWriteInput {
   name: string;
   enabled?: boolean;
   project_id?: string;
-  trigger_type: CerebroWorkflowTriggerType;
+  // trigger_type/action_type are required for a "standard" workflow. For an
+  // issue_loop write, omit them entirely — the server pins an inert
+  // placeholder and compiles the real rules from loop_spec instead (see
+  // issueLoopPlaceholderRule on the server).
+  trigger_type?: CerebroWorkflowTriggerType;
   trigger_config?: unknown;
   conditions?: unknown;
-  action_type: CerebroWorkflowActionType;
+  action_type?: CerebroWorkflowActionType;
   action_config?: unknown;
   // Phase 2: optional. Omitting editor_mode keeps the server-side default of
   // "form" — form-mode workflows therefore don't need to send these fields.
   editor_mode?: CerebroWorkflowEditorMode;
   editor_layout?: unknown;
+  // FIR-2283. Omit for a standard workflow.
+  workflow_type?: CerebroWorkflowType;
+  loop_spec?: LoopSpec;
 }
 
 // Display metadata for the form builder. Order here is the order shown in

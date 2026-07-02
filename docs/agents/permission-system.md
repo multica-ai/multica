@@ -126,17 +126,28 @@ MCP surface adds an endpoint that should be callable by gateway agents, add the
 matching proxy entry in `server/internal/cerebro/runtime/customer_service_mcp_tools.go`
 and cover the name in `TestCustomerServiceMCPToolsAreRegisteredAndInMetadata`.
 
-Loop-gate reporting tools: `report_loop_check` and `report_loop_judge` are
-native Firtal Gateway tools registered only when a loop store is wired into the
-task context (`runtime/firtal_gateway_tools_extended.go`). They do not bypass
-the tool exposure model in row 2: an agent can call them only if the legacy
-grant cascade or the tool-policy chain exposes the tool for that run. The tools
-only record a verdict for an existing `(issue_id, gate, round, check)` row:
-`report_loop_check` records the programmatic exit code, and
-`report_loop_judge` records the judge's structured `pass` plus
-`blocking_issues` verdict. A failing judge verdict must include concrete
-blocking issues; a passing judge verdict stores an empty issue list. They do not
-grant issue access, reveal credentials, or create new work on their own.
+Loop-gate reporting tools: `report_loop_check`, `report_loop_judge`, and
+`report_loop_human` are native Firtal Gateway tools registered only when a loop
+store is wired into the task context (`runtime/firtal_gateway_tools_extended.go`).
+They do not bypass the tool exposure model in row 2: an agent can call them only
+if the legacy grant cascade or the tool-policy chain exposes the tool for that
+run. The tools only record a verdict for an existing
+`(issue_id, gate, round, check)` row: `report_loop_check` records the
+programmatic exit code, `report_loop_judge` records the judge's structured
+`pass` plus `blocking_issues` verdict, and `report_loop_human`
+(`runtime/firtal_gateway_loop.go`, `FirtalReportLoopHumanTool`) records an
+explicit approve/reject decision for a human-type check — an agent assignee
+standing in for a person's sign-off, not scoring a rubric (`approved` boolean;
+a `note` is required whenever `approved` is false). A failing judge verdict must
+include concrete blocking issues; a passing judge verdict stores an empty issue
+list. When a **person** (not an agent) is the assignee of a human-type check,
+they sign off through the `POST /api/cerebro/workflows/{id}/human-checks/{checkId}/approve`
+route (FIR-2283, `workflows/handler.go` `ApproveHumanCheck`, listed in
+`permguard`/`platformcatalog`) instead of the tool — the route records the same
+decision on the matching pending row. Like their siblings, `report_loop_human`
+and the approve route do not grant issue access, reveal credentials, or create
+new work on their own; each only updates a matching pending check the engine
+already dispatched.
 
 **API-connection tool argument shape (FIR-2441).** An `api`-type connection tool
 (exposed under the default-off `cerebro_api_connection_tools` flag, row 2b) takes

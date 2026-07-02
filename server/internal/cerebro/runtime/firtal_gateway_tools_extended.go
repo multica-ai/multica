@@ -1765,5 +1765,6 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	if tctx.LoopStore != nil {
 		r.Register(&FirtalReportLoopCheckTool{store: tctx.LoopStore, tctx: tctx})
 		r.Register(&FirtalReportLoopJudgeTool{store: tctx.LoopStore, tctx: tctx})
+		r.Register(&FirtalReportLoopHumanTool{store: tctx.LoopStore, tctx: tctx})
 	}
 }

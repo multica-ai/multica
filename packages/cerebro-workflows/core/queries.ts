@@ -1,5 +1,7 @@
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  approveHumanCheck,
+  fetchLoopState,
   fetchWorkflow,
   fetchWorkflowRuns,
   fetchWorkflows,
@@ -14,6 +16,8 @@ export const cerebroWorkflowsKeys = {
   detail: (wsId: string, id: string) => [...cerebroWorkflowsKeys.all(wsId), "detail", id] as const,
   runs: (wsId: string, workflowId: string | null, limit: number, offset: number) =>
     [...cerebroWorkflowsKeys.all(wsId), "runs", workflowId ?? "all", limit, offset] as const,
+  loopState: (wsId: string, workflowId: string, issueId: string) =>
+    [...cerebroWorkflowsKeys.all(wsId), "loop-state", workflowId, issueId] as const,
 };
 
 export function cerebroWorkflowsListOptions(wsId: string) {
@@ -92,6 +96,36 @@ export function useRegenerateOutboundSecretMutation(wsId: string, workflowId: st
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: cerebroWorkflowsKeys.detail(wsId, workflowId),
+      });
+    },
+  });
+}
+
+// FIR-2283 — Issue workflow control strip. Polls while a person is watching
+// a specific issue run through the recipe; issueId empty disables the query
+// (nothing to watch yet).
+export function cerebroLoopStateOptions(wsId: string, workflowId: string, issueId: string) {
+  return queryOptions({
+    queryKey: cerebroWorkflowsKeys.loopState(wsId, workflowId, issueId),
+    queryFn: () => fetchLoopState(workflowId, issueId),
+    enabled: !!wsId && !!workflowId && !!issueId,
+    staleTime: 3 * 1000,
+    refetchInterval: 5 * 1000,
+  });
+}
+
+export function useApproveHumanCheckMutation(wsId: string, workflowId: string, issueId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { checkId: string; approved: boolean; note?: string }) =>
+      approveHumanCheck(workflowId, input.checkId, {
+        issue_id: issueId,
+        approved: input.approved,
+        note: input.note,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: cerebroWorkflowsKeys.loopState(wsId, workflowId, issueId),
       });
     },
   });

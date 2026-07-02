@@ -37,6 +37,23 @@ type Handler struct {
 	Service *Service
 	// loopPlanningMaterializer is optional and nil-safe: see loop_planning.go.
 	loopPlanningMaterializer LoopPlanningMaterializer
+	// issueLoopCompiler is optional and nil-safe: see issue_loop.go.
+	issueLoopCompiler IssueLoopCompiler
+	// issueLoopColumns is optional and nil-safe: without it, workflow_type
+	// always reads back as "standard" and an issue_loop create/update is
+	// rejected (see requireIssueLoopColumns). Wired via
+	// WithIssueLoopColumns from router.go.
+	issueLoopColumns *IssueLoopColumnStore
+	// loopCheckStore is optional and nil-safe: see issue_loop_state.go.
+	loopCheckStore LoopCheckStore
+}
+
+// WithIssueLoopColumns plugs in the raw-SQL store for the workflow_type /
+// loop_spec / generated_from_workflow_id columns (see issue_loop_columns.go).
+// Returns the receiver for chainable init.
+func (h *Handler) WithIssueLoopColumns(s *IssueLoopColumnStore) *Handler {
+	h.issueLoopColumns = s
+	return h
 }
 
 func NewHandler(cerebro *cerebrodb.Queries) *Handler {
@@ -67,6 +84,11 @@ type workflowResponse struct {
 	Conditions    json.RawMessage `json:"conditions"`
 	ActionType    string          `json:"action_type"`
 	ActionConfig  json.RawMessage `json:"action_config"`
+	// WorkflowType is "standard" (default) or "issue_loop" (FIR-2283). LoopSpec
+	// carries the recipe (goal, definition_of_done, verification[], caps,
+	// planning) only for an issue_loop row; empty/omitted for standard rows.
+	WorkflowType string          `json:"workflow_type"`
+	LoopSpec     json.RawMessage `json:"loop_spec,omitempty"`
 	// EditorMode / EditorLayout (phase 2): which builder opens this workflow
 	// and the xyflow node-positions for canvas mode. Form-mode rows leave
 	// EditorLayout null.
@@ -99,6 +121,7 @@ func toWorkflowResponse(row cerebrodb.CerebroWorkflow) workflowResponse {
 		Conditions:    nonEmptyJSON(row.Conditions),
 		ActionType:    row.ActionType,
 		ActionConfig:  nonEmptyJSON(row.ActionConfig),
+		WorkflowType:  WorkflowTypeStandard,
 		EditorMode:    row.EditorMode,
 		CreatedByID:   util.UUIDToString(row.CreatedByID),
 		CreatedByType: row.CreatedByType,
@@ -121,6 +144,16 @@ func toWorkflowResponse(row cerebrodb.CerebroWorkflow) workflowResponse {
 	out.InboundSigningSecretSet = row.InboundSigningSecret.Valid && row.InboundSigningSecret.String != ""
 	out.OutboundWebhookSecretSet = row.OutboundWebhookSecret.Valid && row.OutboundWebhookSecret.String != ""
 	return out
+}
+
+// withIssueLoopFields merges the workflow_type / loop_spec columns (read via
+// IssueLoopColumnStore, outside the sqlc-generated row) into a response.
+func withIssueLoopFields(resp workflowResponse, f IssueLoopFields) workflowResponse {
+	if f.WorkflowType != "" {
+		resp.WorkflowType = f.WorkflowType
+	}
+	resp.LoopSpec = f.LoopSpec
+	return resp
 }
 
 type runResponse struct {
@@ -180,6 +213,18 @@ type writeWorkflowRequest struct {
 	// Phase-2 editor metadata. Optional; absent → defaults to "form" + null.
 	EditorMode   string          `json:"editor_mode,omitempty"`
 	EditorLayout json.RawMessage `json:"editor_layout,omitempty"`
+	// WorkflowType (FIR-2283): "standard" (default, absent) or "issue_loop".
+	// An issue_loop request supplies LoopSpec instead of trigger/action —
+	// see validateWriteRequest and materializeIssueLoop. TriggerType /
+	// ActionType are ignored for an issue_loop request; the handler pins
+	// them to an inert placeholder (see issueLoopPlaceholderTrigger/Action)
+	// since the compiled child rules are what actually run.
+	WorkflowType string          `json:"workflow_type,omitempty"`
+	LoopSpec     json.RawMessage `json:"loop_spec,omitempty"`
+}
+
+func (r writeWorkflowRequest) isIssueLoop() bool {
+	return r.WorkflowType == WorkflowTypeIssueLoop
 }
 
 // validateWriteRequest enforces the shape we let through to the DB before we
@@ -197,6 +242,22 @@ type writeWorkflowRequest struct {
 func validateWriteRequest(req writeWorkflowRequest) error {
 	if req.Name == "" {
 		return errors.New("name is required")
+	}
+	if req.isIssueLoop() {
+		// An issue_loop row's trigger/action are the inert placeholder the
+		// handler pins server-side (issueLoopPlaceholderTrigger/Action) — the
+		// compiled child rules are what actually run. Validate the recipe
+		// itself instead of the (ignored) trigger/action the client sent.
+		if len(req.LoopSpec) == 0 {
+			return errors.New("loop_spec is required for an issue_loop workflow")
+		}
+		var probe struct {
+			Goal string `json:"goal"`
+		}
+		if err := json.Unmarshal(req.LoopSpec, &probe); err != nil {
+			return fmt.Errorf("loop_spec: %w", err)
+		}
+		return nil
 	}
 	if !knownTrigger(req.TriggerType) {
 		return errors.New("unknown trigger_type")
@@ -288,6 +349,20 @@ func knownEditorMode(m string) bool {
 	return false
 }
 
+// issueLoopPlaceholderRule returns the inert trigger/action pair persisted on
+// an issue_loop recipe's own cerebro_workflow row. The recipe itself never
+// fires on its own — IssueLoopCompiler compiles it into real dispatch/gate/
+// escalate child rules (see issue_loop.go) that do the actual work — so the
+// parent row's trigger/action only need to satisfy the existing NOT
+// NULL/CHECK constraints on cerebro_workflow without ever running. Reusing
+// already-known enum values (rather than adding a new one) means no CHECK
+// constraint migration is needed: webhook_inbound only fires if something
+// POSTs to this row's own (never-shared, never-published) webhook token, and
+// comment_on_issue with empty content is a harmless no-op even in that case.
+func issueLoopPlaceholderRule() (triggerType string, triggerConfig json.RawMessage, actionType string, actionConfig json.RawMessage) {
+	return TriggerWebhookInbound, json.RawMessage("{}"), ActionCommentOnIssue, json.RawMessage(`{"target":"self","content":""}`)
+}
+
 // List handles GET /api/cerebro/workflows.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireUserID(w, r); !ok {
@@ -302,9 +377,28 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list workflows")
 		return
 	}
+	var issueLoopFields map[string]IssueLoopFields
+	if h.issueLoopColumns != nil {
+		issueLoopFields, err = h.issueLoopColumns.GetMany(r.Context(), wsUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list workflows")
+			return
+		}
+	}
 	out := make([]workflowResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toWorkflowResponse(row))
+		f, ok := issueLoopFields[util.UUIDToString(row.ID)]
+		if ok && f.GeneratedFromWorkflowID != "" {
+			// Hide the dispatch/gate/escalate rules an issue_loop recipe
+			// compiled — they are the bridge's output, not something a
+			// person edits directly (see issue_loop_columns.go).
+			continue
+		}
+		resp := toWorkflowResponse(row)
+		if ok {
+			resp = withIssueLoopFields(resp, f)
+		}
+		out = append(out, resp)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"workflows": out})
 }
@@ -329,7 +423,13 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "workflow not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, toWorkflowResponse(row))
+	resp := toWorkflowResponse(row)
+	if h.issueLoopColumns != nil {
+		if f, err := h.issueLoopColumns.Get(r.Context(), id); err == nil {
+			resp = withIssueLoopFields(resp, f)
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // Create handles POST /api/cerebro/workflows.
@@ -378,16 +478,20 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if editorMode == "" {
 		editorMode = EditorModeForm
 	}
+	triggerType, triggerConfig, actionType, actionConfig := req.TriggerType, req.TriggerConfig, req.ActionType, req.ActionConfig
+	if req.isIssueLoop() {
+		triggerType, triggerConfig, actionType, actionConfig = issueLoopPlaceholderRule()
+	}
 	row, err := h.Cerebro.CreateCerebroWorkflow(r.Context(), cerebrodb.CreateCerebroWorkflowParams{
 		WorkspaceID:   wsUUID,
 		ProjectID:     projectID,
 		Name:          req.Name,
 		Enabled:       enabled,
-		TriggerType:   req.TriggerType,
-		TriggerConfig: defaultJSON(req.TriggerConfig, "{}"),
+		TriggerType:   triggerType,
+		TriggerConfig: defaultJSON(triggerConfig, "{}"),
 		Conditions:    defaultJSON(req.Conditions, "[]"),
-		ActionType:    req.ActionType,
-		ActionConfig:  defaultJSON(req.ActionConfig, "{}"),
+		ActionType:    actionType,
+		ActionConfig:  defaultJSON(actionConfig, "{}"),
 		EditorMode:    editorMode,
 		EditorLayout:  []byte(req.EditorLayout),
 		CreatedByID:   creatorUUID,
@@ -398,7 +502,49 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.materializeLoopPlanning(r.Context(), wsUUID, creatorUUID, actorType(r), req)
+
+	if req.isIssueLoop() {
+		resp, syncErr := h.materializeIssueLoop(r.Context(), wsUUID, row.ID, projectID, creatorUUID, actorType(r), req.LoopSpec)
+		if syncErr != nil {
+			// A bad recipe must not leave a phantom workflow behind — delete
+			// the row we just created and surface the validation error.
+			_ = h.Cerebro.DeleteCerebroWorkflow(r.Context(), row.ID)
+			writeError(w, http.StatusBadRequest, syncErr.Error())
+			return
+		}
+		writeJSON(w, http.StatusCreated, resp)
+		return
+	}
 	writeJSON(w, http.StatusCreated, toWorkflowResponse(row))
+}
+
+// materializeIssueLoop persists the issue_loop columns on workflowID and, if
+// an IssueLoopCompiler is wired, compiles the recipe onto the engine. Returns
+// the response DTO to send back on success, or an error the caller surfaces
+// as a 400 (an issue_loop recipe that fails to compile must not look saved
+// and working — the compiler's own validation, loops.Spec.Validate, is the
+// source of truth for whether a recipe is runnable).
+func (h *Handler) materializeIssueLoop(ctx context.Context, wsUUID, workflowID, projectID, creatorUUID pgtype.UUID, createdByType string, loopSpecJSON json.RawMessage) (workflowResponse, error) {
+	if h.issueLoopColumns == nil {
+		return workflowResponse{}, errors.New("issue workflow support is not wired on this server")
+	}
+	if err := h.issueLoopColumns.Set(ctx, workflowID, WorkflowTypeIssueLoop, loopSpecJSON); err != nil {
+		return workflowResponse{}, err
+	}
+	if h.issueLoopCompiler != nil {
+		if err := h.issueLoopCompiler.SyncIssueLoop(ctx, wsUUID, workflowID, projectID, creatorUUID, createdByType, loopSpecJSON); err != nil {
+			return workflowResponse{}, err
+		}
+	}
+	row, err := h.Cerebro.GetCerebroWorkflow(ctx, workflowID)
+	if err != nil {
+		return workflowResponse{}, err
+	}
+	fields, err := h.issueLoopColumns.Get(ctx, workflowID)
+	if err != nil {
+		return workflowResponse{}, err
+	}
+	return withIssueLoopFields(toWorkflowResponse(row), fields), nil
 }
 
 // materializeLoopPlanning creates the companion loop:planning-dispatch
@@ -429,7 +575,8 @@ func (h *Handler) materializeLoopPlanning(ctx context.Context, wsUUID, creatorUU
 
 // Update handles PUT /api/cerebro/workflows/{id}.
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireUserID(w, r); !ok {
+	userID, ok := requireUserID(w, r)
+	if !ok {
 		return
 	}
 	id, ok := pathUUIDOr400(w, r, "id")
@@ -478,21 +625,40 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if editorMode == "" {
 		editorMode = EditorModeForm
 	}
+	triggerType, triggerConfig, actionType, actionConfig := req.TriggerType, req.TriggerConfig, req.ActionType, req.ActionConfig
+	if req.isIssueLoop() {
+		triggerType, triggerConfig, actionType, actionConfig = issueLoopPlaceholderRule()
+	}
 	row, err := h.Cerebro.UpdateCerebroWorkflow(r.Context(), cerebrodb.UpdateCerebroWorkflowParams{
 		ID:            id,
 		Name:          req.Name,
 		Enabled:       enabled,
 		ProjectID:     projectID,
-		TriggerType:   req.TriggerType,
-		TriggerConfig: defaultJSON(req.TriggerConfig, "{}"),
+		TriggerType:   triggerType,
+		TriggerConfig: defaultJSON(triggerConfig, "{}"),
 		Conditions:    defaultJSON(req.Conditions, "[]"),
-		ActionType:    req.ActionType,
-		ActionConfig:  defaultJSON(req.ActionConfig, "{}"),
+		ActionType:    actionType,
+		ActionConfig:  defaultJSON(actionConfig, "{}"),
 		EditorMode:    editorMode,
 		EditorLayout:  []byte(req.EditorLayout),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update workflow")
+		return
+	}
+
+	if req.isIssueLoop() {
+		actorUUID, actorErr := util.ParseUUID(actorID(r, userID))
+		if actorErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid actor id")
+			return
+		}
+		resp, syncErr := h.materializeIssueLoop(r.Context(), existing.WorkspaceID, row.ID, projectID, actorUUID, actorType(r), req.LoopSpec)
+		if syncErr != nil {
+			writeError(w, http.StatusBadRequest, syncErr.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	writeJSON(w, http.StatusOK, toWorkflowResponse(row))
@@ -767,6 +933,141 @@ func (h *Handler) Runs(w http.ResponseWriter, r *http.Request) {
 		"limit":  limit,
 		"offset": offset,
 	})
+}
+
+// loopStateResponse is the control strip's live-state read for an issue_loop
+// recipe against one issue: round k/N-shaped data (round + the caps that
+// bound it, read off the recipe's own loop_spec), whether the gate is
+// stopped, and any human checks currently awaiting a decision.
+type loopStateResponse struct {
+	Round               int32               `json:"round"`
+	MaxIterations       int                 `json:"max_iterations,omitempty"`
+	Stopped             bool                `json:"stopped"`
+	StopReason          string              `json:"stop_reason,omitempty"`
+	PendingHumanChecks  []PendingHumanCheck `json:"pending_human_checks"`
+}
+
+// LoopState handles GET /api/cerebro/workflows/{id}/loop-state?issue_id=<uuid>.
+// {id} is the issue_loop recipe; issue_id is the specific issue being run
+// through it (the recipe itself has no single "the" issue — a person picks
+// one to watch, typically the test issue they just ran it on).
+func (h *Handler) LoopState(w http.ResponseWriter, r *http.Request) {
+	row, ok := h.loadWorkflowForWrite(w, r)
+	if !ok {
+		return
+	}
+	if h.issueLoopColumns == nil || h.loopCheckStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "issue workflow live state is not wired on this server")
+		return
+	}
+	issueIDStr := r.URL.Query().Get("issue_id")
+	if issueIDStr == "" {
+		writeError(w, http.StatusBadRequest, "issue_id is required")
+		return
+	}
+
+	gateID, err := h.issueLoopColumns.GeneratedChildIDByName(r.Context(), row.ID, "loop:delivery-gate")
+	if err != nil {
+		// Not compiled yet (e.g. a brand-new recipe that failed to sync) —
+		// report the zero state rather than an error; there is nothing to
+		// watch yet.
+		writeJSON(w, http.StatusOK, loopStateResponse{PendingHumanChecks: []PendingHumanCheck{}})
+		return
+	}
+	gate := util.UUIDToString(gateID)
+
+	state, err := h.loopCheckStore.GateState(r.Context(), issueIDStr, gate)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load loop state")
+		return
+	}
+	pending, err := h.loopCheckStore.PendingHumanChecks(r.Context(), issueIDStr, gate)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load pending human checks")
+		return
+	}
+	if pending == nil {
+		pending = []PendingHumanCheck{}
+	}
+
+	maxIterations := 0
+	if h.issueLoopColumns != nil {
+		if fields, err := h.issueLoopColumns.Get(r.Context(), row.ID); err == nil && len(fields.LoopSpec) > 0 {
+			var spec struct {
+				Caps struct {
+					MaxIterations int `json:"max_iterations"`
+				} `json:"caps"`
+			}
+			if json.Unmarshal(fields.LoopSpec, &spec) == nil {
+				maxIterations = spec.Caps.MaxIterations
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, loopStateResponse{
+		Round:              state.Round,
+		MaxIterations:      maxIterations,
+		Stopped:            state.Stopped,
+		StopReason:         state.StopReason,
+		PendingHumanChecks: pending,
+	})
+}
+
+// ApproveHumanCheck handles
+// POST /api/cerebro/workflows/{id}/human-checks/{checkId}/approve.
+// Body: { issue_id, approved, note }. {id} is the issue_loop recipe;
+// checkId is the verification id from the recipe. Records the
+// authenticated caller's decision and lets the gate re-evaluate on its next
+// natural pass (the same reconciliation loop a reported check/judge verdict
+// feeds).
+func (h *Handler) ApproveHumanCheck(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	row, ok := h.loadWorkflowForWrite(w, r)
+	if !ok {
+		return
+	}
+	if h.issueLoopColumns == nil || h.loopCheckStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "issue workflow approvals are not wired on this server")
+		return
+	}
+	checkID := chi.URLParam(r, "checkId")
+	if checkID == "" {
+		writeError(w, http.StatusBadRequest, "checkId is required")
+		return
+	}
+
+	var req struct {
+		IssueID  string `json:"issue_id"`
+		Approved bool   `json:"approved"`
+		Note     string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.IssueID == "" {
+		writeError(w, http.StatusBadRequest, "issue_id is required")
+		return
+	}
+	if !req.Approved && req.Note == "" {
+		writeError(w, http.StatusBadRequest, "note is required when approved is false")
+		return
+	}
+
+	gateID, err := h.issueLoopColumns.GeneratedChildIDByName(r.Context(), row.ID, "loop:delivery-gate")
+	if err != nil {
+		writeError(w, http.StatusNotFound, "this recipe has not been compiled onto the engine yet")
+		return
+	}
+
+	if err := h.loopCheckStore.ApproveHumanCheck(r.Context(), req.IssueID, util.UUIDToString(gateID), checkID, req.Approved, req.Note, actorID(r, userID), actorType(r)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to record decision")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"recorded": true})
 }
 
 // --- helpers ---

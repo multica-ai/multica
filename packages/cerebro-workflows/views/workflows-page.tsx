@@ -102,8 +102,8 @@ export function WorkflowsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[28%]">Name</TableHead>
-                <TableHead className="w-[22%]">Trigger</TableHead>
-                <TableHead className="w-[22%]">Action</TableHead>
+                <TableHead className="w-[22%]">Type</TableHead>
+                <TableHead className="w-[22%]">Trigger / Action</TableHead>
                 <TableHead className="w-[12%]">Active</TableHead>
                 <TableHead className="w-[16%] text-right">Actions</TableHead>
               </TableRow>
@@ -130,8 +130,14 @@ export function WorkflowsPage() {
                       </div>
                     </button>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{wf.trigger_type}</TableCell>
-                  <TableCell className="font-mono text-xs">{wf.action_type}</TableCell>
+                  <TableCell className="text-xs">
+                    {wf.workflow_type === "issue_loop" ? "Issue workflow" : "Standard"}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {wf.workflow_type === "issue_loop"
+                      ? "Plan → Build → Delivery gate"
+                      : `${wf.trigger_type} → ${wf.action_type}`}
+                  </TableCell>
                   <TableCell>
                     <Switch
                       checked={wf.enabled}

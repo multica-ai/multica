@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   CerebroWorkflow,
+  LoopStateResponse,
   RegenerateInboundSigningSecretResponse,
   RegenerateInboundTokenResponse,
   RegenerateOutboundSecretResponse,
@@ -57,6 +58,10 @@ export const workflowSchema = z
     inbound_webhook_token: z.string().nullable().optional(),
     inbound_signing_secret_set: z.boolean().optional().default(false),
     outbound_webhook_secret_set: z.boolean().optional().default(false),
+    // FIR-2283. Default "standard" so an older backend that omits the field
+    // entirely renders as the pre-existing workflow type, never crashes.
+    workflow_type: z.string().optional().default("standard"),
+    loop_spec: z.unknown().optional(),
   })
   .passthrough();
 
@@ -114,6 +119,26 @@ export const regenerateOutboundSecretSchema = z
   })
   .passthrough();
 
+// FIR-2283 — control strip live state.
+export const pendingHumanCheckSchema = z
+  .object({
+    check_id: z.string(),
+    prompt: z.string().default(""),
+    assignee_type: z.string(),
+    assignee_id: z.string(),
+  })
+  .passthrough();
+
+export const loopStateSchema = z
+  .object({
+    round: z.number().default(0),
+    max_iterations: z.number().optional(),
+    stopped: z.boolean().default(false),
+    stop_reason: z.string().optional(),
+    pending_human_checks: z.array(pendingHumanCheckSchema).default([]),
+  })
+  .passthrough();
+
 // Empty / fallback values used by parseWithFallback at call sites. Defined
 // once here so the values stay consistent across api.ts and queries.ts.
 export const EMPTY_WORKFLOWS_LIST: WorkflowsListResponse = { workflows: [] };
@@ -158,4 +183,11 @@ export const EMPTY_WORKFLOW: CerebroWorkflow = {
   inbound_webhook_token: undefined,
   inbound_signing_secret_set: false,
   outbound_webhook_secret_set: false,
+  workflow_type: "standard",
+};
+
+export const EMPTY_LOOP_STATE: LoopStateResponse = {
+  round: 0,
+  stopped: false,
+  pending_human_checks: [],
 };

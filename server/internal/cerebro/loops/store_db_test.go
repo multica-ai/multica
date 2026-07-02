@@ -90,7 +90,7 @@ func TestStore_RoundTripDrivesGate(t *testing.T) {
 	if len(outcomes) != 2 {
 		t.Fatalf("want 2 enqueued outcomes, got %d", len(outcomes))
 	}
-	if got := Reconcile(cfg, outcomes, nil).Action; got != GateWait {
+	if got := Reconcile(cfg, outcomes, nil, nil).Action; got != GateWait {
 		t.Fatalf("all pending should wait, got %s", got)
 	}
 
@@ -103,7 +103,7 @@ func TestStore_RoundTripDrivesGate(t *testing.T) {
 	if got := EvaluateGate(cfg, outcomes); got != GateFailed {
 		t.Fatalf("a failed check should fail the gate, got %s", got)
 	}
-	if got := Reconcile(cfg, outcomes, nil).Action; got != GateRevise {
+	if got := Reconcile(cfg, outcomes, nil, nil).Action; got != GateRevise {
 		t.Fatalf("a failed check should revise, got %s", got)
 	}
 
@@ -119,7 +119,7 @@ func TestStore_RoundTripDrivesGate(t *testing.T) {
 	if got := EvaluateGate(cfg, outcomes); got != GatePassed {
 		t.Fatalf("all green should pass the gate, got %s", got)
 	}
-	if got := Reconcile(cfg, outcomes, nil).Action; got != GateAdvance {
+	if got := Reconcile(cfg, outcomes, nil, nil).Action; got != GateAdvance {
 		t.Fatalf("all green should advance, got %s", got)
 	}
 
@@ -165,7 +165,7 @@ func TestStore_JudgeRoundTripDrivesGate(t *testing.T) {
 	if len(judgeOutcomes) != 1 {
 		t.Fatalf("want 1 enqueued judge outcome, got %d", len(judgeOutcomes))
 	}
-	if got := Reconcile(cfg, nil, judgeOutcomes).Action; got != GateWait {
+	if got := Reconcile(cfg, nil, judgeOutcomes, nil).Action; got != GateWait {
 		t.Fatalf("pending judge should wait, got %s", got)
 	}
 
@@ -175,7 +175,7 @@ func TestStore_JudgeRoundTripDrivesGate(t *testing.T) {
 		t.Fatalf("report judge failure: %v", err)
 	}
 	judgeOutcomes, _ = store.JudgeOutcomes(ctx, issueID, gate, round)
-	if got := Reconcile(cfg, nil, judgeOutcomes).Action; got != GateRevise {
+	if got := Reconcile(cfg, nil, judgeOutcomes, nil).Action; got != GateRevise {
 		t.Fatalf("a failed judge verdict should revise, got %s", got)
 	}
 	if len(judgeOutcomes) != 1 || len(judgeOutcomes[0].Blocking) != 1 {
@@ -187,7 +187,7 @@ func TestStore_JudgeRoundTripDrivesGate(t *testing.T) {
 		t.Fatalf("report judge pass: %v", err)
 	}
 	judgeOutcomes, _ = store.JudgeOutcomes(ctx, issueID, gate, round)
-	if got := Reconcile(cfg, nil, judgeOutcomes).Action; got != GateAdvance {
+	if got := Reconcile(cfg, nil, judgeOutcomes, nil).Action; got != GateAdvance {
 		t.Fatalf("a passing judge verdict should advance, got %s", got)
 	}
 
@@ -199,7 +199,7 @@ func TestStore_JudgeRoundTripDrivesGate(t *testing.T) {
 	if len(judgeOutcomes) != 1 {
 		t.Fatalf("re-enqueue must not add rows, got %d", len(judgeOutcomes))
 	}
-	if got := Reconcile(cfg, nil, judgeOutcomes).Action; got != GateAdvance {
+	if got := Reconcile(cfg, nil, judgeOutcomes, nil).Action; got != GateAdvance {
 		t.Fatalf("re-enqueue must not reopen the gate, got %s", got)
 	}
 }

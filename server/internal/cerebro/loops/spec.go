@@ -35,44 +35,73 @@ const (
 // programmatic check: the command must exit 0 to pass.
 const ExpectExitZero = "exit_zero"
 
+// Assignee types a judge or human check's AssigneeType may carry. Mirrors
+// workflows.AssigneeTypeAgent / workflows.AssigneeTypeMember (spelled out
+// locally rather than imported so this file stays independent of the
+// workflows package — see the package doc: spec.go owns only the spec
+// shape, not execution).
+const (
+	AssigneeAgent  = "agent"
+	AssigneeMember = "member"
+)
+
 // Verification is one typed success criterion.
 type Verification struct {
-	ID   string    `yaml:"id"`
-	Type CheckType `yaml:"type"`
+	ID   string    `yaml:"id" json:"id"`
+	Type CheckType `yaml:"type" json:"type"`
+	// Label is a short human-readable name for the condition (e.g. "Test
+	// suite" for a programmatic check whose real command is hidden behind
+	// "Advanced" in the Issue workflow editor). Display-only — the engine
+	// never reads it, so it round-trips through the spec without touching
+	// the compiled gate config.
+	Label string `yaml:"label,omitempty" json:"label,omitempty"`
 
 	// Programmatic fields.
-	Check  []string `yaml:"check,omitempty"`  // argv array, never a shell string
-	Expect string   `yaml:"expect,omitempty"` // defaults to ExpectExitZero
+	Check  []string `yaml:"check,omitempty" json:"check,omitempty"`   // argv array, never a shell string
+	Expect string   `yaml:"expect,omitempty" json:"expect,omitempty"` // defaults to ExpectExitZero
 
-	// Judge field.
-	Rubric string `yaml:"rubric,omitempty"`
+	// Judge fields. Rubric is the free-text criterion scored; Skill, when
+	// set, names a skill the assigned agent runs instead of a bare rubric
+	// prompt ("AI review runs a skill or a prompt" — Rubric is always kept
+	// as the human-readable criterion shown in the UI either way).
+	Rubric string `yaml:"rubric,omitempty" json:"rubric,omitempty"`
+	Skill  string `yaml:"skill,omitempty" json:"skill,omitempty"`
 
 	// Human field.
-	Prompt string `yaml:"prompt,omitempty"`
+	Prompt string `yaml:"prompt,omitempty" json:"prompt,omitempty"`
+
+	// AssigneeType/AssigneeID select who performs a judge or human check —
+	// "agent" (AssigneeID is an agent id) or "member" (AssigneeID is a
+	// person). Unused for programmatic checks; the engine always runs those
+	// itself. Empty AssigneeType on a judge check falls back to the spec-wide
+	// judge params (CompileParams.JudgeAgentID) so an older spec without
+	// per-check assignees still dispatches.
+	AssigneeType string `yaml:"assignee_type,omitempty" json:"assignee_type,omitempty"`
+	AssigneeID   string `yaml:"assignee_id,omitempty" json:"assignee_id,omitempty"`
 }
 
 // Caps are the termination guards. All are required and must be positive — a
 // loop with no guard is exactly the runaway we refuse to emit.
 type Caps struct {
-	MaxIterations    int `yaml:"max_iterations"`
-	MaxRevisions     int `yaml:"max_revisions"`
-	NoProgressStalls int `yaml:"no_progress_stalls"`
+	MaxIterations    int `yaml:"max_iterations" json:"max_iterations"`
+	MaxRevisions     int `yaml:"max_revisions" json:"max_revisions"`
+	NoProgressStalls int `yaml:"no_progress_stalls" json:"no_progress_stalls"`
 }
 
 // Spec is a parsed loop.yaml.
 type Spec struct {
-	Version          int            `yaml:"version"`
-	Goal             string         `yaml:"goal"`
-	DefinitionOfDone string         `yaml:"definition_of_done"`
-	Verification     []Verification `yaml:"verification"`
-	Caps             Caps           `yaml:"caps"`
+	Version          int            `yaml:"version" json:"version"`
+	Goal             string         `yaml:"goal" json:"goal"`
+	DefinitionOfDone string         `yaml:"definition_of_done" json:"definition_of_done"`
+	Verification     []Verification `yaml:"verification" json:"verification"`
+	Caps             Caps           `yaml:"caps" json:"caps"`
 	// Planning gates the loop behind an explicit design phase. When true,
 	// Compile emits a loop:planning-dispatch rule that fires the plan skill
 	// when the issue enters the planning status (default "todo"), so the
 	// assigned agent must produce and post a plan before the build phase
 	// begins. The agent advances to the build status (default "in_progress")
 	// when it is satisfied with the plan. The delivery gate is unchanged.
-	Planning bool `yaml:"planning,omitempty"`
+	Planning bool `yaml:"planning,omitempty" json:"planning,omitempty"`
 }
 
 // SpecVersion is the only supported loop.yaml schema version.
@@ -185,6 +214,20 @@ func (s *Spec) JudgeChecks() []Verification {
 	out := make([]Verification, 0, len(s.Verification))
 	for _, v := range s.Verification {
 		if v.Type == CheckJudge {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// HumanChecks returns the criteria a person (or an agent standing in for
+// one) must explicitly approve. Like a judge check, the engine cannot decide
+// these on its own — it dispatches each one to the configured assignee and
+// waits for a reported approve/reject decision (see CheckDispatcher.DispatchHuman).
+func (s *Spec) HumanChecks() []Verification {
+	out := make([]Verification, 0, len(s.Verification))
+	for _, v := range s.Verification {
+		if v.Type == CheckHuman {
 			out = append(out, v)
 		}
 	}

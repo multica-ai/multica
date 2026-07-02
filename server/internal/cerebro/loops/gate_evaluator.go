@@ -86,20 +86,28 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 	if err != nil {
 		return false, err
 	}
+	humanOutcomes, err := g.store.HumanOutcomes(ctx, iid, gate, state.Round)
+	if err != nil {
+		return false, err
+	}
 
-	decision := Reconcile(cfg, outcomes, judgeOutcomes)
+	decision := Reconcile(cfg, outcomes, judgeOutcomes, humanOutcomes)
 	switch decision.Action {
 	case GateAdvance:
 		return true, nil
 	case GateEnqueue:
 		// Register the missing checks as pending, then send any not-yet-sent
-		// check to the worker agent's runtime (and any not-yet-sent judge
-		// check to the judge agent's runtime) so they actually run. The gate
-		// still holds (returns false) until every runtime reports green.
+		// check to the worker agent's runtime, any not-yet-sent judge check to
+		// the judge agent's runtime, and any not-yet-sent human check to its
+		// assignee, so they actually run. The gate still holds (returns
+		// false) until every one reports back.
 		if err := g.store.Enqueue(ctx, iid, gate, state.Round, decision.Enqueue); err != nil {
 			return false, err
 		}
 		if err := g.store.EnqueueJudge(ctx, iid, gate, state.Round, decision.EnqueueJudge); err != nil {
+			return false, err
+		}
+		if err := g.store.EnqueueHuman(ctx, iid, gate, state.Round, decision.EnqueueHuman); err != nil {
 			return false, err
 		}
 		if err := g.dispatchPending(ctx, iid, cfg.AgentID, gate, state.Round); err != nil {
@@ -108,9 +116,12 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 		if err := g.dispatchPendingJudge(ctx, iid, cfg, gate, state.Round); err != nil {
 			return false, err
 		}
+		if err := g.dispatchPendingHuman(ctx, iid, gate, state.Round); err != nil {
+			return false, err
+		}
 		return false, nil
 	case GateRevise:
-		return false, g.revise(ctx, iid, gate, cfg, outcomes, judgeOutcomes)
+		return false, g.revise(ctx, iid, gate, cfg, outcomes, judgeOutcomes, humanOutcomes)
 	default:
 		// GateWait: every required check is in flight; hold.
 		return false, nil
@@ -122,8 +133,8 @@ func (g *GateEvaluator) EvaluateCheckGate(ctx context.Context, issueID, gate str
 // can fix the failing checks in the fresh round the caps tracker just opened.
 // A cap trip freezes the gate instead: EvaluateCheckGate's Stopped check on
 // the next call is what actually stops the loop from consuming more rounds.
-func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate string, cfg CheckGateConfig, outcomes []CheckOutcome, judgeOutcomes []JudgeOutcome) error {
-	signature := OutcomeSignature(outcomes, judgeOutcomes)
+func (g *GateEvaluator) revise(ctx context.Context, issueID pgtype.UUID, gate string, cfg CheckGateConfig, outcomes []CheckOutcome, judgeOutcomes []JudgeOutcome, humanOutcomes []HumanOutcome) error {
+	signature := OutcomeSignature(outcomes, judgeOutcomes, humanOutcomes)
 	next, err := g.store.RecordRevision(ctx, issueID, gate, signature, cfg.Caps)
 	if err != nil {
 		return err
@@ -176,18 +187,17 @@ func (g *GateEvaluator) dispatchPending(ctx context.Context, issueID pgtype.UUID
 }
 
 // dispatchPendingJudge sends every enqueued-but-undispatched judge check for
-// this gate round to the judge agent's runtime exactly once, mirroring
-// dispatchPending. It falls back to the worker agent (cfg.AgentID) when no
-// distinct JudgeAgentID is configured, so a spec with judge checks but no
-// judge agent still dispatches instead of stalling forever — Compile always
-// fills JudgeAgentID (defaulting to AgentID), but a hand-built config used
-// directly against the evaluator may not.
+// this gate round to its judge agent's runtime exactly once, mirroring
+// dispatchPending. A check with its own AssigneeType==AssigneeAgent (set on
+// its Verification in the Issue workflow editor) dispatches to that agent and
+// skill; otherwise it falls back to cfg.JudgeAgentID/cfg.JudgeSkill, and
+// further to the worker agent (cfg.AgentID) when even that is empty, so a
+// spec with judge checks but no configured judge still dispatches instead of
+// stalling forever — Compile always fills JudgeAgentID (defaulting to
+// AgentID), but a hand-built config used directly against the evaluator may
+// not.
 func (g *GateEvaluator) dispatchPendingJudge(ctx context.Context, issueID pgtype.UUID, cfg CheckGateConfig, gate string, round int32) error {
-	judgeAgentID := cfg.JudgeAgentID
-	if judgeAgentID == "" {
-		judgeAgentID = cfg.AgentID
-	}
-	if g.dispatcher == nil || judgeAgentID == "" {
+	if g.dispatcher == nil {
 		return nil
 	}
 	pending, err := g.store.PendingJudgeDispatch(ctx, issueID, gate, round)
@@ -196,18 +206,87 @@ func (g *GateEvaluator) dispatchPendingJudge(ctx context.Context, issueID pgtype
 	}
 	issueStr := util.UUIDToString(issueID)
 	for _, check := range pending {
+		checkCfg, found := findJudgeCheckConfig(cfg, check.ID)
+		agentID, skill := judgeAssignee(cfg, checkCfg, found)
+		if agentID == "" {
+			continue
+		}
 		if err := g.dispatcher.DispatchJudge(ctx, JudgeDispatch{
-			AgentID:   judgeAgentID,
+			AgentID:   agentID,
 			IssueID:   issueStr,
 			Gate:      gate,
 			Round:     round,
 			CheckID:   check.ID,
 			Rubric:    check.Rubric,
-			SkillName: cfg.JudgeSkill,
+			SkillName: skill,
 		}); err != nil {
 			return fmt.Errorf("dispatch pending judge check: %w", err)
 		}
 		if err := g.store.MarkJudgeDispatched(ctx, issueID, gate, round, check.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// findJudgeCheckConfig looks up a judge check's own config (assignee/skill
+// override) by id from the gate config's JudgeChecks list.
+func findJudgeCheckConfig(cfg CheckGateConfig, id string) (JudgeCheck, bool) {
+	for _, c := range cfg.JudgeChecks {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return JudgeCheck{}, false
+}
+
+// judgeAssignee resolves which agent (and skill) scores a judge check:
+// the check's own AssigneeType==AssigneeAgent override first, then the gate's
+// spec-wide JudgeAgentID/JudgeSkill, then the worker agent as a last resort
+// (self-graded fallback) so a judge check never silently stalls forever.
+func judgeAssignee(cfg CheckGateConfig, check JudgeCheck, found bool) (agentID, skill string) {
+	if found && check.AssigneeType == AssigneeAgent && check.AssigneeID != "" {
+		s := check.Skill
+		if s == "" {
+			s = cfg.JudgeSkill
+		}
+		return check.AssigneeID, s
+	}
+	if cfg.JudgeAgentID != "" {
+		return cfg.JudgeAgentID, cfg.JudgeSkill
+	}
+	return cfg.AgentID, cfg.JudgeSkill
+}
+
+// dispatchPendingHuman sends every enqueued-but-undispatched human check for
+// this gate round to its assignee exactly once. An agent assignee is
+// dispatched a task the same way a judge check is (asking it to call
+// report_loop_human instead of report_loop_judge); a member (person)
+// assignee has nothing to dispatch to — approval happens out of band via the
+// approve-human-check endpoint when they act on it — so a member check is
+// simply stamped as dispatched (now visible / actionable) without an egress
+// call.
+func (g *GateEvaluator) dispatchPendingHuman(ctx context.Context, issueID pgtype.UUID, gate string, round int32) error {
+	pending, err := g.store.PendingHumanDispatch(ctx, issueID, gate, round)
+	if err != nil {
+		return err
+	}
+	issueStr := util.UUIDToString(issueID)
+	for _, check := range pending {
+		if check.AssigneeType == AssigneeAgent && check.AssigneeID != "" && g.dispatcher != nil {
+			if err := g.dispatcher.DispatchHuman(ctx, HumanDispatch{
+				AssigneeType: check.AssigneeType,
+				AssigneeID:   check.AssigneeID,
+				IssueID:      issueStr,
+				Gate:         gate,
+				Round:        round,
+				CheckID:      check.ID,
+				Prompt:       check.Prompt,
+			}); err != nil {
+				return fmt.Errorf("dispatch pending human check: %w", err)
+			}
+		}
+		if err := g.store.MarkHumanDispatched(ctx, issueID, gate, round, check.ID); err != nil {
 			return err
 		}
 	}

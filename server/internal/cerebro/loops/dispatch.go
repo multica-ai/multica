@@ -53,10 +53,30 @@ type CheckDispatch struct {
 // self-graded fallback), never assumed to be the same session as the worker
 // — the gate does not enforce blindness, but the caller should route a real
 // judge agent here for the verdict to mean anything.
+// DispatchHuman is the seam for a human-type check with an agent assignee:
+// instead of a runnable command or a rubric, it asks the agent to review the
+// delivered work and report an explicit approve/reject decision (via
+// report_loop_human) — standing in for a person's sign-off. A member (person)
+// assignee has no dispatch egress at all: they act through the
+// approve-human-check HTTP endpoint when they choose to, so DispatchHuman is
+// only ever called for an agent assignee (see GateEvaluator.dispatchPendingHuman).
 type CheckDispatcher interface {
 	DispatchCheck(ctx context.Context, d CheckDispatch) error
 	DispatchRevision(ctx context.Context, d RevisionDispatch) error
 	DispatchJudge(ctx context.Context, d JudgeDispatch) error
+	DispatchHuman(ctx context.Context, d HumanDispatch) error
+}
+
+// HumanDispatch is one human check the engine asks an agent assignee to
+// decide, standing in for a person's sign-off.
+type HumanDispatch struct {
+	AssigneeType string // AssigneeAgent — this is only sent for an agent assignee
+	AssigneeID   string // agent whose runtime reviews and decides
+	IssueID      string // issue the loop is building
+	Gate         string // stable per-gate key (the workflow id)
+	Round        int32  // loop round the check belongs to
+	CheckID      string // the verification id from loop.yaml, echoed back on report
+	Prompt       string // what the assignee is being asked to approve
 }
 
 // JudgeDispatch is one judge check the engine asks a judge agent to score.
@@ -283,6 +303,70 @@ func buildJudgePrompt(d JudgeDispatch) string {
 			"pass (true only if the rubric is fully met), and blocking_issues (the specific, concrete reasons if pass is false; empty if true).\n\n"+
 			"Rubric:\n%s",
 		d.Gate, d.Round, d.CheckID, d.CheckID, d.Rubric,
+	)
+}
+
+// DispatchHuman enqueues a quick_create task asking an agent assignee to
+// review the delivered work and report an explicit approve/reject decision,
+// standing in for a person's sign-off. Only ever called for an agent
+// assignee — a member (person) assignee has no dispatch egress, see
+// HumanDispatch's doc comment. Fails loudly the same way DispatchJudge does
+// rather than silently dropping a check the gate is waiting on.
+func (t *TaskDispatcher) DispatchHuman(ctx context.Context, d HumanDispatch) error {
+	if d.Prompt == "" {
+		return fmt.Errorf("dispatch human: empty prompt")
+	}
+	agentID, err := util.ParseUUID(d.AssigneeID)
+	if err != nil {
+		return fmt.Errorf("dispatch human: parse assignee id: %w", err)
+	}
+	agent, err := t.queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return fmt.Errorf("dispatch human: load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return fmt.Errorf("dispatch human: agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return fmt.Errorf("dispatch human: agent has no runtime")
+	}
+
+	contextJSON, err := json.Marshal(map[string]any{
+		"type":         "quick_create",
+		"prompt":       buildHumanPrompt(d),
+		"workspace_id": util.UUIDToString(agent.WorkspaceID),
+		"loop_human": map[string]any{
+			"issue_id": d.IssueID,
+			"gate":     d.Gate,
+			"round":    d.Round,
+			"check_id": d.CheckID,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("dispatch human: marshal context: %w", err)
+	}
+
+	if _, err := t.queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+		AgentID:   agentID,
+		RuntimeID: agent.RuntimeID,
+		Priority:  0,
+		Context:   contextJSON,
+	}); err != nil {
+		return fmt.Errorf("dispatch human: enqueue task: %w", err)
+	}
+	return nil
+}
+
+// buildHumanPrompt renders the instruction an agent standing in for a human
+// sign-off sees. Unlike a judge check (score a rubric), this asks for an
+// explicit approve/reject decision plus a note explaining it either way.
+func buildHumanPrompt(d HumanDispatch) string {
+	return fmt.Sprintf(
+		"Review the delivered work for this issue yourself — do not take the builder's own summary as proof — "+
+			"then report your decision back to the loop gate via the report_loop_human tool with issue_id, gate, "+
+			"round, check_id=%q, approved (true only if you sign off), and note (why, either way).\n\n"+
+			"What you are being asked to approve (gate %s, round %d):\n%s",
+		d.CheckID, d.Gate, d.Round, d.Prompt,
 	)
 }
 

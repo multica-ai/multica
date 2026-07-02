@@ -18,6 +18,7 @@ type fakeDispatcher struct {
 	calls         []CheckDispatch
 	revisionCalls []RevisionDispatch
 	judgeCalls    []JudgeDispatch
+	humanCalls    []HumanDispatch
 }
 
 func (f *fakeDispatcher) DispatchCheck(ctx context.Context, d CheckDispatch) error {
@@ -32,6 +33,11 @@ func (f *fakeDispatcher) DispatchRevision(ctx context.Context, d RevisionDispatc
 
 func (f *fakeDispatcher) DispatchJudge(ctx context.Context, d JudgeDispatch) error {
 	f.judgeCalls = append(f.judgeCalls, d)
+	return nil
+}
+
+func (f *fakeDispatcher) DispatchHuman(ctx context.Context, d HumanDispatch) error {
+	f.humanCalls = append(f.humanCalls, d)
 	return nil
 }
 
