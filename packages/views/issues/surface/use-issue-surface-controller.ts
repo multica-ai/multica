@@ -68,6 +68,8 @@ export interface IssueSurfaceController {
   childProgressMap: Map<string, ChildProgress>;
   projectMap: Map<string, Project>;
   isLoading: boolean;
+  /** See IssueSurfaceData.isRefreshing — placeholder-backed revalidation. */
+  isRefreshing: boolean;
   isEmpty: boolean;
   openCreateIssue: (defaults?: IssueCreateDefaults) => void;
   moveIssue: (

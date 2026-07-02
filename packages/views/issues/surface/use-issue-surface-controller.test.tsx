@@ -399,6 +399,43 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.isEmpty).toBe(false);
   });
 
+  it("reports isRefreshing while a view change revalidates behind the previous snapshot", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    listIssues.mockResolvedValue({ issues: [], total: 0 });
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["list"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    // First load is loading, never refreshing — there is no previous
+    // snapshot to show as a placeholder.
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.isRefreshing).toBe(false);
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // Sort change: the key changes, the previous order stays rendered as a
+    // placeholder while the new order fetches — refreshing, NOT loading.
+    const resolvers: ((r: ListIssuesResponse) => void)[] = [];
+    listIssues.mockImplementation(
+      () => new Promise<ListIssuesResponse>((res) => resolvers.push(res)),
+    );
+    act(() => store.getState().setSortBy("priority"));
+
+    await waitFor(() => expect(result.current.isRefreshing).toBe(true));
+    expect(result.current.isLoading).toBe(false);
+
+    // The revalidation lands — the indicator clears.
+    await act(async () => {
+      for (const resolve of resolvers) resolve({ issues: [], total: 0 });
+    });
+    await waitFor(() => expect(result.current.isRefreshing).toBe(false));
+  });
+
   it("still reports isEmpty for the full-window modes when the list is empty", async () => {
     listIssues.mockResolvedValue({ issues: [], total: 0 });
 

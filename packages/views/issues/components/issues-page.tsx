@@ -9,7 +9,13 @@ import { useT } from "../../i18n";
 import { IssueSurface } from "../surface/issue-surface";
 import { IssuesHeader } from "./issues-header";
 
-function IssuesSurfaceHeader({ issues }: { issues: Issue[] }) {
+function IssuesSurfaceHeader({
+  issues,
+  isRefreshing,
+}: {
+  issues: Issue[];
+  isRefreshing: boolean;
+}) {
   const dateFilter = useViewStore((s) => s.dateFilter);
   const setDateFilter = useViewStore((s) => s.setDateFilter);
 
@@ -18,6 +24,7 @@ function IssuesSurfaceHeader({ issues }: { issues: Issue[] }) {
       scopedIssues={issues}
       dateFilter={dateFilter}
       onDateFilterChange={setDateFilter}
+      isRefreshing={isRefreshing}
     />
   );
 }
@@ -38,7 +45,10 @@ export function IssuesPage() {
         modes={["board", "list", "swimlane"]}
         batchToolbar="list"
         renderHeader={({ controller }) => (
-          <IssuesSurfaceHeader issues={controller.surfaceIssues} />
+          <IssuesSurfaceHeader
+            issues={controller.surfaceIssues}
+            isRefreshing={controller.isRefreshing}
+          />
         )}
         renderEmpty={() => (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">

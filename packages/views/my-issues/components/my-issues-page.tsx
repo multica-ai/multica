@@ -43,6 +43,7 @@ export function MyIssuesPage() {
               allIssues={controller.surfaceIssues}
               scope={scope}
               onScopeChange={setScope}
+              isRefreshing={controller.isRefreshing}
             />
           )}
           renderEmpty={() => (

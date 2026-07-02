@@ -16,16 +16,21 @@ import type { MyIssuesScope } from "@multica/core/issues/stores/my-issues-view-s
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useT } from "../../i18n";
 import { WorkspaceAgentWorkingChip } from "../../issues/components/workspace-agent-working-chip";
-import { IssueDisplayControls } from "../../issues/components/issues-header";
+import {
+  IssueDisplayControls,
+  ViewRefreshIndicator,
+} from "../../issues/components/issues-header";
 
 export function MyIssuesHeader({
   allIssues,
   scope,
   onScopeChange,
+  isRefreshing = false,
 }: {
   allIssues: Issue[];
   scope: MyIssuesScope;
   onScopeChange: (scope: MyIssuesScope) => void;
+  isRefreshing?: boolean;
 }) {
   const { t } = useT("my-issues");
   const { t: tIssues } = useT("issues");
@@ -111,6 +116,7 @@ export function MyIssuesHeader({
             scopedIssueIds={scopedIssueIds}
           />
           <IssueDisplayControls scopedIssues={allIssues} />
+          <ViewRefreshIndicator active={isRefreshing} />
         </div>
       </div>
     </div>

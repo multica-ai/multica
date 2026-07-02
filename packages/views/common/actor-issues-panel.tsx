@@ -11,7 +11,10 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
-import { IssueDisplayControls } from "../issues/components/issues-header";
+import {
+  IssueDisplayControls,
+  ViewRefreshIndicator,
+} from "../issues/components/issues-header";
 import { IssueSurface } from "../issues/surface/issue-surface";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { useT } from "../i18n";
@@ -37,12 +40,14 @@ function ActorIssuesHeader({
   onSearchChange,
   scope,
   onScopeChange,
+  isRefreshing = false,
 }: {
   issues: Issue[];
   search: string;
   onSearchChange: (value: string) => void;
   scope: ActorIssuesScope;
   onScopeChange: (scope: ActorIssuesScope) => void;
+  isRefreshing?: boolean;
 }) {
   const { t } = useT("issues");
 
@@ -84,7 +89,10 @@ function ActorIssuesHeader({
           ))}
         </div>
       </div>
-      <IssueDisplayControls scopedIssues={issues} hideViewToggle />
+      <div className="flex items-center">
+        <IssueDisplayControls scopedIssues={issues} hideViewToggle />
+        <ViewRefreshIndicator active={isRefreshing} />
+      </div>
     </div>
   );
 }
@@ -130,6 +138,7 @@ export function ActorIssuesPanel({
           onSearchChange={setSearch}
           scope={scope}
           onScopeChange={setScope}
+          isRefreshing={controller.isRefreshing}
         />
       )}
       renderEmpty={({ controller }) =>

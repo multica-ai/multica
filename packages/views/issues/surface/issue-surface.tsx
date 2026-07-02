@@ -149,6 +149,7 @@ function IssueSurfaceContent({
           <IssuesHeader
             scopedIssues={controller.surfaceIssues}
             allowGantt={controller.allowGantt}
+            isRefreshing={controller.isRefreshing}
           />
         )}
         {controller.isLoading ? (

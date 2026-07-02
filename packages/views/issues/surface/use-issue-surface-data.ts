@@ -54,6 +54,11 @@ export interface IssueSurfaceData {
   childProgressMap: Map<string, ChildProgress>;
   projectMap: Map<string, Project>;
   isLoading: boolean;
+  /** The window's data is being revalidated while the previous snapshot is
+   *  shown as a placeholder (sort/date change, or any grouped-board filter
+   *  change). Drives the header's deferred refresh indicator — content stays
+   *  put, so this is NOT a loading state. */
+  isRefreshing: boolean;
   isEmpty: boolean;
 }
 
@@ -267,6 +272,15 @@ export function useIssueSurfaceData({
       ? ganttIssuesQuery.isLoading
       : statusIssuesQuery.isLoading;
 
+  // Placeholder-backed revalidation of the ACTIVE query only. First loads are
+  // isLoading (no previous data to place-hold); gantt has no placeholder
+  // phase (its key carries no sort/filter).
+  const isRefreshing = usesAssigneeBoard
+    ? assigneeGroupsQuery.isPlaceholderData
+    : usesGantt
+      ? false
+      : statusIssuesQuery.isPlaceholderData;
+
   return {
     surfaceIssues,
     projectIssues: surfaceIssues,
@@ -289,6 +303,7 @@ export function useIssueSurfaceData({
     childProgressMap,
     projectMap,
     isLoading,
+    isRefreshing,
     // isEmpty asserts "this window has no issues". The board/list/swimlane
     // data IS the full window, so an empty result proves it. The gantt query
     // is a scheduled-only PROJECTION — an empty subset cannot prove the
