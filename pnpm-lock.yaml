@@ -114,6 +114,11 @@ overrides:
   '@types/react-dom': ^19.2.0
   '@xmldom/xmldom': ^0.8.13
 
+patchedDependencies:
+  '@react-native/gradle-plugin@0.83.6':
+    hash: c1b594a16e682d621b6a960926f8ce13fc92edfb397884cfe7fcb0518996a784
+    path: patches/@react-native__gradle-plugin@0.83.6.patch
+
 importers:
 
   .:
@@ -13558,7 +13563,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@react-native/gradle-plugin@0.83.6': {}
+  '@react-native/gradle-plugin@0.83.6(patch_hash=c1b594a16e682d621b6a960926f8ce13fc92edfb397884cfe7fcb0518996a784)': {}
 
   '@react-native/js-polyfills@0.83.6': {}
 
@@ -20523,7 +20528,7 @@ snapshots:
       '@react-native/assets-registry': 0.83.6
       '@react-native/codegen': 0.83.6(@babel/core@7.29.0)
       '@react-native/community-cli-plugin': 0.83.6
-      '@react-native/gradle-plugin': 0.83.6
+      '@react-native/gradle-plugin': 0.83.6(patch_hash=c1b594a16e682d621b6a960926f8ce13fc92edfb397884cfe7fcb0518996a784)
       '@react-native/js-polyfills': 0.83.6
       '@react-native/normalize-colors': 0.83.6
       '@react-native/virtualized-lists': 0.83.6(@types/react@19.2.14)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
