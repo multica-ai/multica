@@ -43,6 +43,8 @@
     "preview_too_large": "ファイルが大きすぎてプレビューできません。ダウンロードしてください。",
     "preview_unsupported": "このファイル形式はプレビューできません。",
     "close": "閉じる",
+    "fullscreen": "全画面表示",
+    "exit_fullscreen": "全画面表示を終了",
     "open_in_new_tab": "新しいタブで開く",
     "remove": "添付ファイルを削除"
   },

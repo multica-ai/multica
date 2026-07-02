@@ -111,6 +111,8 @@ vi.mock("../i18n", () => ({
           preview_too_large: "File is too large to preview. Please download.",
           preview_unsupported: "This file type can't be previewed.",
           close: "Close",
+          fullscreen: "Fullscreen",
+          exit_fullscreen: "Exit fullscreen",
           download_failed: "",
           open_in_new_tab: "Open in new tab",
         },
@@ -279,6 +281,36 @@ describe("AttachmentPreviewModal — dispatch", () => {
       expect(screen.getByText("Send to comments")).toBeTruthy();
     });
     expect(screen.queryByTestId("readonly-content")).toBeNull();
+  });
+
+  it("lets Markdown previews toggle between modal and fullscreen layout", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "# heading\n\nbody\n",
+      originalContentType: "text/markdown",
+    });
+    const att = makeAttachment({ filename: "README.md", content_type: "text/markdown" });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+
+    const fullscreenButton = await screen.findByTitle("Fullscreen");
+    const dialog = screen.getByRole("dialog");
+    const frame = dialog.firstElementChild;
+    expect(frame).not.toBeNull();
+    expect(frame?.className).toContain("max-w-6xl");
+    expect(frame?.className).not.toContain("h-screen");
+
+    fireEvent.click(fullscreenButton);
+
+    expect(screen.getByTitle("Exit fullscreen")).toBeTruthy();
+    expect(frame?.className).toContain("h-screen");
+    expect(frame?.className).toContain("w-screen");
+    expect(frame?.className).toContain("max-w-none");
+    expect(frame?.className).toContain("rounded-none");
+
+    fireEvent.click(screen.getByTitle("Exit fullscreen"));
+
+    expect(screen.getByTitle("Fullscreen")).toBeTruthy();
+    expect(frame?.className).toContain("max-w-6xl");
+    expect(frame?.className).not.toContain("h-screen");
   });
 
   it("renders an iframe with srcdoc + sandbox='allow-scripts' for HTML", async () => {

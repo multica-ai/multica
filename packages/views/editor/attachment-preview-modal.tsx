@@ -42,7 +42,15 @@ import {
   PreviewTooLargeError,
   PreviewUnsupportedError,
 } from "@multica/core/api";
-import { Download, ExternalLink, FileText, Loader2, X } from "lucide-react";
+import {
+  Download,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  X,
+} from "lucide-react";
 import type { Attachment } from "@multica/core/types";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -198,6 +206,7 @@ export function AttachmentPreviewModal({
   const { t } = useT("editor");
   const download = useDownloadAttachment();
   const state = normalize(source);
+  const [markdownFullscreen, setMarkdownFullscreen] = useState(false);
   // useWorkspaceSlug (not useWorkspacePaths) — returns null outside a
   // workspace route instead of throwing, so the new-tab button just hides.
   const slug = useWorkspaceSlug();
@@ -213,6 +222,14 @@ export function AttachmentPreviewModal({
   }, [open, onClose]);
 
   const kind = getPreviewKind(state.contentType, state.filename);
+  const canToggleFullscreen = kind === "markdown";
+  const fullscreenLabel = t(($) =>
+    markdownFullscreen ? $.attachment.exit_fullscreen : $.attachment.fullscreen,
+  );
+
+  useEffect(() => {
+    setMarkdownFullscreen(false);
+  }, [source]);
 
   // Download dispatcher: re-sign through `getAttachment` when an id is
   // available; otherwise fall back to opening the (possibly stale) URL
@@ -249,7 +266,7 @@ export function AttachmentPreviewModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/80 ${markdownFullscreen ? "p-0" : "p-4"}`}
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -260,7 +277,11 @@ export function AttachmentPreviewModal({
           minus the surrounding p-4 (1rem each side) so it never overflows
           the screen on small displays / split panes. */}
       <div
-        className="flex h-[min(90vh,calc(100vh-2rem))] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-background shadow-xl"
+        className={
+          markdownFullscreen
+            ? "flex h-screen w-screen max-w-none flex-col overflow-hidden rounded-none bg-background shadow-xl"
+            : "flex h-[min(90vh,calc(100vh-2rem))] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-background shadow-xl"
+        }
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
@@ -279,6 +300,21 @@ export function AttachmentPreviewModal({
                 onClick={handleOpenInNewTab}
               >
                 <ExternalLink className="size-4" />
+              </button>
+            )}
+            {canToggleFullscreen && (
+              <button
+                type="button"
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                title={fullscreenLabel}
+                aria-label={fullscreenLabel}
+                onClick={() => setMarkdownFullscreen((value) => !value)}
+              >
+                {markdownFullscreen ? (
+                  <Minimize2 className="size-4" />
+                ) : (
+                  <Maximize2 className="size-4" />
+                )}
               </button>
             )}
             <button

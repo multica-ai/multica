@@ -43,6 +43,8 @@
     "preview_too_large": "파일이 너무 커서 미리볼 수 없습니다. 다운로드하세요.",
     "preview_unsupported": "이 파일 형식은 미리보기를 지원하지 않습니다.",
     "close": "닫기",
+    "fullscreen": "전체 화면으로 보기",
+    "exit_fullscreen": "전체 화면 종료",
     "open_in_new_tab": "새 탭에서 열기",
     "remove": "첨부 파일 제거"
   },

@@ -43,6 +43,8 @@
     "preview_too_large": "文件太大，无法在线预览，请下载查看。",
     "preview_unsupported": "该文件类型暂不支持预览。",
     "close": "关闭",
+    "fullscreen": "全屏查看",
+    "exit_fullscreen": "退出全屏",
     "open_in_new_tab": "在新标签页打开",
     "remove": "移除附件"
   },
