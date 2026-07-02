@@ -713,7 +713,8 @@ export class ApiClient {
     });
   }
 
-  /** Dry-run the unified run-enqueue predicate for a prospective issue write
+
+/** Dry-run the unified run-enqueue predicate for a prospective issue write
    *  (create / single assign / single status / batch). Returns the runs that
    *  would start; no side effect. The four entry points consult this instead
    *  of re-implementing the rule (MUL-3375). */
@@ -733,13 +734,17 @@ export class ApiClient {
     });
   }
 
-  async listTimeline(issueId: string): Promise<TimelineEntry[]> {
-    const raw = await this.fetch<unknown>(
-      `/api/issues/${issueId}/timeline`,
-    );
+  async listTimeline(issueId: string, params?: { summary?: boolean }): Promise<TimelineEntry[]> {
+    let path = `/api/issues/${issueId}/timeline`;
+    if (params?.summary) path += `?summary=true`;
+    const raw = await this.fetch<unknown>(path);
     return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
       endpoint: "GET /api/issues/:id/timeline",
     });
+  }
+
+  async getComment(commentId: string): Promise<Comment> {
+    return this.fetch(`/api/comments/${commentId}`);
   }
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {

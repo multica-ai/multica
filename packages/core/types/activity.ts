@@ -29,4 +29,8 @@ export interface TimelineEntry {
   source_task_id?: string | null;
   /** Set by frontend coalescing when consecutive identical activities are merged. */
   coalesced_count?: number;
+  /** Set by backend when summary=true was requested and the comment body was
+   *  truncated to the summary budget. true = truncated, false = fit entirely.
+   *  Omitted when summary mode was not requested. */
+  content_truncated?: boolean;
 }

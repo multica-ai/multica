@@ -313,7 +313,10 @@
       "bar_authors_more_other": "{{names}} 외 {{count}}명",
       "resolve_failed": "스레드를 해결하지 못했습니다",
       "unresolve_failed": "스레드 해결을 취소하지 못했습니다"
-    }
+    },
+    "expand_full_text": "전체 텍스트 펼치기",
+    "loading_full_text": "로딩 중...",
+    "retry_load_full_text": "재시도"
   },
   "reply": {
     "placeholder": "답글 남기기..."

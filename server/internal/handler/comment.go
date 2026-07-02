@@ -2175,3 +2175,37 @@ func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
+
+// GetComment returns a single comment with its full (unsummarized) body.
+// Used by the frontend "expand full text" flow: the timeline endpoint clips
+// comment content to 200 runes under summary=true, and the reader clicks
+// through to fetch the verbatim body via this endpoint.
+func (h *Handler) GetComment(w http.ResponseWriter, r *http.Request) {
+	commentId := chi.URLParam(r, "commentId")
+	commentUUID, ok := parseUUIDOrBadRequest(w, commentId, "comment id")
+	if !ok {
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+		ID:          commentUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
+
+	grouped := h.groupReactions(r, []pgtype.UUID{comment.ID})
+	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
+	cid := uuidToString(comment.ID)
+	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
+	writeJSON(w, http.StatusOK, resp)
+}

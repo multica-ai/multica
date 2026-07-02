@@ -76,6 +76,9 @@ export const issueKeys = {
   /** Full-issue timeline (single TanStack Query, no cursor). */
   timeline: (issueId: string) =>
     [...issueKeys.timelineAll(), issueId] as const,
+  /** Single comment full-body fetch (for expand-on-demand). */
+  comment: (commentId: string) =>
+    ["comments", commentId] as const,
   /** Prefix across all issues — WS task lifecycle events invalidate here so
    *  an open composer's trigger preview refreshes when an agent's queue
    *  state changes (the dedup guard makes the answer queue-dependent). */
@@ -494,11 +497,23 @@ export function childrenByParentsOptions(
  * Cursor pagination was removed in #1929 — at observed data sizes (p99 ~30
  * entries per issue) it added complexity without a UX win and broke reply
  * threads at page boundaries.
+ *
+ * summary=true clips comment bodies to 200 runes to keep first-paint payload
+ * small. Full comment content is fetched on-demand via `commentDetailOptions`.
  */
 export function issueTimelineOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.timeline(issueId),
-    queryFn: () => api.listTimeline(issueId),
+    queryFn: () => api.listTimeline(issueId, { summary: true }),
+  });
+}
+
+/** Fetch a single comment with its full (unsummarized) body. */
+export function commentDetailOptions(commentId: string) {
+  return queryOptions({
+    queryKey: issueKeys.comment(commentId),
+    queryFn: () => api.getComment(commentId),
+    staleTime: 5 * 60 * 1000,
   });
 }
 

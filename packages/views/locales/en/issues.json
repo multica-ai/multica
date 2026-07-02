@@ -325,7 +325,10 @@
       "bar_authors_more_other": "{{names}} and {{count}} others",
       "resolve_failed": "Failed to resolve thread",
       "unresolve_failed": "Failed to unresolve thread"
-    }
+    },
+    "expand_full_text": "Expand full text",
+    "loading_full_text": "Loading...",
+    "retry_load_full_text": "Retry"
   },
   "reply": {
     "placeholder": "Leave a reply..."
