@@ -119,6 +119,13 @@ type APIConnectionTool struct {
 	path     string // endpoint path, may contain {param} placeholders
 	auth     connections.AuthConfig
 
+	// connID / workspaceID identify the connection row for the per-person
+	// session-key cache (FIR-2564 fase 2). exchanger is nil on surfaces that
+	// don't wire it; with session_exchange enabled that fails the call closed.
+	connID      string
+	workspaceID string
+	exchanger   *ConnectionSessionExchanger
+
 	client *http.Client
 }
 
@@ -141,7 +148,7 @@ func (t *APIConnectionTool) Path() string           { return t.path }
 // the per-agent endpoint gate are the caller's responsibility; this only turns a
 // connection list into tools.
 func BuildAPIConnectionTools(conns []connections.Connection, client *http.Client) []Tool {
-	return buildAPIConnectionTools(conns, client)
+	return buildAPIConnectionTools(conns, client, nil)
 }
 
 // buildAPIConnectionTools turns a set of (already enabled) connections into one
@@ -149,7 +156,7 @@ func BuildAPIConnectionTools(conns []connections.Connection, client *http.Client
 // and connections without a usable URL are skipped. It is pure (no DB / network)
 // so it is unit-testable; the caller supplies the connection list and the
 // dispatch http.Client.
-func buildAPIConnectionTools(conns []connections.Connection, client *http.Client) []Tool {
+func buildAPIConnectionTools(conns []connections.Connection, client *http.Client, exchanger *ConnectionSessionExchanger) []Tool {
 	var tools []Tool
 	seen := map[string]struct{}{}
 	for _, c := range conns {
@@ -190,6 +197,9 @@ func buildAPIConnectionTools(conns []connections.Connection, client *http.Client
 					method:      method,
 					path:        path,
 					auth:        c.AuthConfig,
+					connID:      c.ID,
+					workspaceID: c.WorkspaceID,
+					exchanger:   exchanger,
 					client:      client,
 				})
 			}
@@ -345,12 +355,31 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	applyConnectionAuth(req, t.auth)
 
 	client := t.client
 	if client == nil {
 		client = &http.Client{Timeout: apiConnectionToolTimeout}
 	}
+
+	// Per-person session exchange (FIR-2564 fase 2): when enabled and the run
+	// has a triggering human, the call runs on that person's own short-lived
+	// key instead of the shared connection key — fail closed on any exchange
+	// error, never fall back to the (broader) shared key. System runs with no
+	// triggering human keep the shared key.
+	effectiveAuth := t.auth
+	if se := t.auth.SessionExchange; se != nil && se.Enabled {
+		if member := ConnectionTriggerMember(ctx); member != "" {
+			if t.exchanger == nil {
+				return "", fmt.Errorf("api connection %q: session exchange is enabled but not available on this surface", t.connName)
+			}
+			key, xerr := t.exchanger.PersonalKey(ctx, client, t.workspaceID, t.connID, t.baseURL, t.auth, member)
+			if xerr != nil {
+				return "", fmt.Errorf("api connection %q: %w", t.connName, xerr)
+			}
+			effectiveAuth = personalKeyAuth(t.auth, key)
+		}
+	}
+	applyConnectionAuth(req, effectiveAuth)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("api connection %q: call %s %s: %w", t.connName, t.method, filledPath, err)
@@ -366,7 +395,9 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 	// agent constructs, but a misbehaving endpoint can echo its auth back in the
 	// response; without this an echoed token would leak straight to the model.
 	// Applied before BOTH the error and success returns below. (FIR-2166 C review.)
-	text := redactCredentials(strings.TrimSpace(string(body)), t.auth)
+	// effectiveAuth covers the exchanged personal key too, and the shared-key
+	// halves are redacted as well since they still live in t.auth.
+	text := redactCredentials(redactCredentials(strings.TrimSpace(string(body)), effectiveAuth), t.auth)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("api connection %q: %s %s returned HTTP %d: %s", t.connName, t.method, filledPath, resp.StatusCode, text)
 	}

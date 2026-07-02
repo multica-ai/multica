@@ -531,6 +531,17 @@ type CerebroCommentTask struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroConnectionPersonKey struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ConnectionID  pgtype.UUID        `json:"connection_id"`
+	MemberID      pgtype.UUID        `json:"member_id"`
+	KeyCiphertext []byte             `json:"key_ciphertext"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroCostOptimization struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	SavingKey   string             `json:"saving_key"`
