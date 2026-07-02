@@ -296,3 +296,18 @@
   overflow-wrap: break-word;
   vertical-align: top;
 }
+
+/* CEREBRO-PATCH(stacked-tables-editor): FIR-2482 — the editable Tiptap editor now
+   tags data tables `.data-table` too (via cerebro-stacked-tables-extension), so the
+   mobile card layout above (each row → one labelled card) reaches notes, issue
+   descriptions and editable documents. One gap remains vs. the readonly markdown
+   path: ProseMirror renders the header row as <th> cells inside <tbody> (there is no
+   <thead>), so the thead-hiding card rule above never matches it — the header row
+   would otherwise render as a stray unlabelled card. Hide the first row explicitly
+   for editable data tables on mobile; its text is already surfaced on every body cell
+   via the data-label attribute the extension injects. */
+@media (max-width: 640px) {
+  .rich-text-editor:not(.readonly) table.data-table tr:first-child {
+    display: none;
+  }
+}

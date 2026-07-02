@@ -56,6 +56,8 @@ import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
 import { HighlightExtension } from "./highlight";
+// CEREBRO-PATCH(stacked-tables-editor): FIR-2482 — tag editable data tables `.data-table` so the mobile card CSS reaches notes/descriptions/editable docs.
+import { StackedTablesExtension } from "../cerebro-stacked-tables-extension";
 
 const lowlight = createLowlight(common);
 
@@ -193,6 +195,7 @@ export function createEditorExtensions(
     TableRow,
     TableHeader,
     TableCell,
+    StackedTablesExtension,
     BlockMathExtension,
     InlineMathExtension,
     HighlightExtension,
