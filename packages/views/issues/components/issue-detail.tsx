@@ -14,19 +14,23 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  ListTree,
   Milestone,
   MoreHorizontal,
   PanelRight,
   Pin,
   PinOff,
   Plus,
+  Search,
   Tag,
   Unlink,
   Users,
+  X,
 } from "lucide-react";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -96,6 +100,128 @@ import {
   rightSidebarPanelMotionProps,
   useAnimatedRightSidebarState,
 } from "../../layout/animated-right-sidebar";
+
+type IssueSearchResult = {
+  id: string;
+  targetId: string;
+  kind: "title" | "description" | "comment" | "comment-actor" | "activity" | "activity-actor";
+  text: string;
+  matchIndex: number;
+  rootCommentId?: string;
+  activityGroupId?: string;
+};
+
+type CommentNavItem = {
+  id: string;
+  label: string;
+};
+
+type CommentNavPosition = {
+  top: number;
+  right: number;
+  width: number;
+  maxHeight: number;
+};
+
+const COMMENT_NAV_TOP = 64;
+const COMMENT_NAV_TOP_WITH_SEARCH = 112;
+const COMMENT_NAV_STORAGE_PREFIX = "multica_issue_comment_nav_open";
+
+function commentNavStorageKey(wsId: string | null, issueId: string) {
+  return wsId ? `${COMMENT_NAV_STORAGE_PREFIX}:${wsId}:${issueId}` : null;
+}
+
+function readCommentNavOpen(wsId: string | null, issueId: string) {
+  const key = commentNavStorageKey(wsId, issueId);
+  if (!key || typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeCommentNavOpen(wsId: string | null, issueId: string, open: boolean) {
+  const key = commentNavStorageKey(wsId, issueId);
+  if (!key || typeof window === "undefined") return;
+  try {
+    if (open) window.localStorage.setItem(key, "1");
+    else window.localStorage.removeItem(key);
+  } catch {
+    // localStorage can throw in private/sandboxed contexts; UI still works.
+  }
+}
+
+function normalizeIssueSearchQuery(query: string) {
+  return query.trim().toLowerCase();
+}
+
+function countIssueTextMatches(text: string | null | undefined, query: string) {
+  const q = normalizeIssueSearchQuery(query);
+  if (!q) return 0;
+  const source = (text ?? "").toLowerCase();
+  let count = 0;
+  let index = source.indexOf(q);
+  while (index !== -1) {
+    count += 1;
+    index = source.indexOf(q, index + q.length);
+  }
+  return count;
+}
+
+function issueSearchVisibleText(text: string | null | undefined) {
+  return (text ?? "").replace(/\[([^\]]+)\]\(mention:\/\/[^)]+\)/g, "$1");
+}
+
+function commentNavLabel(entry: TimelineEntry, actorName: string, fallbackTime: string) {
+  const plain = issueSearchVisibleText(entry.content)
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[#>*_~\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return plain || actorName || fallbackTime;
+}
+
+function HighlightIssueText({
+  text,
+  query,
+  active,
+  activeMatchIndex,
+}: {
+  text: string;
+  query: string;
+  active?: boolean;
+  activeMatchIndex?: number;
+}) {
+  const q = query.trim();
+  if (!q) return <>{text}</>;
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escaped})`, "gi");
+  const parts = text.split(regex);
+  let matchIndex = -1;
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.toLowerCase() !== q.toLowerCase()) return part;
+        matchIndex += 1;
+        return (
+          <mark
+            key={index}
+            className={cn(
+              "rounded-sm bg-yellow-200 text-inherit dark:bg-yellow-900/60",
+              active && (activeMatchIndex == null || activeMatchIndex === matchIndex) && "ring-2 ring-brand/60",
+            )}
+          >
+            {part}
+          </mark>
+        );
+      })}
+    </>
+  );
+}
 
 function SubscriberPopoverContent({
   members,
@@ -440,6 +566,8 @@ const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
 // parent so it survives Virtuoso's mount/unmount on scroll.
 function ActivityBlock({
   entries,
+  searchQuery,
+  activeSearchResultId,
   expanded,
   onToggle,
   truncateOlder,
@@ -450,6 +578,8 @@ function ActivityBlock({
   timeAgo,
 }: {
   entries: TimelineEntry[];
+  searchQuery?: string;
+  activeSearchResultId?: string | null;
   expanded: boolean;
   onToggle: () => void;
   // Trailing block only: when true, the body shows only the most recent
@@ -482,7 +612,9 @@ function ActivityBlock({
       ? entries.length - LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT
       : 0;
   const visibleEntries =
-    hiddenOlderCount > 0 ? entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT) : entries;
+    hiddenOlderCount > 0
+      ? entries.slice(-LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT)
+      : entries;
   // Hide the "v N activities" collapse header while we're in the truncated
   // default state. The "Show N more" link is the only control users need
   // when they're glancing at recent activity — stacking two chevron rows
@@ -533,13 +665,35 @@ function ActivityBlock({
         }
 
         return (
-          <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
+          <div
+            key={entry.id}
+            id={`issue-search-activity-${entry.id}`}
+            className="flex items-center text-xs text-muted-foreground"
+          >
             <div className="mr-2 flex w-4 shrink-0 justify-center">
               {leadIcon}
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-1">
-              <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-              <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+              <span id={`issue-search-activity-actor-${entry.id}`} className="shrink-0 font-medium">
+                <HighlightIssueText
+                  text={getActorName(entry.actor_type, entry.actor_id)}
+                  query={searchQuery ?? ""}
+                  active={activeSearchResultId?.startsWith(`activity-actor:${entry.id}:`)}
+                  activeMatchIndex={activeSearchResultId?.startsWith(`activity-actor:${entry.id}:`)
+                    ? Number(activeSearchResultId.split(":").at(-1)) || 0
+                    : undefined}
+                />
+              </span>
+              <span className="truncate">
+                <HighlightIssueText
+                  text={formatActivity(entry, t, getActorName)}
+                  query={searchQuery ?? ""}
+                  active={activeSearchResultId?.startsWith(`activity:${entry.id}:`)}
+                  activeMatchIndex={activeSearchResultId?.startsWith(`activity:${entry.id}:`)
+                    ? Number(activeSearchResultId.split(":").at(-1)) || 0
+                    : undefined}
+                />
+              </span>
               {(entry.coalesced_count ?? 1) > 1 &&
                 entry.action !== "task_completed" &&
                 entry.action !== "task_failed" && (
@@ -747,6 +901,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
+  const [issueSearchOpen, setIssueSearchOpen] = useState(false);
+  const [issueSearchQuery, setIssueSearchQuery] = useState("");
+  const [activeIssueSearchIndex, setActiveIssueSearchIndex] = useState(0);
+  const issueSearchInputRef = useRef<HTMLInputElement>(null);
+  const [commentNavOpen, setCommentNavOpen] = useState(() => readCommentNavOpen(wsId, id));
+  const [activeCommentNavId, setActiveCommentNavId] = useState<string | null>(null);
+  const activitySectionRef = useRef<HTMLDivElement>(null);
+  const [commentNavPosition, setCommentNavPosition] = useState<CommentNavPosition | null>(null);
+  const timelineVirtuosoRef = useRef<any>(null);
   const githubSettings = useGitHubSettings();
 
   // Per-issue, per-session set of optional properties currently visible in
@@ -772,6 +935,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCommentNavOpen(readCommentNavOpen(wsId, id));
+    setActiveCommentNavId(null);
+  }, [id, wsId]);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -852,6 +1020,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     });
   }, []);
   const didHighlightRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setIssueSearchOpen(false);
+    setIssueSearchQuery("");
+    setActiveIssueSearchIndex(0);
+  }, [id]);
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; list API omits it, and ContentEditor
@@ -956,13 +1130,44 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         repliesByParent.set(e.parent_id, list);
       }
     }
+    const compareByTimeAndId = (a: TimelineEntry, b: TimelineEntry) => {
+      if (a.created_at !== b.created_at) {
+        return a.created_at < b.created_at ? -1 : 1;
+      }
+      return a.id < b.id ? -1 : 1;
+    };
+    const chronologicalTopLevel = [...topLevel].sort(compareByTimeAndId);
+    const timelineUnits: { entries: TimelineEntry[]; sortTime: string; id: string }[] = [];
+    let pendingActivities: TimelineEntry[] = [];
+    for (const entry of chronologicalTopLevel) {
+      if (entry.type === "activity") {
+        pendingActivities.push(entry);
+        continue;
+      }
+      timelineUnits.push({
+        entries: [...pendingActivities, entry],
+        sortTime: entry.created_at,
+        id: entry.id,
+      });
+      pendingActivities = [];
+    }
+    if (pendingActivities.length > 0) {
+      const lastActivity = pendingActivities[pendingActivities.length - 1]!;
+      timelineUnits.push({
+        entries: pendingActivities,
+        sortTime: lastActivity.created_at,
+        id: lastActivity.id,
+      });
+    }
+    const sortedTimelineUnits = timelineUnits;
+    const sortedTopLevel = sortedTimelineUnits.flatMap((unit) => unit.entries);
 
     // Pre-flatten each top-level comment's thread subtree (parent + every
     // descendant in render order). Reuse the previous array reference when
     // the thread is unchanged so unrelated CommentCards keep their memo.
     const prevThreadReplies = prevThreadRepliesRef.current;
     const threadReplies = new Map<string, TimelineEntry[]>();
-    for (const root of topLevel) {
+    for (const root of sortedTopLevel) {
       if (root.type !== "comment") continue;
       const fresh = collectThreadReplies(root.id, repliesByParent);
       const previous = prevThreadReplies.get(root.id);
@@ -980,39 +1185,46 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const COALESCE_MS = 2 * 60 * 1000;
     const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
     const NEVER_COALESCE_ACTIONS = new Set(["squad_leader_evaluated"]);
-    const coalesced: TimelineEntry[] = [];
-    for (const entry of topLevel) {
-      if (entry.type === "activity") {
-        const prev = coalesced[coalesced.length - 1];
-        if (
-          !NEVER_COALESCE_ACTIONS.has(entry.action!) &&
-          prev?.type === "activity" &&
-          prev.action === entry.action &&
-          prev.actor_type === entry.actor_type &&
-          prev.actor_id === entry.actor_id &&
-          (NO_TIME_LIMIT_ACTIONS.has(entry.action!) ||
-            Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS)
-        ) {
-          coalesced[coalesced.length - 1] = { ...entry, coalesced_count: (prev.coalesced_count ?? 1) + 1 };
-          continue;
+    const coalesceActivities = (entries: TimelineEntry[]) => {
+      const coalesced: TimelineEntry[] = [];
+      for (const entry of entries) {
+        if (entry.type === "activity") {
+          const prev = coalesced[coalesced.length - 1];
+          if (
+            !NEVER_COALESCE_ACTIONS.has(entry.action!) &&
+            prev?.type === "activity" &&
+            prev.action === entry.action &&
+            prev.actor_type === entry.actor_type &&
+            prev.actor_id === entry.actor_id &&
+            (NO_TIME_LIMIT_ACTIONS.has(entry.action!) ||
+              Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS)
+          ) {
+            coalesced[coalesced.length - 1] = { ...entry, coalesced_count: (prev.coalesced_count ?? 1) + 1 };
+            continue;
+          }
         }
+        coalesced.push(entry);
       }
-      coalesced.push(entry);
-    }
+      return coalesced;
+    };
 
     // Group consecutive activities together so the connector line works
     const groups: { type: "activities" | "comment"; entries: TimelineEntry[] }[] = [];
-    for (const entry of coalesced) {
-      if (entry.type === "activity") {
-        const last = groups[groups.length - 1];
-        if (last?.type === "activities") {
-          last.entries.push(entry);
+    for (const unit of sortedTimelineUnits) {
+      const unitGroups: { type: "activities" | "comment"; entries: TimelineEntry[] }[] = [];
+      for (const entry of coalesceActivities(unit.entries)) {
+        if (entry.type === "activity") {
+          const last = unitGroups[unitGroups.length - 1];
+          if (last?.type === "activities") {
+            last.entries.push(entry);
+          } else {
+            unitGroups.push({ type: "activities", entries: [entry] });
+          }
         } else {
-          groups.push({ type: "activities", entries: [entry] });
+          unitGroups.push({ type: "comment", entries: [entry] });
         }
-      } else {
-        groups.push({ type: "comment", entries: [entry] });
       }
+      groups.push(...unitGroups);
     }
 
     return { threadReplies, groups };
@@ -1027,13 +1239,113 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [timelineView.groups, expandedResolved],
   );
 
-  // ID of the trailing activity block — the only one expanded by default.
-  const lastActivityGroupId = useMemo(() => {
-    for (let i = timelineView.groups.length - 1; i >= 0; i--) {
-      const g = timelineView.groups[i]!;
-      if (g.type === "activities") return g.entries[0]!.id;
+  const commentNavItems = useMemo<CommentNavItem[]>(() => {
+    return timelineView.groups
+      .filter((group) => group.type === "comment")
+      .map((group) => group.entries[0])
+      .filter((entry): entry is TimelineEntry => !!entry && entry.type === "comment" && !entry.parent_id)
+      .map((entry) => ({
+        id: entry.id,
+        label: commentNavLabel(entry, getActorName(entry.actor_type, entry.actor_id), timeAgo(entry.created_at)),
+      }));
+  }, [getActorName, timeAgo, timelineView.groups]);
+
+  const showCommentNav = commentNavOpen && !isMobile && commentNavItems.length > 0;
+
+  const toggleCommentNav = useCallback(() => {
+    setCommentNavOpen((open) => {
+      const next = !open;
+      writeCommentNavOpen(wsId, id, next);
+      return next;
+    });
+  }, [id, wsId]);
+
+  useEffect(() => {
+    if (!showCommentNav) {
+      setCommentNavPosition(null);
+      return;
     }
-    return null;
+
+    let frame = 0;
+    const updateNow = () => {
+      const rect = activitySectionRef.current?.getBoundingClientRect();
+      const scrollRect = scrollContainerEl?.getBoundingClientRect();
+      if (!rect || !scrollRect) return;
+      const left = rect.right + 12;
+      const right = scrollRect.right - 8;
+      const availableWidth = Math.floor(right - left);
+      if (availableWidth < 24) {
+        setCommentNavPosition(null);
+        return;
+      }
+      const width = Math.min(160, availableWidth);
+      const safeTop = issueSearchOpen ? COMMENT_NAV_TOP_WITH_SEARCH : COMMENT_NAV_TOP;
+      const top = Math.max(safeTop, Math.ceil(rect.top + 16));
+      const maxHeight = Math.max(
+        0,
+        Math.floor(Math.min(window.innerHeight - top - 16, rect.bottom - top)),
+      );
+      const next = {
+        top,
+        right: Math.max(8, window.innerWidth - right),
+        width,
+        maxHeight,
+      };
+      setCommentNavPosition((prev) => {
+        if (
+          prev?.top === next.top &&
+          prev.right === next.right &&
+          prev.width === next.width &&
+          prev.maxHeight === next.maxHeight
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateNow);
+    };
+
+    updateNow();
+    scrollContainerEl?.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    const observer = new ResizeObserver(update);
+    if (activitySectionRef.current) observer.observe(activitySectionRef.current);
+    if (scrollContainerEl) observer.observe(scrollContainerEl);
+    return () => {
+      scrollContainerEl?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [issueSearchOpen, scrollContainerEl, showCommentNav]);
+
+  // ID of the newest activity block by activity timestamp — the only one
+  // expanded by default. Activity expansion/truncation is based on activity
+  // chronology, independent of comment rendering.
+  const newestActivityGroupId = useMemo(() => {
+    let newestGroup: { id: string; createdAt: string } | null = null;
+    for (const group of timelineView.groups) {
+      if (group.type !== "activities") continue;
+      const latestEntry = group.entries.reduce((latest, entry) =>
+        entry.created_at > latest.created_at ? entry : latest,
+      );
+      if (!newestGroup || latestEntry.created_at > newestGroup.createdAt) {
+        newestGroup = { id: group.entries[0]!.id, createdAt: latestEntry.created_at };
+      }
+    }
+    return newestGroup?.id ?? null;
+  }, [timelineView.groups]);
+
+  const activityGroupByEntryId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const group of timelineView.groups) {
+      if (group.type !== "activities") continue;
+      for (const entry of group.entries) map.set(entry.id, group.entries[0]!.id);
+    }
+    return map;
   }, [timelineView.groups]);
 
   // Map of reply-comment id → root-comment id, so a deep-link to a reply
@@ -1049,6 +1361,192 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
     return map;
   }, [timelineView.threadReplies]);
+
+  const issueSearchResults = useMemo<IssueSearchResult[]>(() => {
+    const q = normalizeIssueSearchQuery(issueSearchQuery);
+    if (!issue || q.length === 0) return [];
+    const results: IssueSearchResult[] = [];
+    const pushMatches = (result: Omit<IssueSearchResult, "id" | "matchIndex"> & { idPrefix: string }) => {
+      const count = countIssueTextMatches(result.text, q);
+      for (let matchIndex = 0; matchIndex < count; matchIndex += 1) {
+        const { idPrefix, ...rest } = result;
+        results.push({
+          ...rest,
+          id: `${idPrefix}:${matchIndex}`,
+          matchIndex,
+        });
+      }
+    };
+    pushMatches({ idPrefix: "title", targetId: "issue-search-title", kind: "title", text: issue.title });
+    pushMatches({
+      idPrefix: "description",
+      targetId: "issue-search-description",
+      kind: "description",
+      text: issueSearchVisibleText(issue.description),
+    });
+    for (const entry of timeline) {
+      if (entry.type === "comment") {
+        const rootCommentId = entry.parent_id ? (replyToRoot.get(entry.id) ?? entry.parent_id) : entry.id;
+        pushMatches({
+          idPrefix: `comment-actor:${entry.id}`,
+          targetId: `issue-search-comment-actor-${entry.id}`,
+          kind: "comment-actor",
+          text: getActorName(entry.actor_type, entry.actor_id),
+          rootCommentId,
+        });
+        pushMatches({
+          idPrefix: `comment:${entry.id}`,
+          targetId: `comment-${entry.id}`,
+          kind: "comment",
+          text: issueSearchVisibleText(entry.content),
+          rootCommentId,
+        });
+      }
+    }
+    for (const group of timelineView.groups) {
+      if (group.type !== "activities") continue;
+      for (const entry of group.entries) {
+        pushMatches({
+          idPrefix: `activity-actor:${entry.id}`,
+          targetId: `issue-search-activity-actor-${entry.id}`,
+          kind: "activity-actor",
+          text: getActorName(entry.actor_type, entry.actor_id),
+          activityGroupId: activityGroupByEntryId.get(entry.id),
+        });
+        const text = formatActivity(entry, t, getActorName);
+        pushMatches({
+          idPrefix: `activity:${entry.id}`,
+          targetId: `issue-search-activity-${entry.id}`,
+          kind: "activity",
+          text,
+          activityGroupId: activityGroupByEntryId.get(entry.id),
+        });
+      }
+    }
+    return results;
+  }, [activityGroupByEntryId, getActorName, issue, issueSearchQuery, replyToRoot, t, timeline, timelineView.groups]);
+
+  const activeIssueSearchResult = issueSearchResults[activeIssueSearchIndex] ?? null;
+
+  useEffect(() => {
+    if (activeIssueSearchIndex >= issueSearchResults.length) {
+      setActiveIssueSearchIndex(0);
+    }
+  }, [activeIssueSearchIndex, issueSearchResults.length]);
+
+  const moveIssueSearch = useCallback((delta: 1 | -1) => {
+    setActiveIssueSearchIndex((index) => {
+      if (issueSearchResults.length === 0) return 0;
+      return (index + delta + issueSearchResults.length) % issueSearchResults.length;
+    });
+  }, [issueSearchResults.length]);
+
+  const closeIssueSearch = useCallback(() => {
+    setIssueSearchOpen(false);
+    setIssueSearchQuery("");
+    setActiveIssueSearchIndex(0);
+  }, []);
+
+  useEffect(() => {
+    if (issueSearchOpen) {
+      requestAnimationFrame(() => issueSearchInputRef.current?.focus());
+    }
+  }, [issueSearchOpen]);
+
+  useEffect(() => {
+    if (!activeIssueSearchResult) return;
+    if (activeIssueSearchResult.rootCommentId) {
+      setExpandedResolved((prev) => {
+        if (prev.has(activeIssueSearchResult.rootCommentId!)) return prev;
+        const next = new Set(prev);
+        next.add(activeIssueSearchResult.rootCommentId!);
+        return next;
+      });
+    }
+    if (activeIssueSearchResult.activityGroupId) {
+      setExpandedActivityIds((prev) => {
+        if (prev.has(activeIssueSearchResult.activityGroupId!)) return prev;
+        const next = new Set(prev);
+        next.add(activeIssueSearchResult.activityGroupId!);
+        return next;
+      });
+      setCollapsedActivityIds((prev) => {
+        if (!prev.has(activeIssueSearchResult.activityGroupId!)) return prev;
+        const next = new Set(prev);
+        next.delete(activeIssueSearchResult.activityGroupId!);
+        return next;
+      });
+      setShowOlderActivityIds((prev) => {
+        if (prev.has(activeIssueSearchResult.activityGroupId!)) return prev;
+        const next = new Set(prev);
+        next.add(activeIssueSearchResult.activityGroupId!);
+        return next;
+      });
+    }
+
+    const scrollToTarget = () => {
+      const target = document.getElementById(activeIssueSearchResult.targetId);
+      if (!target || !scrollContainerEl) return;
+      const c = scrollContainerEl.getBoundingClientRect();
+      const e = target.getBoundingClientRect();
+      scrollContainerEl.scrollTop = Math.max(
+        0,
+        scrollContainerEl.scrollTop + (e.top - c.top) - (scrollContainerEl.clientHeight - e.height) / 2,
+      );
+    };
+    const raf = requestAnimationFrame(() => requestAnimationFrame(scrollToTarget));
+    return () => cancelAnimationFrame(raf);
+  }, [activeIssueSearchResult, scrollContainerEl]);
+
+  const centerCommentInTimeline = useCallback((commentId: string) => {
+    const target = document.getElementById(`comment-${commentId}`);
+    if (!target || !scrollContainerEl) return false;
+    const c = scrollContainerEl.getBoundingClientRect();
+    const e = target.getBoundingClientRect();
+    scrollContainerEl.scrollTop = Math.max(
+      0,
+      scrollContainerEl.scrollTop + (e.top - c.top) - (scrollContainerEl.clientHeight - e.height) / 2,
+    );
+    return true;
+  }, [scrollContainerEl]);
+
+  const handleCommentNavClick = useCallback((commentId: string) => {
+    setActiveCommentNavId(commentId);
+    if (centerCommentInTimeline(commentId)) return;
+    const index = items.findIndex((item) => item.id === commentId);
+    if (index >= 0) {
+      timelineVirtuosoRef.current?.scrollToIndex?.({ index, align: "center" });
+      requestAnimationFrame(() => centerCommentInTimeline(commentId));
+    }
+  }, [centerCommentInTimeline, items]);
+
+  useEffect(() => {
+    if (!showCommentNav || !scrollContainerEl) return;
+    const updateActive = () => {
+      const center = scrollContainerEl.getBoundingClientRect().top + scrollContainerEl.clientHeight / 2;
+      let nearest: { id: string; distance: number } | null = null;
+      for (const item of commentNavItems) {
+        const el = document.getElementById(`comment-${item.id}`);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        const distance = Math.abs(rect.top + rect.height / 2 - center);
+        if (!nearest || distance < nearest.distance) nearest = { id: item.id, distance };
+      }
+      if (nearest) setActiveCommentNavId(nearest.id);
+    };
+    scrollContainerEl.addEventListener("scroll", updateActive, { passive: true });
+    window.addEventListener("resize", updateActive);
+    return () => {
+      scrollContainerEl.removeEventListener("scroll", updateActive);
+      window.removeEventListener("resize", updateActive);
+    };
+  }, [commentNavItems, scrollContainerEl, showCommentNav]);
+
+  useEffect(() => {
+    if (!commentNavItems.some((item) => item.id === activeCommentNavId)) {
+      setActiveCommentNavId(commentNavItems[0]?.id ?? null);
+    }
+  }, [activeCommentNavId, commentNavItems]);
 
   // Deep-link target index in the flat items array. For root comments this is
   // a direct findIndex hit; for reply ids we look up the enclosing root.
@@ -1216,27 +1714,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       clearTimeout(fade);
     };
   }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
-
-  // Cmd-F / Ctrl-F on a virtualized timeline only searches what's mounted in
-  // the viewport — off-screen comments are invisible to browser find-in-page.
-  // Intercept once per (session, issue) when the list is long enough that the
-  // user might actually try; let the keystroke pass through on short lists.
-  // Real fix is in-app search (separate PR); this is the toast stopgap.
-  useEffect(() => {
-    if (items.length <= 30) return;
-    const flagKey = `multica_cmdF_warned:${id}`;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== "f" || !(e.metaKey || e.ctrlKey)) return;
-      if (sessionStorage.getItem(flagKey)) return;
-      e.preventDefault();
-      sessionStorage.setItem(flagKey, "1");
-      toast.message(t(($) => $.detail.cmdf_toast_title), {
-        description: t(($) => $.detail.cmdf_toast_description),
-      });
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [id, items.length, t]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
@@ -1715,6 +2192,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // The wrapper `id="comment-..."` is the deep-link target — equivalent to
   // a native `<a href="#comment-...">` anchor.
   const renderItem = (_i: number, item: TimelineItem): React.ReactElement => {
+    const activeSearchId = activeIssueSearchResult?.id ?? null;
     if (item.kind === "resolved-bar") {
       return (
         <div className="pb-3" id={`comment-${item.id}`}>
@@ -1745,6 +2223,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             expandedResolvedIds={expandedResolved}
             onResolvedExpandChange={toggleResolvedExpand}
             highlightedCommentId={highlightedId}
+            searchQuery={issueSearchQuery}
+            activeSearchResultId={activeSearchId}
           />
         </div>
       );
@@ -1754,12 +2234,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       ? true
       : collapsedActivityIds.has(item.id)
         ? false
-        : item.id === lastActivityGroupId;
-    const truncateOlder = item.id === lastActivityGroupId;
+        : item.id === newestActivityGroupId;
+    const truncateOlder = item.id === newestActivityGroupId;
     const showOlder = showOlderActivityIds.has(item.id);
     return (
       <ActivityBlock
         entries={item.entries}
+        searchQuery={issueSearchQuery}
+        activeSearchResultId={activeSearchId}
         expanded={expanded}
         onToggle={() => toggleActivityBlock(item.id, expanded)}
         truncateOlder={truncateOlder}
@@ -1815,6 +2297,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 it never overlaps the title (which truncates to make room).
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} />
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant={issueSearchOpen ? "secondary" : "ghost"}
+                    size="icon-sm"
+                    className={issueSearchOpen ? "" : "text-muted-foreground"}
+                    onClick={() => {
+                      if (issueSearchOpen) {
+                        closeIssueSearch();
+                      } else {
+                        setIssueSearchOpen(true);
+                      }
+                    }}
+                    aria-label={t(($) => $.detail.issue_search_tooltip)}
+                  >
+                    <Search />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">{t(($) => $.detail.issue_search_tooltip)}</TooltipContent>
+            </Tooltip>
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger
@@ -1900,17 +2404,84 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           data-tab-scroll-root
           className="relative flex-1 overflow-y-auto"
         >
+        {issueSearchOpen && (
+          <div className="sticky top-0 z-30 border-b bg-background/95 px-8 py-2 backdrop-blur">
+            <div className="mx-auto flex w-full max-w-4xl items-center gap-2">
+              <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <Input
+                ref={issueSearchInputRef}
+                value={issueSearchQuery}
+                onChange={(event) => {
+                  setIssueSearchQuery(event.target.value);
+                  setActiveIssueSearchIndex(0);
+                }}
+                placeholder={t(($) => $.detail.issue_search_placeholder)}
+                className="h-8 flex-1"
+              />
+              <span className="w-14 shrink-0 text-center text-xs tabular-nums text-muted-foreground">
+                {issueSearchResults.length > 0
+                  ? t(($) => $.detail.issue_search_count, {
+                      current: activeIssueSearchIndex + 1,
+                      total: issueSearchResults.length,
+                    })
+                  : t(($) => $.detail.issue_search_count_empty)}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={issueSearchResults.length === 0}
+                onClick={() => moveIssueSearch(-1)}
+                aria-label={t(($) => $.detail.issue_search_previous)}
+              >
+                <ChevronLeft />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={issueSearchResults.length === 0}
+                onClick={() => moveIssueSearch(1)}
+                aria-label={t(($) => $.detail.issue_search_next)}
+              >
+                <ChevronRight />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={closeIssueSearch}
+                aria-label={t(($) => $.detail.issue_search_close)}
+              >
+                <X />
+              </Button>
+            </div>
+          </div>
+        )}
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
-          <TitleEditor
-            key={`title-${id}`}
-            defaultValue={issue.title}
-            placeholder={t(($) => $.detail.title_placeholder)}
-            className="w-full text-2xl font-bold leading-snug tracking-tight"
-            onBlur={(value) => {
-              const trimmed = value.trim();
-              if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
-            }}
-          />
+          <div id="issue-search-title">
+            {issueSearchQuery.trim() ? (
+              <h1 className="w-full text-2xl font-bold leading-snug tracking-tight">
+                <HighlightIssueText
+                  text={issue.title}
+                  query={issueSearchQuery}
+                  active={activeIssueSearchResult?.kind === "title"}
+                  activeMatchIndex={activeIssueSearchResult?.kind === "title" ? activeIssueSearchResult.matchIndex : undefined}
+                />
+              </h1>
+            ) : (
+              <TitleEditor
+                key={`title-${id}`}
+                defaultValue={issue.title}
+                placeholder={t(($) => $.detail.title_placeholder)}
+                className="w-full text-2xl font-bold leading-snug tracking-tight"
+                onBlur={(value) => {
+                  const trimmed = value.trim();
+                  if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
+                }}
+              />
+            )}
+          </div>
 
           {parentIssue && (
             <AppLink
@@ -1937,44 +2508,55 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </AppLink>
           )}
 
-          <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
-            <ContentEditor
-              ref={descEditorRef}
-              key={id}
-              defaultValue={issue.description || ""}
-              placeholder={t(($) => $.detail.desc_placeholder)}
-              onUpdate={(md) => {
-                // Bind any pending uploads still referenced in the markdown
-                // so they appear in `issueAttachments` after refresh and the
-                // editor's text/code preview keeps working past reload.
-                //
-                // Match with `contentReferencesAttachment`, NOT `md.includes(a.url)`:
-                // the editor persists the durable `markdownLink`
-                // (`/api/attachments/<id>/download` / `markdown_url`) into the
-                // body, never the raw storage `a.url`. A bare `md.includes(a.url)`
-                // therefore never matches, so the upload is never linked via
-                // `attachment_ids`. After reload it's absent from
-                // `issueAttachments`, the renderer can't resolve it to a
-                // freshly-signed `download_url`, and the persisted auth-gated
-                // download endpoint fails to load as a native <img> on clients
-                // whose origin isn't the API host (Desktop/Electron, mobile
-                // webview) — while still working on web via the cookie/proxy.
-                // This mirrors the comment/reply/chat composers, which already
-                // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
-                const ids = descPendingAttachmentsRef.current
-                  .filter((a) => contentReferencesAttachment(md, a))
-                  .map((a) => a.id);
-                handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
-              }}
-              onUploadFile={handleDescriptionUpload}
-              debounceMs={1500}
-              // Closing the issue modal must save what the user last saw —
-              // without the flush, a paste followed by a quick close loses
-              // the image markdown and its attachment_ids bind (MUL-3254).
-              flushPendingOnUnmount
-              currentIssueId={id}
-              attachments={descEditorAttachments}
-            />
+          <div {...descDropZoneProps} id="issue-search-description" className="relative mt-5 rounded-lg">
+            {issueSearchQuery.trim() ? (
+              <div className="min-h-16 whitespace-pre-wrap text-sm leading-relaxed text-foreground/85">
+                <HighlightIssueText
+                  text={issueSearchVisibleText(issue.description)}
+                  query={issueSearchQuery}
+                  active={activeIssueSearchResult?.kind === "description"}
+                  activeMatchIndex={activeIssueSearchResult?.kind === "description" ? activeIssueSearchResult.matchIndex : undefined}
+                />
+              </div>
+            ) : (
+              <ContentEditor
+                ref={descEditorRef}
+                key={id}
+                defaultValue={issue.description || ""}
+                placeholder={t(($) => $.detail.desc_placeholder)}
+                onUpdate={(md) => {
+                  // Bind any pending uploads still referenced in the markdown
+                  // so they appear in `issueAttachments` after refresh and the
+                  // editor's text/code preview keeps working past reload.
+                  //
+                  // Match with `contentReferencesAttachment`, NOT `md.includes(a.url)`:
+                  // the editor persists the durable `markdownLink`
+                  // (`/api/attachments/<id>/download` / `markdown_url`) into the
+                  // body, never the raw storage `a.url`. A bare `md.includes(a.url)`
+                  // therefore never matches, so the upload is never linked via
+                  // `attachment_ids`. After reload it's absent from
+                  // `issueAttachments`, the renderer can't resolve it to a
+                  // freshly-signed `download_url`, and the persisted auth-gated
+                  // download endpoint fails to load as a native <img> on clients
+                  // whose origin isn't the API host (Desktop/Electron, mobile
+                  // webview) — while still working on web via the cookie/proxy.
+                  // This mirrors the comment/reply/chat composers, which already
+                  // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
+                  const ids = descPendingAttachmentsRef.current
+                    .filter((a) => contentReferencesAttachment(md, a))
+                    .map((a) => a.id);
+                  handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
+                }}
+                onUploadFile={handleDescriptionUpload}
+                debounceMs={1500}
+                // Closing the issue modal must save what the user last saw —
+                // without the flush, a paste followed by a quick close loses
+                // the image markdown and its attachment_ids bind (MUL-3254).
+                flushPendingOnUnmount
+                currentIssueId={id}
+                attachments={descEditorAttachments}
+              />
+            )}
 
             <div className="flex items-center gap-1 mt-3">
               <ReactionBar
@@ -2095,12 +2677,30 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <div className="my-8 border-t" />
 
           {/* Activity / Comments */}
-          <div>
+          <div ref={activitySectionRef} data-comment-nav-anchor>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <h2 className="text-base font-semibold">{t(($) => $.detail.activity_section)}</h2>
               </div>
               <div className="flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant={commentNavOpen ? "secondary" : "ghost"}
+                        size="sm"
+                        className={cn("h-7 gap-1.5 px-2 text-xs", !commentNavOpen && "text-muted-foreground")}
+                        onClick={toggleCommentNav}
+                        aria-label={t(($) => $.detail.comment_nav_toggle)}
+                        aria-pressed={commentNavOpen}
+                      >
+                        <ListTree className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">{t(($) => $.detail.comment_nav_label)}</span>
+                      </Button>
+                    }
+                  />
+                  <TooltipContent side="bottom">{t(($) => $.detail.comment_nav_toggle)}</TooltipContent>
+                </Tooltip>
                 <button
                   type="button"
                   onClick={handleToggleSubscribe}
@@ -2144,6 +2744,58 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             <LocalDirectoryHint projectId={issue?.project_id} />
 
+            <div className="relative">
+              {showCommentNav && commentNavPosition && (
+                <nav
+                  aria-label={t(($) => $.detail.comment_nav_label)}
+                  className="fixed z-40"
+                  style={{
+                    top: commentNavPosition.top,
+                    right: commentNavPosition.right,
+                    width: commentNavPosition.width,
+                  }}
+                >
+                  <div
+                    className="overflow-x-hidden overflow-y-auto overscroll-contain pr-1"
+                    style={{ maxHeight: commentNavPosition.maxHeight }}
+                  >
+                    <div className="flex flex-col">
+                      {commentNavItems.map((item, index) => {
+                        const active = (activeCommentNavId ?? commentNavItems[0]?.id) === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => handleCommentNavClick(item.id)}
+                            className="group flex min-h-7 w-full items-center gap-2 text-left text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            aria-label={t(($) => $.detail.comment_nav_item_aria, {
+                              index: index + 1,
+                              text: item.label,
+                            })}
+                            aria-current={active ? "true" : undefined}
+                          >
+                            <span className="flex w-4 shrink-0 flex-col items-center self-stretch">
+                              {index > 0 && <span className="h-2 w-px bg-border" aria-hidden />}
+                              <span
+                                className={cn(
+                                  "h-2.5 w-2.5 rounded-full border bg-background transition-colors",
+                                  active ? "border-primary bg-primary" : "border-muted-foreground/40 group-hover:border-foreground",
+                                )}
+                                aria-hidden
+                              />
+                              {index < commentNavItems.length - 1 && <span className="min-h-2 flex-1 w-px bg-border" aria-hidden />}
+                            </span>
+                            {commentNavPosition.width >= 120 && (
+                              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </nav>
+              )}
+
             {/* The "agent is working" live signal now lives in the header
                 (IssueAgentHeaderChip) so it stays in one fixed place and
                 doesn't compete with sticky banners in this content column.
@@ -2179,7 +2831,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               // on a target" have fundamentally opposed contracts (estimated
               // heights vs real heights). Trying to satisfy both in one
               // path is what produced the bug history this PR closes.
-              !highlightCommentId ? (
+              !highlightCommentId && !issueSearchQuery.trim() ? (
                 !scrollContainerEl ? (
                   // Skeleton while the callback ref populates so the gap
                   // between IssueDetail mount and Virtuoso mount doesn't
@@ -2188,6 +2840,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 ) : (
                   <div className="mt-4">
                     <Virtuoso
+                      ref={timelineVirtuosoRef}
                       key={`${wsId}:${id}`}
                       customScrollParent={scrollContainerEl}
                       data={items}
@@ -2221,6 +2874,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   next keystroke would flush it into the new issue's
                   draft key. */}
               <CommentInput key={id} issueId={id} onSubmit={submitComment} />
+            </div>
             </div>
           </div>
         </div>

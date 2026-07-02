@@ -120,6 +120,9 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 		echo "Images: $${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:$${MULTICA_IMAGE_TAG:-latest}"; \
 		echo "        $${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:$${MULTICA_IMAGE_TAG:-latest}"; \
 		echo ""; \
+		echo "Note: make selfhost runs official GHCR images, not your current checkout."; \
+		echo "      To verify local source changes, use make dev or make selfhost-build."; \
+		echo ""; \
 		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
 		echo "        or read the generated code from backend logs when Resend is unset."; \
 		echo ""; \

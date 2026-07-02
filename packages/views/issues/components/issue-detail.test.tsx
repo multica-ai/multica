@@ -10,6 +10,34 @@ import enIssues from "../../locales/en/issues.json";
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+const defaultGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+
+function rect(init: { top: number; right: number; bottom: number; left: number; width: number; height: number }): DOMRect {
+  return {
+    x: init.left,
+    y: init.top,
+    ...init,
+    toJSON: () => {},
+  } as DOMRect;
+}
+
+function installIssueDetailLayoutRects({
+  anchorRight = 800,
+  scrollRight = 960,
+}: {
+  anchorRight?: number;
+  scrollRight?: number;
+} = {}) {
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    if (this.hasAttribute("data-tab-scroll-root")) {
+      return rect({ top: 0, right: scrollRight, bottom: 720, left: 0, width: scrollRight, height: 720 });
+    }
+    if (this.hasAttribute("data-comment-nav-anchor")) {
+      return rect({ top: 48, right: anchorRight, bottom: 680, left: 0, width: anchorRight, height: 632 });
+    }
+    return defaultGetBoundingClientRect.call(this);
+  };
+}
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
@@ -49,6 +77,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
     getActorName: (type: string, id: string) => {
       if (type === "member" && id === "user-1") return "Test User";
       if (type === "agent" && id === "agent-1") return "Claude Agent";
+      if (type === "squad" && id === "squad-1") return "Review Squad";
       return "Unknown";
     },
     getActorInitials: (type: string) => (type === "member" ? "TU" : "CA"),
@@ -212,6 +241,7 @@ const mockApiObj = vi.hoisted(() => ({
   listTaskMessages: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
   listIssues: vi.fn().mockResolvedValue({ issues: [], total: 0 }),
+  searchIssues: vi.fn().mockResolvedValue({ issues: [], total: 0 }),
   uploadFile: vi.fn(),
   listIssueReactions: vi.fn().mockResolvedValue([]),
   addIssueReaction: vi.fn(),
@@ -498,6 +528,8 @@ function renderIssueDetailWithHighlight(
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    installIssueDetailLayoutRects();
     mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
@@ -778,6 +810,384 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  it("keeps comment navigation closed by default and toggles root comment nodes", async () => {
+    renderIssueDetail();
+
+    const toggle = await screen.findByRole("button", { name: "Toggle comment navigation" });
+
+    expect(screen.queryByRole("navigation", { name: "Comment navigation" })).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    const nav = screen.getByRole("navigation", { name: "Comment navigation" });
+    expect(nav.firstElementChild).toHaveClass("overflow-y-auto");
+    expect(nav.firstElementChild).toHaveClass("overscroll-contain");
+    expect(localStorage.getItem("multica_issue_comment_nav_open:ws-1:issue-1")).toBe("1");
+    expect(nav).toBeInTheDocument();
+    expect(nav).not.toHaveClass("hidden");
+    expect(nav).toHaveClass("fixed");
+    expect(nav).toHaveStyle({ top: "64px" });
+    expect(nav).toHaveStyle({ width: "140px" });
+    expect(nav).not.toHaveClass("translate-x-[calc(100%+0.75rem)]");
+    const firstNode = screen.getByRole("button", { name: "Go to comment 1: Started working on this" });
+    expect(firstNode).toBeInTheDocument();
+    expect(firstNode).toHaveTextContent("Started working on this");
+    expect(screen.getByRole("button", { name: "Go to comment 2: I can help with this" })).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(localStorage.getItem("multica_issue_comment_nav_open:ws-1:issue-1")).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Comment navigation" })).not.toBeInTheDocument();
+  });
+
+  it("restores open comment navigation for the current issue from local storage", async () => {
+    localStorage.setItem("multica_issue_comment_nav_open:ws-1:issue-1", "1");
+
+    renderIssueDetail();
+
+    expect(await screen.findByRole("navigation", { name: "Comment navigation" })).toBeInTheDocument();
+  });
+
+  it("builds comment navigation from root comments only and keeps resolved roots", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "activity-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "todo", to: "in_progress" },
+        created_at: "2026-01-15T00:00:00Z",
+      },
+      {
+        type: "comment",
+        id: "root-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Root comment",
+        parent_id: null,
+        created_at: "2026-01-16T00:00:00Z",
+        updated_at: "2026-01-16T00:00:00Z",
+        comment_type: "comment",
+      },
+      {
+        type: "comment",
+        id: "reply-1",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        content: "Reply comment",
+        parent_id: "root-1",
+        created_at: "2026-01-16T01:00:00Z",
+        updated_at: "2026-01-16T01:00:00Z",
+        comment_type: "comment",
+      },
+      {
+        type: "comment",
+        id: "resolved-root",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "",
+        parent_id: null,
+        created_at: "2026-01-17T00:00:00Z",
+        updated_at: "2026-01-17T00:00:00Z",
+        comment_type: "comment",
+        resolved_at: "2026-01-18T00:00:00Z",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Toggle comment navigation" }));
+
+    expect(screen.getByRole("button", { name: "Go to comment 1: Root comment" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Go to comment 2: Test User" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Reply comment/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /status/i })).not.toBeInTheDocument();
+  });
+
+  it("marks the clicked comment navigation node current", async () => {
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Toggle comment navigation" }));
+    const second = screen.getByRole("button", { name: "Go to comment 2: I can help with this" });
+    fireEvent.click(second);
+
+    expect(second).toHaveAttribute("aria-current", "true");
+  });
+
+  it("keeps comment navigation below the issue search bar", async () => {
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Search in this issue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Toggle comment navigation" }));
+
+    expect(screen.getByRole("navigation", { name: "Comment navigation" })).toHaveStyle({
+      top: "112px",
+    });
+  });
+
+  it("hides comment navigation when there is no right-side blank space", async () => {
+    installIssueDetailLayoutRects({ anchorRight: 790, scrollRight: 800 });
+
+    renderIssueDetail();
+    fireEvent.click(await screen.findByRole("button", { name: "Toggle comment navigation" }));
+
+    expect(screen.queryByRole("navigation", { name: "Comment navigation" })).not.toBeInTheDocument();
+  });
+
+  it("hides the comment navigation rail on mobile web", async () => {
+    mockViewport.isMobile = true;
+
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Toggle comment navigation" }));
+
+    expect(screen.queryByRole("navigation", { name: "Comment navigation" })).not.toBeInTheDocument();
+  });
+
+  it("searches inside the current issue without backend search and cycles results", async () => {
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Search in this issue" }));
+    fireEvent.change(screen.getByPlaceholderText("Search this issue..."), { target: { value: "this" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("1/2")).toBeInTheDocument();
+    });
+    expect(mockApiObj.searchIssues).not.toHaveBeenCalled();
+    expect(screen.getAllByText("this").some((el) => el.tagName.toLowerCase() === "mark")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Next result" }));
+    expect(screen.getByText("2/2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next result" }));
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close issue search" }));
+
+    expect(screen.queryByPlaceholderText("Search this issue...")).not.toBeInTheDocument();
+    expect(screen.queryByText("1/2")).not.toBeInTheDocument();
+  });
+
+  it("counts repeated matches and navigates between each current match", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      title: "Plain issue title",
+      description: "No matching description",
+    });
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "comment",
+        id: "comment-repeat",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "needle then needle then needle",
+        parent_id: null,
+        created_at: "2026-01-16T00:00:00Z",
+        updated_at: "2026-01-16T00:00:00Z",
+        comment_type: "comment",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Search in this issue" }));
+    fireEvent.change(screen.getByPlaceholderText("Search this issue..."), { target: { value: "needle" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("1/3")).toBeInTheDocument();
+    });
+    const activeMarkIndex = () =>
+      Array.from(document.querySelectorAll("mark")).findIndex((el) => el.classList.contains("ring-2"));
+
+    expect(screen.getAllByText("needle")).toHaveLength(3);
+    expect(activeMarkIndex()).toBe(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Next result" }));
+    expect(screen.getByText("2/3")).toBeInTheDocument();
+    expect(document.querySelectorAll("mark.ring-2")).toHaveLength(1);
+    expect(activeMarkIndex()).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous result" }));
+    expect(screen.getByText("1/3")).toBeInTheDocument();
+    expect(document.querySelectorAll("mark.ring-2")).toHaveLength(1);
+    expect(activeMarkIndex()).toBe(0);
+  });
+
+  it("searches only the rendered coalesced activity row", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      title: "Plain issue title",
+      description: "No matching description",
+    });
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-old",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "todo", to: "in_progress" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+      {
+        type: "activity",
+        id: "act-rendered",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "in_progress", to: "in_review" },
+        created_at: "2026-01-18T00:01:00Z",
+      },
+      {
+        type: "activity",
+        id: "act-priority",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "priority_changed",
+        details: { from: "low", to: "high" },
+        created_at: "2026-01-18T00:03:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Search in this issue" }));
+    fireEvent.change(screen.getByPlaceholderText("Search this issue..."), { target: { value: "changed" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("1/2")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("1/3")).not.toBeInTheDocument();
+    expect(document.getElementById("issue-search-activity-act-old")).toBeNull();
+    expect(document.getElementById("issue-search-activity-act-rendered")).not.toBeNull();
+    expect(document.querySelectorAll("mark.ring-2")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Next result" }));
+    expect(screen.getByText("2/2")).toBeInTheDocument();
+    expect(document.querySelectorAll("mark.ring-2")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous result" }));
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+    expect(document.querySelectorAll("mark.ring-2")).toHaveLength(1);
+  });
+
+  it("clears issue search state when the header search button closes it", async () => {
+    renderIssueDetail();
+
+    const headerSearchButton = await screen.findByRole("button", { name: "Search in this issue" });
+    fireEvent.click(headerSearchButton);
+    fireEvent.change(screen.getByPlaceholderText("Search this issue..."), { target: { value: "this" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("1/2")).toBeInTheDocument();
+    });
+    expect(screen.getAllByText("this").some((el) => el.tagName.toLowerCase() === "mark")).toBe(true);
+
+    fireEvent.click(headerSearchButton);
+
+    expect(screen.queryByPlaceholderText("Search this issue...")).not.toBeInTheDocument();
+    expect(screen.queryByText("1/2")).not.toBeInTheDocument();
+    expect(document.querySelector("mark")).toBeNull();
+  });
+
+  it("searches comment and reply actor display names", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      title: "Plain issue title",
+      description: "No matching description",
+    });
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "comment",
+        id: "root-comment",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Root body",
+        parent_id: null,
+        created_at: "2026-01-16T00:00:00Z",
+        updated_at: "2026-01-16T00:00:00Z",
+        comment_type: "comment",
+      },
+      {
+        type: "comment",
+        id: "reply-comment",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        content: "Reply body",
+        parent_id: "root-comment",
+        created_at: "2026-01-16T01:00:00Z",
+        updated_at: "2026-01-16T01:00:00Z",
+        comment_type: "comment",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Search in this issue" }));
+    fireEvent.change(screen.getByPlaceholderText("Search this issue..."), { target: { value: "Claude Agent" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("1/1")).toBeInTheDocument();
+    });
+    expect(document.querySelector("#issue-search-comment-actor-reply-comment mark.ring-2")).not.toBeNull();
+    expect(mockApiObj.searchIssues).not.toHaveBeenCalled();
+  });
+
+  it("searches activity actor display names", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      title: "Plain issue title",
+      description: "No matching description",
+    });
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "activity-agent",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        action: "status_changed",
+        details: { from: "todo", to: "in_progress" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Search in this issue" }));
+    fireEvent.change(screen.getByPlaceholderText("Search this issue..."), { target: { value: "Claude Agent" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("1/1")).toBeInTheDocument();
+    });
+    expect(document.querySelector("#issue-search-activity-actor-activity-agent mark.ring-2")).not.toBeNull();
+  });
+
+  it("searches mention labels without matching hidden mention URLs", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      title: "Plain issue title",
+      description: "Mention [@Visible Person](mention://member/user-visible-id)",
+    });
+    mockApiObj.listTimeline.mockResolvedValue([]);
+
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Search in this issue" }));
+    const input = screen.getByPlaceholderText("Search this issue...");
+    fireEvent.change(input, { target: { value: "Visible Person" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("1/1")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Visible Person").tagName.toLowerCase()).toBe("mark");
+
+    fireEvent.change(input, { target: { value: "user-visible-id" } });
+
+    await waitFor(() => {
+      expect(screen.getByText("0/0")).toBeInTheDocument();
+    });
+    expect(document.querySelector("mark")).toBeNull();
   });
 
   it("reruns the source task from an agent failure comment", async () => {

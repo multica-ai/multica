@@ -121,6 +121,50 @@ interface CommentCardProps {
   onResolvedExpandChange?: (rootId: string, expand: boolean) => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
+  searchQuery?: string;
+  activeSearchResultId?: string | null;
+}
+
+function HighlightCommentText({
+  text,
+  query,
+  active,
+  activeMatchIndex,
+}: {
+  text: string;
+  query?: string;
+  active?: boolean;
+  activeMatchIndex?: number;
+}) {
+  const q = query?.trim() ?? "";
+  if (!q) return <>{text}</>;
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escaped})`, "gi");
+  const parts = text.split(regex);
+  let matchIndex = -1;
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (part.toLowerCase() !== q.toLowerCase()) return part;
+        matchIndex += 1;
+        return (
+          <mark
+            key={index}
+            className={cn(
+              "rounded-sm bg-yellow-200 text-inherit dark:bg-yellow-900/60",
+              active && (activeMatchIndex == null || activeMatchIndex === matchIndex) && "ring-2 ring-brand/60",
+            )}
+          >
+            {part}
+          </mark>
+        );
+      })}
+    </>
+  );
+}
+
+function commentSearchVisibleText(text: string | null | undefined) {
+  return (text ?? "").replace(/\[([^\]]+)\]\(mention:\/\/[^)]+\)/g, "$1");
 }
 
 // ---------------------------------------------------------------------------
@@ -478,6 +522,8 @@ function CommentRow({
   onDelete,
   onToggleReaction,
   onResolveToggle,
+  searchQuery,
+  activeSearchResultId,
 }: {
   issueId: string;
   entry: TimelineEntry;
@@ -491,6 +537,8 @@ function CommentRow({
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
+  searchQuery?: string;
+  activeSearchResultId?: string | null;
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
@@ -516,8 +564,15 @@ function CommentRow({
         className="flex items-center gap-2.5 px-4 pt-1 pb-1.5"
       >
         <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
-        <span className="cursor-pointer text-sm font-medium">
-          {getActorName(entry.actor_type, entry.actor_id)}
+        <span id={`issue-search-comment-actor-${entry.id}`} className="cursor-pointer text-sm font-medium">
+          <HighlightCommentText
+            text={getActorName(entry.actor_type, entry.actor_id)}
+            query={searchQuery}
+            active={activeSearchResultId?.startsWith(`comment-actor:${entry.id}:`)}
+            activeMatchIndex={activeSearchResultId?.startsWith(`comment-actor:${entry.id}:`)
+              ? Number(activeSearchResultId.split(":").at(-1)) || 0
+              : undefined}
+          />
         </span>
         <Tooltip>
           <TooltipTrigger
@@ -662,7 +717,20 @@ function CommentRow({
       ) : (
         <>
           <div className="pl-12 pr-4 pt-1 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+            {searchQuery?.trim() ? (
+              <div className="whitespace-pre-wrap">
+                <HighlightCommentText
+                  text={commentSearchVisibleText(entry.content)}
+                  query={searchQuery}
+                  active={activeSearchResultId?.startsWith(`comment:${entry.id}:`)}
+                  activeMatchIndex={activeSearchResultId?.startsWith(`comment:${entry.id}:`)
+                    ? Number(activeSearchResultId.split(":").at(-1)) || 0
+                    : undefined}
+                />
+              </div>
+            ) : (
+              <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+            )}
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
           {retryableAgentFailureComment(entry) && (
@@ -704,6 +772,8 @@ function CommentCardImpl({
   expandedResolvedIds,
   onResolvedExpandChange,
   highlightedCommentId,
+  searchQuery,
+  activeSearchResultId,
 }: CommentCardProps) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
@@ -791,8 +861,15 @@ function CommentCardImpl({
               <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
             </CollapsibleTrigger>
             <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={24} enableHoverCard showStatusDot />
-            <span className="shrink-0 cursor-pointer text-sm font-medium">
-              {getActorName(entry.actor_type, entry.actor_id)}
+            <span id={`issue-search-comment-actor-${entry.id}`} className="shrink-0 cursor-pointer text-sm font-medium">
+              <HighlightCommentText
+                text={getActorName(entry.actor_type, entry.actor_id)}
+                query={searchQuery}
+                active={activeSearchResultId?.startsWith(`comment-actor:${entry.id}:`)}
+                activeMatchIndex={activeSearchResultId?.startsWith(`comment-actor:${entry.id}:`)
+                  ? Number(activeSearchResultId.split(":").at(-1)) || 0
+                  : undefined}
+              />
             </span>
             <Tooltip>
               <TooltipTrigger
@@ -952,7 +1029,20 @@ function CommentCardImpl({
             ) : (
               <>
                 <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  {searchQuery?.trim() ? (
+                    <div className="whitespace-pre-wrap">
+                      <HighlightCommentText
+                        text={commentSearchVisibleText(entry.content)}
+                        query={searchQuery}
+                        active={activeSearchResultId?.startsWith(`comment:${entry.id}:`)}
+                        activeMatchIndex={activeSearchResultId?.startsWith(`comment:${entry.id}:`)
+                          ? Number(activeSearchResultId.split(":").at(-1)) || 0
+                          : undefined}
+                      />
+                    </div>
+                  ) : (
+                    <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  )}
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {retryableAgentFailureComment(entry) && (
@@ -1004,6 +1094,8 @@ function CommentCardImpl({
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}
                     onResolveToggle={onResolveToggle}
+                    searchQuery={searchQuery}
+                    activeSearchResultId={activeSearchResultId}
                   />
                 </div>
               )}
@@ -1036,6 +1128,8 @@ function CommentCardImpl({
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}
                     onResolveToggle={onResolveToggle}
+                    searchQuery={searchQuery}
+                    activeSearchResultId={activeSearchResultId}
                   />
                 </div>
               ))}
