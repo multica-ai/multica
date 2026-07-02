@@ -68,3 +68,9 @@ server/server
 data/
 .kilo
 .idea
+
+.cache/go-build
+.cursor
+.gocache
+packages/views
+server
