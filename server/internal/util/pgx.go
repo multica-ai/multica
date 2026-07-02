@@ -151,7 +151,6 @@ func Int4ToPtr(v pgtype.Int4) *int32 {
 	}
 	return &v.Int32
 }
-
 func PtrToInt4(v *int32) pgtype.Int4 {
 	if v == nil {
 		return pgtype.Int4{}

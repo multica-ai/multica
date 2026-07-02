@@ -19,9 +19,9 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
-    runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
+    runtime_config, runtime_id, visibility, max_concurrent_tasks, max_runs_per_day, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -35,6 +35,7 @@ UPDATE agent SET
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
     status = COALESCE(sqlc.narg('status'), status),
     max_concurrent_tasks = COALESCE(sqlc.narg('max_concurrent_tasks'), max_concurrent_tasks),
+    max_runs_per_day = COALESCE(sqlc.narg('max_runs_per_day'), max_runs_per_day),
     instructions = COALESCE(sqlc.narg('instructions'), instructions),
     custom_env = COALESCE(sqlc.narg('custom_env'), custom_env),
     custom_args = COALESCE(sqlc.narg('custom_args'), custom_args),
@@ -781,4 +782,18 @@ SET status = CASE WHEN EXISTS (
 ) THEN 'working' ELSE 'idle' END,
     updated_at = now()
 WHERE a.id = $1
+RETURNING *;
+
+-- name: CountAgentRunsToday :one
+-- Counts all tasks created for this agent since midnight UTC today.
+-- Used to enforce max_runs_per_day at claim time.
+SELECT count(*)::bigint FROM agent_task_queue
+WHERE agent_id = $1 AND created_at >= CURRENT_DATE;
+
+-- name: ClearAgentMaxRunsPerDay :one
+-- Explicit NULL-clear for max_runs_per_day. COALESCE-based UpdateAgent cannot
+-- set the column back to NULL, so the API layer routes "user picked unlimited"
+-- through this dedicated query.
+UPDATE agent SET max_runs_per_day = NULL, updated_at = now()
+WHERE id = $1
 RETURNING *;

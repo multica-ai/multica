@@ -1051,6 +1051,26 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 			return nil
 		}
 
+		// Enforce per-agent daily run budget (step 2 of #4076 spend guardrails).
+		// Counts all tasks created today (UTC midnight boundary) — cheaper than
+		// a full task_usage join and catches the runaway-autopilot shape.
+		if agent.MaxRunsPerDay.Valid && agent.MaxRunsPerDay.Int32 > 0 {
+			todayCount, err := qtx.CountAgentRunsToday(ctx, agentID)
+			if err != nil {
+				outcome = "error_count_runs_today"
+				return fmt.Errorf("count today's runs: %w", err)
+			}
+			if todayCount >= int64(agent.MaxRunsPerDay.Int32) {
+				slog.Info("task claim: daily run budget exceeded",
+					"agent_id", util.UUIDToString(agentID),
+					"today_count", todayCount,
+					"max_runs_per_day", agent.MaxRunsPerDay.Int32,
+				)
+				outcome = "budget_exceeded"
+				return nil
+			}
+		}
+
 		t0 = time.Now()
 		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
 			AgentID:          agentID,

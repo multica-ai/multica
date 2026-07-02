@@ -56,6 +56,7 @@ type AgentResponse struct {
 	Visibility         string `json:"visibility"`
 	Status             string `json:"status"`
 	MaxConcurrentTasks int32  `json:"max_concurrent_tasks"`
+	MaxRunsPerDay      *int32 `json:"max_runs_per_day"`
 	Model              string `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
@@ -134,6 +135,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Visibility:         a.Visibility,
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
+		MaxRunsPerDay:      int4ToPtr(a.MaxRunsPerDay),
 		Model:              a.Model.String,
 		ThinkingLevel:      a.ThinkingLevel.String,
 		OwnerID:            uuidToPtr(a.OwnerID),
@@ -678,6 +680,7 @@ type CreateAgentRequest struct {
 	McpConfig          json.RawMessage   `json:"mcp_config"`
 	Visibility         string            `json:"visibility"`
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
+	MaxRunsPerDay      *int32            `json:"max_runs_per_day"`
 	Model              string            `json:"model"`
 	ThinkingLevel      string            `json:"thinking_level"`
 	// Template records which template slug was used to seed this agent
@@ -824,6 +827,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		RuntimeID:          runtime.ID,
 		Visibility:         req.Visibility,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
+		MaxRunsPerDay:      ptrToInt4(req.MaxRunsPerDay),
 		OwnerID:            parseUUID(ownerID),
 		CustomEnv:          ce,
 		CustomArgs:         ca,
@@ -889,6 +893,7 @@ type UpdateAgentRequest struct {
 	Visibility         *string          `json:"visibility"`
 	Status             *string          `json:"status"`
 	MaxConcurrentTasks *int32           `json:"max_concurrent_tasks"`
+	MaxRunsPerDay      *int32           `json:"max_runs_per_day"`
 	Model              *string          `json:"model"`
 	// ThinkingLevel is treated as a tri-state per-MUL-2339:
 	//   - field omitted → no change (leave existing value alone)
@@ -1120,6 +1125,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.Model = pgtype.Text{String: "", Valid: true}
 	}
 
+	// max_runs_per_day handling. Tri-state semantics:
+	//   - field omitted  → leave column alone (COALESCE narg)
+	//   - field set to 0 → clear to NULL (unlimited)
+	//   - field set to >0 → set the value
+	shouldClearMaxRunsPerDay := false
+	if _, ok := rawFields["max_runs_per_day"]; ok {
+		if req.MaxRunsPerDay != nil && *req.MaxRunsPerDay > 0 {
+			params.MaxRunsPerDay = pgtype.Int4{Int32: *req.MaxRunsPerDay, Valid: true}
+		} else if req.MaxRunsPerDay == nil || *req.MaxRunsPerDay == 0 {
+			shouldClearMaxRunsPerDay = true
+		}
+	}
+
 	// thinking_level handling (MUL-2339). Tri-state semantics:
 	//   - field omitted  → leave column alone (COALESCE narg), but if a
 	//     runtime change in this same request would make the *existing*
@@ -1205,6 +1223,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
+			return
+		}
+	}
+	if shouldClearMaxRunsPerDay {
+		updated, err = h.Queries.ClearAgentMaxRunsPerDay(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent max_runs_per_day failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear max_runs_per_day: "+err.Error())
 			return
 		}
 	}
