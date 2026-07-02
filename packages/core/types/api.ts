@@ -130,6 +130,12 @@ export interface GroupedIssuesResponse {
   groups: IssueAssigneeGroup[];
 }
 
+export interface OpenIdeCommandResponse {
+  command_id: string;
+  status: "queued";
+  task_id: string;
+}
+
 /** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */
 export interface IssueStatusBucket {
   issues: Issue[];

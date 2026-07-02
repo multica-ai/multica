@@ -18,6 +18,7 @@ import type {
   GroupedIssuesResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
+  OpenIdeCommandResponse,
   RuntimeBriefResponse,
   Squad,
   TimelineEntry,
@@ -557,6 +558,18 @@ export const ActiveTasksForIssueResponseSchema = z.object({
 
 export const EMPTY_ACTIVE_TASKS_FOR_ISSUE_RESPONSE = {
   tasks: [],
+};
+
+export const OpenIdeCommandResponseSchema = z.object({
+  command_id: z.string(),
+  status: z.literal("queued"),
+  task_id: z.string(),
+}).loose();
+
+export const EMPTY_OPEN_IDE_COMMAND_RESPONSE: OpenIdeCommandResponse = {
+  command_id: "",
+  status: "queued",
+  task_id: "",
 };
 
 const CancelledChatMessageSchema = z.object({

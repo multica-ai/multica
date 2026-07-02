@@ -13,9 +13,9 @@
  *   - video : <video controls src={download_url}>
  *   - audio : <audio controls src={download_url}>
  *
- *   - markdown : fetch text via api.getAttachmentTextContent, render via
- *                the existing ReadonlyContent (full mention/mermaid/katex
- *                pipeline included).
+ *   - markdown : fetch text via api.getAttachmentTextContent. Issue-scoped
+ *                attachments render through MarkdownAnnotationPreview;
+ *                other contexts keep the existing ReadonlyContent pipeline.
  *   - html     : fetch text, hand to <iframe srcdoc={text}
  *                sandbox="allow-scripts">. The iframe runs in an opaque
  *                origin: scripts execute (chart libraries / vanilla SVG
@@ -59,6 +59,7 @@ import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
 import { HtmlPreviewBody } from "./html-preview-body";
 import { CodeBlockStatic } from "./code-block-static";
+import { MarkdownAnnotationPreview } from "./markdown-annotation-preview";
 
 // ---------------------------------------------------------------------------
 // Preview source — full attachment, or URL-only (media types only)
@@ -400,13 +401,27 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
-          render={(text) => (
-            <ReadonlyContent
-              content={text}
-              className="px-6 py-4"
-              attachments={source.kind === "full" ? [source.attachment] : []}
-            />
-          )}
+          render={(text) => {
+            const issueId = source.kind === "full" ? source.attachment.issue_id : null;
+            if (issueId) {
+              return (
+                <MarkdownAnnotationPreview
+                  attachmentId={state.attachmentId!}
+                  filename={state.filename}
+                  content={text}
+                  issueId={issueId}
+                  attachments={source.kind === "full" ? [source.attachment] : []}
+                />
+              );
+            }
+            return (
+              <ReadonlyContent
+                content={text}
+                className="px-6 py-4"
+                attachments={source.kind === "full" ? [source.attachment] : []}
+              />
+            );
+          }}
         />
       );
     case "html":

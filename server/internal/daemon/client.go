@@ -259,6 +259,30 @@ func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir 
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/session", taskID), body, nil)
 }
 
+func (c *Client) ClaimDaemonCommands(ctx context.Context, daemonID string, limit int) ([]DaemonCommand, error) {
+	var resp struct {
+		Commands []DaemonCommand `json:"commands"`
+	}
+	if err := c.postJSON(ctx, "/api/daemon/commands/claim", map[string]any{
+		"daemon_id": daemonID,
+		"limit":     limit,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Commands, nil
+}
+
+func (c *Client) CompleteDaemonCommand(ctx context.Context, daemonID, commandID, status, errMsg string) error {
+	body := map[string]any{
+		"daemon_id": daemonID,
+		"status":    status,
+	}
+	if errMsg != "" {
+		body["error"] = errMsg
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/commands/%s/complete", commandID), body, nil)
+}
+
 // RecoverOrphans tells the server to fail any dispatched/running tasks the
 // previous daemon process for this runtime left behind. The server will
 // auto-retry eligible tasks.
@@ -293,8 +317,8 @@ type (
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":             runtimeID,
-		"supports_batch_import":  true,
+		"runtime_id":            runtimeID,
+		"supports_batch_import": true,
 	}, &resp); err != nil {
 		return nil, err
 	}

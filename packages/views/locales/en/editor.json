@@ -46,6 +46,20 @@
     "open_in_new_tab": "Open in new tab",
     "remove": "Remove attachment"
   },
+  "annotation": {
+    "count": "Annotations {{count}}",
+    "add": "Add note",
+    "note_placeholder": "Add a note",
+    "save": "Save note",
+    "cancel": "Cancel",
+    "clear": "Clear",
+    "send_to_comments": "Send to comments",
+    "sent": "Sent to comments",
+    "send_failed": "Failed to send annotations",
+    "invalid_selection": "This selection cannot be located in the Markdown source. Select plain text content.",
+    "empty_note": "Enter a note.",
+    "list_title": "Current annotations"
+  },
   "link_hover": {
     "copy_link": "Copy link",
     "open_link": "Open link",

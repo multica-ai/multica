@@ -46,6 +46,20 @@
     "open_in_new_tab": "新しいタブで開く",
     "remove": "添付ファイルを削除"
   },
+  "annotation": {
+    "count": "注釈 {{count}}",
+    "add": "メモを追加",
+    "note_placeholder": "メモを入力",
+    "save": "メモを保存",
+    "cancel": "キャンセル",
+    "clear": "クリア",
+    "send_to_comments": "コメントに送信",
+    "sent": "コメントに送信しました",
+    "send_failed": "注釈を送信できませんでした",
+    "invalid_selection": "この選択範囲は Markdown ソースに特定できません。プレーンテキストを選択してください。",
+    "empty_note": "メモを入力してください。",
+    "list_title": "今回の注釈"
+  },
   "link_hover": {
     "copy_link": "リンクをコピー",
     "open_link": "リンクを開く",

@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
@@ -48,6 +50,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     getAttachmentTextContent: getAttachmentTextContentMock,
     getBaseUrl: getBaseUrlMock,
+    createComment: vi.fn(),
   },
   PreviewTooLargeError: FakePreviewTooLargeError,
   PreviewUnsupportedError: FakePreviewUnsupportedError,
@@ -111,6 +114,19 @@ vi.mock("../i18n", () => ({
           download_failed: "",
           open_in_new_tab: "Open in new tab",
         },
+        annotation: {
+          count: "Annotations 0",
+          clear: "Clear",
+          send_to_comments: "Send to comments",
+          add: "Add note",
+          note_placeholder: "Add a note",
+          cancel: "Cancel",
+          save: "Save note",
+          list_title: "Current annotations",
+          sent: "Sent to comments",
+          send_failed: "Failed to send",
+          empty_note: "Enter a note.",
+        },
       }),
   }),
 }));
@@ -161,6 +177,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -244,6 +261,24 @@ describe("AttachmentPreviewModal — dispatch", () => {
       expect(screen.getByTestId("readonly-content")).toBeTruthy();
     });
     expect(screen.getByTestId("readonly-content").textContent).toContain("# heading");
+  });
+
+  it("enables annotation controls for issue Markdown attachments", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({
+      text: "# heading\n\nbody\n",
+      originalContentType: "text/markdown",
+    });
+    const att = makeAttachment({
+      filename: "README.md",
+      content_type: "text/markdown",
+      issue_id: "issue-1",
+    });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Send to comments")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("readonly-content")).toBeNull();
   });
 
   it("renders an iframe with srcdoc + sandbox='allow-scripts' for HTML", async () => {

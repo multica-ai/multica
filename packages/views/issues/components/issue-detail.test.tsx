@@ -2,14 +2,29 @@ import { forwardRef, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Issue, TimelineEntry } from "@multica/core/types";
+import type { AgentTask, Issue, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
+import { toast } from "sonner";
+import { ApiError } from "@multica/core/api";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+const MockApiError = vi.hoisted(() => class ApiError extends Error {
+  readonly status: number;
+  readonly statusText: string;
+  readonly body?: unknown;
+
+  constructor(message: string, status: number, statusText: string, body?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.statusText = statusText;
+    this.body = body;
+  }
+});
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
@@ -223,9 +238,11 @@ const mockApiObj = vi.hoisted(() => ({
   listAgents: vi.fn().mockResolvedValue([]),
   getProject: vi.fn(),
   listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+  openIssueInIde: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
+  ApiError: MockApiError,
   api: mockApiObj,
   getApi: () => mockApiObj,
   setApiInstance: vi.fn(),
@@ -513,6 +530,11 @@ describe("IssueDetail (shared)", () => {
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
+    mockApiObj.openIssueInIde.mockResolvedValue({
+      command_id: "cmd-1",
+      status: "queued",
+      task_id: "task-1",
+    });
     // Reset project mock — individual tests override per case. Default fixture
     // has project_id: null so getProject is not invoked.
     mockApiObj.getProject.mockReset();
@@ -624,6 +646,342 @@ describe("IssueDetail (shared)", () => {
     // The "+ Add property" affordance is always offered while any
     // optional field is still hidden.
     expect(screen.getByText("Add property")).toBeInTheDocument();
+  });
+
+  it("shows an IntelliJ IDEA open button in the project row when the issue has a project", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "project-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      title: "Project",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+
+    renderIssueDetail();
+
+    expect(await screen.findByRole("button", {
+      name: "Open working directory in IntelliJ IDEA",
+    })).toBeInTheDocument();
+  });
+
+  it("does not show the IntelliJ IDEA open button when the issue has no project", async () => {
+    renderIssueDetail();
+
+    await screen.findByTestId("project-picker");
+
+    expect(screen.queryByRole("button", {
+      name: "Open working directory in IntelliJ IDEA",
+    })).not.toBeInTheDocument();
+  });
+
+  it("requests IntelliJ IDEA to open the issue working directory", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "project-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      title: "Project",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", {
+      name: "Open working directory in IntelliJ IDEA",
+    });
+    await waitFor(() => {
+      expect(button).toBeEnabled();
+    });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(mockApiObj.openIssueInIde).toHaveBeenCalledWith("issue-1", "intellij_idea", { taskId: undefined });
+    });
+    expect(toast.success).toHaveBeenCalledWith("Requested local runtime to open IntelliJ IDEA");
+  });
+
+  it("passes the latest task with a work directory when opening IntelliJ IDEA", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "project-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      title: "Project",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+    mockApiObj.listTasksByIssue.mockResolvedValue([
+      {
+        id: "task-old",
+        agent_id: "agent-1",
+        runtime_id: "",
+        issue_id: "issue-1",
+        status: "completed",
+        priority: 0,
+        dispatched_at: null,
+        started_at: null,
+        completed_at: null,
+        result: null,
+        error: null,
+        created_at: "2026-01-01T00:00:00Z",
+        relative_work_dir: "ws/task-old/workdir",
+      },
+      {
+        id: "task-new",
+        agent_id: "agent-1",
+        runtime_id: "",
+        issue_id: "issue-1",
+        status: "completed",
+        priority: 0,
+        dispatched_at: null,
+        started_at: null,
+        completed_at: null,
+        result: null,
+        error: null,
+        created_at: "2026-01-02T00:00:00Z",
+        relative_work_dir: "ws/task-new/workdir",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", {
+      name: "Open working directory in IntelliJ IDEA",
+    });
+    await waitFor(() => {
+      expect(mockApiObj.listTasksByIssue).toHaveBeenCalledWith("issue-1");
+      expect(button).toBeEnabled();
+    });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(mockApiObj.openIssueInIde).toHaveBeenCalledWith("issue-1", "intellij_idea", { taskId: "task-new" });
+    });
+  });
+
+  it("prefers a child issue task when opening IntelliJ IDEA from a parent issue", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "project-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      title: "Project",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+    mockApiObj.listChildIssues.mockResolvedValue({
+      issues: [
+        {
+          ...mockIssue,
+          id: "child-issue-1",
+          identifier: "TES-2",
+          number: 2,
+          title: "Child execution issue",
+          parent_issue_id: "issue-1",
+          project_id: "project-1",
+        },
+      ],
+    });
+    mockApiObj.listTasksByIssue.mockImplementation((issueId: string) => {
+      if (issueId === "child-issue-1") {
+        return Promise.resolve([
+          {
+            id: "child-task",
+            agent_id: "agent-1",
+            runtime_id: "",
+            issue_id: "child-issue-1",
+            status: "completed",
+            priority: 0,
+            dispatched_at: null,
+            started_at: null,
+            completed_at: null,
+            result: null,
+            error: null,
+            created_at: "2026-01-01T00:00:00Z",
+            relative_work_dir: "ws/child/workdir",
+          },
+        ]);
+      }
+      return Promise.resolve([
+        {
+          id: "parent-task",
+          agent_id: "agent-1",
+          runtime_id: "",
+          issue_id: "issue-1",
+          status: "completed",
+          priority: 0,
+          dispatched_at: null,
+          started_at: null,
+          completed_at: null,
+          result: null,
+          error: null,
+          created_at: "2026-01-02T00:00:00Z",
+          relative_work_dir: "ws/parent/workdir",
+        },
+      ]);
+    });
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", {
+      name: "Open working directory in IntelliJ IDEA",
+    });
+    await waitFor(() => {
+      expect(mockApiObj.listTasksByIssue).toHaveBeenCalledWith("child-issue-1");
+      expect(button).toBeEnabled();
+    });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(mockApiObj.openIssueInIde).toHaveBeenCalledWith("issue-1", "intellij_idea", { taskId: "child-task" });
+    });
+  });
+
+  it("does not request IntelliJ IDEA before task history has loaded", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "project-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      title: "Project",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+    let resolveTasks: (tasks: AgentTask[]) => void = () => {};
+    mockApiObj.listTasksByIssue.mockReturnValue(new Promise((resolve) => {
+      resolveTasks = resolve;
+    }));
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", {
+      name: "Open working directory in IntelliJ IDEA",
+    });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(mockApiObj.openIssueInIde).not.toHaveBeenCalled();
+
+    resolveTasks([]);
+    await waitFor(() => {
+      expect(button).toBeEnabled();
+    });
+  });
+
+  it("shows the runtime owner error when opening IntelliJ is forbidden", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "project-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      title: "Project",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+    mockApiObj.openIssueInIde.mockRejectedValue(
+      new ApiError("forbidden", 403, "Forbidden", { error: "forbidden" }),
+    );
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", {
+      name: "Open working directory in IntelliJ IDEA",
+    });
+    await waitFor(() => {
+      expect(button).toBeEnabled();
+    });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Only the local runtime that ran this task can open it");
+    });
+  });
+
+  it("shows the no working directory error when no eligible task exists", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "project-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      title: "Project",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+    mockApiObj.openIssueInIde.mockRejectedValue(
+      new ApiError("no eligible task", 409, "Conflict", { code: "no_eligible_task" }),
+    );
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", {
+      name: "Open working directory in IntelliJ IDEA",
+    });
+    await waitFor(() => {
+      expect(button).toBeEnabled();
+    });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("This issue has no working directory to open");
+    });
   });
 
   it("hides every optional property row when none are set", async () => {

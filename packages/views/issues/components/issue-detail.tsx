@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  Code2,
   MoreHorizontal,
   PanelRight,
   Pin,
@@ -42,7 +43,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
-import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { AgentTask, Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly } from "@multica/core/issues/date";
@@ -60,13 +61,13 @@ import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueKeys, issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -79,7 +80,7 @@ import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import { useTimeAgo } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -658,6 +659,103 @@ interface IssueDetailProps {
   highlightCommentId?: string;
 }
 
+function apiErrorCode(error: unknown): string | null {
+  if (!(error instanceof ApiError)) return null;
+  const body = error.body;
+  if (!body || typeof body !== "object") return null;
+  const code = (body as { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
+export function pickOpenIdeTaskId(tasks: AgentTask[] | undefined): string | undefined {
+  if (!tasks?.length) return undefined;
+  let latest: AgentTask | undefined;
+  for (const task of tasks) {
+    if (!task.relative_work_dir) continue;
+    if (!latest || task.created_at > latest.created_at) {
+      latest = task;
+    }
+  }
+  return latest?.id;
+}
+
+function OpenIssueInIntelliJButton({
+  issueId,
+  childIssueIds = [],
+  childIssueIdsLoading = false,
+}: {
+  issueId: string;
+  childIssueIds?: string[];
+  childIssueIdsLoading?: boolean;
+}) {
+  const { t } = useT("issues");
+  const [pending, setPending] = useState(false);
+  const { data: tasks, isLoading: tasksLoading } = useQuery({
+    queryKey: issueKeys.tasks(issueId),
+    queryFn: () => api.listTasksByIssue(issueId),
+    staleTime: 30_000,
+  });
+  const childTaskQueries = useQueries({
+    queries: childIssueIdsLoading
+      ? []
+      : childIssueIds.map((childIssueId) => ({
+          queryKey: issueKeys.tasks(childIssueId),
+          queryFn: () => api.listTasksByIssue(childIssueId),
+          staleTime: 30_000,
+        })),
+  });
+  const childTasksLoading = childIssueIdsLoading || childTaskQueries.some((query) => query.isLoading);
+  const childTasks = childTaskQueries.flatMap((query) => query.data ?? []);
+  const taskId = pickOpenIdeTaskId(childTasks) ?? pickOpenIdeTaskId(tasks);
+
+  const handleOpen = useCallback(async () => {
+    if (pending || tasksLoading || childTasksLoading) return;
+    setPending(true);
+    try {
+      await api.openIssueInIde(issueId, "intellij_idea", { taskId });
+      toast.success(t(($) => $.detail.open_intellij_requested));
+    } catch (error) {
+      const code = apiErrorCode(error);
+      if (error instanceof ApiError && error.status === 403) {
+        toast.error(t(($) => $.detail.open_intellij_not_owner));
+      } else if (error instanceof ApiError && error.status === 409 && code === "no_eligible_task") {
+        toast.error(t(($) => $.detail.open_intellij_no_workdir));
+      } else if (error instanceof ApiError && error.status === 409 && code === "daemon_offline") {
+        toast.error(t(($) => $.detail.open_intellij_daemon_offline));
+      } else if (error instanceof ApiError && error.status === 409 && code === "ide_unavailable") {
+        toast.error(t(($) => $.detail.open_intellij_ide_unavailable));
+      } else {
+        toast.error(t(($) => $.detail.open_intellij_failed));
+      }
+    } finally {
+      setPending(false);
+    }
+  }, [childTasksLoading, issueId, pending, taskId, tasksLoading, t]);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="shrink-0 text-muted-foreground"
+            aria-label={t(($) => $.detail.open_intellij_aria)}
+            disabled={pending || tasksLoading || childTasksLoading}
+            onClick={handleOpen}
+          >
+            <Code2 className="size-3.5" />
+          </Button>
+        }
+      />
+      <TooltipContent side="top">
+        {t(($) => $.detail.open_intellij_tooltip)}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // IssueDetail
 // ---------------------------------------------------------------------------
@@ -1061,7 +1159,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     ...projectDetailOptions(wsId, issueProjectId ?? ""),
     enabled: !!issueProjectId,
   });
-  const { data: childIssues = [] } = useQuery({
+  const { data: childIssues = [], isLoading: childIssuesLoading } = useQuery({
     ...childIssuesOptions(wsId, id),
     enabled: !!issue,
   });
@@ -1412,10 +1510,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_project)}>
-            <ProjectPicker
-              projectId={issue.project_id}
-              onUpdate={handleUpdateField}
-            />
+            <div className="flex min-w-0 items-center gap-1">
+              <ProjectPicker
+                projectId={issue.project_id}
+                onUpdate={handleUpdateField}
+              />
+              {issue.project_id && (
+                <OpenIssueInIntelliJButton
+                  issueId={issue.id}
+                  childIssueIds={childIssueIds}
+                  childIssueIdsLoading={childIssuesLoading}
+                />
+              )}
+            </div>
           </PropRow>
 
           {/* Optional props — rendered only when set on the issue OR added

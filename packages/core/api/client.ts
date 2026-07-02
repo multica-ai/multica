@@ -11,6 +11,7 @@ import type {
   UpdateMemberRequest,
   ListIssuesParams,
   ListGroupedIssuesParams,
+  OpenIdeCommandResponse,
   Agent,
   CreateAgentRequest,
   AgentTemplate,
@@ -213,6 +214,8 @@ import {
   EMPTY_CANCEL_TASK_RESPONSE,
   EMPTY_ACTIVE_TASKS_FOR_ISSUE_RESPONSE,
   EMPTY_TASK_MESSAGE_PAYLOAD_LIST,
+  EMPTY_OPEN_IDE_COMMAND_RESPONSE,
+  OpenIdeCommandResponseSchema,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1467,6 +1470,26 @@ export class ApiClient {
     return parseWithFallback(raw, AgentTaskListSchema, EMPTY_AGENT_TASK_LIST, {
       endpoint: "GET /api/issues/:id/task-runs",
     });
+  }
+
+  async openIssueInIde(
+    issueId: string,
+    ide: "intellij_idea",
+    options?: { taskId?: string },
+  ): Promise<OpenIdeCommandResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/ide/open`, {
+      method: "POST",
+      body: JSON.stringify({
+        ide,
+        ...(options?.taskId ? { task_id: options.taskId } : {}),
+      }),
+    });
+    return parseWithFallback(
+      raw,
+      OpenIdeCommandResponseSchema,
+      EMPTY_OPEN_IDE_COMMAND_RESPONSE,
+      { endpoint: "POST /api/issues/:id/ide/open" },
+    );
   }
 
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {

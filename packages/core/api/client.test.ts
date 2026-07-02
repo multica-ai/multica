@@ -618,6 +618,83 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("openIssueInIde", () => {
+    it("uses the issue-level IDE open endpoint and parses the command response", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          command_id: "cmd-1",
+          status: "queued",
+          task_id: "task-1",
+        }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.openIssueInIde("issue-1", "intellij_idea");
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]).toMatchObject([
+        "https://api.example.test/api/issues/issue-1/ide/open",
+        {
+          method: "POST",
+          body: JSON.stringify({ ide: "intellij_idea" }),
+        },
+      ]);
+      expect(result).toEqual({
+        command_id: "cmd-1",
+        status: "queued",
+        task_id: "task-1",
+      });
+    });
+
+    it("sends task_id when opening a specific task in the IDE", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          command_id: "cmd-1",
+          status: "queued",
+          task_id: "task-2",
+        }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = new ApiClient("https://api.example.test");
+      await client.openIssueInIde("issue-1", "intellij_idea", { taskId: "task-2" });
+
+      expect(fetchMock.mock.calls[0]).toMatchObject([
+        "https://api.example.test/api/issues/issue-1/ide/open",
+        {
+          method: "POST",
+          body: JSON.stringify({ ide: "intellij_idea", task_id: "task-2" }),
+        },
+      ]);
+    });
+
+    it("falls back to a safe command response when the body drifts", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ command_id: 123 }), {
+            status: 202,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.openIssueInIde("issue-1", "intellij_idea")).resolves.toEqual({
+        command_id: "",
+        status: "queued",
+        task_id: "",
+      });
+    });
+  });
+
   describe("chat attachment wiring", () => {
     it("uploadFile includes chat_session_id in the FormData body", async () => {
       const fetchMock = vi.fn().mockResolvedValue(

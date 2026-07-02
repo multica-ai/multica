@@ -46,6 +46,20 @@
     "open_in_new_tab": "在新标签页打开",
     "remove": "移除附件"
   },
+  "annotation": {
+    "count": "批注 {{count}}",
+    "add": "添加备注",
+    "note_placeholder": "输入备注",
+    "save": "保存备注",
+    "cancel": "取消",
+    "clear": "清空",
+    "send_to_comments": "发送到评论区",
+    "sent": "已发送到评论区",
+    "send_failed": "发送批注失败",
+    "invalid_selection": "当前选区无法定位到 Markdown 源文件，请选择纯文本内容。",
+    "empty_note": "请输入备注内容。",
+    "list_title": "本次批注"
+  },
   "link_hover": {
     "copy_link": "复制链接",
     "open_link": "打开链接",

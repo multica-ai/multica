@@ -250,6 +250,23 @@ type ContactSalesInquiry struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type DaemonCommand struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	DaemonID        string             `json:"daemon_id"`
+	RuntimeID       pgtype.UUID        `json:"runtime_id"`
+	RequesterUserID pgtype.UUID        `json:"requester_user_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	TaskID          pgtype.UUID        `json:"task_id"`
+	CommandType     string             `json:"command_type"`
+	Payload         []byte             `json:"payload"`
+	Status          string             `json:"status"`
+	ClaimedAt       pgtype.Timestamptz `json:"claimed_at"`
+	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
+	Error           pgtype.Text        `json:"error"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type DaemonConnection struct {
 	ID              pgtype.UUID        `json:"id"`
 	AgentID         pgtype.UUID        `json:"agent_id"`
