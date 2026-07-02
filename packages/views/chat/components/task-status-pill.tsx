@@ -134,12 +134,19 @@ export function TaskStatusPill({
   availability,
 }: Props) {
   const resolveStage = useResolveStage();
-  // Anchor: locked on first render. Once set we never reassign — otherwise
-  // the timer would visibly snap backwards when an optimistic-seeded
-  // `Date.now()` anchor is later replaced by a server-side created_at that
-  // happened a few hundred ms earlier. Monotonic elapsed > strict accuracy.
+  // Anchor: locked per task, re-anchored when the pending task changes. Within
+  // a single task we never reassign — otherwise the timer would visibly snap
+  // backwards when an optimistic-seeded `Date.now()` anchor is later replaced
+  // by a server-side created_at that happened a few hundred ms earlier
+  // (monotonic elapsed > strict accuracy). But when a new chat message starts a
+  // new task, the anchor MUST reset so the counter restarts from the new task's
+  // created_at instead of inheriting the previous task's baseline — otherwise
+  // the pill opens showing the prior task's 20s/30s (#4264). task_id is the
+  // identity that distinguishes "same task, refined created_at" from "new task".
   const anchorRef = useRef<number | null>(null);
-  if (anchorRef.current === null) {
+  const anchoredTaskIdRef = useRef<string | undefined>(undefined);
+  if (anchorRef.current === null || pendingTask.task_id !== anchoredTaskIdRef.current) {
+    anchoredTaskIdRef.current = pendingTask.task_id;
     if (pendingTask.created_at) {
       const t = Date.parse(pendingTask.created_at);
       anchorRef.current = Number.isFinite(t) ? t : Date.now();
