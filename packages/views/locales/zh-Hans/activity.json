@@ -1,0 +1,72 @@
+{
+  "title": "动态",
+  "heading": "工作区动态",
+  "subtitle": "查看此工作区的动态和项目变化。",
+  "tabs": {
+    "activity": "时间线",
+    "wrapup": "总结"
+  },
+  "filters": {
+    "showing": "显示",
+    "all_projects": "所有项目",
+    "by": "由",
+    "everyone": "所有人",
+    "filter_placeholder": "筛选..."
+  },
+  "dates": {
+    "today": "今天",
+    "yesterday": "昨天"
+  },
+  "activity": {
+    "title": "最新动态",
+    "description": "最近的 issue、项目和 agent 变化。",
+    "empty_title": "暂无动态",
+    "empty_body": "工作开始推进后，工作区动态会显示在这里。",
+    "issue_count_one": "{{count}} 个 issue",
+    "issue_count_other": "{{count}} 个 issue",
+    "active_agents_one": "{{count}} 个 agent 活跃",
+    "active_agents_other": "{{count}} 个 agent 活跃",
+    "kind": {
+      "issue": "Issue",
+      "project": "项目",
+      "agent": "Agent"
+    },
+    "actions": {
+      "issue_created": "创建了",
+      "issue_updated": "更新了",
+      "issue_done": "完成了",
+      "issue_blocked": "阻塞了",
+      "project_created": "创建了项目",
+      "project_updated": "更新了项目",
+      "agent_created": "创建了 agent",
+      "agent_updated": "更新了 agent",
+      "agent_archived": "归档了 agent"
+    }
+  },
+  "wrapup": {
+    "title": "项目",
+    "description": "按最近动态排序的项目分组。",
+    "date_label": "今天",
+    "section_title": "在项目中",
+    "project_count_one": "{{count}} 个项目",
+    "project_count_other": "{{count}} 个项目",
+    "empty_title": "暂无项目",
+    "empty_body": "创建项目或未分组 issue 后会显示在这里。",
+    "no_project": "无项目",
+    "open_issues_one": "{{count}} 个未完成",
+    "open_issues_other": "{{count}} 个未完成",
+    "done_issues_one": "{{count}} 个已完成",
+    "done_issues_other": "{{count}} 个已完成",
+    "resources_one": "{{count}} 个资源",
+    "resources_other": "{{count}} 个资源"
+  },
+  "status": {
+    "agent": {
+      "idle": "空闲",
+      "working": "工作中",
+      "blocked": "阻塞",
+      "error": "错误",
+      "offline": "离线"
+    }
+  }
+}

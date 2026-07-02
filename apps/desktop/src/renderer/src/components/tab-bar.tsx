@@ -1,6 +1,8 @@
 import { Fragment } from "react";
 import {
   Inbox,
+  Activity,
+  BarChart3,
   CircleUser,
   ListTodo,
   Bot,
@@ -49,6 +51,8 @@ import { paths } from "@multica/core/paths";
 
 const TAB_ICONS: Record<string, LucideIcon> = {
   Inbox,
+  Activity,
+  BarChart3,
   CircleUser,
   ListTodo,
   Bot,

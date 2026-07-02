@@ -136,6 +136,8 @@ const ROUTE_ICONS: Record<string, string> = {
   projects: "FolderKanban",
   autopilots: "ListTodo",
   agents: "Bot",
+  usage: "BarChart3",
+  activity: "Activity",
   runtimes: "Monitor",
   skills: "BookOpenText",
   settings: "Settings",

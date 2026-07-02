@@ -10,6 +10,7 @@ import {
 // needs to be rewritten to /{slug}/{route}/... so old bookmarks, deep links,
 // and post-revert-and-reapply users don't hit 404.
 const LEGACY_ROUTE_SEGMENTS = new Set([
+  "activity",
   "issues",
   "projects",
   "agents",
