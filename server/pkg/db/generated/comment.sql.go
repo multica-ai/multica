@@ -276,6 +276,44 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 	return i, err
 }
 
+const getLatestAgentCommentOnIssue = `-- name: GetLatestAgentCommentOnIssue :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id FROM comment
+WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestAgentCommentOnIssueParams struct {
+	IssueID  pgtype.UUID `json:"issue_id"`
+	AuthorID pgtype.UUID `json:"author_id"`
+}
+
+// The most recent agent-authored comment on an issue, used by the squad-leader
+// evaluation recorder to recover the leader's delegation comment (and its
+// @mention list) without forcing the leader to repeat itself in the activity
+// payload. NULL row if the agent has not commented yet — caller treats that
+// as "no delegated_to recorded".
+func (q *Queries) GetLatestAgentCommentOnIssue(ctx context.Context, arg GetLatestAgentCommentOnIssueParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getLatestAgentCommentOnIssue, arg.IssueID, arg.AuthorID)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+	)
+	return i, err
+}
+
 const getThreadRoot = `-- name: GetThreadRoot :one
 WITH RECURSIVE root_of AS (
     SELECT c.id, c.parent_id

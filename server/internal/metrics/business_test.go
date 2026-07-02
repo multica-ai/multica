@@ -138,6 +138,7 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 
 	// Direct Record* helpers (no PostHog event source).
 	m.RecordAutopilotRunSkipped("manual", "throttled")
+	m.RecordSquadLeaderEvaluation("action")
 	m.RecordWebhookDelivery("github", "dispatched")
 	m.RecordGithubEventReceived("pull_request", "opened")
 	m.RecordGithubPRReview("approved")
