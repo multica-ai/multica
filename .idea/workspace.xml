@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="87a2153b-7d49-4ae8-ac6a-9cbe9f0e1891" name="Changes" comment="feat(task2): 实现任务编排引擎核心功能&#10;&#10;- 设计并实现 DAG 调度器的数据结构和算法&#10;- 支持任务依赖关系、环检测、并发限制和失败策略&#10;- 实现 fail_fast、retry、skip 三种失败处理策略&#10;- 添加完整的单元测试覆盖各种依赖场景&#10;- 提供任务状态快照和调度接口&#10;- 包含详细的设计文档和故障分析报告" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="MavenImportPreferences">
+    <option name="generalSettings">
+      <MavenGeneralSettings>
+        <option name="customMavenHome" value="D:\development tool\IntelliJ IDEA 2020.2.3\plugins\maven\lib\maven3" />
+        <option name="localRepository" value="D:\Maven\.m2\repository" />
+        <option name="mavenHomeTypeForPersistence" value="CUSTOM" />
+        <option name="userSettingsFile" value="D:\Maven\.m2\settings.xml" />
+      </MavenGeneralSettings>
+    </option>
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 2
+}</component>
+  <component name="ProjectId" id="3FoFwvZvE7hheBenLcCFAfnLR8Y" />
+  <component name="ProjectViewState">
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "main",
+    "kotlin-language-version-configured": "true",
+    "settings.editor.selected.configurable": "preferences.pluginManager"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-jdk-30f59d01ecdd-cffe25b9f5b3-intellij.indexing.shared.core-IU-253.28294.334" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="87a2153b-7d49-4ae8-ac6a-9cbe9f0e1891" name="Changes" comment="" />
+      <created>1782733756739</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1782733756739</updated>
+    </task>
+    <task id="LOCAL-00001" summary="feat(task2): 实现任务编排引擎核心功能&#10;&#10;- 设计并实现 DAG 调度器的数据结构和算法&#10;- 支持任务依赖关系、环检测、并发限制和失败策略&#10;- 实现 fail_fast、retry、skip 三种失败处理策略&#10;- 添加完整的单元测试覆盖各种依赖场景&#10;- 提供任务状态快照和调度接口&#10;- 包含详细的设计文档和故障分析报告">
+      <option name="closed" value="true" />
+      <created>1782741766877</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1782741766877</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
+    <servers />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="feat(task2): 实现任务编排引擎核心功能&#10;&#10;- 设计并实现 DAG 调度器的数据结构和算法&#10;- 支持任务依赖关系、环检测、并发限制和失败策略&#10;- 实现 fail_fast、retry、skip 三种失败处理策略&#10;- 添加完整的单元测试覆盖各种依赖场景&#10;- 提供任务状态快照和调度接口&#10;- 包含详细的设计文档和故障分析报告" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(task2): 实现任务编排引擎核心功能&#10;&#10;- 设计并实现 DAG 调度器的数据结构和算法&#10;- 支持任务依赖关系、环检测、并发限制和失败策略&#10;- 实现 fail_fast、retry、skip 三种失败处理策略&#10;- 添加完整的单元测试覆盖各种依赖场景&#10;- 提供任务状态快照和调度接口&#10;- 包含详细的设计文档和故障分析报告" />
+  </component>
+</project>
