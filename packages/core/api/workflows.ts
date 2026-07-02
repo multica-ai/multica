@@ -1,14 +1,19 @@
 import type { Plan, Workflow, WorkflowNode, WorkflowEdge } from "../types/workflow";
+import { getApi } from "./index";
 
 const BASE = "/api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const api = getApi();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  // Forward auth headers from the ApiClient singleton
+  const authHeaders = (api as unknown as { authHeaders: () => Record<string, string> }).authHeaders();
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
+    headers: { ...headers, ...authHeaders, ...init?.headers },
+    credentials: "include",
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}: ${await res.text()}`);

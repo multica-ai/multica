@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
   addEdge,
-  useNodesState,
   useEdgesState,
   type Connection,
   type Node,
@@ -29,7 +28,6 @@ interface WorkflowCanvasProps {
   initialEdges: WorkflowEdge[];
   onNodeUpdate?: (nodeId: string, data: Partial<WorkflowNode>) => void;
   onEdgeCreate?: (sourceId: string, targetId: string) => void;
-  onNodesChange?: (nodes: WorkflowNode[]) => void;
 }
 
 export function WorkflowCanvas({
@@ -37,14 +35,14 @@ export function WorkflowCanvas({
   initialEdges,
   onNodeUpdate,
   onEdgeCreate,
-  onNodesChange,
 }: WorkflowCanvasProps) {
-  const nodes: Node<WorkflowNode>[] = useMemo(() =>
+  const nodes: Node[] = useMemo(() =>
     initialNodes.map((n) => ({
       id: n.id,
       type: "agent",
       position: { x: n.position_x, y: n.position_y },
-      data: n,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data: n as any,
     })),
     [initialNodes]
   );
@@ -59,31 +57,26 @@ export function WorkflowCanvas({
     [initialEdges]
   );
 
-  const [flowNodes, setFlowNodes, onNodesChangeInternal] = useNodesState(nodes);
-  const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState(edges);
-
-  // Notify external consumer of position changes after each render
-  useEffect(() => {
-    onNodesChange?.(
-      flowNodes.map((n) => ({
-        ...n.data,
-        position_x: n.position.x,
-        position_y: n.position.y,
-      }))
-    );
-  }, [flowNodes, onNodesChange]);
+  const [flowNodes, setFlowNodes] = useState<Node[]>(nodes);
+  const [flowEdges, setFlowEdges] = useEdgesState(edges);
 
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
-      setFlowEdges((eds) => addEdge({ ...connection, type: "workflow" }, eds));
+      setFlowEdges((eds: Edge[]) => addEdge({ ...connection, type: "workflow" }, eds));
       onEdgeCreate?.(connection.source, connection.target);
     },
     [setFlowEdges, onEdgeCreate]
   );
 
   const onNodeDragStop = useCallback(
-    (_event: unknown, node: Node) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (_event: any, node: Node) => {
+      setFlowNodes((nds) =>
+        nds.map((n) =>
+          n.id === node.id ? { ...n, position: node.position } : n
+        )
+      );
       onNodeUpdate?.(node.id, {
         position_x: node.position.x,
         position_y: node.position.y,
@@ -97,8 +90,6 @@ export function WorkflowCanvas({
       <ReactFlow
         nodes={flowNodes}
         edges={flowEdges}
-        onNodesChange={onNodesChangeInternal}
-        onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes}
@@ -110,8 +101,8 @@ export function WorkflowCanvas({
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <Controls />
         <MiniMap
-          nodeColor={(n) => {
-            const s = n.data?.status as string | undefined;
+          nodeColor={(n: Node) => {
+            const s = (n.data as { status?: string })?.status;
             if (s === "completed") return "#22c55e";
             if (s === "failed") return "#ef4444";
             if (s === "running") return "#3b82f6";

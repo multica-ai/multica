@@ -9,7 +9,7 @@ function WorkflowEdge({
   sourcePosition, targetPosition,
   selected,
 }: EdgeProps) {
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const [edgePath] = getBezierPath({
     sourceX, sourceY, sourcePosition,
     targetX, targetY, targetPosition,
   });

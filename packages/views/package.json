@@ -48,6 +48,7 @@
     "./onboarding": "./onboarding/index.ts",
     "./platform": "./platform/index.ts",
     "./i18n": "./i18n/index.ts",
+    "./workflows": "./workflows/index.ts",
     "./attachments": "./attachments/index.ts",
     "./locales": "./locales/index.ts",
     "./locales/*": "./locales/*"
@@ -80,6 +81,7 @@
     "@tiptap/react": "^3.22.1",
     "@tiptap/starter-kit": "^3.22.1",
     "@tiptap/suggestion": "^3.22.1",
+    "@xyflow/react": "^12.11.1",
     "cmdk": "^1.1.1",
     "hast-util-to-html": "^9.0.5",
     "katex": "catalog:",

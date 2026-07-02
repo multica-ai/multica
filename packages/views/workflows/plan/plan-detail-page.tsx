@@ -18,7 +18,7 @@ export function PlanDetailPage({ planId }: PlanDetailPageProps) {
   });
 
   const workflowId = plan?.workflow_id;
-  const { data: nodes = [], isLoading: nodesLoading } = useQuery({
+  const { data: nodes = [] } = useQuery({
     queryKey: ["workflow-nodes", workflowId],
     queryFn: () => workflowApi.listNodes(workflowId!),
     enabled: !!workflowId,
@@ -34,6 +34,7 @@ export function PlanDetailPage({ planId }: PlanDetailPageProps) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["workflow-nodes", workflowId] });
     },
+    onError: (err) => console.error("confirmMutation failed:", err),
   });
 
   const updateNodeMutation = useMutation({
@@ -42,6 +43,7 @@ export function PlanDetailPage({ planId }: PlanDetailPageProps) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["workflow-nodes", workflowId] });
     },
+    onError: (err) => console.error("updateNodeMutation failed:", err),
   });
 
   const createEdgeMutation = useMutation({
@@ -50,6 +52,7 @@ export function PlanDetailPage({ planId }: PlanDetailPageProps) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["workflow-edges", workflowId] });
     },
+    onError: (err) => console.error("createEdgeMutation failed:", err),
   });
 
   if (planLoading || !workflowId) {
@@ -72,6 +75,7 @@ export function PlanDetailPage({ planId }: PlanDetailPageProps) {
             // TODO: Open agent picker modal for node creation
             // For Phase 1, create node with placeholder agent_id
             workflowApi.createNode(workflowId, {
+              // TODO: Replace with actual agent selection (Phase 2)
               agent_id: "00000000-0000-0000-0000-000000000000", // placeholder
               title: "New Node",
               prompt: "",
@@ -92,7 +96,6 @@ export function PlanDetailPage({ planId }: PlanDetailPageProps) {
       {/* Canvas */}
       <div className="flex-1 min-h-0">
         <WorkflowCanvas
-          workflowId={workflowId}
           initialNodes={nodes}
           initialEdges={edges}
           onNodeUpdate={(nodeId, data) =>

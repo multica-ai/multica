@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { planApi } from "@multica/core/api/workflows";
+import type { Plan } from "@multica/core/types/workflow";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card } from "@multica/ui/components/ui/card";
@@ -11,7 +12,7 @@ export function PlanListPage() {
   const wsId = useWorkspaceId();
   const navigation = useNavigation();
 
-  const { data: plans, isLoading } = useQuery({
+  const { data: plans, isLoading } = useQuery<Plan[]>({
     queryKey: ["plans", wsId],
     queryFn: () => planApi.list(wsId),
   });

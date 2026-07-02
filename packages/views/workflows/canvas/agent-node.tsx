@@ -14,8 +14,10 @@ const STATUS_STYLES: Record<string, { border: string; bg: string; label: string 
   skipped:   { border: "border-muted-foreground",            bg: "bg-muted", label: "Skipped" },
 };
 
-function AgentNode({ data, selected }: NodeProps<WorkflowNode>) {
-  const style = STATUS_STYLES[data.status] ?? STATUS_STYLES.pending;
+function AgentNode({ data, selected }: NodeProps) {
+  const nodeData = data as unknown as WorkflowNode;
+  const status = nodeData.status ?? "pending";
+  const style = STATUS_STYLES[status] ?? { border: "border-muted-foreground", bg: "bg-muted", label: status };
 
   return (
     <div
@@ -28,19 +30,19 @@ function AgentNode({ data, selected }: NodeProps<WorkflowNode>) {
     >
       <Handle type="target" position={Position.Left} className="!w-2 !h-2" />
       <div className="flex items-center justify-between mb-2">
-        <span className="font-medium text-sm truncate">{data.title}</span>
+        <span className="font-medium text-sm truncate">{nodeData.title}</span>
         <span className={cn(
           "text-xs px-1.5 py-0.5 rounded-full",
-          data.status === "completed" && "bg-green-500/20 text-green-600",
-          data.status === "failed" && "bg-red-500/20 text-red-600",
-          data.status === "running" && "bg-blue-500/20 text-blue-600",
-          data.status === "pending" && "bg-muted text-muted-foreground",
+          status === "completed" && "bg-green-500/20 text-green-600",
+          status === "failed" && "bg-red-500/20 text-red-600",
+          status === "running" && "bg-blue-500/20 text-blue-600",
+          status === "pending" && "bg-muted text-muted-foreground",
         )}>
           {style.label}
         </span>
       </div>
       <p className="text-xs text-muted-foreground line-clamp-2">
-        {data.prompt || "No prompt set"}
+        {nodeData.prompt || "No prompt set"}
       </p>
       <Handle type="source" position={Position.Right} className="!w-2 !h-2" />
     </div>
