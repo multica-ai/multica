@@ -53,8 +53,18 @@ type Config struct {
 	MaxAge time.Duration
 
 	// Backoff is the per-attempt retry schedule (F2.6). Attempt N uses
-	// Backoff[min(N, len-1)]. Default 1s/5s/30s.
+	// Backoff[min(N, len-1)]. A progressive schedule that keeps climbing to a
+	// high cap so a persistently-failing entry backs OFF instead of hammering
+	// the registry (FIR-2549: a flat 30s cap let one bad transcript re-POST
+	// every 30s for the whole MaxAge window). Default 1s/5s/30s/2m/10m/30m/1h.
 	Backoff []time.Duration
+
+	// MaxAttempts is the attempt-count dead-letter cutoff: an entry that has
+	// failed this many times is parked as dead_letter, independent of MaxAge
+	// (FIR-2549). MaxAge alone let a deterministically-failing upload retry for
+	// up to 7 days; a bounded attempt count stops a bad batch in minutes.
+	// <= 0 disables the attempt cap (MaxAge still applies). Default 12.
+	MaxAttempts int
 }
 
 // Env var names. Exported so the daemon config layer and tests share them.
@@ -64,13 +74,30 @@ const (
 	EnvAPIKey         = "MULTICA_TRACE_UPLOAD_API_KEY"
 	EnvMaxConcurrency = "MULTICA_TRACE_UPLOAD_MAX_CONCURRENCY"
 	EnvMaxAgeHours    = "MULTICA_TRACE_UPLOAD_MAX_AGE_HOURS"
+	EnvMaxAttempts    = "MULTICA_TRACE_UPLOAD_MAX_ATTEMPTS"
 )
 
-// DefaultBackoff is the exponential retry schedule from the issue (1s/5s/30s).
-var DefaultBackoff = []time.Duration{1 * time.Second, 5 * time.Second, 30 * time.Second}
+// DefaultBackoff is the progressive retry schedule (FIR-2549). Each failed
+// attempt waits longer than the last, climbing to a 1h ceiling, so a batch that
+// keeps failing retreats instead of hammering the registry every 30s.
+var DefaultBackoff = []time.Duration{
+	1 * time.Second,
+	5 * time.Second,
+	30 * time.Second,
+	2 * time.Minute,
+	10 * time.Minute,
+	30 * time.Minute,
+	1 * time.Hour,
+}
 
 // DefaultMaxAge is the dead-letter cutoff from the issue (7 days).
 const DefaultMaxAge = 7 * 24 * time.Hour
+
+// DefaultMaxAttempts is the attempt-count dead-letter cutoff (FIR-2549). With
+// the progressive backoff above, 12 attempts spans ~2h before the entry is
+// parked — long enough to ride out a real registry outage, short enough that a
+// deterministically-failing batch stops fast instead of retrying for 7 days.
+const DefaultMaxAttempts = 12
 
 // DefaultMaxConcurrentPerWorkspace bounds parallel uploads per workspace.
 const DefaultMaxConcurrentPerWorkspace = 2
@@ -87,6 +114,7 @@ func ConfigFromEnv(workspacesRoot string) Config {
 		MaxConcurrentPerWorkspace: DefaultMaxConcurrentPerWorkspace,
 		MaxAge:                    DefaultMaxAge,
 		Backoff:                   DefaultBackoff,
+		MaxAttempts:               DefaultMaxAttempts,
 	}
 	if workspacesRoot != "" {
 		c.StateDir = workspacesRoot + string(os.PathSeparator) + ".trace-upload"
@@ -99,6 +127,11 @@ func ConfigFromEnv(workspacesRoot string) Config {
 	if v := strings.TrimSpace(os.Getenv(EnvMaxAgeHours)); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			c.MaxAge = time.Duration(n) * time.Hour
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvMaxAttempts)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.MaxAttempts = n // <= 0 disables the attempt cap
 		}
 	}
 	return c
@@ -120,6 +153,7 @@ func ConfigFromValues(workspacesRoot, endpoint, apiKey string, maxAgeHours int) 
 		MaxConcurrentPerWorkspace: DefaultMaxConcurrentPerWorkspace,
 		MaxAge:                    DefaultMaxAge,
 		Backoff:                   DefaultBackoff,
+		MaxAttempts:               DefaultMaxAttempts,
 	}
 	if workspacesRoot != "" {
 		c.StateDir = workspacesRoot + string(os.PathSeparator) + ".trace-upload"
