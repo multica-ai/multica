@@ -156,6 +156,41 @@ func TestBatchUpdateStageOnly(t *testing.T) {
 	}
 }
 
+// TestBatchUpdateChildDoneNotifyOnly — a batch update that only flips
+// child_done_notify counts as a real mutation (updated=1) and persists, keeping
+// the batch path type-consistent with single UpdateIssue (MUL-3924 review nit).
+func TestBatchUpdateChildDoneNotifyOnly(t *testing.T) {
+	a := createTestIssue(t, "BU-cdn A", "todo", "low")
+	t.Cleanup(func() { deleteTestIssue(t, a) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{a},
+		"updates":   map[string]any{"child_done_notify": false},
+	})
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Updated int `json:"updated"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Updated != 1 {
+		t.Fatalf("expected updated=1 for a child_done_notify-only batch update, got %d", resp.Updated)
+	}
+
+	gw := httptest.NewRecorder()
+	gr := newRequest("GET", "/api/issues/"+a, nil)
+	gr = withURLParam(gr, "id", a)
+	testHandler.GetIssue(gw, gr)
+	var got IssueResponse
+	json.NewDecoder(gw.Body).Decode(&got)
+	if got.ChildDoneNotify {
+		t.Errorf("expected child_done_notify=false to persist, got true")
+	}
+}
+
 // createTestIssue is a small helper to keep the table-driven cases clean.
 // Returns the new issue's id; caller is responsible for cleanup.
 func createTestIssue(t *testing.T, title, status, priority string) string {

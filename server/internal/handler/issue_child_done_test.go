@@ -228,6 +228,37 @@ func TestChildDoneSkippedWhenParentBacklog(t *testing.T) {
 	}
 }
 
+// TestChildDoneSkippedWhenChildDoneNotifyOff — the per-parent opt-out from
+// MUL-3924. When the parent's child_done_notify toggle is off, a completing
+// child must not wake the parent: no system comment, no assignee trigger — even
+// for an otherwise-eligible (open, non-member) parent that would normally fire.
+// Also asserts the UpdateIssue response round-trips the new field.
+func TestChildDoneSkippedWhenChildDoneNotifyOff(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	// Turn the toggle off on the parent.
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+fx.parent.ID, map[string]any{"child_done_notify": false})
+	req = withURLParam(req, "id", fx.parent.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue child_done_notify=false: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated parent: %v", err)
+	}
+	if updated.ChildDoneNotify {
+		t.Fatalf("expected child_done_notify=false in update response, got true")
+	}
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
+		t.Errorf("parent with child_done_notify=off should not receive notification, got %d comments", got)
+	}
+}
+
 // TestChildDoneSkippedWhenNoParent — an issue with no parent_issue_id must
 // not produce any system comment on anything.
 func TestChildDoneSkippedWhenNoParent(t *testing.T) {

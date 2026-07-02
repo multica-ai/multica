@@ -34,6 +34,7 @@ function makeIssue(idx: number): Issue {
     project_id: PROJECT_ID,
     position: idx,
     stage: null,
+    child_done_notify: true,
     start_date: "2026-05-01T00:00:00Z",
     due_date: null,
     labels: [],

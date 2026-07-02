@@ -37,6 +37,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -2044,21 +2045,49 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                         : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
                     )}
                   />
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                          onClick={() => actions.openCreateSubIssue()}
-                          aria-label={t(($) => $.detail.add_sub_issue_aria)}
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
-                      }
-                    />
-                    <TooltipContent side="bottom">{t(($) => $.detail.add_sub_issue_tooltip)}</TooltipContent>
-                  </Tooltip>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    {/* Per-parent child-done -> parent wake toggle (MUL-3924).
+                        Only shown for agent/squad-assigned parents — the only
+                        case where completing a child actually enqueues a run.
+                        Human-assigned / unassigned parents are never woken, so
+                        the control would be a no-op there. */}
+                    {(issue.assignee_type === "agent" || issue.assignee_type === "squad") && (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <span className="inline-flex items-center">
+                              <Switch
+                                checked={issue.child_done_notify}
+                                onCheckedChange={(checked) =>
+                                  handleUpdateField({ child_done_notify: checked })
+                                }
+                                size="sm"
+                                aria-label={t(($) => $.detail.child_done_notify_label)}
+                              />
+                            </span>
+                          }
+                        />
+                        <TooltipContent side="bottom">
+                          {t(($) => $.detail.child_done_notify_tooltip)}
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                            onClick={() => actions.openCreateSubIssue()}
+                            aria-label={t(($) => $.detail.add_sub_issue_aria)}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </button>
+                        }
+                      />
+                      <TooltipContent side="bottom">{t(($) => $.detail.add_sub_issue_tooltip)}</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
 
                 {/* Inline batch toolbar — appears next to the rows when

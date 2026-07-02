@@ -198,6 +198,12 @@ Read each sub-issue's description before promoting and only promote items whose
 stated dependencies are met; if a description conflicts with the parent's
 breakdown, leave it `backlog` and comment to confirm first.
 
+The child-done wake is opt-out per parent: the parent's Sub-issues header has a
+`child_done_notify` toggle (default on). When a parent turns it off, completing
+its sub-issues posts no system comment and does not wake the parent assignee —
+the chain is intentionally manual. This only applies to agent/squad-assigned
+parents; human-assigned parents are never woken regardless.
+
 ## Incorrect → correct
 
 PR title (link the issue):

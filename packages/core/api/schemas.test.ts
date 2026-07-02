@@ -91,6 +91,24 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     const parsed = ListIssuesResponseSchema.parse(payload);
     expect(parsed.issues[0]?.stage).toBeNull();
   });
+
+  it("round-trips child_done_notify: false", () => {
+    const payload = { issues: [{ ...baseIssue, child_done_notify: false }], total: 1 };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.child_done_notify).toBe(false);
+  });
+
+  it("defaults child_done_notify to true when omitted or non-boolean (older backend / drift)", () => {
+    // baseIssue omits child_done_notify entirely (older backend).
+    const parsedOmitted = ListIssuesResponseSchema.parse({ issues: [baseIssue], total: 1 });
+    expect(parsedOmitted.issues[0]?.child_done_notify).toBe(true);
+
+    const parsedNull = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, child_done_notify: null }],
+      total: 1,
+    });
+    expect(parsedNull.issues[0]?.child_done_notify).toBe(true);
+  });
 });
 
 // POST /api/issues/preview-trigger feeds this schema through parseWithFallback

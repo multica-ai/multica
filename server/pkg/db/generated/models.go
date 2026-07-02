@@ -488,6 +488,7 @@ type Issue struct {
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
 	Stage              pgtype.Int4        `json:"stage"`
+	ChildDoneNotify    bool               `json:"child_done_notify"`
 }
 
 type IssueDependency struct {

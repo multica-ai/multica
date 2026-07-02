@@ -259,6 +259,10 @@ export const IssueSchema = z.object({
   // Older backends predate `stage`; default to null so a missing field parses
   // cleanly into the non-optional Issue.stage (number | null).
   stage: z.number().nullable().default(null),
+  // Per-parent child-done -> parent notification toggle. Older backends omit it;
+  // default true (current production behavior) so a missing/null field parses
+  // cleanly into the non-optional Issue.child_done_notify.
+  child_done_notify: BooleanWithDefaultSchema(true),
   start_date: z.string().nullable(),
   due_date: z.string().nullable(),
   metadata: IssueMetadataSchema,

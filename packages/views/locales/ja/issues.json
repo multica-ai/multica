@@ -167,6 +167,8 @@
     "add_sub_issues": "サブイシューを追加",
     "add_sub_issue_tooltip": "サブイシューを追加",
     "add_sub_issue_aria": "サブイシューを追加",
+    "child_done_notify_label": "サブイシュー完了時に通知",
+    "child_done_notify_tooltip": "オンにすると、サブイシューが完了するたび（ステージ設定時は各ステージ完了ごと）にこのイシューの担当者に通知して起動します。オフにすると自動通知は行われません。",
     "section_properties": "プロパティ",
     "section_parent_issue": "親イシュー",
     "section_pull_requests": "Pull requests",
