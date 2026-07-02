@@ -155,6 +155,30 @@ func TestLooksLikeS3Hostname(t *testing.T) {
 	}
 }
 
+func TestS3ForcePathStyleFromEnv(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "empty defaults false", value: "", want: false},
+		{name: "lower true", value: "true", want: true},
+		{name: "title true", value: "True", want: true},
+		{name: "one true", value: "1", want: true},
+		{name: "false", value: "false", want: false},
+		{name: "zero false", value: "0", want: false},
+		{name: "invalid defaults false", value: "yes", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("S3_FORCE_PATH_STYLE", tc.value)
+			if got := s3ForcePathStyleFromEnv(); got != tc.want {
+				t.Fatalf("s3ForcePathStyleFromEnv() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestS3StorageUploadedURL(t *testing.T) {
 	const key = "uploads/abc/file.png"
 
