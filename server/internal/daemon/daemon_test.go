@@ -925,6 +925,48 @@ func TestMergeUsage(t *testing.T) {
 	}
 }
 
+func TestExecuteWithCapacityFallbackRetriesLowerClaudeModel(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	backend := &fakeBackend{
+		results: []agent.Result{
+			{Status: "failed", Error: "Selected model is at capacity. Please try a different model."},
+			{Status: "completed", Output: "done", Usage: map[string]agent.TokenUsage{
+				"claude-sonnet-4-6": {InputTokens: 10, OutputTokens: 2},
+			}},
+		},
+	}
+
+	got, _, err := d.executeWithCapacityFallback(
+		context.Background(),
+		backend,
+		"prompt",
+		agent.ExecOptions{Model: "claude-opus-4-6"},
+		slog.Default(),
+		"task-capacity",
+		"claude",
+	)
+	if err != nil {
+		t.Fatalf("executeWithCapacityFallback returned error: %v", err)
+	}
+	if got.Status != "completed" {
+		t.Fatalf("status = %q, want completed", got.Status)
+	}
+	if len(backend.calls) != 2 {
+		t.Fatalf("backend calls = %d, want 2", len(backend.calls))
+	}
+	if backend.calls[0].Model != "claude-opus-4-6" {
+		t.Fatalf("first model = %q, want claude-opus-4-6", backend.calls[0].Model)
+	}
+	if backend.calls[1].Model != "claude-sonnet-4-6" {
+		t.Fatalf("fallback model = %q, want claude-sonnet-4-6", backend.calls[1].Model)
+	}
+	if backend.calls[1].ResumeSessionID != "" {
+		t.Fatalf("fallback retry must start fresh, got ResumeSessionID=%q", backend.calls[1].ResumeSessionID)
+	}
+}
+
 // fakeBackend is a test double for agent.Backend that returns preconfigured
 // results. Each call to Execute pops the next entry from the results slice.
 type fakeBackend struct {

@@ -499,7 +499,9 @@ func TestCreateRetryTask_InheritsIsLeaderTask(t *testing.T) {
 				testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1 OR parent_task_id = $1`, parentID)
 			})
 
-			child, err := testHandler.Queries.CreateRetryTask(ctx, util.MustParseUUID(parentID))
+			child, err := testHandler.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{
+				ID: util.MustParseUUID(parentID),
+			})
 			if err != nil {
 				t.Fatalf("CreateRetryTask: %v", err)
 			}

@@ -3908,7 +3908,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"timeout", execOpts.Timeout,
 	)
 
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+	result, tools, err := d.executeWithCapacityFallback(ctx, backend, prompt, execOpts, taskLog, task.ID, provider)
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -4109,6 +4109,90 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			FailureReason: failureReason,
 		}, nil
 	}
+}
+
+func (d *Daemon) executeWithCapacityFallback(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID, provider string) (agent.Result, int32, error) {
+	result, tools, err := d.executeAndDrain(ctx, backend, prompt, opts, taskLog, taskID)
+	if err != nil {
+		return result, tools, err
+	}
+
+	usage := result.Usage
+	for _, fallbackModel := range capacityFallbackModels(provider, opts.Model) {
+		if !shouldTryCapacityModelFallback(result) {
+			break
+		}
+		retryOpts := opts
+		retryOpts.Model = fallbackModel
+		retryOpts.ResumeSessionID = ""
+		taskLog.Warn("provider model capacity failure, retrying with fallback model",
+			"provider", provider,
+			"from_model", opts.Model,
+			"fallback_model", fallbackModel,
+			"error", result.Error,
+		)
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, retryOpts, taskLog, taskID)
+		if retryErr != nil {
+			taskLog.Error("fallback model retry failed to start", "provider", provider, "model", fallbackModel, "error", retryErr)
+			break
+		}
+		result = retryResult
+		result.Usage = mergeUsage(usage, result.Usage)
+		usage = result.Usage
+		tools += retryTools
+	}
+	return result, tools, nil
+}
+
+func shouldTryCapacityModelFallback(result agent.Result) bool {
+	if result.Status != "failed" {
+		return false
+	}
+	errText := strings.ToLower(strings.TrimSpace(result.Error))
+	if errText == "" || strings.Contains(errText, "session limit") {
+		return false
+	}
+	if taskfailure.Classify(errText) != taskfailure.ReasonAgentProviderCapacityOrRateLimit {
+		return false
+	}
+	return strings.Contains(errText, "capacity") && strings.Contains(errText, "model")
+}
+
+func capacityFallbackModels(provider, currentModel string) []string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	current := strings.ToLower(strings.TrimSpace(currentModel))
+	switch provider {
+	case "claude":
+		switch {
+		case current == "":
+			return []string{"claude-haiku-4-5-20251001"}
+		case strings.Contains(current, "opus"):
+			return []string{"claude-sonnet-4-6", "claude-haiku-4-5-20251001"}
+		case strings.Contains(current, "sonnet"):
+			return []string{"claude-haiku-4-5-20251001"}
+		}
+	case "codebuddy":
+		switch {
+		case strings.Contains(current, "opus"):
+			return []string{"claude-sonnet-4.6", "claude-haiku-4.5"}
+		case strings.Contains(current, "sonnet"):
+			return []string{"claude-haiku-4.5"}
+		}
+	case "codex":
+		switch {
+		case current == "":
+			return []string{"gpt-5.5-mini"}
+		case strings.Contains(current, "mini"):
+			return nil
+		case strings.HasPrefix(current, "gpt-5.5"):
+			return []string{"gpt-5.5-mini"}
+		case strings.HasPrefix(current, "gpt-5.4"):
+			return []string{"gpt-5.4-mini"}
+		case current == "gpt-5":
+			return []string{"gpt-5.4-mini"}
+		}
+	}
+	return nil
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the

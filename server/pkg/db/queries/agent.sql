@@ -203,7 +203,7 @@ INSERT INTO agent_task_queue (
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id
+    squad_id, not_before
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -213,9 +213,10 @@ SELECT
     p.attempt + 1, p.max_attempts, p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
-    p.squad_id
+    p.squad_id,
+    sqlc.narg('not_before')::timestamptz
 FROM agent_task_queue p
-WHERE p.id = $1
+WHERE p.id = sqlc.arg('id')
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :many
@@ -305,6 +306,7 @@ SET status = 'dispatched',
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      AND (atq.not_before IS NULL OR atq.not_before <= now())
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -558,8 +560,8 @@ RETURNING *;
 WITH victims AS (
     SELECT id FROM agent_task_queue
     WHERE status = 'queued'
-      AND created_at < now() - make_interval(secs => @ttl_secs::double precision)
-    ORDER BY created_at ASC
+      AND COALESCE(not_before, created_at) < now() - make_interval(secs => @ttl_secs::double precision)
+    ORDER BY COALESCE(not_before, created_at) ASC
     LIMIT @max_per_tick::int
     FOR UPDATE SKIP LOCKED
 )
@@ -595,6 +597,12 @@ FOR UPDATE;
 -- or running task for the issue.
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
+
+-- name: HasActiveTaskForAutopilotRun :one
+-- Returns true if there is any queued, dispatched, waiting_local_directory,
+-- or running task for the run_only autopilot run.
+SELECT count(*) > 0 AS has_active FROM agent_task_queue
+WHERE autopilot_run_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
 
 -- name: HasPendingTaskForIssue :one
 -- Returns true if there is a queued or dispatched (but not yet running) task for the issue.
@@ -648,6 +656,7 @@ ORDER BY priority DESC, created_at ASC;
 -- idx_agent_task_queue_claim_candidates so the warm path is cheap.
 SELECT * FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
+  AND (not_before IS NULL OR not_before <= now())
 ORDER BY priority DESC, created_at ASC;
 
 -- name: PromoteDueDeferredTasksForRuntime :many
@@ -677,6 +686,13 @@ WITH cancelled AS (
     RETURNING fallback.*
 )
 SELECT * FROM cancelled;
+
+-- name: HasFutureQueuedTaskForRuntime :one
+-- Returns true when the runtime has queued work deliberately scheduled for
+-- the future. ClaimTaskForRuntime uses this to avoid caching a negative
+-- empty-queue verdict that would hide the task after not_before passes.
+SELECT count(*) > 0 AS has_future FROM agent_task_queue
+WHERE runtime_id = $1 AND status = 'queued' AND not_before > now();
 
 -- name: ListActiveTasksByIssue :many
 -- Backs the issue-detail "agent live" banner. Includes 'queued' so the
@@ -767,6 +783,40 @@ SELECT t.* FROM (
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC;
+
+-- name: SelectWorkspacesExceedingProviderFailureThreshold :many
+-- Runtime-wide capacity/session-limit alert candidates. The monitor emits one
+-- daily inbox alert per workspace when provider capacity/rate-limit failures
+-- exceed the threshold, then suppresses repeats inside the same lookback.
+WITH provider_failures AS (
+    SELECT a.workspace_id,
+           atq.id,
+           atq.completed_at,
+           atq.error
+    FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id
+    WHERE atq.status = 'failed'
+      AND atq.failure_reason = sqlc.arg('failure_reason')::text
+      AND atq.completed_at IS NOT NULL
+      AND atq.completed_at >= sqlc.arg('since')::timestamptz
+)
+SELECT pf.workspace_id,
+       count(*)::bigint AS failed_tasks,
+       min(pf.completed_at)::timestamptz AS first_failed_at,
+       max(pf.completed_at)::timestamptz AS last_failed_at,
+       ((array_agg(pf.id ORDER BY pf.completed_at DESC))[1])::uuid AS sample_task_id,
+       ((array_agg(pf.error ORDER BY pf.completed_at DESC))[1])::text AS sample_error
+FROM provider_failures pf
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM inbox_item i
+    WHERE i.workspace_id = pf.workspace_id
+      AND i.type = 'runtime_provider_capacity_alert'
+      AND i.created_at >= sqlc.arg('since')::timestamptz
+)
+GROUP BY pf.workspace_id
+HAVING count(*) > sqlc.arg('threshold')::bigint
+ORDER BY failed_tasks DESC, pf.workspace_id ASC;
 
 -- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
