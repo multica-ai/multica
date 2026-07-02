@@ -1,0 +1,1 @@
+ALTER TABLE squad ADD COLUMN capability JSONB NOT NULL DEFAULT '{}';
