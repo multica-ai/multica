@@ -22,6 +22,7 @@ export function IssueMentionCard({ issueId, fallbackLabel }: IssueMentionCardPro
       <IssueChip
         issueId={issueId}
         fallbackLabel={fallbackLabel}
+        resolveDetail={false}
         className="cursor-pointer hover:bg-accent transition-colors"
       />
     </AppLink>

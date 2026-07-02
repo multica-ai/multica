@@ -30,6 +30,12 @@ import './markdown.css'
  */
 export type RenderMode = 'terminal' | 'minimal' | 'full'
 
+export interface MentionRenderProps {
+  type: string
+  id: string
+  label?: string
+}
+
 export interface MarkdownProps {
   children: string
   /**
@@ -55,7 +61,7 @@ export interface MarkdownProps {
    * Custom renderer for mention links (e.g. mention://issue/UUID).
    * When not provided, mentions render as a simple styled span.
    */
-  renderMention?: (props: { type: string; id: string }) => React.ReactNode
+  renderMention?: (props: MentionRenderProps) => React.ReactNode
   /**
    * CDN hostname for file card detection (e.g. "multica-static.copilothub.ai").
    * When provided, enables file card preprocessing and rendering.
@@ -128,7 +134,7 @@ function createComponents(
   mode: RenderMode,
   onUrlClick?: (url: string) => void,
   onFileClick?: (path: string) => void,
-  renderMention?: (props: { type: string; id: string }) => React.ReactNode,
+  renderMention?: (props: MentionRenderProps) => React.ReactNode,
   renderImage?: (props: { src: string; alt: string }) => React.ReactNode,
   renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode,
 ): Partial<Components> {
@@ -187,10 +193,15 @@ function createComponents(
           const id = mentionMatch[2]
 
           if (renderMention) {
+            const rawLabel = React.Children.toArray(children)
+              .map((child) => (typeof child === 'string' || typeof child === 'number' ? String(child) : ''))
+              .join('')
+              .trim()
+            const label = (rawLabel.startsWith('@') ? rawLabel.slice(1) : rawLabel) || undefined
             // Let the custom renderer opt out for types it doesn't handle
             // by returning null/undefined — we then fall through to the
             // default styled span so nothing ever disappears silently.
-            const rendered = renderMention({ type, id })
+            const rendered = renderMention({ type, id, label })
             if (rendered) return <>{rendered}</>
           }
 
