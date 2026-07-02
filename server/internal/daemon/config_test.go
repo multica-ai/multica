@@ -299,6 +299,68 @@ func TestLoadConfig_SkipsMulticaHooksShadowingAgentBinaries(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_SkipsMulticaHooksFromLoginShellFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	sh := "/bin/sh"
+	if _, err := os.Stat(sh); err != nil {
+		t.Skipf("no /bin/sh available: %v", err)
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hooksDir := filepath.Join(home, ".multica", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	realBinDir := t.TempDir()
+	hookPath := filepath.Join(hooksDir, "codex")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexec codex \"$@\"\n"), 0o755); err != nil {
+		t.Fatalf("write hook wrapper: %v", err)
+	}
+	realPath := filepath.Join(realBinDir, "codex")
+	if err := os.WriteFile(realPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write real codex: %v", err)
+	}
+
+	t.Setenv("PATH", "/usr/bin:/bin")
+	if _, err := exec.LookPath("codex"); err == nil {
+		t.Skip("PATH leak - codex already visible to daemon without shell fallback")
+	}
+	rc := filepath.Join(t.TempDir(), "sh.rc")
+	rcBody := "export PATH=\"" + hooksDir + string(os.PathListSeparator) + realBinDir + ":$PATH\"\n"
+	if err := os.WriteFile(rc, []byte(rcBody), 0o644); err != nil {
+		t.Fatalf("write shell rc: %v", err)
+	}
+	t.Setenv("SHELL", sh)
+	t.Setenv("ENV", rc)
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	pinNonCodexAgentsToMissingPaths(t)
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return nil }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex from login-shell fallback, got %#v", cfg.Agents)
+	}
+	want := canonicalExecutablePath(realPath)
+	if got.Path != want {
+		t.Fatalf("codex path = %q, want unshadowed real binary %q", got.Path, want)
+	}
+	if strings.HasPrefix(got.Path, hooksDir) {
+		t.Fatalf("codex path still points into hooks dir: %q", got.Path)
+	}
+}
+
 // TestLoadConfig_AutoUpdateDefault_SelfHostOff is the regression guard for
 // MUL-2381: a daemon pointed at any non-cloud server URL must default
 // AutoUpdateEnabled to false, because self-host operators frequently run a

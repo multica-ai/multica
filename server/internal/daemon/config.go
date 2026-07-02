@@ -898,7 +898,9 @@ func resolveAgentsViaLoginShell(names []string) map[string]string {
 //     than hand back garbage),
 //  5. canonicalises the directory via `cd ... && pwd -P` so symlinked prefix
 //     dirs (fnm/nvm/volta) collapse to stable paths,
-//  6. prints `<name>\t<canonical_path>` one entry per line for the caller.
+//  6. if the resolved path lives in ~/.multica/hooks, searches the same
+//     shell-expanded PATH for the first executable outside that hooks dir,
+//  7. prints `<name>\t<canonical_path>` one entry per line for the caller.
 //
 // Why steps 2 is important — and why this PR's first revision missed #2512:
 // the motivating case has `alias claude=...` in ~/.zshrc *and* fnm's real
@@ -927,6 +929,18 @@ func buildLoginShellResolveScript(names []string) string {
 	b.WriteString("  [ -n \"$p\" ] || continue\n")
 	b.WriteString("  case \"$p\" in /*) ;; *) continue ;; esac\n")
 	b.WriteString("  d=$(dirname \"$p\") && f=$(basename \"$p\") && c=$(cd \"$d\" 2>/dev/null && pwd -P) || continue\n")
+	b.WriteString("  hc=\"\"\n")
+	b.WriteString("  if [ -n \"${HOME:-}\" ]; then hd=\"$HOME/.multica/hooks\"; hc=$(cd \"$hd\" 2>/dev/null && pwd -P) || hc=\"\"; fi\n")
+	b.WriteString("  if [ -n \"$hc\" ] && [ \"$c\" = \"$hc\" ]; then\n")
+	b.WriteString("    oldIFS=$IFS; IFS=:\n")
+	b.WriteString("    for d2 in $PATH; do\n")
+	b.WriteString("      [ -n \"$d2\" ] || d2=.\n")
+	b.WriteString("      c2=$(cd \"$d2\" 2>/dev/null && pwd -P) || continue\n")
+	b.WriteString("      [ \"$c2\" = \"$hc\" ] && continue\n")
+	b.WriteString("      if [ -f \"$c2/$n\" ] && [ -x \"$c2/$n\" ]; then c=\"$c2\"; f=\"$n\"; break; fi\n")
+	b.WriteString("    done\n")
+	b.WriteString("    IFS=$oldIFS\n")
+	b.WriteString("  fi\n")
 	b.WriteString("  printf '%s\\t%s\\n' \"$n\" \"$c/$f\"\n")
 	b.WriteString("done\n")
 	return b.String()
