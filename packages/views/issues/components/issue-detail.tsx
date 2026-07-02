@@ -30,7 +30,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -745,6 +745,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const githubSettings = useGitHubSettings();
@@ -1558,6 +1559,53 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           )}
         </div>}
       </div>
+
+      {/* Issue attachments — standalone attachments the user uploaded to this issue.
+          Attachments already referenced in the description (e.g. inline images, file
+          cards in markdown) are filtered out so the sidebar only shows the user-
+          facing extras. Uses the same pattern as comment-card's AttachmentList. */}
+      {issueAttachments && issueAttachments.length > 0 && (() => {
+        const descMd = issue.description ?? "";
+        const standalone = issueAttachments.filter((a) => {
+          if (contentReferencesAttachment(descMd, a)) return false;
+          const hasSiblingInContent = issueAttachments.some(
+            (other) =>
+              other.id !== a.id &&
+              other.filename === a.filename &&
+              other.content_type === a.content_type &&
+              other.size_bytes === a.size_bytes &&
+              contentReferencesAttachment(descMd, other),
+          );
+          if (hasSiblingInContent) return false;
+          return true;
+        });
+        if (!standalone.length) return null;
+        return (
+          <div>
+            <button
+              type="button"
+              className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${attachmentsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => setAttachmentsOpen(!attachmentsOpen)}
+            >
+              {t(($) => $.detail.section_attachments)}
+              <span className="tabular-nums"> · {standalone.length}</span>
+              <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${attachmentsOpen ? "rotate-90" : ""}`} />
+            </button>
+            {attachmentsOpen && (
+              <AttachmentDownloadProvider attachments={issueAttachments}>
+                <div className="flex flex-col gap-1 pl-2">
+                  {standalone.map((a) => (
+                    <AttachmentRenderer
+                      key={a.id}
+                      attachment={{ kind: "record", attachment: a }}
+                    />
+                  ))}
+                </div>
+              </AttachmentDownloadProvider>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Parent issue — standalone section, only when the issue has a
           parent. Setting a parent is reachable via the issue actions menu;
