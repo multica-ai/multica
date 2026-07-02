@@ -20,7 +20,11 @@ import { Label } from "@multica/ui/components/ui/label";
 import { NativeSelect } from "@multica/ui/components/ui/native-select";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import { AgentPicker } from "@multica/views/autopilots/components/pickers/agent-picker";
+import { AssigneePicker } from "@multica/views/issues/components";
 import { Plus, Trash2 } from "lucide-react";
+
+import { SkillNamePicker } from "./loop-pickers";
 
 import {
   CONFIRMED_BY_OPTIONS,
@@ -306,30 +310,27 @@ export function WorkflowIssueLoopForm({ workflowId, embedded }: Props) {
           </p>
           {form.planning && (
             <Field label="Plan skill (defaults to the build skill below)">
-              <Input
+              <SkillNamePicker
                 value={form.planSkill}
-                onChange={(e) => setForm({ ...form, planSkill: e.target.value })}
-                placeholder="e.g. plan-feature"
+                onChange={(name) => setForm({ ...form, planSkill: name })}
+                placeholder="Same as the build skill"
               />
             </Field>
           )}
         </Section>
 
         <Section title="Build">
-          <Field label="Worker skill (name from workspace)">
-            <Input
+          <Field label="Worker skill">
+            <SkillNamePicker
               value={form.buildSkill}
-              onChange={(e) => setForm({ ...form, buildSkill: e.target.value })}
-              required
-              placeholder="firtal-data-evaluate"
+              onChange={(name) => setForm({ ...form, buildSkill: name })}
+              placeholder="Select the skill the worker runs"
             />
           </Field>
-          <Field label="Agent-ID (must have the skill attached)">
-            <Input
-              value={form.buildAgentId}
-              onChange={(e) => setForm({ ...form, buildAgentId: e.target.value })}
-              required
-              placeholder="<uuid>"
+          <Field label="Agent (must have the skill attached)">
+            <AgentPicker
+              agentId={form.buildAgentId || null}
+              onChange={(id) => setForm({ ...form, buildAgentId: id })}
             />
           </Field>
           <Field label="Goal">
@@ -547,11 +548,11 @@ function VerificationRowEditor({
             </NativeSelect>
           </Field>
           {row.runsAs === "skill" ? (
-            <Field label="Skill (name from workspace)">
-              <Input
+            <Field label="Skill">
+              <SkillNamePicker
                 value={row.skill}
-                onChange={(e) => onChange({ skill: e.target.value })}
-                placeholder="code-review"
+                onChange={(name) => onChange({ skill: name })}
+                placeholder="Select the review skill"
               />
             </Field>
           ) : (
@@ -594,22 +595,18 @@ function AssigneeFields({
 }) {
   return (
     <Field label="Assign to">
-      <div className="flex gap-2">
-        <NativeSelect
-          value={row.assigneeType}
-          onChange={(e) => onChange({ assigneeType: e.target.value as LoopAssigneeType })}
-          className="w-28 shrink-0"
-        >
-          <option value="agent">Agent</option>
-          <option value="member">Person</option>
-        </NativeSelect>
-        <Input
-          value={row.assigneeId}
-          onChange={(e) => onChange({ assigneeId: e.target.value })}
-          placeholder={row.assigneeType === "agent" ? "Agent <uuid>" : "Member <uuid>"}
-          className="flex-1"
-        />
-      </div>
+      <AssigneePicker
+        assigneeType={row.assigneeId ? row.assigneeType : null}
+        assigneeId={row.assigneeId || null}
+        onUpdate={(u) => {
+          const type = u.assignee_type;
+          if (type === "agent" || type === "member") {
+            onChange({ assigneeType: type, assigneeId: u.assignee_id ?? "" });
+          } else {
+            onChange({ assigneeId: "" });
+          }
+        }}
+      />
     </Field>
   );
 }
