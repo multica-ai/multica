@@ -436,6 +436,7 @@
     "unavailable": "Agent unavailable",
     "detail_link": "Detail →",
     "runtime_label": "Runtime",
+    "model_label": "Model",
     "skills_label": "Skills",
     "owner_label": "Owner",
     "unknown_runtime": "Unknown runtime"

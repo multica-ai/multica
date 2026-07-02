@@ -423,6 +423,7 @@
     "unavailable": "智能体不可用",
     "detail_link": "详情 →",
     "runtime_label": "运行时",
+    "model_label": "模型",
     "skills_label": "Skills",
     "owner_label": "所有者",
     "unknown_runtime": "未知运行时"

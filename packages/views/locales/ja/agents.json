@@ -415,6 +415,7 @@
     "unavailable": "エージェントを利用できません",
     "detail_link": "詳細 →",
     "runtime_label": "ランタイム",
+    "model_label": "モデル",
     "skills_label": "スキル",
     "owner_label": "オーナー",
     "unknown_runtime": "不明なランタイム"
