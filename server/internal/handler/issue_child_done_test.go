@@ -450,9 +450,10 @@ func TestChildDoneTriggersParentAgentWhenSameAgentOwnsChild(t *testing.T) {
 // whose leader is also agent A. Because the parent is an AGENT, dispatch
 // routes through the agent path, which (post-MUL-2808) has no self-trigger
 // guard: A coordinates the parent and must be woken to advance it when the
-// child completes, regardless of who executed the child. The genuinely
-// loop-prone case — BOTH sides squads sharing a leader — is still guarded on
-// the squad path (see TestChildDoneSelfTriggerGuard_SquadParentDifferentSquadSameLeader).
+// child completes, regardless of who executed the child. The squad path now
+// behaves identically: MUL-3969 removed its old same-squad / shared-leader
+// guards, so BOTH sides being squads that share a leader also wakes the leader
+// (see TestChildDoneWakesLeaderWhenParentAndChildSquadsShareLeader).
 func TestChildDoneTriggersParentAgentWhenChildSquadSharesLeader(t *testing.T) {
 	fx := newChildDoneFixture(t, "in_progress")
 	sq := newSquadCommentTriggerFixture(t)
@@ -477,13 +478,16 @@ func TestChildDoneTriggersParentAgentWhenChildSquadSharesLeader(t *testing.T) {
 	}
 }
 
-// TestChildDoneSelfTriggerGuard_SquadParentDifferentSquadSameLeader — the
-// cross-squad shared-leader loop. Parent is squad A, child is squad B,
-// both squads have the same leader agent. The previous guard only blocked
-// `parent.squad == child.squad`, so two distinct squads sharing a leader
-// would still wake the same agent. effectiveChildAgentOwner reduces both
-// sides to "leader agent" and blocks the enqueue.
-func TestChildDoneSelfTriggerGuard_SquadParentDifferentSquadSameLeader(t *testing.T) {
+// TestChildDoneWakesLeaderWhenParentAndChildSquadsShareLeader — cross-squad
+// shared-leader case. Parent is squad A, child is squad B, both squads have
+// the same leader agent. The squad path used to suppress the leader wake here
+// (effectiveChildAgentOwner reduced both sides to the shared leader), but that
+// guard was removed in MUL-3969: waking the leader on the PARENT is a serial
+// sub-task handoff across two DIFFERENT issues, not a self-loop, and it is the
+// only signal that carries the parent-level stage-barrier instruction. The
+// leader must now be woken exactly once; runaway re-triggering is bounded by
+// the HasPendingTaskForIssueAndAgent idempotency check.
+func TestChildDoneWakesLeaderWhenParentAndChildSquadsShareLeader(t *testing.T) {
 	fx := newChildDoneFixture(t, "in_progress")
 	parentSquad := newSquadCommentTriggerFixture(t)
 
@@ -516,7 +520,37 @@ func TestChildDoneSelfTriggerGuard_SquadParentDifferentSquadSameLeader(t *testin
 	if !strings.Contains(content, "mention://squad/"+parentSquad.SquadID) {
 		t.Errorf("expected parent-squad mention in system comment, got: %s", content)
 	}
-	if got := countPendingTasksForAgent(t, fx.parent.ID, parentSquad.LeaderID); got != 0 {
-		t.Errorf("expected 0 pending leader tasks on parent (cross-squad shared-leader guard), got %d", got)
+	if got := countPendingTasksForAgent(t, fx.parent.ID, parentSquad.LeaderID); got != 1 {
+		t.Errorf("expected 1 pending leader task on parent (shared-leader guard removed, MUL-3969), got %d", got)
+	}
+}
+
+// TestChildDoneWakesLeaderWhenChildIsSameSquad — the MUL-3969 repro. Parent
+// and the just-finished child are BOTH assigned to the same squad (the common
+// "a squad decomposes its parent into sub-issues it works itself" pattern).
+// The old same-squad guard suppressed the leader wake, so the stage-barrier
+// system comment landed on the parent but the "wrap up / advance" instruction
+// was never delivered to the leader and the parent silently stalled in
+// in_progress. The leader must now be woken exactly once.
+func TestChildDoneWakesLeaderWhenChildIsSameSquad(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+	sq := newSquadCommentTriggerFixture(t)
+
+	setIssueAssigneeDirect(t, fx.parent.ID, "squad", sq.SquadID)
+	setIssueAssigneeDirect(t, fx.child.ID, "squad", sq.SquadID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`,
+			fx.parent.ID, fx.child.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "mention://squad/"+sq.SquadID) {
+		t.Errorf("expected parent-squad mention in system comment, got: %s", content)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 1 {
+		t.Errorf("expected 1 pending leader task for same-squad child (MUL-3969), got %d", got)
 	}
 }
