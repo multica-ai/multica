@@ -4,7 +4,9 @@ import { inboxKeys } from "../inbox/queries";
 import { patchInboxIssueStatus } from "../inbox/ws-updaters";
 import { projectKeys } from "../projects/queries";
 import {
+  decrementBucketTotal,
   findIssueLocation,
+  moveBucketTotal,
   patchIssueInBuckets,
   removeIssueFromBuckets,
 } from "./cache-helpers";
@@ -36,8 +38,13 @@ import type { InboxItem, Issue, ListIssuesCache } from "../types";
  *   card present, membership undecidable client-side (involves / my:all) →
  *     patch + mark the key stale
  *   card absent, change can't affect this list → skip
- *   card absent, issue may have entered / left beyond the loaded window /
- *     shifted a bucket total → mark the key stale (never hard-insert: the
+ *   card absent, stayed a member + status changed → move one unit of the
+ *     server total between the two buckets (count-only arithmetic, arrays
+ *     untouched, zero requests)
+ *   card absent, left the list (reassigned / re-projected) → old status
+ *     bucket total -1
+ *   card absent, may have ENTERED, or anything undecidable (no base entity,
+ *     unknown membership) → mark the key stale (never hard-insert: the
  *     right page/slot under the list's sort+filter is server knowledge)
  *
  * Stale keys are NOT invalidated here — timing is the caller's contract:
@@ -159,6 +166,37 @@ export function applyIssueChange(
     // Neither before nor after the change does this issue belong to the
     // list — its pages and counts are untouched.
     if (wasMember === false && isMember === false) continue;
+
+    // Certain count arithmetic — branch on the membership OUTCOME, never on
+    // which field changed, so status / assignee / project (and future team)
+    // all flow through the same two cases. wasMember === true implies a
+    // baseIssue exists, so the old status is known.
+    if (wasMember === true && baseIssue) {
+      if (isMember === true) {
+        // Still a member. Only a status change moves a count between
+        // buckets; anything else (e.g. member→member reassignment) leaves
+        // this list's pages and counts untouched.
+        if (!changed.status || patch.status === undefined) continue;
+        const next = moveBucketTotal(data, baseIssue.status, patch.status);
+        if (next !== data) {
+          prevLists.push([key, data]);
+          qc.setQueryData<ListIssuesCache>(key, next);
+        }
+        continue;
+      }
+      if (isMember === false) {
+        // Left the list entirely — the bucket it was counted in loses one.
+        const next = decrementBucketTotal(data, baseIssue.status);
+        if (next !== data) {
+          prevLists.push([key, data]);
+          qc.setQueryData<ListIssuesCache>(key, next);
+        }
+        continue;
+      }
+    }
+    // Entering (its page/slot under the list's sort is server knowledge) or
+    // any uncertainty (no base, unknown membership) → refetch instead of
+    // guessing.
     staleKeys.push(key);
   }
 

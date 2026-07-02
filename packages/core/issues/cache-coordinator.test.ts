@@ -112,10 +112,11 @@ describe("applyIssueChange", () => {
     expect(result.staleKeys).toEqual([]);
   });
 
-  it("status change: rebuckets loaded cards, patches inbox, flags absent-but-member lists for count drift", () => {
+  it("status change: rebuckets loaded cards, patches inbox, adjusts counts for absent-but-member lists", () => {
     qc.setQueryData<ListIssuesCache>(wsKey, bucketed([issue()]));
-    // p1 list loaded but the card is beyond its loaded window — its counts
-    // drift when the status flips server-side.
+    // p1 list loaded but the card is beyond its loaded window — the change
+    // is certain (old + new status known, membership definite), so the two
+    // bucket totals shift arithmetically with zero requests.
     qc.setQueryData<ListIssuesCache>(projectP1Key, bucketed([], 3));
     // p2 list loaded; the issue was never a member — untouched.
     qc.setQueryData<ListIssuesCache>(projectP2Key, bucketed([]));
@@ -152,10 +153,61 @@ describe("applyIssueChange", () => {
       qc.getQueryData<InboxItem[]>(inboxKey)?.[0]?.issue_status,
     ).toBe("in_progress");
 
+    // Off-window count arithmetic: todo 3 → 2, in_progress 0 → 1, loaded
+    // arrays untouched, and no refetch needed.
+    expect(total(qc, projectP1Key, "todo")).toBe(2);
+    expect(total(qc, projectP1Key, "in_progress")).toBe(1);
+    expect(ids(qc, projectP1Key, "todo")).toEqual([]);
+
     const staleHashes = result.staleKeys.map(hashKey);
-    expect(staleHashes).toContain(hashKey(projectP1Key));
+    expect(staleHashes).not.toContain(hashKey(projectP1Key));
     expect(staleHashes).not.toContain(hashKey(projectP2Key));
     expect(staleHashes).not.toContain(hashKey(wsKey));
+  });
+
+  it("off-window leave: decrements the old status bucket total without a refetch", () => {
+    // The card is beyond My-Assigned's loaded window; reassigning it to bob
+    // means the list's todo total counted it and must lose one.
+    qc.setQueryData<ListIssuesCache>(myAssignedKey, bucketed([], 2));
+
+    const patch = { assignee_id: "bob", assignee_type: "member" as const };
+    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
+      changed: issueChangedDims(patch, issue()),
+      baseIssue: issue(),
+    });
+
+    expect(total(qc, myAssignedKey, "todo")).toBe(1);
+    expect(result.staleKeys).toEqual([]);
+  });
+
+  it("off-window member-to-member reassignment leaves counts and pages untouched", () => {
+    // Members tab: bob is still a member, membership holds, status unchanged
+    // — nothing about this list can have drifted, so not even a stale key.
+    qc.setQueryData<ListIssuesCache>(membersKey, bucketed([], 5));
+
+    const patch = { assignee_id: "bob", assignee_type: "member" as const };
+    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
+      changed: issueChangedDims(patch, issue()),
+      baseIssue: issue(),
+    });
+
+    expect(total(qc, membersKey, "todo")).toBe(5);
+    expect(result.staleKeys).toEqual([]);
+  });
+
+  it("rolls off-window count arithmetic back on failure", () => {
+    const snapshot = bucketed([], 3);
+    qc.setQueryData<ListIssuesCache>(projectP1Key, snapshot);
+
+    const patch = { status: "in_progress" as const };
+    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
+      changed: issueChangedDims(patch, issue()),
+      baseIssue: issue(),
+    });
+    expect(total(qc, projectP1Key, "todo")).toBe(2);
+
+    rollbackIssueChange(qc, WS_ID, "issue-1", result);
+    expect(qc.getQueryData<ListIssuesCache>(projectP1Key)).toEqual(snapshot);
   });
 
   it("assignee change me→bob: removes from my-assigned (total decremented), keeps members tab, flags union/involves scopes", () => {
