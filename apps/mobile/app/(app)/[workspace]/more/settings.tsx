@@ -12,14 +12,19 @@
  *
  * Theme picker stays inline (3 fixed options, fits in one section).
  */
-import { Alert, ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import {
+  Alert,
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import type { Workspace } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { workspaceListOptions } from "@/data/queries/workspaces";
@@ -57,7 +62,16 @@ export default function SettingsPage() {
   const clearWorkspace = useWorkspaceStore((s) => s.clear);
   const { data, isLoading, error } = useQuery(workspaceListOptions());
   const { preference, setPreference, colorScheme } = useColorScheme();
-  const mutedFg = THEME[colorScheme].mutedForeground;
+  const theme = THEME[colorScheme];
+  const mutedFg = theme.mutedForeground;
+  // iOS inset-grouped surfaces. The app's tokens lack a dedicated grouped-bg
+  // pair, so derive the two-level contrast per mode: a recessed page behind
+  // raised cards (light: gray page / white card · dark: black page / elevated
+  // card). Mirrors systemGroupedBackground + secondarySystemGroupedBackground.
+  const grouped =
+    colorScheme === "dark"
+      ? { page: theme.background, card: theme.secondary, sep: theme.border }
+      : { page: theme.muted, card: theme.card, sep: theme.border };
 
   const onSwitch = async (ws: Workspace) => {
     if (ws.slug === currentSlug) return;
@@ -89,10 +103,11 @@ export default function SettingsPage() {
 
   return (
     <ScrollView
-      className="flex-1 bg-background"
-      contentContainerClassName="px-4 py-4 gap-6"
+      className="flex-1"
+      style={{ backgroundColor: grouped.page }}
+      contentContainerClassName="px-4 py-5 gap-8"
     >
-      <SectionGroup title="Account">
+      <SectionGroup title="Account" cardBg={grouped.card}>
         <NavRow
           onPress={goProfile}
           chevronColor={mutedFg}
@@ -111,7 +126,7 @@ export default function SettingsPage() {
           title={user?.name ?? "—"}
           subtitle={user?.email}
         />
-        <Separator />
+        <InsetSeparator color={grouped.sep} inset={64} />
         <NavRow
           onPress={goNotifications}
           chevronColor={mutedFg}
@@ -120,7 +135,7 @@ export default function SettingsPage() {
         />
       </SectionGroup>
 
-      <SectionGroup title="Workspaces">
+      <SectionGroup title="Workspaces" cardBg={grouped.card}>
         {isLoading ? (
           <View className="py-4 items-center">
             <ActivityIndicator />
@@ -144,14 +159,16 @@ export default function SettingsPage() {
                   iconColor={mutedFg}
                   onPress={() => onSwitch(ws)}
                 />
-                {!isLast ? <Separator /> : null}
+                {!isLast ? (
+                  <InsetSeparator color={grouped.sep} inset={16} />
+                ) : null}
               </View>
             );
           })
         )}
       </SectionGroup>
 
-      <SectionGroup title="Appearance">
+      <SectionGroup title="Appearance" cardBg={grouped.card}>
         {/* Two converging entry points by design, NOT a double-fire:
               - Tap on small radio circle  → RadioGroupItem (Pressable, inner) consumes → onValueChange fires
               - Tap on text / row padding  → outer Pressable.onPress fires
@@ -177,17 +194,27 @@ export default function SettingsPage() {
                     {opt.label}
                   </Text>
                 </Pressable>
-                {!isLast ? <Separator /> : null}
+                {!isLast ? (
+                  <InsetSeparator color={grouped.sep} inset={16} />
+                ) : null}
               </View>
             );
           })}
         </RadioGroup>
       </SectionGroup>
 
-      <View className="pt-2">
-        <Button variant="destructive" onPress={onSignOut}>
-          <Text>Sign out</Text>
-        </Button>
+      {/* Sign out — iOS pattern: a standalone grouped cell with centered
+          destructive text, not a filled button. */}
+      <View
+        className="rounded-[10px] overflow-hidden"
+        style={{ backgroundColor: grouped.card }}
+      >
+        <Pressable
+          onPress={onSignOut}
+          className="px-4 py-3.5 items-center active:bg-secondary"
+        >
+          <Text className="text-base text-destructive">Sign out</Text>
+        </Pressable>
       </View>
     </ScrollView>
   );
@@ -229,20 +256,40 @@ function NavRow({
 
 function SectionGroup({
   title,
+  cardBg,
   children,
 }: {
   title: string;
+  cardBg: string;
   children: React.ReactNode;
 }) {
   return (
     <View className="gap-2">
-      <Text className="text-xs uppercase tracking-wider text-muted-foreground px-1">
+      <Text className="text-xs uppercase tracking-wider text-muted-foreground px-4">
         {title}
       </Text>
-      <View className="rounded-md border border-border bg-card overflow-hidden">
+      <View
+        className="rounded-[10px] overflow-hidden"
+        style={{ backgroundColor: cardBg }}
+      >
         {children}
       </View>
     </View>
+  );
+}
+
+// iOS inset hairline divider: a thin rule that starts after the row's leading
+// content (so it aligns under the text, not under the avatar/edge) — the
+// signature look of a UITableView row separator.
+function InsetSeparator({ color, inset }: { color: string; inset: number }) {
+  return (
+    <View
+      style={{
+        height: StyleSheet.hairlineWidth,
+        marginLeft: inset,
+        backgroundColor: color,
+      }}
+    />
   );
 }
 
