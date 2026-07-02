@@ -31,11 +31,17 @@ DELETE FROM agent_invocation_target
 WHERE agent_id = $1;
 
 -- name: DeleteAgentInvocationTargetsByMember :exec
--- Removes member-target grants pointing at a leaving user across the whole
--- workspace. Called from the member-removal / runtime-revoke cleanup path so a
--- departed user does not linger on any agent's allow-list.
-DELETE FROM agent_invocation_target
-WHERE target_type = 'member' AND target_id = $1;
+-- Removes member-target grants pointing at a leaving user, SCOPED to a single
+-- workspace. A user may belong to multiple workspaces; removing them from one
+-- must NOT touch their invocation grants on agents in another workspace. Joins
+-- through agent (agent_invocation_target has no workspace_id column and no FK)
+-- to bound the delete to @workspace_id.
+DELETE FROM agent_invocation_target ait
+USING agent a
+WHERE ait.agent_id = a.id
+  AND a.workspace_id = @workspace_id
+  AND ait.target_type = 'member'
+  AND ait.target_id = @target_id;
 
 -- name: DeleteAgentInvocationTargetsByArchivedRuntimeAgents :exec
 -- Application-layer replacement for the (deliberately absent) agent_id ON

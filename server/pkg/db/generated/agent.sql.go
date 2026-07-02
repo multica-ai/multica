@@ -1402,8 +1402,9 @@ type CreateRetryTaskParams struct {
 //
 // originator_user_id is inherited so the Composio overlay decision sees the
 // same top-of-chain human across the retry: the user behind the original
-// run has not changed, and the enqueue hook in TaskService can keep gating
-// on (originator == agent.owner_id) without a separate parent lookup.
+// run has not changed. The Composio overlay follows the agent's invocation
+// permission and uses the agent owner's connection (MUL-3963); originator is
+// carried for A2A/audit, not as an originator == agent.owner_id gate.
 func (q *Queries) CreateRetryTask(ctx context.Context, arg CreateRetryTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createRetryTask, arg.ID, arg.RuntimeMcpOverlay)
 	var i AgentTaskQueue

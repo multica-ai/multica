@@ -523,3 +523,94 @@ func TestRevokeMember_ClearsInvocationTargets(t *testing.T) {
 		t.Errorf("re-invited member must NOT reclaim the stale invocation grant")
 	}
 }
+
+// TestRevokeMember_InvocationTargetCleanupIsWorkspaceScoped locks the 3rd-review
+// fix (MUL-3963): removing a user from ONE workspace must only prune their
+// member-target invocation grants in THAT workspace. A user who belongs to
+// multiple workspaces must keep their grants in the workspaces they remain in.
+func TestRevokeMember_InvocationTargetCleanupIsWorkspaceScoped(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	userX := createPermissionTestMember(t, "perm-xws@multica.test")
+
+	// Workspace A (the shared test workspace): an agent allow-lists userX.
+	agentA := createPublicToAgentWithTargets(t, "xws-agent-a", []map[string]any{
+		{"target_type": "member", "target_id": userX},
+	})
+
+	// Workspace B: fresh workspace with its own runtime + agent that also
+	// allow-lists the same userX.
+	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = 'xws-b-perm-test'`)
+	var wsB string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ('XWS B', 'xws-b-perm-test', '', 'XWB')
+		RETURNING id
+	`).Scan(&wsB); err != nil {
+		t.Fatalf("create workspace B: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsB) })
+
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`, wsB, testUserID); err != nil {
+		t.Fatalf("add owner to B: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, wsB, userX); err != nil {
+		t.Fatalf("add userX to B: %v", err)
+	}
+	var rtB string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, NULL, 'xws-b-rt', 'cloud', 'handler_test_runtime', 'online', 'dev', '{}'::jsonb, $2, now())
+		RETURNING id
+	`, wsB, testUserID).Scan(&rtB); err != nil {
+		t.Fatalf("create runtime B: %v", err)
+	}
+	var agentB string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'xws-agent-b', '', 'cloud', '{}'::jsonb, $2, 'private', 'public_to', 1, $3)
+		RETURNING id
+	`, wsB, rtB, testUserID).Scan(&agentB); err != nil {
+		t.Fatalf("create agent B: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_invocation_target (agent_id, target_type, target_id) VALUES ($1, 'member', $2)
+	`, agentB, userX); err != nil {
+		t.Fatalf("seed B member target: %v", err)
+	}
+
+	if invocationTargetCount(t, agentA) != 1 || invocationTargetCount(t, agentB) != 1 {
+		t.Fatalf("setup: expected one member target on each of A and B")
+	}
+
+	// Remove userX from workspace A only.
+	var memberRowA string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, userX,
+	).Scan(&memberRowA); err != nil {
+		t.Fatalf("load member row A: %v", err)
+	}
+	if _, err := testHandler.revokeAndRemoveMember(ctx,
+		util.MustParseUUID(testWorkspaceID),
+		util.MustParseUUID(userX),
+		util.MustParseUUID(memberRowA),
+		util.MustParseUUID(testUserID),
+	); err != nil {
+		t.Fatalf("revokeAndRemoveMember(A): %v", err)
+	}
+
+	if n := invocationTargetCount(t, agentA); n != 0 {
+		t.Errorf("workspace A target should be pruned on removal, got %d", n)
+	}
+	if n := invocationTargetCount(t, agentB); n != 1 {
+		t.Errorf("workspace B target MUST survive removal from A (cross-workspace collateral), got %d", n)
+	}
+}

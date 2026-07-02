@@ -71,9 +71,10 @@ type AgentResponse struct {
 	// per-model; the API never normalizes across providers. See MUL-2339.
 	ThinkingLevel string `json:"thinking_level"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
-	// agent is allowed to mount as MCP at task dispatch — but only when the
-	// run originator is the agent owner (MUL-3869 / MUL-3721). NULL or empty
-	// = no overlay regardless of who triggers. Like mcp_config, this is
+	// agent is allowed to mount as MCP at task dispatch — for ANY run that
+	// passes the agent's invocation permission, using the agent OWNER's
+	// Composio connection (MUL-3963; no longer gated on originator == owner).
+	// NULL or empty = no overlay. Like mcp_config, this is
 	// owner-only data: the slugs themselves are not secret, but the
 	// "this is what {agent owner} is willing to surface" view is — surfacing
 	// it cross-account is privacy-confusing UX and would let workspace
@@ -656,10 +657,11 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		// are secret but because surfacing "what {owner} has opted into"
 		// across the workspace leaks the owner's integration footprint and
 		// confuses non-owners who cannot actually edit it. Workspace
-		// owner/admin do NOT bypass this gate (unlike mcp_config) because
-		// the dispatch decision is owner-vs-originator anyway, so admins
-		// seeing the slugs gives them nothing actionable. Agent actors are
-		// also redacted (same A2A lateral-movement reasoning as mcp_config).
+		// owner/admin do NOT bypass this gate (unlike mcp_config): the overlay
+		// uses the OWNER's connection and follows invocation permission
+		// (MUL-3963), so surfacing the slugs to admins gives them nothing
+		// actionable. Agent actors are also redacted (same A2A
+		// lateral-movement reasoning as mcp_config).
 		if actorType == "agent" || uuidToString(a.OwnerID) != userID {
 			redactComposioToolkitAllowlist(&resp)
 		}
@@ -1406,10 +1408,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	//
 	// Owner-only WRITE. The caller is already past canManageAgent, which lets
 	// workspace owner/admins through alongside the agent owner — but the
-	// dispatch gate downstream is owner-vs-originator, so a workspace admin
-	// flipping someone else's agent allowlist would create an allowlist that
-	// can never fire (the admin is not the originator either) and silently
-	// confuse the agent owner about what their agent is allowed to mount.
+	// Composio overlay uses the agent OWNER's connection (MUL-3963), so an
+	// admin editing someone else's allowlist would silently reshape what the
+	// OWNER exposes through their own connected apps, confusing the owner
+	// about what their agent surfaces. Keep it owner-only.
 	// Drop the field with a debug log instead of erroring so an over-eager
 	// UI that sends the whole agent payload back on every save (PATCH-as-PUT)
 	// keeps working — same "silent ignore" stance the issue calls out, and

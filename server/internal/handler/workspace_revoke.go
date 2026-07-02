@@ -129,10 +129,13 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	// (MUL-3963 keeps the new table FK-free, matching the MUL-3515 channel
 	// generalization). Prune this leaving member's grants in the same tx as the
 	// member-row delete so a re-invited user does not silently reclaim old
-	// invocation permission on agents that had allow-listed them. This is
-	// workspace-agnostic by user id, which is correct: the member is leaving
-	// this workspace and every agent lives in it.
-	if err := qtx.DeleteAgentInvocationTargetsByMember(ctx, userID); err != nil {
+	// invocation permission on agents that had allow-listed them. SCOPED to
+	// this workspace: the same user may belong to other workspaces, and
+	// removing them here must not touch their grants on agents elsewhere.
+	if err := qtx.DeleteAgentInvocationTargetsByMember(ctx, db.DeleteAgentInvocationTargetsByMemberParams{
+		WorkspaceID: workspaceID,
+		TargetID:    userID,
+	}); err != nil {
 		return empty, err
 	}
 

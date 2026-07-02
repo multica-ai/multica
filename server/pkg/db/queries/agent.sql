@@ -232,8 +232,9 @@ WHERE id = $1 AND issue_id IS NULL;
 --
 -- originator_user_id is inherited so the Composio overlay decision sees the
 -- same top-of-chain human across the retry: the user behind the original
--- run has not changed, and the enqueue hook in TaskService can keep gating
--- on (originator == agent.owner_id) without a separate parent lookup.
+-- run has not changed. The Composio overlay follows the agent's invocation
+-- permission and uses the agent owner's connection (MUL-3963); originator is
+-- carried for A2A/audit, not as an originator == agent.owner_id gate.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,

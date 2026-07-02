@@ -71,15 +71,26 @@ func (q *Queries) DeleteAgentInvocationTargetsByArchivedRuntimeAgents(ctx contex
 }
 
 const deleteAgentInvocationTargetsByMember = `-- name: DeleteAgentInvocationTargetsByMember :exec
-DELETE FROM agent_invocation_target
-WHERE target_type = 'member' AND target_id = $1
+DELETE FROM agent_invocation_target ait
+USING agent a
+WHERE ait.agent_id = a.id
+  AND a.workspace_id = $1
+  AND ait.target_type = 'member'
+  AND ait.target_id = $2
 `
 
-// Removes member-target grants pointing at a leaving user across the whole
-// workspace. Called from the member-removal / runtime-revoke cleanup path so a
-// departed user does not linger on any agent's allow-list.
-func (q *Queries) DeleteAgentInvocationTargetsByMember(ctx context.Context, targetID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAgentInvocationTargetsByMember, targetID)
+type DeleteAgentInvocationTargetsByMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	TargetID    pgtype.UUID `json:"target_id"`
+}
+
+// Removes member-target grants pointing at a leaving user, SCOPED to a single
+// workspace. A user may belong to multiple workspaces; removing them from one
+// must NOT touch their invocation grants on agents in another workspace. Joins
+// through agent (agent_invocation_target has no workspace_id column and no FK)
+// to bound the delete to @workspace_id.
+func (q *Queries) DeleteAgentInvocationTargetsByMember(ctx context.Context, arg DeleteAgentInvocationTargetsByMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteAgentInvocationTargetsByMember, arg.WorkspaceID, arg.TargetID)
 	return err
 }
 
