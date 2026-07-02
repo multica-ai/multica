@@ -9,8 +9,13 @@ package execenv
 // wake-up; the platform re-schedules after each dispatch when needed.
 //
 // Key platform constraints baked in here so agents do not need to rediscover them:
-//   - Minimum interval: 15 minutes between wakeup creations for the same agent+issue.
-//   - fire_at must be at least 15 minutes from now for trigger_type=time.
+//   - There is a small minimum gap between two time-wakeups for the same
+//     agent+issue. It is a per-workspace setting (wakeup_min_interval_minutes,
+//     default 5, hard floor 1), NOT a fixed platform-wide number — so this brief
+//     deliberately does NOT hardcode a minute count. If fire_at is too soon the
+//     API rejects it with the exact current minimum in the error text; the agent
+//     reads that number and retries. This keeps the guidance correct even when
+//     the setting changes, and stops stale numbers spreading (FIR-2544).
 //   - Do NOT say "I'll check back" or "I'll wake up" without actually calling
 //     schedule_wakeup — agents have no memory across runs.
 
@@ -27,8 +32,9 @@ func cerebroWakeupMandatoryRule() string {
 	add("**\"Jeg vender tilbage snart\" UDEN et sat wakeup = ikke godkendt.** Agenter har ingen hukommelse mellem kørsler — uden en konkret wakeup vender agenten aldrig tilbage, og issuet staller stille. Sæt wakeup'en FØR du poster, skriv tidspunktet. Et vagt løfte tæller ikke.\n\n")
 	add("Brug `trigger_type=time` + `fire_at=<RFC3339>` for én enkelt fremtidig vækker. Foretruk MCP (`schedule_wakeup`) når tilgængeligt; ellers `multica wakeup create --at <RFC3339>`.\n\n")
 	add("**Platform-begrænsninger (håndhæves server-side):**\n")
-	add("- `fire_at` skal være mindst 15 minutter fra nu.\n")
-	add("- Der må kun oprettes én pending wakeup pr. agent+issue ad gangen (inden for 15 minutter).\n")
-	add("- Hvis agenten afviser wakeup-oprettelse, tjek om en eksisterende wakeup er tilstrækkelig.\n\n")
+	// CEREBRO-PATCH(runtime-config-wakeup-mandatory): FIR-2544 — describe the wakeup minimum as a self-correcting per-workspace value, never a hardcoded minute count, so stale numbers can't spread.
+	add("- Der er et lille minimums-interval mellem to time-wakeups på samme agent+issue. Grænsen sættes pr. workspace (i **Cerebro-features**) og er typisk få minutter — der er INGEN fast platform-grænse du skal huske udenad.\n")
+	add("- Lær ikke et bestemt tal: sæt bare det `fire_at` du reelt har brug for. Er det for tidligt, afviser API'et med det præcise minimum i fejlteksten (fx \"fire_at must be at least N minutes from now\") — brug det tal og prøv igen.\n")
+	add("- Der må kun være én pending wakeup pr. agent+issue ad gangen; opret en ny når den gamle er fyret eller aflyst.\n\n")
 	return string(b)
 }

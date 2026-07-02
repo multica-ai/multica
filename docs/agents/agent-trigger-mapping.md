@@ -111,7 +111,7 @@ func RunSweeper(ctx context.Context, svc *Service, interval time.Duration) {
 
 **If runtime offline:** `Dispatch()` calls `postpone()`, resetting the wakeup to pending with a delay and incrementing `consecutive_postpones`.
 
-**Constraints:** minimum 15 minutes from now (server-enforced); one pending wakeup per agent+issue at a time.
+**Constraints:** `fire_at` must be at least the per-workspace minimum interval ahead (`wakeup_min_interval_minutes`, default 5, hard floor 1 — set in Cerebro features; NOT a fixed 15). A too-soon `fire_at` is rejected with the exact current minimum in the error. One pending wakeup per agent+issue at a time.
 
 ---
 
