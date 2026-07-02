@@ -214,6 +214,11 @@
     "prop_cache_value": "{{read}} 读 / {{write}} 写",
     "prop_runs": "运行次数",
     "activity_section": "动态",
+    "comment_order": {
+      "label": "评论排序",
+      "oldest_first": "最早优先",
+      "newest_first": "最新优先"
+    },
     "subscribe": "订阅",
     "unsubscribe": "取消订阅",
     "no_subscribers_results": "未找到结果",

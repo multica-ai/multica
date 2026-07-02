@@ -214,6 +214,11 @@
     "prop_cache_value": "読み取り {{read}} / 書き込み {{write}}",
     "prop_runs": "実行",
     "activity_section": "アクティビティ",
+    "comment_order": {
+      "label": "コメントの順序",
+      "oldest_first": "古い順",
+      "newest_first": "新しい順"
+    },
     "subscribe": "購読",
     "unsubscribe": "購読解除",
     "no_subscribers_results": "結果が見つかりません",
