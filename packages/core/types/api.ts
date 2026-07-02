@@ -2,6 +2,11 @@ import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeTyp
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
+export interface IssueActorRef {
+  type: IssueAssigneeType;
+  id: string;
+}
+
 // Issue API
 export interface CreateIssueRequest {
   title: string;
@@ -79,6 +84,8 @@ export interface ListIssuesParams {
   workspace_id?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
+  priorities?: IssuePriority[];
+  assignee_types?: IssueAssigneeType[];
   assignee_id?: string;
   assignee_ids?: string[];
   creator_id?: string;
@@ -102,16 +109,17 @@ export interface ListIssuesParams {
    * majority on the client.
    */
   scheduled?: boolean;
+  assignee_filters?: IssueActorRef[];
+  include_no_assignee?: boolean;
+  creator_filters?: IssueActorRef[];
+  project_ids?: string[];
+  include_no_project?: boolean;
+  label_ids?: string[];
   date_field?: "created_at" | "updated_at";
   date_start?: string;
   date_end?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
-}
-
-export interface IssueActorRef {
-  type: IssueAssigneeType;
-  id: string;
 }
 
 export interface ListGroupedIssuesParams {

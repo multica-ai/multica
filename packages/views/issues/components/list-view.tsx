@@ -19,7 +19,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
+import type { IssueListFilter, IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -59,6 +59,7 @@ export function ListView({
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
   myIssuesFilter,
+  listFilter,
   projectId,
   onMoveIssue,
   sort,
@@ -68,6 +69,7 @@ export function ListView({
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
+  listFilter?: IssueListFilter;
   projectId?: string;
   onMoveIssue?: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   sort?: IssueSortParam;
@@ -316,6 +318,7 @@ export function ListView({
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
             myIssuesOpts={myIssuesOpts}
+            listFilter={listFilter}
             projectId={projectId}
             dragEnabled={dragEnabled}
             isExpanded={isExpanded}
@@ -365,6 +368,7 @@ function StatusAccordionItem({
   issueMap,
   childProgressMap,
   myIssuesOpts,
+  listFilter,
   projectId,
   dragEnabled,
   isExpanded,
@@ -376,6 +380,7 @@ function StatusAccordionItem({
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  listFilter?: IssueListFilter;
   projectId?: string;
   dragEnabled: boolean;
   isExpanded: boolean;
@@ -390,6 +395,7 @@ function StatusAccordionItem({
     status,
     myIssuesOpts,
     sort,
+    listFilter,
   );
 
   const issues = useMemo(

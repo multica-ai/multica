@@ -18,13 +18,34 @@ export interface IssueSortParam {
   date_end?: ListIssuesParams["date_end"];
 }
 
+export type IssueListFilter = Pick<
+  ListIssuesParams,
+  | "priorities"
+  | "assignee_types"
+  | "assignee_filters"
+  | "include_no_assignee"
+  | "creator_filters"
+  | "project_ids"
+  | "include_no_project"
+  | "label_ids"
+>;
+
+function hasIssueListFilter(filter?: IssueListFilter) {
+  if (!filter) return false;
+  return Object.values(filter).some((value) =>
+    Array.isArray(value) ? value.length > 0 : value === true,
+  );
+}
+
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
   /** PREFIX for invalidation — no sort. */
   list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
-  /** FULL KEY for queryOptions — includes sort. */
-  listSorted: (wsId: string, sort?: IssueSortParam) =>
-    [...issueKeys.list(wsId), sort ?? {}] as const,
+  /** FULL KEY for queryOptions — includes active server-side filter + sort. */
+  listSorted: (wsId: string, sort?: IssueSortParam, filter?: IssueListFilter) =>
+    hasIssueListFilter(filter)
+      ? [...issueKeys.list(wsId), filter, sort ?? {}] as const
+      : [...issueKeys.list(wsId), sort ?? {}] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -113,9 +134,37 @@ export const issueKeys = {
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
 };
 
+function isIssueListPrefix(wsId: string, queryKey: readonly unknown[]) {
+  const prefix = issueKeys.list(wsId);
+  return prefix.every((part, index) => Object.is(queryKey[index], part));
+}
+
+export function isFilteredIssueListKey(wsId: string, queryKey: readonly unknown[]) {
+  const prefix = issueKeys.list(wsId);
+  return isIssueListPrefix(wsId, queryKey) && queryKey.length === prefix.length + 2;
+}
+
+export function invalidateFilteredIssueLists(qc: QueryClient, wsId: string) {
+  qc.invalidateQueries({
+    predicate: (query) => isFilteredIssueListKey(wsId, query.queryKey),
+  });
+}
+
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
-  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id"
+  | "assignee_id"
+  | "assignee_ids"
+  | "creator_id"
+  | "project_id"
+  | "involves_user_id"
+  | "priorities"
+  | "assignee_types"
+  | "assignee_filters"
+  | "include_no_assignee"
+  | "creator_filters"
+  | "project_ids"
+  | "include_no_project"
+  | "label_ids"
 >;
 
 export type AssigneeGroupedIssuesFilter = Omit<
@@ -139,7 +188,7 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
   return out;
 }
 
-async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
+async function fetchFirstPages(filter: ListIssuesParams = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
   const responses = await Promise.all(
     PAGINATED_STATUSES.map((status) =>
       api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
@@ -172,11 +221,15 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortPara
  * total — pagination on the "All" scope is out of scope; the first
  * 50-per-status × 3 widening (deduped) is what the page renders.
  */
-async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
+async function fetchAllMyFirstPages(
+  userId: string,
+  filter: MyIssuesFilter = {},
+  sort?: IssueSortParam,
+): Promise<ListIssuesCache> {
   const [byAssignee, byCreator, byInvolves] = await Promise.all([
-    fetchFirstPages({ assignee_id: userId }, sort),
-    fetchFirstPages({ creator_id: userId }, sort),
-    fetchFirstPages({ involves_user_id: userId }, sort),
+    fetchFirstPages({ ...filter, assignee_id: userId }, sort),
+    fetchFirstPages({ ...filter, creator_id: userId }, sort),
+    fetchFirstPages({ ...filter, involves_user_id: userId }, sort),
   ]);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
@@ -260,12 +313,16 @@ async function fetchAllMyAssigneeGroups(
  * Fetches the first page of each paginated status in parallel. Use
  * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
  */
-export function issueListOptions(wsId: string, sort?: IssueSortParam) {
+export function issueListOptions(
+  wsId: string,
+  sort?: IssueSortParam,
+  filter?: IssueListFilter,
+) {
   return queryOptions({
-    queryKey: issueKeys.listSorted(wsId, sort),
-    queryFn: () => fetchFirstPages({}, sort),
+    queryKey: issueKeys.listSorted(wsId, sort, filter),
+    queryFn: () => fetchFirstPages(filter ?? {}, sort),
     select: flattenIssueBuckets,
-    placeholderData: keepPreviousData,
+    placeholderData: hasIssueListFilter(filter) ? undefined : keepPreviousData,
   });
 }
 
@@ -307,7 +364,7 @@ export function myIssueListOptions(
     queryKey: issueKeys.myListSorted(wsId, scope, filter, sort),
     queryFn: () =>
       scope === "all" && userId
-        ? fetchAllMyFirstPages(userId, sort)
+        ? fetchAllMyFirstPages(userId, filter, sort)
         : fetchFirstPages(filter, sort),
     select: flattenIssueBuckets,
     placeholderData: keepPreviousData,

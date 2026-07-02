@@ -15,7 +15,7 @@ import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
 import type { Issue, IssueAssigneeGroup, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { AssigneeGroupedIssuesFilter, IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
+import type { AssigneeGroupedIssuesFilter, IssueListFilter, IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -121,6 +121,7 @@ export function BoardView({
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
   myIssuesFilter,
+  listFilter,
   sort,
   projectId,
 }: {
@@ -135,6 +136,8 @@ export function BoardView({
   /** When set, per-status load-more targets the scoped cache instead of the workspace one. */
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
+  /** Server-side filters for the workspace status-board cache. Ignored for my-issues caches. */
+  listFilter?: IssueListFilter;
   /** Must match the sort the page queried with — embedded in the cache key. */
   sort?: IssueSortParam;
   /** When set, the per-column "+" pre-fills the project on the create form. */
@@ -419,6 +422,7 @@ export function BoardView({
                 issueMap={issueMapRef.current}
                 childProgressMap={childProgressMap}
                 myIssuesOpts={myIssuesOpts}
+                listFilter={listFilter}
                 sort={sort}
                 projectId={projectId}
                 sortLabel={sortLabel}
@@ -457,6 +461,7 @@ export function BoardView({
           <BoardHiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
             myIssuesOpts={myIssuesOpts}
+            listFilter={listFilter}
             sort={sort}
           />
         )}
@@ -528,6 +533,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   issueMap,
   childProgressMap,
   myIssuesOpts,
+  listFilter,
   sort,
   projectId,
   sortLabel,
@@ -537,6 +543,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  listFilter?: IssueListFilter;
   sort?: IssueSortParam;
   projectId?: string;
   sortLabel?: string | null;
@@ -545,6 +552,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
     group.status,
     myIssuesOpts,
     sort,
+    listFilter,
   );
   return (
     <BoardColumn
@@ -574,23 +582,27 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
 function BoardHiddenColumnRow({
   status,
   myIssuesOpts,
+  listFilter,
   sort,
 }: {
   status: IssueStatus;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  listFilter?: IssueListFilter;
   sort?: IssueSortParam;
 }) {
-  const { total } = useLoadMoreByStatus(status, myIssuesOpts, sort);
+  const { total } = useLoadMoreByStatus(status, myIssuesOpts, sort, listFilter);
   return <HiddenColumnRow status={status} total={total} />;
 }
 
 function BoardHiddenColumnsPanel({
   hiddenStatuses,
   myIssuesOpts,
+  listFilter,
   sort,
 }: {
   hiddenStatuses: IssueStatus[];
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  listFilter?: IssueListFilter;
   sort?: IssueSortParam;
 }) {
   return (
@@ -601,6 +613,7 @@ function BoardHiddenColumnsPanel({
           key={status}
           status={status}
           myIssuesOpts={myIssuesOpts}
+          listFilter={listFilter}
           sort={sort}
         />
       )}

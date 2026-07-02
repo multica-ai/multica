@@ -35,7 +35,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import { childrenByParentsOptions, issueKeys, type IssueSortParam, type MyIssuesFilter } from "@multica/core/issues/queries";
+import { childrenByParentsOptions, issueKeys, type IssueListFilter, type IssueSortParam, type MyIssuesFilter } from "@multica/core/issues/queries";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -451,6 +451,7 @@ export function SwimLaneView({
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
   myIssuesFilter,
+  listFilter,
   sort,
   projectId,
 }: {
@@ -475,6 +476,7 @@ export function SwimLaneView({
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
+  listFilter?: IssueListFilter;
   /** Must match the sort the page queried with — embedded in the cache key. */
   sort?: IssueSortParam;
   /** Pre-fills `project_id` on the create form for the in-cell "+" button. */
@@ -1210,6 +1212,7 @@ export function SwimLaneView({
             sortedStatuses={sortedStatuses}
             gridStyle={gridStyle}
             myIssuesOpts={myIssuesOpts}
+            listFilter={listFilter}
             sort={sort}
           />
         </div>
@@ -1503,11 +1506,13 @@ function SwimLaneLoadMoreRow({
   sortedStatuses,
   gridStyle,
   myIssuesOpts,
+  listFilter,
   sort,
 }: {
   sortedStatuses: IssueStatus[];
   gridStyle: React.CSSProperties;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  listFilter?: IssueListFilter;
   sort?: IssueSortParam;
 }) {
   return (
@@ -1517,6 +1522,7 @@ function SwimLaneLoadMoreRow({
           key={status}
           status={status}
           myIssuesOpts={myIssuesOpts}
+          listFilter={listFilter}
           sort={sort}
         />
       ))}
@@ -1527,13 +1533,15 @@ function SwimLaneLoadMoreRow({
 function SwimLaneLoadMoreCell({
   status,
   myIssuesOpts,
+  listFilter,
   sort,
 }: {
   status: IssueStatus;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  listFilter?: IssueListFilter;
   sort?: IssueSortParam;
 }) {
-  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, myIssuesOpts, sort);
+  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, myIssuesOpts, sort, listFilter);
   if (!hasMore) return <div />;
   return <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />;
 }

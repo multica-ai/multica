@@ -122,6 +122,39 @@ function expectInvalidated(qc: QueryClient, queryKey: readonly unknown[]) {
   expect(qc.getQueryState(queryKey)?.isInvalidated).toBe(true);
 }
 
+describe("filtered workspace list invalidation", () => {
+  let qc: QueryClient;
+  const unfilteredKey = issueKeys.listSorted(WS_ID, undefined);
+  const filteredKey = issueKeys.listSorted(WS_ID, undefined, { priorities: ["high"] });
+
+  beforeEach(() => {
+    qc = new QueryClient();
+    qc.setQueryData<ListIssuesCache>(unfilteredKey, makeListCache(baseIssue));
+    qc.setQueryData<ListIssuesCache>(filteredKey, makeListCache(baseIssue));
+  });
+
+  it("invalidates filtered workspace lists after issue creation", () => {
+    onIssueCreated(qc, WS_ID, { ...otherIssue, priority: "low" });
+
+    expectInvalidated(qc, filteredKey);
+    expect(qc.getQueryState(unfilteredKey)?.isInvalidated).toBe(false);
+  });
+
+  it("invalidates filtered workspace lists after issue updates", () => {
+    onIssueUpdated(qc, WS_ID, { ...baseIssue, title: "Renamed" });
+
+    expectInvalidated(qc, filteredKey);
+    expect(qc.getQueryState(unfilteredKey)?.isInvalidated).toBe(false);
+  });
+
+  it("invalidates filtered workspace lists after label changes", () => {
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
+
+    expectInvalidated(qc, filteredKey);
+    expect(qc.getQueryState(unfilteredKey)?.isInvalidated).toBe(false);
+  });
+});
+
 describe("onIssueLabelsChanged", () => {
   let qc: QueryClient;
 

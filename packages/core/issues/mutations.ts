@@ -3,8 +3,10 @@ import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-quer
 import { api } from "../api";
 import {
   issueKeys,
+  invalidateFilteredIssueLists,
   ISSUE_PAGE_SIZE,
   type AssigneeGroupedIssuesFilter,
+  type IssueListFilter,
   type IssueSortParam,
   type MyIssuesFilter,
 } from "./queries";
@@ -36,6 +38,19 @@ import type {
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
+
+function hasOwn(value: object, key: PropertyKey) {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function updateAffectsFilteredIssueLists(update: Partial<UpdateIssueRequest>) {
+  return (
+    hasOwn(update, "priority") ||
+    hasOwn(update, "assignee_type") ||
+    hasOwn(update, "assignee_id") ||
+    hasOwn(update, "project_id")
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Shared mutation variable types — used by both mutation hooks and
@@ -72,6 +87,7 @@ export function useLoadMoreByStatus(
   status: IssueStatus,
   myIssues?: { scope: string; filter: MyIssuesFilter },
   sort?: IssueSortParam,
+  listFilter?: IssueListFilter,
 ) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -79,7 +95,7 @@ export function useLoadMoreByStatus(
 
   const activeKey = myIssues
     ? issueKeys.myListSorted(wsId, myIssues.scope, myIssues.filter, sort)
-    : issueKeys.listSorted(wsId, sort);
+    : issueKeys.listSorted(wsId, sort, listFilter);
   const cache = qc.getQueryData<ListIssuesCache>(activeKey);
   const bucket = cache?.byStatus[status];
   const loaded = bucket?.issues.length ?? 0;
@@ -95,6 +111,7 @@ export function useLoadMoreByStatus(
         limit: ISSUE_PAGE_SIZE,
         offset: loaded,
         ...sort,
+        ...listFilter,
         ...myIssues?.filter,
       });
       qc.setQueryData<ListIssuesCache>(activeKey, (old) => {
@@ -110,7 +127,7 @@ export function useLoadMoreByStatus(
     } finally {
       setIsLoading(false);
     }
-  }, [qc, activeKey, status, loaded, hasMore, isLoading, myIssues?.filter, sort]);
+  }, [qc, activeKey, status, loaded, hasMore, isLoading, listFilter, myIssues?.filter, sort]);
 
   return { loadMore, hasMore, isLoading, total };
 }
@@ -331,10 +348,11 @@ export function useUpdateIssue() {
       );
     },
     onSettled: (_data, _err, vars, ctx) => {
-      // The issue's own list + detail caches are reconciled surgically in
+      // The unfiltered list + detail caches are reconciled surgically in
       // onSuccess / onError, so they are deliberately NOT invalidated here — a
-      // full-list refetch on settle is what made drags flicker. Only aggregate
-      // caches that cannot be patched from a single issue are refreshed below.
+      // full-list refetch on settle is what made drags flicker. Filtered
+      // workspace list variants are refreshed below only when the update can
+      // move a row in or out of their server-side filters.
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -352,6 +370,9 @@ export function useUpdateIssue() {
       // myAll whenever project_id was part of this update (MUL-3669 / #4548).
       if (Object.prototype.hasOwnProperty.call(vars, "project_id")) {
         qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      }
+      if (updateAffectsFilteredIssueLists(vars)) {
+        invalidateFilteredIssueLists(qc, wsId);
       }
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
@@ -527,13 +548,10 @@ export function useBatchUpdateIssues() {
       }
     },
     onSettled: (_data, _err, _vars, ctx) => {
-      // Deliberately NOT invalidating issueKeys.list / myAll here: the onMutate
-      // patch above is a complete surgical reconcile for these bucketed boards
-      // (batch changes status / priority / project — never a server-computed
-      // value), so a full-board refetch on settle would only re-introduce the
-      // flicker the single-issue update already removed. Aggregate / grouped
-      // caches that cannot be recomputed from a single-issue patch are still
-      // refreshed below.
+      // Deliberately NOT invalidating the unfiltered issueKeys.list / myAll
+      // caches here: the onMutate patch above is a complete surgical reconcile
+      // for those bucketed boards. Filtered workspace list variants are
+      // refreshed below when the batch update can change filter membership.
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -547,6 +565,9 @@ export function useBatchUpdateIssues() {
       // project's filtered list even if the WS echo is delayed (MUL-3669 / #4548).
       if (Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")) {
         qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      }
+      if (updateAffectsFilteredIssueLists(_vars.updates)) {
+        invalidateFilteredIssueLists(qc, wsId);
       }
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {

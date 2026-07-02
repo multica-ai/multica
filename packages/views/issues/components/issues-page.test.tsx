@@ -487,6 +487,12 @@ describe("IssuesPage (shared)", () => {
     mockViewState.grouping = "status";
     mockViewState.statusFilters = [];
     mockViewState.priorityFilters = [];
+    mockViewState.assigneeFilters = [];
+    mockViewState.includeNoAssignee = false;
+    mockViewState.creatorFilters = [];
+    mockViewState.projectFilters = [];
+    mockViewState.includeNoProject = false;
+    mockViewState.labelFilters = [];
     mockScope = "all";
   });
 
@@ -525,6 +531,42 @@ describe("IssuesPage (shared)", () => {
     await screen.findByText("Backlog");
     expect(screen.getAllByText("Todo").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("In Progress").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("server-filters status board pages when an assignee filter is active", async () => {
+    mockViewState.assigneeFilters = [{ type: "member", id: "user-1" }];
+    mockListIssues.mockImplementation((params: any) => {
+      const assigneeFilters = params?.assignee_filters ?? [];
+      const filtered = mockIssues.filter((issue) => {
+        const statusMatches = issue.status === params?.status;
+        const assigneeMatches =
+          assigneeFilters.length === 0 ||
+          assigneeFilters.some(
+            (filter: { type: string; id: string }) =>
+              issue.assignee_type === filter.type && issue.assignee_id === filter.id,
+          );
+        return statusMatches && assigneeMatches;
+      });
+      return Promise.resolve({
+        issues: filtered,
+        total:
+          params?.status === "todo" && assigneeFilters.length === 0
+            ? 99
+            : filtered.length,
+      });
+    });
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Implement auth");
+    expect(screen.queryByText("Squad task")).not.toBeInTheDocument();
+    expect(screen.queryByText("99")).not.toBeInTheDocument();
+    expect(mockListIssues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "todo",
+        assignee_filters: [{ type: "member", id: "user-1" }],
+      }),
+    );
   });
 
   it("groups board columns by assignee", async () => {
