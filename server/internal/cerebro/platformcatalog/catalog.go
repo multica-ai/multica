@@ -359,6 +359,9 @@ var catalog = []Capability{
 			"DELETE /api/notes/{id}/lock",
 			// FIR-1317: conflict detection + AI merge dialog.
 			"POST /api/notes/{id}/merge",
+			// FIR-2595: grant a tagged member viewer access to a note
+			// (the "Give access & send" choice in the mention flow).
+			"POST /api/notes/{id}/mention-access",
 		},
 	},
 	{
