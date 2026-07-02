@@ -106,7 +106,7 @@ while IFS= read -r line; do
       esac
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCallUpdate","toolCallId":"tc-current","status":"completed","name":"Shell","parameters":{"command":"echo current"},"output":"current tool output\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"loaded"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheReadTokens":7,"cacheWriteTokens":3}}}\n' "$id"
       exit 0
       ;;
   esac
@@ -159,6 +159,47 @@ func TestKiroBackendSetModelFailureFailsTask(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestKiroBackendAttributesUsageToCurrentModel(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed result, got status=%q error=%q", result.Status, result.Error)
+	}
+	if _, ok := result.Usage["unknown"]; ok {
+		t.Fatalf("usage should use Kiro current model, got unknown entry: %+v", result.Usage)
+	}
+	usage, ok := result.Usage["auto"]
+	if !ok {
+		t.Fatalf("expected usage under current model auto, got %+v", result.Usage)
+	}
+	if usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
+		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
 	}
 }
 
@@ -551,8 +592,8 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	if result.Output != "loaded" {
 		t.Fatalf("output = %q, want loaded", result.Output)
 	}
-	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 0 {
-		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=0", usage)
+	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
+		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
 	}
 	if len(messages) != 3 {
 		t.Fatalf("messages = %+v, want current tool use, tool result, and text only", messages)
