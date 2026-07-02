@@ -124,19 +124,18 @@ func TestCommentMentionsOthersButNotAssignee_NoAssignee(t *testing.T) {
 // isReplyToMemberThread
 // -------------------------------------------------------------------
 
+// CEREBRO-PATCH(reply-triggers-assignee): FIR-2553 — our fork never suppresses
+// the assignee's on_comment trigger on a member-thread reply (upstream did).
+// isReplyToMemberThread therefore always returns false; a plain reply routes to
+// the issue assignee, and involving anyone else requires an explicit @mention.
 func TestIsReplyToMemberThread(t *testing.T) {
 	h := &Handler{}
 	issue := issueWithAgentAssignee()
 
 	memberParent := &db.Comment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "plain thread starter"}
 	agentParent := &db.Comment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
-	// Member-started thread root that @mentions the assignee agent.
-	memberParentMentioningAssignee := &db.Comment{
-		AuthorType: "member",
-		AuthorID:   testUUID(memberID),
-		Content:    fmt.Sprintf("[@Agent](mention://agent/%s) can you look at this?", agentAssigneeID),
-	}
-	// Member-started thread root that @mentions a non-assignee agent.
+	// Member-started thread root that @mentions a non-assignee agent — the exact
+	// shape from the FIR-2553 bug report (issue assigned to A, root tagged B).
 	memberParentMentioningOther := &db.Comment{
 		AuthorType: "member",
 		AuthorID:   testUUID(memberID),
@@ -147,69 +146,21 @@ func TestIsReplyToMemberThread(t *testing.T) {
 		name    string
 		parent  *db.Comment
 		content string
-		want    bool
 	}{
+		{name: "top-level comment (nil parent)", parent: nil, content: "a comment"},
+		{name: "reply to agent thread", parent: agentParent, content: "sounds good"},
+		{name: "plain reply to member thread", parent: memberParent, content: "I agree with you"},
 		{
-			name:    "top-level comment (nil parent) → allow",
-			parent:  nil,
-			content: "a comment",
-			want:    false,
-		},
-		{
-			name:    "reply to agent thread, no mentions → allow",
-			parent:  agentParent,
-			content: "sounds good",
-			want:    false,
-		},
-		{
-			name:    "reply to agent thread, mention other member → allow (handled by other check)",
-			parent:  agentParent,
-			content: fmt.Sprintf("[@Bob](mention://member/%s) thoughts?", memberID),
-			want:    false, // isReplyToMemberThread only checks member threads
-		},
-		{
-			name:    "reply to member thread, no mentions → suppress",
-			parent:  memberParent,
-			content: "I agree with you",
-			want:    true,
-		},
-		{
-			name:    "reply to member thread, mention other member → suppress",
-			parent:  memberParent,
-			content: fmt.Sprintf("[@Alice](mention://member/%s) what about this?", otherMemberID),
-			want:    true,
-		},
-		{
-			name:    "reply to member thread, mention assignee agent → allow",
-			parent:  memberParent,
-			content: fmt.Sprintf("[@Agent](mention://agent/%s) can you help?", agentAssigneeID),
-			want:    false,
-		},
-		{
-			name:    "reply to member thread, mention other agent (not assignee) → suppress",
-			parent:  memberParent,
-			content: fmt.Sprintf("[@Other](mention://agent/%s) take a look", otherAgentID),
-			want:    true,
-		},
-		{
-			name:    "reply to member thread that @mentioned assignee, no re-mention → allow",
-			parent:  memberParentMentioningAssignee,
-			content: "here is more context for you",
-			want:    false,
-		},
-		{
-			name:    "reply to member thread that @mentioned other agent, no re-mention → suppress",
+			name:    "plain reply to member thread that tagged a non-assignee agent (FIR-2553)",
 			parent:  memberParentMentioningOther,
 			content: "here is more context",
-			want:    true, // parent mentioned other agent, not assignee — still suppress on_comment
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := h.isReplyToMemberThread(context.Background(), tt.parent, tt.content, issue)
-			if got != tt.want {
-				t.Errorf("isReplyToMemberThread() = %v, want %v", got, tt.want)
+			if got := h.isReplyToMemberThread(context.Background(), tt.parent, tt.content, issue); got {
+				t.Errorf("isReplyToMemberThread() = true, want false (fork never suppresses)")
 			}
 		})
 	}
@@ -219,6 +170,10 @@ func TestIsReplyToMemberThread(t *testing.T) {
 // shouldInheritParentMentions
 // -------------------------------------------------------------------
 
+// CEREBRO-PATCH(reply-triggers-assignee): FIR-2553 — thread-root mention
+// inheritance is disabled in our fork, so shouldInheritParentMentions always
+// returns false. A plain reply routes to the issue assignee, not to whichever
+// agent was tagged at the thread root.
 func TestShouldInheritParentMentions(t *testing.T) {
 	memberParent := &db.Comment{AuthorType: "member", AuthorID: testUUID(memberID), Content: "thread starter"}
 	agentParent := &db.Comment{AuthorType: "agent", AuthorID: testUUID(agentAssigneeID), Content: "agent thread starter"}
@@ -229,20 +184,18 @@ func TestShouldInheritParentMentions(t *testing.T) {
 		parent          *db.Comment
 		replyMentions   []util.Mention
 		replyAuthorType string
-		want            bool
 	}{
-		{"nil parent → false", nil, nil, "member", false},
-		{"reply has explicit mentions → false", memberParent, someMention, "member", false},
-		{"agent-authored reply, member parent → false (loop guard)", memberParent, nil, "agent", false},
-		{"member reply, agent parent → false (parent author guard)", agentParent, nil, "member", false},
-		{"member reply, member parent, no mentions → true (intended use)", memberParent, nil, "member", true},
+		{"nil parent", nil, nil, "member"},
+		{"reply has explicit mentions", memberParent, someMention, "member"},
+		{"agent-authored reply, member parent", memberParent, nil, "agent"},
+		{"member reply, agent parent", agentParent, nil, "member"},
+		{"member reply, member parent, no mentions (was the inheriting case)", memberParent, nil, "member"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := shouldInheritParentMentions(tt.parent, tt.replyMentions, tt.replyAuthorType)
-			if got != tt.want {
-				t.Errorf("shouldInheritParentMentions() = %v, want %v", got, tt.want)
+			if got := shouldInheritParentMentions(tt.parent, tt.replyMentions, tt.replyAuthorType); got {
+				t.Errorf("shouldInheritParentMentions() = true, want false (inheritance disabled)")
 			}
 		})
 	}
@@ -297,7 +250,8 @@ func TestOnCommentTriggerDecision(t *testing.T) {
 		{"reply agent thread, no mention", agentParent, "got it", true},
 		{"reply agent thread, mention other member", agentParent, fmt.Sprintf("[@Bob](mention://member/%s) ?", memberID), false},
 		{"reply agent thread, mention assignee", agentParent, fmt.Sprintf("[@Agent](mention://agent/%s) yes", agentAssigneeID), true},
-		{"reply member thread, no mention", memberParent, "agreed", false},
+		// FIR-2553: a plain reply in a member thread now wakes the issue assignee.
+		{"reply member thread, no mention", memberParent, "agreed", true},
 		{"reply member thread, mention other member", memberParent, fmt.Sprintf("[@Bob](mention://member/%s) ok", memberID), false},
 		{"reply member thread, mention assignee", memberParent, fmt.Sprintf("[@Agent](mention://agent/%s) help", agentAssigneeID), true},
 		{"reply member thread that @mentioned assignee, no re-mention", memberParentMentioningAssignee, "here is more info", true},

@@ -75,11 +75,13 @@ func TestCommentRoutesViaMention(t *testing.T) {
 			want:       false,
 		},
 		{
-			name:       "plain reply to member parent with @agent inherits",
+			// CEREBRO-PATCH(reply-triggers-assignee): FIR-2553 — inheritance is
+			// disabled, so a plain reply no longer routes via the root's @agent.
+			name:       "plain reply to member parent with @agent does not inherit (fork)",
 			content:    "any update?",
 			parent:     memberRoot("[@A](mention://agent/11111111-1111-1111-1111-111111111111) handle this"),
 			authorType: "member",
-			want:       true,
+			want:       false,
 		},
 		{
 			name:       "plain reply to member parent with no routing mention does not inherit",
@@ -110,11 +112,13 @@ func TestCommentRoutesViaMention(t *testing.T) {
 			want:       true,
 		},
 		{
-			name:       "plain reply to member parent with @all inherits",
+			// CEREBRO-PATCH(reply-triggers-assignee): FIR-2553 — no inheritance;
+			// a plain reply does not route via the root's @all either.
+			name:       "plain reply to member parent with @all does not inherit (fork)",
 			content:    "any update?",
 			parent:     memberRoot("[@all](mention://all/all) heads up"),
 			authorType: "member",
-			want:       true,
+			want:       false,
 		},
 	}
 	for _, tc := range cases {
@@ -144,7 +148,6 @@ func shouldEnqueueSquadLeaderOnReplyForTest(ctx context.Context, issue db.Issue,
 	_, ok := testHandler.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, parent, authorType, authorID, commentTriggerComputeOptions{})
 	return ok
 }
-
 
 // squadCommentTriggerFixture wires a squad assigned to a fresh issue and
 // returns the loaded db.Issue plus the leader agent UUID for use in
@@ -468,20 +471,21 @@ func TestCreateComment_SquadLeaderSkipHonorsInheritedMention(t *testing.T) {
 	}
 
 	// 3. Member posts a reply in the same thread with NO mentions.
-	//    The leader-skip helper must see that the parent's @OtherAgent
-	//    mention is inherited into the @mention path, and stay out of the
-	//    way. Result:
-	//      - leader: still 0 queued tasks (no double-trigger)
-	//      - OtherAgent: re-queued via inherited mention (one new task)
+	//    CEREBRO-PATCH(reply-triggers-assignee): FIR-2553 — thread-root mention
+	//    inheritance is disabled. A plain reply no longer re-fires @OtherAgent;
+	//    instead it routes to the issue assignee, which here is the squad, so
+	//    the squad LEADER wakes. Result:
+	//      - leader: 1 queued task (plain reply wakes the assignee squad leader)
+	//      - OtherAgent: still 0 (no inheritance re-fire)
 	postMemberComment(map[string]any{
 		"content":   "any update?",
 		"parent_id": parent.ID,
 	})
-	if got := countQueued(fx.LeaderID); got != 0 {
-		t.Fatalf("after plain reply: expected 0 leader tasks (inherited mention routes), got %d (MUL-3744)", got)
+	if got := countQueued(fx.LeaderID); got != 1 {
+		t.Fatalf("after plain reply: expected 1 leader task (assignee wakes, FIR-2553), got %d", got)
 	}
-	if got := countQueued(fx.OtherID); got != 1 {
-		t.Fatalf("after plain reply: expected 1 OtherAgent task (inherited mention path), got %d", got)
+	if got := countQueued(fx.OtherID); got != 0 {
+		t.Fatalf("after plain reply: expected 0 OtherAgent tasks (inheritance disabled, FIR-2553), got %d", got)
 	}
 }
 
