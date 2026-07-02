@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Investigate before you code
+
+A queryable code-map of this codebase is committed at `graphify-out/graph.json`. Query it before grepping to learn how things connect:
+
+```bash
+graphify query "<question>" --graph graphify-out/graph.json
+```
+
+If you changed cerebro code, refresh the map with `scripts/cerebro/build-graphify-map.sh` (or `graphify update .`). Ground every claim in code you have actually read — never act on an assumption you have not verified in the code.
+
 ## Conventions reference
 
 The single source of truth for **code naming, the i18n translation glossary, and the Chinese voice guide** is the docs site:
@@ -433,28 +443,12 @@ test("example", async ({ page }) => {
 - Use atomic commits grouped by logical intent.
 - Conventional format: `feat(scope)`, `fix(scope)`, `refactor(scope)`, `docs`, `test(scope)`, `chore(scope)`.
 
-## Minimum Pre-Push Checks
+## Verification — mandatory before claiming done
+
+After writing or modifying code, always run the full verification pipeline. Never mark work complete, open a PR, or claim a fix works without green checks — evidence before assertions.
 
 ```bash
 make check    # Runs all checks: typecheck, unit tests, Go tests, E2E
-```
-
-Run verification only when the user explicitly asks for it.
-
-For targeted checks when requested:
-```bash
-pnpm typecheck        # TypeScript type errors only
-pnpm test             # TS unit tests only (Vitest, all packages)
-make test             # Go tests only
-pnpm exec playwright test   # E2E only (requires backend + frontend running)
-```
-
-## AI Agent Verification Loop
-
-After writing or modifying code, always run the full verification pipeline:
-
-```bash
-make check
 ```
 
 **Workflow:**
@@ -464,7 +458,14 @@ make check
 - Repeat until all checks pass
 - Only then consider the task complete
 
-**Quick iteration:** If you know only TypeScript or Go is affected, run individual checks first for faster feedback, then finish with a full `make check` before marking work complete.
+**Quick iteration:** while iterating, run the targeted check for the layer you touched, then finish with a full `make check` before marking work complete:
+
+```bash
+pnpm typecheck        # TypeScript type errors only
+pnpm test             # TS unit tests only (Vitest, all packages)
+make test             # Go tests only
+pnpm exec playwright test   # E2E only (requires backend + frontend running)
+```
 
 ## Environments + Deploy
 
