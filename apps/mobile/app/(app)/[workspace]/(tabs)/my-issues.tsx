@@ -16,6 +16,7 @@
  */
 import { useMemo } from "react";
 import { Pressable, SectionList, View } from "react-native";
+import SegmentedControl from "@react-native-segmented-control/segmented-control";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -25,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Header } from "@/components/ui/header";
 import { HeaderActions } from "@/components/ui/app-header-actions";
 import { StatusIcon } from "@/components/ui/status-icon";
-import { IssueRow } from "@/components/issue/issue-row";
+import { SwipeableIssueRow } from "@/components/issue/swipeable-issue-row";
 import { IssuesLoading } from "@/components/issue/issues-loading";
 import {
   buildMyIssuesFilter,
@@ -182,7 +183,7 @@ export default function MyIssues() {
           )}
           contentContainerClassName="pb-6"
           renderItem={({ item }) => (
-            <IssueRow
+            <SwipeableIssueRow
               issue={item}
               onPress={() => {
                 if (wsSlug) router.push(`/${wsSlug}/issue/${item.id}`);
@@ -260,29 +261,25 @@ function ScopeToolbar<S extends string>({
   onOpenFilter: () => void;
   hasActiveFilters: boolean;
 }) {
+  const { colorScheme } = useColorScheme();
+  const selectedIndex = Math.max(
+    0,
+    scopes.findIndex((s) => s.value === scope),
+  );
   return (
-    <View className="flex-row items-center justify-between px-4 pt-2 pb-2">
-      <View className="flex-row items-center gap-1 flex-shrink min-w-0">
-        {scopes.map((s) => {
-          const active = scope === s.value;
-          return (
-            <Button
-              key={s.value}
-              variant="outline"
-              size="sm"
-              onPress={() => onChange(s.value)}
-              className={active ? "bg-accent" : ""}
-              accessibilityState={{ selected: active }}
-            >
-              <Text
-                numberOfLines={1}
-                className={active ? "text-accent-foreground" : "text-muted-foreground"}
-              >
-                {s.label}
-              </Text>
-            </Button>
-          );
-        })}
+    <View className="flex-row items-center gap-2 px-4 pt-2 pb-2">
+      <View className="flex-1 min-w-0">
+        {/* Native iOS UISegmentedControl: authentic sliding selection +
+            system selection haptic, instead of the custom pill row. */}
+        <SegmentedControl
+          values={scopes.map((s) => s.label)}
+          selectedIndex={selectedIndex}
+          appearance={colorScheme}
+          onChange={(e) => {
+            const next = scopes[e.nativeEvent.selectedSegmentIndex];
+            if (next) onChange(next.value);
+          }}
+        />
       </View>
       <FilterButton
         onPress={onOpenFilter}
