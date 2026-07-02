@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { ListTodo } from "lucide-react";
-import type { UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useIssueViewStore, useClearFiltersOnWorkspaceChange, type IssueDateFilter } from "@multica/core/issues/stores/view-store";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
@@ -13,7 +13,7 @@ import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-contex
 import { filterIssues, filterAssigneeGroups } from "../utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
+import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, childrenByParentsOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -27,6 +27,7 @@ import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
+const EMPTY_CHILDREN = new Map<string, Issue[]>();
 
 function issueDateFilterToApiParams(filter: IssueDateFilter | null) {
   if (!filter) return {};
@@ -205,6 +206,23 @@ export function IssuesPage() {
   // regardless of client-side pagination or filtering of done issues.
   const { data: childProgressMap = EMPTY_CHILD_PROGRESS } = useQuery(childIssueProgressOptions(wsId));
 
+  // Collect parent IDs from visible issues that have children.
+  const visibleParentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const issue of issues) {
+      if (childProgressMap.has(issue.id)) {
+        ids.add(issue.id);
+      }
+    }
+    return [...ids].sort();
+  }, [issues, childProgressMap]);
+
+  // Fetch children for the visible parent issues.
+  const queryClient = useQueryClient();
+  const { data: childrenMap = EMPTY_CHILDREN } = useQuery(
+    childrenByParentsOptions(wsId, visibleParentIds, queryClient),
+  );
+
   const visibleStatuses = useMemo(() => {
     if (statusFilters.length > 0)
       return BOARD_STATUSES.filter((s) => statusFilters.includes(s));
@@ -298,7 +316,7 @@ export function IssuesPage() {
                 sort={queryParams}
               />
             ) : (
-              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} sort={queryParams} onMoveIssue={handleMoveIssue} />
+              <ListView issues={issues} visibleStatuses={visibleStatuses} childProgressMap={childProgressMap} childrenMap={childrenMap} sort={queryParams} onMoveIssue={handleMoveIssue} />
             )}
           </div>
         )}
