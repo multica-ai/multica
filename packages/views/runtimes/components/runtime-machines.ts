@@ -1,6 +1,6 @@
 import { deriveRuntimeHealth, type RuntimeHealth } from "@multica/core/runtimes";
 import type { AgentRuntime } from "@multica/core/types";
-import { formatDeviceInfo } from "../utils";
+import { formatDeviceInfo, runtimeIPAddresses } from "../utils";
 
 export type RuntimeMachineSection = "local" | "remote" | "cloud";
 export type RuntimeMachineFilter = "all" | "online" | "issues";
@@ -16,6 +16,7 @@ export interface RuntimeMachine {
   title: string;
   subtitle: string | null;
   deviceInfo: string | null;
+  ipAddresses: string[];
   cliVersion: string | null;
   mode: AgentRuntime["runtime_mode"];
   section: RuntimeMachineSection;
@@ -118,6 +119,7 @@ function placeholderLocalMachine(
     title: options.localMachineName ?? "This machine",
     subtitle: null,
     deviceInfo: null,
+    ipAddresses: [],
     cliVersion: null,
     mode: "local",
     section: "local",
@@ -148,6 +150,7 @@ export function filterRuntimeMachines(
       machine.title,
       machine.subtitle,
       machine.deviceInfo,
+      machine.ipAddresses.join(" "),
       machine.daemonId,
       machine.providerNames.join(" "),
       machine.runtimes.map((runtime) => runtime.name).join(" "),
@@ -201,6 +204,7 @@ function finalizeRuntimeMachine(
     localMachineName: options.localMachineName,
   });
   const deviceInfo = first ? formatDeviceInfo(first.device_info ?? null) : null;
+  const ipAddresses = runtimeMachineIPAddresses(runtimes);
   const subtitle = machineSubtitle({
     title,
     deviceInfo,
@@ -237,6 +241,7 @@ function finalizeRuntimeMachine(
     title,
     subtitle,
     deviceInfo,
+    ipAddresses,
     cliVersion: commonCliVersion(runtimes),
     mode: draft.mode,
     section: isCurrent ? "local" : draft.mode === "cloud" ? "cloud" : "remote",
@@ -250,6 +255,19 @@ function finalizeRuntimeMachine(
     providerNames,
     lastSeenAt: latestLastSeenAt(runtimes),
   };
+}
+
+function runtimeMachineIPAddresses(runtimes: AgentRuntime[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const runtime of runtimes) {
+    for (const ip of runtimeIPAddresses(runtime)) {
+      if (seen.has(ip)) continue;
+      seen.add(ip);
+      result.push(ip);
+    }
+  }
+  return result;
 }
 
 function runtimeMachineId(runtime: AgentRuntime): string {

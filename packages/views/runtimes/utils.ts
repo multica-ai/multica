@@ -57,6 +57,43 @@ export function formatDeviceInfo(raw: string | null): string | null {
     .join(" · ");
 }
 
+export function runtimeIPAddresses(
+  runtime: Pick<AgentRuntime, "metadata">,
+): string[] {
+  const metadata = runtime.metadata;
+  if (!metadata || typeof metadata !== "object") return [];
+
+  const values: string[] = [];
+  const list = metadata.ip_addresses;
+  if (Array.isArray(list)) {
+    for (const value of list) {
+      if (typeof value === "string") values.push(value);
+    }
+  }
+
+  const single = metadata.ip_address;
+  if (typeof single === "string") values.push(single);
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+export function formatRuntimeIPSummary(
+  addresses: readonly string[],
+): string | null {
+  const first = addresses[0];
+  if (!first) return null;
+  const extra = addresses.length - 1;
+  return extra > 0 ? `${first} +${extra}` : first;
+}
+
 function prettifyOsArch(part: string): string {
   const lower = part.toLowerCase();
   // Pattern: <os>-<arch>; e.g. darwin-amd64, linux-arm64, windows-amd64.

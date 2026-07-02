@@ -105,6 +105,23 @@ describe("runtime machine grouping", () => {
     expect(subtitle).toMatch(/^daemon /);
   });
 
+  it("carries runtime IP metadata into machine search", () => {
+    const machines = buildRuntimeMachines(
+      [
+        makeRuntime({
+          metadata: {
+            cli_version: "0.3.0",
+            ip_addresses: ["10.0.0.8", "192.168.1.20"],
+          },
+        }),
+      ],
+      { now: NOW },
+    );
+
+    expect(machines[0]?.ipAddresses).toEqual(["10.0.0.8", "192.168.1.20"]);
+    expect(filterRuntimeMachines(machines, "192.168.1.20", "all")).toHaveLength(1);
+  });
+
   it("synthesizes a placeholder local machine when ensureLocalMachine is set and no runtime matches", () => {
     // Reproduces the "Start button disappears after stopping the daemon"
     // bug: the daemon is stopped (localDaemonId is null) and the server

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -175,6 +176,7 @@ type DaemonRegisterRequest struct {
 	// and tasks keep working without manual intervention.
 	LegacyDaemonIDs []string `json:"legacy_daemon_ids"`
 	DeviceName      string   `json:"device_name"`
+	IPAddresses     []string `json:"ip_addresses"`
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
 	Runtimes        []struct {
@@ -268,6 +270,49 @@ func normalizeProvider(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
+const maxRuntimeIPAddresses = 8
+
+func normalizeRuntimeIPAddresses(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		addr, err := netip.ParseAddr(strings.TrimSpace(value))
+		if err != nil {
+			continue
+		}
+		addr = addr.Unmap()
+		if addr.IsLoopback() ||
+			addr.IsUnspecified() ||
+			addr.IsMulticast() ||
+			addr.IsLinkLocalUnicast() {
+			continue
+		}
+
+		normalized := addr.String()
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+		if len(result) >= maxRuntimeIPAddresses {
+			break
+		}
+	}
+	return result
+}
+
+func daemonRuntimeMetadata(version, cliVersion, launchedBy string, ipAddresses []string) map[string]any {
+	metadata := map[string]any{
+		"version":     version,
+		"cli_version": cliVersion,
+		"launched_by": launchedBy,
+	}
+	if normalized := normalizeRuntimeIPAddresses(ipAddresses); len(normalized) > 0 {
+		metadata["ip_addresses"] = normalized
+	}
+	return metadata
+}
+
 func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	var req DaemonRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -278,6 +323,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
 	req.DaemonID = strings.TrimSpace(req.DaemonID)
 	req.DeviceName = strings.TrimSpace(req.DeviceName)
+	req.IPAddresses = normalizeRuntimeIPAddresses(req.IPAddresses)
 
 	if req.DaemonID == "" {
 		writeError(w, http.StatusBadRequest, "daemon_id is required")
@@ -345,11 +391,12 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		if runtime.Status == "offline" {
 			status = "offline"
 		}
-		metadata, _ := json.Marshal(map[string]any{
-			"version":     runtime.Version,
-			"cli_version": req.CLIVersion,
-			"launched_by": req.LaunchedBy,
-		})
+		metadata, _ := json.Marshal(daemonRuntimeMetadata(
+			runtime.Version,
+			req.CLIVersion,
+			req.LaunchedBy,
+			req.IPAddresses,
+		))
 
 		var registered db.AgentRuntime
 		var inserted bool
@@ -537,14 +584,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		if commandName == "" {
 			commandName = profile.CommandName
 		}
-		metadata, _ := json.Marshal(map[string]any{
-			"version":                            "",
-			"cli_version":                        req.CLIVersion,
-			"launched_by":                        req.LaunchedBy,
-			"runtime_profile_registration_error": true,
-			"runtime_profile_failure_reason":     reason,
-			"command_name":                       commandName,
-		})
+		failureMetadata := daemonRuntimeMetadata("", req.CLIVersion, req.LaunchedBy, req.IPAddresses)
+		failureMetadata["runtime_profile_registration_error"] = true
+		failureMetadata["runtime_profile_failure_reason"] = reason
+		failureMetadata["command_name"] = commandName
+		metadata, _ := json.Marshal(failureMetadata)
 		if _, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
 			WorkspaceID: wsUUID,
 			DaemonID:    strToText(req.DaemonID),

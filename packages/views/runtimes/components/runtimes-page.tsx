@@ -46,6 +46,7 @@ import {
   type RuntimeMachineFilter,
 } from "./runtime-machines";
 import { HealthDot, HealthIcon, useHealthLabel } from "./shared";
+import { formatRuntimeIPSummary } from "../utils";
 import { useT } from "../../i18n";
 
 const MACHINE_FILTERS: RuntimeMachineFilter[] = ["all", "online", "issues"];
@@ -599,6 +600,7 @@ function MachineRow({
   const { t } = useT("runtimes");
   const Icon = machine.section === "cloud" ? Cloud : Monitor;
   const busyCount = machine.runningCount + machine.queuedCount;
+  const ipSummary = formatRuntimeIPSummary(machine.ipAddresses);
   const runtimeCount = t(($) => $.machine.runtime_count, {
     count: machine.runtimes.length,
   });
@@ -636,6 +638,14 @@ function MachineRow({
             </span>
           )}
         </span>
+        {ipSummary && (
+          <span
+            className="mt-0.5 block truncate font-mono text-xs text-muted-foreground"
+            title={machine.ipAddresses.join(", ")}
+          >
+            IP {ipSummary}
+          </span>
+        )}
         <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
           <ProviderIconStack providers={machine.providerNames} />
           {busyCount > 0 ? (
@@ -728,6 +738,7 @@ function MachineDetail({
   const runtimesMeta = t(($) => $.machine.metrics.runtimes_hint, {
     count: machine.onlineCount,
   });
+  const ipSummary = formatRuntimeIPSummary(machine.ipAddresses);
   // Single inline meta strip replaces the old 4-card grid. Health is already
   // shown as a chip in the title row; CLI / daemon id are scanning-grade
   // info, not headline numbers — they belong in muted secondary text.
@@ -746,6 +757,17 @@ function MachineDetail({
     metaParts.push(
       <span key="cli" className="font-mono">
         {machine.cliVersion}
+      </span>,
+    );
+  }
+  if (ipSummary) {
+    metaParts.push(
+      <span
+        key="ip"
+        className="font-mono"
+        title={machine.ipAddresses.join(", ")}
+      >
+        IP {ipSummary}
       </span>,
     );
   }

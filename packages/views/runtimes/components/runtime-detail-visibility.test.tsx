@@ -232,6 +232,17 @@ describe("RuntimeDetail visibility section", () => {
     expect(btn.disabled).toBe(false);
   });
 
+  it("shows IP metadata in the runtime identity facts", () => {
+    renderDetail(
+      makeRuntime({
+        metadata: { ip_addresses: ["10.0.0.8", "192.168.1.20"] },
+      }),
+    );
+
+    expect(screen.getByText("IP")).toBeInTheDocument();
+    expect(screen.getByText("10.0.0.8 +1")).toBeInTheDocument();
+  });
+
   it("hides the Delete runtime button entirely for callers who cannot edit", () => {
     renderDetail(
       makeRuntime({

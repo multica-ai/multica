@@ -90,10 +90,11 @@ func TestClient_GetRuntimeProfiles_RequestShape(t *testing.T) {
 // configurable set of runtime profiles and captures the runtimes array sent
 // to /api/daemon/register.
 type profileRegisterFixture struct {
-	daemon       *Daemon
-	server       *httptest.Server
-	sentRuntimes []map[string]any
-	sentFailures []map[string]any
+	daemon          *Daemon
+	server          *httptest.Server
+	sentIPAddresses []string
+	sentRuntimes    []map[string]any
+	sentFailures    []map[string]any
 }
 
 func newProfileRegisterFixture(t *testing.T, profiles []RuntimeProfile, profilesStatus int) *profileRegisterFixture {
@@ -103,10 +104,12 @@ func newProfileRegisterFixture(t *testing.T, profiles []RuntimeProfile, profiles
 		switch {
 		case r.URL.Path == "/api/daemon/register":
 			var body struct {
+				IPAddresses    []string         `json:"ip_addresses"`
 				Runtimes       []map[string]any `json:"runtimes"`
 				FailedProfiles []map[string]any `json:"failed_profiles"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			fx.sentIPAddresses = body.IPAddresses
 			fx.sentRuntimes = body.Runtimes
 			fx.sentFailures = body.FailedProfiles
 			// Echo back a Runtime row per requested runtime, threading
@@ -204,6 +207,29 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	// The response runtime carries the profile_id back.
 	if len(resp.Runtimes) != 1 || resp.Runtimes[0].ProfileID != "prof-1" {
 		t.Fatalf("response runtimes wrong: %+v", resp.Runtimes)
+	}
+}
+
+func TestRegisterRuntimes_SendsLocalIPAddresses(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	orig := collectLocalIPAddresses
+	collectLocalIPAddresses = func() []string {
+		return []string{"10.0.0.8", "192.168.1.20"}
+	}
+	t.Cleanup(func() { collectLocalIPAddresses = orig })
+
+	fx := newProfileRegisterFixture(t, nil, http.StatusNotFound)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"claude": {Path: "/bin/claude"},
+	}
+
+	if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	want := []string{"10.0.0.8", "192.168.1.20"}
+	if strings.Join(fx.sentIPAddresses, ",") != strings.Join(want, ",") {
+		t.Fatalf("ip_addresses = %v, want %v", fx.sentIPAddresses, want)
 	}
 }
 

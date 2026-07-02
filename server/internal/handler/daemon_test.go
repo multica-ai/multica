@@ -24,6 +24,32 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+func TestNormalizeRuntimeIPAddressesKeepsDiagnosticAddressesOnly(t *testing.T) {
+	got := normalizeRuntimeIPAddresses([]string{
+		" 10.0.0.8 ",
+		"::ffff:192.168.1.20",
+		"127.0.0.1",
+		"fe80::1",
+		"not-an-ip",
+		"10.0.0.8",
+	})
+	want := []string{"10.0.0.8", "192.168.1.20"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("addresses = %v, want %v", got, want)
+	}
+}
+
+func TestDaemonRuntimeMetadataIncludesIPAddresses(t *testing.T) {
+	metadata := daemonRuntimeMetadata("codex 1.2.3", "v0.3.0", "desktop", []string{"10.0.0.8"})
+	if metadata["version"] != "codex 1.2.3" {
+		t.Fatalf("version = %v", metadata["version"])
+	}
+	got, ok := metadata["ip_addresses"].([]string)
+	if !ok || strings.Join(got, ",") != "10.0.0.8" {
+		t.Fatalf("ip_addresses = %#v, want [10.0.0.8]", metadata["ip_addresses"])
+	}
+}
+
 func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
 	var logs bytes.Buffer
 	prev := slog.Default()

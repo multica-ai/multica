@@ -110,6 +110,8 @@ var (
 		}
 		return info.Mode().Perm()&0o111 != 0
 	}
+
+	collectLocalIPAddresses = localIPAddresses
 )
 
 // workspaceState tracks registered runtimes for a single workspace.
@@ -969,6 +971,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		"daemon_id":         d.cfg.DaemonID,
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
 		"device_name":       d.cfg.DeviceName,
+		"ip_addresses":      collectLocalIPAddresses(),
 		"cli_version":       d.cfg.CLIVersion,
 		"launched_by":       d.cfg.LaunchedBy,
 		"runtimes":          runtimes,

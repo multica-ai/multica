@@ -58,7 +58,9 @@ import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import {
   computeCostInWindow,
   formatLastSeen,
+  formatRuntimeIPSummary,
   pctChange,
+  runtimeIPAddresses,
 } from "../utils";
 import { splitRuntimeName } from "./runtime-machines";
 import {
@@ -184,18 +186,30 @@ export function buildWorkloadIndex(
 
 function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
   const { base: baseName } = splitRuntimeName(runtime.name);
+  const ipAddresses = runtimeIPAddresses(runtime);
+  const ipSummary = formatRuntimeIPSummary(ipAddresses);
   return (
     <ListGridCell className="gap-2">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center">
         <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
       </div>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <span className="block min-w-0 shrink truncate text-sm font-medium">
-          {baseName}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="block min-w-0 shrink truncate text-sm font-medium">
+            {baseName}
+          </span>
+          <RuntimeKindBadge runtime={runtime} />
+          <PendingRuntimeBadge runtime={runtime} />
+          <VisibilityBadge runtime={runtime} />
         </span>
-        <RuntimeKindBadge runtime={runtime} />
-        <PendingRuntimeBadge runtime={runtime} />
-        <VisibilityBadge runtime={runtime} />
+        {ipSummary && (
+          <span
+            className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground"
+            title={ipAddresses.join(", ")}
+          >
+            IP {ipSummary}
+          </span>
+        )}
       </div>
     </ListGridCell>
   );

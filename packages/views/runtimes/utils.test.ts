@@ -9,8 +9,10 @@ import {
   collectUnmappedModels,
   computeCostInWindow,
   estimateCost,
+  formatRuntimeIPSummary,
   isModelPriced,
   isSelfHealingRuntime,
+  runtimeIPAddresses,
   sliceWindow,
   todayIso,
   weekStartIso,
@@ -80,6 +82,48 @@ describe("isSelfHealingRuntime", () => {
         makeRuntime({ runtime_mode: "cloud", status: "offline" }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("runtimeIPAddresses", () => {
+  function makeRuntime(metadata: Record<string, unknown>): AgentRuntime {
+    return {
+      id: "rt-1",
+      workspace_id: "ws-1",
+      daemon_id: "daemon-1",
+      name: "Claude (dev.local)",
+      runtime_mode: "local",
+      provider: "claude",
+      launch_header: "",
+      status: "online",
+      device_info: "dev.local",
+      metadata,
+      owner_id: "user-1",
+      visibility: "private",
+      last_seen_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+  }
+
+  it("reads deduped IP metadata from list and legacy scalar shapes", () => {
+    const runtime = makeRuntime({
+      ip_addresses: ["10.0.0.8", " 10.0.0.8 ", "192.168.1.20"],
+      ip_address: "172.16.0.5",
+    });
+
+    expect(runtimeIPAddresses(runtime)).toEqual([
+      "10.0.0.8",
+      "192.168.1.20",
+      "172.16.0.5",
+    ]);
+  });
+
+  it("formats a compact address summary", () => {
+    expect(formatRuntimeIPSummary(["10.0.0.8", "192.168.1.20"])).toBe(
+      "10.0.0.8 +1",
+    );
+    expect(formatRuntimeIPSummary([])).toBeNull();
   });
 });
 

@@ -39,7 +39,11 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
-import { formatLastSeen } from "../utils";
+import {
+  formatLastSeen,
+  formatRuntimeIPSummary,
+  runtimeIPAddresses,
+} from "../utils";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
@@ -261,6 +265,8 @@ function HeroCard({
   const { t } = useT("runtimes");
   const [showDetails, setShowDetails] = useState(false);
   const device = runtime.device_info ? parseDeviceInfo(runtime.device_info) : null;
+  const ipAddresses = runtimeIPAddresses(runtime);
+  const ipSummary = formatRuntimeIPSummary(ipAddresses);
   const hasTechDetails = !!cliVersion || !!daemonShort;
 
   return (
@@ -286,7 +292,7 @@ function HeroCard({
       {/* User-visible facts — Owner / Device / Runtime, each labelled.
           Replaces the older dense `·`-separated meta strip that mixed
           everything (including dev-only IDs) at the same visual weight. */}
-      <dl className="grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+      <dl className="grid grid-cols-1 divide-y sm:grid-cols-4 sm:divide-x sm:divide-y-0">
         <Fact label="Owner">
           {ownerMember ? (
             <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -313,6 +319,22 @@ function HeroCard({
                 }
               />
               <TooltipContent>{device.hostname}</TooltipContent>
+            </Tooltip>
+          ) : (
+            <span className="text-sm text-muted-foreground">—</span>
+          )}
+        </Fact>
+        <Fact label="IP">
+          {ipSummary ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="block truncate font-mono text-xs">
+                    {ipSummary}
+                  </span>
+                }
+              />
+              <TooltipContent>{ipAddresses.join(", ")}</TooltipContent>
             </Tooltip>
           ) : (
             <span className="text-sm text-muted-foreground">—</span>
