@@ -33,6 +33,7 @@
       "general": "通用",
       "repositories": "代码仓库",
       "github": "GitHub",
+      "gitlab": "GitLab",
       "integrations": "集成",
       "labs": "实验室",
       "members": "成员"
@@ -376,6 +377,30 @@
       "check_now": "立即检查",
       "checking": "检查中..."
     }
+  },
+  "gitlab": {
+    "title": "GitLab",
+    "description": "连接你的 GitLab 命名空间，以便在 issue 中追踪合并请求。",
+    "section_master": "GitLab 集成",
+    "master_description_on": "此工作区已启用 GitLab 功能。",
+    "master_description_off": "开启以在此工作区启用 GitLab 功能。",
+    "section_connection": "连接",
+    "section_features": "功能",
+    "feature_mr_sidebar_label": "合并请求侧栏",
+    "feature_mr_sidebar_description": "在 issue 详情侧栏中显示关联的合并请求。",
+    "feature_issue_sync_label": "issue 同步",
+    "feature_issue_sync_description": "在 issue 详情侧栏中显示关联的 GitLab issue 引用。",
+    "feature_comment_sync_label": "评论同步",
+    "feature_comment_sync_description": "在 Multica 与关联的 GitLab issue 之间双向中继评论。",
+    "namespace_label": "GitLab 命名空间或群组路径",
+    "namespace_placeholder": "例如 my-group",
+    "connect": "连接 GitLab",
+    "connected_as": "已连接：{{namespace}}",
+    "disconnect": "断开连接",
+    "not_configured": "此服务器未配置 GitLab 集成。",
+    "toast_failed": "更新 GitLab 设置失败",
+    "toast_disconnected": "已断开 GitLab 连接",
+    "toast_disconnect_failed": "断开 GitLab 连接失败"
   },
   "members": {
     "section_title": "成员（{{count}}）",

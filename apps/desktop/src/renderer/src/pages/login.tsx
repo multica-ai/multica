@@ -21,7 +21,6 @@ export function DesktopLoginPage() {
       `${webUrl}/login?platform=desktop`,
     );
   };
-
   return (
     <div className="flex h-screen flex-col">
       <DragStrip />

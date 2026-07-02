@@ -36,8 +36,11 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
-  setAuthConfig: ({ allowSignup, googleClientId = "", workspaceCreationDisabled = false }) =>
-    set({ allowSignup, googleClientId, workspaceCreationDisabled }),
+  setAuthConfig: ({
+    allowSignup,
+    googleClientId = "",
+    workspaceCreationDisabled = false,
+  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
 }));

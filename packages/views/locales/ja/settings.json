@@ -33,6 +33,7 @@
       "general": "一般",
       "repositories": "リポジトリ",
       "github": "GitHub",
+      "gitlab": "GitLab",
       "integrations": "連携",
       "labs": "ラボ",
       "members": "メンバー"
@@ -376,6 +377,30 @@
       "check_now": "今すぐ確認",
       "checking": "確認中…"
     }
+  },
+  "gitlab": {
+    "title": "GitLab",
+    "description": "GitLab ネームスペースを接続して、イシューでマージリクエストを追跡します。",
+    "section_master": "GitLab 連携",
+    "master_description_on": "このワークスペースで GitLab 機能が有効です。",
+    "master_description_off": "オンにしてこのワークスペースで GitLab 機能を有効にします。",
+    "section_connection": "接続",
+    "section_features": "機能",
+    "feature_mr_sidebar_label": "マージリクエストサイドバー",
+    "feature_mr_sidebar_description": "イシュー詳細サイドバーにリンクされたマージリクエストを表示します。",
+    "feature_issue_sync_label": "イシュー同期",
+    "feature_issue_sync_description": "イシュー詳細サイドバーにリンクされた GitLab イシューの参照を表示します。",
+    "feature_comment_sync_label": "コメント同期",
+    "feature_comment_sync_description": "Multica とリンクされた GitLab イシュー間でコメントを双方向に中継します。",
+    "namespace_label": "GitLab ネームスペースまたはグループパス",
+    "namespace_placeholder": "例: my-group",
+    "connect": "GitLab を接続",
+    "connected_as": "{{namespace}} として接続済み",
+    "disconnect": "接続解除",
+    "not_configured": "このサーバーには GitLab 統合が設定されていません。",
+    "toast_failed": "GitLab 設定の更新に失敗しました",
+    "toast_disconnected": "GitLab を切断しました",
+    "toast_disconnect_failed": "GitLab の切断に失敗しました"
   },
   "members": {
     "section_title": "メンバー（{{count}}）",

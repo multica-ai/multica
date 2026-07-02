@@ -490,6 +490,21 @@
     "update_failed": "Failed to update label",
     "delete_failed": "Failed to delete label"
   },
+  "merge_requests": {
+    "title": "Merge Requests",
+    "show_more": "Show {{count}} more",
+    "show_less": "Show less",
+    "state": {
+      "open": "Open",
+      "merged": "Merged",
+      "closed": "Closed",
+      "locked": "Locked"
+    }
+  },
+  "gitlab_issue": {
+    "title": "GitLab Issue",
+    "assignee_label": "GitLab"
+  },
   "backlog_hint": {
     "title": "Agent is paused in Backlog",
     "description": "This issue is parked, so the assigned agent will wait. Move it to Todo when you want the agent to start.",

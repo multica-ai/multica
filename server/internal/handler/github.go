@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -576,25 +575,6 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 
 // ── Webhook ─────────────────────────────────────────────────────────────────
 
-// identifierRe extracts identifiers like "MUL-1510" from text. Case-insensitive
-// because branch names are conventionally lowercase but issue prefixes are
-// uppercase. Word boundary on the left prevents matching inside email-style
-// strings (e.g. "abc@MUL-1") and the digit anchor on the right rules out
-// version numbers like "v1.2-3".
-var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,9})-(\d+)\b`)
-
-// closingIdentifierRe extracts identifiers that appear immediately after a
-// GitHub-style closing keyword ("close[sd]?", "fix(e[sd])?", "resolve[sd]?"),
-// optionally separated by a colon and whitespace. Matching is intentionally
-// strict on adjacency — "Fix MUL-1" closes MUL-1, but "Fix login MUL-1"
-// does not. This mirrors GitHub's own closing-keyword grammar and is the
-// gate the webhook uses to decide whether to auto-advance an issue to
-// `done` after a PR merges. References like "Follow up in MUL-2" and bare
-// title prefixes like "MUL-1: ..." link the PR (via identifierRe) but
-// never auto-close.
-var closingIdentifierRe = regexp.MustCompile(
-	`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[:\s]+([a-z][a-z0-9]{1,9})-(\d+)\b`,
-)
 
 // HandleGitHubWebhook (POST /api/webhooks/github) is GitHub's destination for
 // every event from a connected installation. We verify HMAC signature, route
@@ -950,7 +930,7 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 					continue
 				}
 				if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
-					h.advanceIssueToDone(ctx, issue, workspaceID)
+					h.advanceIssueToDone(ctx, issue, workspaceID, "github_pr_merged")
 				}
 			}
 		}
@@ -1311,46 +1291,6 @@ func repoIdentityFromURL(raw string) string {
 	return segments[0] + "/" + segments[len(segments)-2] + "/" + segments[len(segments)-1]
 }
 
-// extractIdentifiers pulls every "PREFIX-NUMBER" match across the supplied
-// fields, deduplicating in input order.
-func extractIdentifiers(parts ...string) []string {
-	seen := map[string]struct{}{}
-	out := []string{}
-	for _, src := range parts {
-		for _, m := range identifierRe.FindAllStringSubmatch(src, -1) {
-			ident := strings.ToUpper(m[1]) + "-" + m[2]
-			if _, dup := seen[ident]; dup {
-				continue
-			}
-			seen[ident] = struct{}{}
-			out = append(out, ident)
-		}
-	}
-	return out
-}
-
-// extractClosingIdentifiers pulls every "PREFIX-NUMBER" identifier that
-// appears immediately after a GitHub-style closing keyword in the supplied
-// fields, deduplicating in input order. Identifiers in branch names are
-// intentionally excluded — callers should pass only title and body — because
-// branch names are not natural-language fields and treating "mul-1/fix-login"
-// as a close declaration would silently re-open the bug this gate is meant
-// to fix.
-func extractClosingIdentifiers(parts ...string) []string {
-	seen := map[string]struct{}{}
-	out := []string{}
-	for _, src := range parts {
-		for _, m := range closingIdentifierRe.FindAllStringSubmatch(src, -1) {
-			ident := strings.ToUpper(m[1]) + "-" + m[2]
-			if _, dup := seen[ident]; dup {
-				continue
-			}
-			seen[ident] = struct{}{}
-			out = append(out, ident)
-		}
-	}
-	return out
-}
 
 // lookupIssueByIdentifier looks up an issue in the given workspace by its
 // "PREFIX-NUMBER" identifier. Returns the row + true if the prefix matches
@@ -1404,7 +1344,7 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 	return issue, true
 }
 
-func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) {
+func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string, source string) {
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 		ID:          issue.ID,
 		Status:      "done",
@@ -1431,7 +1371,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		"prev_status":    issue.Status,
 		"creator_type":   issue.CreatorType,
 		"creator_id":     uuidToString(issue.CreatorID),
-		"source":         "github_pr_merged",
+		"source":         source,
 	})
 }
 

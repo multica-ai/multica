@@ -113,6 +113,13 @@ export type {
   GitHubConnectResponse,
 } from "./github";
 export type {
+  GitLabMRState,
+  GitLabConnection,
+  GitLabMergeRequest,
+  GitLabIssue,
+  ListGitLabConnectionsResponse,
+} from "./gitlab";
+export type {
   LarkInstallation,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,

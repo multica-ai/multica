@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"net/url"
+
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -43,6 +45,20 @@ var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace
 // server marks them offline immediately instead of waiting on the 150 s
 // stale-heartbeat sweep.
 var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered")
+
+// injectGitLabCreds rewrites an HTTPS URL to include OAuth2 credentials.
+// Returns rawURL unchanged when token is empty or the URL scheme is not https.
+func injectGitLabCreds(rawURL, token string) string {
+	if token == "" {
+		return rawURL
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" {
+		return rawURL
+	}
+	u.User = url.UserPassword("oauth2", token)
+	return u.String()
+}
 
 const (
 	taskSlotWaitTimeout     = 2 * time.Second
@@ -140,6 +156,11 @@ type workspaceState struct {
 	// first successful profile fetch (older server / network blip); guarded
 	// by Daemon.mu like every other field on this struct.
 	profileSetSig string
+	// gitLabAccessToken holds the decrypted OAuth2 token for the workspace's
+	// GitLab connection (if any). It is injected into HTTPS clone URLs before
+	// passing them to the repo cache so self-hosted GitLab repos can be cloned
+	// without the daemon user having to configure credentials separately.
+	gitLabAccessToken string
 }
 
 type repoCacheBackend interface {
@@ -1356,7 +1377,30 @@ func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
 	if d.repoCache == nil {
 		return
 	}
-	if err := d.repoCache.Sync(workspaceID, repoDataToInfo(repos)); err != nil {
+
+	// Inject GitLab OAuth2 credentials into HTTPS clone URLs when a GitLab
+	// access token is cached for this workspace and GITLAB_URL is configured.
+	gitlabBaseURL := strings.TrimRight(os.Getenv("GITLAB_URL"), "/")
+	d.mu.Lock()
+	gitlabToken := ""
+	if ws, ok := d.workspaces[workspaceID]; ok {
+		gitlabToken = ws.gitLabAccessToken
+	}
+	d.mu.Unlock()
+
+	toSync := repos
+	if gitlabToken != "" && gitlabBaseURL != "" {
+		injected := make([]RepoData, len(repos))
+		for i, r := range repos {
+			injected[i] = r
+			if strings.HasPrefix(r.URL, gitlabBaseURL+"/") {
+				injected[i].URL = injectGitLabCreds(r.URL, gitlabToken)
+			}
+		}
+		toSync = injected
+	}
+
+	if err := d.repoCache.Sync(workspaceID, repoDataToInfo(toSync)); err != nil {
 		d.setWorkspaceRepoSyncError(workspaceID, err.Error())
 		d.logger.Warn("repo cache sync failed", "workspace_id", workspaceID, "error", err)
 		return
@@ -1383,6 +1427,9 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 		// without requiring a daemon restart. An empty payload from the server
 		// clears the override and falls back to defaults.
 		ws.settings = resp.Settings
+		if resp.GitLabAccessToken != nil {
+			ws.gitLabAccessToken = *resp.GitLabAccessToken
+		}
 	}
 	d.mu.Unlock()
 

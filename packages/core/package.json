@@ -83,6 +83,8 @@
     "./billing/mutations": "./billing/mutations.ts",
     "./github": "./github/index.ts",
     "./github/queries": "./github/queries.ts",
+    "./gitlab": "./gitlab/index.ts",
+    "./gitlab/queries": "./gitlab/queries.ts",
     "./lark": "./lark/index.ts",
     "./lark/queries": "./lark/queries.ts",
     "./slack": "./slack/index.ts",

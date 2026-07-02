@@ -61,7 +61,6 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
-
 	// Re-read from env on every request so operators can rotate keys via
 	// secret refresh without a server restart.
 	if v := os.Getenv("ANALYTICS_DISABLED"); v != "true" && v != "1" {

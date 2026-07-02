@@ -33,6 +33,7 @@
       "general": "General",
       "repositories": "Repositories",
       "github": "GitHub",
+      "gitlab": "GitLab",
       "integrations": "Integrations",
       "labs": "Labs",
       "members": "Members"
@@ -376,6 +377,30 @@
       "check_now": "Check now",
       "checking": "Checking…"
     }
+  },
+  "gitlab": {
+    "title": "GitLab",
+    "description": "Connect your GitLab namespace to track merge requests on issues.",
+    "section_master": "GitLab integration",
+    "master_description_on": "GitLab features are active for this workspace.",
+    "master_description_off": "Turn on to enable GitLab features for this workspace.",
+    "section_connection": "Connection",
+    "section_features": "Features",
+    "feature_mr_sidebar_label": "Merge request sidebar",
+    "feature_mr_sidebar_description": "Show linked merge requests in the issue detail sidebar.",
+    "feature_issue_sync_label": "Issue sync",
+    "feature_issue_sync_description": "Show the linked GitLab issue reference in the issue detail sidebar.",
+    "feature_comment_sync_label": "Comment sync",
+    "feature_comment_sync_description": "Relay comments between Multica and the linked GitLab issue in both directions.",
+    "namespace_label": "GitLab namespace or group path",
+    "namespace_placeholder": "e.g. my-group",
+    "connect": "Connect GitLab",
+    "connected_as": "Connected to {{namespace}}",
+    "disconnect": "Disconnect",
+    "not_configured": "GitLab integration is not configured on this server.",
+    "toast_failed": "Failed to update GitLab settings",
+    "toast_disconnected": "GitLab disconnected",
+    "toast_disconnect_failed": "Failed to disconnect GitLab"
   },
   "members": {
     "section_title": "Members ({{count}})",

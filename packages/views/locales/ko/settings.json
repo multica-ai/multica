@@ -33,6 +33,7 @@
       "general": "일반",
       "repositories": "저장소",
       "github": "GitHub",
+      "gitlab": "GitLab",
       "integrations": "연동",
       "labs": "실험실",
       "members": "멤버"
@@ -258,6 +259,30 @@
       "check_now": "지금 확인",
       "checking": "확인 중..."
     }
+  },
+  "gitlab": {
+    "title": "GitLab",
+    "description": "GitLab 네임스페이스를 연결하여 이슈에서 병합 요청을 추적하세요.",
+    "section_master": "GitLab 연동",
+    "master_description_on": "이 워크스페이스에서 GitLab 기능이 활성화되어 있습니다.",
+    "master_description_off": "켜서 이 워크스페이스에서 GitLab 기능을 활성화하세요.",
+    "section_connection": "연결",
+    "section_features": "기능",
+    "feature_mr_sidebar_label": "병합 요청 사이드바",
+    "feature_mr_sidebar_description": "이슈 상세 사이드바에 연결된 병합 요청을 표시합니다.",
+    "feature_issue_sync_label": "이슈 동기화",
+    "feature_issue_sync_description": "이슈 상세 사이드바에 연결된 GitLab 이슈 참조를 표시합니다.",
+    "feature_comment_sync_label": "댓글 동기화",
+    "feature_comment_sync_description": "Multica와 연결된 GitLab 이슈 간에 댓글을 양방향으로 중계합니다.",
+    "namespace_label": "GitLab 네임스페이스 또는 그룹 경로",
+    "namespace_placeholder": "예: my-group",
+    "connect": "GitLab 연결",
+    "connected_as": "{{namespace}}(으)로 연결됨",
+    "disconnect": "연결 해제",
+    "not_configured": "이 서버에는 GitLab 통합이 구성되어 있지 않습니다.",
+    "toast_failed": "GitLab 설정 업데이트에 실패했습니다",
+    "toast_disconnected": "GitLab 연결이 해제되었습니다",
+    "toast_disconnect_failed": "GitLab 연결 해제에 실패했습니다"
   },
   "members": {
     "section_title": "멤버 ({{count}})",

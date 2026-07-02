@@ -40,6 +40,7 @@ services:
 
   backend:
     image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
+    pull_policy: ${MULTICA_PULL_POLICY:-missing}
     depends_on:
       postgres:
         condition: service_healthy
@@ -111,6 +112,12 @@ services:
       MULTICA_LARK_SECRET_KEY: ${MULTICA_LARK_SECRET_KEY:-}
       MULTICA_LARK_HTTP_BASE_URL: ${MULTICA_LARK_HTTP_BASE_URL:-}
       MULTICA_LARK_CALLBACK_BASE_URL: ${MULTICA_LARK_CALLBACK_BASE_URL:-}
+      # Gitlab integration.
+      GITLAB_URL: ${GITLAB_URL:-}
+      GITLAB_APP_ID: ${GITLAB_APP_ID:-}
+      GITLAB_APP_SECRET: ${GITLAB_APP_SECRET:-}
+      GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
+      GITLAB_SECRET_KEY: ${GITLAB_SECRET_KEY:-}
       # Slack bot integration. MULTICA_SLACK_SECRET_KEY is the opt-in: unset =
       # integration disabled. It decrypts the per-installation bot/app tokens,
       # which are brought by each workspace via OAuth/BYO and stored encrypted
@@ -121,6 +128,7 @@ services:
 
   frontend:
     image: ${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:${MULTICA_IMAGE_TAG:-latest}
+    pull_policy: ${MULTICA_PULL_POLICY:-missing}
     depends_on:
       - backend
     ports:

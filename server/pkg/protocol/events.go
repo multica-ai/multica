@@ -135,6 +135,10 @@ const (
 	EventLarkInstallationCreated = "lark_installation:created"
 	EventLarkInstallationRevoked = "lark_installation:revoked"
 
+	// GitLab integration events.
+	EventGitLabConnectionCreated   = "gitlab_connection:created"
+	EventGitLabConnectionDeleted   = "gitlab_connection:deleted"
+	EventGitLabMergeRequestUpdated = "gitlab_merge_request:updated"
 	// Slack installation lifecycle (MUL-3666). Same semantics as the Lark
 	// events: `created` covers both first install and OAuth re-install (the
 	// UNIQUE on (workspace_id, agent_id, channel_type) means at most one row

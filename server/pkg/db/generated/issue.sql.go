@@ -1230,6 +1230,21 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 	return i, err
 }
 
+const updateIssueDescription = `-- name: UpdateIssueDescription :exec
+UPDATE issue SET description = $2, updated_at = now()
+WHERE id = $1
+`
+
+type UpdateIssueDescriptionParams struct {
+	ID          pgtype.UUID `json:"id"`
+	Description pgtype.Text `json:"description"`
+}
+
+func (q *Queries) UpdateIssueDescription(ctx context.Context, arg UpdateIssueDescriptionParams) error {
+	_, err := q.db.Exec(ctx, updateIssueDescription, arg.ID, arg.Description)
+	return err
+}
+
 const updateIssueStatus = `-- name: UpdateIssueStatus :one
 UPDATE issue SET
     status = $2,
