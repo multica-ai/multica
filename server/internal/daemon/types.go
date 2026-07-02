@@ -68,6 +68,7 @@ type Task struct {
 	NewCommentCount          int                   `json:"new_comment_count,omitempty"`           // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
 	NewCommentsSince         string                `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	ChatSessionID            string                `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
+	ChatChannelType          string                `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Drives the channel-awareness block in the prompt
 	ChatMessage              string                `json:"chat_message,omitempty"`                // user message content for chat tasks
 	ChatMessageAttachments   []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`    // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
 	AutopilotRunID           string                `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot run_only tasks

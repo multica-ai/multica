@@ -270,6 +270,31 @@ func TestBuildChatPromptAttachmentIDsCanBeBoundToCreatedIssues(t *testing.T) {
 	}
 }
 
+func TestBuildChatPromptChannelAwareness(t *testing.T) {
+	t.Run("slack-backed session tells the agent it is in slack", func(t *testing.T) {
+		out := buildChatPrompt(Task{
+			ChatSessionID:   "sess-1",
+			ChatChannelType: "slack",
+			ChatMessage:     "你刚刚和 xxx 聊了什么",
+		})
+		for _, want := range []string{"Slack", "multica chat history", "NOT in Multica"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("slack-backed prompt missing %q\n--- output ---\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("web-only session has no channel block", func(t *testing.T) {
+		out := buildChatPrompt(Task{
+			ChatSessionID: "sess-1",
+			ChatMessage:   "hi",
+		})
+		if strings.Contains(out, "multica chat history") {
+			t.Fatalf("web-only chat prompt should not mention channel history, got:\n%s", out)
+		}
+	})
+}
+
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{

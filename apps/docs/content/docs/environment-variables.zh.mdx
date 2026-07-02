@@ -157,6 +157,7 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `REDIS_URL` | 空 | Redis 连接 URL（例如 `redis://localhost:6379/0`）。不设时认证端点的限流功能直接关闭。同一个 Redis 也被实时事件 fan-out、PAT 缓存、守护进程 token 缓存复用；不设时这些组件分别回落到内存模式 / 直查 DB |
+| `REDIS_DISABLE_CLIENT_NAME` | `false` | 设为 `true` 可跳过每次 Redis 连接时的 `CLIENT SETNAME` 握手。使用托管 Redis（如 GCP Memorystore 或限制了 ACL 的 AWS ElastiCache）等封禁 `CLIENT` 命令的服务时**必须开启**。启用后连接在 `CLIENT LIST` 输出中会失去描述性名称，但能兼容受限的托管服务 |
 | `RATE_LIMIT_AUTH` | `5` | 单 IP 每分钟对 `/auth/send-code` 和 `/auth/google` 的最大请求数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 单 IP 每分钟对 `/auth/verify-code` 的最大请求数 |
 | `RATE_LIMIT_TRUSTED_PROXIES` | 空 | 逗号分隔的 CIDR 列表，列在内的来源 IP 才允许通过 `X-Forwarded-For` 标识客户端。默认空 = **永不信任 XFF**，限流器只看直连的 `RemoteAddr` |

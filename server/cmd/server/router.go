@@ -464,6 +464,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping))
 			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)
 
+			// On-demand history reader behind the unified `multica chat history`
+			// command (MUL-3871): pull the session's Slack conversation when the
+			// agent asks, instead of force-assembling it on every inbound.
+			h.SlackHistory = slack.NewHistory(queries, box.Open, slog.Default())
+
 			// Per-installation inbound: the Supervisor builds + supervises one
 			// Socket Mode connection per active Slack installation, authenticated
 			// with that installation's OWN app-level token (xapp-, pasted at BYO
@@ -1138,6 +1143,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
+
+			// Agent-facing unified history read: `multica chat history` resolves
+			// the caller's task-scoped token to its own chat session and returns
+			// the bound channel's prior messages (MUL-3871). No session id is
+			// passed — the token IS the scope, so an agent can only read its own
+			// conversation.
+			r.Get("/api/chat/history", h.GetChatChannelHistory)
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
