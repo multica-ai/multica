@@ -1,14 +1,19 @@
 import type { NextConfig } from "next";
 import { config } from "dotenv";
 import { resolve } from "path";
-import { resolveRemoteApiUrl } from "./config/runtime-urls";
+import {
+  resolveDocsUrl,
+  resolveRemoteApiUrl,
+} from "./config/runtime-urls";
 import { createMDX } from "fumadocs-mdx/next";
 
-// Load root .env so REMOTE_API_URL is available to next.config.ts
+// Load root .env so local next.config.ts rewrites see REMOTE_API_URL / DOCS_URL.
+// Production requests use proxy.ts runtime rewrites, which read process.env
+// when the Next.js server runs instead of baking these URLs at build time.
 config({ path: resolve(__dirname, "../../.env") });
 
 const remoteApiUrl = resolveRemoteApiUrl(process.env);
-const docsUrl = process.env.DOCS_URL || "http://localhost:4000";
+const docsUrl = resolveDocsUrl(process.env);
 
 // Parse hostnames from CORS_ALLOWED_ORIGINS so that Next.js dev server
 // allows cross-origin HMR / webpack requests (e.g. from Tailscale IPs).
@@ -38,34 +43,38 @@ const nextConfig: NextConfig = {
     return {
       // Run before file-system routes so /docs isn't shadowed by the
       // [workspaceSlug] dynamic segment.
-      beforeFiles: [
-        {
-          source: "/docs",
-          destination: `${docsUrl}/docs`,
-        },
-        {
-          source: "/docs/:path*",
-          destination: `${docsUrl}/docs/:path*`,
-        },
-      ],
-      afterFiles: [
-        {
-          source: "/api/:path*",
-          destination: `${remoteApiUrl}/api/:path*`,
-        },
-        {
-          source: "/ws",
-          destination: `${remoteApiUrl}/ws`,
-        },
-        {
-          source: "/auth/:path*",
-          destination: `${remoteApiUrl}/auth/:path*`,
-        },
-        {
-          source: "/uploads/:path*",
-          destination: `${remoteApiUrl}/uploads/:path*`,
-        },
-      ],
+      beforeFiles: docsUrl
+        ? [
+            {
+              source: "/docs",
+              destination: `${docsUrl}/docs`,
+            },
+            {
+              source: "/docs/:path*",
+              destination: `${docsUrl}/docs/:path*`,
+            },
+          ]
+        : [],
+      afterFiles: remoteApiUrl
+        ? [
+            {
+              source: "/api/:path*",
+              destination: `${remoteApiUrl}/api/:path*`,
+            },
+            {
+              source: "/ws",
+              destination: `${remoteApiUrl}/ws`,
+            },
+            {
+              source: "/auth/:path*",
+              destination: `${remoteApiUrl}/auth/:path*`,
+            },
+            {
+              source: "/uploads/:path*",
+              destination: `${remoteApiUrl}/uploads/:path*`,
+            },
+          ]
+        : [],
       fallback: [],
     };
   },
