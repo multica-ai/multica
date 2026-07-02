@@ -264,6 +264,39 @@ function ReadonlyLink({
   );
 }
 
+const HljsCodeBlock = memo(function HljsCodeBlock({
+  lang,
+  code,
+  className,
+}: {
+  lang?: string;
+  code: string;
+  className?: string;
+}) {
+  const html = useMemo(() => {
+    try {
+      const tree = lang
+        ? lowlight.highlight(lang, code)
+        : lowlight.highlightAuto(code);
+      return toHtml(tree);
+    } catch {
+      return "";
+    }
+  }, [lang, code]);
+
+  if (html) {
+    return (
+      <code
+        className={cn("hljs", lang && `language-${lang}`)}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  }
+  return (
+    <code className={cn("hljs", className)}>{code}</code>
+  );
+});
+
 function buildComponents(): Partial<Components> {
   return {
     // Links — route mention:// to mention components, others show preview card
@@ -334,28 +367,8 @@ function buildComponents(): Partial<Components> {
       }
 
       // Block code — highlight with lowlight, output hljs classes
-      const code = String(children).replace(/\n$/, "");
-      try {
-        const tree = lang
-          ? lowlight.highlight(lang, code)
-          : lowlight.highlightAuto(code);
-        const html = toHtml(tree);
-        if (html) {
-          return (
-            <code
-              className={cn("hljs", lang && `language-${lang}`)}
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
-          );
-        }
-      } catch {
-        // fall through to plain render
-      }
-      return (
-        <code className={cn("hljs", className)} {...props}>
-          {children}
-        </code>
-      );
+      const codeText = String(children).replace(/\n$/, "");
+      return <HljsCodeBlock lang={lang} code={codeText} className={className} />;
     },
 
     // Pre — wrap regular code fences with copy chrome.
