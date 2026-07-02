@@ -301,49 +301,106 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
     expect(qc.getQueryState(issueKeys.myAll(WS_ID))?.isInvalidated).toBe(false);
   });
 
-  it("invalidates myAll when the assignee changes (membership may shift)", () => {
-    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(issueA));
+  it("removes the card from an assignee-filtered list when the assignee changes (membership-aware, no blanket refetch)", () => {
+    const assignedKey = issueKeys.myListSorted(
+      WS_ID,
+      "assigned",
+      { assignee_id: "user-1" },
+      undefined,
+    );
+    const mine: Issue = { ...issueA, assignee_type: "member", assignee_id: "user-1" };
+    qc.setQueryData<ListIssuesCache>(assignedKey, makeListCache(mine));
 
     onIssueUpdated(
       qc,
       WS_ID,
-      { ...issueA, assignee_type: "member", assignee_id: "user-2" },
+      { ...mine, assignee_type: "member", assignee_id: "user-2" },
       { assigneeChanged: true },
     );
 
-    expectInvalidated(qc, issueKeys.myAll(WS_ID));
+    // The card LEAVES the loaded list surgically — the fix for the residue
+    // that used to wait on a refetch (and on the mutation path never came).
+    const list = qc.getQueryData<ListIssuesCache>(assignedKey);
+    expect(list?.byStatus.todo?.issues).toEqual([]);
+    expect(list?.byStatus.todo?.total).toBe(0);
+    expect(qc.getQueryState(assignedKey)?.isInvalidated).toBe(false);
   });
 
-  it("invalidates myAll when the project changes (Project board membership)", () => {
-    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(issueA));
+  it("flags union-scope (my:all) lists stale on an assignee change instead of guessing membership", () => {
+    const myAllListKey = issueKeys.myListSorted(WS_ID, "all", {}, undefined);
+    const mine: Issue = { ...issueA, assignee_type: "member", assignee_id: "user-1" };
+    qc.setQueryData<ListIssuesCache>(myAllListKey, makeListCache(mine));
 
-    // issueA.project_id is null; moving it into a project shifts Project-board
-    // membership. No server flag here — this exercises the legacy cache-diff
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      { ...mine, assignee_type: "member", assignee_id: "user-2" },
+      { assigneeChanged: true },
+    );
+
+    // Union membership (assigned ∪ created ∪ involved) is server knowledge:
+    // the card is patched in place and the list refetches to reconcile.
+    const list = qc.getQueryData<ListIssuesCache>(myAllListKey);
+    expect(list?.byStatus.todo?.issues[0]?.assignee_id).toBe("user-2");
+    expectInvalidated(qc, myAllListKey);
+  });
+
+  it("moves the card out of the old project's list and flags the loaded target list (legacy diff fallback, no server flag)", () => {
+    // issueA.project_id is null; moving it into project-9 must reconcile both
+    // ends. No server flag here — this exercises the legacy cache-diff
     // fallback that keeps a new frontend working against an older backend.
+    const targetKey = issueKeys.myListSorted(
+      WS_ID,
+      "project:project-9",
+      { project_id: "project-9" },
+      undefined,
+    );
+    qc.setQueryData<ListIssuesCache>(targetKey, makeListCache());
+
     onIssueUpdated(qc, WS_ID, { ...issueA, project_id: "project-9" });
 
-    expectInvalidated(qc, issueKeys.myAll(WS_ID));
+    // Never hard-inserted (its page/slot is server knowledge) — the loaded
+    // target list is refetched instead.
+    expect(
+      qc.getQueryData<ListIssuesCache>(targetKey)?.byStatus.todo?.issues,
+    ).toEqual([]);
+    expectInvalidated(qc, targetKey);
   });
 
-  it("invalidates myAll on a server project_changed flag even when the cached project_id already matches (local optimistic move)", () => {
-    // Reproduces the post-optimistic-move state behind MUL-3669: onMutate has
-    // already written the NEW project into detail + list, so a cache diff would
-    // compute projectChanged=false and skip the refetch. The authoritative
-    // server flag must still drive it.
+  it("drops the card from the old project's list on a server project_changed flag even when the cached project_id already matches", () => {
+    // Reproduces the drift state behind MUL-3669: the detail cache already
+    // carries the NEW project (e.g. a local optimistic write), so a cache
+    // diff would compute projectChanged=false — the authoritative server
+    // flag must still drive the membership reconcile for any list where the
+    // card lingers.
     const moved: Issue = { ...issueA, project_id: "project-9" };
+    const oldProjectKey = issueKeys.myListSorted(
+      WS_ID,
+      "project:project-1",
+      { project_id: "project-1" },
+      undefined,
+    );
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, moved.id), moved);
-    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(moved));
+    qc.setQueryData<ListIssuesCache>(oldProjectKey, makeListCache(moved));
 
     onIssueUpdated(qc, WS_ID, moved, { projectChanged: true });
 
-    expectInvalidated(qc, issueKeys.myAll(WS_ID));
+    expect(
+      qc.getQueryData<ListIssuesCache>(oldProjectKey)?.byStatus.todo?.issues,
+    ).toEqual([]);
   });
 
-  it("does NOT invalidate myAll when the server flag says project_changed=false (flag overrides the legacy diff)", () => {
+  it("does NOT touch project lists when the server flag says project_changed=false (flag overrides the legacy diff)", () => {
     // No detail/list cache for the issue, so the legacy diff would resolve
     // oldProjectId=null and fire on the non-null incoming project_id. An explicit
     // false flag from the server is authoritative and must suppress that.
-    qc.setQueryData<ListIssuesCache>(issueKeys.myAll(WS_ID), makeListCache(issueA));
+    const projectKey = issueKeys.myListSorted(
+      WS_ID,
+      "project:project-9",
+      { project_id: "project-9" },
+      undefined,
+    );
+    qc.setQueryData<ListIssuesCache>(projectKey, makeListCache());
 
     onIssueUpdated(
       qc,
@@ -352,7 +409,7 @@ describe("onIssueUpdated — position move is surgical, not a list refetch", () 
       { projectChanged: false },
     );
 
-    expect(qc.getQueryState(issueKeys.myAll(WS_ID))?.isInvalidated).toBe(false);
+    expect(qc.getQueryState(projectKey)?.isInvalidated).toBe(false);
   });
 });
 

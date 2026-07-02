@@ -33,6 +33,7 @@
     "./issues/timeline-sort": "./issues/timeline-sort.ts",
     "./issues/date": "./issues/date.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
+    "./issues/surface/*": "./issues/surface/*.ts",
     "./issues/config": "./issues/config/index.ts",
     "./issues/config/status": "./issues/config/status.ts",
     "./issues/config/priority": "./issues/config/priority.ts",

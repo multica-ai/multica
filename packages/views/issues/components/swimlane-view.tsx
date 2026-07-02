@@ -32,7 +32,6 @@ import { filterIssues, type IssueFilters } from "../utils/filter";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { projectListOptions } from "@multica/core/projects/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import { childrenByParentsOptions, issueKeys, type IssueSortParam, type MyIssuesFilter } from "@multica/core/issues/queries";
@@ -44,7 +43,6 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { sortIssues } from "../utils/sort";
 import { BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
-import { useModalStore } from "@multica/core/modals";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
 import { StatusIcon } from "./status-icon";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -57,6 +55,8 @@ import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
+import type { IssueActivityState } from "../surface/activity";
+import type { IssueCreateDefaults } from "../surface/types";
 
 const COLUMN_WIDTH = 280;
 const COLUMN_GAP = 16;
@@ -220,10 +220,10 @@ interface LaneGroup {
 }
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
-const EMPTY_PROJECTS: Project[] = [];
 // Stable reference for non-parent groupings — keeps the `statusTotals` /
 // `cells` memos from busting on every render when there are no headers.
 const EMPTY_HEADER_IDS = new Set<string>();
+const EMPTY_PROJECTS: Project[] = [];
 
 /**
  * Build parent-grouping lanes. The "No parent" lane is always pinned at the
@@ -449,10 +449,13 @@ export function SwimLaneView({
   hiddenStatuses = [],
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
+  projectMap,
   myIssuesScope,
   myIssuesFilter,
   sort,
   projectId,
+  activityByIssueId,
+  onCreateIssue,
 }: {
   issues: Issue[];
   /**
@@ -473,12 +476,15 @@ export function SwimLaneView({
     onSettled?: () => void,
   ) => void;
   childProgressMap?: Map<string, ChildProgress>;
+  projectMap?: Map<string, Project>;
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
   /** Must match the sort the page queried with — embedded in the cache key. */
   sort?: IssueSortParam;
   /** Pre-fills `project_id` on the create form for the in-cell "+" button. */
   projectId?: string;
+  activityByIssueId?: ReadonlyMap<string, IssueActivityState>;
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
 }) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
@@ -491,14 +497,24 @@ export function SwimLaneView({
 
   const wsId = useWorkspaceId();
 
-  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const { data: snapshot = [] } = useQuery({
+    ...agentTaskSnapshotOptions(wsId),
+    enabled: !activityByIssueId,
+  });
   const runningIssueIds = useMemo(() => {
+    if (activityByIssueId) {
+      const ids = new Set<string>();
+      for (const [issueId, activity] of activityByIssueId) {
+        if (activity.isWorking) ids.add(issueId);
+      }
+      return ids;
+    }
     const ids = new Set<string>();
     for (const t of snapshot) {
       if (t.status === "running" && t.issue_id) ids.add(t.issue_id);
     }
     return ids;
-  }, [snapshot]);
+  }, [activityByIssueId, snapshot]);
 
   const activeFilters = useMemo(() => ({
     // Status is enforced by visible-column rendering, not by filterIssues
@@ -517,10 +533,13 @@ export function SwimLaneView({
     // per-parent loaded sub-issues get re-added even when the toggle is off.
     showSubIssues: activeFiltersProp?.showSubIssues ?? true,
   }), [activeFiltersProp, runningIssueIds]);
-  const { data: projects = EMPTY_PROJECTS } = useQuery({
-    ...projectListOptions(wsId),
-    enabled: swimlaneGrouping === "project",
-  });
+  const projects = useMemo(
+    () =>
+      swimlaneGrouping === "project" && projectMap
+        ? Array.from(projectMap.values())
+        : EMPTY_PROJECTS,
+    [projectMap, swimlaneGrouping],
+  );
   const { getActorName } = useActorName();
 
   const laneSourceIssues = unfilteredIssues ?? issues;
@@ -1174,9 +1193,11 @@ export function SwimLaneView({
                 sortedStatuses={sortedStatuses}
                 issueMap={issueMapRef.current}
                 childProgressMap={childProgressMap}
+                projectMap={projectMap}
                 gridStyle={gridStyle}
                 paths={paths}
                 projectId={projectId}
+                onCreateIssue={onCreateIssue}
               />
             ))}
           <SortableContext
@@ -1198,9 +1219,11 @@ export function SwimLaneView({
                   sortedStatuses={sortedStatuses}
                   issueMap={issueMapRef.current}
                   childProgressMap={childProgressMap}
+                  projectMap={projectMap}
                   gridStyle={gridStyle}
                   paths={paths}
                   projectId={projectId}
+                  onCreateIssue={onCreateIssue}
                 />
               ))}
           </SortableContext>
@@ -1226,7 +1249,15 @@ export function SwimLaneView({
       <DragOverlay dropAnimation={null}>
         {activeIssue ? (
           <div className="w-[280px] rotate-2 scale-105 cursor-grabbing opacity-90 shadow-lg shadow-black/10">
-            <BoardCardContent issue={activeIssue} childProgress={childProgressMap.get(activeIssue.id)} />
+            <BoardCardContent
+              issue={activeIssue}
+              childProgress={childProgressMap.get(activeIssue.id)}
+              project={
+                activeIssue.project_id
+                  ? projectMap?.get(activeIssue.project_id)
+                  : undefined
+              }
+            />
           </div>
         ) : null}
       </DragOverlay>
@@ -1257,9 +1288,11 @@ function DraggableSwimLane({
   sortedStatuses,
   issueMap,
   childProgressMap,
+  projectMap,
   gridStyle,
   paths,
   projectId,
+  onCreateIssue,
 }: {
   lane: LaneGroup;
   grouping: SwimlaneGrouping;
@@ -1269,9 +1302,11 @@ function DraggableSwimLane({
   sortedStatuses: IssueStatus[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
+  projectMap?: Map<string, Project>;
   gridStyle: React.CSSProperties;
   paths: ReturnType<typeof useWorkspacePaths>;
   projectId?: string;
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
 }) {
   const { t } = useT("issues");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -1366,9 +1401,11 @@ function DraggableSwimLane({
                 issueIds={issueIds}
                 issueMap={issueMap}
                 childProgressMap={childProgressMap}
+                projectMap={projectMap}
                 status={status}
                 lane={lane}
                 projectId={projectId}
+                onCreateIssue={onCreateIssue}
                 readOnly={lane.isOrphan}
               />
             );
@@ -1384,18 +1421,22 @@ function SwimLaneCell({
   issueIds,
   issueMap,
   childProgressMap,
+  projectMap,
   status,
   lane,
   projectId,
+  onCreateIssue,
   readOnly = false,
 }: {
   cellId: string;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
+  projectMap?: Map<string, Project>;
   status: IssueStatus;
   lane: LaneGroup;
   projectId?: string;
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   /**
    * Display-only cell — the create affordance is suppressed and drag-end
    * upstream refuses to honour drops that would re-anchor a card to this
@@ -1425,12 +1466,12 @@ function SwimLaneCell({
   );
 
   const handleAdd = useCallback(() => {
-    const data: Record<string, unknown> = { status, ...lane.moveUpdates };
+    const data: IssueCreateDefaults = { status, ...lane.moveUpdates };
     // Per-page project override takes precedence (e.g. Project Detail
     // pre-fills its own project id regardless of grouping).
     if (projectId) data.project_id = projectId;
-    useModalStore.getState().open("create-issue", data);
-  }, [status, lane, projectId]);
+    onCreateIssue?.(data);
+  }, [status, lane, projectId, onCreateIssue]);
 
   return (
     <div className={`flex min-h-[120px] flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
@@ -1446,6 +1487,9 @@ function SwimLaneCell({
               key={issue.id}
               issue={issue}
               childProgress={childProgressMap.get(issue.id)}
+              project={
+                issue.project_id ? projectMap?.get(issue.project_id) : undefined
+              }
             />
           ))}
         </SortableContext>
@@ -1455,7 +1499,7 @@ function SwimLaneCell({
           </p>
         )}
       </div>
-      {!readOnly && (
+      {!readOnly && onCreateIssue && (
         <Tooltip>
           <TooltipTrigger
             render={

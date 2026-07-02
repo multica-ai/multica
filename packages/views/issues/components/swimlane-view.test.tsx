@@ -47,18 +47,12 @@ vi.mock("@multica/core/paths", async () => {
   };
 });
 
-// Stub backend-bound queries that the swimlane invokes for project /
-// assignee groupings. The hook MUST return a stable reference each call
+// Stub backend-bound hooks that the swimlane invokes for assignee groupings.
+// The hook MUST return a stable reference each call
 // — production `useActorName` wraps its returns in `useMemo`, and the
 // swimlane feeds the result into a `useMemo(..., [getActorName, ...])`
 // that then drives a `useEffect(setLocalCells, [cells])` chain. A fresh
 // object per render therefore loops the effect indefinitely.
-vi.mock("@multica/core/projects/queries", () => ({
-  projectListOptions: (_wsId: string) => ({
-    queryKey: ["projects", _wsId, "list"],
-    queryFn: () => Promise.resolve([]),
-  }),
-}));
 const { mockActorNameResult } = vi.hoisted(() => ({
   mockActorNameResult: {
     getActorName: (_type: string, _id: string) => "Mock Actor",
@@ -409,11 +403,13 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("Child Issue 1")).toBeInTheDocument();
   });
 
-  it("triggers modal open when add button is clicked", () => {
+  it("calls the create callback when add button is clicked", () => {
+    const onCreateIssue = vi.fn();
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
         onMoveIssue={vi.fn()}
+        onCreateIssue={onCreateIssue}
       />,
     );
 
@@ -421,25 +417,48 @@ describe("SwimLaneView", () => {
     expect(addButtons.length).toBeGreaterThan(0);
 
     fireEvent.click(addButtons[0]!);
-    expect(mockOpenModal).toHaveBeenCalledWith("create-issue", expect.any(Object));
+    expect(onCreateIssue).toHaveBeenCalledWith(expect.any(Object));
+    expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
   it("includes project_id in the create payload when projectId prop is set", () => {
+    const onCreateIssue = vi.fn();
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
         onMoveIssue={vi.fn()}
         projectId="proj-42"
+        onCreateIssue={onCreateIssue}
       />,
     );
 
     const addButtons = screen.getAllByRole("button", { name: /add issue/i });
     fireEvent.click(addButtons[0]!);
 
-    expect(mockOpenModal).toHaveBeenCalledWith(
-      "create-issue",
+    expect(onCreateIssue).toHaveBeenCalledWith(
       expect.objectContaining({ project_id: "proj-42" }),
     );
+    expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
+  it("routes add button through the surface create callback when provided", () => {
+    const onCreateIssue = vi.fn();
+    renderWithI18n(
+      <SwimLaneView
+        issues={mockIssues}
+        onMoveIssue={vi.fn()}
+        projectId="proj-42"
+        onCreateIssue={onCreateIssue}
+      />,
+    );
+
+    const addButtons = screen.getAllByRole("button", { name: /add issue/i });
+    fireEvent.click(addButtons[0]!);
+
+    expect(onCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ project_id: "proj-42" }),
+    );
+    expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
   // A child whose parent isn't in the loaded set — lands in "Other parents".
@@ -481,6 +500,7 @@ describe("SwimLaneView", () => {
       <SwimLaneView
         issues={[...mockIssues, orphanChild]}
         onMoveIssue={vi.fn()}
+        onCreateIssue={vi.fn()}
       />,
     );
 
@@ -1063,10 +1083,9 @@ describe("SwimLaneView", () => {
 
     // No-project pinned lane is always present.
     expect(screen.getAllByText("No project").length).toBeGreaterThanOrEqual(1);
-    // Both issue cards from real projects render — production fetches
-    // project titles from the API; in tests the mocked listProjects
-    // returns [] so the lane headers fall back to an empty title and
-    // we assert on card visibility, not lane title text.
+    // Both issue cards from real projects render. The component receives
+    // project metadata from its parent, so this standalone test asserts on
+    // card visibility rather than lane title text.
     expect(screen.getByText("Issue A")).toBeInTheDocument();
     expect(screen.getByText("Issue B")).toBeInTheDocument();
     expect(screen.getByText("Issue C")).toBeInTheDocument();
