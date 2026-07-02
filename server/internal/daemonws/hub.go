@@ -585,6 +585,11 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 	// PopPending. The natural bound is the read pump's lifetime (the conn
 	// closes if the daemon goes away) plus Redis's own server-side limits.
 	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport)
+	if errors.Is(err, handler.ErrRuntimeNotFound) {
+			slog.Debug("daemon websocket heartbeat: runtime not found (likely deleted)",
+				"runtime_id", payload.RuntimeID)
+			return
+		}
 	if err != nil {
 		slog.Warn("daemon websocket heartbeat handler failed",
 			"error", err,
