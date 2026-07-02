@@ -119,7 +119,9 @@ func init() {
 	// create
 	autopilotCreateCmd.Flags().String("title", "", "Autopilot title (required)")
 	autopilotCreateCmd.Flags().String("description", "", "Autopilot description (used as task prompt)")
-	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID) — required")
+	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID)")
+	autopilotCreateCmd.Flags().String("squad", "", "Assignee squad (name or ID)")
+	autopilotCreateCmd.Flags().String("squad-id", "", "Assignee squad ID (canonical UUID)")
 	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue or run_only (required)")
 	autopilotCreateCmd.Flags().String("priority", "none", "Priority for created issues (none, low, medium, high, urgent)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
@@ -131,6 +133,8 @@ func init() {
 	autopilotUpdateCmd.Flags().String("title", "", "New title")
 	autopilotUpdateCmd.Flags().String("description", "", "New description")
 	autopilotUpdateCmd.Flags().String("agent", "", "New assignee agent (name or ID)")
+	autopilotUpdateCmd.Flags().String("squad", "", "New assignee squad (name or ID)")
+	autopilotUpdateCmd.Flags().String("squad-id", "", "New assignee squad ID (canonical UUID)")
 	autopilotUpdateCmd.Flags().String("project", "", "New project ID (use empty string to clear)")
 	autopilotUpdateCmd.Flags().String("priority", "", "New priority")
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
@@ -214,7 +218,7 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 			strVal(a, "title"),
 			strVal(a, "status"),
 			strVal(a, "execution_mode"),
-			actors.agent(strVal(a, "assignee_id")),
+			formatAutopilotAssignee(a, actors),
 			strVal(a, "last_run_at"),
 		})
 	}
@@ -254,7 +258,7 @@ func runAutopilotGet(cmd *cobra.Command, args []string) error {
 		strVal(ap, "title"),
 		strVal(ap, "status"),
 		strVal(ap, "execution_mode"),
-		actors.agent(strVal(ap, "assignee_id")),
+		formatAutopilotAssignee(ap, actors),
 		strVal(ap, "last_run_at"),
 	}}
 	cli.PrintTable(os.Stdout, headers, rows)
@@ -274,10 +278,6 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	if title == "" {
 		return fmt.Errorf("--title is required")
 	}
-	agent, _ := cmd.Flags().GetString("agent")
-	if agent == "" {
-		return fmt.Errorf("--agent is required (agent name or ID)")
-	}
 	mode, _ := cmd.Flags().GetString("mode")
 	if mode == "" {
 		return fmt.Errorf("--mode is required (create_issue or run_only)")
@@ -289,14 +289,18 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	agentID, err := resolveAgent(ctx, client, agent)
+	assigneeType, assigneeID, hasAssignee, err := resolveAutopilotAssigneeFromFlags(ctx, client, cmd, true)
 	if err != nil {
-		return fmt.Errorf("resolve agent: %w", err)
+		return err
+	}
+	if !hasAssignee {
+		return fmt.Errorf("--agent, --squad, or --squad-id is required")
 	}
 
 	body := map[string]any{
 		"title":          title,
-		"assignee_id":    agentID,
+		"assignee_type":  assigneeType,
+		"assignee_id":    assigneeID,
 		"execution_mode": mode,
 	}
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
@@ -360,13 +364,13 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("description")
 		body["description"] = v
 	}
-	if cmd.Flags().Changed("agent") {
-		v, _ := cmd.Flags().GetString("agent")
-		agentID, resolveErr := resolveAgent(ctx, client, v)
-		if resolveErr != nil {
-			return fmt.Errorf("resolve agent: %w", resolveErr)
-		}
-		body["assignee_id"] = agentID
+	assigneeType, assigneeID, hasAssignee, err := resolveAutopilotAssigneeFromFlags(ctx, client, cmd, false)
+	if err != nil {
+		return err
+	}
+	if hasAssignee {
+		body["assignee_type"] = assigneeType
+		body["assignee_id"] = assigneeID
 	}
 	if cmd.Flags().Changed("project") {
 		v, _ := cmd.Flags().GetString("project")
@@ -764,6 +768,59 @@ func resolveAutopilotSubscriberInputs(ctx context.Context, client *cli.APIClient
 	return inputs, nil
 }
 
+func resolveAutopilotAssigneeFromFlags(ctx context.Context, client *cli.APIClient, cmd *cobra.Command, required bool) (string, string, bool, error) {
+	agentSet := cmd.Flags().Changed("agent")
+	squadSet := cmd.Flags().Changed("squad")
+	squadIDSet := cmd.Flags().Changed("squad-id")
+
+	setCount := 0
+	for _, set := range []bool{agentSet, squadSet, squadIDSet} {
+		if set {
+			setCount++
+		}
+	}
+	if setCount > 1 {
+		return "", "", false, fmt.Errorf("--agent, --squad, and --squad-id are mutually exclusive")
+	}
+	if setCount == 0 {
+		if required {
+			return "", "", false, fmt.Errorf("--agent, --squad, or --squad-id is required")
+		}
+		return "", "", false, nil
+	}
+
+	if agentSet {
+		ref, _ := cmd.Flags().GetString("agent")
+		if strings.TrimSpace(ref) == "" {
+			return "", "", true, fmt.Errorf("--agent cannot be empty")
+		}
+		agentID, err := resolveAgent(ctx, client, ref)
+		if err != nil {
+			return "", "", true, fmt.Errorf("resolve agent: %w", err)
+		}
+		return "agent", agentID, true, nil
+	}
+
+	if squadIDSet {
+		id, _ := cmd.Flags().GetString("squad-id")
+		id = strings.TrimSpace(id)
+		if !uuidRegexp.MatchString(id) {
+			return "", "", true, fmt.Errorf("--squad-id must be a canonical UUID")
+		}
+		return "squad", id, true, nil
+	}
+
+	ref, _ := cmd.Flags().GetString("squad")
+	if strings.TrimSpace(ref) == "" {
+		return "", "", true, fmt.Errorf("--squad cannot be empty")
+	}
+	squadID, err := resolveSquad(ctx, client, ref)
+	if err != nil {
+		return "", "", true, fmt.Errorf("resolve squad: %w", err)
+	}
+	return "squad", squadID, true, nil
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -809,4 +866,33 @@ func resolveAgent(ctx context.Context, client *cli.APIClient, nameOrID string) (
 		}
 		return "", fmt.Errorf("ambiguous agent %q; matches:\n%s", nameOrID, strings.Join(parts, "\n"))
 	}
+}
+
+// resolveSquad accepts either a UUID or a squad name (case-insensitive, with
+// exact matches preferred by resolveAssignee) and returns the squad UUID.
+func resolveSquad(ctx context.Context, client *cli.APIClient, nameOrID string) (string, error) {
+	if uuidRegexp.MatchString(nameOrID) {
+		return nameOrID, nil
+	}
+	squadOnly := assigneeKinds{squad: true}
+	kind, id, err := resolveAssignee(ctx, client, nameOrID, squadOnly)
+	if err != nil {
+		return "", err
+	}
+	if kind != "squad" {
+		return "", fmt.Errorf("%q resolved to %s; autopilot assignee must be an agent or squad", nameOrID, kind)
+	}
+	return id, nil
+}
+
+func formatAutopilotAssignee(autopilot map[string]any, actors actorDisplayLookup) string {
+	aID := strVal(autopilot, "assignee_id")
+	if aID == "" {
+		return ""
+	}
+	aType := strVal(autopilot, "assignee_type")
+	if aType == "" {
+		aType = "agent"
+	}
+	return actors.actor(aType, aID)
 }
