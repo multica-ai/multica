@@ -118,6 +118,25 @@ type AuthConfig struct {
 	APIKeyHeader   string `json:"api_key_header,omitempty"`
 	CFAccessID     string `json:"cf_access_id,omitempty"`
 	CFAccessSecret string `json:"cf_access_secret,omitempty"`
+	// SessionExchange, when enabled, makes server-side API-connection dispatch
+	// exchange the connection's shared key for the triggering person's own
+	// short-lived session key before calling the remote API (FIR-2564 fase 2,
+	// Firtal Data Registry POST /sessions/exchange contract). Non-secret config;
+	// exchanged keys are cached encrypted in cerebro_connection_person_key,
+	// never here.
+	SessionExchange *SessionExchangeConfig `json:"session_exchange,omitempty"`
+}
+
+// SessionExchangeConfig configures per-person session-key exchange for an
+// API-type connection.
+type SessionExchangeConfig struct {
+	Enabled bool `json:"enabled"`
+	// Path of the exchange endpoint relative to the connection URL.
+	// Default "/sessions/exchange".
+	Path string `json:"path,omitempty"`
+	// TTLSeconds is the lifetime requested for each exchanged key.
+	// Default 3600 (1 hour); the remote API caps it server-side.
+	TTLSeconds int `json:"ttl_seconds,omitempty"`
 }
 
 // EndpointPermission describes one REST path and the HTTP methods allowed on it.

@@ -93,6 +93,11 @@ type APIConnectionResolver struct {
 	flags  apiConnectionFlagChecker
 	client *http.Client
 	logger *slog.Logger
+	// exchanger enables per-person session-key exchange (FIR-2564 fase 2) on
+	// the tools this resolver builds. Wired when the flag checker is the
+	// cerebrodb query handle (which carries the person-key cache); nil
+	// otherwise, which fails exchange-enabled calls closed.
+	exchanger *ConnectionSessionExchanger
 }
 
 // NewAPIConnectionResolver builds the resolver. A nil conns or policy (feature
@@ -101,13 +106,19 @@ func NewAPIConnectionResolver(conns apiConnectionLister, policy endpointPolicyRe
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &APIConnectionResolver{
+	r := &APIConnectionResolver{
 		conns:  conns,
 		policy: policy,
 		flags:  flags,
 		client: &http.Client{Timeout: apiConnectionToolTimeout},
 		logger: logger,
 	}
+	// The cerebrodb query handle doubles as the person-key cache store; when
+	// the flag checker is that handle, per-person session exchange is available.
+	if store, ok := flags.(connectionPersonKeyStore); ok {
+		r.exchanger = NewConnectionSessionExchanger(store, logger)
+	}
+	return r
 }
 
 // ListForAgent returns the api-connection endpoint tools this agent may use, each
@@ -138,7 +149,7 @@ func (r *APIConnectionResolver) ListForAgent(ctx context.Context, ident APIConne
 			"workspace_id", util.UUIDToString(ident.WorkspaceID), "error", err)
 		return nil
 	}
-	built := buildAPIConnectionTools(conns, r.client)
+	built := buildAPIConnectionTools(conns, r.client, r.exchanger)
 	if len(built) == 0 {
 		return nil
 	}

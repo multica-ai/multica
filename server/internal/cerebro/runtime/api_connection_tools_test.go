@@ -77,7 +77,7 @@ func TestBuildAPIConnectionTools(t *testing.T) {
 		{Name: "nourl", Type: connections.TypeAPI, URL: "", Enabled: true,
 			EndpointPermissions: []connections.EndpointPermission{{Path: "/x", Methods: []string{"GET"}}}},
 	}
-	tools := buildAPIConnectionTools(conns, nil)
+	tools := buildAPIConnectionTools(conns, nil, nil)
 	got := map[string]bool{}
 	for _, tl := range tools {
 		got[tl.Name()] = true

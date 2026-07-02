@@ -896,6 +896,9 @@ func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agent
 // The first round without tool calls becomes the final output. Budget is
 // checked before each tool dispatch. Usage is summed across all rounds.
 func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID, originalUserID pgtype.UUID, pruneApply bool) (GatewayCompletion, error) {
+	// FIR-2564 fase 2: carry the triggering human to API-connection dispatch so
+	// exchange-enabled connections run on that person's own session key.
+	ctx = WithConnectionTriggerMember(ctx, meta.TriggerUserID)
 	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available.
 	// Pin the default file-attachment target (create_file) to the surface this
 	// task runs on, so an agent never has to know the chat-message UUID.
@@ -1275,6 +1278,9 @@ func coreFirtalGatewayTools(tools []Tool) []Tool {
 // Deny/Ask row would silently not apply here. guardToolCall is a no-op when no
 // gate is configured, so the default fleet is unaffected.
 func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID pgtype.UUID, toolSrv *mcp.Server, tools []GatewayToolDef, pruneOn bool) (GatewayCompletion, error) {
+	// FIR-2564 fase 2: carry the triggering human to API-connection dispatch so
+	// exchange-enabled connections run on that person's own session key.
+	ctx = WithConnectionTriggerMember(ctx, meta.TriggerUserID)
 	history := withToolUsageHint(initialMessages)
 
 	var acc GatewayCompletion
