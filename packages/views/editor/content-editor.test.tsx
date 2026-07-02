@@ -42,6 +42,13 @@ vi.mock("./utils/preprocess", () => ({
   preprocessMarkdown: (value: string) => value,
 }));
 
+// The real caret-restore logic needs a live ProseMirror doc (covered by
+// restore-selection.test.ts). Here we only care that the sync effect reaches
+// the dispatch, so return a sentinel selection.
+vi.mock("./utils/restore-selection", () => ({
+  clampSelectionToText: vi.fn(() => ({ __selection: true })),
+}));
+
 vi.mock("./bubble-menu", () => ({
   EditorBubbleMenu: () => null,
 }));
@@ -61,6 +68,10 @@ vi.mock("./attachment-download-context", () => ({
 
 const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
 const onCreateFired = vi.hoisted(() => ({ value: false }));
+// When true, the mock withholds `onCreate` — modelling Tiptap v3's real timing,
+// where `onCreate` is deferred a tick after `useEditor` first hands back a
+// non-null editor, so the content-sync effect runs before it.
+const suppressOnCreate = vi.hoisted(() => ({ value: false }));
 const latestEditorOptions = vi.hoisted<{
   current?: { onUpdate?: (args: { editor: unknown }) => void };
 }>(() => ({}));
@@ -86,6 +97,7 @@ vi.mock("@tiptap/react", () => ({
           setTextSelection: mockSetTextSelection,
         },
         getMarkdown: () => editorState.markdown,
+        view: { dispatch: vi.fn() },
         state: {
           doc: {
             content: { size: 0 },
@@ -96,10 +108,18 @@ vi.mock("@tiptap/react", () => ({
             },
           },
           selection: { empty: true, from: 0, to: 0 },
+          // Minimal chainable transaction stub: the content-sync effect calls
+          // `editor.state.tr.setSelection(...)` then hands the result to
+          // `view.dispatch`. Real selection math lives in restore-selection.ts.
+          tr: {
+            setSelection() {
+              return this;
+            },
+          },
         },
       };
     }
-    if (!onCreateFired.value) {
+    if (!onCreateFired.value && !suppressOnCreate.value) {
       onCreateFired.value = true;
       options?.onCreate?.({ editor: editorRef.current });
     }
@@ -113,6 +133,7 @@ vi.mock("@tiptap/react", () => ({
 }));
 
 import { ContentEditor, type ContentEditorRef } from "./content-editor";
+import { clampSelectionToText } from "./utils/restore-selection";
 
 describe("ContentEditor", () => {
   beforeEach(() => {
@@ -123,6 +144,7 @@ describe("ContentEditor", () => {
     editorState.uploadingNodes = [];
     editorRef.current = null;
     onCreateFired.value = false;
+    suppressOnCreate.value = false;
     latestEditorOptions.current = undefined;
     providerProps.attachments = undefined;
   });
@@ -240,6 +262,67 @@ describe("ContentEditor", () => {
     );
 
     expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("does not re-parse or move the caret on remount when the draft's markdown round-trip isn't byte-identical (ordered-list cursor bug)", () => {
+    // RAS-27: the comment box remounts on issue switch and feeds the persisted
+    // draft back as defaultValue. The editor mounts from that draft, but
+    // @tiptap/markdown reserializes an ordered list slightly differently from
+    // its source (here, an extra space). The normalized-markdown guard alone
+    // treats that as an external change and re-parses — clamping the caret onto
+    // the list's structural gap (caret "jumps to the second line"). The
+    // parser-input guard must short-circuit instead: no setContent, no caret move.
+    editorState.markdown = "1.  buy milk"; // reserialized: differs from source
+    render(<ContentEditor defaultValue="1. buy milk" />);
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+    expect(clampSelectionToText).not.toHaveBeenCalled();
+  });
+
+  it("seeds the input guard synchronously so a remount short-circuits even before the deferred onCreate fires", () => {
+    // Tiptap v3's onCreate runs a tick after the sync effect first sees a
+    // non-null editor. If the guard were seeded only in onCreate it would be
+    // null on that first run and the ordered-list draft would be re-parsed
+    // anyway. Withhold onCreate and prove the render-time seed still short-circuits.
+    suppressOnCreate.value = true;
+    editorState.markdown = "1.  buy milk"; // reserialized: differs from source
+    render(<ContentEditor defaultValue="1. buy milk" />);
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+    expect(clampSelectionToText).not.toHaveBeenCalled();
+  });
+
+  it("still applies a legitimate external revert after a local edit advanced the draft (A→B→A, no swallow)", () => {
+    // Regression for the parser-input guard swallowing a valid external update:
+    // description A, user edits to B (saved), defaultValue syncs to B, then a
+    // collaborator reverts to A. The editor holds B, so A must be re-applied —
+    // the guard must not treat A as "already applied" just because it once was.
+    vi.useFakeTimers();
+    const onUpdate = vi.fn();
+    editorState.markdown = "A";
+    const { rerender } = render(
+      <ContentEditor defaultValue="A" onUpdate={onUpdate} debounceMs={100} />,
+    );
+    expect(mockSetContent).not.toHaveBeenCalled();
+
+    // User edits to B; the debounced onUpdate advances lastEmitted to B.
+    editorState.markdown = "B";
+    act(() => {
+      latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      vi.advanceTimersByTime(100);
+    });
+
+    // Server confirms: defaultValue -> B. Editor already holds B, so the effect
+    // short-circuits (Guard 3) — and must advance the guard to B.
+    rerender(<ContentEditor defaultValue="B" onUpdate={onUpdate} debounceMs={100} />);
+    expect(mockSetContent).not.toHaveBeenCalled();
+
+    // Collaborator reverts to A while the editor still holds B: must re-apply.
+    rerender(<ContentEditor defaultValue="A" onUpdate={onUpdate} debounceMs={100} />);
+    expect(mockSetContent).toHaveBeenCalledWith(
+      "A",
+      expect.objectContaining({ emitUpdate: false, contentType: "markdown" }),
+    );
   });
 
   it("does not sync when defaultValue normalizes to the current editor markdown", () => {
